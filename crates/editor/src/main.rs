@@ -30,6 +30,7 @@ mod history;
 mod hot_patch;
 mod import_dialog;
 mod layout;
+mod levels;
 mod loading;
 mod lua_syntax;
 mod material_editor;

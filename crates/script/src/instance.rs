@@ -19,6 +19,7 @@ use crate::events::{Event, LuaSignal, Owner};
 use crate::gui_service::LuaGuiService;
 use crate::http::LuaHttpService;
 use crate::input::{LuaContextActionService, LuaUserInputService};
+use crate::levels::LuaLevelService;
 use crate::localization::LuaLocalizationService;
 use crate::run_service::LuaRunService;
 use crate::save::LuaSaveService;
@@ -405,6 +406,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "TweenService") => LuaTweenService.into_lua(lua)?,
         (ClassName::DataModel, "CollectionService") => LuaCollectionService.into_lua(lua)?,
         (ClassName::DataModel, "SaveService") => LuaSaveService.into_lua(lua)?,
+        (ClassName::DataModel, "LevelService") => LuaLevelService.into_lua(lua)?,
         (ClassName::DataModel, "LocalizationService") => LuaLocalizationService.into_lua(lua)?,
         (ClassName::DataModel, "GuiService") => LuaGuiService.into_lua(lua)?,
         (ClassName::DataModel, "Debris") => LuaDebris.into_lua(lua)?,
@@ -950,7 +952,7 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 
 /// `game:GetService(name)`: a service by its class name, such as
 /// `"Players"`, or `"UserInputService"`, `"ContextActionService"` or
-/// `"UserGameSettings"` (LocalScripts only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`,
+/// `"UserGameSettings"` (LocalScripts only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`, `"LevelService"`,
 /// `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`,
 /// `"DataService"` or `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
@@ -972,6 +974,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "TweenService" => return LuaTweenService.into_lua(lua),
             "CollectionService" => return LuaCollectionService.into_lua(lua),
             "SaveService" => return LuaSaveService.into_lua(lua),
+            "LevelService" => return LuaLevelService.into_lua(lua),
             "LocalizationService" => return LuaLocalizationService.into_lua(lua),
             "GuiService" => return LuaGuiService.into_lua(lua),
             "Debris" => return LuaDebris.into_lua(lua),
@@ -1005,6 +1008,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     "Debris",
                     "GuiService",
                     "HttpService",
+                    "LevelService",
                     "LocalizationService",
                     "PhysicsService",
                     "ReplicatedFirst",

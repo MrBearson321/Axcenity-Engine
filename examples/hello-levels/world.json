@@ -1,0 +1,103 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Position": [0, -0.5, 0],
+          "Size": [80, 1, 80],
+          "Color": [0.36, 0.6, 0.3],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "SpawnLocation",
+        "name": "Home",
+        "properties": {
+          "Position": [0, 0.5, 10]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Portal",
+        "properties": {
+          "Position": [0, 3, -20],
+          "Size": [6, 6, 1],
+          "Color": [0.55, 0.3, 0.9],
+          "Material": "Neon",
+          "Anchored": true,
+          "CanCollide": false
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Lever",
+        "properties": {
+          "Position": [12, 1, 0],
+          "Size": [1, 2, 1],
+          "Color": [0.8, 0.6, 0.2],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "ProximityPrompt",
+            "name": "ProximityPrompt",
+            "properties": {
+              "ActionText": "Pull",
+              "ObjectText": "Lever"
+            }
+          }
+        ]
+      },
+      {
+        "class": "ScreenGui",
+        "name": "Menu",
+        "children": [
+          {
+            "class": "Frame",
+            "name": "Panel",
+            "properties": {
+              "Position": [0.5, -150, 0.5, -80],
+              "Size": [0, 300, 0, 160]
+            },
+            "children": [
+              {
+                "class": "TextButton",
+                "name": "Play",
+                "properties": {
+                  "Text": "New game",
+                  "Size": [1, 0, 0.5, 0]
+                }
+              },
+              {
+                "class": "TextButton",
+                "name": "Continue",
+                "properties": {
+                  "Text": "Continue",
+                  "Position": [0, 0, 0.5, 0],
+                  "Size": [1, 0, 0.5, 0]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "replicated_storage": {
+    "children": [
+      {
+        "class": "Folder",
+        "name": "Shared",
+        "children": [
+          {
+            "class": "IntValue",
+            "name": "PortalsTaken"
+          }
+        ]
+      }
+    ]
+  }
+}

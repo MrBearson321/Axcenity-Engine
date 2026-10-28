@@ -35,6 +35,7 @@ mod edits;
 mod engine;
 mod files;
 mod input_settings;
+mod levels;
 mod material_files;
 mod material_tab;
 mod nav_overlay;
@@ -241,6 +242,11 @@ pub struct EditorApp {
     confirm_delete: Option<InstanceId>,
     /// A sky image waiting for "Use this sky?" to be answered (`app/sky.rs`).
     confirm_sky: Option<String>,
+    /// The Levels panel's typing and the level it acts on (`app/levels.rs`).
+    levels_panel: crate::levels::LevelsPanel,
+    /// Play starts in the start level, whichever level is open (the Levels
+    /// panel's Play from Start Level).
+    play_from_start: bool,
     /// Bake Probes was clicked: the probes are baked on the next frame,
     /// which has the GPU device.
     bake_probes_asked: bool,
@@ -388,6 +394,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::DataTable => self.app.data_table_pane(ui),
             Pane::Material => self.app.material_pane(ui, self.render_state),
             Pane::Tags => self.app.tags_pane(ui),
+            Pane::Levels => self.app.levels_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
         }
     }
@@ -489,6 +496,8 @@ enum Discard {
     CloseProject,
     /// File > New Project…: back to the start screen, asking for the new one.
     NewProject,
+    /// Opening a level from the Levels panel (`None`: the start level).
+    OpenLevel(Option<String>),
 }
 
 /// A screenshot asked for, to make the open project's thumbnail from.
@@ -524,6 +533,11 @@ struct Keys {
 /// What the editor remembers about the open project.
 struct OpenProject {
     name: String,
+    /// The start level's name (the manifest's `start_level`), in `world.json`.
+    start_level: String,
+    /// The level being edited, from `levels/`; `None` for the start level
+    /// (Phase 48). Saving writes its Workspace there.
+    level: Option<String>,
     show_splash: bool,
     /// How built games' loading screen goes (File > Build Game).
     loading_screen: axcenity_project::LoadingScreen,
@@ -609,6 +623,8 @@ impl EditorApp {
             tabs: ScriptTabs::default(),
             confirm_delete: None,
             confirm_sky: None,
+            levels_panel: Default::default(),
+            play_from_start: false,
             stale_light_probes: None,
             bake_probes_asked: false,
             constraint_tool: None,
@@ -1240,6 +1256,8 @@ mod play_tests;
 #[cfg(test)]
 mod posing_tests;
 
+#[cfg(test)]
+mod level_tests;
 #[cfg(test)]
 mod ragdoll_tests;
 #[cfg(test)]

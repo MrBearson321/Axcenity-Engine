@@ -512,6 +512,16 @@ pub(super) fn palette(
                 checkpoint: first(Filter::Checkpoints),
             }),
             B(BlockKind::RestoreCheckpoint),
+            B(BlockKind::LoadLevel {
+                level: text("Castle"),
+                spawn: text("Gate"),
+            }),
+            B(BlockKind::AddLevel {
+                level: text("Dungeon"),
+            }),
+            B(BlockKind::RemoveLevel {
+                level: text("Dungeon"),
+            }),
             R(Expression::DataValue {
                 column: storage_name(NameKind::Column),
                 row: Box::new(Expression::DataRow {

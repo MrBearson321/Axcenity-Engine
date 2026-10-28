@@ -14,6 +14,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | The navigation mesh, agents, or behavior trees | [architecture/navigation.md](architecture/navigation.md) |
 | Play and Stop | [architecture/play-mode.md](architecture/play-mode.md) |
 | Save slots, checkpoints, `SaveService` | [architecture/saves.md](architecture/saves.md) |
+| Levels, `LevelService`, the Levels panel | [project/levels.md](project/levels.md) |
 | Platforms or file access | [architecture/portability.md](architecture/portability.md) |
 | Build speed, test commands, or nextest settings | [development.md](development.md) |
 | The editor window, ribbon, or theme | [editor/shell.md](editor/shell.md) |

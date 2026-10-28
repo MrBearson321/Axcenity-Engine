@@ -231,7 +231,7 @@ fn feet(world: &World, character: InstanceId) -> Option<Vector3> {
 }
 
 /// Moves `character`'s parts together so its feet are at `to`.
-fn stand_at(world: &mut World, character: InstanceId, to: Vector3) {
+pub(crate) fn stand_at(world: &mut World, character: InstanceId, to: Vector3) {
     let Some(from) = feet(world, character) else {
         return;
     };
@@ -249,7 +249,7 @@ fn stand_at(world: &mut World, character: InstanceId, to: Vector3) {
 }
 
 /// The middle of the top of a SpawnLocation.
-fn top_of(world: &World, spawn: InstanceId) -> Vector3 {
+pub(crate) fn top_of(world: &World, spawn: InstanceId) -> Vector3 {
     let position = vector(world, spawn, "Position").unwrap_or_default();
     let size = vector(world, spawn, "Size").unwrap_or_default();
     Vector3::new(position.x, position.y + size.y * 0.5, position.z)
@@ -316,14 +316,7 @@ pub fn load_character(lua: &Lua, player: InstanceId) -> mlua::Result<InstanceId>
             .unwrap_or_default();
         let _ = world.set_name(character, name.clone());
 
-        let choices = spawn_locations(&world, player);
-        let spawn = match choices.len() {
-            0 => None,
-            count => lua.app_data_mut::<Spawning>().map(|mut spawning| {
-                let index = spawning.random.next_integer(0, count as i64 - 1);
-                choices[index as usize]
-            }),
-        };
+        let spawn = pick_spawn(lua, &world, player);
         match spawn {
             Some(spawn) => {
                 let top = top_of(&world, spawn);
@@ -370,6 +363,19 @@ pub fn load_character(lua: &Lua, player: InstanceId) -> mlua::Result<InstanceId>
         spawned.shields.extend(shield);
     }
     Ok(character)
+}
+
+/// One of `player`'s SpawnLocations (see [`spawn_locations`]), chosen at
+/// random, or `None` without one.
+pub(crate) fn pick_spawn(lua: &Lua, world: &World, player: InstanceId) -> Option<InstanceId> {
+    let choices = spawn_locations(world, player);
+    match choices.len() {
+        0 => None,
+        count => lua.app_data_mut::<Spawning>().map(|mut spawning| {
+            let index = spawning.random.next_integer(0, count as i64 - 1);
+            choices[index as usize]
+        }),
+    }
 }
 
 fn list(lua: &Lua, ids: Vec<InstanceId>) -> mlua::Result<mlua::Table> {

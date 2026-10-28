@@ -332,7 +332,10 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SaveSlot { .. }
         | BlockKind::LoadSlot { .. }
         | BlockKind::SetCheckpoint { .. }
-        | BlockKind::RestoreCheckpoint => Category::More,
+        | BlockKind::RestoreCheckpoint
+        | BlockKind::LoadLevel { .. }
+        | BlockKind::AddLevel { .. }
+        | BlockKind::RemoveLevel { .. } => Category::More,
         BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
     }
 }
@@ -1087,6 +1090,19 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Object(checkpoint, Filter::Checkpoints),
         ])],
         BlockKind::RestoreCheckpoint => vec![Row(vec![label("go back to checkpoint")])],
+        BlockKind::LoadLevel { level, spawn } => vec![Row(vec![
+            label("load level"),
+            Slot(level, SlotKind::Text),
+            label("at"),
+            Slot(spawn, SlotKind::Text),
+        ])],
+        BlockKind::AddLevel { level } => {
+            vec![Row(vec![label("add level"), Slot(level, SlotKind::Text)])]
+        }
+        BlockKind::RemoveLevel { level } => vec![Row(vec![
+            label("remove level"),
+            Slot(level, SlotKind::Text),
+        ])],
         BlockKind::SetLanguage { language } => vec![Row(vec![
             label("set language to"),
             Slot(language, SlotKind::Text),

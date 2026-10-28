@@ -62,6 +62,7 @@ mod http;
 mod humanoid;
 mod input;
 mod instance;
+mod levels;
 mod localization;
 mod modules;
 mod physical;
@@ -85,7 +86,7 @@ mod user_settings;
 mod watchdog;
 
 use std::cell::Ref;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -104,6 +105,7 @@ pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, Gam
 pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
 pub use definitions::{ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions};
 pub use input::KeyEvent;
+pub use levels::Levels;
 pub use prompt::ShownPrompt;
 pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
@@ -222,6 +224,10 @@ pub struct ScriptRuntime {
     /// `SaveService`'s player data, settings and checkpoint, which both
     /// sides share.
     saves: save::SharedSaves,
+    /// `LevelService`'s levels, which both sides share (Phase 48).
+    levels: levels::SharedLevels,
+    /// Levels loaded since the host last asked, for its loading screen.
+    level_loads: Vec<String>,
     /// Every script and ModuleScript started, in the order they first
     /// started, with the code they run now, so they can run again.
     started: Vec<Started>,
@@ -252,10 +258,13 @@ impl ScriptRuntime {
     /// trait; which one is only known when the program runs.
     pub fn with_transport(transport: Box<dyn Transport>) -> Self {
         let saves = save::SharedSaves::default();
+        let levels = levels::SharedLevels::default();
         let server = Context::new(Side::Server);
         let client = Context::new(Side::Client);
         server.lua.set_app_data(saves.clone());
         client.lua.set_app_data(saves.clone());
+        server.lua.set_app_data(levels.clone());
+        client.lua.set_app_data(levels.clone());
         Self {
             server,
             client,
@@ -273,6 +282,8 @@ impl ScriptRuntime {
             player_events: Vec::new(),
             reported_change_loop: false,
             saves,
+            levels,
+            level_loads: Vec::new(),
             started: Vec::new(),
             clones: Vec::new(),
             starting_clones: false,
@@ -290,6 +301,29 @@ impl ScriptRuntime {
     /// `SaveService`'s player data, settings and active checkpoint.
     pub fn saves(&self) -> Ref<'_, Saves> {
         self.saves.0.borrow()
+    }
+
+    /// Every level of the game for `LevelService` (Phase 48), by name, each
+    /// a world of its own (only its Workspace is used), with `start` among
+    /// them. `current` is the one in the world now: the start level in a
+    /// built game, the open level in the editor's Play. Call it before
+    /// starting scripts.
+    pub fn set_levels(&mut self, start: &str, current: &str, worlds: BTreeMap<String, World>) {
+        let mut levels = Levels::new(start, worlds);
+        levels.set_current(current);
+        self.saves.0.borrow_mut().levels = levels.saved();
+        *self.levels.0.borrow_mut() = levels;
+    }
+
+    /// `LevelService`'s levels: the current one and those added.
+    pub fn levels(&self) -> Ref<'_, Levels> {
+        self.levels.0.borrow()
+    }
+
+    /// The levels loaded (`LoadLevel`, or a slot in another level) since
+    /// the last call, oldest first. Hosts show their loading screen again.
+    pub fn take_level_loads(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.level_loads)
     }
 
     /// Bytes the Lua heaps of both sides hold now, for the editor's profiler.
@@ -489,6 +523,26 @@ impl ScriptRuntime {
     /// Fires the player events `LoadCharacter`, joining and respawns
     /// queued, on both sides: an old character is destroyed once its
     /// `CharacterRemoving` has fired.
+    /// Fires `LevelLoaded` on both sides for each level loaded, after the
+    /// changes the load made have fired.
+    fn fire_level_events(&mut self, world: &mut World) {
+        for _ in 0..MAX_CHANGE_ROUNDS {
+            let loaded = std::mem::take(&mut self.levels.0.borrow_mut().loaded);
+            if loaded.is_empty() {
+                return;
+            }
+            for name in loaded {
+                self.fire_change_rounds(world);
+                for side in [Side::Server, Side::Client] {
+                    self.context(side).fire_level_loaded(world, &name);
+                    self.collect(side);
+                    self.fire_change_rounds(world);
+                }
+                self.level_loads.push(name);
+            }
+        }
+    }
+
     fn fire_player_events(&mut self, world: &mut World) {
         for _ in 0..MAX_CHANGE_ROUNDS {
             if self.player_events.is_empty() {
@@ -1052,6 +1106,7 @@ impl ScriptRuntime {
         self.fire_health_events(world);
         self.fire_tool_events(world);
         self.fire_player_events(world);
+        self.fire_level_events(world);
         self.stop_destroyed_scripts(world);
         self.start_clones(world);
     }
@@ -1427,6 +1482,8 @@ mod tween_tests;
 
 #[cfg(test)]
 mod gui_service_tests;
+#[cfg(test)]
+mod levels_tests;
 #[cfg(test)]
 mod localization_tests;
 #[cfg(test)]

@@ -132,6 +132,11 @@ impl EditorApp {
             return;
         }
         project.world_text = text.clone();
+        // Another level is open: `world.json` is read again when the start
+        // level is opened, or Play reads it.
+        if project.level.is_some() {
+            return;
+        }
         let world_file = project::WORLD_FILE;
         if !self.history.is_saved() {
             project.keep_world_file = true;

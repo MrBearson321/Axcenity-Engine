@@ -1078,6 +1078,43 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         ],
     },
     ValueType {
+        class: "LevelService",
+        doc: "The game's levels, from `game:GetService(\"LevelService\")`: `world.json` is the start level, and each other level is `levels/<name>.world.json`. A level is its Workspace; ReplicatedStorage, Players, Lighting, StarterPlayer and Teams stay the same from level to level. Both sides share it.",
+        fields: &[
+            Field {
+                name: "CurrentLevel",
+                ty: "string",
+                doc: "The name of the level in the Workspace now: the start level until LoadLevel loads another (in the editor's Play, the open level).",
+            },
+            Field {
+                name: "LevelLoaded",
+                ty: "Signal",
+                doc: "Fires with the level's name once LoadLevel (or LoadSlot, for a slot saved in another level) has put it in the Workspace: `function(name) ... end`. Connect again to things in the new level here.",
+            },
+        ],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "LoadLevel",
+                doc: "Puts the level `name` in place of the Workspace, such as `LevelService:LoadLevel(\"Castle\", \"Gate\")`. The Workspace's ScreenGuis and the players' characters stay; everything else in it is replaced, and the levels added with AddLevel go. Characters stand on the Instance called `spawnName` in the new level, or on one of their SpawnLocations. The loading screen shows, and LevelLoaded fires once it's in.",
+                params: &[("name", "string"), ("spawnName", "string?")],
+                returns: "()",
+            },
+            Function {
+                name: "AddLevel",
+                doc: "Copies the level `name` into a new Model of that name in the Workspace, beside the current level, and returns the Model. An error if it's added already.",
+                params: &[("name", "string")],
+                returns: "Model",
+            },
+            Function {
+                name: "RemoveLevel",
+                doc: "Takes the level `name`, added with AddLevel, out of the Workspace. An error if it isn't added.",
+                params: &[("name", "string")],
+                returns: "()",
+            },
+        ],
+    },
+    ValueType {
         class: "LocalizationService",
         doc: "The language UI text shows, from `game:GetService(\"LocalizationService\")`. A TextLabel or TextButton with a `TextKey` shows that key's value from the project's string table (`strings.json`, edited in the UI Designer's Strings tab) in `Language`, or its own Text when there's none. Both sides share it.",
         fields: &[
@@ -2099,7 +2136,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -2724,6 +2761,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "SaveService",
             ty: "SaveService",
             doc: "Save slots, player data, settings and checkpoints (same as `game:GetService(\"SaveService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "LevelService",
+            ty: "LevelService",
+            doc: "The game's levels (same as `game:GetService(\"LevelService\")`).",
         },
     ),
     (

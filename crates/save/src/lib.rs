@@ -83,6 +83,16 @@ pub struct SavedCheckpoint {
     pub capture: Capture,
 }
 
+/// The levels a game was in when a slot was saved (Phase 48): the
+/// current level, and the ones added beside it, in the order they were
+/// added.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SavedLevels {
+    pub current: String,
+    #[serde(default)]
+    pub added: Vec<String>,
+}
+
 /// One slot file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SlotFile {
@@ -95,6 +105,10 @@ pub struct SlotFile {
     pub world: WorldState,
     #[serde(default)]
     pub checkpoint: Option<SavedCheckpoint>,
+    /// Left out by games without levels and by older slots, which load
+    /// unchanged, so the save version stays the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels: Option<SavedLevels>,
 }
 
 /// What a running game keeps for saving. Hosts make one per game run, with
@@ -109,6 +123,9 @@ pub struct Saves {
     /// keeps them as settings named `UI/…`.
     pub settings: BTreeMap<String, Value>,
     checkpoint: Option<(InstanceId, Capture)>,
+    /// The levels the game is in, which slots record. Hosts with levels
+    /// keep it up to date; `None` for a game without them.
+    pub levels: Option<SavedLevels>,
 }
 
 impl Saves {
@@ -220,6 +237,7 @@ impl Saves {
             settings,
             world: state,
             checkpoint,
+            levels: self.levels.clone(),
         };
         let text = serde_json::to_string_pretty(&file).expect("a slot file always serializes");
         let write_error = |err: std::io::Error| SaveError::Write {
@@ -242,6 +260,15 @@ impl Saves {
     /// as it is). A missing, damaged or newer slot changes nothing.
     pub fn load(&mut self, world: &mut World, slot: u32) -> Result<(), SaveError> {
         let file = self.read(slot)?;
+        self.apply(world, file);
+        Ok(())
+    }
+
+    /// Puts the game back as `file` (read with [`read`](Self::read)) was
+    /// saved, as [`load`](Self::load) does. Its levels are only noted in
+    /// [`levels`](Self::levels): a host with levels loads them into `world`
+    /// before this.
+    pub fn apply(&mut self, world: &mut World, file: SlotFile) {
         let restored = restore(world, &file.world);
         self.player_data = from_properties(&file.player_data);
         let mut settings = from_properties(&file.settings);
@@ -255,7 +282,9 @@ impl Saves {
             let id = (*restored.get(saved.instance)?)?;
             (world.get(id)?.class() == ClassName::Checkpoint).then_some((id, saved.capture))
         });
-        Ok(())
+        if file.levels.is_some() {
+            self.levels = file.levels;
+        }
     }
 
     /// Reads and checks slot `slot`, moving an older save version up to

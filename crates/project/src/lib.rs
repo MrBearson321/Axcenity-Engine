@@ -14,6 +14,8 @@
 //!   strings.json    the string table: UI text in each language (optional)
 //!   input.json      the input map: actions and their bindings (optional)
 //!   collision-groups.json  the collision groups (optional)
+//!   levels/         `<name>.world.json`: the levels other than the start
+//!                   level, `world.json` (optional; see `levels.rs`)
 //! ```
 //!
 //! One damaged file never stops the rest from loading: [`load`] leaves it
@@ -29,6 +31,7 @@
 //! `watch.rs` notices files changed by other programs ([`Watcher`]).
 
 mod asset_fix;
+mod levels;
 mod migrate;
 mod migrate_animation;
 mod migrate_physics;
@@ -71,6 +74,12 @@ pub use asset_fix::{
     FileWrite, Fix, FixPlan, IGNORED_FILE, Ignored, PropertyFix, files_of_kind, list_project_files,
     plan_fix, read_ignored, suggestion, write_ignored,
 };
+pub use levels::{
+    DEFAULT_START_LEVEL, FileChange, LEVEL_SUFFIX, LEVELS_FOLDER, check_level_name,
+    copy_workspace_into, keep_level_file, level_file, level_names, level_path, load_levels,
+    load_with_level, new_level_text, read_level, read_start_level, replace_workspace, save_level,
+    set_start_level, set_start_level_name, write_files, write_level,
+};
 pub use migrate::PREVIOUS_FORMAT_DIR;
 pub use package::{
     Clashes, Contents, ImportPlan, PACKAGE_EXTENSION, Package, PackageError, PackageManifest,
@@ -83,7 +92,9 @@ pub use terrain_files::{
     TERRAIN_FOLDER, data_folder, is_safe_folder, keep_terrain_folder, load_terrains,
     new_terrain_folder, save_terrain, terrain_folder_path,
 };
-pub use validate::{AssetKind, Finding, FindingKind, Report, Site, check_assets};
+pub use validate::{
+    AssetKind, Finding, FindingKind, Report, Site, check_assets, check_assets_in_level,
+};
 pub use versions::{Version, list_versions, record_version, restore_version};
 pub use watch::{Watched, Watcher, is_asset_path};
 pub use world_file::{WorldError, parse_prefab, parse_world, write_prefab, write_world};
@@ -124,10 +135,18 @@ pub struct Manifest {
     pub description: String,
     #[serde(default)]
     pub loading_screen: LoadingScreen,
+    /// The name of the start level, `world.json` (Phase 48). Other levels
+    /// are `levels/<name>.world.json`.
+    #[serde(default = "default_start_level")]
+    pub start_level: String,
 }
 
 fn default_show_splash() -> bool {
     true
+}
+
+fn default_start_level() -> String {
+    levels::DEFAULT_START_LEVEL.to_owned()
 }
 
 /// How the player's loading screen goes (`loading_screen` in the manifest).
@@ -225,7 +244,11 @@ pub fn set_loading_screen(folder: &Path, loading: &LoadingScreen) -> Result<(), 
 }
 
 /// Sets one key of the manifest, keeping the rest of the file as it was.
-fn update_manifest(folder: &Path, key: &str, value: serde_json::Value) -> Result<(), SaveError> {
+pub(crate) fn update_manifest(
+    folder: &Path,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<(), SaveError> {
     let path = folder.join(MANIFEST_FILE);
     let text = fs::read_to_string(&path).map_err(SaveError::new(&path))?;
     let mut manifest: serde_json::Value = serde_json::from_str(&text).map_err(|error| {
@@ -389,6 +412,16 @@ pub fn load_with_progress(
     folder: &Path,
     progress: &mut dyn FnMut(LoadStep),
 ) -> Result<Project, LoadError> {
+    load_project(folder, None, progress)
+}
+
+/// [`load_with_progress`], with the level `level` in the Workspace in
+/// place of the start level's (see [`levels::load_with_level`]).
+pub(crate) fn load_project(
+    folder: &Path,
+    level: Option<&str>,
+    progress: &mut dyn FnMut(LoadStep),
+) -> Result<Project, LoadError> {
     progress(LoadStep::Manifest);
     let manifest_path = folder.join(MANIFEST_FILE);
     let manifest_text = read(&manifest_path)?;
@@ -406,6 +439,7 @@ pub fn load_with_progress(
                 show_splash: default_show_splash(),
                 description: String::new(),
                 loading_screen: LoadingScreen::default(),
+                start_level: default_start_level(),
             }
         }
     };
@@ -427,19 +461,58 @@ pub fn load_with_progress(
     };
 
     progress(LoadStep::World);
-    let (mut world, world_loaded) = match load_world(folder) {
+    let (mut world, mut world_loaded) = match load_world(folder) {
         Ok(world) => (world, true),
         Err(err) => {
             problems.push(err);
             (World::new(), false)
         }
     };
+    // A level other than the start level: its Workspace, before terrains,
+    // scripts and UI graphs look in it.
+    if let Some(name) = level {
+        let opened = std::fs::read_to_string(folder.join(levels::level_path(name)))
+            .map_err(|source| LoadError::Read {
+                path: folder.join(levels::level_path(name)),
+                source,
+            })
+            .and_then(|text| {
+                parse_world(&text).map_err(|source| LoadError::World {
+                    path: folder.join(levels::level_path(name)),
+                    source,
+                })
+            });
+        match opened {
+            Ok(level) => levels::replace_workspace(&mut world, &level),
+            Err(err) => {
+                problems.push(err);
+                levels::replace_workspace(&mut world, &World::new());
+                world_loaded = false;
+            }
+        }
+    }
     strings::load_strings(folder, &mut world, &mut problems);
     collision_groups::load_collision_groups(folder, &mut world, &mut problems);
     let damaged_terrains =
         terrain_files::load_terrains_reporting(folder, &mut world, &mut problems, progress);
     let (mut scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems, progress);
     let ui_graphs = load_ui_graphs(folder, &mut world, &mut scripts, &mut problems);
+    if level.is_some() {
+        // A level without a graph's ScreenGui just doesn't use that graph.
+        problems.retain(|problem| match problem {
+            LoadError::UiGraph { path, .. } => path
+                .file_name()
+                .and_then(|file| file.to_str())
+                .is_none_or(|file| {
+                    screen_gui_named(
+                        &world,
+                        axcenity_blocks_runtime::ui_graph::ui_graph_gui_name(file),
+                    )
+                    .is_some()
+                }),
+            _ => true,
+        });
+    }
     progress(LoadStep::Stylesheets);
     let stylesheets = load_stylesheets(folder, &mut problems);
     let input_map = load_input_map(folder, &mut problems);
@@ -540,7 +613,7 @@ pub fn keep_world_file(folder: &Path) -> Result<Option<String>, SaveError> {
 
 /// Writes `text` to `path` through a temporary file next to it, which then
 /// replaces `path` in one step.
-fn write_through_temporary(path: &Path, text: &str) -> Result<(), SaveError> {
+pub(crate) fn write_through_temporary(path: &Path, text: &str) -> Result<(), SaveError> {
     let mut temporary = path.as_os_str().to_owned();
     temporary.push(".saving");
     let error = SaveError::new(path);
@@ -549,7 +622,7 @@ fn write_through_temporary(path: &Path, text: &str) -> Result<(), SaveError> {
     fs::rename(&temporary, path).map_err(error)
 }
 
-fn read(path: &Path) -> Result<String, LoadError> {
+pub(crate) fn read(path: &Path) -> Result<String, LoadError> {
     fs::read_to_string(path).map_err(|source| LoadError::Read {
         path: path.to_owned(),
         source,

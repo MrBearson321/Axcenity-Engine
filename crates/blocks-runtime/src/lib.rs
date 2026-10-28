@@ -515,6 +515,22 @@ pub enum BlockKind {
     /// player character standing on it.
     RestoreCheckpoint,
 
+    // Levels: `LevelService` (Phase 48).
+    /// Puts the level `level` in place of the Workspace, with characters
+    /// at the Instance called `spawn` there (empty text: a SpawnLocation).
+    LoadLevel {
+        level: Expression,
+        spawn: Expression,
+    },
+    /// Copies the level `level` into a Model beside the current level.
+    AddLevel {
+        level: Expression,
+    },
+    /// Takes the added level `level` out again.
+    RemoveLevel {
+        level: Expression,
+    },
+
     // Camera: `workspace.CurrentCamera` (LocalScripts only).
     /// Sets `CameraType` to one of [`CAMERA_TYPES`]: Scriptable leaves the
     /// camera to scripts, Custom gives it back to the controller.
@@ -918,6 +934,8 @@ impl BlockKind {
             | BlockKind::SetVelocity { velocity: e, .. }
             | BlockKind::SaveSlot { slot: e }
             | BlockKind::LoadSlot { slot: e }
+            | BlockKind::AddLevel { level: e }
+            | BlockKind::RemoveLevel { level: e }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
@@ -934,6 +952,7 @@ impl BlockKind {
             | BlockKind::DestroyAfter { seconds: e, .. }
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
+            BlockKind::LoadLevel { level, spawn } => vec![level, spawn],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
             BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],
@@ -983,6 +1002,16 @@ impl BlockKind {
         )
     }
 
+    /// Level blocks, which need `LevelService`.
+    pub fn levels(&self) -> bool {
+        matches!(
+            self,
+            BlockKind::LoadLevel { .. }
+                | BlockKind::AddLevel { .. }
+                | BlockKind::RemoveLevel { .. }
+        )
+    }
+
     /// Blocks nothing can go after: they never finish ("forever") or end
     /// the script ("stop this script").
     pub fn is_cap(&self) -> bool {
@@ -1017,6 +1046,8 @@ impl BlockKind {
             | BlockKind::SetVelocity { velocity: e, .. }
             | BlockKind::SaveSlot { slot: e }
             | BlockKind::LoadSlot { slot: e }
+            | BlockKind::AddLevel { level: e }
+            | BlockKind::RemoveLevel { level: e }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
@@ -1033,6 +1064,7 @@ impl BlockKind {
             | BlockKind::DestroyAfter { seconds: e, .. }
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
+            BlockKind::LoadLevel { level, spawn } => vec![level, spawn],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
             BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],

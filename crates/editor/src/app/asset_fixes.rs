@@ -57,7 +57,8 @@ impl EditorApp {
         let Some(project) = &self.project else {
             return;
         };
-        let report = project::check_assets(&project.folder, &self.world);
+        let report =
+            project::check_assets_in_level(&project.folder, &self.world, project.level.as_deref());
         let files = project::list_project_files(&project.folder);
         let ignored = project::read_ignored(&project.folder);
         self.asset_check.set(report, &files, ignored);

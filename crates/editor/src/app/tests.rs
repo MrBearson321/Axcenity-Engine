@@ -441,6 +441,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::DataTable => app.data_table_pane(ui),
                         Pane::Material => app.material_pane(ui, None),
                         Pane::Tags => app.tags_pane(ui),
+                        Pane::Levels => app.levels_pane(ui),
                         Pane::Scene | Pane::Script(_) => {}
                     }
                     fit = Some((ui.min_rect(), room));

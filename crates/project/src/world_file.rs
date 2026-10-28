@@ -680,6 +680,16 @@ pub fn write_world(world: &World) -> String {
     out
 }
 
+/// The text of a level file (`levels/<name>.world.json`): `world`'s
+/// Workspace only, written as in [`write_world`].
+pub fn write_workspace_only(world: &World) -> String {
+    let mut out = format!("{{\n  \"format_version\": {WORLD_FORMAT_VERSION},\n  \"workspace\": ");
+    let roots = world_roots(world);
+    write_instance(world, world.workspace(), 1, &roots, &mut out);
+    out.push_str("\n}\n");
+    out
+}
+
 /// The children of `id` that go in the world file. Scripts are saved as
 /// their own `.lua` files, Players only exist while the game runs, and a
 /// service inside another (StarterPlayerScripts) is always there.

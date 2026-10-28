@@ -14,7 +14,7 @@ mod input;
 mod splash;
 mod watch;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -113,8 +113,12 @@ fn main() -> Result<()> {
     log::info!("loaded project \"{}\"", project.manifest.name);
     let show_splash = project.manifest.show_splash;
     let loading = project.manifest.loading_screen.clone();
+    // Every level, read before anything changes the start level.
+    let mut problems = project.problems;
+    let start_level = project.manifest.start_level.clone();
+    let levels = game_levels(&project.folder, &start_level, &project.world, &mut problems);
     // A damaged file only takes itself out: say which, and run the rest.
-    for problem in project.problems {
+    for problem in problems {
         eprintln!("error: {:#}", anyhow::Error::new(problem));
     }
     let mut stylesheets = Vec::new();
@@ -169,6 +173,7 @@ fn main() -> Result<()> {
     }
     // The project's actions, before any LocalScript asks about them.
     scripts.set_input_map(project.input_map.clone());
+    scripts.set_levels(&start_level, &start_level, levels);
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let mut audio = GameAudio::default();
     let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
@@ -191,6 +196,7 @@ fn main() -> Result<()> {
     app.show_splash = show_splash;
     app.splash = splash;
     app.loading_gui = loading_gui;
+    app.loading_screen = loading;
     app.audio = audio;
     app.data_folder = data_folder;
     app.watcher = watcher;
@@ -241,6 +247,22 @@ impl Drop for PackedProjectFolder {
             );
         }
     }
+}
+
+/// The game's levels for `LevelService`, by name: the start level (as
+/// `start_world` loaded) and every one in `levels/`. One that can't be
+/// read is left out and added to `problems`.
+fn game_levels(
+    folder: &std::path::Path,
+    start: &str,
+    start_world: &World,
+    problems: &mut Vec<axcenity_project::LoadError>,
+) -> BTreeMap<String, World> {
+    let mut levels: BTreeMap<String, World> = axcenity_project::load_levels(folder, problems)
+        .into_iter()
+        .collect();
+    levels.insert(start.to_owned(), start_world.clone());
+    levels
 }
 
 /// Starts every script in the order the project lists them (Scripts, then
@@ -425,6 +447,8 @@ struct App {
     splash: splash::Splash,
     /// The game's own loading screen, when the project names one.
     loading_gui: Option<LoadingGui>,
+    /// How the loading screen goes, for each level loaded (Phase 48).
+    loading_screen: axcenity_project::LoadingScreen,
     world: World,
     stylesheets: Vec<axcenity_ui::Stylesheet>,
     /// Runs the scripts, and keeps the ones paused by `task.wait`.
@@ -524,6 +548,7 @@ impl App {
             show_splash: false,
             splash: splash::Splash::new(),
             loading_gui: None,
+            loading_screen: axcenity_project::LoadingScreen::default(),
             world,
             stylesheets,
             scripts,
@@ -564,6 +589,24 @@ impl App {
             last_frame: None,
             shader_time: 0.0,
             watcher: None,
+        }
+    }
+
+    /// Shows the game's loading screen again for its minimum time when a
+    /// script loaded a level (`LevelService:LoadLevel`, or a slot saved in
+    /// another level). Its ScreenGui stays through the load.
+    fn follow_level_loads(&mut self) {
+        if self.scripts.take_level_loads().is_empty() {
+            return;
+        }
+        let shown = LoadingGui::start(
+            &mut self.world,
+            &self.loading_screen.screen_gui,
+            self.loading_screen.min_seconds,
+            false,
+        );
+        if shown.is_some() {
+            self.loading_gui = shown;
         }
     }
 
@@ -1244,6 +1287,8 @@ impl ApplicationHandler for App {
                     .place_tools(&mut self.world, self.animators.poses());
                 print_output(&mut self.scripts);
 
+                // A level loaded this frame shows the loading screen again.
+                self.follow_level_loads();
                 // The loading screen goes once its time is up and, when the
                 // game waits for one, a LocalScript has said it's ready.
                 let ready = self.scripts.take_loading_screen_removed();
@@ -1449,6 +1494,8 @@ mod physics_tests;
 mod health_tests;
 #[cfg(test)]
 mod humanoid_tests;
+#[cfg(test)]
+mod level_tests;
 #[cfg(test)]
 mod prompt_tests;
 #[cfg(test)]

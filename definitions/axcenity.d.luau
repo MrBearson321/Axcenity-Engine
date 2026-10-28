@@ -405,6 +405,20 @@ declare extern type SaveService with
 	function RestoreCheckpoint(self): ()
 end
 
+--- The game's levels, from `game:GetService("LevelService")`: `world.json` is the start level, and each other level is `levels/<name>.world.json`. A level is its Workspace; ReplicatedStorage, Players, Lighting, StarterPlayer and Teams stay the same from level to level. Both sides share it.
+declare extern type LevelService with
+	--- The name of the level in the Workspace now: the start level until LoadLevel loads another (in the editor's Play, the open level).
+	CurrentLevel: string
+	--- Fires with the level's name once LoadLevel (or LoadSlot, for a slot saved in another level) has put it in the Workspace: `function(name) ... end`. Connect again to things in the new level here.
+	LevelLoaded: Signal
+	--- Puts the level `name` in place of the Workspace, such as `LevelService:LoadLevel("Castle", "Gate")`. The Workspace's ScreenGuis and the players' characters stay; everything else in it is replaced, and the levels added with AddLevel go. Characters stand on the Instance called `spawnName` in the new level, or on one of their SpawnLocations. The loading screen shows, and LevelLoaded fires once it's in.
+	function LoadLevel(self, name: string, spawnName: string?): ()
+	--- Copies the level `name` into a new Model of that name in the Workspace, beside the current level, and returns the Model. An error if it's added already.
+	function AddLevel(self, name: string): Model
+	--- Takes the level `name`, added with AddLevel, out of the Workspace. An error if it isn't added.
+	function RemoveLevel(self, name: string): ()
+end
+
 --- The language UI text shows, from `game:GetService("LocalizationService")`. A TextLabel or TextButton with a `TextKey` shows that key's value from the project's string table (`strings.json`, edited in the UI Designer's Strings tab) in `Language`, or its own Text when there's none. Both sides share it.
 declare extern type LocalizationService with
 	--- The active language, such as `"English"`: one of `Languages`, the first when the game starts. Setting it changes every bound label and button; a language the table doesn't have is an error and changes nothing.
@@ -1126,6 +1140,8 @@ declare extern type DataModel extends Instance with
 	CollectionService: CollectionService
 	--- Save slots, player data, settings and checkpoints (same as `game:GetService("SaveService")`).
 	SaveService: SaveService
+	--- The game's levels (same as `game:GetService("LevelService")`).
+	LevelService: LevelService
 	--- The language UI text shows (same as `game:GetService("LocalizationService")`).
 	LocalizationService: LocalizationService
 	--- The player's game UI settings (same as `game:GetService("GuiService")`).
@@ -1135,7 +1151,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 

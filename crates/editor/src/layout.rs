@@ -54,6 +54,8 @@ pub enum Pane {
     Material,
     /// Every tag in the world (`tags.rs`). Starts closed.
     Tags,
+    /// The project's levels (`levels.rs`, Phase 48). Starts closed.
+    Levels,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -61,7 +63,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 13] = [
+    pub const CLOSABLE: [Pane; 14] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -75,6 +77,7 @@ impl Pane {
         Pane::DataTable,
         Pane::Material,
         Pane::Tags,
+        Pane::Levels,
     ];
 
     pub fn label(self) -> &'static str {
@@ -93,6 +96,7 @@ impl Pane {
             Pane::DataTable => "Data Table",
             Pane::Material => "Material",
             Pane::Tags => "Tags",
+            Pane::Levels => "Levels",
             Pane::Script(_) => "Script",
         }
     }
@@ -113,6 +117,7 @@ impl Pane {
             Pane::DataTable => icons::TABLE,
             Pane::Material => icons::SPHERE,
             Pane::Tags => icons::TAG,
+            Pane::Levels => icons::STACK,
             Pane::Script(_) => icons::CODE,
         }
     }
@@ -182,7 +187,7 @@ impl Layout {
             | Pane::DataTable
             | Pane::Material => Some(Pane::Scene),
             // A tab beside Properties, down the right.
-            Pane::Terrain | Pane::Tags => Some(Pane::Properties),
+            Pane::Terrain | Pane::Tags | Pane::Levels => Some(Pane::Properties),
             Pane::Script(_) => Some(Pane::Scene),
         };
         let beside = neighbor
@@ -195,7 +200,10 @@ impl Layout {
                 tree.push_to_focused_leaf(pane);
             }
             // Its neighbor is closed too: split it off the Scene's side.
-            (Pane::Explorer | Pane::Properties | Pane::Terrain | Pane::Tags, None) => {
+            (
+                Pane::Explorer | Pane::Properties | Pane::Terrain | Pane::Tags | Pane::Levels,
+                None,
+            ) => {
                 tree.split_right(NodeIndex::root(), 0.78, vec![pane]);
             }
             _ => {
@@ -418,6 +426,7 @@ mod tests {
                     | Pane::DataTable
                     | Pane::Material
                     | Pane::Tags
+                    | Pane::Levels
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;

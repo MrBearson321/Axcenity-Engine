@@ -847,3 +847,35 @@ fn a_slot_keeps_the_inventory_and_the_tool_in_hand_by_tool_name_and_item() {
     );
     assert!(world.find_first_child(made, "Handle").is_some());
 }
+
+#[test]
+fn a_slot_keeps_the_levels_and_one_without_them_reads_as_none() {
+    let folder = folder("levels");
+    let mut saves = Saves::new(Some(folder.clone()));
+    let world = level().world;
+    saves.save(&world, 1).unwrap();
+    let text = fs::read_to_string(saves.slot_path(1).unwrap()).unwrap();
+    assert!(!text.contains("levels"), "{text}");
+    assert_eq!(saves.read(1).unwrap().levels, None);
+
+    saves.levels = Some(SavedLevels {
+        current: "Castle".to_owned(),
+        added: vec!["Dungeon".to_owned()],
+    });
+    saves.save(&world, 2).unwrap();
+    let file = saves.read(2).unwrap();
+    assert_eq!(file.version, SAVE_VERSION);
+    assert_eq!(file.levels, saves.levels);
+
+    // Loading one without levels keeps the game's; one with them notes them.
+    let mut loaded = Saves::new(Some(folder));
+    let mut world = World::new();
+    loaded.levels = Some(SavedLevels {
+        current: "Meadow".to_owned(),
+        added: Vec::new(),
+    });
+    loaded.load(&mut world, 1).unwrap();
+    assert_eq!(loaded.levels.as_ref().unwrap().current, "Meadow");
+    loaded.load(&mut world, 2).unwrap();
+    assert_eq!(loaded.levels, saves.levels);
+}

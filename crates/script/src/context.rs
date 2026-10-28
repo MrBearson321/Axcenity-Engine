@@ -507,6 +507,14 @@ impl Context {
         });
     }
 
+    /// Fires `LevelService.LevelLoaded` with the level's name (Phase 48).
+    pub fn fire_level_loaded(&self, world: &mut World, name: &str) {
+        with_world(&self.lua, world, || {
+            let name = name.to_owned();
+            events::fire(&self.lua, events::Owner::LevelService, "LevelLoaded", name);
+        });
+    }
+
     /// Fires a no-argument event on one Instance.
     pub fn fire_instance_event(
         &self,

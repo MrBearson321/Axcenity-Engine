@@ -18,7 +18,7 @@ use axcenity_core::{InstanceId, Value, World};
 use serde::{Deserialize, Serialize};
 
 use crate::validate::{AssetKind, Finding, FindingKind, PREFABS_FOLDER, Site, project_files};
-use crate::world_file::{parse_prefab, write_prefab};
+use crate::world_file::{parse_prefab, parse_world, write_prefab, write_world};
 
 const IMAGES_FOLDER: &str = "assets/images";
 const PARTICLES_FOLDER: &str = "assets/particles";
@@ -96,6 +96,7 @@ impl Finding {
             self.site,
             Site::Instance { .. }
                 | Site::Prefab { .. }
+                | Site::Level { .. }
                 | Site::ClipSource { .. }
                 | Site::StateClip { .. }
                 | Site::TableCell { .. }
@@ -306,6 +307,9 @@ enum Doc {
         world: Box<World>,
         roots: Vec<InstanceId>,
     },
+    /// A level file (Phase 48), written back as it was read: `world.json`
+    /// whole, a `levels/` file as its Workspace.
+    Level(Box<World>),
     Clip(ClipFile),
     Machine(StateMachineFile),
     Table(DataTable),
@@ -381,7 +385,9 @@ impl Planner<'_> {
             AssetKind::Prefab => PREFABS_FOLDER,
             AssetKind::Folder => return Err("pick a folder inside the project".to_owned()),
             AssetKind::Texture => match finding.site {
-                Site::Instance { property, .. } | Site::Prefab { property, .. } => match property {
+                Site::Instance { property, .. }
+                | Site::Prefab { property, .. }
+                | Site::Level { property, .. } => match property {
                     "Image" => IMAGES_FOLDER,
                     "Texture" => PARTICLES_FOLDER,
                     _ => PROJECT_TEXTURES_FOLDER,
@@ -485,6 +491,24 @@ impl Planner<'_> {
                     .set_property(id, property, Value::String(value.unwrap_or_default()))
                     .map_err(|err| format!("could not change `{file}`: {err}"))
             }
+            Site::Level {
+                file,
+                place,
+                property,
+            } => {
+                let Doc::Level(world) = self.doc(file, read_level)? else {
+                    return Err(format!("`{file}` isn't a level"));
+                };
+                let roots = world
+                    .get(world.workspace())
+                    .map(|workspace| workspace.children().to_vec())
+                    .unwrap_or_default();
+                let id = place_in(world, &roots, place)
+                    .ok_or_else(|| format!("`{file}` changed since the check; check again"))?;
+                world
+                    .set_property(id, property, Value::String(value.unwrap_or_default()))
+                    .map_err(|err| format!("could not change `{file}`: {err}"))
+            }
             Site::ClipSource { file } => {
                 let Doc::Clip(clip) = self.doc(file, read_clip)? else {
                     return Err(format!("`{file}` isn't a clip"));
@@ -555,6 +579,8 @@ impl Planner<'_> {
         for (path, (before, doc)) in self.docs {
             let after = match doc {
                 Doc::Prefab { world, roots } => write_prefab(&world, &roots),
+                Doc::Level(world) if path == crate::WORLD_FILE => write_world(&world),
+                Doc::Level(world) => crate::write_level(&world),
                 Doc::Clip(clip) => clip.to_json(),
                 Doc::Machine(machine) => machine.to_json(),
                 Doc::Table(table) => table.to_json(),
@@ -587,6 +613,12 @@ fn read_prefab(text: &str) -> Result<Doc, String> {
         world: Box::new(world),
         roots,
     })
+}
+
+fn read_level(text: &str) -> Result<Doc, String> {
+    parse_world(text)
+        .map(|world| Doc::Level(Box::new(world)))
+        .map_err(|err| err.to_string())
 }
 
 fn read_clip(text: &str) -> Result<Doc, String> {

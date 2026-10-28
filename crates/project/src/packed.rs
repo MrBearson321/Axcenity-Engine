@@ -219,7 +219,12 @@ fn include_runtime_file(root: &Path, path: &Path) -> bool {
     // LocalScript under its ScreenGui, as it does for a project folder.
     if matches!(
         first.to_str(),
-        Some("scripts" | "assets" | axcenity_blocks_runtime::ui_graph::UI_GRAPHS_FOLDER)
+        Some(
+            "scripts"
+                | "assets"
+                | crate::LEVELS_FOLDER
+                | axcenity_blocks_runtime::ui_graph::UI_GRAPHS_FOLDER
+        )
     ) {
         return true;
     }

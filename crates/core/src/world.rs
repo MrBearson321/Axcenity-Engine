@@ -709,6 +709,65 @@ impl World {
         Ok(root)
     }
 
+    /// Copies `id` in `source` (another world) and everything inside it
+    /// into this world, like [`duplicate`](Self::duplicate), and returns the
+    /// copy, with no parent yet. Scripts are left out, and so is what's
+    /// inside them. An ObjectValue pointing inside the copied tree points at
+    /// the same place in the copy; one pointing elsewhere becomes nil. Levels
+    /// load this way.
+    pub fn copy_from(&mut self, source: &World, id: InstanceId) -> Result<InstanceId, TreeError> {
+        let original = source.get(id).ok_or(TreeError::Stale)?;
+        if original.class.is_service() {
+            return Err(TreeError::Service(original.class));
+        }
+        let mut copies = HashMap::new();
+        let mut order = vec![id];
+        order.extend(source.descendants(id));
+        let mut root = None;
+        for old in order {
+            let instance = source.get(old).expect("descendants are alive");
+            let parent = match instance.parent {
+                Some(parent) if old != id => match copies.get(&parent) {
+                    Some(&parent) => Some(parent),
+                    // Inside a script that was left out.
+                    None => continue,
+                },
+                _ => None,
+            };
+            if instance.class.is_script() {
+                continue;
+            }
+            let mut copy = instance.clone();
+            copy.parent = parent;
+            copy.children.clear();
+            let new = InstanceId(self.instances.insert(copy));
+            if let Some(parent) = parent {
+                self.instances
+                    .get_mut(parent.0)
+                    .expect("copied above")
+                    .children
+                    .push(new);
+            }
+            if let Some(data) = source.terrains.get(&old) {
+                self.terrains.insert(new, data.clone());
+            }
+            copies.insert(old, new);
+            root.get_or_insert(new);
+        }
+        for &copy in copies.values() {
+            let instance = self.instances.get_mut(copy.0).expect("copied above");
+            for value in instance.properties.values_mut() {
+                if let Value::Instance(target) = value
+                    && let Some(old) = *target
+                {
+                    *target = copies.get(&old).copied();
+                }
+            }
+        }
+        // A script at the root copies nothing.
+        root.ok_or(TreeError::Stale)
+    }
+
     /// Gives a copy of a Terrain its original's landscape. They share it
     /// until one is changed.
     fn copy_terrain(&mut self, original: InstanceId, copy: InstanceId) {

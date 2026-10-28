@@ -48,6 +48,7 @@ fn the_projects_loading_screen_covers_play_until_a_local_script_is_ready() {
         None,
         &GraphicsSettings::default(),
         &Capabilities::default(),
+        PlayLevels::default(),
     )
     .unwrap();
     let enabled = |session: &Session| {
@@ -102,6 +103,7 @@ fn scripts_change_only_the_copy() {
         None,
         &GraphicsSettings::default(),
         &Capabilities::default(),
+        PlayLevels::default(),
     )
     .unwrap();
 
@@ -128,6 +130,7 @@ fn script_errors_go_to_output_and_the_game_keeps_running() {
         None,
         &GraphicsSettings::default(),
         &Capabilities::default(),
+        PlayLevels::default(),
     )
     .unwrap();
     for _ in 0..90 {
@@ -161,6 +164,7 @@ fn a_panic_in_a_frame_is_caught_with_its_message() {
         None,
         &GraphicsSettings::default(),
         &Capabilities::default(),
+        PlayLevels::default(),
     )
     .unwrap();
     let camera = CameraState::default();
@@ -207,6 +211,7 @@ end",
         None,
         &GraphicsSettings::default(),
         &Capabilities::default(),
+        PlayLevels::default(),
     )
     .unwrap();
     let camera = CameraState::default();
@@ -284,6 +289,7 @@ fn each_frame_reports_its_steps_cost_and_the_load_for_the_profiler() {
         None,
         &GraphicsSettings::default(),
         &Capabilities::default(),
+        PlayLevels::default(),
     )
     .unwrap();
     assert!(session.cost().is_none(), "no frame has run yet");
@@ -388,6 +394,7 @@ fn a_local_script_in_play_reads_keys_and_moves_the_camera() {
         None,
         &GraphicsSettings::default(),
         &Capabilities::default(),
+        PlayLevels::default(),
     )
     .unwrap();
     let space = KeyEvent {

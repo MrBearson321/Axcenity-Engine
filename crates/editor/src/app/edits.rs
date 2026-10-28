@@ -1055,6 +1055,13 @@ impl EditorApp {
             self.output
                 .error(format!("Could not restore a project file: {err}"));
         }
+        // A level's start or name changed back or again (Phase 48).
+        if files
+            .iter()
+            .any(|file| file.path == axcenity_project::MANIFEST_FILE)
+        {
+            self.follow_start_level();
+        }
         self.animation.sync_after_history(
             &project,
             &self.assets,

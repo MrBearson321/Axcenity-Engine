@@ -335,10 +335,20 @@ impl EditorApp {
             return false;
         };
         if project.keep_world_file {
-            match project::keep_world_file(&project.folder) {
+            // With a level open, its file is the one the editor never loaded.
+            let (kept, file) = match &project.level {
+                Some(name) => (
+                    project::keep_level_file(&project.folder, name),
+                    project::level_path(name),
+                ),
+                None => (
+                    project::keep_world_file(&project.folder),
+                    project::WORLD_FILE.to_owned(),
+                ),
+            };
+            match kept {
                 Ok(Some(kept)) => self.output.info(format!(
-                    "Kept the old `{}`, which the editor never loaded, as `{kept}`.",
-                    project::WORLD_FILE
+                    "Kept the old `{file}`, which the editor never loaded, as `{kept}`."
                 )),
                 Ok(None) => {}
                 Err(err) => {
@@ -361,10 +371,13 @@ impl EditorApp {
                 .error(format!("Could not save: {}", chain(&err)));
             return false;
         }
-        match project::save_world(&project.folder, &self.world) {
+        match project::save_level(&project.folder, project.level.as_deref(), &self.world) {
             Ok(()) => {
                 // So the watcher's report of this change is known to be ours.
-                project.world_text = Some(project::write_world(&self.world));
+                project.world_text = match project.level {
+                    None => Some(project::write_world(&self.world)),
+                    Some(_) => read_world_text(&project.folder),
+                };
                 // The undo history stays: saving only marks this point as saved.
                 self.history.mark_saved();
                 true

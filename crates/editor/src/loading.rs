@@ -61,6 +61,8 @@ struct Status {
 /// A project being opened. Dropping it cancels the load.
 pub struct Loading {
     pub folder: PathBuf,
+    /// The level it opens in (`None`: the start level).
+    pub level: Option<String>,
     /// The project's name, or its folder's when the manifest can't be read.
     pub name: String,
     status: Arc<Mutex<Status>>,
@@ -75,6 +77,7 @@ impl Loading {
     pub fn start(
         ctx: &egui::Context,
         folder: &Path,
+        level: Option<String>,
         terrain: TerrainCache,
         camera: Camera,
     ) -> Self {
@@ -94,6 +97,7 @@ impl Loading {
         let (sender, done) = mpsc::channel();
         let job = Job {
             folder: folder.to_owned(),
+            level: level.clone(),
             status: status.clone(),
             cancel: cancel.clone(),
             ctx: ctx.clone(),
@@ -108,6 +112,7 @@ impl Loading {
         });
         Self {
             folder: folder.to_owned(),
+            level,
             name,
             status,
             cancel,
@@ -173,6 +178,7 @@ fn lock(status: &Mutex<Status>) -> std::sync::MutexGuard<'_, Status> {
 /// What the loading thread owns.
 struct Job {
     folder: PathBuf,
+    level: Option<String>,
     status: Arc<Mutex<Status>>,
     cancel: Arc<AtomicBool>,
     ctx: egui::Context,
@@ -180,10 +186,11 @@ struct Job {
 
 impl Job {
     fn run(&self, mut terrain: TerrainCache, camera: Camera) -> Result<Loaded, LoadError> {
-        let project = axcenity_project::load_with_progress(&self.folder, &mut |step| {
-            let (doing, count, at) = describe(step);
-            self.report(doing, count, FILES, at);
-        })?;
+        let project =
+            axcenity_project::load_with_level(&self.folder, self.level.as_deref(), &mut |step| {
+                let (doing, count, at) = describe(step);
+                self.report(doing, count, FILES, at);
+            })?;
 
         let assets = Assets::new(&project.folder);
         let files = asset_files(&project.world);

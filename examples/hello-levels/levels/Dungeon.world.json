@@ -1,0 +1,28 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Stairs",
+        "properties": {
+          "Position": [30, 0.5, 0],
+          "Size": [8, 1, 8],
+          "Color": [0.3, 0.28, 0.26],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Cell",
+        "properties": {
+          "Position": [30, 3, -8],
+          "Size": [8, 6, 1],
+          "Color": [0.25, 0.25, 0.28],
+          "Material": "Metal",
+          "Anchored": true
+        }
+      }
+    ]
+  }
+}

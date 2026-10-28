@@ -1538,10 +1538,10 @@ Blocks: "load level", "add level", "remove level".
 
 ### Acceptance criteria
 
-- [ ] Touching a portal in level 1 loads level 2 at the named spawn. A Folder in ReplicatedStorage and the player data survive the load.
-- [ ] `AddLevel("Dungeon")` streams a dungeon in beside the current level, and `RemoveLevel` takes it away, in the editor Play and in a built game.
-- [ ] Saving in level 2 and loading the slot from the main menu returns to level 2.
-- [ ] A project with only `world.json` opens and plays unchanged.
+- [x] Touching a portal in level 1 loads level 2 at the named spawn. A Folder in ReplicatedStorage and the player data survive the load.
+- [x] `AddLevel("Dungeon")` streams a dungeon in beside the current level, and `RemoveLevel` takes it away, in the editor Play and in a built game.
+- [x] Saving in level 2 and loading the slot from the main menu returns to level 2.
+- [x] A project with only `world.json` opens and plays unchanged.
 
 ---
 

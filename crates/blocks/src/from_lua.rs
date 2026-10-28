@@ -19,12 +19,13 @@ use crate::{
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 9] = [
+const SERVICES: [&str; 10] = [
     "UserInputService",
     "RunService",
     "Debris",
     "TweenService",
     "SaveService",
+    "LevelService",
     "LocalizationService",
     "Lighting",
     "UserGameSettings",
@@ -164,6 +165,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             }
             kind if kind.saves() => {
                 services.insert("SaveService".to_owned());
+            }
+            kind if kind.levels() => {
+                services.insert("LevelService".to_owned());
             }
             BlockKind::SetLanguage { .. } => {
                 services.insert("LocalizationService".to_owned());
@@ -952,6 +956,9 @@ impl<'a> Converter<'a> {
         if let Some(save) = self.save_call(call, scope) {
             return Some(save);
         }
+        if let Some(level) = self.level_call(call, scope) {
+            return Some(level);
+        }
         match &call.kind {
             ExprKind::Call(function, args) => {
                 if self.is_field(function, "task", "wait")
@@ -1109,6 +1116,36 @@ impl<'a> Converter<'a> {
                 checkpoint: self.target(checkpoint)?,
             },
             ("RestoreCheckpoint", []) => BlockKind::RestoreCheckpoint,
+            _ => return None,
+        })
+    }
+
+    /// `LevelService:LoadLevel("Castle", "Gate")`, `AddLevel("Dungeon")` and
+    /// `RemoveLevel("Dungeon")`.
+    fn level_call(&self, call: &Expr, scope: Scope) -> Option<BlockKind> {
+        let ExprKind::Method(object, method, args) = &call.kind else {
+            return None;
+        };
+        if !self.is_service(object, "LevelService") {
+            return None;
+        }
+        Some(match (method.as_str(), args.as_slice()) {
+            ("LoadLevel", [level]) => BlockKind::LoadLevel {
+                level: self.expression(level, scope),
+                spawn: Expression::Text {
+                    value: String::new(),
+                },
+            },
+            ("LoadLevel", [level, spawn]) => BlockKind::LoadLevel {
+                level: self.expression(level, scope),
+                spawn: self.expression(spawn, scope),
+            },
+            ("AddLevel", [level]) => BlockKind::AddLevel {
+                level: self.expression(level, scope),
+            },
+            ("RemoveLevel", [level]) => BlockKind::RemoveLevel {
+                level: self.expression(level, scope),
+            },
             _ => return None,
         })
     }

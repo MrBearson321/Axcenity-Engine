@@ -11,10 +11,14 @@ impl EditorApp {
     /// current project stays open. [`Self::begin_open`] reads it in the
     /// background instead.
     pub fn open(&mut self, folder: &Path) {
-        match axcenity_project::load(folder) {
+        self.open_in_level(folder, None);
+    }
+    /// [`Self::open`], in the level `level` (`None`: the start level).
+    pub fn open_in_level(&mut self, folder: &Path, level: Option<String>) {
+        match axcenity_project::load_with_level(folder, level.as_deref(), &mut |_| {}) {
             Ok(project) => {
                 let assets = Assets::new(&project.folder);
-                self.open_loaded(project, assets);
+                self.open_loaded(project, assets, level);
             }
             // `{:#}` on an `anyhow::Error` shows the whole chain of causes
             // on one line, such as which line of which file is wrong.
@@ -25,13 +29,28 @@ impl EditorApp {
     /// loading screen over the window until it's read (see `loading.rs`).
     /// It opens in [`Self::follow_loading`].
     pub fn begin_open(&mut self, ctx: &egui::Context, folder: &Path) {
+        self.begin_open_in_level(ctx, folder, None);
+    }
+    /// [`Self::begin_open`], in the level `level` (`None`: the start level).
+    pub(super) fn begin_open_in_level(
+        &mut self,
+        ctx: &egui::Context,
+        folder: &Path,
+        level: Option<String>,
+    ) {
         if self.loading.is_some() {
             return;
         }
         let mut terrain = TerrainCache::new();
         terrain.view = self.viewport.terrain.view;
         terrain.detail_distance = self.viewport.terrain.detail_distance;
-        self.loading = Some(Loading::start(ctx, folder, terrain, viewport::start_view()));
+        self.loading = Some(Loading::start(
+            ctx,
+            folder,
+            level,
+            terrain,
+            viewport::start_view(),
+        ));
     }
     /// Opens the project being loaded once its thread is done. Returns true
     /// while it's still loading, when only the loading screen is drawn.
@@ -45,7 +64,7 @@ impl EditorApp {
         let loading = self.loading.take().expect("checked above");
         match result {
             Ok(loaded) => {
-                self.open_loaded(loaded.project, loaded.assets);
+                self.open_loaded(loaded.project, loaded.assets, loading.level.clone());
                 // After opening, which forgets the old project's terrains.
                 let mut terrain = loaded.terrain;
                 terrain.view = self.viewport.terrain.view;
@@ -122,7 +141,12 @@ impl EditorApp {
         ));
     }
     /// Opens `project`, read with its models and textures into `assets`.
-    fn open_loaded(&mut self, project: axcenity_project::Project, assets: Assets) {
+    fn open_loaded(
+        &mut self,
+        project: axcenity_project::Project,
+        assets: Assets,
+        level: Option<String>,
+    ) {
         if let Some(from) = project.migrated_from {
             let kept = project
                 .migration_backup
@@ -226,8 +250,19 @@ impl EditorApp {
             })
             .collect();
         let ui_graphs = ui_graphs::documents(&project.world, project.ui_graphs);
+        // A level that's the start level by name is opened as it.
+        let start_level = project.manifest.start_level;
+        let level = level.filter(|name| *name != start_level);
+        if let Some(name) = &level {
+            self.output.info(format!(
+                "Opened the level \"{name}\" (`{}`).",
+                axcenity_project::level_path(name)
+            ));
+        }
         self.project = Some(OpenProject {
             name: project.manifest.name,
+            start_level,
+            level,
             show_splash,
             loading_screen,
             input_map: project.input_map,
@@ -356,6 +391,7 @@ impl EditorApp {
     /// Instances have the edit world's IDs where they match. A resumed game
     /// doesn't show the loading screen again.
     pub(super) fn start_session(&mut self, resumed: Option<World>) {
+        let (levels, from_start) = self.play_levels(resumed.is_none());
         let Some(project) = &self.project else {
             return;
         };
@@ -381,7 +417,10 @@ impl EditorApp {
         } else {
             &project.loading_screen
         };
-        let game = resumed.as_ref().unwrap_or(&self.world);
+        let game = resumed
+            .as_ref()
+            .or(from_start.as_ref())
+            .unwrap_or(&self.world);
         // `project` borrows `self.project` and `output` borrows `self.output`:
         // different fields, so Rust allows both borrows at once.
         let scripts = play::read_scripts(
@@ -406,6 +445,7 @@ impl EditorApp {
             play_save_folder(&project.name),
             &self.graphics,
             &self.capabilities.unwrap_or_default(),
+            levels,
         ) {
             Ok(session) => {
                 self.play = Some(session);
@@ -425,6 +465,60 @@ impl EditorApp {
             }
             Err(crash) => self.crashed(crash),
         }
+    }
+    /// Play's levels (Phase 48): the open level's world is the edit world,
+    /// the others are read from their files (Play saved them first). With
+    /// Play from Start Level on and another level open, a fresh game also
+    /// gets the edit world with the start level's Workspace, to start in.
+    fn play_levels(&mut self, fresh: bool) -> (play::PlayLevels, Option<World>) {
+        let Some(project) = &self.project else {
+            return Default::default();
+        };
+        let mut problems = Vec::new();
+        let mut worlds: std::collections::BTreeMap<String, World> =
+            axcenity_project::load_levels(&project.folder, &mut problems)
+                .into_iter()
+                .collect();
+        let open = project.level.clone();
+        let start_world = match &open {
+            None => Some(self.world.clone()),
+            Some(_) => match axcenity_project::read_start_level(&project.folder) {
+                Ok(world) => Some(world),
+                Err(err) => {
+                    problems.push(err);
+                    None
+                }
+            },
+        };
+        let start = project.start_level.clone();
+        if let Some(world) = &start_world {
+            worlds.insert(start.clone(), world.clone());
+        }
+        if let Some(name) = &open {
+            worlds.insert(name.clone(), self.world.clone());
+        }
+        for problem in problems {
+            self.output
+                .error(format!("Play: {:#}", anyhow::Error::new(problem)));
+        }
+        let from_start = match (&open, start_world) {
+            (Some(_), Some(start_world)) if fresh && self.play_from_start => {
+                let mut game = self.world.clone();
+                axcenity_project::replace_workspace(&mut game, &start_world);
+                Some(game)
+            }
+            _ => None,
+        };
+        let current = match (&open, &from_start) {
+            (Some(name), None) => name.clone(),
+            _ => start.clone(),
+        };
+        let levels = play::PlayLevels {
+            start,
+            current,
+            worlds,
+        };
+        (levels, from_start)
     }
     /// Whether Play is paused at a breakpoint.
     pub(super) fn paused(&self) -> bool {
@@ -821,7 +915,8 @@ impl EditorApp {
             | Discard::OpenAnother
             | Discard::OpenSample(_)
             | Discard::CloseProject
-            | Discard::NewProject => self.unsaved(),
+            | Discard::NewProject
+            | Discard::OpenLevel(_) => self.unsaved(),
         };
         if unsaved {
             self.asking = Some(discard);
@@ -842,7 +937,8 @@ impl EditorApp {
                 | Discard::OpenAnother
                 | Discard::OpenSample(_)
                 | Discard::CloseProject
-                | Discard::NewProject => self.save().then_some(discard),
+                | Discard::NewProject
+                | Discard::OpenLevel(_) => self.save().then_some(discard),
             },
             Answer::DontSave => {
                 if let Discard::CloseTab(path) = &discard {
@@ -897,6 +993,11 @@ impl EditorApp {
                     .new_project(axcenity_project::Template::Baseplate);
             }
             Discard::CloseTab(path) => self.tabs.close(&path),
+            Discard::OpenLevel(level) => {
+                if let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) {
+                    self.begin_open_in_level(ctx, &folder, level);
+                }
+            }
         }
     }
     /// Goes back to the start screen. The project's thumbnail is taken first
@@ -987,6 +1088,7 @@ impl EditorApp {
                 (project, "opening another project")
             }
             Discard::CloseProject => (project, "closing it"),
+            Discard::OpenLevel(_) => (project, "opening another level"),
             Discard::CloseTab(path) => (axcenity_project::script_name(path), "closing it"),
         };
         // What isn't saved: only the tab, when closing a tab.

@@ -39,6 +39,8 @@ pub enum Owner {
     Tween(u64),
     /// `CollectionService`'s tag signals.
     CollectionService,
+    /// `LevelService.LevelLoaded` (Phase 48).
+    LevelService,
 }
 
 /// Which event of its owner.
@@ -169,7 +171,10 @@ impl Connections {
         self.handlers.retain(|(owner, _), _| match owner {
             Owner::Instance(instance) => exists(*instance),
             Owner::Tween(tween) => tweens.contains(tween),
-            Owner::UserInputService | Owner::RunService | Owner::CollectionService => true,
+            Owner::UserInputService
+            | Owner::RunService
+            | Owner::CollectionService
+            | Owner::LevelService => true,
         });
     }
 }

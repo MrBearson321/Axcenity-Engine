@@ -18,7 +18,7 @@ use axcenity_assets::{
 };
 use axcenity_core::{ClassName, InstanceId, Value, World};
 
-use crate::world_file::parse_prefab;
+use crate::world_file::{parse_prefab, parse_world};
 
 /// Folders at the project root that are not part of the game.
 const SKIP_ROOT_DIRS: &[&str] = &[".axcenity", ".git", "target", "node_modules"];
@@ -111,6 +111,15 @@ pub enum Site {
         place: Vec<usize>,
         property: &'static str,
     },
+    /// A property of an Instance in a level file other than the open one
+    /// (Phase 48): `levels/<name>.world.json`, or `world.json` while
+    /// another level is open. `place` is the child index at each level,
+    /// from the file's Workspace children down.
+    Level {
+        file: String,
+        place: Vec<usize>,
+        property: &'static str,
+    },
     /// The model a linked clip's take comes from.
     ClipSource { file: String },
     /// A clip of one state in a state machine.
@@ -195,9 +204,15 @@ impl AssetKind {
 }
 
 /// Scans `folder` and `world` without writing. `world` is the open tree
-/// (including unsaved edits); prefabs, clips, state machines and models are
-/// read from disk.
+/// (including unsaved edits), with the start level open; prefabs, clips,
+/// state machines, models and the other levels are read from disk.
 pub fn check_assets(folder: &Path, world: &World) -> Report {
+    check_assets_in_level(folder, world, None)
+}
+
+/// [`check_assets`] with the level `open` in `world` (`None` for the start
+/// level). Every other level is read from its file and checked too.
+pub fn check_assets_in_level(folder: &Path, world: &World, open: Option<&str>) -> Report {
     let mut scan = Scan {
         folder: folder.to_path_buf(),
         loader: Assets::new(folder),
@@ -205,6 +220,7 @@ pub fn check_assets(folder: &Path, world: &World) -> Report {
         models: HashMap::new(),
     };
     scan.world(world, None);
+    scan.levels(open);
     scan.prefabs();
     scan.clips();
     scan.state_machines();
@@ -252,6 +268,67 @@ impl Scan {
                     },
                 };
                 self.reference(&owner, property, path, kind, site);
+            }
+        }
+    }
+
+    /// The levels' Workspaces, but the open one's: each file's `world.json`
+    /// services are the open world's, checked already.
+    fn levels(&mut self, open: Option<&str>) {
+        let mut files: Vec<String> = crate::level_names(&self.folder)
+            .iter()
+            .filter(|&name| Some(name.as_str()) != open)
+            .map(|name| crate::level_path(name))
+            .collect();
+        if open.is_some() {
+            files.insert(0, crate::WORLD_FILE.to_owned());
+        }
+        for file in files {
+            let text = match fs::read_to_string(self.folder.join(&file)) {
+                Ok(text) => text,
+                Err(err) => {
+                    self.push_file(
+                        FindingKind::ImportFailure,
+                        file,
+                        format!("could not read the level: {err}"),
+                    );
+                    continue;
+                }
+            };
+            let world = match parse_world(&text) {
+                Ok(world) => world,
+                Err(err) => {
+                    self.push_file(
+                        FindingKind::ImportFailure,
+                        file,
+                        format!("could not load the level: {err}"),
+                    );
+                    continue;
+                }
+            };
+            let roots = world
+                .get(world.workspace())
+                .map(|workspace| workspace.children().to_vec())
+                .unwrap_or_default();
+            for id in world.descendants(world.workspace()) {
+                let Some(instance) = world.get(id) else {
+                    continue;
+                };
+                let Some(place) = prefab_place(&world, &roots, id) else {
+                    continue;
+                };
+                let owner = owner_name(&world, id, Some(&file));
+                for (property, kind) in refs(instance.class()) {
+                    let Some(path) = string_prop(instance.property(property)) else {
+                        continue;
+                    };
+                    let site = Site::Level {
+                        file: file.clone(),
+                        place: place.clone(),
+                        property,
+                    };
+                    self.reference(&owner, property, path, kind, site);
+                }
             }
         }
     }

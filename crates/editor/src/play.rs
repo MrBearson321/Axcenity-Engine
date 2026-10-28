@@ -61,6 +61,8 @@ pub struct Session {
     ui_sounds: Vec<SoundAction>,
     /// The project's own loading screen, as the built game shows it.
     loading_gui: Option<LoadingGui>,
+    /// How it goes, to show it again for each level loaded (Phase 48).
+    loading: LoadingScreen,
     /// Set by Debug > Panic during Play, to check that a crash is caught.
     panic_next_frame: bool,
     /// What the last frame's steps took, for the Profiler; `None` when it
@@ -75,6 +77,16 @@ pub struct Session {
     game_camera: GameCamera,
     /// Values edited in Properties during Play, and which Stop keeps.
     kept: PlayEdits,
+}
+
+/// The game's levels for Play's `LevelService` (Phase 48): every level by
+/// name, each a world of its own, with the start level's name and the
+/// level Play starts in. Empty for a game without levels.
+#[derive(Default)]
+pub struct PlayLevels {
+    pub start: String,
+    pub current: String,
+    pub worlds: std::collections::BTreeMap<String, World>,
 }
 
 impl Session {
@@ -103,6 +115,7 @@ impl Session {
         save_folder: Option<PathBuf>,
         graphics: &GraphicsSettings,
         capabilities: &Capabilities,
+        levels: PlayLevels,
     ) -> Result<Session, Crash> {
         let mut session = Session {
             world: edit_world.clone(),
@@ -115,6 +128,7 @@ impl Session {
             audio: GameAudio::default(),
             ui_sounds: Vec::new(),
             loading_gui: None,
+            loading: loading.clone(),
             panic_next_frame: false,
             cost: None,
             graphics: None,
@@ -145,6 +159,11 @@ impl Session {
         session.scripts.set_assets(session.assets.clone());
         session.scripts.set_save_folder(save_folder);
         session.scripts.set_input_map(input_map.clone());
+        if !levels.worlds.is_empty() {
+            session
+                .scripts
+                .set_levels(&levels.start, &levels.current, levels.worlds);
+        }
         session.scripts.set_graphics(graphics, capabilities);
         session.scripts.enable_debugger();
         // `RunService:IsStudio()` is true in the editor's Play.
@@ -487,6 +506,17 @@ impl Session {
                 self.scripts.heartbeat(&mut self.world, seconds);
             }
             self.forward_output(output);
+            // A level loaded this frame shows the loading screen again.
+            if !self.scripts.take_level_loads().is_empty()
+                && let Some(shown) = LoadingGui::start(
+                    &mut self.world,
+                    &self.loading.screen_gui,
+                    self.loading.min_seconds,
+                    false,
+                )
+            {
+                self.loading_gui = Some(shown);
+            }
             let ready = self.scripts.take_loading_screen_removed();
             if let Some(loading) = &mut self.loading_gui {
                 loading.advance(&mut self.world, seconds as f32, ready);

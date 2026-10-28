@@ -1,7 +1,7 @@
 //! Saved versions of a project, so a game can be rolled back.
 //!
-//! Each version is a copy of `world.json`, the `scripts` folder and every
-//! `.css` file, under `.axcenity/history/<id>/`. Assets, the manifest and
+//! Each version is a copy of `world.json`, the levels in `levels/`, the
+//! `scripts` folder and every `.css` file, under `.axcenity/history/<id>/`. Assets, the manifest and
 //! the thumbnail stay as they are. The newest [`MAX_VERSIONS`] are kept.
 //! Restoring copies those files back and removes scripts or styles the
 //! version doesn't have. `.axcenity` is already left out of exports.
@@ -131,8 +131,8 @@ pub fn restore_version(folder: &Path, id: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// `world.json`, `strings.json`, `collision-groups.json`, every script and every stylesheet, in
-/// path order.
+/// `world.json`, `strings.json`, `collision-groups.json`, every level in
+/// `levels/`, every script and every stylesheet, in path order.
 fn tracked_files(folder: &Path) -> Vec<String> {
     let mut problems = Vec::new();
     let mut files = Vec::new();
@@ -141,6 +141,11 @@ fn tracked_files(folder: &Path) -> Vec<String> {
             files.push(file.to_owned());
         }
     }
+    files.extend(
+        crate::level_names(folder)
+            .iter()
+            .map(|name| crate::level_path(name)),
+    );
     files.extend(find_scripts(folder, &mut problems));
     files.extend(find_stylesheets(folder, &mut problems));
     files.sort();
@@ -283,6 +288,12 @@ mod tests {
         let _ = fs::remove_dir_all(&folder);
         fs::create_dir_all(folder.join("scripts")).unwrap();
         fs::write(folder.join(WORLD_FILE), "{\"format_version\":1}").unwrap();
+        fs::create_dir_all(folder.join("levels")).unwrap();
+        fs::write(
+            folder.join("levels/Cave.world.json"),
+            "{\"format_version\":1}",
+        )
+        .unwrap();
         fs::write(folder.join("scripts/hello.server.lua"), "print(1)\n").unwrap();
         fs::write(folder.join("ui.css"), "Frame { }\n").unwrap();
         folder
@@ -305,6 +316,8 @@ mod tests {
         )
         .unwrap();
         fs::write(folder.join("scripts/extra.client.lua"), "print(2)\n").unwrap();
+        fs::write(folder.join("levels/Cave.world.json"), "{}").unwrap();
+        fs::write(folder.join("levels/Moon.world.json"), "{}").unwrap();
         assert!(record_version(&folder, "Second").unwrap());
 
         restore_version(&folder, &versions[0].id).unwrap();
@@ -313,6 +326,12 @@ mod tests {
             "{\"format_version\":1}"
         );
         assert!(!folder.join("scripts/extra.client.lua").exists());
+        // Levels come back too, and one made since goes.
+        assert_eq!(
+            fs::read_to_string(folder.join("levels/Cave.world.json")).unwrap(),
+            "{\"format_version\":1}"
+        );
+        assert!(!folder.join("levels/Moon.world.json").exists());
         assert_eq!(
             fs::read_to_string(folder.join("scripts/hello.server.lua")).unwrap(),
             "print(1)\n"

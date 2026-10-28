@@ -16,6 +16,8 @@ my-game/
                   client scripts: keys.client.lua, ...
                   modules: shared/utils.module.lua, ...
                   block scripts: logic.server.blocks.json, ui.client.blocks.json, ...
+  levels/         optional: the levels other than the start level (world.json),
+                  each <name>.world.json with only its workspace (see Levels)
   ui.css          project stylesheet (additional .css files may be in subfolders)
   assets/models/  imported glTF and FBX models: chair.glb, robot.fbx, or
                   tree/tree.gltf with the .bin and textures it uses (see Assets)
@@ -54,6 +56,7 @@ my-game/
 
 - **Lighting** (Phase 30): the `Lighting` service's properties (`ShadowsEnabled`, `ShadowDistance`, `ClockTime`...) are saved as an optional `lighting` section, `{ "properties": { ... } }`, only when one differs from its default or something is inside Lighting, so older files and their saved text stay the same. What's inside Lighting (an `Atmosphere`, graphics Phase 24) is saved as its `children`, like the Workspace's.
 - **ReplicatedStorage** (decided in Phase 14, chosen by the developer): the optional `replicated_storage` section is written like `workspace`, and only when it has something in it, so older files and their saved text stay the same. `format_version` stays 1: older engines would reject the new field, but no older engine is in use. Players (made at Play) and scripts are never in the file. A `LocalScript` or `Player` listed in the file is an error.
+- **Levels** (Phase 48): `world.json` is the start level; `levels/<name>.world.json` files hold other levels' Workspaces, written by `project::write_level` in this layout with only `workspace`. See [levels.md](levels.md).
 - **Players, StarterPlayer and Teams** (Phase 47): optional `players` (`CharacterAutoLoads`, `RespawnTime`, `LeaderboardEnabled`), `starter_player` (`StarterCharacter`, a prefab path) and `teams` (its `Team` children) sections, in Lighting's shape and written the same way: only when a setting isn't its default or something is inside. StarterPlayerScripts is never written (it's always there). The examples without a character of their own have `"players": { "properties": { "CharacterAutoLoads": false } }`.
 
 ## Properties

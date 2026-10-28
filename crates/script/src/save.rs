@@ -128,11 +128,18 @@ impl UserData for LuaSaveService {
             saves.borrow().save(&world, slot).map_err(failed)?;
             Ok(())
         });
+        // The slot's level goes in first (Phase 48), then the rest is
+        // restored over it.
         methods.add_method("LoadSlot", |lua, _, number: mlua::Value| {
             let slot = slot(lua, &number, "LoadSlot")?;
             let saves = saves(lua)?;
+            let file = saves.borrow().read(slot).map_err(failed)?;
             let mut world = world_mut(lua)?;
-            saves.borrow_mut().load(&mut world, slot).map_err(failed)
+            if let Some(saved) = &file.levels {
+                crate::levels::go_to_saved(lua, &mut world, saved);
+            }
+            saves.borrow_mut().apply(&mut world, file);
+            Ok(())
         });
         methods.add_method("HasSlot", |lua, _, number: mlua::Value| {
             let slot = slot(lua, &number, "HasSlot")?;

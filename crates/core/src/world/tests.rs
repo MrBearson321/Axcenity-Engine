@@ -593,3 +593,52 @@ fn an_int_value_rounds_to_a_whole_number() {
         Some(&Value::Number(3.0))
     );
 }
+
+#[test]
+fn copy_from_brings_a_tree_over_from_another_world_without_its_scripts() {
+    let mut level = World::new();
+    let workspace = level.workspace();
+    let model = level.create(ClassName::Model).unwrap();
+    level.set_name(model, "Dungeon").unwrap();
+    level.set_parent(model, Some(workspace)).unwrap();
+    let door = part_in(&mut level, model, "Door");
+    let script = level.create(ClassName::Script).unwrap();
+    level.set_parent(script, Some(model)).unwrap();
+    let link = level.create(ClassName::ObjectValue).unwrap();
+    level
+        .set_property(link, "Value", Value::Instance(Some(door)))
+        .unwrap();
+    level.set_parent(link, Some(model)).unwrap();
+    let outside = level.create(ClassName::ObjectValue).unwrap();
+    level
+        .set_property(outside, "Value", Value::Instance(Some(workspace)))
+        .unwrap();
+    level.set_parent(outside, Some(model)).unwrap();
+
+    let mut world = World::new();
+    let copy = world.copy_from(&level, model).unwrap();
+    assert_eq!(world.get(copy).unwrap().parent(), None);
+    let children: Vec<_> = world.get(copy).unwrap().children().to_vec();
+    let classes: Vec<_> = children
+        .iter()
+        .map(|&id| world.get(id).unwrap().class())
+        .collect();
+    assert_eq!(
+        classes,
+        [
+            ClassName::Part,
+            ClassName::ObjectValue,
+            ClassName::ObjectValue
+        ]
+    );
+    // Points at the copied door, and at nothing outside the copy.
+    assert_eq!(
+        world.get(children[1]).unwrap().property("Value"),
+        Some(&Value::Instance(Some(children[0])))
+    );
+    assert_eq!(
+        world.get(children[2]).unwrap().property("Value"),
+        Some(&Value::Instance(None))
+    );
+    assert!(level.contains(door), "the source is untouched");
+}

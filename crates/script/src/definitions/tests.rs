@@ -408,6 +408,7 @@ fn described_fields_and_methods_exist() {
         ("TweenService", "game:GetService('TweenService')"),
         ("CollectionService", "game:GetService('CollectionService')"),
         ("SaveService", "game:GetService('SaveService')"),
+        ("LevelService", "game:GetService('LevelService')"),
         (
             "LocalizationService",
             "game:GetService('LocalizationService')",

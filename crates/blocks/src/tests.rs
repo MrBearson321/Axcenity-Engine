@@ -3,6 +3,12 @@ use axcenity_script::{OutputKind, ScriptRuntime};
 
 use super::*;
 
+fn text(value: &str) -> Expression {
+    Expression::Text {
+        value: value.to_owned(),
+    }
+}
+
 fn number(value: f64) -> Expression {
     Expression::Number { value }
 }
@@ -126,9 +132,12 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetClockTime { .. } => 67,
         BlockKind::SetAtmosphere { .. } => 68,
         BlockKind::LeaveSeat { .. } => 69,
+        BlockKind::LoadLevel { .. } => 70,
+        BlockKind::AddLevel { .. } => 71,
+        BlockKind::RemoveLevel { .. } => 72,
     })
 }
-const STATEMENT_COUNT: usize = 70;
+const STATEMENT_COUNT: usize = 73;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -483,6 +492,25 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
         (
             BlockKind::RestoreCheckpoint,
             "SaveService:RestoreCheckpoint()",
+        ),
+        (
+            BlockKind::LoadLevel {
+                level: text("Castle"),
+                spawn: text("Gate"),
+            },
+            "LevelService:LoadLevel(\"Castle\", \"Gate\")",
+        ),
+        (
+            BlockKind::AddLevel {
+                level: text("Dungeon"),
+            },
+            "LevelService:AddLevel(\"Dungeon\")",
+        ),
+        (
+            BlockKind::RemoveLevel {
+                level: text("Dungeon"),
+            },
+            "LevelService:RemoveLevel(\"Dungeon\")",
         ),
         (
             BlockKind::SetToneMapping {

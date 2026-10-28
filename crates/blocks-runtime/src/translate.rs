@@ -87,6 +87,9 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             kind if kind.saves() => {
                 services.insert("SaveService");
             }
+            kind if kind.levels() => {
+                services.insert("LevelService");
+            }
             BlockKind::SetLanguage { .. } => {
                 services.insert("LocalizationService");
             }
@@ -644,6 +647,28 @@ impl Writer {
                 ));
             }
             BlockKind::RestoreCheckpoint => self.line("SaveService:RestoreCheckpoint()".to_owned()),
+            BlockKind::LoadLevel { level, spawn } => {
+                let level = self.expression(level)?;
+                // No spawn name: the level's SpawnLocations.
+                let line = match spawn {
+                    Expression::Text { value } if value.is_empty() => {
+                        format!("LevelService:LoadLevel({level})")
+                    }
+                    spawn => format!(
+                        "LevelService:LoadLevel({level}, {})",
+                        self.expression(spawn)?
+                    ),
+                };
+                self.line(line);
+            }
+            BlockKind::AddLevel { level } => {
+                let level = self.expression(level)?;
+                self.line(format!("LevelService:AddLevel({level})"));
+            }
+            BlockKind::RemoveLevel { level } => {
+                let level = self.expression(level)?;
+                self.line(format!("LevelService:RemoveLevel({level})"));
+            }
             BlockKind::SetLanguage { language } => {
                 let language = self.expression(language)?;
                 self.line(format!("LocalizationService.Language = {language}"));
