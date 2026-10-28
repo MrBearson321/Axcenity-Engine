@@ -340,6 +340,8 @@ pub enum BrowserAction {
     DeleteAssets { name: String, files: Vec<String> },
     /// Export these files (and what they need) as an asset package named `name`.
     ExportPackage { name: String, paths: Vec<String> },
+    /// Open the material file at this path in the Material tab.
+    EditMaterial(String),
     /// A line for Output. `error` is a failure.
     Notice { error: bool, text: String },
 }
@@ -782,6 +784,7 @@ impl AssetBrowser {
             ItemMenu::ExportPackage { name, paths } => {
                 return Some(BrowserAction::ExportPackage { name, paths });
             }
+            ItemMenu::EditMaterial { path } => return Some(BrowserAction::EditMaterial(path)),
         }
         None
     }
@@ -1239,6 +1242,7 @@ impl AssetBrowser {
             let name = entry.name.clone();
             let local = self.is_local(&path);
             let prefab = entry.kind == AssetKind::Prefab;
+            let material = entry.kind == AssetKind::Material;
             // The picked assets if this is one of them, or else just this.
             let export = if picked {
                 self.picked.clone()
@@ -1263,6 +1267,15 @@ impl AssetBrowser {
                     return;
                 }
                 ui.separator();
+                if material
+                    && ui
+                        .button(format!("{} Edit material", icons::PENCIL_SIMPLE))
+                        .on_hover_text("Open it in the Material tab.")
+                        .clicked()
+                {
+                    menu = Some(ItemMenu::EditMaterial { path: path.clone() });
+                    ui.close();
+                }
                 if prefab {
                     if ui
                         .button(format!("{} Rename", icons::PENCIL_SIMPLE))
@@ -1363,6 +1376,9 @@ pub(super) enum ItemMenu {
     ExportPackage {
         name: String,
         paths: Vec<String>,
+    },
+    EditMaterial {
+        path: String,
     },
 }
 

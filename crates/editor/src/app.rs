@@ -35,6 +35,7 @@ mod engine;
 mod files;
 mod input_settings;
 mod material_files;
+mod material_tab;
 mod nav_overlay;
 mod probes;
 mod session;
@@ -289,6 +290,8 @@ pub struct EditorApp {
     behavior: BehaviorTreeStudio,
     /// The Data Table tab.
     data_tables: DataTableStudio,
+    /// The Material tab.
+    materials: crate::material_editor::MaterialStudio,
     /// The UI Designer tab's view of a ScreenGui.
     ui_designer: UiDesigner,
     /// The Terrain panel's tools, settings, previews and work under way.
@@ -380,6 +383,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::AssetCheck => self.app.asset_check_pane(ui),
             Pane::BehaviorTree => self.app.behavior_tree_pane(ui),
             Pane::DataTable => self.app.data_table_pane(ui),
+            Pane::Material => self.app.material_pane(ui, self.render_state),
             Pane::Tags => self.app.tags_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
         }
@@ -627,6 +631,7 @@ impl EditorApp {
             animation: AnimationStudio::default(),
             behavior: BehaviorTreeStudio::default(),
             data_tables: DataTableStudio::default(),
+            materials: Default::default(),
             ui_designer: UiDesigner::default(),
             terrain: TerrainStudio::default(),
             layout: Layout::default(),

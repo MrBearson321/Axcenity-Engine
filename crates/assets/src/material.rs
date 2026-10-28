@@ -9,6 +9,7 @@
 //! [default material](StandardMaterial::default). [`Assets::material`](crate::Assets::material)
 //! reads and resolves them.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -351,13 +352,39 @@ pub(crate) struct Resolved {
     pub files: Vec<String>,
     /// A base was missing or made a cycle, so the default material stood in.
     pub broken: bool,
+    /// The files' values put together, before the default material fills
+    /// what none of them sets.
+    pub merged: MaterialFile,
+}
+
+/// A material file's chain of bases, as the editor's Material tab shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaterialChain {
+    /// The file, then its base, then that one's base, and so on, including
+    /// a base that couldn't be read.
+    pub files: Vec<String>,
+    /// Their values put together: what the file and its bases set.
+    pub merged: MaterialFile,
+    /// A base was missing or made a cycle.
+    pub broken: bool,
 }
 
 /// Reads the material file at `path` inside `folder` and its bases, or says
-/// why it can't be read. A base that can't be read, or that leads back
-/// around, is reported in `errors` and the default material stands in for it.
-pub(crate) fn resolve(folder: &Path, path: &str, errors: &mut Vec<String>) -> Option<Resolved> {
-    let top = match read_project_material(folder, path) {
+/// why it can't be read. A file in `edited` is taken from there rather than
+/// read (the editor's Material tab hands its edits over). A base that can't
+/// be read, or that leads back around, is reported in `errors` and the
+/// default material stands in for it.
+pub(crate) fn resolve(
+    folder: &Path,
+    path: &str,
+    edited: &HashMap<String, MaterialFile>,
+    errors: &mut Vec<String>,
+) -> Option<Resolved> {
+    let read = |path: &str| match edited.get(path) {
+        Some(file) => Ok(file.clone()),
+        None => read_project_material(folder, path),
+    };
+    let top = match read(path) {
         Ok(file) => file,
         Err(message) => {
             errors.push(format!("Could not load the material `{path}`: {message}"));
@@ -381,7 +408,7 @@ pub(crate) fn resolve(folder: &Path, path: &str, errors: &mut Vec<String>) -> Op
             broken = true;
             break;
         }
-        match read_project_material(folder, &base) {
+        match read(&base) {
             Ok(file) => {
                 files.push(base);
                 chain.push(file);
@@ -405,6 +432,7 @@ pub(crate) fn resolve(folder: &Path, path: &str, errors: &mut Vec<String>) -> Op
         material: std::sync::Arc::new(merged.resolve()),
         files,
         broken,
+        merged,
     })
 }
 
@@ -675,5 +703,64 @@ mod tests {
             .unwrap();
         assert_eq!(orphan.metalness, 1.0);
         let _ = fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn an_edit_handed_over_is_used_in_place_of_the_file_by_it_and_every_instance() {
+        let folder = project("edited");
+        let (base, instance) = (
+            "assets/materials/base.material.json",
+            "assets/materials/instance.material.json",
+        );
+        write(
+            &folder,
+            base,
+            &MaterialFile {
+                roughness: Some(0.9),
+                ..MaterialFile::default()
+            },
+        );
+        write(
+            &folder,
+            instance,
+            &MaterialFile {
+                base: Some(base.to_owned()),
+                metalness: Some(1.0),
+                ..MaterialFile::default()
+            },
+        );
+        let assets = Assets::new(&folder);
+        assert_eq!(assets.material(instance).unwrap().roughness, 0.9);
+        let chain = assets.material_chain(instance).unwrap();
+        assert_eq!(chain.files, [instance, base]);
+        assert_eq!(chain.merged.roughness, Some(0.9));
+        assert_eq!(chain.merged.metalness, Some(1.0));
+        assert!(!chain.broken);
+
+        // An edit to the base, not yet saved: both draw with it.
+        let edited = MaterialFile {
+            roughness: Some(0.2),
+            ..MaterialFile::default()
+        };
+        assets.put_material_file(base, Some(edited));
+        assert_eq!(assets.material(base).unwrap().roughness, 0.2);
+        assert_eq!(assets.material(instance).unwrap().roughness, 0.2);
+        assert_eq!(assets.material(instance).unwrap().metalness, 1.0);
+        // A material that has no file yet is used too.
+        let new = "assets/materials/new.material.json";
+        assets.put_material_file(
+            new,
+            Some(MaterialFile {
+                base: Some(base.to_owned()),
+                ..MaterialFile::default()
+            }),
+        );
+        assert_eq!(assets.material(new).unwrap().roughness, 0.2);
+
+        // Taken back, the file is read again.
+        assets.put_material_file(base, None);
+        assert_eq!(assets.material(instance).unwrap().roughness, 0.9);
+        assert!(assets.take_errors().is_empty());
+        let _ = fs::remove_dir_all(&folder);
     }
 }

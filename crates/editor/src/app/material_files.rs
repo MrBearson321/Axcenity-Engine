@@ -23,6 +23,12 @@ impl EditorApp {
             Some(id) => vec![id],
             None => self.selection.clone(),
         };
+        self.use_material(&entry.path, &entry.name, targets);
+    }
+
+    /// Draws each Part and MeshPart of `targets` in the material file at
+    /// `path` (called `name`), as one undo step.
+    pub(super) fn use_material(&mut self, path: &str, name: &str, targets: Vec<InstanceId>) {
         let mut properties = Vec::new();
         for id in targets {
             let Some(class) = self.world.get(id).map(|instance| instance.class()) else {
@@ -32,9 +38,9 @@ impl EditorApp {
                 continue;
             }
             let before = history::snapshot(&self.world, id);
-            let _ =
-                self.world
-                    .set_property(id, "MaterialVariant", Value::String(entry.path.clone()));
+            let _ = self
+                .world
+                .set_property(id, "MaterialVariant", Value::String(path.to_owned()));
             if class == ClassName::Part {
                 let _ =
                     self.world
@@ -55,7 +61,7 @@ impl EditorApp {
         }
         self.history.record_tree_and_properties(
             &mut self.world,
-            format!("Material {}", entry.name),
+            format!("Material {name}"),
             Vec::new(),
             properties,
         );

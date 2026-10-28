@@ -292,10 +292,14 @@ impl EditorApp {
         if !self.rebuilds.ready || self.launching.is_some() {
             return;
         }
-        if self.ui_graphs_unsaved() || self.behavior.unsaved() || self.data_tables.unsaved() {
+        if self.ui_graphs_unsaved()
+            || self.behavior.unsaved()
+            || self.data_tables.unsaved()
+            || self.materials.unsaved()
+        {
             self.output.warning(
                 "Relaunch carries the world and script tabs, not Event Graphs, behavior \
-                 trees or data tables. Save those first, then Relaunch.",
+                 trees, data tables or materials. Save those first, then Relaunch.",
             );
             self.toasts
                 .error("Save the Event Graph or behavior tree first.");

@@ -49,6 +49,9 @@ pub enum Pane {
     /// A data table as a grid (`data_table.rs`). Starts closed; opening a
     /// table opens it.
     DataTable,
+    /// A material file's values, bases and preview (`material_editor.rs`).
+    /// Starts closed; opening a material opens it.
+    Material,
     /// Every tag in the world (`tags.rs`). Starts closed.
     Tags,
     /// An open script, stylesheet or block script, by its tab's id
@@ -58,7 +61,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 12] = [
+    pub const CLOSABLE: [Pane; 13] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -70,6 +73,7 @@ impl Pane {
         Pane::AssetCheck,
         Pane::BehaviorTree,
         Pane::DataTable,
+        Pane::Material,
         Pane::Tags,
     ];
 
@@ -87,6 +91,7 @@ impl Pane {
             Pane::AssetCheck => "Asset Check",
             Pane::BehaviorTree => "Behavior Tree",
             Pane::DataTable => "Data Table",
+            Pane::Material => "Material",
             Pane::Tags => "Tags",
             Pane::Script(_) => "Script",
         }
@@ -106,6 +111,7 @@ impl Pane {
             Pane::AssetCheck => icons::LIST,
             Pane::BehaviorTree => icons::BRAIN,
             Pane::DataTable => icons::TABLE,
+            Pane::Material => icons::SPHERE,
             Pane::Tags => icons::TAG,
             Pane::Script(_) => icons::CODE,
         }
@@ -170,9 +176,11 @@ impl Layout {
             Pane::Console => Some(Pane::Assets),
             Pane::Assets | Pane::Profiler | Pane::AssetCheck => Some(Pane::Console),
             // A tab beside the Scene, with room for a preview and a graph.
-            Pane::Animation | Pane::UiDesigner | Pane::BehaviorTree | Pane::DataTable => {
-                Some(Pane::Scene)
-            }
+            Pane::Animation
+            | Pane::UiDesigner
+            | Pane::BehaviorTree
+            | Pane::DataTable
+            | Pane::Material => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain | Pane::Tags => Some(Pane::Properties),
             Pane::Script(_) => Some(Pane::Scene),
@@ -405,7 +413,11 @@ mod tests {
         for pane in Pane::CLOSABLE.into_iter().chain([Pane::Scene]) {
             if matches!(
                 pane,
-                Pane::AssetCheck | Pane::BehaviorTree | Pane::DataTable | Pane::Tags
+                Pane::AssetCheck
+                    | Pane::BehaviorTree
+                    | Pane::DataTable
+                    | Pane::Material
+                    | Pane::Tags
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;

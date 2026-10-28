@@ -368,6 +368,13 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
     app.data_tables
         .edit(crate::data_table::TableEdit::AddRow)
         .unwrap();
+    // A material with a base and maps, so the Material tab shows every row.
+    app.new_material("Fit");
+    app.materials.edit("maps", |file| {
+        file.base = Some("assets/materials/Other.material.json".to_owned());
+        file.maps.roughness = Some(axcenity_assets::MapFile::of("assets/textures/r.png"));
+        file.maps.normal = Some(axcenity_assets::MapFile::of("assets/textures/n.png"));
+    });
     // A terrain with a tool picked, so the Terrain Studio shows its forms.
     let terrain = app.world.create(ClassName::Terrain).unwrap();
     app.world
@@ -409,6 +416,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         }
                         Pane::BehaviorTree => app.behavior_tree_pane(ui),
                         Pane::DataTable => app.data_table_pane(ui),
+                        Pane::Material => app.material_pane(ui, None),
                         Pane::Tags => app.tags_pane(ui),
                         Pane::Scene | Pane::Script(_) => {}
                     }

@@ -82,6 +82,12 @@ impl EditorApp {
             self.data_tables.file_changed(&folder, path);
             self.hand_over_tables();
         }
+        if axcenity_assets::is_material_file(path)
+            && let Some(folder) = self.project.as_ref().map(|project| project.folder.clone())
+        {
+            self.materials.file_changed(&folder, path);
+            self.hand_over_materials();
+        }
     }
 
     /// A stylesheet changed on disk, such as one edited in VS Code: restyle

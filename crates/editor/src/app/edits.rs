@@ -55,6 +55,7 @@ impl EditorApp {
             || self.ui_graphs_unsaved()
             || self.behavior.unsaved()
             || self.data_tables.unsaved()
+            || self.materials.unsaved()
             || self.project.as_ref().is_some_and(|project| {
                 project
                     .block_scripts
@@ -940,6 +941,11 @@ impl EditorApp {
             self.hand_over_tables();
             return;
         }
+        // So are materials: Play draws each edit.
+        if self.materials.has_pointer() && self.materials.undo() {
+            self.hand_over_materials();
+            return;
+        }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
             if let Some(restored) = self.history.undo(&mut self.world) {
                 self.apply_history_texts(restored.texts);
@@ -957,6 +963,10 @@ impl EditorApp {
         }
         if self.data_tables.has_pointer() && self.data_tables.redo() {
             self.hand_over_tables();
+            return;
+        }
+        if self.materials.has_pointer() && self.materials.redo() {
+            self.hand_over_materials();
             return;
         }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {

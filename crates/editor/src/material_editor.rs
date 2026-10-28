@@ -1,0 +1,1269 @@
+//! The Material tab: a material file (`*.material.json`) with every value
+//! and map, its chain of bases, a live preview, presets, and Apply to the
+//! selected parts.
+//!
+//! A value the file sets is marked, and its reset button leaves it to the
+//! base again (or to the default material, with no base). A value it leaves
+//! out shows the base's, dimmed. Each edit is one step of the material's
+//! own undo, used while the pointer is over the tab; dragging a slider or
+//! typing is one step however many frames it takes.
+//!
+//! Materials are written with the project's Save. Each edit is also handed
+//! to the app ([`MaterialStudio::take_changed`]), which gives it to the
+//! shared `Assets`, so every part using the material, or a material built
+//! on it, is drawn with the edit at once, in the viewport and in Play.
+
+use std::path::Path;
+
+use axcenity_assets::{
+    Assets, Channel, MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MaterialChain, MaterialFile,
+    StandardMaterial, read_material_file, write_material_file,
+};
+use axcenity_core::{ClassName, Color3, InstanceId, PartType, Value, Vector3, World};
+use axcenity_render::glam::Vec3;
+use axcenity_render::{Camera, DrawList};
+use eframe::egui;
+use eframe::egui_wgpu::RenderState;
+
+use crate::animation::preview::{Canvas, add_floor};
+use crate::responsive;
+use crate::theme::{self, icons};
+use crate::widgets::{self, Role};
+
+/// Below this width, the preview goes above the values.
+const STACK_BELOW: f32 = 620.0;
+/// The preview's height when it's above the values.
+const STACKED_PREVIEW_HEIGHT: f32 = 220.0;
+/// The size of the preview's sphere and cube, in studs.
+const PREVIEW_SIZE: f32 = 4.0;
+
+/// One material file, as edited.
+#[derive(Debug)]
+pub struct MaterialDocument {
+    pub path: String,
+    pub file: MaterialFile,
+    /// The file as last read or written; `None` before it has a file.
+    saved: Option<MaterialFile>,
+    /// The file before each edit, newest last, and the ones undone.
+    undo: Vec<MaterialFile>,
+    redo: Vec<MaterialFile>,
+}
+
+impl MaterialDocument {
+    fn unsaved(&self) -> bool {
+        self.saved.as_ref() != Some(&self.file)
+    }
+}
+
+/// What the preview shows the material on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PreviewShape {
+    #[default]
+    Sphere,
+    Cube,
+    /// The first selected part, with its shape, size and color.
+    Selected,
+}
+
+/// The first selected part's look, for the preview's Selected shape.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SelectedLook {
+    /// A MeshPart's model, or `None` for a Part.
+    pub mesh_id: Option<String>,
+    pub shape: PartType,
+    pub size: Vector3,
+    /// Its `Color`, which tints the material.
+    pub color: Color3,
+}
+
+impl SelectedLook {
+    /// The look of the Part or MeshPart `id` in `world`.
+    pub fn of(world: &World, id: InstanceId) -> Option<Self> {
+        let instance = world.get(id)?;
+        let mesh_id = match instance.class() {
+            ClassName::Part => None,
+            ClassName::MeshPart => Some(instance.property("MeshId")?.as_str()?.to_owned()),
+            _ => return None,
+        };
+        Some(Self {
+            mesh_id,
+            shape: instance
+                .property("Shape")
+                .and_then(Value::as_part_type)
+                .unwrap_or(PartType::Block),
+            size: instance.property("Size").and_then(Value::as_vector3)?,
+            color: instance
+                .property("Color")
+                .and_then(Value::as_color3)
+                .unwrap_or(Color3::new(1.0, 1.0, 1.0)),
+        })
+    }
+}
+
+/// What the tab is shown with.
+pub struct MaterialScene<'a> {
+    /// The material files in the project, sorted.
+    pub files: &'a [String],
+    /// The project's images, for the maps' pickers.
+    pub images: &'a [String],
+    pub assets: &'a Assets,
+    /// The first selected part's look, if one is a Part or MeshPart.
+    pub selected: Option<SelectedLook>,
+    pub render_state: Option<&'a RenderState>,
+    /// False with no project: shown but not edited.
+    pub editable: bool,
+}
+
+/// What was asked for in the tab, for the app to do.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MaterialAction {
+    Show(String),
+    /// Make a material with this name.
+    New(String),
+    /// Use the material at this path on the selected parts.
+    Apply(String),
+}
+
+/// A starting point for a material's look: its color, metalness, roughness
+/// and opacity. Its maps are kept.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Preset {
+    pub name: &'static str,
+    pub color: [f32; 3],
+    pub metalness: f32,
+    pub roughness: f32,
+    pub opacity: f32,
+}
+
+pub const PRESETS: [Preset; 6] = [
+    Preset {
+        name: "Plastic",
+        color: [0.8, 0.8, 0.8],
+        metalness: 0.0,
+        roughness: 0.5,
+        opacity: 1.0,
+    },
+    Preset {
+        name: "Metal",
+        color: [0.78, 0.78, 0.8],
+        metalness: 1.0,
+        roughness: 0.3,
+        opacity: 1.0,
+    },
+    Preset {
+        name: "Glass",
+        color: [0.9, 0.95, 1.0],
+        metalness: 0.0,
+        roughness: 0.05,
+        opacity: 0.3,
+    },
+    Preset {
+        name: "Wood",
+        color: [0.55, 0.36, 0.2],
+        metalness: 0.0,
+        roughness: 0.75,
+        opacity: 1.0,
+    },
+    Preset {
+        name: "Stone",
+        color: [0.5, 0.5, 0.48],
+        metalness: 0.0,
+        roughness: 0.9,
+        opacity: 1.0,
+    },
+    Preset {
+        name: "Fabric",
+        color: [0.6, 0.22, 0.22],
+        metalness: 0.0,
+        roughness: 1.0,
+        opacity: 1.0,
+    },
+];
+
+impl Preset {
+    fn apply(&self, file: &mut MaterialFile) {
+        file.color = Some(self.color);
+        file.metalness = Some(self.metalness);
+        file.roughness = Some(self.roughness);
+        file.opacity = Some(self.opacity);
+    }
+}
+
+/// One change to a material, and the value it changes: changes to the same
+/// value in a row are one undo step.
+type Change = (&'static str, Box<dyn FnOnce(&mut MaterialFile)>);
+
+/// The open materials, and the one shown.
+#[derive(Default)]
+pub struct MaterialStudio {
+    documents: Vec<MaterialDocument>,
+    current: Option<String>,
+    /// Materials edited since the app last took them.
+    changed: Vec<String>,
+    /// The value being changed: its next change joins the same step.
+    open_field: Option<&'static str>,
+    hovered: bool,
+    pub shape: PreviewShape,
+    preview: MaterialPreview,
+    /// The New material box's name, while it's open.
+    naming: Option<String>,
+}
+
+impl MaterialStudio {
+    pub fn unsaved(&self) -> bool {
+        self.documents.iter().any(MaterialDocument::unsaved)
+    }
+
+    pub fn has_pointer(&self) -> bool {
+        self.hovered
+    }
+
+    pub fn current(&self) -> Option<&MaterialDocument> {
+        self.document(self.current.as_deref()?)
+    }
+
+    pub fn document(&self, path: &str) -> Option<&MaterialDocument> {
+        self.documents.iter().find(|doc| doc.path == path)
+    }
+
+    fn document_mut(&mut self, path: &str) -> Option<&mut MaterialDocument> {
+        self.documents.iter_mut().find(|doc| doc.path == path)
+    }
+
+    /// The materials edited since the last call, as they are now.
+    pub fn take_changed(&mut self) -> Vec<(String, MaterialFile)> {
+        let mut paths = std::mem::take(&mut self.changed);
+        paths.sort();
+        paths.dedup();
+        paths
+            .into_iter()
+            .filter_map(|path| Some((path.clone(), self.document(&path)?.file.clone())))
+            .collect()
+    }
+
+    /// Opens the material file at `path` inside `folder` (or shows it, if
+    /// it's open), or says why it can't be read.
+    pub fn open(&mut self, folder: &Path, path: &str) -> Result<(), String> {
+        if self.document(path).is_none() {
+            let file = read_material_file(&folder.join(path)).map_err(|err| with_causes(&err))?;
+            self.documents.push(MaterialDocument {
+                path: path.to_owned(),
+                file: file.clone(),
+                saved: Some(file),
+                undo: Vec::new(),
+                redo: Vec::new(),
+            });
+        }
+        self.current = Some(path.to_owned());
+        self.open_field = None;
+        Ok(())
+    }
+
+    /// Starts a material at `path`, written with the next save, and shows it.
+    pub fn create(&mut self, path: &str, file: MaterialFile) {
+        self.documents.push(MaterialDocument {
+            path: path.to_owned(),
+            file,
+            saved: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
+        });
+        self.current = Some(path.to_owned());
+        self.open_field = None;
+        self.changed.push(path.to_owned());
+    }
+
+    /// The file at `path` changed on disk: an open material with no
+    /// unsaved edits reads it again; one with edits keeps them.
+    pub fn file_changed(&mut self, folder: &Path, path: &str) {
+        let Some(doc) = self.document(path) else {
+            return;
+        };
+        if doc.unsaved() {
+            return;
+        }
+        let disk = folder.join(path);
+        if !disk.exists() {
+            self.documents.retain(|doc| doc.path != path);
+            if self.current.as_deref() == Some(path) {
+                self.current = None;
+            }
+            self.changed.retain(|changed| changed != path);
+            return;
+        }
+        if let Ok(file) = read_material_file(&disk)
+            && let Some(doc) = self.document_mut(path)
+            && doc.file != file
+        {
+            doc.file = file.clone();
+            doc.saved = Some(file);
+            self.changed.push(path.to_owned());
+        }
+    }
+
+    /// Writes every material with changes into `folder`. Returns the paths
+    /// written, or why one couldn't be.
+    pub fn save(&mut self, folder: &Path) -> Result<Vec<String>, String> {
+        let mut written = Vec::new();
+        for doc in &mut self.documents {
+            if !doc.unsaved() {
+                continue;
+            }
+            write_material_file(&folder.join(&doc.path), &doc.file).map_err(|err| {
+                format!(
+                    "Could not save the material `{}`: {}",
+                    doc.path,
+                    with_causes(&err)
+                )
+            })?;
+            doc.saved = Some(doc.file.clone());
+            written.push(doc.path.clone());
+        }
+        Ok(written)
+    }
+
+    /// Changes the shown material by `change`, as one undo step (a change to
+    /// `field` joins the step before while that value is still being
+    /// changed). False when there's nothing to change.
+    pub fn edit(&mut self, field: &'static str, change: impl FnOnce(&mut MaterialFile)) -> bool {
+        let Some(path) = self.current.clone() else {
+            return false;
+        };
+        let same_step = self.open_field == Some(field);
+        let Some(doc) = self.document_mut(&path) else {
+            return false;
+        };
+        let mut file = doc.file.clone();
+        change(&mut file);
+        if file == doc.file {
+            return false;
+        }
+        let before = std::mem::replace(&mut doc.file, file);
+        if !same_step {
+            doc.undo.push(before);
+            doc.redo.clear();
+        }
+        self.open_field = Some(field);
+        self.changed.push(path);
+        true
+    }
+
+    /// Ends the value being changed, so its next change is a new step.
+    #[cfg(test)]
+    pub fn finish_edit(&mut self) {
+        self.open_field = None;
+    }
+
+    /// Undoes the last edit of the shown material. False when there was none.
+    pub fn undo(&mut self) -> bool {
+        self.history(true)
+    }
+
+    pub fn redo(&mut self) -> bool {
+        self.history(false)
+    }
+
+    fn history(&mut self, undo: bool) -> bool {
+        self.open_field = None;
+        let Some(path) = self.current.clone() else {
+            return false;
+        };
+        let Some(doc) = self.document_mut(&path) else {
+            return false;
+        };
+        let (from, to) = if undo {
+            (&mut doc.undo, &mut doc.redo)
+        } else {
+            (&mut doc.redo, &mut doc.undo)
+        };
+        let Some(file) = from.pop() else {
+            return false;
+        };
+        to.push(std::mem::replace(&mut doc.file, file));
+        self.changed.push(path);
+        true
+    }
+
+    /// The draw list the preview shows the material at `path` in, from its
+    /// camera: what `scene` makes of a part using it, as the viewport and
+    /// Play draw it.
+    #[cfg(test)]
+    pub fn preview_list(
+        &mut self,
+        path: &str,
+        selected: Option<&SelectedLook>,
+        assets: &Assets,
+    ) -> DrawList {
+        self.preview.set(path, self.shape, selected);
+        self.preview.list(assets)
+    }
+
+    /// The tab, then what was asked for in it.
+    pub fn show(&mut self, ui: &mut egui::Ui, scene: &MaterialScene) -> Vec<MaterialAction> {
+        let mut actions = Vec::new();
+        self.hovered = ui.rect_contains_pointer(ui.max_rect());
+        // A drag ended, or typing stopped: the next change is a new step.
+        let (pointer_up, focused) = (
+            ui.input(|input| !input.pointer.any_down()),
+            ui.memory(|memory| memory.focused().is_some()),
+        );
+        if pointer_up && !focused {
+            self.open_field = None;
+        }
+        self.toolbar(ui, scene, &mut actions);
+        ui.add_space(4.0);
+        let Some(path) = self.current.clone() else {
+            ui.weak("Open a material from the list above, or make a new one.");
+            return actions;
+        };
+        let Some(file) = self.document(&path).map(|doc| doc.file.clone()) else {
+            return actions;
+        };
+        let chain = file
+            .base
+            .as_deref()
+            .filter(|base| !base.is_empty())
+            .and_then(|base| scene.assets.material_chain(base));
+        let mut changes: Vec<Change> = Vec::new();
+        let stacked = ui.available_width() < STACK_BELOW;
+        responsive::split(ui, STACK_BELOW, 0.42, |ui, pane| {
+            if pane == 0 {
+                self.preview_pane(ui, scene, &path, stacked);
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt("material values")
+                    .show(ui, |ui| {
+                        values(ui, scene, &path, &file, chain.as_ref(), &mut changes);
+                        ui.add_space(8.0);
+                        let apply = ui
+                            .add_enabled(
+                                scene.editable && scene.selected.is_some(),
+                                widgets::button(
+                                    Role::Primary,
+                                    Some(icons::PAINT_BUCKET),
+                                    "Apply to selected parts",
+                                    &theme::palette(ui.ctx()),
+                                ),
+                            )
+                            .on_disabled_hover_text("Select a Part or MeshPart first.");
+                        if apply.clicked() {
+                            actions.push(MaterialAction::Apply(path.clone()));
+                        }
+                    });
+            }
+        });
+        if scene.editable {
+            for (field, change) in changes {
+                self.edit(field, change);
+            }
+        }
+        actions
+    }
+
+    fn toolbar(
+        &mut self,
+        ui: &mut egui::Ui,
+        scene: &MaterialScene,
+        actions: &mut Vec<MaterialAction>,
+    ) {
+        responsive::toolbar(ui, |ui| {
+            let shown = self.current.as_deref().map_or("Choose a material", |path| {
+                path.rsplit('/').next().unwrap_or(path)
+            });
+            let unsaved = self.current().is_some_and(MaterialDocument::unsaved);
+            let label = if unsaved {
+                format!("{shown} ●")
+            } else {
+                shown.to_owned()
+            };
+            egui::ComboBox::from_id_salt("material file")
+                .selected_text(label)
+                .width(ui.available_width().min(220.0) - 24.0)
+                .show_ui(ui, |ui| {
+                    let mut listed: Vec<&str> = scene.files.iter().map(String::as_str).collect();
+                    for doc in &self.documents {
+                        if !listed.contains(&doc.path.as_str()) {
+                            listed.push(&doc.path);
+                        }
+                    }
+                    if listed.is_empty() {
+                        ui.weak("No materials yet");
+                    }
+                    for path in listed {
+                        let chosen = self.current.as_deref() == Some(path);
+                        if ui.selectable_label(chosen, path).clicked() && !chosen {
+                            actions.push(MaterialAction::Show(path.to_owned()));
+                        }
+                    }
+                });
+            if scene.editable
+                && ui
+                    .add(widgets::button(
+                        Role::Secondary,
+                        Some(icons::PLUS),
+                        "New material",
+                        &theme::palette(ui.ctx()),
+                    ))
+                    .clicked()
+            {
+                self.naming = Some(String::new());
+            }
+            if let Some(name) = &mut self.naming {
+                let field = ui.add(
+                    egui::TextEdit::singleline(name)
+                        .hint_text("Name")
+                        .desired_width(140.0),
+                );
+                field.request_focus();
+                let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
+                let valid = !name.trim().is_empty();
+                if (ui.add_enabled(valid, egui::Button::new("Make")).clicked() || enter) && valid {
+                    actions.push(MaterialAction::New(name.trim().to_owned()));
+                    self.naming = None;
+                } else if ui.button("Cancel").clicked()
+                    || ui.input(|input| input.key_pressed(egui::Key::Escape))
+                {
+                    self.naming = None;
+                }
+            }
+        });
+    }
+
+    /// The preview's shapes and picture: under the values when `stacked`,
+    /// otherwise as tall as the tab.
+    fn preview_pane(
+        &mut self,
+        ui: &mut egui::Ui,
+        scene: &MaterialScene,
+        path: &str,
+        stacked: bool,
+    ) {
+        let mut shape = self.shape;
+        widgets::segmented(
+            ui,
+            &mut shape,
+            &[
+                (PreviewShape::Sphere, Some(icons::SPHERE), "Sphere"),
+                (PreviewShape::Cube, Some(icons::CUBE), "Cube"),
+                (PreviewShape::Selected, Some(icons::CURSOR), "Part"),
+            ],
+        );
+        self.shape = shape;
+        let height = if stacked {
+            STACKED_PREVIEW_HEIGHT
+        } else {
+            ui.available_height().max(60.0)
+        };
+        self.preview.set(path, self.shape, scene.selected.as_ref());
+        self.preview
+            .show(ui, scene.render_state, scene.assets, height);
+    }
+}
+
+/// The values of `file` (the material at `path`), each beside its base's
+/// (`chain`), adding a [`Change`] for each one edited.
+fn values(
+    ui: &mut egui::Ui,
+    scene: &MaterialScene,
+    path: &str,
+    file: &MaterialFile,
+    chain: Option<&MaterialChain>,
+    changes: &mut Vec<Change>,
+) {
+    let inherited_file = chain.map(|chain| chain.merged.clone()).unwrap_or_default();
+    let base = inherited_file.resolve();
+    let palette = theme::palette(ui.ctx());
+
+    widgets::section_label(ui, "Base");
+    responsive::form(ui, "material base", |ui| {
+        ui.label("Builds on");
+        let shown = file.base.as_deref().filter(|base| !base.is_empty());
+        egui::ComboBox::from_id_salt("material base")
+            .selected_text(shown.map_or("Nothing".to_owned(), short_name))
+            .width(ui.available_width().min(220.0) - 24.0)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(shown.is_none(), "Nothing").clicked() {
+                    changes.push(("base", Box::new(|file| file.base = None)));
+                }
+                for other in scene.files.iter().filter(|other| *other != path) {
+                    if ui
+                        .selectable_label(shown == Some(other.as_str()), other)
+                        .clicked()
+                    {
+                        let other = other.clone();
+                        changes.push(("base", Box::new(move |file| file.base = Some(other))));
+                    }
+                }
+            });
+        ui.end_row();
+    });
+    let mut names = vec![short_name(path)];
+    match (chain, file.base.as_deref().filter(|base| !base.is_empty())) {
+        (Some(chain), _) => names.extend(chain.files.iter().map(|file| short_name(file))),
+        (None, Some(base)) => names.push(format!("{} (can't be read)", short_name(base))),
+        (None, None) => {}
+    }
+    ui.label(
+        egui::RichText::new(format!("{} → default", names.join(" → ")))
+            .color(palette.text_secondary),
+    )
+    .on_hover_text("Each value this material leaves out comes from the next one along.");
+    let unread = file.base.as_deref().is_some_and(|base| !base.is_empty()) && chain.is_none();
+    if unread || chain.is_some_and(|chain| chain.broken) {
+        ui.colored_label(
+            palette.warning,
+            "A base is missing or leads back around: the default material stands in for it.",
+        );
+    }
+
+    ui.add_space(6.0);
+    widgets::section_label(ui, "Presets");
+    responsive::toolbar(ui, |ui| {
+        for preset in PRESETS {
+            if ui.button(preset.name).clicked() {
+                changes.push(("preset", Box::new(move |file| preset.apply(file))));
+            }
+        }
+    });
+
+    ui.add_space(6.0);
+    widgets::section_label(ui, "Surface");
+    responsive::form(ui, "material surface", |ui| {
+        color_row(
+            ui,
+            "Color",
+            file.color,
+            base.color,
+            "color",
+            changes,
+            |file, value| {
+                file.color = value;
+            },
+        );
+        number_row(
+            ui,
+            ("Metalness", "metalness"),
+            (file.metalness, base.metalness),
+            0.0..=1.0,
+            changes,
+            |file, value| file.metalness = value,
+        );
+        number_row(
+            ui,
+            ("Roughness", "roughness"),
+            (file.roughness, base.roughness),
+            0.0..=1.0,
+            changes,
+            |file, value| file.roughness = value,
+        );
+        number_row(
+            ui,
+            ("Opacity", "opacity"),
+            (file.opacity, base.opacity),
+            0.0..=1.0,
+            changes,
+            |file, value| file.opacity = value,
+        );
+        number_row(
+            ui,
+            ("Cut out below", "alpha cutoff"),
+            (file.alpha_cutoff, base.alpha_cutoff),
+            0.0..=1.0,
+            changes,
+            |file, value| file.alpha_cutoff = value,
+        );
+        color_row(
+            ui,
+            "Glow color",
+            file.emissive_color,
+            base.emissive_color,
+            "emissive color",
+            changes,
+            |file, value| file.emissive_color = value,
+        );
+        number_row(
+            ui,
+            ("Glow strength", "emissive strength"),
+            (file.emissive_strength, base.emissive_strength),
+            0.0..=20.0,
+            changes,
+            |file, value| file.emissive_strength = value,
+        );
+        let label = value_label(ui, "Double-sided", file.double_sided.is_some());
+        label.on_hover_text("Both sides of each face are drawn and lit.");
+        ui.horizontal(|ui| {
+            let mut on = file.double_sided.unwrap_or(base.double_sided);
+            if ui.checkbox(&mut on, "").changed() {
+                changes.push((
+                    "double sided",
+                    Box::new(move |file| file.double_sided = Some(on)),
+                ));
+            }
+            reset_button(
+                ui,
+                file.double_sided.is_some(),
+                "double sided",
+                changes,
+                |file| {
+                    file.double_sided = None;
+                },
+            );
+        });
+        ui.end_row();
+        pair_row(
+            ui,
+            ("Tiling", "tiling"),
+            (file.tiling, base.tiling),
+            changes,
+            |file, value| file.tiling = value,
+        );
+        pair_row(
+            ui,
+            ("Offset", "offset"),
+            (file.offset, base.offset),
+            changes,
+            |file, value| file.offset = value,
+        );
+    });
+
+    ui.add_space(6.0);
+    widgets::section_label(ui, "Maps");
+    for slot in MapSlot::ALL {
+        map_rows(ui, scene, slot, file, &inherited_file, changes);
+    }
+}
+
+/// An error and its causes on one line.
+fn with_causes(err: &dyn std::error::Error) -> String {
+    let mut text = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        text.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
+    text
+}
+
+/// The file name of `path` without its folder or `.material.json`.
+fn short_name(path: &str) -> String {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    name.strip_suffix(MATERIAL_SUFFIX)
+        .unwrap_or(name)
+        .to_owned()
+}
+
+/// A value's name, marked when this material sets it.
+fn value_label(ui: &mut egui::Ui, name: &str, set: bool) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    if set {
+        ui.label(egui::RichText::new(format!("● {name}")).color(palette.accent))
+            .on_hover_text("Set by this material")
+    } else {
+        ui.label(egui::RichText::new(name).color(palette.text_secondary))
+            .on_hover_text("From its base (or the default material)")
+    }
+}
+
+/// A reset button, shown when this material sets the value, that leaves it
+/// to the base again.
+fn reset_button(
+    ui: &mut egui::Ui,
+    set: bool,
+    field: &'static str,
+    changes: &mut Vec<Change>,
+    reset: impl FnOnce(&mut MaterialFile) + 'static,
+) {
+    if set
+        && widgets::icon_button(
+            ui,
+            icons::ARROW_COUNTER_CLOCKWISE,
+            "Reset to the base",
+            false,
+        )
+        .clicked()
+    {
+        changes.push((field, Box::new(reset)));
+    }
+}
+
+fn number_row(
+    ui: &mut egui::Ui,
+    (name, field): (&str, &'static str),
+    (own, base): (Option<f32>, f32),
+    range: std::ops::RangeInclusive<f32>,
+    changes: &mut Vec<Change>,
+    set: impl Fn(&mut MaterialFile, Option<f32>) + Copy + 'static,
+) {
+    value_label(ui, name, own.is_some());
+    ui.horizontal(|ui| {
+        let mut value = own.unwrap_or(base);
+        if ui.add(egui::Slider::new(&mut value, range)).changed() {
+            changes.push((field, Box::new(move |file| set(file, Some(value)))));
+        }
+        reset_button(ui, own.is_some(), field, changes, move |file| {
+            set(file, None)
+        });
+    });
+    ui.end_row();
+}
+
+fn color_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    own: Option<[f32; 3]>,
+    base: [f32; 3],
+    field: &'static str,
+    changes: &mut Vec<Change>,
+    set: impl Fn(&mut MaterialFile, Option<[f32; 3]>) + Copy + 'static,
+) {
+    value_label(ui, name, own.is_some());
+    ui.horizontal(|ui| {
+        // Material colors are sRGB, like the picker's bytes.
+        let mut bytes = own
+            .unwrap_or(base)
+            .map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
+        if ui.color_edit_button_srgb(&mut bytes).changed() {
+            let color = bytes.map(|byte| f32::from(byte) / 255.0);
+            changes.push((field, Box::new(move |file| set(file, Some(color)))));
+        }
+        reset_button(ui, own.is_some(), field, changes, move |file| {
+            set(file, None)
+        });
+    });
+    ui.end_row();
+}
+
+fn pair_row(
+    ui: &mut egui::Ui,
+    (name, field): (&str, &'static str),
+    (own, base): (Option<[f32; 2]>, [f32; 2]),
+    changes: &mut Vec<Change>,
+    set: impl Fn(&mut MaterialFile, Option<[f32; 2]>) + Copy + 'static,
+) {
+    value_label(ui, name, own.is_some());
+    ui.horizontal(|ui| {
+        let mut value = own.unwrap_or(base);
+        let across = ui.add(egui::DragValue::new(&mut value[0]).speed(0.01).prefix("U "));
+        let down = ui.add(egui::DragValue::new(&mut value[1]).speed(0.01).prefix("V "));
+        if across.changed() || down.changed() {
+            changes.push((field, Box::new(move |file| set(file, Some(value)))));
+        }
+        reset_button(ui, own.is_some(), field, changes, move |file| {
+            set(file, None)
+        });
+    });
+    ui.end_row();
+}
+
+/// One of a material's texture maps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MapSlot {
+    Color,
+    Normal,
+    Metalness,
+    Roughness,
+    Occlusion,
+    Emissive,
+    Opacity,
+    Specular,
+}
+
+impl MapSlot {
+    const ALL: [MapSlot; 8] = [
+        MapSlot::Color,
+        MapSlot::Normal,
+        MapSlot::Metalness,
+        MapSlot::Roughness,
+        MapSlot::Occlusion,
+        MapSlot::Emissive,
+        MapSlot::Opacity,
+        MapSlot::Specular,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            MapSlot::Color => "Color map",
+            MapSlot::Normal => "Normal map",
+            MapSlot::Metalness => "Metalness map",
+            MapSlot::Roughness => "Roughness map",
+            MapSlot::Occlusion => "Occlusion map",
+            MapSlot::Emissive => "Glow map",
+            MapSlot::Opacity => "Opacity map",
+            MapSlot::Specular => "Specular map",
+        }
+    }
+
+    /// The undo step's name for this map.
+    fn field(self) -> &'static str {
+        match self {
+            MapSlot::Color => "color map",
+            MapSlot::Normal => "normal map",
+            MapSlot::Metalness => "metalness map",
+            MapSlot::Roughness => "roughness map",
+            MapSlot::Occlusion => "occlusion map",
+            MapSlot::Emissive => "glow map",
+            MapSlot::Opacity => "opacity map",
+            MapSlot::Specular => "specular map",
+        }
+    }
+
+    fn of(self, file: &MaterialFile) -> &Option<MapFile> {
+        let maps = &file.maps;
+        match self {
+            MapSlot::Color => &maps.color,
+            MapSlot::Normal => &maps.normal,
+            MapSlot::Metalness => &maps.metalness,
+            MapSlot::Roughness => &maps.roughness,
+            MapSlot::Occlusion => &maps.occlusion,
+            MapSlot::Emissive => &maps.emissive,
+            MapSlot::Opacity => &maps.opacity,
+            MapSlot::Specular => &maps.specular,
+        }
+    }
+
+    fn of_mut(self, file: &mut MaterialFile) -> &mut Option<MapFile> {
+        let maps = &mut file.maps;
+        match self {
+            MapSlot::Color => &mut maps.color,
+            MapSlot::Normal => &mut maps.normal,
+            MapSlot::Metalness => &mut maps.metalness,
+            MapSlot::Roughness => &mut maps.roughness,
+            MapSlot::Occlusion => &mut maps.occlusion,
+            MapSlot::Emissive => &mut maps.emissive,
+            MapSlot::Opacity => &mut maps.opacity,
+            MapSlot::Specular => &mut maps.specular,
+        }
+    }
+
+    /// The channel a map reads its value from, or `None` for a map read in
+    /// color (color, normal, glow and specular maps).
+    fn default_channel(self) -> Option<Channel> {
+        match self {
+            MapSlot::Metalness | MapSlot::Roughness | MapSlot::Occlusion => Some(Channel::Red),
+            MapSlot::Opacity => Some(Channel::Alpha),
+            _ => None,
+        }
+    }
+
+    fn has_strength(self) -> bool {
+        matches!(self, MapSlot::Normal | MapSlot::Occlusion)
+    }
+}
+
+/// Sets the map in `slot` of the material to its own values with `change`
+/// made, filling in a map the material didn't set (so it overrides only
+/// what's changed).
+fn change_map(
+    slot: MapSlot,
+    change: impl FnOnce(&mut MapFile) + 'static,
+) -> Box<dyn FnOnce(&mut MaterialFile)> {
+    Box::new(move |file| {
+        let map = slot.of_mut(file).get_or_insert_with(MapFile::default);
+        change(map);
+    })
+}
+
+/// A map's rows: its image, and (as the map has them) its channel,
+/// inversion, strength and DirectX switch.
+fn map_rows(
+    ui: &mut egui::Ui,
+    scene: &MaterialScene,
+    slot: MapSlot,
+    file: &MaterialFile,
+    inherited: &MaterialFile,
+    changes: &mut Vec<Change>,
+) {
+    let own = slot.of(file).clone();
+    let below = slot.of(inherited).clone().unwrap_or_default();
+    let shown = own.as_ref().map_or(below.clone(), |own| {
+        let mut merged = MaterialFile::default();
+        *slot.of_mut(&mut merged) = Some(own.clone());
+        let mut base = MaterialFile::default();
+        *slot.of_mut(&mut base) = Some(below.clone());
+        slot.of(&merged.over(&base)).clone().unwrap_or_default()
+    });
+    let field = slot.field();
+    responsive::form(ui, ("material map", field), |ui| {
+        value_label(ui, slot.label(), own.is_some());
+        ui.horizontal(|ui| {
+            let image = shown.path.clone().unwrap_or_default();
+            let text = if image.is_empty() {
+                "None".to_owned()
+            } else {
+                image.rsplit('/').next().unwrap_or(&image).to_owned()
+            };
+            egui::ComboBox::from_id_salt(("map image", field))
+                .selected_text(text)
+                .width((ui.available_width() - 40.0).clamp(60.0, 180.0))
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(image.is_empty(), "None").clicked() {
+                        changes.push((
+                            field,
+                            change_map(slot, |map| map.path = Some(String::new())),
+                        ));
+                    }
+                    for candidate in scene.images {
+                        if ui
+                            .selectable_label(*candidate == image, candidate)
+                            .clicked()
+                        {
+                            let candidate = candidate.clone();
+                            changes.push((
+                                field,
+                                change_map(slot, move |map| map.path = Some(candidate)),
+                            ));
+                        }
+                    }
+                });
+            reset_button(ui, own.is_some(), field, changes, move |file| {
+                *slot.of_mut(file) = None;
+            });
+        });
+        ui.end_row();
+        if shown.path.as_deref().is_none_or(str::is_empty) {
+            return;
+        }
+        if let Some(default) = slot.default_channel() {
+            ui.label("    Channel");
+            ui.horizontal(|ui| {
+                let before = shown.channel.unwrap_or(default);
+                let mut channel = before;
+                egui::ComboBox::from_id_salt(("map channel", field))
+                    .selected_text(channel_name(channel))
+                    .show_ui(ui, |ui| {
+                        for choice in [Channel::Red, Channel::Green, Channel::Blue, Channel::Alpha]
+                        {
+                            ui.selectable_value(&mut channel, choice, channel_name(choice));
+                        }
+                    });
+                if channel != before {
+                    changes.push((
+                        field,
+                        change_map(slot, move |map| map.channel = Some(channel)),
+                    ));
+                }
+                let mut invert = shown.invert.unwrap_or(false);
+                if ui.checkbox(&mut invert, "Inverted").changed() {
+                    changes.push((
+                        field,
+                        change_map(slot, move |map| map.invert = Some(invert)),
+                    ));
+                }
+            });
+            ui.end_row();
+        }
+        if slot.has_strength() {
+            ui.label("    Strength");
+            let mut strength = shown.strength.unwrap_or(1.0);
+            if ui
+                .add(egui::Slider::new(&mut strength, 0.0..=2.0))
+                .changed()
+            {
+                changes.push((
+                    field,
+                    change_map(slot, move |map| map.strength = Some(strength)),
+                ));
+            }
+            ui.end_row();
+        }
+        if slot == MapSlot::Normal {
+            ui.label("    DirectX");
+            let mut direct_x = shown.direct_x.unwrap_or(false);
+            if ui.checkbox(&mut direct_x, "Green points down").changed() {
+                changes.push((
+                    field,
+                    change_map(slot, move |map| map.direct_x = Some(direct_x)),
+                ));
+            }
+            ui.end_row();
+        }
+    });
+}
+
+fn channel_name(channel: Channel) -> &'static str {
+    match channel {
+        Channel::Red => "Red",
+        Channel::Green => "Green",
+        Channel::Blue => "Blue",
+        Channel::Alpha => "Alpha",
+    }
+}
+
+/// The path a new material named `name` is saved at.
+pub fn material_path(name: &str) -> String {
+    format!("{MATERIALS_FOLDER}/{name}{MATERIAL_SUFFIX}")
+}
+
+/// The look a new material starts with: the default material's, written
+/// out so each value can be seen and changed.
+pub fn new_material() -> MaterialFile {
+    let default = StandardMaterial::default();
+    MaterialFile {
+        color: Some(default.color),
+        metalness: Some(default.metalness),
+        roughness: Some(default.roughness),
+        ..MaterialFile::default()
+    }
+}
+
+/// The material on a sphere, a cube or the selected part's shape, on a
+/// checkered floor, with an orbiting camera.
+struct MaterialPreview {
+    canvas: Canvas,
+    world: World,
+    /// What the world was made for: the material, the shape, and the
+    /// selected part's look.
+    made_for: Option<(String, PreviewShape, Option<SelectedLook>)>,
+    /// Half the part's height, the point the camera looks at, and its size.
+    middle: Vec3,
+    extent: f32,
+    yaw: f32,
+    pitch: f32,
+    zoom: f32,
+}
+
+impl Default for MaterialPreview {
+    fn default() -> Self {
+        Self {
+            canvas: Canvas::default(),
+            world: World::new(),
+            made_for: None,
+            middle: Vec3::ZERO,
+            extent: PREVIEW_SIZE,
+            yaw: 35.0,
+            pitch: 20.0,
+            zoom: 1.9,
+        }
+    }
+}
+
+impl MaterialPreview {
+    /// Shows the material at `path` on `shape`, making the world again if
+    /// any of them changed.
+    fn set(&mut self, path: &str, shape: PreviewShape, selected: Option<&SelectedLook>) {
+        let selected = match shape {
+            PreviewShape::Selected => selected.cloned(),
+            _ => None,
+        };
+        let wanted = (path.to_owned(), shape, selected);
+        if self.made_for.as_ref() == Some(&wanted) {
+            return;
+        }
+        let (part_shape, size, color, mesh_id) = match &wanted.2 {
+            Some(look) => (
+                look.shape,
+                Vec3::new(look.size.x, look.size.y, look.size.z),
+                look.color,
+                look.mesh_id.clone(),
+            ),
+            None => (
+                if shape == PreviewShape::Cube {
+                    PartType::Block
+                } else {
+                    PartType::Ball
+                },
+                Vec3::splat(PREVIEW_SIZE),
+                Color3::new(1.0, 1.0, 1.0),
+                None,
+            ),
+        };
+        let mut world = World::new();
+        let extent = size.max_element().max(0.1);
+        add_floor(&mut world, Vec3::ZERO, 0.0, (extent / 3.0).max(0.25));
+        let class = if mesh_id.is_some() {
+            ClassName::MeshPart
+        } else {
+            ClassName::Part
+        };
+        let part = world.create(class).expect("not a service");
+        let mut properties = vec![
+            ("Anchored", Value::Bool(true)),
+            ("Size", Value::Vector3(Vector3::new(size.x, size.y, size.z))),
+            (
+                "Position",
+                Value::Vector3(Vector3::new(0.0, size.y / 2.0, 0.0)),
+            ),
+            ("Color", Value::Color3(color)),
+            ("MaterialVariant", Value::String(path.to_owned())),
+        ];
+        match mesh_id {
+            Some(mesh_id) => properties.push(("MeshId", Value::String(mesh_id))),
+            None => properties.push(("Shape", Value::PartType(part_shape))),
+        }
+        for (name, value) in properties {
+            world
+                .set_property(part, name, value)
+                .expect("parts have these");
+        }
+        world
+            .set_parent(part, Some(world.workspace()))
+            .expect("parts go in the Workspace");
+        self.world = world;
+        self.middle = Vec3::new(0.0, size.y / 2.0, 0.0);
+        self.extent = extent;
+        self.made_for = Some(wanted);
+    }
+
+    fn camera(&self) -> Camera {
+        let (yaw, pitch) = (self.yaw.to_radians(), self.pitch.to_radians());
+        let direction = Vec3::new(
+            yaw.sin() * pitch.cos(),
+            pitch.sin(),
+            yaw.cos() * pitch.cos(),
+        );
+        Camera {
+            position: self.middle + direction * self.extent * self.zoom,
+            look_at: self.middle,
+            fov_y_degrees: 50.0,
+        }
+    }
+
+    fn list(&self, assets: &Assets) -> DrawList {
+        axcenity_scene::build_draw_list(&self.world, assets, self.camera())
+    }
+
+    /// Draws the preview, `height` points tall. Dragging turns the camera
+    /// around the part, and the wheel zooms.
+    fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        render_state: Option<&RenderState>,
+        assets: &Assets,
+        height: f32,
+    ) {
+        let size = egui::vec2(ui.available_width(), height);
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::drag());
+        if response.dragged() {
+            let delta = response.drag_delta();
+            self.yaw -= delta.x * 0.4;
+            self.pitch = (self.pitch + delta.y * 0.3).clamp(-10.0, 85.0);
+        }
+        if response.hovered() {
+            let scroll = ui.input(|input| input.smooth_scroll_delta.y);
+            if scroll != 0.0 {
+                self.zoom = (self.zoom * (1.0 - scroll * 0.002)).clamp(0.8, 8.0);
+            }
+        }
+        let Some(render_state) = render_state else {
+            ui.painter_at(rect).text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "The preview needs the wgpu renderer.",
+                egui::FontId::proportional(13.0),
+                ui.visuals().weak_text_color(),
+            );
+            return;
+        };
+        let list = self.list(assets);
+        self.canvas.paint(ui, rect, render_state, &list);
+        if response.hovered() {
+            ui.painter_at(rect).text(
+                rect.left_bottom() + egui::vec2(8.0, -6.0),
+                egui::Align2::LEFT_BOTTOM,
+                "Drag to turn · scroll to zoom",
+                egui::FontId::proportional(11.0),
+                egui::Color32::from_white_alpha(160),
+            );
+        }
+    }
+}

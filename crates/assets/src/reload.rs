@@ -188,7 +188,7 @@ impl Assets {
         for material in paths {
             used = true;
             let mut errors = Vec::new();
-            match material::resolve(&folder, &material, &mut errors) {
+            match material::resolve(&folder, &material, &shared.edited_materials, &mut errors) {
                 Some(resolved) if !resolved.broken => materials.push((material, resolved)),
                 _ => problems.extend(errors),
             }

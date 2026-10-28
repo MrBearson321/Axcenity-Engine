@@ -96,6 +96,7 @@ impl EditorApp {
             Some(BrowserAction::ExportPackage { name, paths }) => {
                 self.export_package_with_dialog(&name, paths)
             }
+            Some(BrowserAction::EditMaterial(path)) => self.open_material(&path),
             Some(BrowserAction::Notice { error, text }) => {
                 if error {
                     self.output.error(text);

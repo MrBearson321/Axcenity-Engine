@@ -378,8 +378,8 @@ A Material document tab for `*.material.json`, with every value and map, the bas
 
 ### Acceptance criteria
 
-- [ ] A material created, edited, saved, reopened and assigned looks the same in the preview, the viewport and Play.
-- [ ] Editing a base material updates its instances' previews and parts, except for their overridden values.
+- [x] A material created, edited, saved, reopened and assigned looks the same in the preview, the viewport and Play.
+- [x] Editing a base material updates its instances' previews and parts, except for their overridden values.
 
 ---
 

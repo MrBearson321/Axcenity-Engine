@@ -248,6 +248,7 @@ impl EditorApp {
         self.animation = AnimationStudio::default();
         self.behavior = BehaviorTreeStudio::default();
         self.data_tables = DataTableStudio::default();
+        self.materials = Default::default();
         self.asset_check.clear();
         self.replace_world(project.world);
     }

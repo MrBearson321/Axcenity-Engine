@@ -57,9 +57,9 @@ pub use light_probes::{
     write_light_probes,
 };
 pub use material::{
-    MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MapSettings, MaterialFile, MaterialFileError,
-    MaterialMaps, StandardMaps, StandardMaterial, is_material_file, material_json, parse_material,
-    read_material_file, write_material_file,
+    MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MapSettings, MaterialChain, MaterialFile,
+    MaterialFileError, MaterialMaps, StandardMaps, StandardMaterial, is_material_file,
+    material_json, parse_material, read_material_file, write_material_file,
 };
 pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, MapSlot,
@@ -138,6 +138,9 @@ struct Shared {
     /// Every material file asked for so far, by its path, put together
     /// with its bases. `None` means it couldn't be read.
     materials: HashMap<String, Option<material::Resolved>>,
+    /// Material files as the editor's Material tab has them, used in place
+    /// of the files on disk (see [`Assets::put_material_file`]).
+    edited_materials: HashMap<String, MaterialFile>,
     /// The takes of every model file asked for so far, by its path.
     takes: HashMap<String, Option<Arc<Vec<Take>>>>,
     /// Every data table asked for so far, by its path, or why it can't
@@ -164,6 +167,18 @@ struct Shared {
     /// Files whose last reload failed, so the next failure isn't reported
     /// again until one succeeds.
     reload_failed: HashSet<String>,
+}
+
+/// Forgets every material made from the material file `file`, so each is
+/// put together again the next time it's asked for.
+fn forget_materials_using(shared: &mut Shared, file: &str) {
+    shared.materials.retain(|_, material| {
+        material
+            .as_ref()
+            .is_some_and(|resolved| !resolved.files.iter().any(|used| used == file))
+    });
+    // One that couldn't be read has no files to look at.
+    shared.materials.remove(file);
 }
 
 impl Assets {
@@ -357,10 +372,38 @@ impl Assets {
             return material.as_ref().map(|resolved| resolved.material.clone());
         }
         let folder = shared.folder.clone()?;
-        let resolved = material::resolve(&folder, path, &mut shared.errors);
+        let shared = &mut *shared;
+        let resolved =
+            material::resolve(&folder, path, &shared.edited_materials, &mut shared.errors);
         let material = resolved.as_ref().map(|resolved| resolved.material.clone());
         shared.materials.insert(path.to_owned(), resolved);
         material
+    }
+
+    /// The material file at `path` with its chain of bases, put together
+    /// as [`material`](Self::material) does, or `None` if it can't be read.
+    pub fn material_chain(&self, path: &str) -> Option<MaterialChain> {
+        self.material(path)?;
+        let shared = self.lock();
+        let resolved = shared.materials.get(path)?.as_ref()?;
+        Some(MaterialChain {
+            files: resolved.files.clone(),
+            merged: resolved.merged.clone(),
+            broken: resolved.broken,
+        })
+    }
+
+    /// Uses `file` as the material file at `path` from now on, without
+    /// reading it (`None` reads the file again): the editor's Material tab
+    /// hands over each edit, so every part using it, or a material built
+    /// on it, is drawn with the edit at once.
+    pub fn put_material_file(&self, path: &str, file: Option<MaterialFile>) {
+        let mut shared = self.lock();
+        match file {
+            Some(file) => shared.edited_materials.insert(path.to_owned(), file),
+            None => shared.edited_materials.remove(path),
+        };
+        forget_materials_using(&mut shared, path);
     }
 
     /// The data table named `name` (such as `weapons`, the file
@@ -561,13 +604,7 @@ impl Assets {
         shared.light_probes.remove(file);
         shared.takes.remove(file);
         shared.tables.remove(file);
-        shared.materials.retain(|_, material| {
-            material
-                .as_ref()
-                .is_some_and(|resolved| !resolved.files.iter().any(|used| used == file))
-        });
-        // One that couldn't be read has no files to look at.
-        shared.materials.remove(file);
+        forget_materials_using(&mut shared, file);
     }
 
     /// Forgets every model, texture, probe bake, take and material that couldn't be
