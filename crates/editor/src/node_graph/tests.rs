@@ -68,6 +68,7 @@ impl Harness {
                     &GraphContext {
                         library: &UiNodes,
                         objects: &[],
+                        images: &[],
                         errors: &errors,
                         editable: true,
                         key: "test",
@@ -384,6 +385,7 @@ fn the_editor_draws_with_errors_comments_and_every_node_kind() {
                 &GraphContext {
                     library: &UiNodes,
                     objects: &[],
+                    images: &[],
                     errors: &errors,
                     editable: true,
                     key: "draw test",

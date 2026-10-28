@@ -9,7 +9,7 @@
 //! [default material](StandardMaterial::default). [`Assets::material`](crate::Assets::material)
 //! reads and resolves them.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -74,6 +74,45 @@ pub struct MaterialFile {
     /// `""` is none, so an instance can go back to the standard surface.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shader: Option<String>,
+    /// Values the shader reads with `parameter(i)`, by name. The file that
+    /// sets the shader names them (in name order, `i` from 0); an instance
+    /// changes their values, merged name by name.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub parameters: BTreeMap<String, ParamValue>,
+    /// The editor's material graph that this file's shader, maps and
+    /// parameters were made from. Editor data: it isn't taken from a base,
+    /// and the player reads only what it made.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph: Option<serde_json::Value>,
+}
+
+/// A material parameter's value: a number, or a color or vector (2 to 4
+/// numbers; colors are sRGB, 0 to 1).
+///
+/// `#[serde(untagged)]` writes each as the plain JSON value (`4` or
+/// `[1, 0.5, 0]`), and reads whichever one the JSON is.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ParamValue {
+    Number(f32),
+    Vector(Vec<f32>),
+}
+
+impl ParamValue {
+    /// Its numbers as the shader reads them: a number in x, a vector's in
+    /// order, the rest 0.
+    pub fn as_vec4(&self) -> [f32; 4] {
+        let mut out = [0.0; 4];
+        match self {
+            ParamValue::Number(number) => out[0] = *number,
+            ParamValue::Vector(numbers) => {
+                for (slot, number) in out.iter_mut().zip(numbers) {
+                    *slot = *number;
+                }
+            }
+        }
+        out
+    }
 }
 
 /// A material file's texture maps, each `None` when the file leaves it
@@ -183,12 +222,19 @@ impl MaterialFile {
             offset: self.offset.or(base.offset),
             double_sided: self.double_sided.or(base.double_sided),
             shader: self.shader.clone().or_else(|| base.shader.clone()),
+            parameters: base
+                .parameters
+                .iter()
+                .chain(&self.parameters)
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+            graph: self.graph.clone(),
         }
     }
 
     /// Every value, with the default material's where this file has none
     /// (its `base` isn't followed: put the chain together with
-    /// [`over`](Self::over) first).
+    /// [`over`](Self::over) first). Its parameters are all the ones it has.
     pub fn resolve(&self) -> StandardMaterial {
         let default = StandardMaterial::default();
         let maps = &self.maps;
@@ -232,6 +278,11 @@ impl MaterialFile {
                     file: String::new(),
                     code: code.into(),
                 }),
+            parameters: self
+                .parameters
+                .iter()
+                .map(|(name, value)| (name.clone(), value.as_vec4()))
+                .collect(),
         }
     }
 }
@@ -255,6 +306,10 @@ pub struct StandardMaterial {
     pub double_sided: bool,
     /// Its surface shader, if it has one.
     pub shader: Option<MaterialShader>,
+    /// The values its shader reads (`parameter(i)` is the `i`th), in name
+    /// order: the parameters the file with the shader names, with the
+    /// values the chain gives them.
+    pub parameters: Vec<(String, [f32; 4])>,
 }
 
 /// A material's surface shader: WGSL code with a `surface` function.
@@ -284,6 +339,7 @@ impl Default for StandardMaterial {
             offset: [0.0, 0.0],
             double_sided: false,
             shader: None,
+            parameters: Vec::new(),
         }
     }
 }
@@ -457,12 +513,19 @@ pub(crate) fn resolve(
         .fold(MaterialFile::default(), |below, file| file.over(&below));
     let mut material = merged.resolve();
     if let Some(shader) = &mut material.shader
-        && let Some((file, _)) = files
+        && let Some((file, declaring)) = files
             .iter()
             .zip(&chain)
             .find(|(_, file)| file.shader.is_some())
     {
         shader.file = file.clone();
+        // Only the parameters its shader's file names: an instance's value
+        // for one it doesn't is left out, so the others keep their places.
+        material
+            .parameters
+            .retain(|(name, _)| declaring.parameters.contains_key(name));
+    } else {
+        material.parameters.clear();
     }
     Some(Resolved {
         material: std::sync::Arc::new(material),
@@ -556,6 +619,11 @@ mod tests {
 "
                 .into(),
             ),
+            parameters: BTreeMap::from([
+                ("Scale".to_owned(), ParamValue::Number(4.0)),
+                ("Tint".to_owned(), ParamValue::Vector(vec![1.0, 0.5, 0.0])),
+            ]),
+            graph: Some(serde_json::json!({ "nodes": [] })),
         }
     }
 
@@ -843,6 +911,74 @@ mod tests {
         assets.put_material_file(base, None);
         assert_eq!(assets.material(instance).unwrap().roughness, 0.9);
         assert!(assets.take_errors().is_empty());
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn an_instance_overrides_the_parameters_its_shaders_file_names_and_no_others() {
+        let folder = project("parameters");
+        let (base, instance) = (
+            "assets/materials/moss.material.json",
+            "assets/materials/autumn.material.json",
+        );
+        write(
+            &folder,
+            base,
+            &MaterialFile {
+                shader: Some(
+                    "fn surface(input: SurfaceInput) -> Surface {
+    return standard_surface(input);
+}
+"
+                    .into(),
+                ),
+                parameters: BTreeMap::from([
+                    ("Amount".to_owned(), ParamValue::Number(0.5)),
+                    ("Tint".to_owned(), ParamValue::Vector(vec![0.2, 0.6, 0.2])),
+                ]),
+                graph: Some(serde_json::json!({ "nodes": [] })),
+                ..MaterialFile::default()
+            },
+        );
+        write(
+            &folder,
+            instance,
+            &MaterialFile {
+                base: Some(base.to_owned()),
+                parameters: BTreeMap::from([
+                    ("Tint".to_owned(), ParamValue::Vector(vec![0.8, 0.4, 0.1])),
+                    ("Unknown".to_owned(), ParamValue::Number(9.0)),
+                ]),
+                ..MaterialFile::default()
+            },
+        );
+        let text = fs::read_to_string(folder.join(instance)).unwrap();
+        assert!(
+            text.contains("\"Unknown\": 9.0"),
+            "a number is written plain: {text}"
+        );
+
+        let assets = Assets::new(&folder);
+        let parameters = |path| assets.material(path).unwrap().parameters.clone();
+        assert_eq!(
+            parameters(base),
+            [
+                ("Amount".to_owned(), [0.5, 0.0, 0.0, 0.0]),
+                ("Tint".to_owned(), [0.2, 0.6, 0.2, 0.0]),
+            ]
+        );
+        assert_eq!(
+            parameters(instance),
+            [
+                ("Amount".to_owned(), [0.5, 0.0, 0.0, 0.0]),
+                ("Tint".to_owned(), [0.8, 0.4, 0.1, 0.0]),
+            ],
+            "its own tint, its base's amount, and not a parameter the shader doesn't name"
+        );
+        // The graph is the editor's, so the instance doesn't take it.
+        let chain = assets.material_chain(instance).unwrap();
+        assert_eq!(chain.merged.graph, None);
+        assert!(chain.merged.shader.is_some());
         let _ = fs::remove_dir_all(&folder);
     }
 }

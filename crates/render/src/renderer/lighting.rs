@@ -26,6 +26,7 @@ use super::{
     MAX_TILES, MIN_TILE_SIZE, MapsUniform, MaterialKey, MeshKey, NEAR_PLANE, POINT_SHADOW_SPREAD,
     PointShadow, PostUniform, SHADOW_CASCADES, SHADOW_CASTER_RANGE, SpotShadow,
 };
+use crate::SURFACE_PARAMETERS;
 
 /// The camera's view (world to view space) and projection (view to clip
 /// space).
@@ -791,7 +792,8 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
         };
     }
     let textures = material_textures(item).map(|source| source.map(|source| source.key()));
-    if textures.iter().all(Option::is_none) {
+    let params = item.material.surface_parameters;
+    if textures.iter().all(Option::is_none) && params == [[0.0; 4]; SURFACE_PARAMETERS] {
         return MaterialKey::default();
     }
     let maps = &item.material.maps;
@@ -835,6 +837,7 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
             0.0,
             0.0,
         ],
+        params,
     };
     MaterialKey {
         textures,
@@ -858,6 +861,7 @@ pub(super) fn maps_uniform_of(key: &MaterialKey) -> MapsUniform {
             specular: [0.0; 4],
             uv_matrix: [1.0, 0.0, 0.0, 1.0],
             uv_offset: [0.0; 4],
+            params: [[0.0; 4]; SURFACE_PARAMETERS],
         };
     }
     bytemuck::cast(key.maps)

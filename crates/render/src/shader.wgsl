@@ -26,6 +26,8 @@ struct Maps {
     uv_matrix: vec4<f32>,
     // xy: added to the texture coordinates after `uv_matrix`.
     uv_offset: vec4<f32>,
+    // The surface shader's values (`Material::surface_parameters`).
+    params: array<vec4<f32>, 8>,
 }
 
 // The item's material textures. Color ones (base color, emission) are read
@@ -284,6 +286,12 @@ fn standard_surface(input: SurfaceInput) -> Surface {
     out.emissive = input.emissive * emissive_texel.rgb;
     out.opacity = input.opacity * mix(texel.a, opacity_map, maps.settings.w);
     return out;
+}
+
+// The material's value `index` (0 to 7: its `parameters` in name order).
+// A number is in x, a color or vector in xyz (colors as written, sRGB).
+fn parameter(index: i32) -> vec4<f32> {
+    return maps.params[index];
 }
 
 // An sRGB color (as a Part's `Color` is written) as linear light.

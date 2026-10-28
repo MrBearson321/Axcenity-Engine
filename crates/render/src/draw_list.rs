@@ -908,7 +908,15 @@ pub struct Material {
     /// error draws in glowing magenta checks, and is reported once
     /// ([`crate::TextureRenderer::take_shader_errors`]).
     pub surface_shader: Option<crate::SurfaceShader>,
+    /// Values its surface shader reads with `parameter(i)` (a material
+    /// file's `parameters`, in name order), so materials that differ only
+    /// in them share the shader's pipelines. Unused ones are 0.
+    pub surface_parameters: [[f32; 4]; SURFACE_PARAMETERS],
 }
+
+/// How many values a surface shader can read with `parameter(i)`
+/// ([`Material::surface_parameters`]).
+pub const SURFACE_PARAMETERS: usize = 8;
 
 impl Default for Material {
     fn default() -> Self {
@@ -927,6 +935,7 @@ impl Default for Material {
             double_sided: false,
             terrain: None,
             surface_shader: None,
+            surface_parameters: [[0.0; 4]; SURFACE_PARAMETERS],
         }
     }
 }

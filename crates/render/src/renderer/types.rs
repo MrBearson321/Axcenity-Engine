@@ -1,4 +1,5 @@
 use super::*;
+use crate::SURFACE_PARAMETERS;
 use crate::graphics::{PointShadowMapSize, SpotShadowMapSize};
 use glam::{Mat4, Vec3};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -374,6 +375,8 @@ pub(super) struct MapsUniform {
     pub(super) uv_matrix: [f32; 4],
     /// Added to the turned texture coordinates, then unused.
     pub(super) uv_offset: [f32; 4],
+    /// The surface shader's values ([`crate::Material::surface_parameters`]).
+    pub(super) params: [[f32; 4]; SURFACE_PARAMETERS],
 }
 
 /// A texture uploaded to the GPU, with a view for each way it's read.
@@ -411,7 +414,7 @@ pub(super) const MATERIAL_TEXTURES: usize = 8;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct MaterialKey {
     pub(super) textures: [Option<u64>; MATERIAL_TEXTURES],
-    pub(super) maps: [[u32; 4]; 9],
+    pub(super) maps: [[u32; 4]; 9 + SURFACE_PARAMETERS],
     /// A terrain chunk's binding (see `terrain::TerrainKey`), all 0 for
     /// everything else.
     pub(super) terrain: terrain::TerrainKey,

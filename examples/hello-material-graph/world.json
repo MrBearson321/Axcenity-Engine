@@ -1,0 +1,46 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.42, 0.45, 0.5],
+          "Material": "Plastic",
+          "Position": [0, -1, 0],
+          "Roughness": 0.8,
+          "Shape": "Block",
+          "Size": [40, 1, 40]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "MossyWall",
+        "properties": {
+          "Anchored": true,
+          "Color": [1, 1, 1],
+          "MaterialVariant": "assets/materials/MossyStone.material.json",
+          "Position": [-4.5, 2.5, 0],
+          "Shape": "Block",
+          "Size": [8, 6, 2],
+          "TileSize": 8
+        }
+      },
+      {
+        "class": "Part",
+        "name": "AutumnWall",
+        "properties": {
+          "Anchored": true,
+          "Color": [1, 1, 1],
+          "MaterialVariant": "assets/materials/AutumnStone.material.json",
+          "Position": [4.5, 2.5, 0],
+          "Shape": "Block",
+          "Size": [8, 6, 2],
+          "TileSize": 8
+        }
+      }
+    ]
+  }
+}

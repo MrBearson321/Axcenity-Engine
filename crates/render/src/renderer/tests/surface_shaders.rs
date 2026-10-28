@@ -148,3 +148,53 @@ fn surface_shaders_draw_with_ambient_occlusion_and_msaa_and_are_compiled_again_f
     renderer.render(&list).unwrap();
     assert_eq!(renderer.scene.surface_shaders.alive(), (0, false));
 }
+
+#[test]
+fn materials_differing_only_in_parameters_share_a_shader_and_draw_their_own_values() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // Glows in the color in parameter 1, times the number in parameter 0.
+    let code = "\
+fn surface(input: SurfaceInput) -> Surface {
+    var out = standard_surface(input);
+    out.base_color = vec3<f32>(0.0);
+    out.emissive = srgb(parameter(1).xyz) * parameter(0).x;
+    return out;
+}
+";
+    let block = |x: f32, color: [f32; 3]| {
+        let mut block = big_block();
+        block.transform = Mat4::from_scale_rotation_translation(
+            Vec3::new(2.0, 4.0, 4.0),
+            glam::Quat::IDENTITY,
+            Vec3::new(x, 0.0, -5.0),
+        );
+        block.material.surface_shader = Some(SurfaceShader::new("glow", code));
+        block.material.surface_parameters[0] = [1.0, 0.0, 0.0, 0.0];
+        block.material.surface_parameters[1] = [color[0], color[1], color[2], 0.0];
+        block
+    };
+    let list = list_of(vec![
+        block(-1.5, [1.0, 0.0, 0.0]),
+        block(1.5, [0.0, 0.0, 1.0]),
+    ]);
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let left = pixel_at(&mut renderer, &list, Vec3::new(-1.5, 0.0, -3.0));
+    let right = pixel_at(&mut renderer, &list, Vec3::new(1.5, 0.0, -3.0));
+    assert!(
+        left[0] > 200 && left[2] < 30,
+        "the left one is red: {left:?}"
+    );
+    assert!(
+        right[2] > 200 && right[0] < 30,
+        "the right one is blue: {right:?}"
+    );
+    assert!(renderer.take_shader_errors().is_empty());
+    assert_eq!(
+        renderer.scene.surface_shaders.alive(),
+        (1, false),
+        "they share the shader"
+    );
+}

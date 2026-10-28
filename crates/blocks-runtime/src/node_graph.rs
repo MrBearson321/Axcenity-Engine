@@ -27,6 +27,10 @@ pub enum PinType {
     Number,
     Text,
     Bool,
+    /// Two numbers (a material graph's texture coordinates).
+    Vector2,
+    /// Three numbers (a material graph's colors, positions and normals).
+    Vector3,
     /// Any value.
     Any,
 }
@@ -40,6 +44,8 @@ impl PinType {
             (PinType::Exec, from) | (from, PinType::Exec) => from == PinType::Exec && self == from,
             (PinType::Any, _) | (_, PinType::Any) => true,
             (PinType::Text, PinType::Number | PinType::Bool) => true,
+            // A number fills every part of a vector.
+            (PinType::Vector2 | PinType::Vector3, PinType::Number) => true,
             (to, from) => to == from,
         }
     }
@@ -50,6 +56,8 @@ impl PinType {
             PinType::Number => "a number",
             PinType::Text => "text",
             PinType::Bool => "true or false",
+            PinType::Vector2 => "a Vector2",
+            PinType::Vector3 => "a Vector3",
             PinType::Any => "any value",
         }
     }
@@ -66,6 +74,10 @@ pub struct PinSpec {
     pub required: bool,
     /// What a new node's box for this input holds.
     pub default: &'static str,
+    /// False: the input has no box to type in, and is only wired (a
+    /// material graph's output, whose unwired inputs keep the material's
+    /// own values).
+    pub typed: bool,
 }
 
 impl PinSpec {
@@ -75,6 +87,7 @@ impl PinSpec {
             ty: PinType::Exec,
             required: false,
             default: "",
+            typed: true,
         }
     }
 
@@ -84,6 +97,7 @@ impl PinSpec {
             ty,
             required: false,
             default: "",
+            typed: true,
         }
     }
 
@@ -93,11 +107,20 @@ impl PinSpec {
             ty,
             required: true,
             default: "",
+            typed: true,
         }
     }
 
     pub const fn with_default(self, default: &'static str) -> Self {
         Self { default, ..self }
+    }
+
+    /// This input with no box to type in: it's only wired.
+    pub const fn wired_only(self) -> Self {
+        Self {
+            typed: false,
+            ..self
+        }
     }
 }
 
@@ -125,6 +148,10 @@ pub enum FieldKind {
     },
     /// One of the graph's variables, by name.
     Variable,
+    /// One of the project's images, by its path.
+    Image,
+    /// A color, as `r, g, b` (sRGB, 0 to 1).
+    Color,
 }
 
 /// A setting on a node that isn't a pin, such as which button or which
@@ -380,6 +407,8 @@ impl NodeGraph {
             return Err(match to_type {
                 PinType::Number => "That input needs a number.",
                 PinType::Bool => "That input needs true or false (a red pin).",
+                PinType::Vector2 => "That input needs a Vector2 or a number.",
+                PinType::Vector3 => "That input needs a Vector3 (such as a color) or a number.",
                 _ => "That value doesn't fit this input.",
             });
         }

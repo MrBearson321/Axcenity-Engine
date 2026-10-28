@@ -509,4 +509,281 @@ mod tests {
         assert_eq!(app.materials.shader_error(), None);
         let _ = std::fs::remove_dir_all(&folder);
     }
+
+    /// The draw-list material the part `id` is drawn with in `list`.
+    fn material_in(world: &World, id: InstanceId, list: &DrawList) -> axcenity_render::Material {
+        let at = world
+            .get(id)
+            .unwrap()
+            .property("Position")
+            .and_then(Value::as_vector3)
+            .unwrap();
+        let at = Vec3::new(at.x, at.y, at.z);
+        list.items
+            .iter()
+            .find(|item| item.transform.w_axis.truncate().distance(at) < 1e-3)
+            .expect("the part is drawn")
+            .material
+            .clone()
+    }
+
+    /// Draws the Material tab once, in `view`.
+    fn draw_tab(app: &mut EditorApp, view: crate::material_editor::MaterialView) {
+        app.materials.view = view;
+        let ctx = crate::theme::test_context();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.material_pane(ui, None));
+        });
+    }
+
+    type Gpu = (axcenity_render::wgpu::Device, axcenity_render::wgpu::Queue);
+
+    fn gpu() -> Option<Gpu> {
+        use axcenity_render::wgpu;
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+        pollster::block_on(adapter.request_device(&Default::default())).ok()
+    }
+
+    fn render((device, queue): &Gpu, list: &DrawList) -> Vec<u8> {
+        let mut renderer = axcenity_render::TextureRenderer::new(device, queue, 160, 120);
+        renderer.render(list).unwrap();
+        assert!(renderer.take_shader_errors().is_empty());
+        renderer.read_pixels()
+    }
+
+    #[test]
+    fn a_graph_mixing_two_textures_by_noise_previews_live_saves_and_draws_the_same_from_its_file() {
+        use crate::material_editor::MaterialView;
+        use crate::material_graph::{graph_of, graph_value, set_parameter, tests::mossy_stone};
+        use axcenity_assets::ParamValue;
+        let folder = copy_of_example("hello-material-graph", "material-graph-tab");
+        let mut app = EditorApp::new(Some(&folder));
+        app.new_material("Lichen");
+        let path = "assets/materials/Lichen.material.json";
+        let graph = mossy_stone("assets/textures/stone.png", "assets/textures/moss.png");
+        app.materials
+            .edit("graph", |file| file.graph = Some(graph_value(&graph)));
+        app.materials.finish_edit();
+
+        // The new code waits for the graph to be still, then is used.
+        assert!(app.materials.sync_graphs(Some(10.0)));
+        assert_eq!(app.materials.current().unwrap().file.shader, None);
+        assert!(!app.materials.sync_graphs(Some(11.0)));
+        let file = app.materials.current().unwrap().file.clone();
+        let shader = file.shader.clone().expect("the graph made the shader");
+        assert!(shader.contains("graph_perlin_noise"), "{shader}");
+        assert_eq!(
+            file.maps.color.as_ref().and_then(|map| map.path.as_deref()),
+            Some("assets/textures/stone.png")
+        );
+        app.hand_over_materials();
+        let preview_of = |app: &mut EditorApp| {
+            let list = app.materials.preview_list(path, None, &app.assets);
+            let item = list
+                .items
+                .iter()
+                .find(|item| item.transform.w_axis.x == 0.0 && item.transform.w_axis.z == 0.0)
+                .expect("the preview draws the part");
+            let material = item.material.clone();
+            (list, material)
+        };
+        let (before, material) = preview_of(&mut app);
+        assert_eq!(material.surface_shader.as_ref().unwrap().code(), shader);
+        assert!(material.base_color_texture.is_some() && material.maps.emissive.is_some());
+        assert_eq!(material.surface_parameters[0], [0.35, 0.7, 0.2, 0.0]);
+
+        // A parameter changed in the tab shows at once: it isn't new code.
+        app.materials.edit("parameter", |file| {
+            let tint = ParamValue::Vector(vec![0.9, 0.2, 0.6]);
+            let mut graph = graph_of(file.graph.as_ref().unwrap()).unwrap();
+            assert!(set_parameter(&mut graph, "Moss Tint", &tint));
+            file.graph = Some(graph_value(&graph));
+        });
+        assert!(!app.materials.sync_graphs(Some(11.0)));
+        app.hand_over_materials();
+        let (after, material) = preview_of(&mut app);
+        assert_eq!(material.surface_parameters[0], [0.9, 0.2, 0.6, 0.0]);
+        assert_eq!(material.surface_shader.as_ref().unwrap().code(), shader);
+        draw_tab(&mut app, MaterialView::Graph);
+        draw_tab(&mut app, MaterialView::Values);
+        let gpu = gpu();
+        if let Some(gpu) = &gpu {
+            assert_ne!(
+                render(gpu, &before),
+                render(gpu, &after),
+                "the preview changed"
+            );
+        }
+
+        assert!(app.save());
+        let edited = app.materials.current().unwrap().file.clone();
+        let written = axcenity_assets::read_material_file(&folder.join(path)).unwrap();
+        assert_eq!(written, edited);
+        assert!(written.graph.is_some() && written.shader.is_some());
+
+        // The player reads the file, not the tab: it draws the same.
+        let wall = part(&app, "MossyWall");
+        app.use_material(path, "Lichen", vec![wall]);
+        let in_editor = axcenity_scene::build_draw_list(&app.world, &app.assets, camera());
+        let from_file = axcenity_assets::Assets::new(&folder);
+        let in_player = axcenity_scene::build_draw_list(&app.world, &from_file, camera());
+        let (a, b) = (
+            material_in(&app.world, wall, &in_editor),
+            material_in(&app.world, wall, &in_player),
+        );
+        assert_eq!(
+            a.surface_shader.unwrap().key(),
+            b.surface_shader.unwrap().key()
+        );
+        assert_eq!(a.surface_parameters, b.surface_parameters);
+        if let Some(gpu) = &gpu {
+            assert_eq!(render(gpu, &in_editor), render(gpu, &in_player));
+        }
+        assert!(from_file.take_errors().is_empty());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_parameter_overridden_in_an_instance_changes_only_that_instance() {
+        use crate::material_editor::MaterialView;
+        use crate::material_graph::{graph_of, graph_value, set_parameter};
+        use axcenity_assets::ParamValue;
+        let folder = copy_of_example("hello-material-graph", "material-graph-instance");
+        let mut app = EditorApp::new(Some(&folder));
+        let (mossy, autumn) = (
+            "assets/materials/MossyStone.material.json",
+            "assets/materials/AutumnStone.material.json",
+        );
+        let (base_wall, instance_wall) = (part(&app, "MossyWall"), part(&app, "AutumnWall"));
+        let drawn = |app: &EditorApp, id| {
+            let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera());
+            material_in(&app.world, id, &list)
+        };
+        let base_before = drawn(&app, base_wall);
+
+        app.open_material(autumn);
+        draw_tab(&mut app, MaterialView::Values);
+        app.materials.edit("parameter", |file| {
+            file.parameters.insert(
+                "Moss Tint".to_owned(),
+                ParamValue::Vector(vec![0.2, 0.3, 1.0]),
+            );
+        });
+        app.materials.finish_edit();
+        app.hand_over_materials();
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            app.materials.view = MaterialView::Values;
+            let path = std::path::Path::new(&folder).join("material-instance-parameters.png");
+            crate::snapshot::snapshot(
+                &path,
+                egui::vec2(900.0, 1100.0),
+                vec![Vec::new(); 3],
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| app.material_pane(ui, None));
+                },
+            );
+        }
+        let (base, instance) = (drawn(&app, base_wall), drawn(&app, instance_wall));
+        assert_eq!(instance.surface_parameters[0], [0.2, 0.3, 1.0, 0.0]);
+        assert_eq!(
+            base.surface_parameters, base_before.surface_parameters,
+            "the base is untouched"
+        );
+        assert_eq!(
+            base.surface_shader.as_ref().unwrap().key(),
+            instance.surface_shader.as_ref().unwrap().key(),
+            "they share the shader"
+        );
+
+        // The base's roughness changes both; the instance keeps its tint.
+        app.open_material(mossy);
+        app.materials.edit("parameter", |file| {
+            let mut graph = graph_of(file.graph.as_ref().unwrap()).unwrap();
+            assert!(set_parameter(
+                &mut graph,
+                "Roughness",
+                &ParamValue::Number(0.3)
+            ));
+            file.graph = Some(graph_value(&graph));
+        });
+        app.materials.sync_graphs(Some(0.0));
+        app.hand_over_materials();
+        let (base, instance) = (drawn(&app, base_wall), drawn(&app, instance_wall));
+        assert_eq!(base.surface_parameters[1][0], 0.3);
+        assert_eq!(instance.surface_parameters[1][0], 0.3);
+        assert_eq!(instance.surface_parameters[0], [0.2, 0.3, 1.0, 0.0]);
+        assert_eq!(
+            base.surface_parameters[0],
+            base_before.surface_parameters[0]
+        );
+
+        assert!(app.save());
+        let written = axcenity_assets::read_material_file(&folder.join(autumn)).unwrap();
+        assert_eq!(
+            written.parameters["Moss Tint"],
+            ParamValue::Vector(vec![0.2, 0.3, 1.0])
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn graph_errors_in_the_tab_point_at_their_nodes_and_the_last_shader_stays() {
+        use crate::material_editor::MaterialView;
+        use crate::material_graph::{MaterialLibrary, OUTPUT, graph_of, graph_value};
+        use axcenity_blocks::node_graph::{NodeLibrary, PinRef};
+        let folder = copy_of_example("hello-material-graph", "material-graph-errors");
+        let mut app = EditorApp::new(Some(&folder));
+        let mossy = "assets/materials/MossyStone.material.json";
+        app.open_material(mossy);
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            app.materials.view = MaterialView::Graph;
+            let path = std::path::Path::new(&folder).join("material-graph-tab.png");
+            crate::snapshot::snapshot_rendered(
+                &path,
+                egui::vec2(1280.0, 640.0),
+                vec![Vec::new(); 3],
+                |ctx, render| {
+                    egui::CentralPanel::default()
+                        .show(ctx, |ui| app.material_pane(ui, Some(render)));
+                },
+            );
+        }
+        let file = app.materials.current().unwrap().file.clone();
+        let mut graph = graph_of(file.graph.as_ref().unwrap()).unwrap();
+        // The Mix's B breaks off, and a second output appears.
+        let mix = graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == "mix")
+            .unwrap()
+            .id;
+        graph.disconnect(&PinRef::new(mix, "B"), false);
+        let second = graph.add_node(MaterialLibrary.spec(OUTPUT).unwrap(), [0.0, 0.0]);
+        let value = graph_value(&graph);
+        app.materials
+            .edit("graph", move |file| file.graph = Some(value));
+        app.materials.sync_graphs(None);
+        let (on_nodes, on_graph) = app.materials.graph_errors(mossy);
+        assert!(on_graph.is_empty(), "{on_graph:?}");
+        assert_eq!(
+            on_nodes[&mix],
+            ["B isn't connected: wire a value in, or type one."]
+        );
+        assert!(on_nodes[&second][0].contains("Only one Material Output"));
+        assert_eq!(on_nodes.len(), 2, "{on_nodes:?}");
+        assert_eq!(
+            app.materials.current().unwrap().file.shader,
+            file.shader,
+            "it keeps the shader it last made"
+        );
+        draw_tab(&mut app, MaterialView::Graph);
+
+        // Undone, the errors go.
+        assert!(app.materials.undo());
+        app.materials.sync_graphs(None);
+        let (on_nodes, on_graph) = app.materials.graph_errors(mossy);
+        assert!(on_nodes.is_empty() && on_graph.is_empty());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 }

@@ -1312,6 +1312,9 @@ mod skinning_tests;
 mod shader_tests;
 
 #[cfg(test)]
+mod material_graph_tests;
+
+#[cfg(test)]
 mod accessibility_tests;
 
 #[cfg(test)]

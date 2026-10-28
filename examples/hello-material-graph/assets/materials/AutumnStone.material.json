@@ -1,0 +1,10 @@
+{
+  "base": "assets/materials/MossyStone.material.json",
+  "parameters": {
+    "Moss Tint": [
+      1.0,
+      0.45,
+      0.1
+    ]
+  }
+}

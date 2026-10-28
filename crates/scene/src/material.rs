@@ -6,7 +6,9 @@ use axcenity_assets::{
     StandardMaterial,
 };
 use axcenity_core::{ClassName, Instance, InstanceId, TextureChannel, Value, World};
-use axcenity_render::{Channel, ChannelMap, Material, NormalMap, SurfaceShader, TextureMaps};
+use axcenity_render::{
+    Channel, ChannelMap, Material, NormalMap, SURFACE_PARAMETERS, SurfaceShader, TextureMaps,
+};
 
 use crate::draw_list::{GLOW_BOOST, texture};
 
@@ -79,7 +81,18 @@ pub(crate) fn variant_material(standard: &StandardMaterial, assets: &Assets) -> 
             .shader
             .as_ref()
             .map(|shader| SurfaceShader::new(&shader.file, &shader.code)),
+        surface_parameters: surface_parameters(standard),
     }
+}
+
+/// `standard`'s parameters as its shader reads them, in their order; past
+/// the renderer's [`SURFACE_PARAMETERS`] they're left out.
+fn surface_parameters(standard: &StandardMaterial) -> [[f32; 4]; SURFACE_PARAMETERS] {
+    let mut out = [[0.0; 4]; SURFACE_PARAMETERS];
+    for (slot, (_, value)) in out.iter_mut().zip(&standard.parameters) {
+        *slot = *value;
+    }
+    out
 }
 
 /// A material file with the look of the Part `id`, for Save as Material:

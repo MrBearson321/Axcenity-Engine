@@ -1,0 +1,216 @@
+{
+  "color": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "metalness": 0.0,
+  "roughness": 0.85,
+  "maps": {
+    "color": {
+      "path": "assets/textures/stone.png"
+    },
+    "emissive": {
+      "path": "assets/textures/moss.png"
+    }
+  },
+  "shader": "// Made by this material's graph (the Material tab's Graph view): edit the graph,\n// not this code, which is made again from it.\nfn surface(input: SurfaceInput) -> Surface {\n    let n2 = textureSample(base_color_texture, material_sampler, input.uv); // Texture Sample\n    let n3 = textureSample(emissive_texture, material_sampler, input.uv); // Texture Sample\n    let n5 = n3.rgb * srgb(parameter(0).xyz); // Multiply\n    let n6 = graph_perlin_noise(input.uv * 4.0f); // Noise\n    let n7 = smoothstep(0.4f, 0.6f, n6); // Smooth Step\n    let n8 = mix(n2.rgb, n5, vec3<f32>(n7)); // Mix\n    var out: Surface;\n    out.base_color = n8;\n    out.metalness = input.metalness;\n    out.roughness = parameter(1).x;\n    out.normal = input.normal;\n    out.emissive = input.emissive;\n    out.opacity = input.opacity;\n    return out;\n}\n\n// A random number from 0 to 1 for each point (cell corner).\nfn graph_hash(p: vec2<f32>) -> f32 {\n    var q = fract(p * vec2<f32>(123.34, 456.21));\n    q = q + dot(q, q + 45.32);\n    return fract(q.x * q.y);\n}\n\n// Random slopes at cell corners (Perlin's gradient noise), 0 to 1.\nfn graph_corner_slope(corner: vec2<f32>, offset: vec2<f32>) -> f32 {\n    let angle = graph_hash(corner) * 6.2831853;\n    return dot(vec2<f32>(cos(angle), sin(angle)), offset);\n}\n\nfn graph_perlin_noise(p: vec2<f32>) -> f32 {\n    let i = floor(p);\n    let f = fract(p);\n    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n    let a = graph_corner_slope(i, f);\n    let b = graph_corner_slope(i + vec2<f32>(1.0, 0.0), f - vec2<f32>(1.0, 0.0));\n    let c = graph_corner_slope(i + vec2<f32>(0.0, 1.0), f - vec2<f32>(0.0, 1.0));\n    let d = graph_corner_slope(i + vec2<f32>(1.0, 1.0), f - vec2<f32>(1.0, 1.0));\n    return clamp(mix(mix(a, b, u.x), mix(c, d, u.x), u.y) * 0.7071 + 0.5, 0.0, 1.0);\n}\n",
+  "parameters": {
+    "Moss Tint": [
+      0.35,
+      0.7,
+      0.2
+    ],
+    "Roughness": 0.85
+  },
+  "graph": {
+    "format_version": 1,
+    "nodes": [
+      {
+        "id": 1,
+        "kind": "material_output",
+        "position": [
+          900.0,
+          160.0
+        ]
+      },
+      {
+        "id": 2,
+        "kind": "texture",
+        "position": [
+          0.0,
+          0.0
+        ],
+        "values": {
+          "Read as": "Color",
+          "Texture": "assets/textures/stone.png"
+        }
+      },
+      {
+        "id": 3,
+        "kind": "texture",
+        "position": [
+          0.0,
+          200.0
+        ],
+        "values": {
+          "Read as": "Color",
+          "Texture": "assets/textures/moss.png"
+        }
+      },
+      {
+        "id": 4,
+        "kind": "color_parameter",
+        "position": [
+          0.0,
+          400.0
+        ],
+        "values": {
+          "Color": "0.35, 0.7, 0.2",
+          "Name": "Moss Tint"
+        }
+      },
+      {
+        "id": 5,
+        "kind": "multiply",
+        "position": [
+          320.0,
+          280.0
+        ],
+        "values": {
+          "A": "0",
+          "B": "1"
+        }
+      },
+      {
+        "id": 6,
+        "kind": "noise",
+        "position": [
+          0.0,
+          560.0
+        ],
+        "values": {
+          "Scale": "4",
+          "Type": "Perlin"
+        }
+      },
+      {
+        "id": 7,
+        "kind": "smooth_step",
+        "position": [
+          320.0,
+          500.0
+        ],
+        "values": {
+          "Edge 0": "0.4",
+          "Edge 1": "0.6"
+        }
+      },
+      {
+        "id": 8,
+        "kind": "mix",
+        "position": [
+          600.0,
+          160.0
+        ],
+        "values": {
+          "Factor": "0.5"
+        }
+      },
+      {
+        "id": 9,
+        "kind": "number_parameter",
+        "position": [
+          600.0,
+          420.0
+        ],
+        "values": {
+          "Name": "Roughness",
+          "Value": "0.85"
+        }
+      }
+    ],
+    "wires": [
+      {
+        "from": {
+          "node": 3,
+          "pin": "Color"
+        },
+        "to": {
+          "node": 5,
+          "pin": "A"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "pin": "Color"
+        },
+        "to": {
+          "node": 5,
+          "pin": "B"
+        }
+      },
+      {
+        "from": {
+          "node": 6,
+          "pin": "Value"
+        },
+        "to": {
+          "node": 7,
+          "pin": "Value"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "pin": "Color"
+        },
+        "to": {
+          "node": 8,
+          "pin": "A"
+        }
+      },
+      {
+        "from": {
+          "node": 5,
+          "pin": "Result"
+        },
+        "to": {
+          "node": 8,
+          "pin": "B"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "pin": "Result"
+        },
+        "to": {
+          "node": 8,
+          "pin": "Factor"
+        }
+      },
+      {
+        "from": {
+          "node": 8,
+          "pin": "Result"
+        },
+        "to": {
+          "node": 1,
+          "pin": "Base Color"
+        }
+      },
+      {
+        "from": {
+          "node": 9,
+          "pin": "Value"
+        },
+        "to": {
+          "node": 1,
+          "pin": "Roughness"
+        }
+      }
+    ]
+  }
+}

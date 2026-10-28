@@ -380,6 +380,7 @@ impl BehaviorTreeStudio {
             &GraphContext {
                 library: &BehaviorNodes,
                 objects: &[],
+                images: &[],
                 errors: &by_node,
                 editable: scene.editable,
                 key: &path,

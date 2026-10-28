@@ -41,6 +41,7 @@ pub(super) struct NodeDraw<'a> {
     /// Its wired pins: name and whether it's an output.
     pub(super) wired: &'a BTreeSet<(String, bool)>,
     pub(super) objects: &'a [GraphObject],
+    pub(super) images: &'a [String],
     pub(super) variables: &'a [String],
     pub(super) key: &'a str,
 }
@@ -62,6 +63,7 @@ pub(super) fn draw_node(
         wire_held,
         wired,
         objects,
+        images,
         variables,
         key,
     } = draw;
@@ -182,8 +184,7 @@ pub(super) fn draw_node(
                 control,
                 field,
                 &mut value,
-                objects,
-                variables,
+                (objects, images, variables),
                 id.with(field.name),
             );
             set_value(node, field.name, value);
@@ -215,7 +216,7 @@ pub(super) fn draw_node(
                 font.clone(),
                 PIN_TEXT,
             );
-            if input.ty != PinType::Exec && !connected {
+            if input.ty != PinType::Exec && input.typed && !connected {
                 let left = text_x + text_width(ui.ctx(), input.name, 12.0) * z + s(6.0);
                 let mut value = node.value(input.name).to_owned();
                 let boxed = Rect::from_min_size(
@@ -323,15 +324,14 @@ fn shown_value(field: &FieldSpec, value: &str) -> String {
     }
 }
 
-/// The control for a field: a menu of choices, objects or variables, or a
-/// text box.
+/// The control for a field: a menu of choices, objects, images or
+/// variables, a color button, or a text box.
 fn field_control(
     ui: &mut egui::Ui,
     rect: Rect,
     field: &FieldSpec,
     value: &mut String,
-    objects: &[GraphObject],
-    variables: &[String],
+    (objects, images, variables): (&[GraphObject], &[String], &[String]),
     id: egui::Id,
 ) {
     let choices: Vec<(String, String)> = match field.kind {
@@ -339,6 +339,23 @@ fn field_control(
             ui.put(rect, egui::TextEdit::singleline(value).id(id));
             return;
         }
+        FieldKind::Color => {
+            let mut bytes = super::parse_numbers::<3>(value)
+                .unwrap_or([1.0; 3])
+                .map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            if child.color_edit_button_srgb(&mut bytes).changed() {
+                *value = super::numbers_text(&bytes.map(|byte| f32::from(byte) / 255.0));
+            }
+            return;
+        }
+        FieldKind::Image => images
+            .iter()
+            .map(|path| {
+                let name = path.rsplit('/').next().unwrap_or(path);
+                (path.clone(), name.to_owned())
+            })
+            .collect(),
         FieldKind::Choice(choices) => choices
             .iter()
             .map(|choice| ((*choice).to_owned(), (*choice).to_owned()))
@@ -375,6 +392,7 @@ fn field_control(
             if choices.is_empty() {
                 ui.weak(match field.kind {
                     FieldKind::Variable => "Add a variable beside the graph first.",
+                    FieldKind::Image => "Add an image to the project's assets first.",
                     _ => "There's nothing of this kind.",
                 });
             }
@@ -404,6 +422,17 @@ fn value_control(ui: &mut egui::Ui, rect: Rect, ty: PinType, value: &mut String,
             if child.checkbox(&mut on, "").changed() {
                 *value = on.to_string();
             }
+        }
+        PinType::Vector2 | PinType::Vector3 => {
+            let hint = if ty == PinType::Vector2 {
+                "x, y"
+            } else {
+                "x, y, z"
+            };
+            ui.put(
+                rect,
+                egui::TextEdit::singleline(value).hint_text(hint).id(id),
+            );
         }
         _ => {
             let hint = if ty == PinType::Any { "value" } else { "" };

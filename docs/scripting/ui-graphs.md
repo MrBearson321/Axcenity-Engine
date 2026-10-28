@@ -52,7 +52,7 @@ Objects are picked from menus: elements by their path under the ScreenGui (empty
 
 ## Code
 
-- Data and edits (generic): `crates/blocks-runtime/src/node_graph.rs` (`NodeGraph`, `NodeSpec`, `NodeLibrary`, `connect`, `copy`, `paste`).
+- Data and edits (generic): `crates/blocks-runtime/src/node_graph.rs` (`NodeGraph`, `NodeSpec`, `NodeLibrary`, `connect`, `copy`, `paste`). Material graphs (`docs/rendering/models.md`) use it too: their `Vector2` and `Vector3` pins (a number wires into either), `Image` and `Color` fields (the editor's `GraphContext::images` lists the project's images), and inputs without a box to type in (`PinSpec::wired_only`).
 - UI nodes and the compiler: `crates/blocks-runtime/src/ui_graph.rs`; tests in `ui_graph_tests.rs`.
 - Loading and objects: `crates/project/src/ui_graphs.rs` (`graph_objects`, `compile_graph_for`).
 - Editor: `crates/editor/src/node_graph.rs` (with `draw.rs`, `menu.rs`, `variables.rs`), `ui_designer/event_graph.rs`, `app/ui_graphs.rs` (documents, saving, undo); Play reads graphs in `play::read_scripts`.

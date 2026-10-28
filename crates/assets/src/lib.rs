@@ -58,7 +58,7 @@ pub use light_probes::{
 };
 pub use material::{
     MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MapSettings, MaterialChain, MaterialFile,
-    MaterialFileError, MaterialMaps, MaterialShader, StandardMaps, StandardMaterial,
+    MaterialFileError, MaterialMaps, MaterialShader, ParamValue, StandardMaps, StandardMaterial,
     is_material_file, material_json, parse_material, read_material_file, write_material_file,
 };
 pub use model::{

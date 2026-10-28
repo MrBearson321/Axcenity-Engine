@@ -83,7 +83,13 @@ pub fn category_color(category: &str) -> Color32 {
         "Flow" | "Composites" => Color32::from_rgb(92, 96, 110),
         "Conditions" => Color32::from_rgb(170, 112, 36),
         "Data" => Color32::from_rgb(44, 134, 92),
-        "Variables" => Color32::from_rgb(128, 78, 170),
+        "Variables" | "Parameters" => Color32::from_rgb(128, 78, 170),
+        // A material graph's.
+        "Output" => Color32::from_rgb(168, 42, 42),
+        "Inputs" => Color32::from_rgb(44, 112, 140),
+        "Textures" => Color32::from_rgb(52, 104, 186),
+        "Color" => Color32::from_rgb(176, 96, 40),
+        "Noise" => Color32::from_rgb(40, 132, 120),
         _ => Color32::from_rgb(92, 96, 110),
     }
 }
@@ -95,6 +101,8 @@ pub fn pin_color(ty: PinType) -> Color32 {
         PinType::Number => Color32::from_rgb(106, 214, 92),
         PinType::Text => Color32::from_rgb(241, 105, 190),
         PinType::Bool => Color32::from_rgb(220, 64, 64),
+        PinType::Vector2 => Color32::from_rgb(232, 196, 64),
+        PinType::Vector3 => Color32::from_rgb(242, 140, 52),
         PinType::Any => Color32::from_rgb(160, 162, 172),
     }
 }
@@ -104,6 +112,8 @@ pub struct GraphContext<'a> {
     pub library: &'a dyn NodeLibrary,
     /// What object fields can pick.
     pub objects: &'a [GraphObject],
+    /// What image fields can pick: the project's images, by path.
+    pub images: &'a [String],
     /// Errors to show on nodes, by node id.
     pub errors: &'a BTreeMap<u32, Vec<String>>,
     /// False: the graph is shown but not edited.
@@ -164,11 +174,31 @@ impl NodeShape {
 /// with what's typed, up to a limit.
 fn value_width(ctx: &egui::Context, ty: PinType, value: &str) -> f32 {
     match ty {
-        PinType::Text | PinType::Any => {
+        PinType::Text | PinType::Any | PinType::Vector2 | PinType::Vector3 => {
             (text_width(ctx, value, 12.0) + 18.0).clamp(VALUE_WIDTH, 200.0)
         }
         _ => VALUE_WIDTH,
     }
+}
+
+/// `N` numbers typed as `1, 0.5, 0` (a vector or a color), or `None` when
+/// that isn't what `text` is. One number fills all `N`.
+pub fn parse_numbers<const N: usize>(text: &str) -> Option<[f32; N]> {
+    let numbers: Vec<f32> = text
+        .split(',')
+        .map(|part| part.trim().parse::<f32>().ok().filter(|n| n.is_finite()))
+        .collect::<Option<_>>()?;
+    match numbers.len() {
+        1 => Some([numbers[0]; N]),
+        n if n == N => numbers.try_into().ok(),
+        _ => None,
+    }
+}
+
+/// Numbers as [`parse_numbers`] reads them.
+pub fn numbers_text(numbers: &[f32]) -> String {
+    let parts: Vec<String> = numbers.iter().map(|n| format!("{}", n)).collect();
+    parts.join(", ")
 }
 
 fn text_width(ctx: &egui::Context, text: &str, size: f32) -> f32 {
@@ -204,7 +234,7 @@ pub fn node_shape(
                 .wires_into(&PinRef::new(node.id, input.name))
                 .next()
                 .is_some();
-            if input.ty != PinType::Exec && !wired {
+            if input.ty != PinType::Exec && input.typed && !wired {
                 row_width += value_width(ctx, input.ty, node.value(input.name)) + 6.0;
             }
         }
@@ -676,6 +706,7 @@ impl GraphView {
                 wire_held,
                 wired: &wired,
                 objects: context.objects,
+                images: context.images,
                 variables: &variables,
                 key: context.key,
             };

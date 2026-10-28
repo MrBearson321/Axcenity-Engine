@@ -3,7 +3,7 @@
 Map only. `render` draws a draw list. It does not know about Instances. Open the one file that matches the change.
 
 - Pipeline, materials, built-in shapes, platforms: [rendering/pipeline.md](rendering/pipeline.md)
-- Imported models, texture maps, material files and surface shaders: [rendering/models.md](rendering/models.md)
+- Imported models, texture maps, material files, surface shaders and material graphs: [rendering/models.md](rendering/models.md)
 - Animation playback: [rendering/animation.md](rendering/animation.md)
 - Point and spot lights, and their shadows: [rendering/lights.md](rendering/lights.md)
 - Sky, sky images, environment maps, reflection probes, light probe volumes, real-time GI and environment lighting: [rendering/sky.md](rendering/sky.md)

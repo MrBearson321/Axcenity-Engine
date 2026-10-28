@@ -973,7 +973,7 @@ fn model_material(material: &ModelMaterial) -> Material {
         uv_offset: material.uv_offset,
         double_sided: material.double_sided,
         terrain: None,
-        surface_shader: None,
+        ..Material::default()
     }
 }
 

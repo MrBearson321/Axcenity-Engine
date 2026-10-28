@@ -362,6 +362,7 @@ impl UiDesigner {
             &GraphContext {
                 library: &UiNodes,
                 objects: &objects,
+                images: &[],
                 errors: &by_node,
                 editable: scene.editing,
                 key: &key,

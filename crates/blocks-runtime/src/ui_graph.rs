@@ -861,7 +861,8 @@ impl<'a> Compiler<'a> {
                     return None;
                 }
             },
-            PinType::Exec => return None,
+            // Only material graphs have vector pins.
+            PinType::Exec | PinType::Vector2 | PinType::Vector3 => return None,
         };
         Some(value)
     }

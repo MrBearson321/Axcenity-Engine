@@ -14,11 +14,17 @@
 //! box loses focus, so the scene isn't compiled again on every key. The
 //! code is checked with `naga` here, and its error shown on its line.
 //!
+//! The Graph view edits the material's graph instead (`material_editor/graph.rs`),
+//! which makes its shader, maps and parameters.
+//!
 //! Materials are written with the project's Save. Each edit is also handed
 //! to the app ([`MaterialStudio::take_changed`]), which gives it to the
 //! shared `Assets`, so every part using the material, or a material built
 //! on it, is drawn with the edit at once, in the viewport and in Play.
 
+mod graph;
+
+use std::collections::HashMap;
 use std::path::Path;
 
 use axcenity_assets::{
@@ -32,6 +38,7 @@ use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use crate::animation::preview::{Canvas, add_floor};
+use crate::node_graph::GraphView;
 use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets::{self, Role};
@@ -76,6 +83,16 @@ impl MaterialDocument {
     fn unsaved(&self) -> bool {
         self.saved.as_ref() != Some(&self.file)
     }
+}
+
+/// Which of a material's views the tab shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MaterialView {
+    /// Every value and map.
+    #[default]
+    Values,
+    /// Its graph.
+    Graph,
 }
 
 /// What the preview shows the material on.
@@ -234,6 +251,11 @@ pub struct MaterialStudio {
     shader_draft: Option<ShaderDraft>,
     /// The last code checked, and what the check found.
     shader_check: Option<(String, Result<(), ShaderError>)>,
+    pub view: MaterialView,
+    /// What each material's graph last compiled to, by path.
+    builds: HashMap<String, graph::GraphBuild>,
+    /// Where each material's graph is looked at, by path.
+    graph_views: HashMap<String, GraphView>,
 }
 
 /// Shader code being typed in the Material tab.
@@ -344,6 +366,8 @@ impl MaterialStudio {
     /// Writes every material with changes into `folder`. Returns the paths
     /// written, or why one couldn't be.
     pub fn save(&mut self, folder: &Path) -> Result<Vec<String>, String> {
+        // A graph's newest code is saved with it.
+        self.sync_graphs(None);
         let mut written = Vec::new();
         for doc in &mut self.documents {
             if !doc.unsaved() {
@@ -456,7 +480,22 @@ impl MaterialStudio {
         if pointer_up && !focused {
             self.open_field = None;
         }
+        let now = ui.input(|input| input.time);
+        if self.sync_graphs(Some(now)) {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(graph::GRAPH_PAUSE));
+        }
         self.toolbar(ui, scene, &mut actions);
+        let mut view = self.view;
+        widgets::segmented(
+            ui,
+            &mut view,
+            &[
+                (MaterialView::Values, Some(icons::LIST), "Values"),
+                (MaterialView::Graph, Some(icons::GRAPH), "Graph"),
+            ],
+        );
+        self.view = view;
         ui.add_space(4.0);
         let Some(path) = self.current.clone() else {
             ui.weak("Open a material from the list above, or make a new one.");
@@ -472,16 +511,31 @@ impl MaterialStudio {
             .and_then(|base| scene.assets.material_chain(base));
         let mut changes: Vec<Change> = Vec::new();
         let stacked = ui.available_width() < STACK_BELOW;
-        responsive::split(ui, STACK_BELOW, 0.42, |ui, pane| {
+        let graph_view = self.view == MaterialView::Graph;
+        let share = if graph_view { 0.3 } else { 0.42 };
+        responsive::split(ui, STACK_BELOW, share, |ui, pane| {
             if pane == 0 {
                 self.preview_pane(ui, scene, &path, stacked);
+            } else if graph_view {
+                self.graph_pane(ui, scene, &path, &file, &mut changes, &mut actions);
             } else {
                 egui::ScrollArea::vertical()
                     .id_salt("material values")
                     .show(ui, |ui| {
+                        let (on_nodes, on_graph) = self.graph_errors(&path);
+                        if !on_nodes.is_empty() || !on_graph.is_empty() {
+                            ui.colored_label(
+                                theme::palette(ui.ctx()).warning,
+                                "Its graph has errors: see the Graph view.",
+                            );
+                        }
                         values(ui, scene, &path, &file, chain.as_ref(), &mut changes);
                         ui.add_space(6.0);
-                        self.shader_section(ui, &path, &file, chain.as_ref(), &mut changes);
+                        if file.graph.is_some() {
+                            graph::graph_code(ui, &file);
+                        } else {
+                            self.shader_section(ui, &path, &file, chain.as_ref(), &mut changes);
+                        }
                         ui.add_space(8.0);
                         let apply = ui
                             .add_enabled(
@@ -900,10 +954,22 @@ fn values(
         );
     });
 
+    graph::parameter_rows(ui, scene, path, file, chain, changes);
+
     ui.add_space(6.0);
     widgets::section_label(ui, "Maps");
+    // A graph's textures are its other maps.
+    let graph = file.graph.is_some();
+    if graph {
+        ui.label(
+            egui::RichText::new("Its other maps are the images its graph reads.")
+                .color(palette.text_secondary),
+        );
+    }
     for slot in MapSlot::ALL {
-        map_rows(ui, scene, slot, file, &inherited_file, changes);
+        if !graph || matches!(slot, MapSlot::Occlusion | MapSlot::Specular) {
+            map_rows(ui, scene, slot, file, &inherited_file, changes);
+        }
     }
 }
 

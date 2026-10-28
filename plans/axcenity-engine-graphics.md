@@ -404,9 +404,9 @@ The generic node-graph editor (`editor/src/node_graph.rs`) gets a material node 
 
 ### Acceptance criteria
 
-- [ ] A graph mixing two textures by noise previews live, saves, and draws the same in the player.
-- [ ] An exposed parameter overridden in an instance changes only that instance.
-- [ ] Graph errors (an unconnected output, a type mismatch) point at the node.
+- [x] A graph mixing two textures by noise previews live, saves, and draws the same in the player.
+- [x] An exposed parameter overridden in an instance changes only that instance.
+- [x] Graph errors (an unconnected output, a type mismatch) point at the node.
 
 ---
 

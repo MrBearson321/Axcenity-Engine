@@ -16,10 +16,10 @@ mod tone_mapping;
 pub use draw_list::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, LightProbeGrid,
     LightProbeVolume, Material, MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage,
-    ReflectionProbe, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, Sprite, Sun, TerrainLayer,
-    TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow, TextSpan, TextStroke,
-    TextureMaps, TextureSource, UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle, UiShadow,
-    UiSlice, UiText, VerticalAlign, is_turned, turn_point, turned_bounds,
+    ReflectionProbe, SURFACE_PARAMETERS, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, Sprite,
+    Sun, TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow, TextSpan,
+    TextStroke, TextureMaps, TextureSource, UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle,
+    UiShadow, UiSlice, UiText, VerticalAlign, is_turned, turn_point, turned_bounds,
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{

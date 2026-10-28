@@ -33,6 +33,7 @@ mod layout;
 mod loading;
 mod lua_syntax;
 mod material_editor;
+mod material_graph;
 mod node_graph;
 mod output;
 mod placing;
