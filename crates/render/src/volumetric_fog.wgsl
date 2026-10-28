@@ -78,7 +78,7 @@ fn air_sun_visibility(position: vec3<f32>) -> f32 {
 fn air_light(position: vec3<f32>, dir: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
     let fog = frame.fog;
     var light = fog.sun.rgb * fog_phase(dir, fog.sun_direction.xyz, fog.sun.w)
-        * air_sun_visibility(position);
+        * air_sun_visibility(position) * cloud_shadow(frame.clouds, position, fog.sun_direction.xyz);
     if frame.lights.x == 0u {
         return light;
     }

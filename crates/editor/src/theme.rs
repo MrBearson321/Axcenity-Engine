@@ -741,6 +741,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::ReflectionProbe => icons::SPHERE,
         ClassName::LightProbeVolume => icons::DOTS_NINE,
         ClassName::Atmosphere => icons::CLOUD_SUN,
+        ClassName::Clouds => icons::CLOUD,
         ClassName::ParticleEmitter => icons::SPARKLE,
         ClassName::Animator => AnimKind::Animator.icon(),
         ClassName::Animation => AnimKind::Animation.icon(),
@@ -846,7 +847,8 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::SpotLight
         | ClassName::ReflectionProbe
         | ClassName::LightProbeVolume
-        | ClassName::Atmosphere => pick((232, 205, 110), (150, 115, 0)),
+        | ClassName::Atmosphere
+        | ClassName::Clouds => pick((232, 205, 110), (150, 115, 0)),
         ClassName::ParticleEmitter => pick((232, 150, 108), (175, 80, 30)),
         ClassName::Animator => AnimKind::Animator.color(visuals),
         ClassName::Animation | ClassName::AnimationTrack => AnimKind::Animation.color(visuals),

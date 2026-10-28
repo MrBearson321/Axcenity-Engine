@@ -3,8 +3,8 @@
 
 use axcenity_core::{ClassName, World};
 use axcenity_render::{
-    AmbientOcclusion, AntiAliasing, Capabilities, GraphicsSettings, Quality, ReflectionQuality,
-    ShadowQuality, TextureQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, GraphicsSettings, Quality,
+    ReflectionQuality, ShadowQuality, TextureQuality,
 };
 
 use super::*;
@@ -49,6 +49,7 @@ fn a_local_script_reads_the_settings_the_host_gave() {
         print(s.GraphicsQuality, s.ShadowQuality, s.ShadowDistance, s.PostProcessing)
         print(s.RenderScale, s.TextureQuality, s.AntiAliasing, s.AmbientOcclusion)
         print(s.ReflectionQuality, s.ContactShadows, s.RealtimeGI, s.VolumetricFog)
+        print(s.CloudQuality)
         print(s == game.UserGameSettings, tostring(s))",
     );
     assert_eq!(
@@ -57,6 +58,7 @@ fn a_local_script_reads_the_settings_the_host_gave() {
             "Enum.GraphicsQuality.Medium\tEnum.ShadowQuality.Low\t100\ttrue",
             "1.5\tEnum.TextureQuality.Half\tEnum.AntiAliasing.FXAA\tEnum.AmbientOcclusion.Low",
             "Enum.ReflectionQuality.Medium\tfalse\tfalse\tfalse",
+            "Enum.CloudQuality.Medium",
             "false\tUserGameSettings",
         ]
     );
@@ -80,6 +82,7 @@ fn setting_the_quality_and_overrides_is_a_change_the_host_takes_once() {
         s.TextureQuality = Enum.TextureQuality.Full
         s.AmbientOcclusion = Enum.AmbientOcclusion.High
         s.ReflectionQuality = Enum.ReflectionQuality.Ultra
+        s.CloudQuality = Enum.CloudQuality.Low
         s.PostProcessing = true
         s.ContactShadows = false
         s.RealtimeGI = true
@@ -108,6 +111,7 @@ fn setting_the_quality_and_overrides_is_a_change_the_host_takes_once() {
         contact_shadows: Some(false),
         realtime_gi: Some(true),
         volumetric_fog: Some(true),
+        cloud_quality: Some(CloudQuality::Low),
     };
     assert_eq!(runtime.take_graphics_change(), Some(expected.clone()));
     assert_eq!(runtime.take_graphics_change(), None);

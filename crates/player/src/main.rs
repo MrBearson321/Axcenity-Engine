@@ -1306,6 +1306,9 @@ mod graphics_tests;
 mod time_of_day_tests;
 
 #[cfg(test)]
+mod clouds_tests;
+
+#[cfg(test)]
 mod bench_tests;
 
 #[cfg(test)]

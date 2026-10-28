@@ -11,8 +11,8 @@
 //! takes a script's change with `take_graphics_change`.
 
 use axcenity_render::{
-    AmbientOcclusion, AntiAliasing, Capabilities, GraphicsSettings, Quality, RENDER_SCALE_RANGE,
-    ReflectionQuality, ShadowQuality, TextureQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, GraphicsSettings, Quality,
+    RENDER_SCALE_RANGE, ReflectionQuality, ShadowQuality, TextureQuality,
 };
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -60,6 +60,10 @@ pub(crate) fn reflection_quality_names() -> Vec<&'static str> {
     ReflectionQuality::ALL
         .map(ReflectionQuality::label)
         .to_vec()
+}
+
+pub(crate) fn cloud_quality_names() -> Vec<&'static str> {
+    CloudQuality::ALL.map(CloudQuality::label).to_vec()
 }
 
 /// `mode`'s item name in `Enum.AntiAliasing`. Its label ("MSAA 4×") isn't a
@@ -309,6 +313,23 @@ impl UserData for LuaUserGameSettings {
                 value,
             )?;
             change(lua, |settings, _| settings.reflection_quality = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("CloudQuality", |lua, _| {
+            let name = settings(lua).cloud_quality().label();
+            Ok(item(EnumType::CloudQuality, name))
+        });
+        fields.add_field_method_set("CloudQuality", |lua, _, value: mlua::Value| {
+            let chosen = enum_choice(
+                lua,
+                "CloudQuality",
+                EnumType::CloudQuality,
+                &CloudQuality::ALL,
+                CloudQuality::label,
+                value,
+            )?;
+            change(lua, |settings, _| settings.cloud_quality = chosen);
             Ok(())
         });
 

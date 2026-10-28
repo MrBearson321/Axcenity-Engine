@@ -14,6 +14,8 @@
 //! real-time GI is on.
 //! `fog.rs` packs the frame's fog and, while volumetric fog is on, works
 //! out the sun's and lamps' light in it.
+//! `clouds.rs` packs the frame's clouds and keeps how far the wind has
+//! carried them.
 //! `culling.rs` tests bounds against each view, so what a view can't see
 //! isn't drawn.
 //! `gpu_timer.rs` measures the GPU's time per frame and per pass, for the
@@ -43,6 +45,7 @@ pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE};
 pub use surface_shaders::{ShaderError, SurfaceShader};
 
 mod atmosphere_sky;
+mod clouds;
 mod culling;
 mod environment;
 mod fog;

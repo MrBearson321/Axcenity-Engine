@@ -901,7 +901,7 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::Workspace,
         "GlobalWind",
-        "The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag and pushes unanchored parts with WindAffected.",
+        "The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag, pushes unanchored parts with WindAffected, and carries Lighting's Clouds along (its level part).",
     ),
     (
         ClassName::Lighting,
@@ -1109,6 +1109,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Atmosphere,
         "Haze",
         "Adds dust and haze to the air, from 0 to 10: a paler horizon, a wider glow around the sun, a dimmer, redder sun, and thicker fog (1 + Haze times as thick).",
+    ),
+    (
+        ClassName::Clouds,
+        "Cover",
+        "How much of the sky is cloud, from 0 (a clear sky) to 1 (overcast).",
+    ),
+    (
+        ClassName::Clouds,
+        "Density",
+        "How thick the clouds are, from 0 (none) to 1: thicker clouds are whiter on top, darker underneath, and cast deeper shadows.",
+    ),
+    (
+        ClassName::Clouds,
+        "Color",
+        "The clouds' own color, which the sun and sky light. White by default.",
     ),
     (
         ClassName::ParticleEmitter,
@@ -3461,6 +3476,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Atmosphere => {
             "Inside Lighting: the sky is drawn as sunlight scattered by air in place of the sky colors: blue by day, red and orange toward sunset, dark and starry at night as ClockTime goes round. The air also colors the sun's light and lights and is reflected by parts. Far parts fade into its fog, the sky's color around the horizon, thickest low down; at Ultra graphics the fog shows the sun's shadows (sun shafts) and lamps' light. Lighting's own FogStart and FogEnd aren't used while it's there. A SkyImage is still drawn in its place, but the sun's light is colored by the air."
+        }
+        ClassName::Clouds => {
+            "Inside Lighting: a layer of cloud high in the sky (800 to 1200 studs up), lit by the sun and sky, whose shadows fall on the world beneath. workspace.GlobalWind carries the clouds and their shadows along. The player's graphics settings choose how finely it's drawn (UserGameSettings.CloudQuality); at Low it's a flat sheet."
         }
         ClassName::ParticleEmitter => {
             "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."

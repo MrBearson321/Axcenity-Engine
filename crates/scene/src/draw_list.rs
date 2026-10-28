@@ -14,9 +14,9 @@ use axcenity_assets::{
 use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
-    AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Fog, Light, Material,
-    MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage, ReflectionProbe, Shadows,
-    Shape, Skin, Sky, SkyImage, SpotShadows, Sun, TextureMaps, TextureSource,
+    AmbientLight, Camera, Channel, ChannelMap, Clouds, Cone, DrawItem, DrawList, Fog, Light,
+    Material, MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage, ReflectionProbe,
+    Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, Sun, TextureMaps, TextureSource,
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
@@ -44,6 +44,7 @@ struct LightingSettings {
     shadows: Shadows,
     sky: Sky,
     fog: Fog,
+    clouds: Clouds,
     post: PostProcessing,
     ambient: AmbientLight,
 }
@@ -54,6 +55,7 @@ fn lighting_settings(world: &World, assets: &Assets) -> LightingSettings {
         shadows: Shadows::default(),
         sky: Sky::default(),
         fog: Fog::default(),
+        clouds: Clouds::default(),
         post: PostProcessing::default(),
         ambient: AMBIENT,
     };
@@ -103,6 +105,7 @@ fn lighting_settings(world: &World, assets: &Assets) -> LightingSettings {
     post.bloom_threshold = number_of("BloomThreshold", post.bloom_threshold);
     settings.sun = crate::time_of_day::sun_and_sky(world, lighting, &mut settings.sky);
     settings.fog = crate::fog::fog_of(world, lighting);
+    settings.clouds = crate::clouds::clouds_of(world, lighting);
     settings
 }
 
@@ -345,6 +348,7 @@ pub fn build_draw_list_posed(
     DrawList {
         sky: settings.sky,
         fog: settings.fog,
+        clouds: settings.clouds,
         camera,
         sun: settings.sun,
         ambient: settings.ambient,

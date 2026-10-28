@@ -20,11 +20,12 @@ use super::{
 };
 
 /// The shader for parts and models, and the shadow and sky passes: the
-/// sky's colors, the fog and the shared lighting, then `shader.wgsl` and the
-/// standard material's `surface` function.
+/// sky's colors, the fog, the clouds and the shared lighting, then
+/// `shader.wgsl` and the standard material's `surface` function.
 pub(super) const SCENE_SHADER: &str = concat!(
     include_str!("../sky.wgsl"),
     include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../shader.wgsl"),
     include_str!("../surface.wgsl")
@@ -34,6 +35,7 @@ pub(super) const SCENE_SHADER: &str = concat!(
 pub(super) const SCENE_TEMPLATE: &str = concat!(
     include_str!("../sky.wgsl"),
     include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../shader.wgsl")
 );
@@ -42,6 +44,7 @@ pub(super) const SCENE_TEMPLATE: &str = concat!(
 pub(super) const TERRAIN_SHADER: &str = concat!(
     include_str!("../sky.wgsl"),
     include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../terrain.wgsl")
 );
@@ -54,6 +57,7 @@ pub(super) const SPRITE_SHADER: &str =
 pub(super) const VOLUMETRIC_FOG_SHADER: &str = concat!(
     include_str!("../sky.wgsl"),
     include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../volumetric_fog.wgsl")
 );

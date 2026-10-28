@@ -446,8 +446,8 @@ A `Clouds` instance (`Cover`, `Density`, `Color`) draws a ray-marched cloud laye
 
 ### Acceptance criteria
 
-- [ ] Clouds move with `Workspace.GlobalWind`, and their shadows move with them.
-- [ ] Cover 0 shows a clear sky, and removing the instance costs nothing.
+- [x] Clouds move with `Workspace.GlobalWind`, and their shadows move with them.
+- [x] Cover 0 shows a clear sky, and removing the instance costs nothing.
 
 ---
 

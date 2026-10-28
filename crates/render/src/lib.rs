@@ -16,7 +16,7 @@ mod tone_mapping;
 
 pub use atmosphere::Atmosphere;
 pub use draw_list::{
-    AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Fog, Light,
+    AmbientLight, Camera, Channel, ChannelMap, Clouds, Cone, DrawItem, DrawList, Fog, Light,
     LightProbeGrid, LightProbeVolume, Material, MeshSource, NormalMap, PointShadows,
     PostProcessing, ProbeImage, ReflectionProbe, SURFACE_PARAMETERS, Shadows, Shape, Skin, Sky,
     SkyImage, SpotShadows, Sprite, Sun, TerrainLayer, TerrainLayers, TerrainSurface, TerrainView,
@@ -26,10 +26,10 @@ pub use draw_list::{
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{
-    AmbientOcclusion, AntiAliasing, Capabilities, EffectiveGraphics, EnvironmentMapSize,
-    GraphicsSettings, POINT_SHADOW_FACES, PointShadowMapSize, Quality, RENDER_SCALE_RANGE,
-    ReflectionQuality, ShadowMapSize, ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE,
-    TextureQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, EffectiveGraphics,
+    EnvironmentMapSize, GraphicsSettings, POINT_SHADOW_FACES, PointShadowMapSize, Quality,
+    RENDER_SCALE_RANGE, ReflectionQuality, ShadowMapSize, ShadowQuality, SpotShadowMapSize,
+    TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 pub use renderer::{
     CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE, RenderStats, Renderer,

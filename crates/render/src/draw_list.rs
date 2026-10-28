@@ -19,6 +19,9 @@ pub struct DrawList {
     /// Air that hides what's far away: items, terrain, sprites and the sky
     /// fade into it with distance.
     pub fog: Fog,
+    /// A layer of cloud high above, drawn in the sky, whose shadows fall
+    /// on the world.
+    pub clouds: Clouds,
     pub camera: Camera,
     pub sun: Sun,
     pub ambient: AmbientLight,
@@ -593,6 +596,52 @@ impl Default for Fog {
             falloff: 50.0,
             sun_scattering: 0.0,
             forward_scattering: 0.0,
+        }
+    }
+}
+
+/// A layer of cloud (a `Clouds`), between [`Clouds::BOTTOM`] and
+/// [`Clouds::TOP`] studs up, drawn in the sky and lit by the sun, which
+/// it shades on the ground. The wind carries it along. The default is
+/// none.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Clouds {
+    /// How much of the sky is cloud, from 0 (none) to 1 (overcast).
+    pub cover: f32,
+    /// How thick the clouds are, from 0 (none) to 1: thicker clouds are
+    /// whiter on top, darker underneath, and cast deeper shadows.
+    pub density: f32,
+    /// The clouds' own color (sRGB), which the sun and sky light.
+    pub color: [f32; 3],
+    /// Studs a second the clouds drift (the Workspace's `GlobalWind`).
+    /// Only its level part moves them.
+    pub wind: Vec3,
+}
+
+impl Clouds {
+    /// The cloud layer's bottom and top, in studs above the world's origin.
+    pub const BOTTOM: f32 = 800.0;
+    pub const TOP: f32 = 1200.0;
+
+    /// Whether any cloud is drawn.
+    pub fn is_drawn(&self) -> bool {
+        self.cover.is_finite() && self.cover > 0.0 && self.density.is_finite() && self.density > 0.0
+    }
+
+    /// Whether the clouds drift, so a host should keep drawing frames.
+    pub fn is_moving(&self) -> bool {
+        self.is_drawn() && self.wind.is_finite() && (self.wind.x != 0.0 || self.wind.z != 0.0)
+    }
+}
+
+impl Default for Clouds {
+    /// No clouds.
+    fn default() -> Self {
+        Self {
+            cover: 0.0,
+            density: 0.7,
+            color: [1.0; 3],
+            wind: Vec3::ZERO,
         }
     }
 }

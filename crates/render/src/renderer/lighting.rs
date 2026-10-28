@@ -150,6 +150,8 @@ pub(super) fn frame_uniform(
         night: [0.0; 4],
         // So does the fog, which takes the sky's colors.
         fog: Default::default(),
+        // And the clouds, which drift with the wind.
+        clouds: Default::default(),
     }
 }
 

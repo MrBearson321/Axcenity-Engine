@@ -7,6 +7,7 @@ use crate::draw_list::{
 use crate::graphics::ShadowQuality;
 use glam::Mat4;
 
+mod clouds;
 mod environment_maps;
 mod fog;
 mod frustum_culling;
@@ -135,6 +136,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
             ..Sky::default()
         },
         fog: crate::Fog::default(),
+        clouds: crate::Clouds::default(),
         camera: Camera {
             position: Vec3::ZERO,
             look_at: Vec3::NEG_Z,

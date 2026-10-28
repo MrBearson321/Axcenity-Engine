@@ -800,8 +800,10 @@ pub(super) fn create_sky_pipeline(
         primitive: wgpu::PrimitiveState::default(),
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
+            // Drawn after solid items, at the far plane: only where none
+            // was drawn.
             depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::Always,
+            depth_compare: wgpu::CompareFunction::LessEqual,
             stencil: Default::default(),
             bias: Default::default(),
         }),

@@ -342,7 +342,7 @@ impl Look {
 }
 
 /// The Workspace's `GlobalWind`, in studs a second.
-fn global_wind(world: &World) -> Vec3 {
+pub(crate) fn global_wind(world: &World) -> Vec3 {
     world
         .get(world.workspace())
         .and_then(|workspace| workspace.property("GlobalWind"))

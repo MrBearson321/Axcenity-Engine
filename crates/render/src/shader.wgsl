@@ -398,6 +398,11 @@ fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
     // How far the direction turns from one pixel to the next: about the
     // angle each pixel covers (taken here, where every pixel runs together).
     let spread = length(fwidth(dir));
-    let sky = sky_radiance(dir, spread);
+    var sky = sky_radiance(dir, spread);
+    if frame.clouds.color.w != 0.0 {
+        sky = clouded_sky(frame.clouds, frame.camera_position.xyz, dir, sky, frame.sun_direction.xyz,
+            frame.sun_radiance.rgb, frame.sky_top.rgb, frame.sky_horizon.rgb,
+            pixel_noise(in.clip_position.xy));
+    }
     return vec4<f32>(fogged_along(frame.fog, frame.camera_position.xyz, dir, FOG_SKY_DISTANCE, sky), 1.0);
 }

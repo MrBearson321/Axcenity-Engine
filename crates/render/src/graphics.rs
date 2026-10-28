@@ -279,6 +279,51 @@ impl ReflectionQuality {
     }
 }
 
+/// How a `Clouds` layer is drawn. Ordered from cheapest to dearest. Every
+/// quality draws the same clouds and their shadows; the dearer ones march
+/// through them for depth and lighting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum CloudQuality {
+    /// A flat sheet of cloud, one look-up per pixel of sky.
+    Low,
+    /// Marched through in 16 steps, lit by the cloud's thickness above.
+    Medium,
+    /// 32 steps with fine detail, lit by 3 steps toward the sun.
+    High,
+    /// 64 steps with fine detail, lit by 6 steps toward the sun.
+    Ultra,
+}
+
+impl CloudQuality {
+    pub const ALL: [CloudQuality; 4] = [
+        CloudQuality::Low,
+        CloudQuality::Medium,
+        CloudQuality::High,
+        CloudQuality::Ultra,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CloudQuality::Low => "Low",
+            CloudQuality::Medium => "Medium",
+            CloudQuality::High => "High",
+            CloudQuality::Ultra => "Ultra",
+        }
+    }
+
+    /// Steps through the cloud layer per pixel (0 for the flat sheet), and
+    /// steps toward the sun from each (0 to judge it by the cloud's
+    /// thickness above).
+    pub fn steps(self) -> (u32, u32) {
+        match self {
+            CloudQuality::Low => (0, 0),
+            CloudQuality::Medium => (16, 0),
+            CloudQuality::High => (32, 3),
+            CloudQuality::Ultra => (64, 6),
+        }
+    }
+}
+
 /// The smallest and largest render scale: the scene is drawn at this
 /// fraction of the output's width and height.
 pub const RENDER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
@@ -371,6 +416,8 @@ pub struct GraphicsSettings {
     /// The sun's light in fog shadowed (sun shafts), and lamps lighting it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volumetric_fog: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloud_quality: Option<CloudQuality>,
 }
 
 impl GraphicsSettings {
@@ -515,6 +562,16 @@ impl GraphicsSettings {
             .unwrap_or(self.quality == Quality::Ultra)
     }
 
+    /// How clouds are drawn: the override, or the preset's (its own name).
+    pub fn cloud_quality(&self) -> CloudQuality {
+        self.cloud_quality.unwrap_or(match self.quality {
+            Quality::Low => CloudQuality::Low,
+            Quality::Medium => CloudQuality::Medium,
+            Quality::High => CloudQuality::High,
+            Quality::Ultra => CloudQuality::Ultra,
+        })
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -607,6 +664,8 @@ impl GraphicsSettings {
             contact_shadows: self.contact_shadows(),
             realtime_gi,
             volumetric_fog,
+            // Every GPU can draw it: it's worked out in the sky's pixels.
+            cloud_quality: self.cloud_quality(),
             notes,
         }
     }
@@ -716,6 +775,7 @@ pub struct EffectiveGraphics {
     /// Whether fog shows the sun's shadows and lamps' light (needs the
     /// prepass's depth).
     pub volumetric_fog: bool,
+    pub cloud_quality: CloudQuality,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -784,6 +844,12 @@ mod tests {
         let reflections =
             Quality::ALL.map(|quality| GraphicsSettings::preset(quality).reflection_quality());
         assert_eq!(reflections, ReflectionQuality::ALL);
+        let clouds = Quality::ALL.map(|quality| GraphicsSettings::preset(quality).cloud_quality());
+        assert_eq!(clouds, CloudQuality::ALL);
+        assert_eq!(
+            CloudQuality::ALL.map(CloudQuality::steps),
+            [(0, 0), (16, 0), (32, 3), (64, 6)]
+        );
         let environment = |size, samples| Some(EnvironmentMapSize { size, samples });
         assert_eq!(
             ReflectionQuality::ALL.map(ReflectionQuality::map),
@@ -993,6 +1059,7 @@ mod tests {
             contact_shadows: Some(true),
             realtime_gi: Some(true),
             volumetric_fog: Some(false),
+            cloud_quality: Some(CloudQuality::Low),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -1265,6 +1332,7 @@ mod tests {
                         contact_shadows: post,
                         realtime_gi: post,
                         volumetric_fog: post,
+                        cloud_quality: Some(CloudQuality::Medium),
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);
@@ -1280,6 +1348,7 @@ mod tests {
                         assert_eq!(effective.contact_shadows, settings.contact_shadows());
                         assert!(effective.realtime_gi <= settings.realtime_gi());
                         assert!(effective.volumetric_fog <= settings.volumetric_fog());
+                        assert_eq!(effective.cloud_quality, settings.cloud_quality());
                         let lowered =
                             usize::from(effective.shadow_quality != settings.shadow_quality())
                                 + usize::from(effective.anti_aliasing != settings.anti_aliasing())

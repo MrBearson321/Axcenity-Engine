@@ -1187,6 +1187,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 ty: "boolean",
                 doc: "An Atmosphere's fog lit by the sun with its shadows (sun shafts) and by lamps. On at Ultra, and off on a GPU without compute shaders.",
             },
+            Field {
+                name: "CloudQuality",
+                ty: "EnumCloudQuality",
+                doc: "How Lighting's Clouds are drawn: Low as a flat sheet, Medium, High and Ultra looked through in 16, 32 or 64 steps (High and Ultra with fine detail and light traced toward the sun). Every quality casts the same shadows.",
+            },
         ],
         operators: &[],
         methods: &[],

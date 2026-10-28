@@ -1,6 +1,6 @@
 // Lighting shared by every scene shader: the frame's bindings (group 0),
 // the sun and its shadows, point and spot lights, and the sky that lights
-// and reflects. Compiled after `sky.wgsl` and `fog.wgsl`. `shader.wgsl` (parts and models)
+// and reflects. Compiled after `sky.wgsl`, `fog.wgsl` and `clouds.wgsl`. `shader.wgsl` (parts and models)
 // and `terrain.wgsl` are each compiled after this file, and both light
 // their surfaces with `light_surface`.
 // Colors here are linear light, and can be brighter than 1 (stage 5 maps them down).
@@ -75,6 +75,8 @@ struct Frame {
     night: vec4<f32>,
     // What fades into the distance (fog.wgsl).
     fog: Fog,
+    // The layer of cloud in the sky (clouds.wgsl).
+    clouds: Clouds,
 }
 
 // The most light probe volumes drawn at once. Must match `MAX_VOLUMES` in
@@ -725,7 +727,8 @@ fn light_surface(
 
     var sun = shade(n, v, frame.sun_direction.xyz, base_color, metalness, roughness, f0)
         * frame.sun_radiance.rgb
-        * sun_visibility(world_position, geometric, pixel);
+        * sun_visibility(world_position, geometric, pixel)
+        * cloud_shadow(frame.clouds, world_position, frame.sun_direction.xyz);
     if solid {
         sun *= contact_visibility(world_position, geometric, frame.sun_direction.xyz,
             frame.contact.y, pixel);

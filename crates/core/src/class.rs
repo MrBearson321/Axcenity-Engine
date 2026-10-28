@@ -126,6 +126,10 @@ pub enum ClassName {
     /// redden it, night darkens it) in place of its colors, and colors the
     /// sun's light. It also lights and is reflected by surfaces.
     Atmosphere,
+    /// Inside Lighting: a layer of cloud high in the sky, lit by the sun,
+    /// whose shadows fall on the world. The Workspace's `GlobalWind`
+    /// carries it along.
+    Clouds,
     /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
     ParticleEmitter,
     /// Inside a Part, MeshPart, Model, ScreenGui or UI element: plays
@@ -216,7 +220,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 75] = [
+    pub const ALL: [ClassName; 76] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -258,6 +262,7 @@ impl ClassName {
         ClassName::ReflectionProbe,
         ClassName::LightProbeVolume,
         ClassName::Atmosphere,
+        ClassName::Clouds,
         ClassName::ParticleEmitter,
         ClassName::Animator,
         ClassName::Animation,
@@ -337,6 +342,7 @@ impl ClassName {
             ClassName::ReflectionProbe => "ReflectionProbe",
             ClassName::LightProbeVolume => "LightProbeVolume",
             ClassName::Atmosphere => "Atmosphere",
+            ClassName::Clouds => "Clouds",
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
@@ -707,6 +713,15 @@ impl ClassName {
                 // Adds dust and haze to the air, from 0 to 10: a paler
                 // horizon, a wider glow and a dimmer, redder sun.
                 ("Haze", Value::Number(0.0)),
+            ],
+            ClassName::Clouds => vec![
+                // How much of the sky is cloud, from 0 (none) to 1 (overcast).
+                ("Cover", Value::Number(0.5)),
+                // How thick the clouds are, from 0 (none) to 1: thicker ones
+                // are whiter on top, darker below, and cast deeper shadows.
+                ("Density", Value::Number(0.7)),
+                // The clouds' own color, which the sun and sky light.
+                ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
             ],
             ClassName::ParticleEmitter => vec![
                 ("Enabled", Value::Bool(true)),
@@ -1543,6 +1558,7 @@ impl ClassName {
             | ClassName::ReflectionProbe
             | ClassName::LightProbeVolume
             | ClassName::Atmosphere
+            | ClassName::Clouds
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer

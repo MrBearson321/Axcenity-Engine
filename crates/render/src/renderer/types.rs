@@ -89,6 +89,8 @@ pub(super) struct FrameUniform {
     pub(super) night: [f32; 4],
     /// What fades into the distance (fog.wgsl's `Fog`).
     pub(super) fog: fog::FogRaw,
+    /// The layer of cloud in the sky (clouds.wgsl's `Clouds`).
+    pub(super) clouds: clouds::CloudsRaw,
 }
 
 /// The most point and spot lights drawn at once.
@@ -673,6 +675,8 @@ pub(super) struct ScenePipeline {
     /// The sun's and lamps' light in height fog, while volumetric fog is
     /// on and the world has some; `None` otherwise.
     pub(super) volumetric_fog: Option<Box<fog::VolumetricFog>>,
+    /// How far the wind has carried the clouds.
+    pub(super) cloud_drift: clouds::CloudDrift,
     /// The frame's bindings, for making them seen by compute shaders too.
     pub(super) frame_entries: Vec<wgpu::BindGroupLayoutEntry>,
     /// Whether the sky draws the sun's disc: false only while baking light

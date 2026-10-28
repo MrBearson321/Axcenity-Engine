@@ -45,6 +45,8 @@ pub enum Insertable {
     LightProbeVolume,
     /// Air that scatters sunlight into the sky, always in Lighting.
     Atmosphere,
+    /// A layer of cloud in the sky, always in Lighting.
+    Clouds,
     ParticleEmitter,
     Animator,
     Animation,
@@ -98,7 +100,7 @@ impl Insertable {
     /// Ribbon ▸ Lighting ▸ Reflections.
     pub const PROBES: [Insertable; 2] = [Insertable::ReflectionProbe, Insertable::LightProbeVolume];
     /// Ribbon ▸ Lighting ▸ Sky.
-    pub const SKY: [Insertable; 1] = [Insertable::Atmosphere];
+    pub const SKY: [Insertable; 2] = [Insertable::Atmosphere, Insertable::Clouds];
     /// Effects give off particles from the part they are inside.
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
     /// Animators (skeletal) and Animations (property clips).
@@ -167,6 +169,7 @@ impl Insertable {
             Insertable::ReflectionProbe => "Reflection Probe",
             Insertable::LightProbeVolume => "Light Probes",
             Insertable::Atmosphere => "Atmosphere",
+            Insertable::Clouds => "Clouds",
             Insertable::ParticleEmitter => "Particles",
             Insertable::Animator => "Animator",
             Insertable::Animation => "Animation",
@@ -209,6 +212,7 @@ impl Insertable {
             Insertable::ReflectionProbe => ClassName::ReflectionProbe,
             Insertable::LightProbeVolume => ClassName::LightProbeVolume,
             Insertable::Atmosphere => ClassName::Atmosphere,
+            Insertable::Clouds => ClassName::Clouds,
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
             Insertable::Animator => ClassName::Animator,
             Insertable::Animation => ClassName::Animation,
@@ -353,9 +357,10 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
 /// Animation, a part or a ScreenGui or frame it can animate. Otherwise a
 /// RemoteEvent (or RemoteFunction, BindableEvent or BindableFunction) goes
 /// into ReplicatedStorage (where both sides find it, as in Roblox), and
-/// anything else into the Workspace. An Atmosphere always goes into Lighting.
+/// anything else into the Workspace. An Atmosphere or Clouds always goes
+/// into Lighting.
 pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) -> InstanceId {
-    if what == Insertable::Atmosphere {
+    if matches!(what, Insertable::Atmosphere | Insertable::Clouds) {
         return world.lighting();
     }
     let default = match what {

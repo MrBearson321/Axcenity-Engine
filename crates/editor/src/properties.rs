@@ -68,7 +68,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 23] = [
+const GROUPS: [(&str, &[&str]); 24] = [
     (
         "Appearance",
         &[
@@ -267,6 +267,7 @@ const GROUPS: [(&str, &[&str]); 23] = [
         "Atmosphere",
         &["Density", "Offset", "Decay", "Glare", "Haze"],
     ),
+    ("Clouds", &["Cover", "Density"]),
     (
         "Post-processing",
         &[
@@ -381,6 +382,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
                 instance.class() == ClassName::Lighting
             }
             "Atmosphere" => instance.class() == ClassName::Atmosphere,
+            "Clouds" => instance.class() == ClassName::Clouds,
             "Light" => matches!(
                 instance.class(),
                 ClassName::PointLight | ClassName::SpotLight
@@ -800,6 +802,7 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Sky" => icons::CLOUD_SUN,
         "Fog" => icons::CLOUD_FOG,
         "Atmosphere" => icons::WIND,
+        "Clouds" => icons::CLOUD,
         "Post-processing" => icons::SPARKLE,
         "Light" => icons::LIGHTBULB,
         "Attributes" => icons::LIST_BULLETS,
@@ -1189,8 +1192,8 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             )
             .changed()
             .then_some(Value::Number(number)),
-        // An Atmosphere's air.
-        Value::Number(mut number) if matches!(name, "Density" | "Offset") => ui
+        // An Atmosphere's air and Clouds' cover and thickness.
+        Value::Number(mut number) if matches!(name, "Density" | "Offset" | "Cover") => ui
             .add(egui::Slider::new(&mut number, 0.0..=1.0).clamping(egui::SliderClamping::Always))
             .changed()
             .then_some(Value::Number(number)),

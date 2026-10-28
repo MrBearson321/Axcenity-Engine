@@ -254,6 +254,7 @@ impl ScenePipeline {
             light_probes,
             realtime_gi: None,
             volumetric_fog: None,
+            cloud_drift: Default::default(),
             frame_entries,
             sun_disc: true,
             no_occlusion_view,
@@ -548,6 +549,9 @@ impl ScenePipeline {
                 0.0
             },
         );
+        let drift = self.cloud_drift.advance(&list.clouds, list.time);
+        frame_uniform.clouds =
+            clouds::CloudsRaw::new(&list.clouds, drift, self.graphics.cloud_quality);
         let (probes, probe_count) = self.probes.uniform();
         frame_uniform.probes = probes;
         frame_uniform.reflection_probes[0] = probe_count;
@@ -981,11 +985,22 @@ impl ScenePipeline {
             });
 
             pass.set_bind_group(0, frame_bind_group, &[]);
-            pass.set_pipeline(&self.sky_pipeline);
-            pass.draw(0..3, 0..1);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             let mut drawn = (0, 0);
-            for batch in batches {
+            // Solid items come first, then the sky only where none was drawn
+            // (its depth test), so the sky and its clouds are worked out
+            // only for the pixels that show them, then see-through items
+            // over both.
+            let batch_count = batches.len();
+            let see_through = batches
+                .iter()
+                .position(|batch| batch.transparent)
+                .unwrap_or(batch_count);
+            for (index, batch) in batches.into_iter().enumerate() {
+                if index == see_through {
+                    pass.set_pipeline(&self.sky_pipeline);
+                    pass.draw(0..3, 0..1);
+                }
                 let Some(mesh) = self.bind_batch(&mut pass, &batch, false) else {
                     continue;
                 };
@@ -993,6 +1008,10 @@ impl ScenePipeline {
                 drawn.0 += batch.instances.end - batch.instances.start;
                 drawn.1 += 1;
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
+            }
+            if see_through == batch_count {
+                pass.set_pipeline(&self.sky_pipeline);
+                pass.draw(0..3, 0..1);
             }
             (counts.items_drawn, counts.batches) = drawn;
             // Last, over everything, but hidden behind solid items.

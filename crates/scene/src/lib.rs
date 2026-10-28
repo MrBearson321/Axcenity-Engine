@@ -15,6 +15,7 @@
 //!   a rotation, for drawing and for the editor's rotate tool.
 
 mod camera;
+mod clouds;
 mod constraints;
 mod draw_list;
 mod fog;

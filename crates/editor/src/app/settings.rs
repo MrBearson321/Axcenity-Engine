@@ -9,8 +9,8 @@ use super::*;
 use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, type_scale};
 use crate::widgets;
 use axcenity_render::{
-    AmbientOcclusion, AntiAliasing, Capabilities, GraphicsSettings, Quality, RENDER_SCALE_RANGE,
-    ReflectionQuality, ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, GraphicsSettings, Quality,
+    RENDER_SCALE_RANGE, ReflectionQuality, ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 
 /// Ctrl+, (Cmd+, on macOS) opens Settings, as in most desktop apps.
@@ -692,6 +692,20 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
+            ui.label("Cloud quality");
+            let label = |quality: Option<CloudQuality>| match quality {
+                Some(quality) => quality.label().to_owned(),
+                None => format!("Preset ({})", preset.cloud_quality().label()),
+            };
+            egui::ComboBox::from_id_salt("cloud quality")
+                .selected_text(label(settings.cloud_quality))
+                .show_ui(ui, |ui| {
+                    for choice in std::iter::once(None).chain(CloudQuality::ALL.map(Some)) {
+                        ui.selectable_value(&mut settings.cloud_quality, choice, label(choice));
+                    }
+                });
+            ui.end_row();
+
             ui.label("Contact shadows");
             let on_off = |on: bool| if on { "On" } else { "Off" };
             let label = |on: Option<bool>| match on {
@@ -796,6 +810,13 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
         "Real-time GI: on (light probe volumes traced again, two probes a frame)"
     } else {
         "Real-time GI: off (light probe volumes keep their bakes)"
+    });
+    ui.label(match effective.cloud_quality.steps() {
+        (0, _) => "Clouds: Low, a flat sheet".to_owned(),
+        (steps, _) => format!(
+            "Clouds: {}, looked through in {steps} steps",
+            effective.cloud_quality.label()
+        ),
     });
     ui.label(if effective.volumetric_fog {
         "Volumetric fog: on (sun shafts and lamp light in an Atmosphere's fog)"
@@ -1099,6 +1120,7 @@ mod tests {
             contact_shadows: Some(false),
             realtime_gi: Some(true),
             volumetric_fog: Some(true),
+            cloud_quality: Some(CloudQuality::Ultra),
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);
