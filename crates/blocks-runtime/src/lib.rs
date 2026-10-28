@@ -678,7 +678,7 @@ pub const ATMOSPHERE_NUMBERS: [&str; 4] = ["Density", "Offset", "Glare", "Haze"]
 /// `Enum.GraphicsQuality`'s items, which the graphics quality block offers.
 pub const GRAPHICS_QUALITIES: [&str; 5] = ["Automatic", "Low", "Medium", "High", "Ultra"];
 /// The `UserGameSettings` overrides the graphics option block sets.
-pub const GRAPHICS_OPTIONS: [&str; 8] = [
+pub const GRAPHICS_OPTIONS: [&str; 9] = [
     "ShadowQuality",
     "AntiAliasing",
     "TextureQuality",
@@ -687,9 +687,15 @@ pub const GRAPHICS_OPTIONS: [&str; 8] = [
     "PostProcessing",
     "ContactShadows",
     "RealtimeGI",
+    "VolumetricFog",
 ];
 /// The [`GRAPHICS_OPTIONS`] that are on or off (booleans in Lua), not enums.
-pub const GRAPHICS_SWITCHES: [&str; 3] = ["PostProcessing", "ContactShadows", "RealtimeGI"];
+pub const GRAPHICS_SWITCHES: [&str; 4] = [
+    "PostProcessing",
+    "ContactShadows",
+    "RealtimeGI",
+    "VolumetricFog",
+];
 /// The `UserGameSettings` overrides the graphics number block sets.
 pub const GRAPHICS_NUMBERS: [&str; 2] = ["ShadowDistance", "RenderScale"];
 /// The graphics option block's choice that removes the override (nil).
@@ -705,7 +711,9 @@ pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
         "TextureQuality" => &["Quarter", "Half", "Full", PRESET],
         "AmbientOcclusion" => &["Off", "Low", "High", PRESET],
         "ReflectionQuality" => &["Low", "Medium", "High", "Ultra", PRESET],
-        "PostProcessing" | "ContactShadows" | "RealtimeGI" => &["On", "Off", PRESET],
+        "PostProcessing" | "ContactShadows" | "RealtimeGI" | "VolumetricFog" => {
+            &["On", "Off", PRESET]
+        }
         _ => &[],
     }
 }

@@ -37,6 +37,8 @@ struct SpriteUniform {
     view_proj: [[f32; 4]; 4],
     right: [f32; 4],
     up: [f32; 4],
+    eye: [f32; 4],
+    fog: super::fog::FogRaw,
 }
 
 /// A run of sprites with the same texture (`None` is plain white).
@@ -67,7 +69,7 @@ impl SpritePass {
             label: Some("sprite camera"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -158,7 +160,7 @@ impl SpritePass {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         list: &DrawList,
-        view_proj: Mat4,
+        (view_proj, fog): (Mat4, super::fog::FogRaw),
         view: &Frustum,
         view_of: impl Fn(u64) -> Option<&'a wgpu::TextureView>,
     ) -> (Vec<SpriteDraw>, u32) {
@@ -173,6 +175,8 @@ impl SpritePass {
             view_proj: view_proj.to_cols_array_2d(),
             right: right.extend(0.0).to_array(),
             up: up.extend(0.0).to_array(),
+            eye: eye.extend(1.0).to_array(),
+            fog,
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
 
@@ -270,7 +274,7 @@ fn sprite_pipeline(
     layout: &wgpu::PipelineLayout,
     samples: u32,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("../sprite.wgsl"));
+    let shader = super::shader_module(device, "sprites", super::gpu::SPRITE_SHADER);
     let blend = wgpu::BlendComponent {
         src_factor: wgpu::BlendFactor::One,
         dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,

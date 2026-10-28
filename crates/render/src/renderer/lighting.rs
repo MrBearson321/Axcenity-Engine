@@ -148,6 +148,8 @@ pub(super) fn frame_uniform(
         clock: [list.time, 0.0, 0.0, 0.0],
         // The sky's look fills this in.
         night: [0.0; 4],
+        // So does the fog, which takes the sky's colors.
+        fog: Default::default(),
     }
 }
 

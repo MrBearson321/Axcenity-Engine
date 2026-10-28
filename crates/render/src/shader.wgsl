@@ -349,7 +349,8 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     // Solid items stay solid whatever the texture's alpha, so the window's
     // own alpha stays 1.
     let alpha = select(clamp(shaded.opacity, 0.0, 1.0), 1.0, solid);
-    return vec4<f32>(color + shaded.emissive, alpha);
+    let seen = fogged(frame.fog, frame.camera_position.xyz, in.world_position, color + shaded.emissive);
+    return vec4<f32>(seen, alpha);
 }
 
 // Whether a fading item leaves out the pixel at `pixel`, in a fine pattern,
@@ -397,5 +398,6 @@ fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
     // How far the direction turns from one pixel to the next: about the
     // angle each pixel covers (taken here, where every pixel runs together).
     let spread = length(fwidth(dir));
-    return vec4<f32>(sky_radiance(dir, spread), 1.0);
+    let sky = sky_radiance(dir, spread);
+    return vec4<f32>(fogged_along(frame.fog, frame.camera_position.xyz, dir, FOG_SKY_DISTANCE, sky), 1.0);
 }

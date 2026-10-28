@@ -449,6 +449,8 @@ declare extern type UserGameSettings with
 	ContactShadows: boolean
 	--- Light probe volumes traced again a few probes each frame, so their bounced light follows a moving sun or changing lamps. Off at every preset, and off on a GPU without compute shaders.
 	RealtimeGI: boolean
+	--- An Atmosphere's fog lit by the sun with its shadows (sun shafts) and by lamps. On at Ultra, and off on a GPU without compute shaders.
+	VolumetricFog: boolean
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -1131,6 +1133,12 @@ declare extern type Lighting extends Instance with
 	EnvironmentIntensity: number
 	--- A picture of the whole sky, such as "assets/sky/noon.hdr", shown behind the world and reflected by parts in place of the sky colors, with its light on everything. A Radiance .hdr file keeps the sun brighter than white; a PNG or JPEG also works. It wraps once around the world, its middle toward -Z and top straight up. Empty for the sky colors. Only drawn where the player's graphics settings have reflection quality above Low.
 	SkyImage: string
+	--- The color far things fade into with distance fog (FogStart to FogEnd). Not used while Lighting has an Atmosphere, whose fog takes the sky's color.
+	FogColor: Color3
+	--- How many studs from the camera distance fog starts. Nearer is clear.
+	FogStart: number
+	--- How many studs from the camera everything is FogColor, including the sky. The default, 100000, is further than anything is seen, so there's no fog. An Atmosphere's fog takes its place.
+	FogEnd: number
 	--- If false, the scene is drawn with no tone mapping or bloom.
 	PostProcessingEnabled: boolean
 	--- Brightens or darkens the whole image before tone mapping. 1 is neutral.
@@ -2200,19 +2208,19 @@ declare extern type LightProbeVolume extends Instance with
 	[string]: any
 end
 
---- Inside Lighting: the sky is drawn as sunlight scattered by air in place of the sky colors: blue by day, red and orange toward sunset, dark and starry at night as ClockTime goes round. The air also colors the sun's light and lights and is reflected by parts. A SkyImage is still drawn in its place, but the sun's light is colored by the air.
+--- Inside Lighting: the sky is drawn as sunlight scattered by air in place of the sky colors: blue by day, red and orange toward sunset, dark and starry at night as ClockTime goes round. The air also colors the sun's light and lights and is reflected by parts. Far parts fade into its fog, the sky's color around the horizon, thickest low down; at Ultra graphics the fog shows the sun's shadows (sun shafts) and lamps' light. Lighting's own FogStart and FogEnd aren't used while it's there. A SkyImage is still drawn in its place, but the sun's light is colored by the air.
 declare extern type Atmosphere extends Instance with
-	--- How thick the air is, from 0 (none: a black sky and a white sun) to 1. 0.395 is Earth's.
+	--- How thick the air is, from 0 (none: a black sky and a white sun, and no fog) to 1. 0.395 is Earth's: its fog hides half of what's 500 studs away at ground level.
 	Density: number
-	--- How high above the ground the sky is seen from, from 0 to 1 (one height of the air up, where the sky above darkens).
+	--- How high above the ground the sky is seen from, from 0 to 1 (one height of the air up, where the sky above darkens). The fog is thickest at the bottom of the air and thins with height, every 50 studs by about a third; Offset lifts the world above that bottom (by 250 studs at 1), so the fog thins.
 	Offset: number
 	--- Tints the whole sky. The default grey leaves it as the air scatters it.
 	Color: Color3
 	--- Tints the sky away from the sun. The default blue-grey leaves it as the air scatters it.
 	Decay: Color3
-	--- Brightens the glow around the sun, from 0 to 10.
+	--- Brightens the glow around the sun, from 0 to 10, and tightens its glow in the fog.
 	Glare: number
-	--- Adds dust and haze to the air, from 0 to 10: a paler horizon, a wider glow around the sun, and a dimmer, redder sun.
+	--- Adds dust and haze to the air, from 0 to 10: a paler horizon, a wider glow around the sun, a dimmer, redder sun, and thicker fog (1 + Haze times as thick).
 	Haze: number
 	[string]: any
 end

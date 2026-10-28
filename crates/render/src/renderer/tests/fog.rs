@@ -1,0 +1,244 @@
+//! Fog: distance fog (Lighting's), height fog (an Atmosphere's) and, at
+//! Ultra, volumetric fog's sun shafts.
+
+use super::*;
+use crate::{Fog, Quality};
+
+/// The frame size these tests draw at.
+const SIZE: u32 = 128;
+
+/// A block of `size` at `middle` that gives off red light and is lit by
+/// nothing, so only the fog changes it.
+fn red_block(middle: Vec3, size: Vec3) -> DrawItem {
+    let mut block = item(Shape::Block, middle, 1.0);
+    block.transform = Mat4::from_scale_rotation_translation(size, glam::Quat::IDENTITY, middle);
+    block.material.base_color = [0.0; 3];
+    block.material.emissive = [1.0, 0.0, 0.0];
+    block
+}
+
+/// Where `point` is drawn in a `SIZE`² frame of `list`, as (column, row).
+fn screen_of(list: &DrawList, point: Vec3) -> (usize, usize) {
+    let clip = view_projection(list, 1.0) * point.extend(1.0);
+    let ndc = clip.truncate() / clip.w;
+    let x = ((ndc.x * 0.5 + 0.5) * SIZE as f32) as usize;
+    let y = ((0.5 - ndc.y * 0.5) * SIZE as f32) as usize;
+    (x, y)
+}
+
+fn pixel_at(pixels: &[u8], (x, y): (usize, usize)) -> [u8; 4] {
+    pixels[(y * SIZE as usize + x) * 4..][..4]
+        .try_into()
+        .unwrap()
+}
+
+/// Green fog from 10 studs out, whole from 60.
+fn green_distance_fog() -> Fog {
+    Fog {
+        color: Some([0.0, 1.0, 0.0]),
+        start: 10.0,
+        end: 60.0,
+        ..Fog::default()
+    }
+}
+
+#[test]
+fn far_parts_fade_into_the_distance_fog_and_so_do_sprites_and_the_sky() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let near = Vec3::new(-3.0, 0.0, -8.0);
+    let middle = Vec3::new(0.0, 0.0, -35.0);
+    let far = Vec3::new(30.0, 0.0, -100.0);
+    let mut list = list_of(vec![
+        red_block(near, Vec3::splat(2.0)),
+        red_block(middle, Vec3::splat(6.0)),
+        red_block(far, Vec3::splat(20.0)),
+    ]);
+    let sprite_at = Vec3::new(-30.0, 25.0, -100.0);
+    list.sprites.push(crate::Sprite {
+        position: sprite_at,
+        size: 20.0,
+        ..red_sprite(0.0, 0.0)
+    });
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    renderer.render(&list).unwrap();
+    let clear = renderer.read_pixels();
+    for point in [near, middle, far, sprite_at] {
+        let [r, g, ..] = pixel_at(&clear, screen_of(&list, point));
+        assert!(r > 200 && g < 10, "red without fog at {point}: {r} {g}");
+    }
+
+    list.fog = green_distance_fog();
+    renderer.render(&list).unwrap();
+    let fogged = renderer.read_pixels();
+    let [r, g, ..] = pixel_at(&fogged, screen_of(&list, near));
+    assert!(r > 200 && g < 10, "nearer than the start is clear: {r} {g}");
+    // Halfway from 10 to 60 studs: half the fog, in linear light.
+    let [r, g, ..] = pixel_at(&fogged, screen_of(&list, middle));
+    assert!(
+        (150..=215).contains(&r) && (150..=215).contains(&g),
+        "half fog: {r} {g}"
+    );
+    for point in [far, sprite_at] {
+        let [r, g, ..] = pixel_at(&fogged, screen_of(&list, point));
+        assert!(
+            r < 10 && g > 245,
+            "past the end is all fog at {point}: {r} {g}"
+        );
+    }
+    // The sky, which was black, is as far as anything.
+    let [r, g, b, _] = pixel_at(&fogged, (64, 2));
+    assert!(
+        r < 10 && g > 245 && b < 10,
+        "the sky fades too: {r} {g} {b}"
+    );
+}
+
+#[test]
+fn height_fog_hides_far_parts_and_thins_above_its_height() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // Two blocks as far away: one at the fog's height, one 30 studs up.
+    let low = Vec3::new(-12.0, 0.0, -60.0);
+    let high = Vec3::new(12.0, 30.0, -60.0);
+    let mut list = list_of(vec![
+        red_block(low, Vec3::splat(8.0)),
+        red_block(high, Vec3::splat(8.0)),
+    ]);
+    list.camera.look_at = Vec3::new(0.0, 15.0, -60.0);
+    list.fog = Fog {
+        color: Some([0.0, 1.0, 0.0]),
+        density: 0.05,
+        height: 0.0,
+        falloff: 10.0,
+        ..Fog::default()
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    renderer.render(&list).unwrap();
+    let pixels = renderer.read_pixels();
+    let [low_red, low_green, ..] = pixel_at(&pixels, screen_of(&list, low)).map(u16::from);
+    let [high_red, high_green, ..] = pixel_at(&pixels, screen_of(&list, high)).map(u16::from);
+    assert!(
+        low_green > 200,
+        "60 studs of thick fog: {low_red} {low_green}"
+    );
+    assert!(
+        high_red > low_red + 60 && high_green < low_green,
+        "thinner up high: {high_red} {high_green} vs {low_red} {low_green}"
+    );
+
+    // Raised to the high block, the fog around it is as thick as low down.
+    list.fog.height = 40.0;
+    renderer.render(&list).unwrap();
+    let raised = renderer.read_pixels();
+    let [red, green, ..] = pixel_at(&raised, screen_of(&list, high)).map(u16::from);
+    assert!(
+        red + 60 < high_red && green > 200,
+        "under the fog's height: {red} {green} vs {high_red} {high_green}"
+    );
+}
+
+/// Black air full of fog that scatters only the sun's light, with the sun
+/// low ahead of the camera, and a black wall over the left half of the
+/// view that shadows the air in front of it.
+fn shafts() -> (DrawList, Vec3, Vec3) {
+    let wall_middle = Vec3::new(-25.0, 0.0, -40.0);
+    let mut wall = red_block(wall_middle, Vec3::new(50.0, 60.0, 1.0));
+    wall.material.emissive = [0.0; 3];
+    let mut list = list_of(vec![wall]);
+    list.sun.direction = Vec3::new(0.0, 0.25, -1.0);
+    list.fog = Fog {
+        color: Some([0.0; 3]),
+        density: 0.02,
+        height: 100.0,
+        falloff: 50.0,
+        sun_scattering: 1.0,
+        forward_scattering: 0.6,
+        ..Fog::default()
+    };
+    // In front of the wall, and the open sky beside it.
+    (
+        list,
+        Vec3::new(-12.0, 0.0, -40.0),
+        Vec3::new(12.0, 0.0, -40.0),
+    )
+}
+
+fn ultra(volumetric: bool) -> GraphicsSettings {
+    GraphicsSettings {
+        volumetric_fog: Some(volumetric),
+        ..GraphicsSettings::preset(Quality::Ultra)
+    }
+}
+
+#[test]
+fn volumetric_fog_shadows_the_suns_light_in_the_air_at_ultra() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let (list, shadowed, open) = shafts();
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    assert!(GraphicsSettings::preset(Quality::Ultra).volumetric_fog());
+    renderer.set_graphics(&ultra(true));
+    renderer.render(&list).unwrap();
+    assert_eq!(renderer.scene.volumetric_fogs_alive(), 1);
+    let on = renderer.read_pixels();
+    renderer.set_graphics(&ultra(false));
+    renderer.render(&list).unwrap();
+    assert_eq!(renderer.scene.volumetric_fogs_alive(), 0);
+    let off = renderer.read_pixels();
+
+    let [lit_on, ..] = pixel_at(&on, screen_of(&list, open));
+    let [lit_off, ..] = pixel_at(&off, screen_of(&list, open));
+    assert!(lit_off > 120, "the sun glows in the fog: {lit_off}");
+    assert!(
+        lit_on.abs_diff(lit_off) <= 8,
+        "open air scatters the same: {lit_on} vs {lit_off}"
+    );
+    let [dark_on, ..] = pixel_at(&on, screen_of(&list, shadowed));
+    let [dark_off, ..] = pixel_at(&off, screen_of(&list, shadowed));
+    assert!(
+        dark_off > 90,
+        "without it, the air before the wall glows: {dark_off}"
+    );
+    assert!(
+        dark_on + 60 < dark_off,
+        "the wall's shadow in the air: {dark_on} vs {dark_off}"
+    );
+}
+
+#[test]
+fn volumetric_fog_is_absent_below_ultra_and_costs_nothing() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let (mut list, ..) = shafts();
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+        renderer.set_graphics(&GraphicsSettings::preset(quality));
+        list.fog = Fog::default();
+        renderer.render(&list).unwrap();
+        let clear = renderer.stats();
+        list.fog = shafts().0.fog;
+        renderer.render(&list).unwrap();
+        let fogged = renderer.stats();
+        assert_eq!(renderer.scene.volumetric_fogs_alive(), 0, "{quality:?}");
+        assert_eq!(fogged.target_bytes, clear.target_bytes, "{quality:?}");
+        assert_eq!(fogged.draw_calls, clear.draw_calls, "{quality:?}");
+    }
+    // At Ultra it's drawn only while there's fog for it, and freed after.
+    renderer.set_graphics(&GraphicsSettings::preset(Quality::Ultra));
+    renderer.render(&list).unwrap();
+    let with_grid = renderer.stats().target_bytes;
+    assert_eq!(renderer.scene.volumetric_fogs_alive(), 1);
+    list.fog = Fog::default();
+    renderer.render(&list).unwrap();
+    assert_eq!(renderer.scene.volumetric_fogs_alive(), 0);
+    assert!(renderer.stats().target_bytes < with_grid);
+}

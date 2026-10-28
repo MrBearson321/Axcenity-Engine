@@ -1,6 +1,6 @@
 // Lighting shared by every scene shader: the frame's bindings (group 0),
 // the sun and its shadows, point and spot lights, and the sky that lights
-// and reflects. Compiled after `sky.wgsl`. `shader.wgsl` (parts and models)
+// and reflects. Compiled after `sky.wgsl` and `fog.wgsl`. `shader.wgsl` (parts and models)
 // and `terrain.wgsl` are each compiled after this file, and both light
 // their surfaces with `light_surface`.
 // Colors here are linear light, and can be brighter than 1 (stage 5 maps them down).
@@ -73,6 +73,8 @@ struct Frame {
     // x: how bright the stars are (0 by day), y: 1 when the sky image is an
     // atmosphere's, so the sun or moon and the stars are drawn over it.
     night: vec4<f32>,
+    // What fades into the distance (fog.wgsl).
+    fog: Fog,
 }
 
 // The most light probe volumes drawn at once. Must match `MAX_VOLUMES` in

@@ -23,6 +23,9 @@ pub enum FramePass {
     Prepass,
     /// Ambient occlusion and its blur.
     AmbientOcclusion,
+    /// The volumetric fog's grid, while it's on (its light is added to the
+    /// scene as part of `Scene`).
+    VolumetricFog,
     /// The sky, items, terrain and sprites, with MSAA resolved.
     Scene,
     /// Bloom, tone mapping and FXAA.
@@ -32,11 +35,12 @@ pub enum FramePass {
 }
 
 impl FramePass {
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 7;
     pub const ALL: [FramePass; Self::COUNT] = [
         FramePass::Shadows,
         FramePass::Prepass,
         FramePass::AmbientOcclusion,
+        FramePass::VolumetricFog,
         FramePass::Scene,
         FramePass::PostProcessing,
         FramePass::Ui,
@@ -47,6 +51,7 @@ impl FramePass {
             FramePass::Shadows => "Shadows",
             FramePass::Prepass => "Depth prepass",
             FramePass::AmbientOcclusion => "Ambient occlusion",
+            FramePass::VolumetricFog => "Volumetric fog",
             FramePass::Scene => "Scene",
             FramePass::PostProcessing => "Post-processing",
             FramePass::Ui => "UI",

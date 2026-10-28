@@ -288,7 +288,7 @@ fn fs_terrain(in: TerrainOut) -> @location(0) vec4<f32> {
         let line = 1.0 - clamp(min(to_line.x, to_line.y), 0.0, 1.0);
         color = mix(color, vec3<f32>(0.02, 0.02, 0.03), line * 0.6);
     }
-    return vec4<f32>(color, 1.0);
+    return vec4<f32>(fogged(frame.fog, frame.camera_position.xyz, in.world_position, color), 1.0);
 }
 
 // The depth and normal prepass, for ambient occlusion.

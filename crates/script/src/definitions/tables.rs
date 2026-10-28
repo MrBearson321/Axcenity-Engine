@@ -1182,6 +1182,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 ty: "boolean",
                 doc: "Light probe volumes traced again a few probes each frame, so their bounced light follows a moving sun or changing lamps. Off at every preset, and off on a GPU without compute shaders.",
             },
+            Field {
+                name: "VolumetricFog",
+                ty: "boolean",
+                doc: "An Atmosphere's fog lit by the sun with its shadows (sun shafts) and by lamps. On at Ultra, and off on a GPU without compute shaders.",
+            },
         ],
         operators: &[],
         methods: &[],

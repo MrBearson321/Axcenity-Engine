@@ -16,6 +16,9 @@ use crate::{Atmosphere, ToneMapping};
 pub struct DrawList {
     /// The sky behind the scene, which also lights and is reflected by it.
     pub sky: Sky,
+    /// Air that hides what's far away: items, terrain, sprites and the sky
+    /// fade into it with distance.
+    pub fog: Fog,
     pub camera: Camera,
     pub sun: Sun,
     pub ambient: AmbientLight,
@@ -522,6 +525,76 @@ pub struct Sun {
     pub direction: Vec3,
     pub color: [f32; 3],
     pub intensity: f32,
+}
+
+/// Fog: what's far from the camera fades into the fog's own light. Two
+/// kinds can be combined, and the default is neither:
+///
+/// - **Distance fog** (Lighting's `FogStart`, `FogEnd` and `FogColor`): none
+///   nearer than `start` studs, all fog from `end` on, straight between.
+/// - **Height fog** (an Atmosphere's): `density` of the light is lost per
+///   stud at and below `height`, thinning by `e` every `falloff` studs above
+///   it. Its sun scatters in it, brightest looking toward the sun, which is
+///   what the graphics settings' volumetric fog shadows (sun shafts).
+///
+/// The sky is fogged as if it were [`Fog::SKY_DISTANCE`] studs away.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fog {
+    /// The fog's own light (sRGB), or `None` for the sky's color around the
+    /// horizon, so far items fade into the sky behind them.
+    pub color: Option<[f32; 3]>,
+    pub start: f32,
+    /// Infinite for no distance fog.
+    pub end: f32,
+    /// How much light height fog takes away per stud at and below
+    /// `height`: 0 for none.
+    pub density: f32,
+    pub height: f32,
+    pub falloff: f32,
+    /// How much of the sun's light the height fog scatters toward the
+    /// camera (0 none, 1 all of it), and how much of that goes forward,
+    /// away from the sun (0 the same every way, toward 1 a tight glow
+    /// around it).
+    pub sun_scattering: f32,
+    pub forward_scattering: f32,
+}
+
+impl Fog {
+    /// How far away the sky is taken to be, in studs: as far as the camera
+    /// sees.
+    pub const SKY_DISTANCE: f32 = 5000.0;
+
+    /// Whether any fog is drawn.
+    pub fn is_drawn(&self) -> bool {
+        self.has_distance_fog() || self.has_height_fog()
+    }
+
+    pub fn has_distance_fog(&self) -> bool {
+        self.end.is_finite() && self.start.is_finite()
+    }
+
+    pub fn has_height_fog(&self) -> bool {
+        self.density.is_finite()
+            && self.density > 0.0
+            && self.height.is_finite()
+            && self.falloff.is_finite()
+    }
+}
+
+impl Default for Fog {
+    /// No fog.
+    fn default() -> Self {
+        Self {
+            color: Some([0.75; 3]),
+            start: 0.0,
+            end: f32::INFINITY,
+            density: 0.0,
+            height: 0.0,
+            falloff: 50.0,
+            sun_scattering: 0.0,
+            forward_scattering: 0.0,
+        }
+    }
 }
 
 /// Light that reaches every surface equally, standing in for light bounced

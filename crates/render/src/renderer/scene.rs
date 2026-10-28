@@ -9,16 +9,6 @@ impl ScenePipeline {
         height: u32,
         capabilities: Capabilities,
     ) -> Self {
-        let storage_entry = |binding| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        };
         let skinning = Skinning::new(&device);
         let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame uniform"),
@@ -26,122 +16,10 @@ impl ScenePipeline {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let frame_entries = frame_layout_entries();
         let frame_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("frame"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                    count: None,
-                },
-                storage_entry(3),
-                storage_entry(4),
-                storage_entry(16),
-                skinning::joints_entry(),
-                wgpu::BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 8,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 10,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::Cube,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 11,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 12,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 13,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::CubeArray,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 14,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 15,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-            ],
+            entries: &frame_entries,
         });
         let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("lights"),
@@ -375,6 +253,8 @@ impl ScenePipeline {
             probes,
             light_probes,
             realtime_gi: None,
+            volumetric_fog: None,
+            frame_entries,
             sun_disc: true,
             no_occlusion_view,
             occlusion_sampler,
@@ -489,6 +369,9 @@ impl ScenePipeline {
         if !self.graphics.realtime_gi && self.realtime_gi.take().is_some() {
             // The probes traced while it was on give way to their bakes.
             self.light_probes.restore_bakes();
+        }
+        if !self.graphics.volumetric_fog {
+            self.volumetric_fog = None;
         }
         let quality = self.graphics.shadow_quality;
         if self.shadow_map.as_ref().map(|map| map.size) != quality.map() {
@@ -640,6 +523,31 @@ impl ScenePipeline {
             0.0
         };
         frame_uniform.night = [stars, f32::from(u8::from(sky.scattered)), 0.0, 0.0];
+        // Volumetric fog needs the prepass's depth, which its setting keeps.
+        let volumetric = fog::volumetric_drawn(&list.fog, &self.graphics)
+            && self.frame_targets.occlusion.is_some();
+        if !volumetric {
+            self.volumetric_fog = None;
+        } else if self.volumetric_fog.is_none() {
+            self.volumetric_fog = Some(Box::new(fog::VolumetricFog::new(
+                &self.device,
+                &self.frame_entries,
+                &self.frame_layout,
+                &self.targets_alive.volumetric_fog,
+            )));
+            self.bind_frame();
+        }
+        frame_uniform.fog = fog::FogRaw::new(
+            &list.fog,
+            sky.colors[1],
+            glam::Vec3::from_slice(&frame_uniform.sun_direction[..3]),
+            glam::Vec3::from_slice(&frame_uniform.sun_radiance[..3]),
+            if volumetric {
+                fog::VOLUMETRIC_REACH
+            } else {
+                0.0
+            },
+        );
         let (probes, probe_count) = self.probes.uniform();
         frame_uniform.probes = probes;
         frame_uniform.reflection_probes[0] = probe_count;
@@ -822,7 +730,7 @@ impl ScenePipeline {
                 &self.device,
                 &self.queue,
                 list,
-                view_projection(list, aspect),
+                (view_projection(list, aspect), frame_uniform.fog),
                 &camera_view,
                 |key| {
                     textures
@@ -1026,6 +934,10 @@ impl ScenePipeline {
         } else {
             mark(&mut encoder, FramePass::AmbientOcclusion);
         }
+        mark(&mut encoder, FramePass::VolumetricFog);
+        if let Some(fog) = &self.volumetric_fog {
+            fog.scatter(&mut encoder);
+        }
         mark(&mut encoder, FramePass::Scene);
 
         // The scene is drawn into the HDR texture; post-processing then brings
@@ -1085,6 +997,17 @@ impl ScenePipeline {
             (counts.items_drawn, counts.batches) = drawn;
             // Last, over everything, but hidden behind solid items.
             self.sprites.draw(&mut pass, &sprite_draws);
+        }
+        // The light the volumetric fog scattered in front of what was drawn.
+        if let (Some(fog), Some(occlusion)) = (&self.volumetric_fog, &self.frame_targets.occlusion)
+        {
+            fog.composite(
+                &self.device,
+                &mut encoder,
+                frame_bind_group,
+                &self.frame_targets.hdr_view,
+                &occlusion.depth_view,
+            );
         }
         mark(&mut encoder, FramePass::PostProcessing);
 
@@ -1186,6 +1109,7 @@ impl ScenePipeline {
                 shadows,
                 prepass,
                 prepass && ambient_occlusion,
+                self.volumetric_fog.is_some(),
                 true,
                 true,
                 turned.drawn || ui_drawn,
@@ -1271,10 +1195,10 @@ impl ScenePipeline {
             .map_or(&self.no_prepass_depth_view, |targets| &targets.depth_view);
         let (environment, sky_image) = self.environment.views();
         let probes = self.probes.view();
-        let bind = |prepass_depth| {
+        let bind = |layout, prepass_depth| {
             create_frame_bind_group(
                 &self.device,
-                &self.frame_layout,
+                layout,
                 [
                     &self.frame_buffer,
                     &self.light_buffer,
@@ -1299,8 +1223,15 @@ impl ScenePipeline {
                 ],
             )
         };
-        self.frame_bind_group = bind(prepass_depth);
-        self.prepass_frame_bind_group = bind(&self.no_prepass_depth_view);
+        self.frame_bind_group = bind(&self.frame_layout, prepass_depth);
+        self.prepass_frame_bind_group = bind(&self.frame_layout, &self.no_prepass_depth_view);
+        let fog_group = self
+            .volumetric_fog
+            .as_ref()
+            .map(|fog| bind(&fog.frame_layout, prepass_depth));
+        if let Some(fog) = &mut self.volumetric_fog {
+            fog.frame_group = fog_group;
+        }
         self.shadow_bind_group = create_shadow_bind_group(
             &self.device,
             &self.shadow_layout,
@@ -1345,6 +1276,13 @@ impl ScenePipeline {
     #[cfg(test)]
     pub(super) fn occlusion_targets_alive(&self) -> usize {
         Arc::strong_count(&self.targets_alive.occlusion) - 1
+    }
+
+    /// How many sets of volumetric fog grids are alive: 0 or 1, unless one
+    /// leaked.
+    #[cfg(test)]
+    pub(super) fn volumetric_fogs_alive(&self) -> usize {
+        Arc::strong_count(&self.targets_alive.volumetric_fog) - 1
     }
 
     /// How many multisampled and FXAA targets are alive: 0 or 1 each.
@@ -1398,7 +1336,8 @@ impl ScenePipeline {
                 + sheet_bytes
                 + self.environment.bytes()
                 + self.probes.bytes()
-                + self.realtime_gi.as_ref().map_or(0, |gi| gi.bytes()),
+                + self.realtime_gi.as_ref().map_or(0, |gi| gi.bytes())
+                + self.volumetric_fog.as_ref().map_or(0, |fog| fog.bytes()),
             buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum(),
         }
     }
@@ -1891,14 +1830,146 @@ fn scene_pipelines(
     )
 }
 
+/// The frame's bindings (group 0 in lighting.wgsl), as the scene's shaders
+/// see them.
+fn frame_layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
+    let storage_entry = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+    vec![
+        wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 1,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Depth,
+                view_dimension: wgpu::TextureViewDimension::D2Array,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 2,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+            count: None,
+        },
+        storage_entry(3),
+        storage_entry(4),
+        storage_entry(16),
+        skinning::joints_entry(),
+        wgpu::BindGroupLayoutEntry {
+            binding: 6,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Depth,
+                view_dimension: wgpu::TextureViewDimension::D2Array,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 7,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 8,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 10,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::Cube,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 11,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 12,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 13,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::CubeArray,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 14,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Depth,
+                view_dimension: wgpu::TextureViewDimension::D2Array,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 15,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Depth,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        },
+    ]
+}
+
 /// The scene's samples per pixel, whether FXAA needs its target, and
-/// whether ambient occlusion needs the prepass's and its own.
+/// whether ambient occlusion needs the prepass's and its own (contact
+/// shadows and volumetric fog need only the prepass's depth).
 fn targets_used(graphics: &EffectiveGraphics) -> (u32, bool, bool) {
     let anti_aliasing = graphics.anti_aliasing;
     (
         anti_aliasing.samples(),
         anti_aliasing == crate::AntiAliasing::Fxaa,
-        graphics.ambient_occlusion != crate::AmbientOcclusion::Off || graphics.contact_shadows,
+        graphics.ambient_occlusion != crate::AmbientOcclusion::Off
+            || graphics.contact_shadows
+            || graphics.volumetric_fog,
     )
 }
 

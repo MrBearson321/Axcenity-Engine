@@ -368,6 +368,9 @@ pub struct GraphicsSettings {
     /// a few probes each frame. Off at every preset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub realtime_gi: Option<bool>,
+    /// The sun's light in fog shadowed (sun shafts), and lamps lighting it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volumetric_fog: Option<bool>,
 }
 
 impl GraphicsSettings {
@@ -505,6 +508,13 @@ impl GraphicsSettings {
         self.realtime_gi.unwrap_or(false)
     }
 
+    /// Whether fog is drawn volumetric: the override, or the preset's (on
+    /// at Ultra).
+    pub fn volumetric_fog(&self) -> bool {
+        self.volumetric_fog
+            .unwrap_or(self.quality == Quality::Ultra)
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -574,6 +584,14 @@ impl GraphicsSettings {
                     .to_owned(),
             );
         }
+        // Its grid is worked out by compute shaders.
+        let volumetric_fog = self.volumetric_fog() && capabilities.compute_shaders;
+        if self.volumetric_fog() && !volumetric_fog {
+            notes.push(
+                "Volumetric fog is off: this GPU can't run compute shaders. Fog is drawn without                  sun shafts."
+                    .to_owned(),
+            );
+        }
         EffectiveGraphics {
             shadow_quality,
             shadow_distance: self.shadow_distance(),
@@ -588,6 +606,7 @@ impl GraphicsSettings {
             // Like ambient occlusion, it reads only the prepass.
             contact_shadows: self.contact_shadows(),
             realtime_gi,
+            volumetric_fog,
             notes,
         }
     }
@@ -694,6 +713,9 @@ pub struct EffectiveGraphics {
     pub contact_shadows: bool,
     /// Whether light probe volumes are traced again as the light changes.
     pub realtime_gi: bool,
+    /// Whether fog shows the sun's shadows and lamps' light (needs the
+    /// prepass's depth).
+    pub volumetric_fog: bool,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -970,6 +992,7 @@ mod tests {
             reflection_quality: Some(ReflectionQuality::Medium),
             contact_shadows: Some(true),
             realtime_gi: Some(true),
+            volumetric_fog: Some(false),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -1139,7 +1162,7 @@ mod tests {
         }
         let on = GraphicsSettings {
             realtime_gi: Some(true),
-            ..GraphicsSettings::preset(Quality::Ultra)
+            ..GraphicsSettings::preset(Quality::High)
         };
         let used = on.effective(&Capabilities::default());
         assert!(used.realtime_gi);
@@ -1158,8 +1181,40 @@ mod tests {
             lowered.notes
         );
         // Asking for none needs nothing, so nothing is noted.
-        let off = GraphicsSettings::preset(Quality::Ultra).effective(&no_compute);
+        let off = GraphicsSettings::preset(Quality::High).effective(&no_compute);
         assert!(!off.realtime_gi && off.notes.is_empty());
+    }
+
+    #[test]
+    fn volumetric_fog_is_on_only_at_ultra_and_off_with_a_note_without_compute_shaders() {
+        for quality in Quality::ALL {
+            let preset = GraphicsSettings::preset(quality);
+            let ultra = quality == Quality::Ultra;
+            assert_eq!(preset.volumetric_fog(), ultra, "{quality:?}");
+            assert_eq!(
+                preset.effective(&Capabilities::default()).volumetric_fog,
+                ultra
+            );
+        }
+        let on = GraphicsSettings {
+            volumetric_fog: Some(true),
+            ..GraphicsSettings::preset(Quality::Low)
+        };
+        assert!(on.effective(&Capabilities::default()).volumetric_fog);
+        let no_compute = Capabilities {
+            compute_shaders: false,
+            ..Capabilities::default()
+        };
+        let lowered = GraphicsSettings::preset(Quality::Ultra).effective(&no_compute);
+        assert!(!lowered.volumetric_fog);
+        assert!(
+            lowered
+                .notes
+                .iter()
+                .any(|note| note.contains("Volumetric fog is off")),
+            "{:?}",
+            lowered.notes
+        );
     }
 
     #[test]
@@ -1209,6 +1264,7 @@ mod tests {
                         reflection_quality: None,
                         contact_shadows: post,
                         realtime_gi: post,
+                        volumetric_fog: post,
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);
@@ -1223,13 +1279,17 @@ mod tests {
                         assert!(effective.reflection_quality <= settings.reflection_quality());
                         assert_eq!(effective.contact_shadows, settings.contact_shadows());
                         assert!(effective.realtime_gi <= settings.realtime_gi());
+                        assert!(effective.volumetric_fog <= settings.volumetric_fog());
                         let lowered =
                             usize::from(effective.shadow_quality != settings.shadow_quality())
                                 + usize::from(effective.anti_aliasing != settings.anti_aliasing())
                                 + usize::from(
                                     effective.reflection_quality != settings.reflection_quality(),
                                 )
-                                + usize::from(effective.realtime_gi != settings.realtime_gi());
+                                + usize::from(effective.realtime_gi != settings.realtime_gi())
+                                + usize::from(
+                                    effective.volumetric_fog != settings.volumetric_fog(),
+                                );
                         assert_eq!(effective.notes.len(), lowered);
                     }
                 }

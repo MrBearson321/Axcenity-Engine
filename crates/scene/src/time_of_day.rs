@@ -107,14 +107,22 @@ pub(crate) fn sun_and_sky(world: &World, lighting: &Instance, sky: &mut Sky) -> 
     }
 }
 
-/// The air of the Lighting's first Atmosphere, with its sun and moon left
-/// at their defaults.
-fn atmosphere_of(world: &World, lighting: &Instance) -> Option<Atmosphere> {
-    let atmosphere = lighting
+/// The Lighting's first Atmosphere.
+pub(crate) fn atmosphere_instance<'a>(
+    world: &'a World,
+    lighting: &Instance,
+) -> Option<&'a Instance> {
+    lighting
         .children()
         .iter()
         .filter_map(|&id| world.get(id))
-        .find(|child| child.class() == ClassName::Atmosphere)?;
+        .find(|child| child.class() == ClassName::Atmosphere)
+}
+
+/// The air of the Lighting's first Atmosphere, with its sun and moon left
+/// at their defaults.
+fn atmosphere_of(world: &World, lighting: &Instance) -> Option<Atmosphere> {
+    let atmosphere = atmosphere_instance(world, lighting)?;
     let number_of = |name, default: f64, most: f64| match atmosphere.property(name) {
         Some(Value::Number(value)) if value.is_finite() => value.clamp(0.0, most),
         _ => default,

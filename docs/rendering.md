@@ -7,6 +7,7 @@ Map only. `render` draws a draw list. It does not know about Instances. Open the
 - Animation playback: [rendering/animation.md](rendering/animation.md)
 - Point and spot lights, and their shadows: [rendering/lights.md](rendering/lights.md)
 - Sky, time of day (sun, moon and stars), Atmosphere, sky images, environment maps, reflection probes, light probe volumes, real-time GI and environment lighting: [rendering/sky.md](rendering/sky.md)
+- Fog (Lighting's distance fog, an Atmosphere's height fog, volumetric fog and sun shafts): [rendering/fog.md](rendering/fog.md)
 - Bloom and tone mapping: [rendering/post.md](rendering/post.md)
 - Sprites and particles: [rendering/particles.md](rendering/particles.md)
 - The machine's graphics settings (presets, overrides, capabilities, `UserGameSettings`, `graphics.json`, the per-preset references): [rendering/settings.md](rendering/settings.md)

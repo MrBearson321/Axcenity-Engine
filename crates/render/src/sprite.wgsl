@@ -1,10 +1,14 @@
 // Camera-facing sprites, such as particles. See renderer/sprites.rs.
+// Compiled after `fog.wgsl`.
 
 struct Sprites {
     view_proj: mat4x4<f32>,
     // The camera's right and up directions, one stud long.
     right: vec4<f32>,
     up: vec4<f32>,
+    // Where the camera is.
+    eye: vec4<f32>,
+    fog: Fog,
 };
 
 @group(0) @binding(0) var<uniform> sprites: Sprites;
@@ -25,6 +29,7 @@ struct VertexOut {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) emission: f32,
+    @location(3) world: vec3<f32>,
 };
 
 @vertex
@@ -51,6 +56,7 @@ fn vs_main(@builtin(vertex_index) index: u32, sprite: SpriteIn) -> VertexOut {
     out.uv = vec2<f32>(corner.x + 0.5, 0.5 - corner.y);
     out.color = sprite.color;
     out.emission = sprite.params.y;
+    out.world = world;
     return out;
 }
 
@@ -60,5 +66,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // Premultiplied: the color already carries the sprite's opacity.
     let rgb = texel.rgb * in.color.rgb * texel.a;
     let alpha = texel.a * in.color.a;
-    return vec4<f32>(rgb, alpha * (1.0 - in.emission));
+    let covers = alpha * (1.0 - in.emission);
+    // Fogged like a surface, premultiplied: the fog's light goes only where
+    // the sprite hides what's behind it, which had its own.
+    let fogged_rgb = fogged(sprites.fog, sprites.eye.xyz, in.world, rgb);
+    let through = fogged(sprites.fog, sprites.eye.xyz, in.world, vec3<f32>(0.0));
+    return vec4<f32>(fogged_rgb - through * (1.0 - covers), covers);
 }

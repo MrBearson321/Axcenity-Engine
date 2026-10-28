@@ -327,6 +327,13 @@ impl UserData for LuaUserGameSettings {
             change(lua, |settings, _| settings.realtime_gi = chosen);
             Ok(())
         });
+
+        fields.add_field_method_get("VolumetricFog", |lua, _| Ok(settings(lua).volumetric_fog()));
+        fields.add_field_method_set("VolumetricFog", |lua, _, value: mlua::Value| {
+            let chosen = bool_choice(lua, "VolumetricFog", value)?;
+            change(lua, |settings, _| settings.volumetric_fog = chosen);
+            Ok(())
+        });
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {

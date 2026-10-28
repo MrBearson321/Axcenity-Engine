@@ -87,6 +87,8 @@ pub(super) struct FrameUniform {
     /// How bright the stars are, and 1 when the sky image is an
     /// atmosphere's (lighting.wgsl's `night`).
     pub(super) night: [f32; 4],
+    /// What fades into the distance (fog.wgsl's `Fog`).
+    pub(super) fog: fog::FogRaw,
 }
 
 /// The most point and spot lights drawn at once.
@@ -557,6 +559,8 @@ pub(super) struct TargetsAlive {
     pub(super) fxaa: Arc<()>,
     /// Sets of [`OcclusionTargets`].
     pub(super) occlusion: Arc<()>,
+    /// Sets of the volumetric fog's grids.
+    pub(super) volumetric_fog: Arc<()>,
 }
 
 /// The multisampled color the scene is drawn into while MSAA is on. Its
@@ -666,6 +670,11 @@ pub(super) struct ScenePipeline {
     /// Traces light probes again each frame while real-time GI is on and
     /// there are probes; `None` otherwise.
     pub(super) realtime_gi: Option<Box<realtime_gi::RealtimeGi>>,
+    /// The sun's and lamps' light in height fog, while volumetric fog is
+    /// on and the world has some; `None` otherwise.
+    pub(super) volumetric_fog: Option<Box<fog::VolumetricFog>>,
+    /// The frame's bindings, for making them seen by compute shaders too.
+    pub(super) frame_entries: Vec<wgpu::BindGroupLayoutEntry>,
     /// Whether the sky draws the sun's disc: false only while baking light
     /// probes.
     pub(super) sun_disc: bool,

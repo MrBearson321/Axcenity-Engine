@@ -433,8 +433,8 @@ Distance and height fog from Atmosphere (and Lighting's `FogStart`, `FogEnd` and
 
 ### Acceptance criteria
 
-- [ ] Far parts fade into the fog color, and the fog thins with height above its offset.
-- [ ] Volumetric fog shows sun shafts at Ultra and is absent below it, at no cost.
+- [x] Far parts fade into the fog color, and the fog thins with height above its offset.
+- [x] Volumetric fog shows sun shafts at Ultra and is absent below it, at no cost.
 
 ---
 

@@ -950,6 +950,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Lighting,
+        "FogColor",
+        "The color far things fade into with distance fog (FogStart to FogEnd). Not used while Lighting has an Atmosphere, whose fog takes the sky's color.",
+    ),
+    (
+        ClassName::Lighting,
+        "FogStart",
+        "How many studs from the camera distance fog starts. Nearer is clear.",
+    ),
+    (
+        ClassName::Lighting,
+        "FogEnd",
+        "How many studs from the camera everything is FogColor, including the sky. The default, 100000, is further than anything is seen, so there's no fog. An Atmosphere's fog takes its place.",
+    ),
+    (
+        ClassName::Lighting,
         "ClockTime",
         "The time of day in hours, from 0 to 24 (25 becomes 1). The sun rises due east at 6, is highest at 12 and sets due west at 18; the moon, opposite it, lights the night, when the stars come out. Worlds made before it existed start at about 10.27, where their sun always was.",
     ),
@@ -1068,12 +1083,12 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::Atmosphere,
         "Density",
-        "How thick the air is, from 0 (none: a black sky and a white sun) to 1. 0.395 is Earth's.",
+        "How thick the air is, from 0 (none: a black sky and a white sun, and no fog) to 1. 0.395 is Earth's: its fog hides half of what's 500 studs away at ground level.",
     ),
     (
         ClassName::Atmosphere,
         "Offset",
-        "How high above the ground the sky is seen from, from 0 to 1 (one height of the air up, where the sky above darkens).",
+        "How high above the ground the sky is seen from, from 0 to 1 (one height of the air up, where the sky above darkens). The fog is thickest at the bottom of the air and thins with height, every 50 studs by about a third; Offset lifts the world above that bottom (by 250 studs at 1), so the fog thins.",
     ),
     (
         ClassName::Atmosphere,
@@ -1088,12 +1103,12 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::Atmosphere,
         "Glare",
-        "Brightens the glow around the sun, from 0 to 10.",
+        "Brightens the glow around the sun, from 0 to 10, and tightens its glow in the fog.",
     ),
     (
         ClassName::Atmosphere,
         "Haze",
-        "Adds dust and haze to the air, from 0 to 10: a paler horizon, a wider glow around the sun, and a dimmer, redder sun.",
+        "Adds dust and haze to the air, from 0 to 10: a paler horizon, a wider glow around the sun, a dimmer, redder sun, and thicker fog (1 + Haze times as thick).",
     ),
     (
         ClassName::ParticleEmitter,
@@ -3445,7 +3460,7 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "Inside a Part: a grid of light probes filling the part's box, baked in the editor (Lighting > Bake Probes) with the light from the sun, lamps and sky and what it bounces off. Everything in the box, still or moving, is lit by the probes around it in place of the sky's even light, so a part beside a red wall picks up its red. Overlapping volumes blend, the smaller one winning, and each fades into what's around it over its BlendDistance. Changing the world doesn't change a bake until it's baked again; the Explorer warns when it's out of date."
         }
         ClassName::Atmosphere => {
-            "Inside Lighting: the sky is drawn as sunlight scattered by air in place of the sky colors: blue by day, red and orange toward sunset, dark and starry at night as ClockTime goes round. The air also colors the sun's light and lights and is reflected by parts. A SkyImage is still drawn in its place, but the sun's light is colored by the air."
+            "Inside Lighting: the sky is drawn as sunlight scattered by air in place of the sky colors: blue by day, red and orange toward sunset, dark and starry at night as ClockTime goes round. The air also colors the sun's light and lights and is reflected by parts. Far parts fade into its fog, the sky's color around the horizon, thickest low down; at Ultra graphics the fog shows the sun's shadows (sun shafts) and lamps' light. Lighting's own FogStart and FogEnd aren't used while it's there. A SkyImage is still drawn in its place, but the sun's light is colored by the air."
         }
         ClassName::ParticleEmitter => {
             "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."

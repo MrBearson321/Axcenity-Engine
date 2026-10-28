@@ -17,6 +17,7 @@
 mod camera;
 mod constraints;
 mod draw_list;
+mod fog;
 mod foliage;
 mod light_probes;
 mod material;

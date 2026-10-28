@@ -66,9 +66,10 @@ fn frame(renderer: &mut TextureRenderer, world: &World, camera: &FlyCamera) -> (
     (list, renderer.read_pixels())
 }
 
-/// How many pixels are darker than 90% of the floor's usual (its median),
+/// How many pixels are darker than 94% of the floor's usual (its median),
 /// seen from straight above: the pole's shadow (and its top). A low sun's
-/// shadow is faint, since the sky lights the floor about as much as it.
+/// shadow is faint, since the sky lights the floor about as much as it,
+/// and the Atmosphere's fog over the 70 studs down lightens it a little.
 fn shadowed_pixels(pixels: &[u8]) -> usize {
     let mut brightness: Vec<u32> = pixels
         .chunks(4)
@@ -77,7 +78,7 @@ fn shadowed_pixels(pixels: &[u8]) -> usize {
     let mut sorted = brightness.clone();
     sorted.sort_unstable();
     let median = sorted[sorted.len() / 2];
-    brightness.retain(|&b| b * 10 < median * 9);
+    brightness.retain(|&b| b * 50 < median * 47);
     brightness.len()
 }
 

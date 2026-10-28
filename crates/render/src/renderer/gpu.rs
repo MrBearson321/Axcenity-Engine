@@ -20,10 +20,11 @@ use super::{
 };
 
 /// The shader for parts and models, and the shadow and sky passes: the
-/// sky's colors and the shared lighting, then `shader.wgsl` and the
+/// sky's colors, the fog and the shared lighting, then `shader.wgsl` and the
 /// standard material's `surface` function.
 pub(super) const SCENE_SHADER: &str = concat!(
     include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../shader.wgsl"),
     include_str!("../surface.wgsl")
@@ -32,15 +33,29 @@ pub(super) const SCENE_SHADER: &str = concat!(
 /// shader goes after it (`surface_shaders.rs`).
 pub(super) const SCENE_TEMPLATE: &str = concat!(
     include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../shader.wgsl")
 );
-/// The shader for terrain chunks: the sky's colors and the shared
-/// lighting, then `terrain.wgsl`.
+/// The shader for terrain chunks: the sky's colors, the fog and the
+/// shared lighting, then `terrain.wgsl`.
 pub(super) const TERRAIN_SHADER: &str = concat!(
     include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../terrain.wgsl")
+);
+/// The sprites' shader: the fog, then `sprite.wgsl`.
+pub(super) const SPRITE_SHADER: &str =
+    concat!(include_str!("../fog.wgsl"), include_str!("../sprite.wgsl"));
+/// The volumetric fog's passes: the sky's colors, the fog and the shared
+/// lighting (for the frame's bindings and shadows), then
+/// `volumetric_fog.wgsl`.
+pub(super) const VOLUMETRIC_FOG_SHADER: &str = concat!(
+    include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
+    include_str!("../lighting.wgsl"),
+    include_str!("../volumetric_fog.wgsl")
 );
 /// The shader that bakes the sky's environment maps: the sky's colors,
 /// then `environment.wgsl`.

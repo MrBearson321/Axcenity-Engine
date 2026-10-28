@@ -616,6 +616,15 @@ impl ClassName {
                 // A project path to an HDR picture of the whole sky, drawn
                 // and reflected in place of the colors above. Empty for none.
                 ("SkyImage", Value::String(String::new())),
+                // Distance fog: none nearer than FogStart studs, all FogColor
+                // from FogEnd on. The default end is further than anything is
+                // seen, so there's none. An Atmosphere's fog replaces it.
+                (
+                    "FogColor",
+                    Value::Color3(Color3::new(192.0 / 255.0, 192.0 / 255.0, 192.0 / 255.0)),
+                ),
+                ("FogStart", Value::Number(0.0)),
+                ("FogEnd", Value::Number(100_000.0)),
                 // Tone mapping and bloom.
                 ("PostProcessingEnabled", Value::Bool(true)),
                 ("Exposure", Value::Number(1.0)),

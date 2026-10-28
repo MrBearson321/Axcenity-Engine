@@ -117,6 +117,7 @@ mod tests {
             reflection_quality: Some(ReflectionQuality::Low),
             contact_shadows: Some(true),
             realtime_gi: Some(true),
+            volumetric_fog: Some(false),
         };
         save(&folder, &settings).unwrap();
         assert_eq!(load(&folder), Some(settings));

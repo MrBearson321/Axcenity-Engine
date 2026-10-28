@@ -8,6 +8,7 @@ use crate::graphics::ShadowQuality;
 use glam::Mat4;
 
 mod environment_maps;
+mod fog;
 mod frustum_culling;
 mod level_of_detail;
 mod light_probe_volumes;
@@ -133,6 +134,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
             image: None,
             ..Sky::default()
         },
+        fog: crate::Fog::default(),
         camera: Camera {
             position: Vec3::ZERO,
             look_at: Vec3::NEG_Z,
@@ -890,13 +892,13 @@ fn stats_time_each_pass_the_frame_draws() {
         renderer.stats()
     };
 
-    // Shadows and ambient occlusion on, no UI.
+    // Shadows and ambient occlusion on, no UI or fog.
     renderer.set_graphics(&with_occlusion(crate::AmbientOcclusion::High));
     let mut list = list_of(vec![big_block()]);
     list.shadows.enabled = true;
     let stats = draw(&mut renderer, &list);
     for pass in FramePass::ALL {
-        let expected = pass != FramePass::Ui;
+        let expected = !matches!(pass, FramePass::Ui | FramePass::VolumetricFog);
         assert_eq!(stats.pass_time(pass).is_some(), expected, "{pass:?}");
     }
     let passes: Duration = stats.pass_times.iter().flatten().sum();
@@ -3174,6 +3176,14 @@ fn every_setting_and_value() -> Vec<GraphicsSettings> {
     for on in [true, false] {
         all.push(with(&|s| s.realtime_gi = Some(on)));
     }
+    // Volumetric fog alone still draws the prepass, for its depth.
+    for on in [true, false] {
+        all.push(with(&|s| {
+            s.ambient_occlusion = Some(AmbientOcclusion::Off);
+            s.contact_shadows = Some(false);
+            s.volumetric_fog = Some(on);
+        }));
+    }
     // Contact shadows alone still draw the prepass.
     all.push(with(&|s| {
         s.ambient_occlusion = Some(AmbientOcclusion::Off);
@@ -3229,6 +3239,14 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
     ));
     list.lights
         .push(shadowing_point_light(Vec3::new(2.0, 4.0, -8.0), 20.0));
+    // Fog for volumetric fog to light.
+    list.fog = crate::Fog {
+        color: None,
+        density: 0.01,
+        sun_scattering: 0.8,
+        forward_scattering: 0.6,
+        ..crate::Fog::default()
+    };
     // A baked volume, for real-time GI to trace.
     list.light_probe_volumes
         .push(crate::draw_list::LightProbeVolume {
@@ -3266,6 +3284,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             ),
             scene.environment.bytes(),
             scene.probes_traced().is_some(),
+            scene.volumetric_fogs_alive(),
         )
     };
     for round in 0..3 {
@@ -3283,8 +3302,14 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             renderer.set_graphics(settings);
             renderer.render(&list).unwrap();
             let used = renderer.graphics().clone();
-            let (_, _, (sun, (spot, point), targets, occlusion, (msaa, fxaa)), environment, gi) =
-                counts(&renderer);
+            let (
+                _,
+                _,
+                (sun, (spot, point), targets, occlusion, (msaa, fxaa)),
+                environment,
+                gi,
+                fogs,
+            ) = counts(&renderer);
             let context = format!("round {round}, step {step}: {settings:?}");
             // A ceiling of 0 studs draws no sun shadows, so needs no map.
             let sun_drawn = used.shadow_quality.map().is_some() && used.shadow_distance > 0.0;
@@ -3300,9 +3325,11 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 "{context}"
             );
             assert_eq!(targets, 1, "{context}");
-            // The prepass is drawn for ambient occlusion or contact shadows.
-            let prepass =
-                used.ambient_occlusion != crate::AmbientOcclusion::Off || used.contact_shadows;
+            // The prepass is drawn for ambient occlusion, contact shadows
+            // or volumetric fog.
+            let prepass = used.ambient_occlusion != crate::AmbientOcclusion::Off
+                || used.contact_shadows
+                || used.volumetric_fog;
             assert_eq!(occlusion, usize::from(prepass), "{context}");
             assert_eq!(
                 msaa,
@@ -3321,6 +3348,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 "{context}"
             );
             assert_eq!(gi, used.realtime_gi, "{context}");
+            assert_eq!(fogs, usize::from(used.volumetric_fog), "{context}");
         }
         // Back on High, as it started.
         assert_eq!(counts(&renderer), start, "round {round}");

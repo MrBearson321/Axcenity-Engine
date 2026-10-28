@@ -68,7 +68,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 22] = [
+const GROUPS: [(&str, &[&str]); 23] = [
     (
         "Appearance",
         &[
@@ -262,6 +262,7 @@ const GROUPS: [(&str, &[&str]); 22] = [
             "SkyImage",
         ],
     ),
+    ("Fog", &["FogColor", "FogStart", "FogEnd"]),
     (
         "Atmosphere",
         &["Density", "Offset", "Decay", "Glare", "Haze"],
@@ -376,7 +377,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
             "Auto Material" => instance.class() == ClassName::TerrainLayer,
             "UI" => crate::style_panel::is_styled(instance.class()),
             "Audio" => instance.class() == ClassName::Sound,
-            "Time of Day" | "Shadows" | "Sky" | "Post-processing" => {
+            "Time of Day" | "Shadows" | "Sky" | "Fog" | "Post-processing" => {
                 instance.class() == ClassName::Lighting
             }
             "Atmosphere" => instance.class() == ClassName::Atmosphere,
@@ -797,6 +798,7 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Shadows" => icons::SUN,
         "Time of Day" => icons::CLOCK,
         "Sky" => icons::CLOUD_SUN,
+        "Fog" => icons::CLOUD_FOG,
         "Atmosphere" => icons::WIND,
         "Post-processing" => icons::SPARKLE,
         "Light" => icons::LIGHTBULB,

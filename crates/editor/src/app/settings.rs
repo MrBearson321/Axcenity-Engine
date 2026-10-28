@@ -720,6 +720,20 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                     }
                 });
             ui.end_row();
+
+            ui.label("Volumetric fog");
+            let label = |on: Option<bool>| match on {
+                Some(on) => on_off(on).to_owned(),
+                None => format!("Preset ({})", on_off(preset.volumetric_fog())),
+            };
+            egui::ComboBox::from_id_salt("volumetric fog")
+                .selected_text(label(settings.volumetric_fog))
+                .show_ui(ui, |ui| {
+                    for choice in [None, Some(true), Some(false)] {
+                        ui.selectable_value(&mut settings.volumetric_fog, choice, label(choice));
+                    }
+                });
+            ui.end_row();
         });
     ui.add_space(16.0);
     widgets::section_label(ui, "In use");
@@ -782,6 +796,11 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
         "Real-time GI: on (light probe volumes traced again, two probes a frame)"
     } else {
         "Real-time GI: off (light probe volumes keep their bakes)"
+    });
+    ui.label(if effective.volumetric_fog {
+        "Volumetric fog: on (sun shafts and lamp light in an Atmosphere's fog)"
+    } else {
+        "Volumetric fog: off (fog without shadows in it)"
     });
     for note in &effective.notes {
         ui.label(egui::RichText::new(note).color(palette.warning));
@@ -1079,6 +1098,7 @@ mod tests {
             reflection_quality: Some(ReflectionQuality::Medium),
             contact_shadows: Some(false),
             realtime_gi: Some(true),
+            volumetric_fog: Some(true),
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);

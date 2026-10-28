@@ -12,6 +12,8 @@
 //! frame's joints, so the vertex shader poses them.
 //! `realtime_gi.rs` traces light probes again a few each frame, while
 //! real-time GI is on.
+//! `fog.rs` packs the frame's fog and, while volumetric fog is on, works
+//! out the sun's and lamps' light in it.
 //! `culling.rs` tests bounds against each view, so what a view can't see
 //! isn't drawn.
 //! `gpu_timer.rs` measures the GPU's time per frame and per pass, for the
@@ -43,6 +45,7 @@ pub use surface_shaders::{ShaderError, SurfaceShader};
 mod atmosphere_sky;
 mod culling;
 mod environment;
+mod fog;
 mod gpu;
 mod gpu_timer;
 mod light_probes;
