@@ -722,6 +722,11 @@ impl ClassName {
                 ("Density", Value::Number(0.7)),
                 // The clouds' own color, which the sun and sky light.
                 ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                // How fast the clouds drift on their own, in studs a second,
+                // and which way, in degrees turned from +X (east) toward +Z
+                // (south). The Workspace's GlobalWind adds to it.
+                ("Speed", Value::Number(20.0)),
+                ("Direction", Value::Number(0.0)),
             ],
             ClassName::ParticleEmitter => vec![
                 ("Enabled", Value::Bool(true)),

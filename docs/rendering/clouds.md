@@ -9,7 +9,7 @@ A `Clouds` inside Lighting (the Lighting ribbon's **Clouds**, beside Atmosphere,
 - `Cover` (0 to 1, default 0.5): how much of the sky is cloud. 0 is a clear sky, drawn exactly as without clouds; 1 is overcast.
 - `Density` (0 to 1, default 0.7): how much light the cloud takes away (0.05 per stud at 1, `EXTINCTION`), so thicker clouds are whiter on top, darker below, and cast deeper shadows. 0 is none.
 - `Color` (default white): the clouds' own color, lit by the sun and the sky.
-- The Workspace's `GlobalWind` (studs a second; its level part) carries them and their shadows along. The renderer keeps how far they've gone (`CloudDrift`), moving them on by the wind times the time since the last frame (`DrawList::time`), so a new wind changes their speed, not where they are; when the time counts back (a host starting again) they stay put. Each renderer has its own drift (a probe bake starts from none). The editor keeps drawing frames while clouds are in the wind (`viewport::shader_time`).
+- `Speed` (studs a second, default 20; 0 holds them still, below 0 counts as 0) and `Direction` (degrees from +X, east, toward +Z, south; default 0): how they drift on their own, so they move out of the box. The Workspace's `GlobalWind` (studs a second; its level part) adds to that drift, and their shadows move with them. The renderer keeps how far they've gone (`CloudDrift`), moving them on by the wind times the time since the last frame (`DrawList::time`), so a new wind changes their speed, not where they are; when the time counts back (a host starting again) they stay put. Each renderer has its own drift (a probe bake starts from none). The editor keeps drawing frames while clouds are in the wind (`viewport::shader_time`).
 
 ## How they're drawn
 
@@ -28,6 +28,6 @@ Clouds add no pass, target or draw call: they're worked out in the sky pass's pi
 
 - `render/src/renderer/tests/clouds.rs` (GPU): the clouds overhead and their shadows on a floor move by the wind's distance (the middle row's best-matching shift is the wind's 100 studs in pixels), and stay still without wind; Cover 0 draws exactly the clear frame, clouds add no draw calls or target bytes, and taking them out restores the frame; every cloud quality draws clouds and shades the ground the same.
 - `render/src/renderer/clouds.rs`: none by default or without density, each quality's steps and detail, the drift following the wind (level part only), keeping its place when the wind changes or time counts back.
-- `scene/src/clouds.rs`: a new world has none; Lighting's Clouds take Cover (held to 0 to 1), Density, Color and the GlobalWind, and Cover 0 or removing it is none.
-- `player/src/clouds_tests.rs` (GPU): a world's Clouds shade part of the floor, its GlobalWind moves the shadows, still air keeps them, and destroying the Clouds gives the frame without them.
+- `scene/src/clouds.rs`: a new world has none; Lighting's Clouds take Cover (held to 0 to 1), Density and Color, drift east at 20 studs a second by default, turn with Direction and scale with Speed (not below 0), add the GlobalWind, and Cover 0 or removing it is none.
+- `player/src/clouds_tests.rs` (GPU): a world's Clouds shade part of the floor, its GlobalWind moves the shadows, still air at Speed 0 keeps them, their own Speed moves them, and destroying the Clouds gives the frame without them.
 - `render/src/graphics.rs`: each preset's cloud quality.

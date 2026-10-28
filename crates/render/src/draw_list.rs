@@ -613,8 +613,9 @@ pub struct Clouds {
     pub density: f32,
     /// The clouds' own color (sRGB), which the sun and sky light.
     pub color: [f32; 3],
-    /// Studs a second the clouds drift (the Workspace's `GlobalWind`).
-    /// Only its level part moves them.
+    /// Studs a second the clouds drift: a `Clouds`' own `Speed` toward its
+    /// `Direction`, plus the Workspace's `GlobalWind`. Only its level part
+    /// moves them.
     pub wind: Vec3,
 }
 

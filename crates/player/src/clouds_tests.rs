@@ -1,6 +1,6 @@
-//! Clouds in a world, drawn: Lighting's Clouds shade the ground, the
-//! Workspace's GlobalWind carries their shadows, and taking them out
-//! leaves the frame as it was.
+//! Clouds in a world, drawn: Lighting's Clouds shade the ground, their own
+//! Speed and the Workspace's GlobalWind carry their shadows, and taking
+//! them out leaves the frame as it was.
 
 use axcenity_core::{ClassName, Value, Vector3};
 use axcenity_render::TextureRenderer;
@@ -68,6 +68,10 @@ fn global_wind_carries_cloud_shadows_and_removing_clouds_changes_nothing() {
 
     let clouds = world.create(ClassName::Clouds).unwrap();
     world.set_parent(clouds, Some(world.lighting())).unwrap();
+    // Held still, so only the wind moves them below.
+    world
+        .set_property(clouds, "Speed", Value::Number(0.0))
+        .unwrap();
     let shaded = frame(&mut renderer, &world, 0.0);
     let darker = shaded
         .chunks(4)
@@ -98,10 +102,15 @@ fn global_wind_carries_cloud_shadows_and_removing_clouds_changes_nothing() {
     set_wind(&mut world, 0.0);
     let still = frame(&mut renderer, &world, 10.0);
     assert!(frame(&mut renderer, &world, 15.0) == still);
+    // Their own Speed moves them without wind.
+    world
+        .set_property(clouds, "Speed", Value::Number(30.0))
+        .unwrap();
+    assert!(frame(&mut renderer, &world, 20.0) != still, "they drift");
 
     world.destroy(clouds).unwrap();
     assert!(
-        frame(&mut renderer, &world, 20.0) == clear,
+        frame(&mut renderer, &world, 25.0) == clear,
         "without Clouds the frame is as it was"
     );
 }

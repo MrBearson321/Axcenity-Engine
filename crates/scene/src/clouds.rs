@@ -1,8 +1,10 @@
 //! The world's clouds (graphics Phase 26): Lighting's first `Clouds`,
-//! carried by the Workspace's `GlobalWind`. Without one there are none.
+//! drifting at its own `Speed` toward its `Direction`, and carried by the
+//! Workspace's `GlobalWind` too. Without one there are none.
 
 use axcenity_core::{ClassName, Instance, Value, World};
 use axcenity_render::Clouds;
+use axcenity_render::glam::Vec3;
 
 /// The clouds the Lighting holds.
 pub(crate) fn clouds_of(world: &World, lighting: &Instance) -> Clouds {
@@ -19,6 +21,13 @@ pub(crate) fn clouds_of(world: &World, lighting: &Instance) -> Clouds {
         _ => default,
     };
     let defaults = Clouds::default();
+    let drift = |name, default: f64| match clouds.property(name) {
+        Some(Value::Number(value)) if value.is_finite() => *value,
+        _ => default,
+    };
+    let speed = drift("Speed", 20.0).max(0.0) as f32;
+    let heading = (drift("Direction", 0.0) as f32).to_radians();
+    let own = Vec3::new(heading.cos(), 0.0, heading.sin()) * speed;
     Clouds {
         cover: number_of("Cover", 0.5),
         density: number_of("Density", defaults.density),
@@ -26,7 +35,7 @@ pub(crate) fn clouds_of(world: &World, lighting: &Instance) -> Clouds {
             .property("Color")
             .and_then(Value::as_color3)
             .map_or(defaults.color, |color| [color.r, color.g, color.b]),
-        wind: crate::particles::global_wind(world),
+        wind: own + crate::particles::global_wind(world),
     }
 }
 
@@ -50,9 +59,10 @@ mod tests {
         let clouds = world.create(ClassName::Clouds).unwrap();
         world.set_parent(clouds, Some(world.lighting())).unwrap();
         let drawn = clouds_in(&world);
-        assert!(drawn.is_drawn() && !drawn.is_moving(), "{drawn:?}");
+        assert!(drawn.is_drawn() && drawn.is_moving(), "{drawn:?}");
         assert_eq!((drawn.cover, drawn.density), (0.5, 0.7));
         assert_eq!(drawn.color, [1.0; 3]);
+        assert_eq!(drawn.wind.to_array(), [20.0, 0.0, 0.0], "drifting east");
 
         let set = |world: &mut World, id, name: &str, value| {
             world.set_property(id, name, value).unwrap();
@@ -76,8 +86,22 @@ mod tests {
         assert_eq!(drawn.cover, 1.0, "held to overcast");
         assert_eq!(drawn.density, 0.25);
         assert_eq!(drawn.color, [1.0, 0.5, 0.0]);
-        assert_eq!(drawn.wind.to_array(), [4.0, 0.0, -3.0]);
-        assert!(drawn.is_moving());
+        assert_eq!(drawn.wind.to_array(), [24.0, 0.0, -3.0], "wind adds on");
+
+        // Their own drift turns with Direction and scales with Speed.
+        set(&mut world, clouds, "Speed", Value::Number(10.0));
+        set(&mut world, clouds, "Direction", Value::Number(90.0));
+        let wind = clouds_in(&world).wind;
+        assert!((wind - Vec3::new(4.0, 0.0, 7.0)).length() < 1e-4, "{wind}");
+        set(&mut world, clouds, "Speed", Value::Number(-5.0));
+        assert_eq!(clouds_in(&world).wind.to_array(), [4.0, 0.0, -3.0]);
+        set(
+            &mut world,
+            workspace,
+            "GlobalWind",
+            Value::Vector3(Vector3::new(0.0, 0.0, 0.0)),
+        );
+        assert!(!clouds_in(&world).is_moving(), "no speed, no wind: still");
 
         set(&mut world, clouds, "Cover", Value::Number(0.0));
         assert!(!clouds_in(&world).is_drawn(), "no cover, no clouds");

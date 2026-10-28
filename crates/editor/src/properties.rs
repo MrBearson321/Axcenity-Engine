@@ -267,7 +267,7 @@ const GROUPS: [(&str, &[&str]); 24] = [
         "Atmosphere",
         &["Density", "Offset", "Decay", "Glare", "Haze"],
     ),
-    ("Clouds", &["Cover", "Density"]),
+    ("Clouds", &["Cover", "Density", "Speed", "Direction"]),
     (
         "Post-processing",
         &[
@@ -1187,6 +1187,17 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             .add(
                 egui::Slider::new(&mut number, -90.0..=90.0)
                     .clamping(egui::SliderClamping::Always)
+                    .suffix("°")
+                    .max_decimals(1),
+            )
+            .changed()
+            .then_some(Value::Number(number)),
+        // Which way Clouds drift (a SpotLight's or emitter's Direction is a
+        // Vector3).
+        Value::Number(mut number) if name == "Direction" => ui
+            .add(
+                egui::Slider::new(&mut number, 0.0..=360.0)
+                    .clamping(egui::SliderClamping::Never)
                     .suffix("°")
                     .max_decimals(1),
             )

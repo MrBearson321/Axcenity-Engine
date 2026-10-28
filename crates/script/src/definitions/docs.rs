@@ -1126,6 +1126,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The clouds' own color, which the sun and sky light. White by default.",
     ),
     (
+        ClassName::Clouds,
+        "Speed",
+        "How fast the clouds drift on their own, in studs a second (20 by default; 0 to hold them still). workspace.GlobalWind adds to it. Their shadows move with them.",
+    ),
+    (
+        ClassName::Clouds,
+        "Direction",
+        "Which way the clouds drift on their own, in degrees turned from +X (east, 0) toward +Z (south, 90).",
+    ),
+    (
         ClassName::ParticleEmitter,
         "Enabled",
         "If false, it stops giving off particles; those already out live on.",
@@ -3478,7 +3488,7 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "Inside Lighting: the sky is drawn as sunlight scattered by air in place of the sky colors: blue by day, red and orange toward sunset, dark and starry at night as ClockTime goes round. The air also colors the sun's light and lights and is reflected by parts. Far parts fade into its fog, the sky's color around the horizon, thickest low down; at Ultra graphics the fog shows the sun's shadows (sun shafts) and lamps' light. Lighting's own FogStart and FogEnd aren't used while it's there. A SkyImage is still drawn in its place, but the sun's light is colored by the air."
         }
         ClassName::Clouds => {
-            "Inside Lighting: a layer of cloud high in the sky (800 to 1200 studs up), lit by the sun and sky, whose shadows fall on the world beneath. workspace.GlobalWind carries the clouds and their shadows along. The player's graphics settings choose how finely it's drawn (UserGameSettings.CloudQuality); at Low it's a flat sheet."
+            "Inside Lighting: a layer of cloud high in the sky (800 to 1200 studs up), lit by the sun and sky, whose shadows fall on the world beneath. They drift at their own Speed toward their Direction, and workspace.GlobalWind carries them too; their shadows move with them. The player's graphics settings choose how finely it's drawn (UserGameSettings.CloudQuality); at Low it's a flat sheet."
         }
         ClassName::ParticleEmitter => {
             "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."

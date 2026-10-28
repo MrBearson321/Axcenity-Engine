@@ -2240,7 +2240,7 @@ declare extern type Atmosphere extends Instance with
 	[string]: any
 end
 
---- Inside Lighting: a layer of cloud high in the sky (800 to 1200 studs up), lit by the sun and sky, whose shadows fall on the world beneath. workspace.GlobalWind carries the clouds and their shadows along. The player's graphics settings choose how finely it's drawn (UserGameSettings.CloudQuality); at Low it's a flat sheet.
+--- Inside Lighting: a layer of cloud high in the sky (800 to 1200 studs up), lit by the sun and sky, whose shadows fall on the world beneath. They drift at their own Speed toward their Direction, and workspace.GlobalWind carries them too; their shadows move with them. The player's graphics settings choose how finely it's drawn (UserGameSettings.CloudQuality); at Low it's a flat sheet.
 declare extern type Clouds extends Instance with
 	--- How much of the sky is cloud, from 0 (a clear sky) to 1 (overcast).
 	Cover: number
@@ -2248,6 +2248,10 @@ declare extern type Clouds extends Instance with
 	Density: number
 	--- The clouds' own color, which the sun and sky light. White by default.
 	Color: Color3
+	--- How fast the clouds drift on their own, in studs a second (20 by default; 0 to hold them still). workspace.GlobalWind adds to it. Their shadows move with them.
+	Speed: number
+	--- Which way the clouds drift on their own, in degrees turned from +X (east, 0) toward +Z (south, 90).
+	Direction: number
 	[string]: any
 end
 
