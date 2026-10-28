@@ -520,6 +520,16 @@ pub enum BlockKind {
     SetToneMapping {
         curve: String,
     },
+    /// Sets `Lighting.ClockTime`: the time of day, in hours.
+    SetClockTime {
+        time: Expression,
+    },
+    /// Sets one of [`ATMOSPHERE_NUMBERS`] on Lighting's Atmosphere (the
+    /// child named Atmosphere).
+    SetAtmosphere {
+        property: String,
+        value: Expression,
+    },
 
     // Graphics: the player's computer's settings (LocalScripts only).
     /// Sets `UserGameSettings.GraphicsQuality` to one of
@@ -663,6 +673,8 @@ pub const SLIDE_EDGES: [&str; 4] = ["Left", "Right", "Top", "Bottom"];
 pub const CAMERA_TYPES: [&str; 5] = ["Scriptable", "Custom", "Follow", "Track", "Fixed"];
 /// `Enum.ToneMapping`'s items, which the tone mapping block offers.
 pub const TONE_MAPPINGS: [&str; 3] = ["Classic", "Neutral", "Filmic"];
+/// The Atmosphere numbers the atmosphere block sets.
+pub const ATMOSPHERE_NUMBERS: [&str; 4] = ["Density", "Offset", "Glare", "Haze"];
 /// `Enum.GraphicsQuality`'s items, which the graphics quality block offers.
 pub const GRAPHICS_QUALITIES: [&str; 5] = ["Automatic", "Low", "Medium", "High", "Ultra"];
 /// The `UserGameSettings` overrides the graphics option block sets.
@@ -876,6 +888,8 @@ impl BlockKind {
             | BlockKind::FadeIn { seconds: e, .. }
             | BlockKind::FadeOut { seconds: e, .. }
             | BlockKind::SetGraphicsNumber { value: e, .. }
+            | BlockKind::SetClockTime { time: e }
+            | BlockKind::SetAtmosphere { value: e, .. }
             | BlockKind::PointCameraAt { position: e }
             | BlockKind::DestroyAfter { seconds: e, .. }
             | BlockKind::Print { value: e } => vec![e],
@@ -885,6 +899,16 @@ impl BlockKind {
             BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],
             _ => Vec::new(),
         }
+    }
+
+    /// The world's look blocks, which need `Lighting`.
+    pub fn sets_lighting(&self) -> bool {
+        matches!(
+            self,
+            BlockKind::SetToneMapping { .. }
+                | BlockKind::SetClockTime { .. }
+                | BlockKind::SetAtmosphere { .. }
+        )
     }
 
     /// Graphics settings blocks, which need `UserGameSettings`.
@@ -963,6 +987,8 @@ impl BlockKind {
             | BlockKind::FadeIn { seconds: e, .. }
             | BlockKind::FadeOut { seconds: e, .. }
             | BlockKind::SetGraphicsNumber { value: e, .. }
+            | BlockKind::SetClockTime { time: e }
+            | BlockKind::SetAtmosphere { value: e, .. }
             | BlockKind::PointCameraAt { position: e }
             | BlockKind::DestroyAfter { seconds: e, .. }
             | BlockKind::Print { value: e } => vec![e],

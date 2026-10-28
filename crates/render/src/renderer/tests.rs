@@ -131,6 +131,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
             ground_color: [0.0; 3],
             environment_intensity: 0.0,
             image: None,
+            ..Sky::default()
         },
         camera: Camera {
             position: Vec3::ZERO,

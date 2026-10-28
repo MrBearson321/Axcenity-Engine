@@ -40,6 +40,7 @@ pub use gpu_timer::FramePass;
 pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE};
 pub use surface_shaders::{ShaderError, SurfaceShader};
 
+mod atmosphere_sky;
 mod culling;
 mod environment;
 mod gpu;

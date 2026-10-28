@@ -756,6 +756,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         for what in Insertable::LIGHTS
             .into_iter()
             .chain(Insertable::PROBES)
+            .chain(Insertable::SKY)
             .chain(Insertable::EFFECTS)
             .chain(Insertable::ANIMATION)
             .chain(Insertable::CHARACTERS)

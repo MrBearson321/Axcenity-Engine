@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use glam::{Mat3, Mat4, Quat, Vec3};
 
-use crate::ToneMapping;
+use crate::{Atmosphere, ToneMapping};
 
 #[derive(Clone, Debug)]
 pub struct DrawList {
@@ -552,6 +552,15 @@ pub struct Sky {
     /// A picture of the whole sky, drawn and reflected in place of the
     /// colors above while the reflection quality bakes environment maps.
     pub image: Option<SkyImage>,
+    /// Air that scatters the sun's and moon's light, drawn and lit in
+    /// place of the colors above (but not of an image).
+    pub atmosphere: Option<Atmosphere>,
+    /// How much of their light the colors above give: 1 by day, less at
+    /// night. Not applied to an image or an atmosphere.
+    pub daylight: f32,
+    /// How bright the stars are, from 0 (by day) to 1. Drawn over the
+    /// colors or an atmosphere, never over an image.
+    pub stars: f32,
 }
 
 impl Default for Sky {
@@ -562,6 +571,9 @@ impl Default for Sky {
             ground_color: [0.35, 0.33, 0.3],
             environment_intensity: 0.6,
             image: None,
+            atmosphere: None,
+            daylight: 1.0,
+            stars: 0.0,
         }
     }
 }

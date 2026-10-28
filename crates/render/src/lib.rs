@@ -6,6 +6,7 @@
 //! drawn into with [`Renderer`], and [`TextureRenderer`] draws into a texture
 //! on a GPU device someone else set up (the editor's viewport).
 
+mod atmosphere;
 mod draw_list;
 mod fonts;
 mod graphics;
@@ -13,6 +14,7 @@ mod mesh;
 mod renderer;
 mod tone_mapping;
 
+pub use atmosphere::Atmosphere;
 pub use draw_list::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, LightProbeGrid,
     LightProbeVolume, Material, MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage,

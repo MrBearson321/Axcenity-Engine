@@ -8,6 +8,12 @@ use crate::value::{CFrame, Color3, EnumItem, UDim2, Value, Vector2, Vector3};
 /// Events every Instance has, whatever its class. `Changed` fires with the
 /// name of a property that got a new value, `ChildAdded` and `ChildRemoved`
 /// with the child. Scripts reach them like class events: `part.Changed`.
+/// `Lighting.ClockTime` and `GeographicLatitude` for worlds saved before
+/// they existed: on this day, at this place, the sun is where it always
+/// was (toward 0.5, 1, 0.25), so those worlds look as they did.
+pub const DEFAULT_CLOCK_TIME: f64 = 10.2748873292782;
+pub const DEFAULT_LATITUDE: f64 = 14.0362434679265;
+
 pub const INSTANCE_EVENTS: [&str; 8] = [
     "Changed",
     "ChildAdded",
@@ -116,6 +122,10 @@ pub enum ClassName {
     /// light what's in it with the light the editor baked around them
     /// (`Bake`), not the sky's.
     LightProbeVolume,
+    /// Inside Lighting: the sky is drawn as light scattered by air (sunsets
+    /// redden it, night darkens it) in place of its colors, and colors the
+    /// sun's light. It also lights and is reflected by surfaces.
+    Atmosphere,
     /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
     ParticleEmitter,
     /// Inside a Part, MeshPart, Model, ScreenGui or UI element: plays
@@ -206,7 +216,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 74] = [
+    pub const ALL: [ClassName; 75] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -247,6 +257,7 @@ impl ClassName {
         ClassName::SpotLight,
         ClassName::ReflectionProbe,
         ClassName::LightProbeVolume,
+        ClassName::Atmosphere,
         ClassName::ParticleEmitter,
         ClassName::Animator,
         ClassName::Animation,
@@ -325,6 +336,7 @@ impl ClassName {
             ClassName::SpotLight => "SpotLight",
             ClassName::ReflectionProbe => "ReflectionProbe",
             ClassName::LightProbeVolume => "LightProbeVolume",
+            ClassName::Atmosphere => "Atmosphere",
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
@@ -613,6 +625,12 @@ impl ClassName {
                 ("BloomEnabled", Value::Bool(true)),
                 ("BloomIntensity", Value::Number(0.35)),
                 ("BloomThreshold", Value::Number(1.0)),
+                // The time of day in hours, from 0 to 24 (it wraps), and how
+                // far north of the equator the world is in degrees. They set
+                // where the sun and moon are. The defaults put the sun where
+                // it was before the time of day could be set.
+                ("ClockTime", Value::Number(DEFAULT_CLOCK_TIME)),
+                ("GeographicLatitude", Value::Number(DEFAULT_LATITUDE)),
             ],
             ClassName::PointLight => vec![
                 ("Enabled", Value::Bool(true)),
@@ -656,6 +674,30 @@ impl ClassName {
                 // Studs inside the box's faces over which its light fades in
                 // from what's around it.
                 ("BlendDistance", Value::Number(2.0)),
+            ],
+            ClassName::Atmosphere => vec![
+                // How thick the air is, from 0 (none: a black sky and a white
+                // sun) to 1. 0.395 is Earth's.
+                ("Density", Value::Number(0.395)),
+                // How high above the ground the sky is seen from, from 0 to 1
+                // (one height of the air, where the sky above darkens).
+                ("Offset", Value::Number(0.0)),
+                // Tints the whole sky; this grey leaves it as it is.
+                (
+                    "Color",
+                    Value::Color3(Color3::new(199.0 / 255.0, 199.0 / 255.0, 199.0 / 255.0)),
+                ),
+                // Tints the sky away from the sun; this blue-grey leaves it
+                // as it is.
+                (
+                    "Decay",
+                    Value::Color3(Color3::new(106.0 / 255.0, 112.0 / 255.0, 125.0 / 255.0)),
+                ),
+                // Brightens the glow around the sun, from 0 to 10.
+                ("Glare", Value::Number(0.0)),
+                // Adds dust and haze to the air, from 0 to 10: a paler
+                // horizon, a wider glow and a dimmer, redder sun.
+                ("Haze", Value::Number(0.0)),
             ],
             ClassName::ParticleEmitter => vec![
                 ("Enabled", Value::Bool(true)),
@@ -1491,6 +1533,7 @@ impl ClassName {
             | ClassName::SpotLight
             | ClassName::ReflectionProbe
             | ClassName::LightProbeVolume
+            | ClassName::Atmosphere
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer

@@ -298,6 +298,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetValue { .. }
         | BlockKind::SetProperty { .. }
         | BlockKind::SetToneMapping { .. }
+        | BlockKind::SetClockTime { .. }
+        | BlockKind::SetAtmosphere { .. }
         | BlockKind::SetLanguage { .. }
         | BlockKind::SetGraphicsQuality { .. }
         | BlockKind::SetGraphicsOption { .. }
@@ -1071,6 +1073,17 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
         BlockKind::SetToneMapping { curve } => vec![Row(vec![
             label("set tone mapping to"),
             Part::Choice(curve, &axcenity_blocks::TONE_MAPPINGS),
+        ])],
+        BlockKind::SetClockTime { time } => vec![Row(vec![
+            label("set time of day to"),
+            Part::Slot(time, SlotKind::Number),
+            label("hours"),
+        ])],
+        BlockKind::SetAtmosphere { property, value } => vec![Row(vec![
+            label("set atmosphere"),
+            Part::Choice(property, &axcenity_blocks::ATMOSPHERE_NUMBERS),
+            label("to"),
+            Part::Slot(value, SlotKind::Number),
         ])],
         BlockKind::SetGraphicsQuality { quality } => vec![Row(vec![
             label("set graphics quality to"),

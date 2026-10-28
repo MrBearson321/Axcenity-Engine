@@ -950,6 +950,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Lighting,
+        "ClockTime",
+        "The time of day in hours, from 0 to 24 (25 becomes 1). The sun rises due east at 6, is highest at 12 and sets due west at 18; the moon, opposite it, lights the night, when the stars come out. Worlds made before it existed start at about 10.27, where their sun always was.",
+    ),
+    (
+        ClassName::Lighting,
+        "GeographicLatitude",
+        "How far north of the equator the world is, in degrees (negative is south). The noon sun stands this far from straight up, toward +Z north of the equator.",
+    ),
+    (
+        ClassName::Lighting,
         "PostProcessingEnabled",
         "If false, the scene is drawn with no tone mapping or bloom.",
     ),
@@ -1054,6 +1064,36 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::LightProbeVolume,
         "BlendDistance",
         "How far inside the part's faces, in studs, its light fades in from what's around it.",
+    ),
+    (
+        ClassName::Atmosphere,
+        "Density",
+        "How thick the air is, from 0 (none: a black sky and a white sun) to 1. 0.395 is Earth's.",
+    ),
+    (
+        ClassName::Atmosphere,
+        "Offset",
+        "How high above the ground the sky is seen from, from 0 to 1 (one height of the air up, where the sky above darkens).",
+    ),
+    (
+        ClassName::Atmosphere,
+        "Color",
+        "Tints the whole sky. The default grey leaves it as the air scatters it.",
+    ),
+    (
+        ClassName::Atmosphere,
+        "Decay",
+        "Tints the sky away from the sun. The default blue-grey leaves it as the air scatters it.",
+    ),
+    (
+        ClassName::Atmosphere,
+        "Glare",
+        "Brightens the glow around the sun, from 0 to 10.",
+    ),
+    (
+        ClassName::Atmosphere,
+        "Haze",
+        "Adds dust and haze to the air, from 0 to 10: a paler horizon, a wider glow around the sun, and a dimmer, redder sun.",
     ),
     (
         ClassName::ParticleEmitter,
@@ -3403,6 +3443,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::LightProbeVolume => {
             "Inside a Part: a grid of light probes filling the part's box, baked in the editor (Lighting > Bake Probes) with the light from the sun, lamps and sky and what it bounces off. Everything in the box, still or moving, is lit by the probes around it in place of the sky's even light, so a part beside a red wall picks up its red. Overlapping volumes blend, the smaller one winning, and each fades into what's around it over its BlendDistance. Changing the world doesn't change a bake until it's baked again; the Explorer warns when it's out of date."
+        }
+        ClassName::Atmosphere => {
+            "Inside Lighting: the sky is drawn as sunlight scattered by air in place of the sky colors: blue by day, red and orange toward sunset, dark and starry at night as ClockTime goes round. The air also colors the sun's light and lights and is reflected by parts. A SkyImage is still drawn in its place, but the sun's light is colored by the air."
         }
         ClassName::ParticleEmitter => {
             "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."

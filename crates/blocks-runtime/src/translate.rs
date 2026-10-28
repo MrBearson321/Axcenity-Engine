@@ -90,7 +90,7 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             BlockKind::SetLanguage { .. } => {
                 services.insert("LocalizationService");
             }
-            BlockKind::SetToneMapping { .. } => {
+            kind if kind.sets_lighting() => {
                 services.insert("Lighting");
             }
             kind if kind.sets_graphics() => {
@@ -646,6 +646,15 @@ impl Writer {
             BlockKind::SetToneMapping { curve } => {
                 let curve = choice(curve, &TONE_MAPPINGS, "a tone mapping")?;
                 self.line(format!("Lighting.ToneMapping = Enum.ToneMapping.{curve}"));
+            }
+            BlockKind::SetClockTime { time } => {
+                let time = self.expression(time)?;
+                self.line(format!("Lighting.ClockTime = {time}"));
+            }
+            BlockKind::SetAtmosphere { property, value } => {
+                let property = choice(property, &ATMOSPHERE_NUMBERS, "an atmosphere number")?;
+                let value = self.expression(value)?;
+                self.line(format!("Lighting.Atmosphere.{property} = {value}"));
             }
             BlockKind::SetGraphicsQuality { quality } => {
                 let quality = choice(quality, &GRAPHICS_QUALITIES, "a graphics quality")?;

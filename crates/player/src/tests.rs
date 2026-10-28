@@ -1199,6 +1199,7 @@ fn stripes_seen(
         ground_color: [0.0; 3],
         environment_intensity: 0.0,
         image: None,
+        ..Default::default()
     };
     list.ambient.intensity = 0.0;
     // Models and textures load the first time they're drawn.

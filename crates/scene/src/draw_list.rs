@@ -24,11 +24,6 @@ use crate::material;
 use crate::orientation::rotation_from_orientation;
 use crate::terrain::TerrainCache;
 
-const SUN: Sun = Sun {
-    direction: Vec3::new(0.5, 1.0, 0.25),
-    color: [1.0, 0.97, 0.92],
-    intensity: 3.0,
-};
 // A little flat light on top of the sky's, so shadowed corners aren't black.
 const AMBIENT: AmbientLight = AmbientLight {
     color: [0.75, 0.85, 1.0],
@@ -43,8 +38,9 @@ pub(crate) const GLOW_BOOST: f32 = 2.5;
 /// them). A MeshPart in here is drawn posed; the rest are drawn still.
 pub type Poses = HashMap<InstanceId, Arc<Posed>>;
 
-/// Everything the Lighting service's properties set.
+/// Everything the Lighting service's properties (and its Atmosphere) set.
 struct LightingSettings {
+    sun: Sun,
     shadows: Shadows,
     sky: Sky,
     post: PostProcessing,
@@ -53,6 +49,7 @@ struct LightingSettings {
 
 fn lighting_settings(world: &World, assets: &Assets) -> LightingSettings {
     let mut settings = LightingSettings {
+        sun: crate::time_of_day::default_sun(),
         shadows: Shadows::default(),
         sky: Sky::default(),
         post: PostProcessing::default(),
@@ -102,6 +99,7 @@ fn lighting_settings(world: &World, assets: &Assets) -> LightingSettings {
     post.bloom_enabled = bool_of("BloomEnabled", post.bloom_enabled);
     post.bloom_intensity = number_of("BloomIntensity", post.bloom_intensity);
     post.bloom_threshold = number_of("BloomThreshold", post.bloom_threshold);
+    settings.sun = crate::time_of_day::sun_and_sky(world, lighting, &mut settings.sky);
     settings
 }
 
@@ -344,7 +342,7 @@ pub fn build_draw_list_posed(
     DrawList {
         sky: settings.sky,
         camera,
-        sun: SUN,
+        sun: settings.sun,
         ambient: settings.ambient,
         shadows: settings.shadows,
         lights,
@@ -1001,7 +999,7 @@ fn channel_map(map: &ChannelTexture) -> ChannelMap {
 }
 
 /// Converts linear light to sRGB, the opposite of what the renderer does.
-fn srgb(linear: [f32; 3]) -> [f32; 3] {
+pub(crate) fn srgb(linear: [f32; 3]) -> [f32; 3] {
     linear.map(|c| {
         if c <= 0.0031308 {
             c * 12.92

@@ -14,11 +14,11 @@ use std::ops::Range;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 
-use crate::draw_list::{Sky, SkyImage};
+use crate::draw_list::SkyImage;
 use crate::graphics::{EnvironmentMapSize, ReflectionQuality};
 
+use super::atmosphere_sky::SkyLook;
 use super::gpu::shader_module;
-use super::lighting::linear_color;
 
 /// The environment maps' and sky image's format: light brighter than 1,
 /// which every GPU can draw into and filter.
@@ -231,7 +231,7 @@ impl Environment {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        sky: &Sky,
+        sky: &SkyLook,
         quality: ReflectionQuality,
         max_texture_size: u32,
     ) -> bool {
@@ -252,7 +252,7 @@ impl Environment {
         let Some(map) = map else {
             return rebind;
         };
-        let colors = [sky.top_color, sky.horizon_color, sky.ground_color].map(linear_color);
+        let colors = sky.colors;
         let key = BakeKey {
             colors: self.image.is_none().then(|| {
                 let [top, horizon, ground] = colors.map(|color| color.to_array().map(f32::to_bits));
@@ -677,7 +677,7 @@ fn gradient_sky(dir: Vec3, [top, horizon, ground]: [Vec3; 3]) -> Vec3 {
 
 /// The direction the middle of pixel (`x`, `y`) of a `width` × `height`
 /// sky image looks along: the inverse of `equirect_uv` in sky.wgsl.
-fn pixel_direction(x: u32, y: u32, width: u32, height: u32) -> Vec3 {
+pub(super) fn pixel_direction(x: u32, y: u32, width: u32, height: u32) -> Vec3 {
     let theta = (y as f32 + 0.5) / height as f32 * PI;
     let phi = ((x as f32 + 0.5) / width as f32 - 0.5) * 2.0 * PI;
     Vec3::new(

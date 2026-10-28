@@ -68,7 +68,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 20] = [
+const GROUPS: [(&str, &[&str]); 22] = [
     (
         "Appearance",
         &[
@@ -242,6 +242,7 @@ const GROUPS: [(&str, &[&str]); 20] = [
             "Looped",
         ],
     ),
+    ("Time of Day", &["ClockTime", "GeographicLatitude"]),
     (
         "Shadows",
         &[
@@ -260,6 +261,10 @@ const GROUPS: [(&str, &[&str]); 20] = [
             "EnvironmentIntensity",
             "SkyImage",
         ],
+    ),
+    (
+        "Atmosphere",
+        &["Density", "Offset", "Decay", "Glare", "Haze"],
     ),
     (
         "Post-processing",
@@ -371,7 +376,10 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
             "Auto Material" => instance.class() == ClassName::TerrainLayer,
             "UI" => crate::style_panel::is_styled(instance.class()),
             "Audio" => instance.class() == ClassName::Sound,
-            "Shadows" | "Sky" | "Post-processing" => instance.class() == ClassName::Lighting,
+            "Time of Day" | "Shadows" | "Sky" | "Post-processing" => {
+                instance.class() == ClassName::Lighting
+            }
+            "Atmosphere" => instance.class() == ClassName::Atmosphere,
             "Light" => matches!(
                 instance.class(),
                 ClassName::PointLight | ClassName::SpotLight
@@ -787,7 +795,9 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "UI" => icons::LAYOUT,
         "Audio" => icons::SPEAKER_HIGH,
         "Shadows" => icons::SUN,
+        "Time of Day" => icons::CLOCK,
         "Sky" => icons::CLOUD_SUN,
+        "Atmosphere" => icons::WIND,
         "Post-processing" => icons::SPARKLE,
         "Light" => icons::LIGHTBULB,
         "Attributes" => icons::LIST_BULLETS,
@@ -1156,6 +1166,34 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             .then_some(Value::Number(number)),
         Value::Number(mut number) if name == "AmbientOcclusionIntensity" => ui
             .add(egui::Slider::new(&mut number, 0.0..=2.0).clamping(egui::SliderClamping::Edits))
+            .changed()
+            .then_some(Value::Number(number)),
+        // Lighting's time of day goes round the clock (the world wraps it).
+        Value::Number(mut number) if name == "ClockTime" => ui
+            .add(
+                egui::Slider::new(&mut number, 0.0..=24.0)
+                    .clamping(egui::SliderClamping::Never)
+                    .suffix(" h")
+                    .max_decimals(2),
+            )
+            .changed()
+            .then_some(Value::Number(number)),
+        Value::Number(mut number) if name == "GeographicLatitude" => ui
+            .add(
+                egui::Slider::new(&mut number, -90.0..=90.0)
+                    .clamping(egui::SliderClamping::Always)
+                    .suffix("°")
+                    .max_decimals(1),
+            )
+            .changed()
+            .then_some(Value::Number(number)),
+        // An Atmosphere's air.
+        Value::Number(mut number) if matches!(name, "Density" | "Offset") => ui
+            .add(egui::Slider::new(&mut number, 0.0..=1.0).clamping(egui::SliderClamping::Always))
+            .changed()
+            .then_some(Value::Number(number)),
+        Value::Number(mut number) if matches!(name, "Glare" | "Haze") => ui
+            .add(egui::Slider::new(&mut number, 0.0..=10.0).clamping(egui::SliderClamping::Always))
             .changed()
             .then_some(Value::Number(number)),
         // A UI element's three see-through parts, as percentages.

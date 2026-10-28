@@ -1355,6 +1355,37 @@ fn lighting_tone_mapping_takes_enum_items_and_names() {
 }
 
 #[test]
+fn a_script_sets_the_time_of_day_and_makes_an_atmosphere() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/day.server.lua",
+        "local Lighting = game:GetService(\"Lighting\")
+         Lighting.ClockTime = 25.5
+         print(Lighting.ClockTime)
+         Lighting.GeographicLatitude = -30
+         local air = Instance.new(\"Atmosphere\")
+         air.Density = 0.6
+         air.Haze = 3
+         air.Color = Color3.new(1, 0.8, 0.6)
+         air.Parent = Lighting
+         print(Lighting:FindFirstChildOfClass(\"Atmosphere\") == air, Lighting.Atmosphere.Glare)",
+    );
+    assert_eq!(lines(&mut runtime), ["1.5", "true	0"]);
+    assert_eq!(
+        property(&world, world.lighting(), "GeographicLatitude"),
+        Value::Number(-30.0)
+    );
+    let air = world
+        .find_first_child(world.lighting(), "Atmosphere")
+        .unwrap();
+    assert_eq!(property(&world, air, "Density"), Value::Number(0.6));
+    assert_eq!(property(&world, air, "Haze"), Value::Number(3.0));
+}
+
+#[test]
 fn animator_parameters_are_set_and_read_by_kind() {
     let mut world = World::new();
     let animator = world.create(ClassName::Animator).unwrap();

@@ -11,10 +11,10 @@ use std::collections::BTreeSet;
 
 use crate::lua::{self, Expr, ExprKind, FunctionBody, Stat, StatKind, SyntaxError};
 use crate::{
-    Block, BlockKind, BlockScript, BlockShape, CAMERA_TYPES, Comparison, EASING_DIRECTIONS,
-    EASING_STYLES, Expression, GRAPHICS_NUMBERS, GRAPHICS_OPTIONS, GRAPHICS_QUALITIES,
-    GRAPHICS_SWITCHES, LogicOp, MathFunction, MathOp, PRESET, TONE_MAPPINGS, graphics_choices,
-    translate,
+    ATMOSPHERE_NUMBERS, Block, BlockKind, BlockScript, BlockShape, CAMERA_TYPES, Comparison,
+    EASING_DIRECTIONS, EASING_STYLES, Expression, GRAPHICS_NUMBERS, GRAPHICS_OPTIONS,
+    GRAPHICS_QUALITIES, GRAPHICS_SWITCHES, LogicOp, MathFunction, MathOp, PRESET, TONE_MAPPINGS,
+    graphics_choices, translate,
 };
 
 /// The services blocks get with `game:GetService`, which the translation
@@ -168,7 +168,7 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             BlockKind::SetLanguage { .. } => {
                 services.insert("LocalizationService".to_owned());
             }
-            BlockKind::SetToneMapping { .. } => {
+            kind if kind.sets_lighting() => {
                 services.insert("Lighting".to_owned());
             }
             kind if kind.sets_graphics() => {
@@ -1336,6 +1336,23 @@ impl<'a> Converter<'a> {
         if property == "ToneMapping" && self.is_service(object, "Lighting") {
             return Some(BlockKind::SetToneMapping {
                 curve: enum_item(value, "ToneMapping", &TONE_MAPPINGS)?,
+            });
+        }
+        // Lighting.ClockTime = 18
+        if property == "ClockTime" && self.is_service(object, "Lighting") {
+            return Some(BlockKind::SetClockTime {
+                time: self.expression(value, scope),
+            });
+        }
+        // Lighting.Atmosphere.Haze = 2
+        if let ExprKind::Field(parent, child) = &object.kind
+            && child == "Atmosphere"
+            && self.is_service(parent, "Lighting")
+            && ATMOSPHERE_NUMBERS.contains(&property.as_str())
+        {
+            return Some(BlockKind::SetAtmosphere {
+                property: property.clone(),
+                value: self.expression(value, scope),
             });
         }
         if self.is_service(object, "UserGameSettings") {

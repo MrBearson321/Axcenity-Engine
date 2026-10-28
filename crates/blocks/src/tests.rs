@@ -120,9 +120,11 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetFriction { .. } => 64,
         BlockKind::ForEachPartInRadius { .. } => 65,
         BlockKind::ForEachPartTouching { .. } => 66,
+        BlockKind::SetClockTime { .. } => 67,
+        BlockKind::SetAtmosphere { .. } => 68,
     })
 }
-const STATEMENT_COUNT: usize = 67;
+const STATEMENT_COUNT: usize = 69;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -477,6 +479,17 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 curve: "Filmic".to_owned(),
             },
             "Lighting.ToneMapping = Enum.ToneMapping.Filmic",
+        ),
+        (
+            BlockKind::SetClockTime { time: number(18.5) },
+            "Lighting.ClockTime = 18.5",
+        ),
+        (
+            BlockKind::SetAtmosphere {
+                property: "Haze".to_owned(),
+                value: number(2.0),
+            },
+            "Lighting.Atmosphere.Haze = 2",
         ),
         (
             BlockKind::SetLanguage {
@@ -1037,6 +1050,77 @@ fn translated_blocks_run_in_the_scheduler_like_typed_lua() {
         .map(|line| (line.kind, line.text))
         .collect();
     assert_eq!(output, [(OutputKind::Print, "moves: 3".to_owned())]);
+}
+
+/// The time of day and atmosphere blocks set Lighting's ClockTime and its
+/// Atmosphere's air, and come back from their Lua.
+#[test]
+fn the_time_of_day_and_atmosphere_blocks_set_lighting_and_come_back_from_lua() {
+    let blocks = script(vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![
+                block(2, BlockKind::SetClockTime { time: number(18.5) }),
+                block(
+                    3,
+                    BlockKind::SetAtmosphere {
+                        property: "Haze".to_owned(),
+                        value: number(2.0),
+                    },
+                ),
+            ],
+        },
+    )]);
+    let source = translate(&blocks).unwrap().source;
+    assert!(
+        source.starts_with("local Lighting = game:GetService(\"Lighting\")"),
+        "{source}"
+    );
+
+    let mut world = World::new();
+    let atmosphere = world.create(ClassName::Atmosphere).unwrap();
+    world
+        .set_parent(atmosphere, Some(world.lighting()))
+        .unwrap();
+    let lua = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(lua, Some(world.server_script_service()))
+        .unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, lua, "scripts/Day.server.blocks.json", &source);
+    runtime.step(&mut world, 0.1);
+    assert_eq!(
+        world.get(world.lighting()).unwrap().property("ClockTime"),
+        Some(&Value::Number(18.5))
+    );
+    assert_eq!(
+        world.get(atmosphere).unwrap().property("Haze"),
+        Some(&Value::Number(2.0))
+    );
+
+    let back = crate::from_lua(&source).unwrap();
+    assert_eq!(translate(&back).unwrap().source, source);
+    let mut kinds = Vec::new();
+    back.for_each_block(&mut |b| kinds.push(b.kind.clone()));
+    assert!(kinds.contains(&BlockKind::SetClockTime { time: number(18.5) }));
+    assert!(kinds.contains(&BlockKind::SetAtmosphere {
+        property: "Haze".to_owned(),
+        value: number(2.0),
+    }));
+
+    let wrong = script(vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![block(
+                2,
+                BlockKind::SetAtmosphere {
+                    property: "Color".to_owned(),
+                    value: number(1.0),
+                },
+            )],
+        },
+    )]);
+    assert!(translate(&wrong).is_err());
 }
 
 #[test]

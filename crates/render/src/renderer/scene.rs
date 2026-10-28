@@ -370,6 +370,7 @@ impl ScenePipeline {
             post,
             frame_targets,
             occlusion,
+            atmosphere: Default::default(),
             environment,
             probes,
             light_probes,
@@ -575,11 +576,14 @@ impl ScenePipeline {
         // makes fewer or more than the output's. UI uses the output's.
         let quality = self.graphics.shadow_quality;
         let planned_lights = plan_lights(list, aspect, self.frame_targets.size, quality);
-        // The sky's maps are baked here only when the sky has changed.
+        // An atmosphere's sky is worked out, and the sky's maps baked, only
+        // when the sky has changed.
+        let maps = self.graphics.reflection_quality.map().is_some();
+        let sky = self.atmosphere.look(&list.sky, maps);
         if self.environment.prepare(
             &self.device,
             &self.queue,
-            &list.sky,
+            &sky,
             self.graphics.reflection_quality,
             self.capabilities.max_texture_size,
         ) {
@@ -622,6 +626,20 @@ impl ScenePipeline {
         }
         let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
         (frame_uniform.environment, frame_uniform.sky_light) = self.environment.uniform();
+        let sky_colors = [
+            &mut frame_uniform.sky_top,
+            &mut frame_uniform.sky_horizon,
+            &mut frame_uniform.sky_ground,
+        ];
+        for (slot, color) in sky_colors.into_iter().zip(sky.colors) {
+            slot[..3].copy_from_slice(&color.to_array());
+        }
+        let stars = if list.sky.stars.is_finite() {
+            list.sky.stars.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        frame_uniform.night = [stars, f32::from(u8::from(sky.scattered)), 0.0, 0.0];
         let (probes, probe_count) = self.probes.uniform();
         frame_uniform.probes = probes;
         frame_uniform.reflection_probes[0] = probe_count;

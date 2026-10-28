@@ -84,6 +84,9 @@ pub(super) struct FrameUniform {
     pub(super) volumes: [light_probes::VolumeRaw; light_probes::MAX_VOLUMES],
     /// Seconds (`DrawList::time`), then unused.
     pub(super) clock: [f32; 4],
+    /// How bright the stars are, and 1 when the sky image is an
+    /// atmosphere's (lighting.wgsl's `night`).
+    pub(super) night: [f32; 4],
 }
 
 /// The most point and spot lights drawn at once.
@@ -652,6 +655,8 @@ pub(super) struct ScenePipeline {
     pub(super) frame_targets: FrameTargets,
     /// The prepass and ambient occlusion pipelines.
     pub(super) occlusion: OcclusionPasses,
+    /// An atmosphere's sky, worked out when the air or the sun moves.
+    pub(super) atmosphere: atmosphere_sky::AtmosphereSky,
     /// The sky's environment maps, baked when the sky changes.
     pub(super) environment: environment::Environment,
     /// Reflection probes' baked reflections, each filtered once.

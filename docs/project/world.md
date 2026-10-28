@@ -52,7 +52,7 @@ my-game/
 }
 ```
 
-- **Lighting** (Phase 30): the `Lighting` service's properties (`ShadowsEnabled`, `ShadowDistance`) are saved as an optional `lighting` section, `{ "properties": { ... } }`, only when one differs from its default, so older files and their saved text stay the same. Nothing can be saved inside Lighting.
+- **Lighting** (Phase 30): the `Lighting` service's properties (`ShadowsEnabled`, `ShadowDistance`, `ClockTime`...) are saved as an optional `lighting` section, `{ "properties": { ... } }`, only when one differs from its default or something is inside Lighting, so older files and their saved text stay the same. What's inside Lighting (an `Atmosphere`, graphics Phase 24) is saved as its `children`, like the Workspace's.
 - **ReplicatedStorage** (decided in Phase 14, chosen by the developer): the optional `replicated_storage` section is written like `workspace`, and only when it has something in it, so older files and their saved text stay the same. `format_version` stays 1: older engines would reject the new field, but no older engine is in use. These two services are the only saved ones; Players (made at Play) and scripts are never in the file. A `LocalScript` or `Player` listed in the file is an error.
 
 ## Properties

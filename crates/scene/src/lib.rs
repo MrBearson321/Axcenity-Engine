@@ -6,6 +6,7 @@
 //! - [`FlyCamera`] is the camera both of them look through.
 //! - [`Particles`] moves ParticleEmitters' particles and draws them as sprites.
 //! - [`TerrainCache`] keeps Terrains' chunk meshes and weights between frames.
+//! - [`sun_direction`] is where the sun is at a time of day and latitude.
 //! - [`asset_files`] lists the models, textures and material files drawing a
 //!   world reads.
 //! - [`part_material_file`] makes a material file from a Part's look.
@@ -26,6 +27,7 @@ mod preload;
 #[cfg(test)]
 mod reload_tests;
 mod terrain;
+mod time_of_day;
 
 pub use camera::{FlyCamera, MoveKeys};
 pub use draw_list::{
@@ -43,3 +45,4 @@ pub use pick::{
 };
 pub use preload::{AssetFile, asset_files};
 pub use terrain::{DEFAULT_DETAIL_DISTANCE, TerrainCache, terrain_hit};
+pub use time_of_day::sun_direction;

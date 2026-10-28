@@ -750,6 +750,10 @@ impl World {
             Value::Number(n) if class == ClassName::IntValue && name == "Value" => {
                 Value::Number(n.round())
             }
+            // The time of day goes round the clock: 25 is 1 in the morning.
+            Value::Number(n) if class == ClassName::Lighting && name == "ClockTime" => {
+                Value::Number(n.rem_euclid(24.0))
+            }
             value => value,
         };
         // `get_key_value` also returns the stored `&'static str` key, which the

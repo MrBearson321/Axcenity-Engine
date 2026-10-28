@@ -288,6 +288,52 @@ fn a_world_saved_without_tone_mapping_opens_with_classic() {
     fs::remove_dir_all(parent).unwrap();
 }
 
+/// Lighting's time of day and an Atmosphere inside it are saved with the
+/// world and come back when it's opened. A world without them is written
+/// as before: no `lighting` at all.
+#[test]
+fn the_time_of_day_and_an_atmosphere_save_with_the_world() {
+    let mut world = World::new();
+    assert!(!write_world(&world).contains("lighting"));
+    let lighting = world.lighting();
+    world
+        .set_property(lighting, "ClockTime", Value::Number(17.5))
+        .unwrap();
+    let atmosphere = world.create(ClassName::Atmosphere).unwrap();
+    world.set_parent(atmosphere, Some(lighting)).unwrap();
+    world
+        .set_property(atmosphere, "Haze", Value::Number(2.5))
+        .unwrap();
+
+    let parent = temp_folder("atmosphere");
+    let folder = create_project(&parent, "Dusk").unwrap();
+    save_world(&folder, &world).unwrap();
+    let project = load(&folder).unwrap();
+    assert!(project.problems.is_empty(), "{:?}", project.problems);
+    let world = &project.world;
+    let lighting = world.get(world.lighting()).unwrap();
+    assert_eq!(lighting.property("ClockTime"), Some(&Value::Number(17.5)));
+    let atmosphere = world
+        .find_first_child(world.lighting(), "Atmosphere")
+        .and_then(|id| world.get(id))
+        .expect("the Atmosphere comes back");
+    assert_eq!(atmosphere.class(), ClassName::Atmosphere);
+    assert_eq!(atmosphere.property("Haze"), Some(&Value::Number(2.5)));
+
+    // An Atmosphere alone (every setting its default) is saved too.
+    let mut only = World::new();
+    let air = only.create(ClassName::Atmosphere).unwrap();
+    only.set_parent(air, Some(only.lighting())).unwrap();
+    let text = write_world(&only);
+    let back = parse_world(&text).unwrap();
+    assert!(
+        back.find_first_child(back.lighting(), "Atmosphere")
+            .is_some(),
+        "{text}"
+    );
+    fs::remove_dir_all(parent).unwrap();
+}
+
 #[test]
 fn a_new_project_loads_and_its_settings_can_change() {
     let parent = temp_folder("new-project");

@@ -1303,6 +1303,9 @@ mod camera_tests;
 mod graphics_tests;
 
 #[cfg(test)]
+mod time_of_day_tests;
+
+#[cfg(test)]
 mod bench_tests;
 
 #[cfg(test)]

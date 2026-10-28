@@ -420,8 +420,8 @@ Lighting gains `ClockTime` and `GeographicLatitude`, which set the sun's and moo
 
 ### Acceptance criteria
 
-- [ ] Moving `ClockTime` from noon to dusk reddens the sun and sky and lengthens shadows. A world without Atmosphere looks as before.
-- [ ] Atmosphere and ClockTime save with the world and can be set from scripts and blocks.
+- [x] Moving `ClockTime` from noon to dusk reddens the sun and sky and lengthens shadows. A world without Atmosphere looks as before.
+- [x] Atmosphere and ClockTime save with the world and can be set from scripts and blocks.
 
 ---
 

@@ -146,6 +146,8 @@ pub(super) fn frame_uniform(
         light_probes: [0; 4],
         volumes: Default::default(),
         clock: [list.time, 0.0, 0.0, 0.0],
+        // The sky's look fills this in.
+        night: [0.0; 4],
     }
 }
 

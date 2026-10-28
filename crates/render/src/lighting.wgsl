@@ -70,6 +70,9 @@ struct Frame {
     volumes: array<Volume, MAX_VOLUMES>,
     // x: seconds (`DrawList::time`), for surface shaders that move.
     clock: vec4<f32>,
+    // x: how bright the stars are (0 by day), y: 1 when the sky image is an
+    // atmosphere's, so the sun or moon and the stars are drawn over it.
+    night: vec4<f32>,
 }
 
 // The most light probe volumes drawn at once. Must match `MAX_VOLUMES` in
@@ -457,10 +460,12 @@ fn sky_gradient(dir: vec3<f32>) -> vec3<f32> {
 }
 
 // What's drawn as the sky looking along `dir`, where one pixel covers
-// `spread` radians of it: the sky image, or the gradient plus the sun. The
-// sun's disc is far brighter than 1, so it blooms. A sky image has its own
-// sun (or none), so none is drawn over it.
+// `spread` radians of it: the sky image, or the gradient, plus the sun (or
+// the moon at night: whichever lights the scene) and the stars. The disc is
+// far brighter than 1, so it blooms. A creator's sky image has its own sun
+// (or none), so nothing is drawn over it; an atmosphere's has none.
 fn sky_radiance(dir: vec3<f32>, spread: f32) -> vec3<f32> {
+    var sky: vec3<f32>;
     if frame.environment.z > 0.5 {
         // The image's level whose pixels are about the size of the screen's,
         // so its detail doesn't shimmer. Toward straight up and down its
@@ -469,15 +474,52 @@ fn sky_radiance(dir: vec3<f32>, spread: f32) -> vec3<f32> {
         // average).
         let across = max(sqrt(max(1.0 - dir.y * dir.y, 0.0)), 0.0625);
         let level = log2(max(spread * frame.environment.w / (2.0 * PI) / across, 1.0));
-        return textureSampleLevel(sky_image, environment_sampler, equirect_uv(dir), level).rgb;
+        sky = textureSampleLevel(sky_image, environment_sampler, equirect_uv(dir), level).rgb;
+        if frame.night.y < 0.5 {
+            return sky;
+        }
+    } else {
+        sky = sky_gradient(dir);
     }
     if frame.light_probes.y != 0u {
-        return sky_gradient(dir);
+        return sky;
     }
     let toward_sun = dot(dir, frame.sun_direction.xyz);
-    let disc = smoothstep(0.99965, 0.99985, toward_sun);
+    // Hidden by the ground once it sets.
+    let above = smoothstep(-0.004, 0.004, dir.y);
+    let disc = smoothstep(0.99965, 0.99985, toward_sun) * above;
     let glow = pow(max(toward_sun, 0.0), 200.0) * 0.4;
-    return sky_gradient(dir) + frame.sun_radiance.rgb * (glow + disc * 8.0);
+    return sky + frame.sun_radiance.rgb * (glow + disc * 8.0) + stars(dir, spread) * frame.night.x;
+}
+
+// A number from 0 to 1 for each whole-numbered point (a hash).
+fn cell_hash(cell: vec3<f32>) -> vec4<f32> {
+    var p = fract(cell * vec3<f32>(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    let q = fract((p.xxy + p.yzz) * p.zyx);
+    return vec4<f32>(q, fract(dot(q, vec3<f32>(17.13, 31.71, 11.37))));
+}
+
+// The stars' light looking along `dir`: a few of the cells of a grid around
+// the viewer hold a star, at a point of their own, about a pixel wide
+// (`spread`) and of its own brightness, fading out toward the horizon.
+fn stars(dir: vec3<f32>, spread: f32) -> vec3<f32> {
+    if dir.y <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let scaled = dir * 150.0;
+    let cell = floor(scaled);
+    let hash = cell_hash(cell);
+    if hash.w < 0.993 {
+        return vec3<f32>(0.0);
+    }
+    let star = normalize(cell + 0.15 + hash.xyz * 0.7);
+    let width = max(spread, 0.0004) * 1.2;
+    let near = 1.0 - smoothstep(0.0, width, acos(clamp(dot(dir, star), -1.0, 1.0)));
+    // Most are faint; a few are bright.
+    let brightness = pow((hash.w - 0.993) / 0.007, 3.0);
+    let tint = mix(vec3<f32>(0.75, 0.85, 1.0), vec3<f32>(1.0, 0.9, 0.75), hash.x);
+    return tint * near * (0.15 + 1.85 * brightness) * smoothstep(0.0, 0.15, dir.y);
 }
 
 // Light from the whole sky that reaches a surface facing `n`: a smooth

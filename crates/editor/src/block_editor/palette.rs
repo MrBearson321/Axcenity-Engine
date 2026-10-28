@@ -260,6 +260,11 @@ pub(super) fn palette(
             B(BlockKind::SetToneMapping {
                 curve: "Neutral".to_owned(),
             }),
+            B(BlockKind::SetClockTime { time: number(18.0) }),
+            B(BlockKind::SetAtmosphere {
+                property: "Haze".to_owned(),
+                value: number(2.0),
+            }),
             B(BlockKind::SetGraphicsQuality {
                 quality: "High".to_owned(),
             }),
