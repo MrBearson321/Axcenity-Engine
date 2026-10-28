@@ -276,6 +276,9 @@ pub struct ViewportScene<'a> {
     pub focused_text: Option<InstanceId>,
     /// The game's loading screen during Play, drawn over the other UI.
     pub loading_screen: Option<InstanceId>,
+    /// The player character's Inventory during Play, whose hotbar is drawn
+    /// over the game UI.
+    pub hotbar: Option<InstanceId>,
     /// The ProximityPrompts that show during Play, drawn over the game UI.
     pub prompts: Vec<axcenity_ui::PromptView>,
     /// The cursor over a ClickDetector during Play (a CSS cursor name).
@@ -692,6 +695,7 @@ impl Viewport {
             stylesheets,
             focused_text,
             loading_screen,
+            hotbar,
             prompts,
             click_cursor,
             light_cones,
@@ -982,6 +986,15 @@ impl Viewport {
             axcenity_scene::build_draw_list_posed(world, assets, camera, poses, &mut self.terrain);
         draw_list.sprites = self.particles.sprites(world, assets);
         draw_list.ui = ui_layout.draw_items.clone();
+        if let Some(inventory) = hotbar {
+            draw_list.ui.extend(axcenity_ui::hotbar_items(
+                world,
+                inventory,
+                stylesheets,
+                width,
+                height,
+            ));
+        }
         draw_list.ui.extend(axcenity_ui::prompt_items(
             world,
             &prompts,

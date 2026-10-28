@@ -1,0 +1,127 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Position": [0, -0.5, 0],
+          "Size": [80, 1, 80],
+          "Color": [0.35, 0.37, 0.4],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Character",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Position": [0, 2.5, 0],
+              "Size": [2, 5, 1],
+              "Color": [0.2, 0.55, 0.9]
+            }
+          },
+          {
+            "class": "ThirdPersonController",
+            "name": "ThirdPersonController"
+          },
+          {
+            "class": "Inventory",
+            "name": "Inventory",
+            "properties": {
+              "Capacity": 2
+            }
+          }
+        ]
+      },
+      {
+        "class": "Tool",
+        "name": "Sword",
+        "properties": {
+          "ToolTip": "Click to swing",
+          "Item": "weapons:sword"
+        },
+        "attributes": { "Sharpness": 3 },
+        "children": [
+          {
+            "class": "Part",
+            "name": "Handle",
+            "properties": {
+              "Position": [0, 0.2, -8],
+              "Size": [0.4, 0.4, 4],
+              "Color": [0.8, 0.82, 0.86],
+              "Material": "Metal"
+            },
+            "children": [
+              {
+                "class": "Attachment",
+                "name": "Grip",
+                "properties": {
+                  "Position": [0, 0, 1.5]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "class": "Tool",
+        "name": "Torch",
+        "properties": {
+          "ToolTip": "Click to wave",
+          "Item": "weapons:torch"
+        },
+        "children": [
+          {
+            "class": "Part",
+            "name": "Handle",
+            "properties": {
+              "Position": [6, 0.25, -8],
+              "Size": [0.5, 0.5, 2.5],
+              "Color": [0.45, 0.28, 0.12]
+            },
+            "children": [
+              {
+                "class": "Attachment",
+                "name": "Grip",
+                "properties": {
+                  "Position": [0, 0, 0.9]
+                }
+              },
+              {
+                "class": "PointLight",
+                "name": "Flame",
+                "properties": {
+                  "Color": [1, 0.65, 0.3],
+                  "Range": 12
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "class": "Tool",
+        "name": "Shield",
+        "properties": {
+          "Item": "weapons:shield"
+        },
+        "children": [
+          {
+            "class": "Part",
+            "name": "Handle",
+            "properties": {
+              "Position": [-6, 0.25, -8],
+              "Size": [2.5, 0.5, 3],
+              "Color": [0.6, 0.2, 0.2]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

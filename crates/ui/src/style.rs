@@ -197,7 +197,7 @@ struct SimpleSelector {
     hovered: bool,
     active: bool,
     disabled: bool,
-    /// `:checked`: a Toggle that's on.
+    /// `:checked`: a Toggle that's on, or a Tool in hand.
     checked: bool,
     /// `:focus`: the element navigation focused, or a TextBox being typed in.
     focus: bool,
@@ -653,8 +653,14 @@ fn simple_matches(
             !interactable,
         ),
     };
-    let checked = instance.class() == ClassName::Toggle
-        && instance.property("Value").and_then(Value::as_bool) == Some(true);
+    // A Toggle that's on, or a Tool in its Inventory's hand (the hotbar's
+    // slot, Phase 45).
+    let checked = match instance.class() {
+        ClassName::Toggle => instance.property("Value").and_then(Value::as_bool) == Some(true),
+        ClassName::Tool => axcenity_core::tool::inventory_holding(world, id)
+            .is_some_and(|inventory| axcenity_core::tool::equipped(world, inventory) == Some(id)),
+        _ => false,
+    };
     let focused = pseudo.focused == Some(id) || pseudo.selected == Some(id);
     if (selector.hovered && !hovered)
         || (selector.active && !active)

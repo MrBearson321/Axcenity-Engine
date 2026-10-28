@@ -71,6 +71,7 @@ pub use query::{
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use axcenity_assets::Assets;
+use axcenity_core::tool::Carried;
 use axcenity_core::{
     ClassName, Instance, InstanceId, Material, PhysicalProperties, Value, Vector3, World,
 };
@@ -281,6 +282,14 @@ impl PartState {
             Some(Value::Bool(anchored)) => *anchored,
             _ => return None,
         };
+        // A Tool put away in an Inventory is out of the world; one in hand
+        // follows the hand, held still and walked through (Phase 45).
+        let carried = axcenity_core::tool::carried(world, id);
+        if carried == Some(Carried::Stored) {
+            return None;
+        }
+        let held = carried == Some(Carried::Held);
+        let anchored = anchored || held;
         let shape = match instance.class() {
             ClassName::MeshPart => {
                 let mesh_id = instance.property("MeshId").and_then(Value::as_str)?;
@@ -288,7 +297,8 @@ impl PartState {
             }
             _ => Form::Primitive(instance.property("Shape").and_then(Value::as_part_type)?),
         };
-        let can_collide = instance.property("CanCollide").and_then(Value::as_bool) != Some(false);
+        let can_collide =
+            !held && instance.property("CanCollide").and_then(Value::as_bool) != Some(false);
         let wind_affected =
             instance.property("WindAffected").and_then(Value::as_bool) == Some(true);
         let massless = instance.property("Massless").and_then(Value::as_bool) == Some(true);

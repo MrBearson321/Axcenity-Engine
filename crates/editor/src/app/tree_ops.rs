@@ -150,6 +150,35 @@ impl EditorApp {
             self.insert_named(what, model, what.class().as_str(), Vec::new());
             return;
         }
+        // So does an Inventory: the character's.
+        if what == Insertable::Inventory {
+            let model = tree::model_of(&self.world, near.or(self.selected));
+            if model.is_none() {
+                self.output.warning(
+                    "An Inventory works inside a character's Model: select the character \
+                     (or a part of it) and insert it again, or move this one into it.",
+                );
+            }
+            self.insert_named(what, model, what.class().as_str(), Vec::new());
+            return;
+        }
+        // The Tool and its Handle are one undo step.
+        if what == Insertable::Tool {
+            let parent = tree::insert_parent(&self.world, near, what);
+            let position = self.insert_position();
+            let tool = tree::tool(&mut self.world, position);
+            let name = tree::unique_name(&self.world, parent, "Tool");
+            self.world.set_name(tool, &name).expect("just made");
+            let index = self.world.get(parent).map_or(0, |p| p.children().len());
+            if self.place(
+                tool,
+                Some(Place { parent, index }),
+                format!("Insert {name}"),
+            ) {
+                self.select_from_viewport(Some(tool));
+            }
+            return;
+        }
         if what == Insertable::HealthBar {
             self.insert_health_bar(near.or(self.selected));
             return;

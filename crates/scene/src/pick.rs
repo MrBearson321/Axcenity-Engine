@@ -150,7 +150,7 @@ pub fn pick_hit_skipping(world: &World, ray: Ray, skip: &[InstanceId]) -> Option
             },
         );
     for id in world.descendants(world.workspace()) {
-        if skip.contains(&id) {
+        if skip.contains(&id) || axcenity_core::tool::is_stored(world, id) {
             continue;
         }
         let Some((shape, transform)) = world.get(id).and_then(part_placement) else {

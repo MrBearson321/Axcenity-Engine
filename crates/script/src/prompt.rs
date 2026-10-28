@@ -49,7 +49,7 @@ impl Fired {
         }
     }
 
-    fn bare(instance: InstanceId, event: &'static str) -> Self {
+    pub(crate) fn bare(instance: InstanceId, event: &'static str) -> Self {
         Self {
             instance,
             event,

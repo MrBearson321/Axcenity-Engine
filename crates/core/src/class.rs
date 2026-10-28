@@ -216,6 +216,17 @@ pub enum ClassName {
     /// and `RightMouseClick` fire when the mouse clicks it from within
     /// `MaxActivationDistance`, and the cursor turns to `CursorIcon` over it.
     ClickDetector,
+    /// Something a character can carry (Phase 45), a Model of parts with
+    /// one `Handle`: touching a dropped one puts it in the character's
+    /// Inventory, and equipping holds it in the right hand by its `Grip`.
+    /// Fires `Equipped`, `Unequipped`, `Activated` (the Primary action) and
+    /// `Deactivated`.
+    Tool,
+    /// The Tools a character carries (Phase 45), put in the character's
+    /// Model: up to `Capacity` of them, as its children, and the one in
+    /// hand (`Equipped`). The default hotbar shows them while
+    /// `HotbarEnabled` is on.
+    Inventory,
     /// Holds `Part0` and `Part1` together where they were when it was made
     /// or enabled. Welded unanchored parts move as one body: an assembly.
     WeldConstraint,
@@ -264,7 +275,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 85] = [
+    pub const ALL: [ClassName; 87] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -328,6 +339,8 @@ impl ClassName {
         ClassName::Health,
         ClassName::ProximityPrompt,
         ClassName::ClickDetector,
+        ClassName::Tool,
+        ClassName::Inventory,
         ClassName::WeldConstraint,
         ClassName::HingeConstraint,
         ClassName::BallSocketConstraint,
@@ -417,6 +430,8 @@ impl ClassName {
             ClassName::Health => "Health",
             ClassName::ProximityPrompt => "ProximityPrompt",
             ClassName::ClickDetector => "ClickDetector",
+            ClassName::Tool => "Tool",
+            ClassName::Inventory => "Inventory",
             ClassName::WeldConstraint => "WeldConstraint",
             ClassName::HingeConstraint => "HingeConstraint",
             ClassName::BallSocketConstraint => "BallSocketConstraint",
@@ -465,6 +480,7 @@ impl ClassName {
             ClassName::Seat | ClassName::DamageZone => &["Part", "BasePart", "PVInstance"],
             ClassName::VehicleSeat => &["Seat", "Part", "BasePart", "PVInstance"],
             ClassName::Model => &["PVInstance"],
+            ClassName::Tool => &["Model", "PVInstance"],
             ClassName::Script | ClassName::ModuleScript => &["LuaSourceContainer"],
             ClassName::LocalScript => &["Script", "LuaSourceContainer"],
             ClassName::TextButton => &["GuiButton", "GuiObject", "GuiBase2d"],
@@ -1549,6 +1565,34 @@ impl ClassName {
                 // "pointer" or "crosshair". Empty is the pointing hand.
                 ("CursorIcon", Value::String(String::new())),
             ],
+            ClassName::Tool => vec![
+                // The part that's held and touched to pick it up. Empty is
+                // its child part named "Handle".
+                ("Handle", Value::Instance(None)),
+                // The Attachment in the Handle that goes in the hand. Empty
+                // is the Handle's Attachment named "Grip", else its middle.
+                ("Grip", Value::Instance(None)),
+                // Off, a Tool with no Handle can still be carried and
+                // equipped; it's never picked up by touch.
+                ("RequiresHandle", Value::Bool(true)),
+                ("CanBeDropped", Value::Bool(true)),
+                // What the hotbar shows for it: ToolTip on hover, the
+                // TextureId image in its slot (its Name with none).
+                ("ToolTip", Value::String(String::new())),
+                ("TextureId", Value::String(String::new())),
+                // The data-table row it is, as "table:key" (such as
+                // "weapons:sword"). Empty for none.
+                ("Item", Value::String(String::new())),
+            ],
+            ClassName::Inventory => vec![
+                // How many Tools it holds; touching more leaves them.
+                ("Capacity", Value::Number(10.0)),
+                // The Tool in hand, set by Equip and UnequipAll.
+                ("Equipped", Value::Instance(None)),
+                // Off, the default hotbar doesn't show and its keys do
+                // nothing, for a game's own.
+                ("HotbarEnabled", Value::Bool(true)),
+            ],
             ClassName::WeldConstraint => {
                 let mut properties = vec![
                     ("Part0", Value::Instance(None)),
@@ -1796,6 +1840,7 @@ impl ClassName {
             | ClassName::BindableFunction
             | ClassName::Player
             | ClassName::Model
+            | ClassName::Inventory
             | ClassName::Folder
             | ClassName::SurfaceAppearance
             | ClassName::ScreenGui
@@ -1854,6 +1899,9 @@ impl ClassName {
                 "MouseHoverEnter",
                 "MouseHoverLeave",
             ],
+            // In and out of the hand, and the Primary action pressed and
+            // let go while it's in the hand.
+            ClassName::Tool => &["Equipped", "Unequipped", "Activated", "Deactivated"],
             // Fires with "Sight" or "Hearing" when it starts seeing or
             // hearing the player character.
             ClassName::NavigationAgent => &["PlayerSensed"],

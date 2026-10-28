@@ -764,3 +764,86 @@ fn a_slot_captures_a_characters_health_and_puts_it_back() {
     assert_eq!(restored.property("MaxHealth"), Some(&Value::Number(150.0)));
     assert_eq!(restored.property("FallDamage"), Some(&Value::Bool(true)));
 }
+
+/// A character with an Inventory, and a Tool named `name` with a Handle
+/// and the `item` row, lying in the Workspace.
+fn tool_in(world: &mut World, parent: InstanceId, name: &str, item: &str) -> InstanceId {
+    let tool = world.create(ClassName::Tool).unwrap();
+    world.set_name(tool, name).unwrap();
+    world
+        .set_property(tool, "Item", Value::String(item.to_owned()))
+        .unwrap();
+    world.set_parent(tool, Some(parent)).unwrap();
+    part(world, tool, "Handle", Vector3::new(0.0, 0.5, -8.0));
+    tool
+}
+
+#[test]
+fn a_slot_keeps_the_inventory_and_the_tool_in_hand_by_tool_name_and_item() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let character = world.create(ClassName::Model).unwrap();
+    world.set_name(character, "Character").unwrap();
+    world.set_parent(character, Some(workspace)).unwrap();
+    let inventory = world.create(ClassName::Inventory).unwrap();
+    world.set_parent(inventory, Some(character)).unwrap();
+    let sword = tool_in(&mut world, inventory, "Sword", "weapons:sword");
+    let torch = tool_in(&mut world, inventory, "Torch", "weapons:torch");
+    let shield = tool_in(&mut world, workspace, "Shield", "weapons:shield");
+    world
+        .set_attribute(sword, "Sharpness", Some(Value::Number(3.0)))
+        .unwrap();
+    world
+        .set_property(inventory, "Equipped", Value::Instance(Some(sword)))
+        .unwrap();
+    let saved = state::snapshot(&world);
+
+    // The sword dropped, the shield picked up, the torch in hand.
+    world.set_parent(sword, Some(workspace)).unwrap();
+    world.set_parent(shield, Some(inventory)).unwrap();
+    world
+        .set_attribute(sword, "Sharpness", Some(Value::Number(1.0)))
+        .unwrap();
+    world
+        .set_property(inventory, "Equipped", Value::Instance(Some(torch)))
+        .unwrap();
+    state::restore(&mut world, &saved);
+
+    // The same Tools, back where they were, in their order.
+    let inventory_children = world.get(inventory).unwrap().children().to_vec();
+    assert_eq!(inventory_children, [sword, torch]);
+    assert_eq!(world.get(shield).unwrap().parent(), Some(workspace));
+    assert_eq!(
+        world.get(inventory).unwrap().property("Equipped"),
+        Some(&Value::Instance(Some(sword)))
+    );
+    assert_eq!(
+        world.get(sword).unwrap().attribute("Sharpness"),
+        Some(&Value::Number(3.0))
+    );
+    // Each keeps its Handle too.
+    assert!(world.find_first_child(sword, "Handle").is_some());
+    assert_eq!(
+        world
+            .descendants(workspace)
+            .into_iter()
+            .filter(|&id| world.get(id).unwrap().class() == ClassName::Tool)
+            .count(),
+        3
+    );
+
+    // A Tool with another Item isn't the saved one: it goes, and the
+    // saved one is made.
+    world
+        .set_property(sword, "Item", Value::String("weapons:axe".into()))
+        .unwrap();
+    world.set_parent(sword, Some(workspace)).unwrap();
+    state::restore(&mut world, &saved);
+    assert!(!world.contains(sword));
+    let made = world.find_first_child(inventory, "Sword").unwrap();
+    assert_eq!(
+        world.get(made).unwrap().property("Item"),
+        Some(&Value::String("weapons:sword".into()))
+    );
+    assert!(world.find_first_child(made, "Handle").is_some());
+}

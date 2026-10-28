@@ -94,7 +94,7 @@ pub fn prompt_items(
 }
 
 /// A text item `text`, in `rect`, from `styles`.
-fn text_item(
+pub(crate) fn text_item(
     text: String,
     rect: UiRect,
     font_size: f32,
@@ -122,7 +122,7 @@ fn text_item(
 
 /// About how wide `text` is at `font_size`: a little wider than tooltips
 /// reckon, since the prompt's text is bolder and never wraps.
-fn text_width(text: &str, font_size: f32) -> f32 {
+pub(crate) fn text_width(text: &str, font_size: f32) -> f32 {
     text.chars().count() as f32 * font_size * 0.6
 }
 

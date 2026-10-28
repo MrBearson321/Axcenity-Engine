@@ -10,6 +10,7 @@ mod style;
 mod accessibility;
 mod css;
 mod gamepad;
+mod hotbar;
 mod interact;
 mod loading;
 mod paint;
@@ -22,6 +23,7 @@ mod widget;
 
 pub use css::*;
 pub use gamepad::{GamepadButton, Gamepads, NavRepeat, PadNavigation, nav_key, pad_key};
+pub use hotbar::hotbar_items;
 use interact::interactable;
 pub use interact::{
     FOCUS_RING_COLOR, NavKey, SCROLL_DRAG_SLOP, TOOLTIP_DELAY, UiCursor, UiEvent, UiInput,

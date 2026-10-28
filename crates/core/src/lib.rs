@@ -16,6 +16,7 @@ mod enums;
 pub mod input;
 mod strings;
 mod terrain;
+pub mod tool;
 mod ui_settings;
 mod value;
 mod world;

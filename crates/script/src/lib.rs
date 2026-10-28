@@ -75,6 +75,7 @@ mod scheduler;
 mod seat;
 mod sides;
 mod task;
+mod tool;
 mod tree;
 mod tween;
 mod types;
@@ -204,6 +205,9 @@ pub struct ScriptRuntime {
     prompts: prompt::Prompts,
     /// What the mouse points at and presses, for ClickDetectors.
     clicks: click::Clicks,
+    /// The Tools in hand last fired, dropped Tools, and the hotbar's keys
+    /// (Phase 45).
+    tools: tool::Tools,
     /// Whether the error for change events that never stop has been shown,
     /// so it's shown once rather than every frame.
     reported_change_loop: bool,
@@ -255,6 +259,7 @@ impl ScriptRuntime {
             health: health::Healths::default(),
             prompts: prompt::Prompts::default(),
             clicks: click::Clicks::default(),
+            tools: tool::Tools::default(),
             reported_change_loop: false,
             saves,
             started: Vec::new(),
@@ -611,6 +616,63 @@ impl ScriptRuntime {
         }
     }
 
+    /// Frame step 1, after [`step_prompts`](Self::step_prompts) (Phase 45):
+    /// characters with an Inventory pick up the dropped Tools they touch,
+    /// while there's room; the player's number keys, mouse wheel and
+    /// controller bumpers pick a hotbar slot, Drop drops the Tool in hand,
+    /// and Primary fires its `Activated` and `Deactivated`, in Scripts and
+    /// then in LocalScripts, after `Equipped` and `Unequipped`.
+    pub fn step_tools(&mut self, world: &mut World) {
+        self.fire_changes(world);
+        let input = self.client.prompt_input();
+        let assets = self.server.assets();
+        let fired = self.tools.step(world, &assets, &input);
+        // Equipped and Unequipped first, then Activated.
+        self.fire_tool_events(world);
+        self.fire_fired(world, &fired);
+    }
+
+    /// Frame step 4, after the Animators pose the characters: each Tool in
+    /// hand moves to its character's right hand (Phase 45), the bone posed
+    /// as `poses` has it.
+    pub fn place_tools(&mut self, world: &mut World, poses: &axcenity_anim::Poses) {
+        self.fire_changes(world);
+        let assets = self.server.assets();
+        tool::place_held(world, &assets, poses);
+        self.fire_changes(world);
+    }
+
+    /// The player character's Inventory, which the default hotbar shows
+    /// unless its `HotbarEnabled` is off.
+    pub fn player_inventory(&self, world: &World) -> Option<InstanceId> {
+        tool::player_inventory(world)
+    }
+
+    /// Fires `Unequipped` and `Equipped` for the Inventories scripts and
+    /// the tools step changed, on both sides, for up to
+    /// [`MAX_CHANGE_ROUNDS`] rounds of handlers that change more.
+    fn fire_tool_events(&mut self, world: &mut World) {
+        for _ in 0..MAX_CHANGE_ROUNDS {
+            if self.tools.dirty.is_empty() {
+                return;
+            }
+            let fired = self.tools.sync(world);
+            self.fire_fired(world, &fired);
+        }
+    }
+
+    /// Fires events with no arguments on their Instances, on both sides.
+    fn fire_fired(&mut self, world: &mut World, fired: &[prompt::Fired]) {
+        if fired.is_empty() {
+            return;
+        }
+        for side in [Side::Server, Side::Client] {
+            self.context(side).fire_prompt_events(world, fired, None);
+            self.collect(side);
+            self.fire_change_rounds(world);
+        }
+    }
+
     /// The ProximityPrompts showing, as of [`step_prompts`](Self::step_prompts).
     pub fn shown_prompts(&self) -> &[ShownPrompt] {
         self.prompts.shown()
@@ -808,6 +870,7 @@ impl ScriptRuntime {
     pub fn fire_changes(&mut self, world: &mut World) {
         self.fire_change_rounds(world);
         self.fire_health_events(world);
+        self.fire_tool_events(world);
         self.stop_destroyed_scripts(world);
         self.start_clones(world);
     }
@@ -1033,6 +1096,7 @@ impl ScriptRuntime {
         self.particle_emits.extend(context.take_particle_emits());
         self.shatters.extend(context.take_shatters());
         self.health.pending.extend(context.take_health_events());
+        self.tools.note(context.take_tool_changes());
         for (copy, original) in context.take_cloned_scripts() {
             // A clone of a clone that hasn't started yet has its code too.
             let code = self
@@ -1212,5 +1276,7 @@ mod prompt_tests;
 mod query_tests;
 #[cfg(test)]
 mod seat_tests;
+#[cfg(test)]
+mod tool_tests;
 #[cfg(test)]
 mod utilities_tests;

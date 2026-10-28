@@ -1,0 +1,28 @@
+{
+  "columns": [
+    {
+      "name": "Damage",
+      "type": "number"
+    }
+  ],
+  "rows": [
+    {
+      "key": "sword",
+      "cells": {
+        "Damage": 10
+      }
+    },
+    {
+      "key": "torch",
+      "cells": {
+        "Damage": 2
+      }
+    },
+    {
+      "key": "shield",
+      "cells": {
+        "Damage": 0
+      }
+    }
+  ]
+}

@@ -2182,6 +2182,56 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The cursor over the part, as a CSS cursor name such as \"pointer\", \"crosshair\" or \"grab\". Empty is the pointing hand.",
     ),
     (
+        ClassName::Tool,
+        "Handle",
+        "The part held in the hand and touched to pick the Tool up. nil uses its child part named \"Handle\".",
+    ),
+    (
+        ClassName::Tool,
+        "Grip",
+        "The Attachment in the Handle that's put in the right hand, turned as the hand is. nil uses the Handle's Attachment named \"Grip\", else the Handle's middle.",
+    ),
+    (
+        ClassName::Tool,
+        "RequiresHandle",
+        "If false, a Tool with no Handle can be carried and equipped (by scripts and the hotbar); it's never picked up by touch.",
+    ),
+    (
+        ClassName::Tool,
+        "CanBeDropped",
+        "If false, the Drop action and tool:Drop() leave it carried.",
+    ),
+    (
+        ClassName::Tool,
+        "ToolTip",
+        "Text the hotbar shows over the bar while it's in hand.",
+    ),
+    (
+        ClassName::Tool,
+        "TextureId",
+        "The image in its hotbar slot, such as \"assets/textures/sword.png\". Empty shows its Name.",
+    ),
+    (
+        ClassName::Tool,
+        "Item",
+        "The data-table row it is, as \"table:key\" (such as \"weapons:sword\"), for scripts to read with DataService. Save slots keep it. Empty for none.",
+    ),
+    (
+        ClassName::Inventory,
+        "Capacity",
+        "How many Tools it holds. A full Inventory leaves a touched Tool on the ground, and Add returns false.",
+    ),
+    (
+        ClassName::Inventory,
+        "Equipped",
+        "The Tool in hand, or nil. Read-only: change it with Equip and UnequipAll.",
+    ),
+    (
+        ClassName::Inventory,
+        "HotbarEnabled",
+        "If false, the default hotbar doesn't show and its number keys, wheel and bumpers do nothing, for a game that makes its own. Drop and Primary still work.",
+    ),
+    (
         ClassName::DamageZone,
         "DamagePerSecond",
         "Health a second taken from every Health whose Model has a part inside the zone (once each, however many of its parts are in). The damage's source is the zone. 0 or less does nothing.",
@@ -3688,6 +3738,26 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires with the Player when the mouse stops pointing at the part, or goes out of reach.",
     ),
     (
+        ClassName::Tool,
+        "Equipped",
+        "Fires when it goes into the hand: Equip, the hotbar, or a save slot loading with it in hand.",
+    ),
+    (
+        ClassName::Tool,
+        "Unequipped",
+        "Fires when it leaves the hand: put away, another equipped, dropped or removed.",
+    ),
+    (
+        ClassName::Tool,
+        "Activated",
+        "Fires when the Primary action (the left mouse button, or RT) is pressed while it's in the player character's hand, such as to swing a sword.",
+    ),
+    (
+        ClassName::Tool,
+        "Deactivated",
+        "Fires when the Primary action is let go after Activated, or the Tool leaves the hand first.",
+    ),
+    (
         ClassName::NavigationAgent,
         "PlayerSensed",
         "Fires when the agent starts seeing or hearing the player character. The handler gets the sense: \"Sight\" or \"Hearing\".",
@@ -3824,6 +3894,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::ClickDetector => {
             "Makes the part it's in clickable. Pointing at the part from within MaxActivationDistance fires MouseHoverEnter and shows CursorIcon; a left click fires MouseClick and a right click RightMouseClick. Clicks the game UI takes don't count."
+        }
+        ClassName::Tool => {
+            "Something a character carries: a Model of parts with a Handle. Touching a dropped Tool puts it in the character's Inventory, if there's room; equipping it holds its Grip in the right hand (a skinned character's right hand bone, a part named RightHand, or beside the body). Activated fires on the Primary action while it's in hand. Drop with the Drop action (Backspace, or Y) or tool:Drop()."
+        }
+        ClassName::Inventory => {
+            "The Tools a character carries, put in the character's Model: up to Capacity Tools as its children, in hotbar order, and Equipped, the one in hand. The default hotbar shows them; number keys, the mouse wheel (while one is in hand) and the controller bumpers pick one. Styled in CSS as `Inventory` (the bar), `Tool` (each slot, `Tool:checked` in hand) and `Tool::key` (its number). Save slots keep it with the world."
         }
         ClassName::DamageZone => {
             "A Part that hurts: every Health whose Model has a part inside it loses DamagePerSecond a second, with the zone as the source. Anchored, half see-through and walked through (CanCollide off) by default. Everything a Part has, and DamagePerSecond."

@@ -315,6 +315,8 @@ fn described_fields_and_methods_exist() {
         (ClassName::RopeConstraint, "Instance.new('RopeConstraint')"),
         (ClassName::RodConstraint, "Instance.new('RodConstraint')"),
         (ClassName::Health, "Instance.new('Health')"),
+        (ClassName::Inventory, "Instance.new('Inventory')"),
+        (ClassName::Tool, "Instance.new('Tool')"),
         (ClassName::DamageZone, "Instance.new('DamageZone')"),
         (ClassName::Animation, "Instance.new('Animation')"),
         (

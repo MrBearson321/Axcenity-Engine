@@ -3088,6 +3088,60 @@ declare extern type ClickDetector extends Instance with
 	[string]: any
 end
 
+--- Something a character carries: a Model of parts with a Handle. Touching a dropped Tool puts it in the character's Inventory, if there's room; equipping it holds its Grip in the right hand (a skinned character's right hand bone, a part named RightHand, or beside the body). Activated fires on the Primary action while it's in hand. Drop with the Drop action (Backspace, or Y) or tool:Drop().
+declare extern type Tool extends Instance with
+	--- The part held in the hand and touched to pick the Tool up. nil uses its child part named "Handle".
+	Handle: Instance?
+	--- The Attachment in the Handle that's put in the right hand, turned as the hand is. nil uses the Handle's Attachment named "Grip", else the Handle's middle.
+	Grip: Instance?
+	--- If false, a Tool with no Handle can be carried and equipped (by scripts and the hotbar); it's never picked up by touch.
+	RequiresHandle: boolean
+	--- If false, the Drop action and tool:Drop() leave it carried.
+	CanBeDropped: boolean
+	--- Text the hotbar shows over the bar while it's in hand.
+	ToolTip: string
+	--- The image in its hotbar slot, such as "assets/textures/sword.png". Empty shows its Name.
+	TextureId: string
+	--- The data-table row it is, as "table:key" (such as "weapons:sword"), for scripts to read with DataService. Save slots keep it. Empty for none.
+	Item: string
+	--- Fires when it goes into the hand: Equip, the hotbar, or a save slot loading with it in hand.
+	Equipped: Signal
+	--- Fires when it leaves the hand: put away, another equipped, dropped or removed.
+	Unequipped: Signal
+	--- Fires when the Primary action (the left mouse button, or RT) is pressed while it's in the player character's hand, such as to swing a sword.
+	Activated: Signal
+	--- Fires when the Primary action is let go after Activated, or the Tool leaves the hand first.
+	Deactivated: Signal
+	[string]: any
+	--- Takes it out of its Inventory (and the hand) and puts its Handle on the ground in front of the character, in the Workspace. The character picks it up again once it has stepped off it and touches it. Returns false if it's not carried or CanBeDropped is off.
+	function Drop(self): boolean
+	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
+	function GetPivot(self): CFrame
+	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
+	function PivotTo(self, target: CFrame): ()
+end
+
+--- The Tools a character carries, put in the character's Model: up to Capacity Tools as its children, in hotbar order, and Equipped, the one in hand. The default hotbar shows them; number keys, the mouse wheel (while one is in hand) and the controller bumpers pick one. Styled in CSS as `Inventory` (the bar), `Tool` (each slot, `Tool:checked` in hand) and `Tool::key` (its number). Save slots keep it with the world.
+declare extern type Inventory extends Instance with
+	--- How many Tools it holds. A full Inventory leaves a touched Tool on the ground, and Add returns false.
+	Capacity: number
+	--- The Tool in hand, or nil. Read-only: change it with Equip and UnequipAll.
+	Equipped: Instance?
+	--- If false, the default hotbar doesn't show and its number keys, wheel and bumpers do nothing, for a game that makes its own. Drop and Primary still work.
+	HotbarEnabled: boolean
+	[string]: any
+	--- The Tools in it, in hotbar order, the one in hand included.
+	function GetItems(self): {Tool}
+	--- Puts `tool` in it, taking it out of any other Inventory first. Returns false, leaving the Tool where it is, when it already holds Capacity Tools; true if it's in it.
+	function Add(self, tool: Tool): boolean
+	--- Takes `tool` out of it (out of the hand first), leaving its Parent nil. Returns false if it wasn't in it.
+	function Remove(self, tool: Tool): boolean
+	--- Puts `tool`, which must be in it, in the character's right hand, putting away the one there. Fires Unequipped and Equipped, and sets the character's Animator's `Equipped` Bool parameter if it has one.
+	function Equip(self, tool: Tool): ()
+	--- Puts away the Tool in hand, if any, firing its Unequipped.
+	function UnequipAll(self): ()
+end
+
 --- Holds `Part0` and `Part1` together where they were when it was made (or enabled). Parts welded together move as one body, an assembly: they fall and tumble together, and an anchored part anchors the whole assembly. `part:GetConnectedParts()` and `part:GetRootPart()` follow welds. Setting a welded part's Position or CFrame moves that part alone, and the weld holds it where it lands.
 declare extern type WeldConstraint extends Instance with
 	--- One of the two parts it holds together.
@@ -3568,7 +3622,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

@@ -309,6 +309,8 @@ pub fn build_draw_list_posed(
     for (id, instance) in world
         .descendants(world.workspace())
         .into_iter()
+        // A Tool put away in an Inventory isn't drawn (Phase 45).
+        .filter(|&id| !axcenity_core::tool::is_stored(world, id))
         .filter_map(|id| Some((id, world.get(id)?)))
     {
         match instance.class() {

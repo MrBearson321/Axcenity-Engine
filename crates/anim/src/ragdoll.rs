@@ -158,6 +158,39 @@ fn bone_kind(name: &str) -> (String, Option<Side>) {
     (base, side)
 }
 
+/// The right hand's bone in `rig` (Phase 45, where Tools are held):
+/// `RightHand`, `mixamorig:RightHand`, `hand.R`, `Hand_R` and the like.
+pub fn right_hand(rig: &Rig) -> Option<usize> {
+    rig.bones
+        .iter()
+        .position(|bone| bone_kind(&bone.name) == ("hand".to_owned(), Some(Side::Right)))
+}
+
+/// Where bone `bone` of the skinned MeshPart `part` is in the world, as
+/// `posed` (its pose from [`Animators::poses`](crate::Animators::poses))
+/// puts it, or resting with no pose. It carries the MeshPart's scale.
+pub fn bone_in_world(
+    world: &World,
+    part: InstanceId,
+    rig: &Rig,
+    posed: Option<&axcenity_assets::Posed>,
+    bone: usize,
+) -> Option<Mat4> {
+    let place = placement(world, part, rig)?;
+    let joint = rig.joints.iter().position(|joint| joint.bone == bone);
+    let in_file = match (posed, joint) {
+        // A joint's matrix is fit * bone * inverse_bind * unfit, in the
+        // model's fitted space: undo the rest to get the bone.
+        (Some(posed), Some(index)) if posed.joints().len() == rig.joints.len() => {
+            let fit = rig.fit;
+            fit.inverse() * posed.joints()[index] * fit * rig.joints[index].inverse_bind.inverse()
+        }
+        _ => *rig.world(&rig.rest_pose()).get(bone)?,
+    };
+    let world_bone = place * in_file;
+    world_bone.is_finite().then_some(world_bone)
+}
+
 /// The names (as [`bone_kind`] gives them) a limb's bone may have.
 fn names_of(limb: Limb) -> &'static [&'static str] {
     match limb {
@@ -802,5 +835,10 @@ mod tests {
         assert_eq!(bone_kind("thigh_L"), ("thigh".into(), Some(Side::Left)));
         assert_eq!(bone_kind("mixamorig:Head"), ("head".into(), None));
         assert_eq!(bone_kind("Leg"), ("leg".into(), None));
+        assert_eq!(
+            bone_kind("mixamorig:RightHand"),
+            ("hand".into(), Some(Side::Right))
+        );
+        assert_eq!(bone_kind("hand.R"), ("hand".into(), Some(Side::Right)));
     }
 }

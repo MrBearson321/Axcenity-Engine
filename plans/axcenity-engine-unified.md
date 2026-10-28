@@ -1452,10 +1452,10 @@ Blocks: "when prompt … is triggered", "when … is clicked".
 
 ### Acceptance criteria
 
-- [ ] Picking up a sword shows it in the hotbar. Pressing 1 equips it in the right hand, and clicking fires `Activated`.
-- [ ] A full inventory refuses a pickup and leaves the Tool on the ground.
-- [ ] Dropping and picking up again gives back the same Tool with its Attributes.
-- [ ] Saving and loading a slot restores the inventory and the equipped tool.
+- [x] Picking up a sword shows it in the hotbar. Pressing 1 equips it in the right hand, and clicking fires `Activated`.
+- [x] A full inventory refuses a pickup and leaves the Tool on the ground.
+- [x] Dropping and picking up again gives back the same Tool with its Attributes.
+- [x] Saving and loading a slot restores the inventory and the equipped tool.
 
 ---
 

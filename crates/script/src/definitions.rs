@@ -561,6 +561,7 @@ fn doc_parent(class: ClassName) -> Option<ClassName> {
     match class {
         ClassName::Seat | ClassName::DamageZone => Some(ClassName::Part),
         ClassName::VehicleSeat => Some(ClassName::Seat),
+        ClassName::Tool => Some(ClassName::Model),
         _ => None,
     }
 }

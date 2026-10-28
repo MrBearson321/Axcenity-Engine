@@ -718,6 +718,8 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Health => icons::HEART,
         ClassName::ProximityPrompt => icons::HAND_TAP,
         ClassName::ClickDetector => icons::CURSOR_CLICK,
+        ClassName::Tool => icons::SWORD,
+        ClassName::Inventory => icons::BACKPACK,
         ClassName::DamageZone => icons::FIRE,
         ClassName::Script => icons::FILE_CODE,
         ClassName::LocalScript => icons::CODE,

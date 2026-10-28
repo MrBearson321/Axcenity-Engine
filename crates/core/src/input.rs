@@ -211,6 +211,8 @@ impl Default for InputMap {
             Action::new("Interact", false, &["E", "ButtonX"]),
             Action::new("Primary", false, &["MouseButton1", "ButtonR2"]),
             Action::new("Secondary", false, &["MouseButton2", "ButtonL2"]),
+            // Drops the Tool in hand in front of the character (Phase 45).
+            Action::new("Drop", false, &["Backspace", "ButtonY"]),
             Action::new("Menu", false, &["Escape", "ButtonStart"]),
             Action::new(
                 UI_NAVIGATE,

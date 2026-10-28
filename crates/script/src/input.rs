@@ -59,6 +59,9 @@ pub struct Inputs {
     /// The mouse buttons the game pressed (true) and let go of this frame,
     /// in order, for ClickDetectors. Clicks the UI took aren't here.
     clicks: Vec<(UserInputType, bool)>,
+    /// The game's wheel notches this frame, away from the player positive,
+    /// for the hotbar (Phase 45).
+    wheel: f32,
 }
 
 impl Default for Inputs {
@@ -73,6 +76,7 @@ impl Default for Inputs {
             next_order: 0,
             gamepad: false,
             clicks: Vec::new(),
+            wheel: 0.0,
         }
     }
 }
@@ -119,6 +123,8 @@ pub struct PromptInput {
     /// The game's mouse presses and releases this frame.
     pub clicks: Vec<(UserInputType, bool)>,
     pub mouse: [f32; 2],
+    /// The game's wheel notches this frame.
+    pub wheel: f32,
 }
 
 /// This frame's [`PromptInput`], after [`fire_input`].
@@ -131,6 +137,7 @@ pub fn prompt_input(lua: &Lua) -> PromptInput {
             gamepad: inputs.gamepad,
             clicks: inputs.clicks.clone(),
             mouse: inputs.all.mouse_position,
+            wheel: inputs.wheel,
         },
         None => PromptInput {
             game: InputState::default(),
@@ -138,6 +145,7 @@ pub fn prompt_input(lua: &Lua) -> PromptInput {
             gamepad: false,
             clicks: Vec::new(),
             mouse: [0.0, 0.0],
+            wheel: 0.0,
         },
     }
 }
@@ -170,6 +178,7 @@ pub fn fire_input(lua: &Lua, events: &[InputEvent]) {
         inputs.all.end_frame();
         inputs.game.end_frame();
         inputs.clicks.clear();
+        inputs.wheel = 0.0;
     }
     for event in events {
         let Some((input, old_stick, game)) = follow(lua, event) else {
@@ -263,6 +272,11 @@ fn follow(lua: &Lua, event: &InputEvent) -> Option<(LuaInputObject, [f32; 2], bo
         } = event.kind
     {
         inputs.clicks.push((button, pressed));
+    }
+    if !event.processed
+        && let InputKind::Wheel { notches, .. } = event.kind
+    {
+        inputs.wheel += notches;
     }
     if !inputs.all.apply(&event.kind) {
         return None;

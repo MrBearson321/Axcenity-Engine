@@ -997,3 +997,57 @@ fn reduced_motion_ends_a_ui_elements_clips_at_once_and_leaves_parts_moving() {
     assert_eq!(transparency(&world), 1.0);
     assert_eq!(animators.take_errors(), Vec::<String>::new());
 }
+
+/// Phase 45: where a Tool's hand is comes from the bone's place in the
+/// posed model, worked back out of the joint matrices the pose keeps.
+#[test]
+fn a_bone_in_the_world_follows_the_pose_the_animators_made() {
+    let (mut world, part, _) = noodle(STATE_MACHINE);
+    world
+        .set_property(
+            part,
+            "Position",
+            Value::Vector3(Vector3::new(4.0, 2.0, -3.0)),
+        )
+        .unwrap();
+    world
+        .set_property(
+            part,
+            "Orientation",
+            Value::Vector3(Vector3::new(0.0, 90.0, 0.0)),
+        )
+        .unwrap();
+    let assets = Assets::new(example());
+    let mut animators = Animators::new();
+    animators.update(&mut world, &assets, 0.4);
+    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    let rig = model.rig.clone().unwrap();
+    let posed = animators.poses().get(&part).cloned().unwrap();
+    let (clip, _) = walk(false);
+    let mut pose = rig.rest_pose();
+    clip.sample(0.4, &rig, &mut pose);
+    let place = crate::ragdoll::placement(&world, part, &rig).unwrap();
+    let posed_here = model.pose(&pose).unwrap();
+    let mut checked = 0;
+    for joint in &rig.joints {
+        let expected = place * rig.world(&pose)[joint.bone];
+        let found =
+            crate::ragdoll::bone_in_world(&world, part, &rig, Some(&posed_here), joint.bone)
+                .unwrap();
+        assert!(
+            found.abs_diff_eq(expected, 1e-3),
+            "bone {}: {found} != {expected}",
+            rig.bones[joint.bone].name
+        );
+        // The Animators' own pose gives a place too.
+        assert!(
+            crate::ragdoll::bone_in_world(&world, part, &rig, Some(&posed), joint.bone).is_some()
+        );
+        checked += 1;
+    }
+    assert!(checked > 1);
+    // No pose: the bone at rest.
+    let rest = place * rig.world(&rig.rest_pose())[rig.joints[0].bone];
+    let found = crate::ragdoll::bone_in_world(&world, part, &rig, None, rig.joints[0].bone);
+    assert!(found.unwrap().abs_diff_eq(rest, 1e-4));
+}

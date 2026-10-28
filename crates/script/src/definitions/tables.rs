@@ -1835,6 +1835,60 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Inventory,
+        Function {
+            name: "GetItems",
+            doc: "The Tools in it, in hotbar order, the one in hand included.",
+            params: &[],
+            returns: "{Tool}",
+        },
+    ),
+    (
+        ClassName::Inventory,
+        Function {
+            name: "Add",
+            doc: "Puts `tool` in it, taking it out of any other Inventory first. Returns false, leaving the Tool where it is, when it already holds Capacity Tools; true if it's in it.",
+            params: &[("tool", "Tool")],
+            returns: "boolean",
+        },
+    ),
+    (
+        ClassName::Inventory,
+        Function {
+            name: "Remove",
+            doc: "Takes `tool` out of it (out of the hand first), leaving its Parent nil. Returns false if it wasn't in it.",
+            params: &[("tool", "Tool")],
+            returns: "boolean",
+        },
+    ),
+    (
+        ClassName::Inventory,
+        Function {
+            name: "Equip",
+            doc: "Puts `tool`, which must be in it, in the character's right hand, putting away the one there. Fires Unequipped and Equipped, and sets the character's Animator's `Equipped` Bool parameter if it has one.",
+            params: &[("tool", "Tool")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Inventory,
+        Function {
+            name: "UnequipAll",
+            doc: "Puts away the Tool in hand, if any, firing its Unequipped.",
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Tool,
+        Function {
+            name: "Drop",
+            doc: "Takes it out of its Inventory (and the hand) and puts its Handle on the ground in front of the character, in the Workspace. The character picks it up again once it has stepped off it and touches it. Returns false if it's not carried or CanBeDropped is off.",
+            params: &[],
+            returns: "boolean",
+        },
+    ),
+    (
         ClassName::Health,
         Function {
             name: "Heal",

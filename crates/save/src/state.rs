@@ -6,7 +6,9 @@
 //! class and name (the second "Coin" to the second "Coin"), sets its
 //! properties, makes the saved ones that are missing and destroys the live
 //! ones the save doesn't have. Matched Instances keep their `InstanceId`,
-//! so a script that holds one still has it after a load.
+//! so a script that holds one still has it after a load. A Tool that isn't
+//! where the save has it is matched by its name and `Item` wherever it is
+//! (Phase 45), so a dropped Tool goes back into its Inventory as itself.
 //!
 //! Attributes and tags are saved with each Instance and put back exactly.
 //! A property that points at an Instance (`ObjectValue.Value`) is saved as
@@ -323,7 +325,7 @@ pub fn restore(world: &mut World, state: &WorldState) -> Vec<Option<InstanceId>>
         }
     }
 
-    let mut stack: Vec<(InstanceId, SavedParent)> = SERVICES
+    let stack: Vec<(InstanceId, SavedParent)> = SERVICES
         .iter()
         .rev()
         .filter_map(|&class| {
@@ -331,64 +333,51 @@ pub fn restore(world: &mut World, state: &WorldState) -> Vec<Option<InstanceId>>
             Some((service, SavedParent::Service(class.as_str().to_owned())))
         })
         .collect();
-    while let Some((live_parent, key)) = stack.pop() {
-        // The live children that are world state, by class, name and which
-        // one of that class and name they are among their siblings.
-        let mut live: Vec<(ClassName, String, usize, InstanceId)> = Vec::new();
-        let mut counts: HashMap<(ClassName, String), usize> = HashMap::new();
-        for child in children(world, live_parent) {
-            let Some(instance) = world.get(child) else {
-                continue;
-            };
-            if !kept(instance.class()) {
-                continue;
-            }
-            let key = (instance.class(), instance.name().to_owned());
-            let nth = counts.entry(key.clone()).or_default();
-            live.push((key.0, key.1, *nth, child));
-            *nth += 1;
-        }
-
-        let mut saved_counts: HashMap<(ClassName, &str), usize> = HashMap::new();
-        let mut next = Vec::new();
-        for &index in saved_children.get(&key).map(Vec::as_slice).unwrap_or(&[]) {
-            let entry = &state.instances[index];
-            let Some(class) = ClassName::from_name(&entry.class).filter(|&class| kept(class))
-            else {
-                continue;
-            };
-            let nth = saved_counts
-                .entry((class, entry.name.as_str()))
-                .or_default();
-            let found = live
-                .iter()
-                .position(|(c, name, n, _)| *c == class && *name == entry.name && n == nth);
-            *nth += 1;
-            let id = match found {
-                Some(position) => {
-                    let id = live.remove(position).3;
-                    set_properties(world, id, &entry.properties);
-                    id
-                }
-                None => {
-                    let Ok(id) = world.create(class) else {
-                        continue;
-                    };
+    let mut tools = Tools::default();
+    let mut matching = Matching {
+        state,
+        saved_children: &saved_children,
+        restored: &mut restored,
+        tools: &mut tools,
+    };
+    matching.run(world, stack);
+    // Tools the save has somewhere else than they are now: each takes a
+    // live Tool with its name and Item from wherever that was, keeping its
+    // InstanceId, or is made. In the save's order, each after the saved
+    // siblings before it, so an Inventory keeps its hotbar order.
+    while !matching.tools.waiting.is_empty() {
+        let (index, live_parent) = matching.tools.waiting.remove(0);
+        let entry = &state.instances[index];
+        let key = tool_key(
+            entry.name.clone(),
+            entry.properties.get("Item").map(|v| &v.0),
+        );
+        let id = match matching.tools.spare.iter().position(|(k, _)| *k == key) {
+            Some(position) => matching.tools.spare.remove(position).1,
+            None => match world.create(ClassName::Tool) {
+                Ok(id) => {
                     let _ = world.set_name(id, entry.name.clone());
-                    set_properties(world, id, &entry.properties);
-                    let _ = world.set_parent(id, Some(live_parent));
                     id
                 }
-            };
-            set_attributes_and_tags(world, id, entry);
-            restored[index] = Some(id);
-            next.push((id, SavedParent::Index(index)));
-        }
-        // What the save doesn't have was destroyed (or not made yet) when it was saved.
-        for (_, _, _, id) in live {
-            let _ = world.destroy(id);
-        }
-        stack.extend(next.into_iter().rev());
+                Err(_) => continue,
+            },
+        };
+        set_properties(world, id, &entry.properties);
+        let before = saved_children.get(&entry.parent).map_or(0, |siblings| {
+            siblings
+                .iter()
+                .take_while(|&&sibling| sibling != index)
+                .filter_map(|&sibling| matching.restored[sibling])
+                .filter(|&sibling| world.get(sibling).and_then(|s| s.parent()) == Some(live_parent))
+                .count()
+        });
+        let _ = world.set_parent_at(id, live_parent, before);
+        set_attributes_and_tags(world, id, entry);
+        matching.restored[index] = Some(id);
+        matching.run(world, vec![(id, SavedParent::Index(index))]);
+    }
+    for (_, id) in std::mem::take(&mut tools.spare) {
+        let _ = world.destroy(id);
     }
     for (entry, id) in state.instances.iter().zip(&restored) {
         let Some(id) = *id else {
@@ -400,6 +389,121 @@ pub fn restore(world: &mut World, state: &WorldState) -> Vec<Option<InstanceId>>
         }
     }
     restored
+}
+
+/// A Tool's name and `Item`, which a save matches it by wherever it is
+/// (Phase 45: "Save slots store the inventory by Tool name and item row").
+type ToolKey = (String, String);
+
+fn tool_key(name: String, item: Option<&Value>) -> ToolKey {
+    let item = match item {
+        Some(Value::String(item)) => item.clone(),
+        _ => String::new(),
+    };
+    (name, item)
+}
+
+/// Tools that didn't match by place.
+#[derive(Default)]
+struct Tools {
+    /// Live Tools the save doesn't have where they are, taken out of the
+    /// tree until a saved Tool takes them (or destroyed at the end).
+    spare: Vec<(ToolKey, InstanceId)>,
+    /// Saved Tools with no live one in their place: the entry, and the
+    /// live parent it goes in.
+    waiting: Vec<(usize, InstanceId)>,
+}
+
+/// One restore's matching of saved entries to live Instances.
+struct Matching<'a> {
+    state: &'a WorldState,
+    saved_children: &'a HashMap<&'a SavedParent, Vec<usize>>,
+    restored: &'a mut Vec<Option<InstanceId>>,
+    tools: &'a mut Tools,
+}
+
+impl Matching<'_> {
+    /// Matches the saved children of each live parent in `stack` to its
+    /// live children, then theirs, and so on down.
+    fn run(&mut self, world: &mut World, mut stack: Vec<(InstanceId, SavedParent)>) {
+        let state = self.state;
+        while let Some((live_parent, key)) = stack.pop() {
+            // The live children that are world state, by class, name and which
+            // one of that class and name they are among their siblings.
+            let mut live: Vec<(ClassName, String, usize, InstanceId)> = Vec::new();
+            let mut counts: HashMap<(ClassName, String), usize> = HashMap::new();
+            for child in children(world, live_parent) {
+                let Some(instance) = world.get(child) else {
+                    continue;
+                };
+                if !kept(instance.class()) {
+                    continue;
+                }
+                let key = (instance.class(), instance.name().to_owned());
+                let nth = counts.entry(key.clone()).or_default();
+                live.push((key.0, key.1, *nth, child));
+                *nth += 1;
+            }
+
+            let mut saved_counts: HashMap<(ClassName, &str), usize> = HashMap::new();
+            let mut next = Vec::new();
+            for &index in self
+                .saved_children
+                .get(&key)
+                .map(Vec::as_slice)
+                .unwrap_or(&[])
+            {
+                let entry = &state.instances[index];
+                let Some(class) = ClassName::from_name(&entry.class).filter(|&class| kept(class))
+                else {
+                    continue;
+                };
+                let nth = saved_counts
+                    .entry((class, entry.name.as_str()))
+                    .or_default();
+                let found = live
+                    .iter()
+                    .position(|(c, name, n, _)| *c == class && *name == entry.name && n == nth);
+                *nth += 1;
+                let id = match found {
+                    Some(position) => {
+                        let id = live.remove(position).3;
+                        set_properties(world, id, &entry.properties);
+                        id
+                    }
+                    None if class == ClassName::Tool => {
+                        self.tools.waiting.push((index, live_parent));
+                        continue;
+                    }
+                    None => {
+                        let Ok(id) = world.create(class) else {
+                            continue;
+                        };
+                        let _ = world.set_name(id, entry.name.clone());
+                        set_properties(world, id, &entry.properties);
+                        let _ = world.set_parent(id, Some(live_parent));
+                        id
+                    }
+                };
+                set_attributes_and_tags(world, id, entry);
+                self.restored[index] = Some(id);
+                next.push((id, SavedParent::Index(index)));
+            }
+            // What the save doesn't have was destroyed (or not made yet) when
+            // it was saved; a Tool may be saved somewhere else.
+            for (class, name, _, id) in live {
+                if class == ClassName::Tool {
+                    let item = world.get(id).and_then(|tool| tool.property("Item"));
+                    let key = tool_key(name, item);
+                    let _ = world.set_parent(id, None);
+                    self.tools.spare.push((key, id));
+                } else {
+                    let _ = world.destroy(id);
+                }
+            }
+            stack.extend(next.into_iter().rev());
+        }
+    }
 }
 
 /// Gives `id` exactly the saved attributes and tags.

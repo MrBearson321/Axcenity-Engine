@@ -764,6 +764,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             .chain(Insertable::HEALTH)
             .chain(Insertable::SEATS)
             .chain(Insertable::INTERACTION)
+            .chain(Insertable::TOOLS)
             .chain(Insertable::VEHICLES)
             .chain(Insertable::AGENTS)
             .chain(Insertable::CHECKPOINTS)

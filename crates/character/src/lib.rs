@@ -528,9 +528,9 @@ fn in_ragdoll(world: &World, id: InstanceId) -> bool {
 
 /// The parts of the character `holder` is: a Model's Part and MeshPart
 /// descendants, or a Part or MeshPart and the parts inside it, leaving out
-/// a Ragdoll's bodies (Phase 41: they follow the animation, or physics).
-/// Empty for anything else. Navigation agents move their parent's body the
-/// same way.
+/// a Ragdoll's bodies (Phase 41: they follow the animation, or physics)
+/// and the Tools it carries (Phase 45: they follow the hand). Empty for
+/// anything else. Navigation agents move their parent's body the same way.
 pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
     let parent = holder;
     let Some(instance) = world.get(parent) else {
@@ -552,11 +552,13 @@ pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
     if instance.class().is_base_part() {
         parts.push(parent);
     }
+    let own_tool = axcenity_core::tool::tool_of(world, parent);
     for id in world.descendants(parent) {
         if world
             .get(id)
             .is_some_and(|child| child.class().is_base_part())
             && !in_ragdoll(world, id)
+            && axcenity_core::tool::tool_of(world, id) == own_tool
         {
             parts.push(id);
         }

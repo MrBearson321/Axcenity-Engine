@@ -340,6 +340,15 @@ fn prompt_items(
     axcenity_ui::prompt_items(world, &views, stylesheets, camera, size.width, size.height)
 }
 
+/// True while the player character has a Tool in hand, so the wheel goes
+/// through the hotbar instead of zooming (Phase 45).
+fn tool_in_hand(scripts: &ScriptRuntime, world: &World) -> bool {
+    scripts
+        .player_inventory(world)
+        .and_then(|inventory| axcenity_core::tool::equipped(world, inventory))
+        .is_some()
+}
+
 /// Fires `Landed` on each controller whose character just landed, after
 /// fall damage (Phase 43).
 fn fire_landed(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut Controllers) {
@@ -1052,14 +1061,15 @@ impl ApplicationHandler for App {
                     }));
                 }
             }
-            // Over a ScrollingFrame the wheel scrolls it; elsewhere it zooms.
+            // Over a ScrollingFrame the wheel scrolls it; with a Tool in
+            // hand it goes through the hotbar; elsewhere it zooms.
             WindowEvent::MouseWheel { delta, .. } => {
                 let scrolled = self.pointer.is_some_and(|pointer| {
                     self.ui
                         .wheel(&self.world, pointer, wheel_pixels(delta))
                         .apply(&mut self.world)
                 });
-                if !scrolled {
+                if !scrolled && !tool_in_hand(&self.scripts, &self.world) {
                     self.zoom += wheel_notches(delta);
                 }
                 self.input.push(InputEvent {
@@ -1147,9 +1157,11 @@ impl ApplicationHandler for App {
                 let pointer = self.apply_cursor((size.width, size.height));
                 let events = self.input.take_events(pointer);
                 self.scripts.input_events(&mut self.world, &events);
-                //    Then ProximityPrompts and ClickDetectors, by that input.
+                //    Then ProximityPrompts and ClickDetectors, by that input,
+                //    then Tools: pickups, the hotbar, Drop and Primary.
                 self.scripts
                     .step_prompts(&mut self.world, f64::from(seconds));
+                self.scripts.step_tools(&mut self.world);
                 print_output(&mut self.scripts);
 
                 // 2. Resume scripts whose wait is over (and due `task.delay`s).
@@ -1216,6 +1228,10 @@ impl ApplicationHandler for App {
                 for error in self.animators.take_errors() {
                     eprintln!("error: {error}");
                 }
+                // Tools in hand follow the posed hands.
+                self.scripts
+                    .place_tools(&mut self.world, self.animators.poses());
+                print_output(&mut self.scripts);
 
                 // The loading screen goes once its time is up and, when the
                 // game waits for one, a LocalScript has said it's ready.
@@ -1281,7 +1297,17 @@ impl ApplicationHandler for App {
                     self.cursor = cursor;
                     window.set_cursor(cursor);
                 }
-                // ProximityPrompts that show, over the rest of the UI.
+                // The hotbar, then ProximityPrompts that show, over the
+                // rest of the UI.
+                if let Some(inventory) = self.scripts.player_inventory(&self.world) {
+                    draw_list.ui.extend(axcenity_ui::hotbar_items(
+                        &self.world,
+                        inventory,
+                        &self.stylesheets,
+                        size.width,
+                        size.height,
+                    ));
+                }
                 draw_list.ui.extend(prompt_items(
                     &self.world,
                     self.scripts.shown_prompts(),
@@ -1406,5 +1432,7 @@ mod prompt_tests;
 mod ragdoll_tests;
 #[cfg(test)]
 mod seat_tests;
+#[cfg(test)]
+mod tool_tests;
 #[cfg(test)]
 mod vehicle_tests;

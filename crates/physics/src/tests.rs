@@ -819,3 +819,54 @@ fn a_part_s_velocity_is_written_back_and_a_set_one_is_kept() {
         position(&world, block)
     );
 }
+
+/// Phase 45: a Tool in hand is held still and walked through; one put away
+/// in an Inventory is out of the world.
+#[test]
+fn a_tool_in_hand_is_held_still_and_one_put_away_is_out_of_the_world() {
+    let (mut world, _) = world_with_floor();
+    let workspace = world.workspace();
+    let character = world.create(ClassName::Model).unwrap();
+    world.set_parent(character, Some(workspace)).unwrap();
+    let inventory = world.create(ClassName::Inventory).unwrap();
+    world.set_parent(inventory, Some(character)).unwrap();
+    let tool = |world: &mut World, y: f32| {
+        let tool = world.create(ClassName::Tool).unwrap();
+        world.set_parent(tool, Some(inventory)).unwrap();
+        let handle = part(world, Vector3::new(0.0, y, 0.0), false);
+        world.set_name(handle, "Handle").unwrap();
+        world.set_parent(handle, Some(tool)).unwrap();
+        (tool, handle)
+    };
+    let (held, held_handle) = tool(&mut world, 5.0);
+    let (_, stored_handle) = tool(&mut world, 10.0);
+    set(
+        &mut world,
+        inventory,
+        "Equipped",
+        Value::Instance(Some(held)),
+    );
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 1.0, 60.0);
+    assert_eq!(position(&world, held_handle), Vector3::new(0.0, 5.0, 0.0));
+    assert_eq!(
+        position(&world, stored_handle),
+        Vector3::new(0.0, 10.0, 0.0)
+    );
+    // A ray down from above meets the held one first, as a sensor (it
+    // doesn't collide): the stored one above it isn't there.
+    let assets = Assets::default();
+    let down = Vector3::new(0.0, -20.0, 0.0);
+    let hit = cast_ray(&world, &assets, Vector3::new(0.0, 15.0, 0.0), down).unwrap();
+    assert_eq!(hit.instance, held_handle);
+    assert!(!hit.can_collide);
+
+    // Put away and back on the ground, it falls like any part.
+    set(&mut world, inventory, "Equipped", Value::Instance(None));
+    world.set_parent(held, Some(workspace)).unwrap();
+    run(&mut physics, &mut world, 1.0, 60.0);
+    assert!(
+        position(&world, held_handle).y < 1.0,
+        "it should have fallen"
+    );
+}

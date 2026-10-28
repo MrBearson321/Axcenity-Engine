@@ -169,6 +169,12 @@ impl Session {
         self.loading_gui.as_ref().and_then(LoadingGui::on_top)
     }
 
+    /// The player character's Inventory (Phase 45), whose hotbar the
+    /// viewport draws.
+    pub fn hotbar(&self) -> Option<InstanceId> {
+        self.scripts.player_inventory(&self.world)
+    }
+
     /// The ProximityPrompts that show (Phase 44), for the viewport to draw.
     pub fn prompts(&self) -> Vec<axcenity_ui::PromptView> {
         self.scripts
@@ -417,8 +423,10 @@ impl Session {
             let seen = self.script_camera(camera);
             self.scripts.set_camera(seen);
             self.scripts.input_events(&mut self.world, input);
-            // Then ProximityPrompts and ClickDetectors, by that input.
+            // Then ProximityPrompts and ClickDetectors, by that input,
+            // then Tools: pickups, the hotbar, Drop and Primary.
             self.scripts.step_prompts(&mut self.world, seconds);
+            self.scripts.step_tools(&mut self.world);
             self.forward_output(output);
             if self.scripts.pause().is_some() {
                 cost.scripts += lap();
@@ -500,6 +508,9 @@ impl Session {
                 self.scripts
                     .fire_instance_event(&mut self.world, animator, name, &args);
             }
+            // Tools in hand follow the posed hands.
+            self.scripts
+                .place_tools(&mut self.world, self.animators.poses());
             self.forward_output(output);
             self.forward_animator_errors(output);
             cost.animation += lap();

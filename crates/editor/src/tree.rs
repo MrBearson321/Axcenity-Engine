@@ -77,6 +77,11 @@ pub enum Insertable {
     ProximityPrompt,
     /// Makes the selected part clickable.
     ClickDetector,
+    /// Something a character carries: a Tool with a Handle part and its
+    /// Grip (see [`tool`]).
+    Tool,
+    /// The Tools the selected character carries.
+    Inventory,
     /// A ready-to-drive car: a Model with a chassis, a VehicleSeat welded
     /// on it, four VehicleWheels and a cylinder for each (see [`vehicle`]).
     Vehicle,
@@ -156,6 +161,8 @@ impl Insertable {
     /// part to click.
     pub const INTERACTION: [Insertable; 2] =
         [Insertable::ProximityPrompt, Insertable::ClickDetector];
+    /// Tools, and the Inventory a character carries them in.
+    pub const TOOLS: [Insertable; 2] = [Insertable::Tool, Insertable::Inventory];
     /// A ready car, and the pieces to build one's own.
     pub const VEHICLES: [Insertable; 3] = [
         Insertable::Vehicle,
@@ -234,6 +241,8 @@ impl Insertable {
             Insertable::Seat => "Seat",
             Insertable::ProximityPrompt => "Prompt",
             Insertable::ClickDetector => "Click Detector",
+            Insertable::Tool => "Tool",
+            Insertable::Inventory => "Inventory",
             Insertable::Vehicle => "Vehicle",
             Insertable::VehicleSeat => "Vehicle Seat",
             Insertable::VehicleWheel => "Wheel",
@@ -288,6 +297,8 @@ impl Insertable {
             Insertable::Seat => ClassName::Seat,
             Insertable::ProximityPrompt => ClassName::ProximityPrompt,
             Insertable::ClickDetector => ClassName::ClickDetector,
+            Insertable::Tool => ClassName::Tool,
+            Insertable::Inventory => ClassName::Inventory,
             Insertable::Vehicle => ClassName::Model,
             Insertable::VehicleSeat => ClassName::VehicleSeat,
             Insertable::VehicleWheel => ClassName::VehicleWheel,
@@ -518,6 +529,36 @@ pub fn vehicle(world: &mut World, position: Vector3) -> InstanceId {
         );
     }
     car
+}
+
+/// The Tool Insert > Tool makes, with no parent yet: a Tool with a Handle
+/// part (a 1 × 1 × 4 stick lying along -Z, centred on `position`) and a
+/// Grip Attachment at its back end, so it's held pointing forward.
+pub fn tool(world: &mut World, position: Vector3) -> InstanceId {
+    let tool = world.create(ClassName::Tool).expect("not a service");
+    world.set_name(tool, "Tool").expect("just made");
+    let handle = world.create(ClassName::Part).expect("not a service");
+    world.set_name(handle, "Handle").expect("just made");
+    for (property, value) in [
+        ("Size", Value::Vector3(Vector3::new(1.0, 1.0, 4.0))),
+        ("Position", Value::Vector3(position)),
+    ] {
+        world
+            .set_property(handle, property, value)
+            .expect("a Part has it");
+    }
+    world.set_parent(handle, Some(tool)).expect("a new Tool");
+    let grip = world.create(ClassName::Attachment).expect("not a service");
+    world.set_name(grip, "Grip").expect("just made");
+    world
+        .set_property(
+            grip,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 0.0, 1.5)),
+        )
+        .expect("an Attachment has it");
+    world.set_parent(grip, Some(handle)).expect("a new part");
+    tool
 }
 
 /// The CSS class of the bars [`health_bar`] makes.

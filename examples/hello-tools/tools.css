@@ -1,0 +1,18 @@
+/* The default hotbar: Inventory is the bar, Tool each slot (Tool:checked
+   the one in hand) and Tool::key its number. Without this file the hotbar
+   has the same layout in white on dark grey. */
+Inventory {
+  color: #f4f1e8;
+}
+Tool {
+  background-color: rgba(20, 24, 32, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+Tool:checked {
+  background-color: rgba(20, 24, 32, 0.95);
+  border: 2px solid #f2b84b;
+  color: #f2b84b;
+}
+Tool::key {
+  color: rgba(255, 255, 255, 0.6);
+}
