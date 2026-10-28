@@ -174,6 +174,16 @@ impl EditorApp {
             }),
             RibbonGroup::Build => ribbon::group(ui, "Build", |ui| {
                 self.tool_buttons(ui, &Tool::BUILD);
+                let button = RibbonButton::new(icons::INTERSECT, "Collision Groups");
+                if ui
+                    .add(button)
+                    .on_hover_text(
+                        "Name collision groups and choose which of them collide: parts in                          groups that don't pass through each other.",
+                    )
+                    .clicked()
+                {
+                    self.collision_groups.open = true;
+                }
             }),
             RibbonGroup::Snapping => ribbon::group(ui, "Snapping", |ui| {
                 let snap = &mut self.snap;

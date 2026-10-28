@@ -345,6 +345,23 @@ pub enum BlockKind {
         variable: String,
         body: Vec<Block>,
     },
+    /// Runs `body` once for each part whose bounding box is within `radius`
+    /// studs of `center` (`workspace:GetPartBoundsInRadius`), with the part
+    /// in the variable `variable`.
+    ForEachPartInRadius {
+        center: Expression,
+        radius: Expression,
+        variable: String,
+        body: Vec<Block>,
+    },
+    /// Runs `body` once for each part overlapping `target`, such as the
+    /// parts inside a trigger zone (`workspace:GetPartsInPart`), with the
+    /// part in the variable `variable`.
+    ForEachPartTouching {
+        target: String,
+        variable: String,
+        body: Vec<Block>,
+    },
     /// Waits until `target` (the Workspace when empty) has a child `name`.
     WaitForChild {
         target: String,
@@ -775,6 +792,8 @@ impl BlockKind {
             | BlockKind::Forever { body }
             | BlockKind::RepeatUntil { body, .. }
             | BlockKind::ForEachChild { body, .. }
+            | BlockKind::ForEachPartInRadius { body, .. }
+            | BlockKind::ForEachPartTouching { body, .. }
             | BlockKind::If { body, .. } => vec![body],
             BlockKind::IfElse {
                 then_body,
@@ -807,6 +826,8 @@ impl BlockKind {
             | BlockKind::Forever { body }
             | BlockKind::RepeatUntil { body, .. }
             | BlockKind::ForEachChild { body, .. }
+            | BlockKind::ForEachPartInRadius { body, .. }
+            | BlockKind::ForEachPartTouching { body, .. }
             | BlockKind::If { body, .. } => vec![body],
             BlockKind::IfElse {
                 then_body,
@@ -861,6 +882,7 @@ impl BlockKind {
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
+            BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],
             _ => Vec::new(),
         }
     }
@@ -947,6 +969,7 @@ impl BlockKind {
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
+            BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],
             _ => Vec::new(),
         }
     }
@@ -1061,6 +1084,13 @@ pub enum Expression {
         origin: Box<Expression>,
         direction: Box<Expression>,
     },
+    /// `workspace:Raycast(origin, direction, params)`, passing by `ignore`
+    /// and everything inside it, such as the shooter's own character.
+    RaycastIgnoring {
+        origin: Box<Expression>,
+        direction: Box<Expression>,
+        ignore: String,
+    },
     /// The part that touched, inside "when touched".
     TouchingPart,
     /// The part under the mouse: `LocalPlayer:GetMouse().Target`, the
@@ -1150,7 +1180,10 @@ impl Expression {
                 vec![min, max]
             }
             Expression::Lerp { from, to, alpha } => vec![from, to, alpha],
-            Expression::Raycast { origin, direction } => vec![origin, direction],
+            Expression::Raycast { origin, direction }
+            | Expression::RaycastIgnoring {
+                origin, direction, ..
+            } => vec![origin, direction],
             Expression::Function { value, .. }
             | Expression::Not { value }
             | Expression::IsA { value, .. }
@@ -1171,7 +1204,10 @@ impl Expression {
                 vec![min, max]
             }
             Expression::Lerp { from, to, alpha } => vec![from, to, alpha],
-            Expression::Raycast { origin, direction } => vec![origin, direction],
+            Expression::Raycast { origin, direction }
+            | Expression::RaycastIgnoring {
+                origin, direction, ..
+            } => vec![origin, direction],
             Expression::Function { value, .. }
             | Expression::Not { value }
             | Expression::IsA { value, .. }

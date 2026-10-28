@@ -269,6 +269,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::IfElse { .. }
         | BlockKind::StopScript
         | BlockKind::ForEachChild { .. }
+        | BlockKind::ForEachPartInRadius { .. }
+        | BlockKind::ForEachPartTouching { .. }
         | BlockKind::WaitForChild { .. }
         | BlockKind::DestroyAfter { .. } => Category::Control,
         BlockKind::MoveTo { .. }
@@ -338,6 +340,7 @@ fn reporter_category(expression: &Expression) -> Category {
         | Expression::PartUnderMouse
         | Expression::KeyDown { .. }
         | Expression::Raycast { .. }
+        | Expression::RaycastIgnoring { .. }
         | Expression::IsA { .. } => Category::Sensing,
         Expression::AnimatorBool { .. } | Expression::AnimatorNumber { .. } => Category::Animation,
         Expression::DataRow { .. } | Expression::DataValue { .. } => Category::More,
@@ -764,6 +767,35 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             ]),
             Mouth(body),
         ],
+        BlockKind::ForEachPartInRadius {
+            center,
+            radius,
+            variable,
+            body,
+        } => vec![
+            Row(vec![
+                label("for each part"),
+                Variable(variable),
+                label("within"),
+                Slot(radius, SlotKind::Number),
+                label("studs of"),
+                Slot(center, SlotKind::Vector),
+            ]),
+            Mouth(body),
+        ],
+        BlockKind::ForEachPartTouching {
+            target,
+            variable,
+            body,
+        } => vec![
+            Row(vec![
+                label("for each part"),
+                Variable(variable),
+                label("touching"),
+                Object(target, Filter::Parts),
+            ]),
+            Mouth(body),
+        ],
         BlockKind::DestroyAfter { target, seconds } => vec![Row(vec![
             label("destroy"),
             Object(target, Filter::Any),
@@ -1136,6 +1168,18 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
             Slot(origin, SlotKind::Vector),
             label("along"),
             Slot(direction, SlotKind::Vector),
+        ],
+        Expression::RaycastIgnoring {
+            origin,
+            direction,
+            ignore,
+        } => vec![
+            label("raycast from"),
+            Slot(origin, SlotKind::Vector),
+            label("along"),
+            Slot(direction, SlotKind::Vector),
+            label("ignoring"),
+            Object(ignore, Filter::Any),
         ],
         Expression::TouchingPart => vec![label("touching part")],
         Expression::PartUnderMouse => vec![label("part under mouse")],

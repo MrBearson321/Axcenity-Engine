@@ -1268,6 +1268,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Part,
+        "CollisionGroup",
+        "The collision group it's in, `\"Default\"` at first. Parts in two groups set not to collide (the Collision Groups window, or `PhysicsService:CollisionGroupSetCollidable`) pass through each other and don't touch. A name that isn't registered counts as Default.",
+    ),
+    (
+        ClassName::Part,
+        "CanQuery",
+        "If false, scripts' raycasts, shape casts and overlap queries (`workspace:Raycast`, `GetPartsInPart`, ...) pass it by. It still collides.",
+    ),
+    (
+        ClassName::Part,
+        "CanTouch",
+        "If false, it fires no Touched or TouchEnded, and touching it fires neither on other parts. It still collides.",
+    ),
+    (
+        ClassName::Part,
         "Massless",
         "If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.",
     ),
@@ -1320,6 +1335,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::MeshPart,
         "WindAffected",
         "If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.",
+    ),
+    (
+        ClassName::MeshPart,
+        "CollisionGroup",
+        "The collision group it's in, `\"Default\"` at first. Parts in two groups set not to collide (the Collision Groups window, or `PhysicsService:CollisionGroupSetCollidable`) pass through each other and don't touch. A name that isn't registered counts as Default.",
+    ),
+    (
+        ClassName::MeshPart,
+        "CanQuery",
+        "If false, scripts' raycasts, shape casts and overlap queries (`workspace:Raycast`, `GetPartsInPart`, ...) pass it by. It still collides.",
+    ),
+    (
+        ClassName::MeshPart,
+        "CanTouch",
+        "If false, it fires no Touched or TouchEnded, and touching it fires neither on other parts. It still collides.",
     ),
     (
         ClassName::MeshPart,
@@ -3051,9 +3081,19 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.",
     ),
     (
+        ClassName::Part,
+        "TouchEnded",
+        "Fires when another part stops touching this one: once they've been apart for a few physics steps, or at once when one of them can't touch the other any more (`CanTouch` off, or set not to collide). The handler gets the other part.",
+    ),
+    (
         ClassName::MeshPart,
         "Touched",
         "Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.",
+    ),
+    (
+        ClassName::MeshPart,
+        "TouchEnded",
+        "Fires when another part stops touching this one: once they've been apart for a few physics steps, or at once when one of them can't touch the other any more (`CanTouch` off, or set not to collide). The handler gets the other part.",
     ),
     (
         ClassName::RemoteEvent,

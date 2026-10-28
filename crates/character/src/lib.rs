@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use axcenity_assets::Assets;
 use axcenity_core::input::{InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
-use axcenity_physics::{GRAVITY, RayHit, cast_ray_excluding, gravity};
+use axcenity_physics::{GRAVITY, QueryParams, RayHit, gravity, raycast};
 
 /// Gap left between the character and a wall or ceiling, in studs. Ground
 /// probes also start this far above the surface they look for.
@@ -32,8 +32,6 @@ const MAX_SLICE: f32 = 0.5;
 const MAX_SLICES: f32 = 64.0;
 /// Steeper than this, `MaxSlopeAngle` is treated as this: a wall is never ground.
 const STEEPEST_SLOPE: f32 = 89.0;
-/// How many sensors (`CanCollide` off) one probe passes through before giving up.
-const MAX_SENSORS: usize = 8;
 /// Radians turned per pixel of mouse movement. The same as the fly camera.
 const MOUSE_SENSITIVITY: f32 = 0.003;
 const MAX_PITCH: f32 = 89.0_f32.to_radians();
@@ -243,6 +241,9 @@ impl Limits {
 /// rotation: characters stand upright, and turning them is not this phase.
 struct Body {
     parts: Vec<InstanceId>,
+    /// The collision group of its first part: probes pass through parts in
+    /// groups that don't collide with it.
+    group: String,
     pivot_x: f32,
     pivot_z: f32,
     feet_y: f32,
@@ -509,8 +510,15 @@ impl Body {
         if !any {
             return None;
         }
+        let group = world
+            .get(parts[0])
+            .and_then(|part| part.property("CollisionGroup"))
+            .and_then(Value::as_str)
+            .unwrap_or(axcenity_core::DEFAULT_GROUP)
+            .to_owned();
         Some(Self {
             parts,
+            group,
             pivot_x: (min.x + max.x) * 0.5,
             pivot_z: (min.z + max.z) * 0.5,
             feet_y: min.y,
@@ -783,7 +791,8 @@ fn move_slice(
 }
 
 /// The first solid hit along a ray, passing through sensors (`CanCollide`
-/// off) and the character's own body.
+/// off), the character's own body and parts in collision groups that don't
+/// collide with it.
 fn solid_hit(
     world: &World,
     assets: &Assets,
@@ -791,15 +800,13 @@ fn solid_hit(
     origin: Vector3,
     direction: Vector3,
 ) -> Option<RayHit> {
-    let mut skip = body.parts.clone();
-    for _ in 0..MAX_SENSORS {
-        let hit = cast_ray_excluding(world, assets, origin, direction, &skip)?;
-        if hit.can_collide {
-            return Some(hit);
-        }
-        skip.push(hit.instance);
-    }
-    None
+    let params = QueryParams {
+        filter: body.parts.clone(),
+        collision_group: Some(body.group.clone()),
+        respect_can_collide: true,
+        ..QueryParams::default()
+    };
+    raycast(world, assets, origin, direction, &params)
 }
 
 /// A horizontal ray from the middle of the body at height `y`, reaching the

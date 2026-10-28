@@ -102,7 +102,7 @@ impl Context {
                 .expect("creating AnimationTrack methods only fails when out of memory"),
         );
         methods.extend(
-            instance::workspace_methods(&lua)
+            crate::query::workspace_methods(&lua)
                 .expect("creating Workspace methods only fails when out of memory"),
         );
         methods.extend(
@@ -305,10 +305,16 @@ impl Context {
         self.lua.set_app_data(flags);
     }
 
-    /// Frame step 4: fires `Touched` on both parts of each pair.
-    pub fn fire_touched(&self, world: &mut World, touches: &[(InstanceId, InstanceId)]) {
+    /// Frame step 4: fires `event` (`Touched` or `TouchEnded`) on both
+    /// parts of each pair.
+    pub fn fire_touch_event(
+        &self,
+        world: &mut World,
+        event: &'static str,
+        pairs: &[(InstanceId, InstanceId)],
+    ) {
         with_world(&self.lua, world, || {
-            for &(a, b) in touches {
+            for &(a, b) in pairs {
                 for (part, other) in [(a, b), (b, a)] {
                     let both_exist = instance::world(&self.lua)
                         .is_ok_and(|world| world.contains(part) && world.contains(other));
@@ -316,7 +322,7 @@ impl Context {
                         events::fire(
                             &self.lua,
                             events::Owner::Instance(part),
-                            "Touched",
+                            event,
                             instance::LuaInstance(other),
                         );
                     }

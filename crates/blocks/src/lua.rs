@@ -371,10 +371,12 @@ pub(crate) enum ExprKind {
     Call(Box<Expr>, Vec<Expr>),
     Method(Box<Expr>, String, Vec<Expr>),
     Function(FunctionBody),
-    /// A table constructor's `name = value` fields, in order. `other` is
-    /// true when it also has fields of another kind (`[k] = v` or a list).
+    /// A table constructor's `name = value` fields and list items, in
+    /// order. `other` is true when it has fields that aren't named
+    /// (`[k] = v` or list items).
     Table {
         named: Vec<(String, Expr)>,
+        list: Vec<Expr>,
         other: bool,
     },
     Binary(&'static str, Box<Expr>, Box<Expr>),
@@ -1145,7 +1147,7 @@ impl Parser<'_> {
 
     fn table(&mut self) -> Result<ExprKind, SyntaxError> {
         self.expect("{")?;
-        let (mut named, mut other) = (Vec::new(), false);
+        let (mut named, mut list, mut other) = (Vec::new(), Vec::new(), false);
         while !self.check("}") {
             if self.accept("[") {
                 self.expression()?;
@@ -1160,7 +1162,7 @@ impl Parser<'_> {
                 self.next();
                 named.push((name, self.expression()?));
             } else {
-                self.expression()?;
+                list.push(self.expression()?);
                 other = true;
             }
             if !self.accept(",") && !self.accept(";") {
@@ -1168,7 +1170,7 @@ impl Parser<'_> {
             }
         }
         self.expect("}")?;
-        Ok(ExprKind::Table { named, other })
+        Ok(ExprKind::Table { named, list, other })
     }
 
     fn primary(&mut self) -> Result<Expr, SyntaxError> {

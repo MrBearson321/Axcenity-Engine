@@ -410,9 +410,12 @@ impl Session {
             cost.physics_steps = self.physics.step(&mut self.world, seconds);
             cost.physics += lap();
             // 4. Fire `Touched` for parts that started touching (and
-            //    `Changed` for parts that moved), then `RunService.Heartbeat`.
+            //    `Changed` for parts that moved), `TouchEnded` for those
+            //    that stopped, then `RunService.Heartbeat`.
             let touches = self.physics.take_touches();
             self.scripts.fire_touched(&mut self.world, &touches);
+            let ends = self.physics.take_touch_ends();
+            self.scripts.fire_touch_ended(&mut self.world, &ends);
             if self.scripts.pause().is_none() {
                 self.scripts.heartbeat(&mut self.world, seconds);
             }

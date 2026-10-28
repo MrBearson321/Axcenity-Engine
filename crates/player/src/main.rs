@@ -1122,10 +1122,13 @@ impl ApplicationHandler for App {
 
                 // 4. Fire `Touched` for parts that started touching during
                 //    those steps (and `Changed` for the parts that moved),
-                //    then `RunService.Heartbeat`. Handlers that wait carry
-                //    on in step 2.
+                //    `TouchEnded` for those that stopped, then
+                //    `RunService.Heartbeat`. Handlers that wait carry on in
+                //    step 2.
                 let touches = self.physics.take_touches();
                 self.scripts.fire_touched(&mut self.world, &touches);
+                let ends = self.physics.take_touch_ends();
+                self.scripts.fire_touch_ended(&mut self.world, &ends);
                 self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
                 let heard = listener_of_view(self.shown_view());

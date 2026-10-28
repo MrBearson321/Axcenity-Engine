@@ -536,3 +536,89 @@ fn with_nothing_in_the_way_an_agent_keeps_to_the_path_it_found() {
     assert_eq!(status(&world, agent), "Reached");
     assert!(agents.take_warnings().is_empty());
 }
+
+/// Phase 38: a player character (a Model with a ThirdPersonController) at
+/// the origin walking toward -Z, an NPC standing in its way at z = -8 and
+/// a wall behind the NPC whose near face is at z = -15.5.
+fn player_npc_and_wall(collide: bool) -> (World, InstanceId, InstanceId, InstanceId) {
+    let mut world = World::new();
+    part(&mut world, at(0.0, -0.5, 0.0), at(60.0, 1.0, 60.0));
+    part(&mut world, at(0.0, 4.0, -16.0), at(20.0, 8.0, 1.0));
+    let groups = world.collision_groups_mut();
+    groups.register("Players").unwrap();
+    groups.register("NPCs").unwrap();
+    groups.set_collidable("Players", "NPCs", collide).unwrap();
+
+    let player = world.create(ClassName::Model).unwrap();
+    world.set_parent(player, Some(world.workspace())).unwrap();
+    let body = world.create(ClassName::Part).unwrap();
+    world.set_parent(body, Some(player)).unwrap();
+    set(&mut world, body, "Size", Value::Vector3(at(2.0, 5.0, 1.0)));
+    set(
+        &mut world,
+        body,
+        "Position",
+        Value::Vector3(at(0.0, 2.5, 0.0)),
+    );
+    let players = Value::String("Players".to_owned());
+    set(&mut world, body, "CollisionGroup", players);
+    let controller = world.create(ClassName::ThirdPersonController).unwrap();
+    world.set_parent(controller, Some(player)).unwrap();
+
+    let (npc, npc_body) = agent_at(&mut world, at(0.0, 0.0, -8.0));
+    let npcs = Value::String("NPCs".to_owned());
+    set(&mut world, npc_body, "CollisionGroup", npcs);
+    (world, body, npc, npc_body)
+}
+
+/// Runs the player (holding `forward`), the agents and physics together,
+/// as a host's frame does.
+fn play(world: &mut World, forward: bool, seconds: f32) {
+    let assets = Assets::default();
+    let input = axcenity_character::MoveInput {
+        forward,
+        ..Default::default()
+    };
+    let mut characters = axcenity_character::Controllers::default();
+    let mut agents = Agents::default();
+    let mut physics = axcenity_physics::Physics::new();
+    for _ in 0..(seconds * 60.0).round() as usize {
+        characters.step(world, &assets, input, 1.0 / 60.0);
+        agents.step(world, &assets, 1.0 / 60.0);
+        characters.keep_kinematic(world);
+        agents.keep_kinematic(world);
+        physics.step(world, 1.0 / 60.0);
+    }
+}
+
+#[test]
+fn players_and_npcs_set_as_non_colliding_walk_through_each_other_and_still_collide_with_walls() {
+    // Collidable, the NPC stops the player.
+    let (mut world, body, _, _) = player_npc_and_wall(true);
+    play(&mut world, true, 2.0);
+    let blocked = feet(&world, body);
+    assert!(blocked.z > -7.5 && blocked.z < -5.0, "{blocked:?}");
+
+    // Set not to collide, the player walks through the NPC to the wall,
+    // which stops it (its body is 1 deep, so its middle is 0.5 from it).
+    let (mut world, body, _, _) = player_npc_and_wall(false);
+    play(&mut world, true, 2.0);
+    let through = feet(&world, body);
+    assert!(through.z < -14.0 && through.z > -15.1, "{through:?}");
+
+    // And the NPC walks through the player standing at the origin, to z = 10.
+    let (mut world, body, npc, npc_body) = player_npc_and_wall(false);
+    set(
+        &mut world,
+        npc,
+        "Destination",
+        Value::Vector3(at(0.0, 0.0, 10.0)),
+    );
+    play(&mut world, false, 3.0);
+    assert_eq!(status(&world, npc), "Reached");
+    assert!(horizontal(feet(&world, npc_body), at(0.0, 0.0, 10.0)) < 0.1);
+    assert!(
+        horizontal(feet(&world, body), at(0.0, 0.0, 0.0)) < 0.01,
+        "the player stays"
+    );
+}

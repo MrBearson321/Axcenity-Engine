@@ -132,6 +132,17 @@ pub(super) fn palette(
                 variable: "child".to_owned(),
                 body: Vec::new(),
             }),
+            B(BlockKind::ForEachPartInRadius {
+                center: vector(0.0, 0.0, 0.0),
+                radius: number(10.0),
+                variable: "part".to_owned(),
+                body: Vec::new(),
+            }),
+            B(BlockKind::ForEachPartTouching {
+                target: part.clone(),
+                variable: "part".to_owned(),
+                body: Vec::new(),
+            }),
             B(BlockKind::WaitForChild {
                 target: String::new(),
                 name: NameKind::Child.example().to_owned(),
@@ -362,12 +373,17 @@ pub(super) fn palette(
                 key: "Space".to_owned(),
             }),
             R(Expression::Property {
-                target: part,
+                target: part.clone(),
                 property: "Position".to_owned(),
             }),
             R(Expression::Raycast {
                 origin: Box::new(vector(0.0, 10.0, 0.0)),
                 direction: Box::new(vector(0.0, -20.0, 0.0)),
+            }),
+            R(Expression::RaycastIgnoring {
+                origin: Box::new(vector(0.0, 10.0, 0.0)),
+                direction: Box::new(vector(0.0, -20.0, 0.0)),
+                ignore: part,
             }),
             R(Expression::IsA {
                 value: Box::new(Expression::TouchingPart),

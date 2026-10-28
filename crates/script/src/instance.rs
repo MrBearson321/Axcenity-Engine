@@ -2,9 +2,8 @@
 //! every read and write looks the Instance up in the World, which is lent to
 //! Lua while scripts run (see `with_world` in `lib.rs`).
 
-use axcenity_assets::Assets;
 use axcenity_audio::SoundAction;
-use axcenity_core::{ClassName, INSTANCE_EVENTS, InstanceId, Parameter, Value, Vector3, World};
+use axcenity_core::{ClassName, INSTANCE_EVENTS, InstanceId, Parameter, Value, World};
 use mlua::{
     AppDataRef, AppDataRefMut, FromLua, Function, IntoLua, Lua, MetaMethod, UserData,
     UserDataMethods,
@@ -25,7 +24,7 @@ use crate::run_service::LuaRunService;
 use crate::save::LuaSaveService;
 use crate::sides;
 use crate::tween::LuaTweenService;
-use crate::types::{LuaVector3, f32_to_lua, type_name, value_from_lua, value_to_lua};
+use crate::types::{type_name, value_from_lua, value_to_lua};
 use crate::user_settings::LuaUserGameSettings;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -477,61 +476,6 @@ pub fn sound_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Fu
         (ClassName::Sound, "Pause", pause),
         (ClassName::Sound, "Resume", resume),
     ])
-}
-
-/// `workspace:Raycast(origin, direction)`: the first collider along the ray.
-pub fn workspace_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
-    let raycast = lua.create_function(
-        |lua, (this, origin, direction): (LuaInstance, mlua::Value, mlua::Value)| {
-            let origin = vector3_arg(lua, origin, "origin")?;
-            let direction = vector3_arg(lua, direction, "direction")?;
-            {
-                let world = world(lua)?;
-                let class = world.get(this.0).ok_or_else(destroyed)?.class();
-                if class != ClassName::Workspace {
-                    return Err(mlua::Error::runtime(format!(
-                        "Raycast is a method of Workspace, not a {class}"
-                    )));
-                }
-            }
-            let assets = lua
-                .app_data_ref::<Assets>()
-                .as_deref()
-                .cloned()
-                .unwrap_or_default();
-            let hit = {
-                let world = world(lua)?;
-                axcenity_physics::cast_ray(&world, &assets, origin, direction)
-            };
-            if let Some(mut rays) = lua.app_data_mut::<crate::DebugRays>() {
-                rays.push(crate::DebugRay {
-                    origin,
-                    direction,
-                    hit,
-                });
-            }
-            let Some(hit) = hit else {
-                return Ok(mlua::Value::Nil);
-            };
-            let result = lua.create_table()?;
-            result.set("Instance", LuaInstance(hit.instance))?;
-            result.set("Position", LuaVector3(hit.position))?;
-            result.set("Normal", LuaVector3(hit.normal))?;
-            result.set("Distance", f32_to_lua(hit.distance))?;
-            Ok(mlua::Value::Table(result))
-        },
-    )?;
-    Ok(vec![(ClassName::Workspace, "Raycast", raycast)])
-}
-
-fn vector3_arg(lua: &Lua, value: mlua::Value, what: &str) -> mlua::Result<Vector3> {
-    match LuaVector3::from_lua(value.clone(), lua) {
-        Ok(vector) => Ok(vector.0),
-        Err(_) => Err(mlua::Error::runtime(format!(
-            "Raycast needs a {what} Vector3, such as workspace:Raycast(Vector3.new(0, 10, 0), Vector3.new(0, -20, 0)), not a {}",
-            type_name(lua, &value)
-        ))),
-    }
 }
 
 /// `animator:Play(state, blend?)`, which asks the host's animator to
@@ -1015,6 +959,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "Debris" => return LuaDebris.into_lua(lua),
             "HttpService" => return LuaHttpService.into_lua(lua),
             "DataService" => return LuaDataService.into_lua(lua),
+            "PhysicsService" => return crate::query::LuaPhysicsService.into_lua(lua),
             "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
             _ => {}
         }
@@ -1043,6 +988,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     "GuiService",
                     "HttpService",
                     "LocalizationService",
+                    "PhysicsService",
                     "ReplicatedFirst",
                     "RunService",
                     "SaveService",

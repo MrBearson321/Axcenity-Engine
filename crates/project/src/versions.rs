@@ -11,7 +11,7 @@ use std::io::{self, ErrorKind};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::{STRINGS_FILE, WORLD_FILE, find_scripts, find_stylesheets};
+use crate::{COLLISION_GROUPS_FILE, STRINGS_FILE, WORLD_FILE, find_scripts, find_stylesheets};
 
 /// Where versions live, relative to the project folder.
 pub const HISTORY_DIR: &str = ".axcenity/history";
@@ -131,12 +131,12 @@ pub fn restore_version(folder: &Path, id: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// `world.json`, `strings.json`, every script and every stylesheet, in
+/// `world.json`, `strings.json`, `collision-groups.json`, every script and every stylesheet, in
 /// path order.
 fn tracked_files(folder: &Path) -> Vec<String> {
     let mut problems = Vec::new();
     let mut files = Vec::new();
-    for file in [WORLD_FILE, STRINGS_FILE] {
+    for file in [WORLD_FILE, STRINGS_FILE, COLLISION_GROUPS_FILE] {
         if folder.join(file).is_file() {
             files.push(file.to_owned());
         }

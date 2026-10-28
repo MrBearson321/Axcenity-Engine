@@ -1280,10 +1280,10 @@ Queries never step or write the world, as now. Blocks: "parts within radius", "p
 
 ### Acceptance criteria
 
-- [ ] Players and NPCs set as non-colliding walk through each other and still collide with walls.
-- [ ] A raycast that excludes the shooter's character hits the wall behind it.
-- [ ] `GetPartsInPart` on a trigger zone lists exactly the parts inside it, and ignores ones with `CanQuery = false`.
-- [ ] `TouchEnded` fires once when a part leaves another.
+- [x] Players and NPCs set as non-colliding walk through each other and still collide with walls.
+- [x] A raycast that excludes the shooter's character hits the wall behind it.
+- [x] `GetPartsInPart` on a trigger zone lists exactly the parts inside it, and ignores ones with `CanQuery = false`.
+- [x] `TouchEnded` fires once when a part leaves another.
 
 ---
 

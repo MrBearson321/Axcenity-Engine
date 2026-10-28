@@ -118,9 +118,11 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::PushWithForce { .. } => 62,
         BlockKind::SetPartVelocity { .. } => 63,
         BlockKind::SetFriction { .. } => 64,
+        BlockKind::ForEachPartInRadius { .. } => 65,
+        BlockKind::ForEachPartTouching { .. } => 66,
     })
 }
-const STATEMENT_COUNT: usize = 65;
+const STATEMENT_COUNT: usize = 67;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -370,6 +372,27 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 body: Vec::new(),
             },
             "for _, coin in workspace.Coins:GetChildren() do",
+        ),
+        (
+            BlockKind::ForEachPartInRadius {
+                center: Expression::Vector3 {
+                    x: 0.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+                radius: number(12.0),
+                variable: "nearby".to_owned(),
+                body: Vec::new(),
+            },
+            "for _, nearby in workspace:GetPartBoundsInRadius(Vector3.new(0, 5, 0), 12) do",
+        ),
+        (
+            BlockKind::ForEachPartTouching {
+                target: "Zone".to_owned(),
+                variable: "inside".to_owned(),
+                body: Vec::new(),
+            },
+            "for _, inside in workspace:GetPartsInPart(workspace.Zone) do",
         ),
         (
             BlockKind::WaitForChild {
@@ -1651,6 +1674,15 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
                 z: 0.0,
             }),
         },
+        Expression::RaycastIgnoring {
+            origin: boxed(variable("a")),
+            direction: boxed(Expression::Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: -50.0,
+            }),
+            ignore: "Shooter".to_owned(),
+        },
         Expression::PartUnderMouse,
         Expression::DataRow {
             table: "weapons".to_owned(),
@@ -2444,4 +2476,128 @@ fn event_and_frame_blocks_fire_bindables_destroy_later_and_run_before_physics_an
     assert_eq!(said(&mut runtime), vec!["render"; 30]);
     runtime.run_command(&mut world, "print('ok')").unwrap();
     assert_eq!(said(&mut runtime), ["ok"]);
+}
+
+/// Phase 38: "for each part touching", "for each part within" and "raycast
+/// … ignoring …" run as the queries they translate to.
+#[test]
+fn query_blocks_list_the_parts_in_a_zone_and_raycast_past_the_shooter() {
+    let mut world = World::new();
+    let mut add = |name: &str, position: Vector3, size: Vector3| {
+        let id = world.create(ClassName::Part).unwrap();
+        world.set_name(id, name).unwrap();
+        world.set_parent(id, Some(world.workspace())).unwrap();
+        for (property, value) in [
+            ("Position", Value::Vector3(position)),
+            ("Size", Value::Vector3(size)),
+            ("Anchored", Value::Bool(true)),
+        ] {
+            world.set_property(id, property, value).unwrap();
+        }
+    };
+    add(
+        "Zone",
+        Vector3::new(0.0, 5.0, 0.0),
+        Vector3::new(10.0, 10.0, 10.0),
+    );
+    add(
+        "Coin",
+        Vector3::new(2.0, 2.0, 2.0),
+        Vector3::new(1.0, 1.0, 1.0),
+    );
+    add(
+        "Shooter",
+        Vector3::new(0.0, 5.0, -10.0),
+        Vector3::new(2.0, 2.0, 2.0),
+    );
+    add(
+        "Wall",
+        Vector3::new(0.0, 5.0, -20.0),
+        Vector3::new(10.0, 10.0, 1.0),
+    );
+
+    let print_name = |id: u64, of: &str| {
+        block(
+            id,
+            BlockKind::Print {
+                value: Expression::Code {
+                    code: format!("{of}.Name"),
+                },
+            },
+        )
+    };
+    let along = |z: f64| Expression::Vector3 { x: 0.0, y: 0.0, z };
+    let from = || Expression::Vector3 {
+        x: 0.0,
+        y: 5.0,
+        z: -6.0,
+    };
+    let blocks = vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![
+                block(
+                    2,
+                    BlockKind::ForEachPartTouching {
+                        target: "Zone".to_owned(),
+                        variable: "inside".to_owned(),
+                        body: vec![print_name(3, "inside")],
+                    },
+                ),
+                block(
+                    4,
+                    BlockKind::ForEachPartInRadius {
+                        center: Expression::Vector3 {
+                            x: 2.0,
+                            y: 2.0,
+                            z: 2.0,
+                        },
+                        radius: number(0.5),
+                        variable: "near".to_owned(),
+                        body: vec![print_name(5, "near")],
+                    },
+                ),
+                block(
+                    6,
+                    BlockKind::SetVariable {
+                        name: "hit".to_owned(),
+                        value: Expression::RaycastIgnoring {
+                            origin: boxed(from()),
+                            direction: boxed(along(-30.0)),
+                            ignore: "Shooter".to_owned(),
+                        },
+                    },
+                ),
+                print_name(7, "hit.Instance"),
+                block(
+                    8,
+                    BlockKind::SetVariable {
+                        name: "hit".to_owned(),
+                        value: Expression::Raycast {
+                            origin: boxed(from()),
+                            direction: boxed(along(-30.0)),
+                        },
+                    },
+                ),
+                print_name(9, "hit.Instance"),
+            ],
+        },
+    )];
+    let source = translate(&script(blocks)).unwrap().source;
+    let lua = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(lua, Some(world.server_script_service()))
+        .unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, lua, "scripts/Q.server.blocks.json", &source);
+    let output: Vec<_> = runtime
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(
+        output,
+        ["Coin", "Zone", "Coin", "Wall", "Shooter"],
+        "{source}"
+    );
 }

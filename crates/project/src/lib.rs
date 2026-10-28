@@ -13,6 +13,7 @@
 //!   *.css           project stylesheets, also found in subfolders
 //!   strings.json    the string table: UI text in each language (optional)
 //!   input.json      the input map: actions and their bindings (optional)
+//!   collision-groups.json  the collision groups (optional)
 //! ```
 //!
 //! One damaged file never stops the rest from loading: [`load`] leaves it
@@ -39,6 +40,7 @@ mod versions;
 mod watch;
 mod world_file;
 
+mod collision_groups;
 mod input_map;
 mod scripts;
 mod strings;
@@ -46,6 +48,9 @@ mod stylesheets;
 mod templates;
 mod ui_graphs;
 
+pub use collision_groups::{
+    COLLISION_GROUPS_FILE, parse_collision_groups, save_collision_groups, write_collision_groups,
+};
 pub use input_map::{INPUT_FILE, load_input_map, parse_input_map, save_input_map, write_input_map};
 pub use scripts::*;
 pub use strings::{STRINGS_FILE, parse_strings, save_strings, write_strings};
@@ -314,6 +319,8 @@ pub enum LoadError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("`{}` is not a valid collision groups file, so every part collides: {message}", path.display())]
+    CollisionGroups { path: PathBuf, message: String },
     #[error("`{}` is not a valid input map, so the default actions are used: {message}", path.display())]
     InputMap { path: PathBuf, message: String },
     #[error("the terrain in `{}` couldn't be loaded, so it's flat: {message}", path.display())]
@@ -426,6 +433,7 @@ pub fn load_with_progress(
         }
     };
     strings::load_strings(folder, &mut world, &mut problems);
+    collision_groups::load_collision_groups(folder, &mut world, &mut problems);
     let damaged_terrains =
         terrain_files::load_terrains_reporting(folder, &mut world, &mut problems, progress);
     let (mut scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems, progress);

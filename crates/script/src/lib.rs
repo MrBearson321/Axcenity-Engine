@@ -62,6 +62,7 @@ mod instance;
 mod localization;
 mod modules;
 mod physical;
+mod query;
 mod random;
 mod remote;
 mod run_service;
@@ -491,9 +492,25 @@ impl ScriptRuntime {
     ///
     /// Changes physics made (parts moving) fire their change events first.
     pub fn fire_touched(&mut self, world: &mut World, touches: &[(InstanceId, InstanceId)]) {
+        self.fire_touch_event(world, "Touched", touches);
+    }
+
+    /// Frame-order step 4, after [`fire_touched`](Self::fire_touched):
+    /// fires `TouchEnded` on both parts of each pair that stopped
+    /// touching, the same way.
+    pub fn fire_touch_ended(&mut self, world: &mut World, ends: &[(InstanceId, InstanceId)]) {
+        self.fire_touch_event(world, "TouchEnded", ends);
+    }
+
+    fn fire_touch_event(
+        &mut self,
+        world: &mut World,
+        event: &'static str,
+        pairs: &[(InstanceId, InstanceId)],
+    ) {
         self.fire_changes(world);
         for side in [Side::Server, Side::Client] {
-            self.context(side).fire_touched(world, touches);
+            self.context(side).fire_touch_event(world, event, pairs);
             self.collect(side);
             self.fire_changes(world);
         }
@@ -1024,5 +1041,7 @@ mod joint_tests;
 mod mover_tests;
 #[cfg(test)]
 mod physical_tests;
+#[cfg(test)]
+mod query_tests;
 #[cfg(test)]
 mod utilities_tests;

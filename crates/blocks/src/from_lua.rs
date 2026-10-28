@@ -683,6 +683,50 @@ impl<'a> Converter<'a> {
         (!path.is_empty()).then(|| path.join("."))
     }
 
+    /// The one object `RaycastParams.new({FilterDescendantsInstances = {x}})`
+    /// passes by, as its path: what "raycast … ignoring" writes.
+    fn ignored(&self, params: &Expr) -> Option<String> {
+        let ExprKind::Call(function, args) = &params.kind else {
+            return None;
+        };
+        let ExprKind::Field(library, new) = &function.kind else {
+            return None;
+        };
+        if new != "new" || !matches!(&library.kind, ExprKind::Name(name) if name == "RaycastParams")
+        {
+            return None;
+        }
+        let [
+            Expr {
+                kind:
+                    ExprKind::Table {
+                        named,
+                        other: false,
+                        ..
+                    },
+                ..
+            },
+        ] = args.as_slice()
+        else {
+            return None;
+        };
+        let [(field, list)] = named.as_slice() else {
+            return None;
+        };
+        let ExprKind::Table {
+            named: inner,
+            list: items,
+            ..
+        } = &list.kind
+        else {
+            return None;
+        };
+        match (field.as_str(), inner.as_slice(), items.as_slice()) {
+            ("FilterDescendantsInstances", [], [item]) => self.target(item),
+            _ => None,
+        }
+    }
+
     /// Like [`Self::target`], with `workspace` itself as the empty path.
     fn container(&self, expr: &Expr) -> Option<String> {
         match &expr.kind {
@@ -807,18 +851,38 @@ impl<'a> Converter<'a> {
                 else {
                     return None;
                 };
-                if skip != "_" || method != "GetChildren" || !args.is_empty() {
+                if skip != "_" {
                     return None;
                 }
                 let inner = Scope {
                     child: Some(variable.as_str()),
                     ..scope
                 };
-                Some(BlockKind::ForEachChild {
-                    target: self.container(object)?,
-                    variable: variable.clone(),
-                    body: self.body(body, inner),
-                })
+                let in_workspace =
+                    matches!(&object.kind, ExprKind::Name(name) if name == "workspace");
+                match (method.as_str(), args.as_slice()) {
+                    ("GetChildren", []) => Some(BlockKind::ForEachChild {
+                        target: self.container(object)?,
+                        variable: variable.clone(),
+                        body: self.body(body, inner),
+                    }),
+                    ("GetPartBoundsInRadius", [center, radius]) if in_workspace => {
+                        Some(BlockKind::ForEachPartInRadius {
+                            center: self.expression(center, scope),
+                            radius: self.expression(radius, scope),
+                            variable: variable.clone(),
+                            body: self.body(body, inner),
+                        })
+                    }
+                    ("GetPartsInPart", [part]) if in_workspace => {
+                        Some(BlockKind::ForEachPartTouching {
+                            target: self.target(part)?,
+                            variable: variable.clone(),
+                            body: self.body(body, inner),
+                        })
+                    }
+                    _ => None,
+                }
             }
             StatKind::If { arms, otherwise } => self.if_chain(arms, otherwise.as_deref(), scope),
             StatKind::Do(body) if matches!(body.as_slice(), [Stat { kind: StatKind::Return(values), .. }] if values.is_empty()) => {
@@ -1067,6 +1131,7 @@ impl<'a> Converter<'a> {
         let ExprKind::Table {
             named,
             other: false,
+            ..
         } = &goals.kind
         else {
             return None;
@@ -1666,12 +1731,23 @@ impl<'a> Converter<'a> {
             ExprKind::Method(object, method, args) => {
                 if method == "Raycast"
                     && matches!(&object.kind, ExprKind::Name(name) if name == "workspace")
-                    && let [origin, direction] = args.as_slice()
                 {
-                    return Some(Expression::Raycast {
-                        origin: boxed(origin),
-                        direction: boxed(direction),
-                    });
+                    match args.as_slice() {
+                        [origin, direction] => {
+                            return Some(Expression::Raycast {
+                                origin: boxed(origin),
+                                direction: boxed(direction),
+                            });
+                        }
+                        [origin, direction, params] => {
+                            return Some(Expression::RaycastIgnoring {
+                                origin: boxed(origin),
+                                direction: boxed(direction),
+                                ignore: self.ignored(params)?,
+                            });
+                        }
+                        _ => {}
+                    }
                 }
                 if method == "IsA"
                     && let [

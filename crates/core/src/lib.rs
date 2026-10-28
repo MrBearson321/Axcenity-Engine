@@ -4,12 +4,14 @@
 //! - [`World`] is the tree of [`Instance`]s, rooted at `game`.
 //! - [`TerrainData`] is a Terrain's heightfield, kept beside its Instance.
 //! - [`StringTable`] is the project's UI text in each language, kept by the world.
+//! - [`CollisionGroups`] is the project's collision groups, kept by the world.
 //! - [`UiSettings`] is the player's game UI settings (text scale, contrast, motion), kept by the world.
 //! - [`Value`] is a typed property value, such as a [`Vector3`] or [`Color3`].
 
 mod animation;
 mod arena;
 mod class;
+mod collision_groups;
 mod enums;
 pub mod input;
 mod strings;
@@ -23,6 +25,7 @@ pub use animation::{
 };
 pub use arena::{Arena, Id};
 pub use class::{ClassName, INSTANCE_EVENTS};
+pub use collision_groups::{CollisionGroups, DEFAULT_GROUP, MAX_COLLISION_GROUPS};
 pub use enums::{
     KeyCode, Material, MaterialPreset, MouseBehavior, PartType, ParticleType, TextureChannel,
     ToneMapping, UserInputState, UserInputType,

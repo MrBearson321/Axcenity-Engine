@@ -153,7 +153,9 @@ fn read_variables(blocks: &[Block], loops: &mut Vec<String>, variables: &mut BTr
             });
         }
         let looping = match &block.kind {
-            BlockKind::ForEachChild { variable, .. } => Some(variable.clone()),
+            BlockKind::ForEachChild { variable, .. }
+            | BlockKind::ForEachPartInRadius { variable, .. }
+            | BlockKind::ForEachPartTouching { variable, .. } => Some(variable.clone()),
             _ => None,
         };
         let pushed = looping.is_some();
@@ -413,6 +415,38 @@ impl Writer {
                 }
                 let object = container(t)?;
                 self.line(format!("for _, {variable} in {object}:GetChildren() do"));
+                self.nested(body, ids)?;
+                self.line("end");
+            }
+            BlockKind::ForEachPartInRadius {
+                center,
+                radius,
+                variable,
+                body,
+            } => {
+                if !valid_identifier(variable) {
+                    return Err(TranslateError::InvalidVariable(variable.clone()));
+                }
+                self.line(format!(
+                    "for _, {variable} in workspace:GetPartBoundsInRadius({}, {}) do",
+                    self.expression(center)?,
+                    self.expression(radius)?
+                ));
+                self.nested(body, ids)?;
+                self.line("end");
+            }
+            BlockKind::ForEachPartTouching {
+                target: t,
+                variable,
+                body,
+            } => {
+                if !valid_identifier(variable) {
+                    return Err(TranslateError::InvalidVariable(variable.clone()));
+                }
+                self.line(format!(
+                    "for _, {variable} in workspace:GetPartsInPart({}) do",
+                    target(t)?
+                ));
                 self.nested(body, ids)?;
                 self.line("end");
             }
@@ -834,6 +868,7 @@ impl Writer {
             | Expression::PartUnderMouse
             | Expression::Property { .. }
             | Expression::Raycast { .. }
+            | Expression::RaycastIgnoring { .. }
             | Expression::Vector3 { .. }
             | Expression::Color3 { .. }
             | Expression::Lerp { .. }
@@ -920,6 +955,18 @@ impl Writer {
                     "workspace:Raycast({}, {})",
                     self.expression(origin)?,
                     self.expression(direction)?
+                )
+            }
+            Expression::RaycastIgnoring {
+                origin,
+                direction,
+                ignore,
+            } => {
+                format!(
+                    "workspace:Raycast({}, {}, RaycastParams.new({{FilterDescendantsInstances = {{{}}}}}))",
+                    self.expression(origin)?,
+                    self.expression(direction)?,
+                    target(ignore)?
                 )
             }
             Expression::PartUnderMouse => "game.Players.LocalPlayer:GetMouse().Target".to_owned(),

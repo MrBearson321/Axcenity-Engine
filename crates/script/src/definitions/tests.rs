@@ -393,6 +393,9 @@ fn described_fields_and_methods_exist() {
             "workspace:Raycast(Vector3.new(0, 10, 0), Vector3.new(0, -20, 0))",
         ),
         ("PhysicalProperties", "PhysicalProperties.new(1, 0.5, 0.25)"),
+        ("PhysicsService", "game:GetService('PhysicsService')"),
+        ("RaycastParams", "RaycastParams.new()"),
+        ("OverlapParams", "OverlapParams.new()"),
     ];
     for value_type in VALUE_TYPES {
         let (_, sample) = samples

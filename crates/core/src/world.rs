@@ -11,6 +11,7 @@ use std::sync::Arc;
 use crate::animation::{AnimationTrackState, AnimatorState, PropertyAnimationState};
 use crate::arena::{Arena, Id};
 use crate::class::ClassName;
+use crate::collision_groups::CollisionGroups;
 use crate::strings::StringTable;
 use crate::terrain::TerrainData;
 use crate::ui_settings::UiSettings;
@@ -230,6 +231,8 @@ pub struct World {
     language: String,
     /// The player's game UI settings (see [`World::ui_settings`]).
     ui_settings: UiSettings,
+    /// The project's collision groups (see [`World::collision_groups`]).
+    collision_groups: CollisionGroups,
 }
 
 impl World {
@@ -282,6 +285,7 @@ impl World {
             strings: Arc::default(),
             language: String::new(),
             ui_settings: UiSettings::default(),
+            collision_groups: CollisionGroups::default(),
         }
     }
 
@@ -329,6 +333,21 @@ impl World {
 
     pub fn set_ui_settings(&mut self, settings: UiSettings) {
         self.ui_settings = settings;
+    }
+
+    /// The project's collision groups (`collision-groups.json`), which
+    /// parts' `CollisionGroup` names. Scripts' `PhysicsService` changes the
+    /// copy Play runs on.
+    pub fn collision_groups(&self) -> &CollisionGroups {
+        &self.collision_groups
+    }
+
+    pub fn collision_groups_mut(&mut self) -> &mut CollisionGroups {
+        &mut self.collision_groups
+    }
+
+    pub fn set_collision_groups(&mut self, groups: CollisionGroups) {
+        self.collision_groups = groups;
     }
 
     /// `key`'s value in the active language, if the string table has one.

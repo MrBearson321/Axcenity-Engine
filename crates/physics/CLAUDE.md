@@ -1,8 +1,8 @@
 # `physics`
 
-- Rapier simulation over `core`, with MeshPart hulls from `assets` and colliding foliage on terrains. Behavior: `docs/architecture/physics.md`. Frame order: `docs/architecture/frame-loop.md`. Queries (`cast_ray`, `debug_colliders`, `solids`) must not step or write back.
+- Rapier simulation over `core`, with MeshPart hulls from `assets` and colliding foliage on terrains. Behavior: `docs/architecture/physics.md`. Frame order: `docs/architecture/frame-loop.md`. Queries (`cast_ray`, `debug_colliders`, `solids`, and Phase 38's `raycast`, `shapecast`, `parts_in_*` with a `QueryParams`) must not step or write back.
 - Preserve deterministic body ordering and the fixed-step accumulator. Use `rapier3d::glamx` types and convert through `core` types.
-- Keep contact ownership/touch tracking synchronized with collider changes, and wake bodies after external state edits.
+- Keep contact ownership/touch tracking synchronized with collider changes, and wake bodies after external state edits. Phase 38: colliders' interaction groups come from `CollisionGroup` (`Groups` in `PartState`, so a group-table change updates them); `CanTouch` and `TouchEnded` are in `find_touches`.
 - Phase 34: `material.rs` gives colliders their `PhysicalProperties` (weights in `user_data`, the contact hook only for weights other than 1, so old worlds simulate the same); `mass.rs` is `Mass` for scripts' impulses. Velocities sync both ways like `Position`.
 - Phase 36: `joints.rs` makes a rapier impulse joint per enabled joint constraint between two bodies, after assemblies are synced, and drives servos and winches before each step (`joints::drive`). `joints::current` gives scripts `CurrentAngle`/`CurrentPosition`/`CurrentLength` from the world.
 - Phase 37: `movers.rs` reads the enabled movers every frame and adds their forces and torques before each step, after `blow` resets forces; velocities and aligns count gravity and earlier forces, and learn contacts' push (`Learned`, forgotten when a script moves the body).

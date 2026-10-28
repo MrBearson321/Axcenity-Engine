@@ -775,6 +775,112 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         ],
     },
     ValueType {
+        class: "PhysicsService",
+        doc: "Collision groups, from `game:GetService(\"PhysicsService\")`. Changes last until Stop; the Collision Groups window (Model tab) sets the ones a game starts with.",
+        fields: &[],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "RegisterCollisionGroup",
+                doc: "Adds a collision group (at most 32, Default included). It collides with every group until set not to. Registering one that's there does nothing.",
+                params: &[("name", "string")],
+                returns: "()",
+            },
+            Function {
+                name: "CollisionGroupSetCollidable",
+                doc: "Sets whether parts in the two groups collide (and touch). Both must be registered.",
+                params: &[
+                    ("group1", "string"),
+                    ("group2", "string"),
+                    ("collidable", "boolean"),
+                ],
+                returns: "()",
+            },
+            Function {
+                name: "CollisionGroupsAreCollidable",
+                doc: "True if parts in the two groups collide. Both must be registered.",
+                params: &[("group1", "string"), ("group2", "string")],
+                returns: "boolean",
+            },
+        ],
+    },
+    ValueType {
+        class: "RaycastParams",
+        doc: "Which parts `workspace:Raycast`, `Spherecast`, `Blockcast` and `Shapecast` find, from `RaycastParams.new()`.",
+        fields: &[
+            Field {
+                name: "FilterDescendantsInstances",
+                ty: "{Instance}",
+                doc: "These Instances and everything inside them are passed by (Exclude) or the only parts found (Include). Empty at first.",
+            },
+            Field {
+                name: "FilterType",
+                ty: "EnumRaycastFilterType",
+                doc: "`Enum.RaycastFilterType.Exclude` (the default) or `Include`.",
+            },
+            Field {
+                name: "CollisionGroup",
+                ty: "string",
+                doc: "Only parts in groups that collide with this one are found. `\"Default\"` at first.",
+            },
+            Field {
+                name: "RespectCanCollide",
+                ty: "boolean",
+                doc: "If true, parts with `CanCollide` off are passed by. False at first.",
+            },
+            Field {
+                name: "IgnoreWater",
+                ty: "boolean",
+                doc: "Kept for familiarity; there's no water yet, so it changes nothing.",
+            },
+        ],
+        operators: &[],
+        methods: &[Function {
+            name: "AddToFilter",
+            doc: "Adds an Instance, or a list of them, to `FilterDescendantsInstances`.",
+            params: &[("instances", "Instance | {Instance}")],
+            returns: "()",
+        }],
+    },
+    ValueType {
+        class: "OverlapParams",
+        doc: "Which parts `workspace:GetPartBoundsInBox`, `GetPartBoundsInRadius` and `GetPartsInPart` list, from `OverlapParams.new()`.",
+        fields: &[
+            Field {
+                name: "FilterDescendantsInstances",
+                ty: "{Instance}",
+                doc: "These Instances and everything inside them are passed by (Exclude) or the only parts listed (Include). Empty at first.",
+            },
+            Field {
+                name: "FilterType",
+                ty: "EnumRaycastFilterType",
+                doc: "`Enum.RaycastFilterType.Exclude` (the default) or `Include`.",
+            },
+            Field {
+                name: "CollisionGroup",
+                ty: "string",
+                doc: "Only parts in groups that collide with this one are listed. `\"Default\"` at first.",
+            },
+            Field {
+                name: "RespectCanCollide",
+                ty: "boolean",
+                doc: "If true, parts with `CanCollide` off are passed by. False at first.",
+            },
+            Field {
+                name: "MaxParts",
+                ty: "number",
+                doc: "The most parts listed; 0 (the default) lists them all.",
+            },
+        ],
+        operators: &[],
+        methods: &[Function {
+            name: "AddToFilter",
+            doc: "Adds an Instance, or a list of them, to `FilterDescendantsInstances`.",
+            params: &[("instances", "Instance | {Instance}")],
+            returns: "()",
+        }],
+    },
+    ValueType {
         class: "DataService",
         doc: "The project's data tables (`assets/data/*.data.json`, made in the Data Table tab), from `game:GetService(\"DataService\")`. Scripts read them; they can't change them.",
         fields: &[],
@@ -1200,7 +1306,7 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
     },
     ValueType {
         class: "RaycastResult",
-        doc: "Where `workspace:Raycast` first met a collider, or nil when it missed.",
+        doc: "Where `workspace:Raycast` (or a shape cast) first met a collider, or nil when it missed.",
         fields: &[
             Field {
                 name: "Instance",
@@ -1785,7 +1891,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -1848,9 +1954,89 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::Workspace,
         Function {
             name: "Raycast",
-            doc: "The first collider along `direction` from `origin`, or nil. The direction's length is how far the ray reaches. Hits sensors (`CanCollide` off) as well as solid parts and terrain. The result has Instance, Position, Normal and Distance.",
-            params: &[("origin", "Vector3"), ("direction", "Vector3")],
+            doc: "The first collider along `direction` from `origin`, or nil. The direction's length is how far the ray reaches. Hits sensors (`CanCollide` off) as well as solid parts and terrain, but not parts with `CanQuery` off. `params` (a `RaycastParams`) can pass by or keep to some parts, a collision group, or sensors. The result has Instance, Position, Normal and Distance.",
+            params: &[
+                ("origin", "Vector3"),
+                ("direction", "Vector3"),
+                ("params?", "RaycastParams"),
+            ],
             returns: "RaycastResult?",
+        },
+    ),
+    (
+        ClassName::Workspace,
+        Function {
+            name: "Spherecast",
+            doc: "Sweeps a ball of `radius` from `position` along `direction` (its length is how far) and returns the first part it meets, as `Raycast` does, or nil. Parts it starts inside aren't hit.",
+            params: &[
+                ("position", "Vector3"),
+                ("radius", "number"),
+                ("direction", "Vector3"),
+                ("params?", "RaycastParams"),
+            ],
+            returns: "RaycastResult?",
+        },
+    ),
+    (
+        ClassName::Workspace,
+        Function {
+            name: "Blockcast",
+            doc: "Sweeps a box of `size` placed at `cframe` along `direction` and returns the first part it meets, as `Raycast` does, or nil. Parts it starts inside aren't hit.",
+            params: &[
+                ("cframe", "CFrame"),
+                ("size", "Vector3"),
+                ("direction", "Vector3"),
+                ("params?", "RaycastParams"),
+            ],
+            returns: "RaycastResult?",
+        },
+    ),
+    (
+        ClassName::Workspace,
+        Function {
+            name: "Shapecast",
+            doc: "Sweeps `part`'s own shape from where it is along `direction` and returns the first other part it meets, as `Raycast` does, or nil. The part doesn't move.",
+            params: &[
+                ("part", "Instance"),
+                ("direction", "Vector3"),
+                ("params?", "RaycastParams"),
+            ],
+            returns: "RaycastResult?",
+        },
+    ),
+    (
+        ClassName::Workspace,
+        Function {
+            name: "GetPartBoundsInBox",
+            doc: "The parts whose bounding boxes overlap the box of `size` at `cframe`, in Explorer order. Terrain isn't listed.",
+            params: &[
+                ("cframe", "CFrame"),
+                ("size", "Vector3"),
+                ("params?", "OverlapParams"),
+            ],
+            returns: "{Instance}",
+        },
+    ),
+    (
+        ClassName::Workspace,
+        Function {
+            name: "GetPartBoundsInRadius",
+            doc: "The parts whose bounding boxes are within `radius` studs of `position`, in Explorer order. Terrain isn't listed.",
+            params: &[
+                ("position", "Vector3"),
+                ("radius", "number"),
+                ("params?", "OverlapParams"),
+            ],
+            returns: "{Instance}",
+        },
+    ),
+    (
+        ClassName::Workspace,
+        Function {
+            name: "GetPartsInPart",
+            doc: "The parts whose shapes overlap `part`'s, not counting it, in Explorer order: what's inside a trigger zone. Terrain isn't listed.",
+            params: &[("part", "Instance"), ("params?", "OverlapParams")],
+            returns: "{Instance}",
         },
     ),
     (
@@ -2745,6 +2931,28 @@ pub(super) const LIBRARIES: &[Library] = &[
                 ("delayTime?", "number"),
             ],
             returns: "TweenInfo",
+        }],
+    },
+    Library {
+        global: "RaycastParams",
+        doc: "Creates RaycastParams values.",
+        constants: &[],
+        functions: &[Function {
+            name: "new",
+            doc: "Params that find every part scripts can query. `fields` sets some at once: `RaycastParams.new({FilterDescendantsInstances = {character}})`.",
+            params: &[("fields?", "{[string]: any}")],
+            returns: "RaycastParams",
+        }],
+    },
+    Library {
+        global: "OverlapParams",
+        doc: "Creates OverlapParams values.",
+        constants: &[],
+        functions: &[Function {
+            name: "new",
+            doc: "Params that list every part scripts can query. `fields` sets some at once: `OverlapParams.new({MaxParts = 10})`.",
+            params: &[("fields?", "{[string]: any}")],
+            returns: "OverlapParams",
         }],
     },
     Library {

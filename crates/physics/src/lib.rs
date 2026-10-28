@@ -15,7 +15,13 @@
 //! anchors, resizes or deletes a part is noticed on the next frame.
 //!
 //! After each step it also notes which parts started touching, for the
-//! `Touched` event. The host collects them with [`Physics::take_touches`].
+//! `Touched` event, and which stopped, for `TouchEnded`. The host collects
+//! them with [`Physics::take_touches`] and [`Physics::take_touch_ends`].
+//! Parts with `CanTouch` off touch nothing.
+//!
+//! Each part is in a collision group (its `CollisionGroup`, see
+//! [`axcenity_core::CollisionGroups`]); parts in two groups set not to
+//! collide pass through each other and never touch.
 //!
 //! The Workspace's `GlobalWind` pushes unanchored parts that have
 //! `WindAffected` on: before each step, each gets a drag force toward the
@@ -37,8 +43,9 @@
 //! LinearVelocity, AngularVelocity, VectorForce, Torque, AlignPosition and
 //! AlignOrientation push or turn a part's body every step (see `movers`).
 //!
-//! [`cast_ray`] and [`debug_colliders`] read the world the same way the
-//! simulation does, without stepping it or writing back.
+//! [`cast_ray`], [`raycast`], [`shapecast`], the overlap queries and
+//! [`debug_colliders`] read the world the same way the simulation does,
+//! without stepping it or writing back.
 
 pub mod assembly;
 pub mod joints;
@@ -50,7 +57,8 @@ mod shapes;
 
 pub use mass::Mass;
 pub use query::{
-    ColliderOutline, Column, RayHit, Solid, cast_ray, cast_ray_excluding, debug_colliders, solids,
+    CastShape, ColliderOutline, Column, QueryParams, RayHit, Solid, cast_ray, cast_ray_excluding,
+    debug_colliders, parts_in_box, parts_in_part, parts_in_radius, raycast, shapecast, solids,
 };
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -63,7 +71,8 @@ use rapier3d::glamx::{EulerRot, Quat, Vec3};
 use rapier3d::math::Pose;
 use rapier3d::pipeline::PhysicsWorld;
 use rapier3d::prelude::{
-    Collider, ColliderHandle, RigidBodyBuilder, RigidBodyHandle, RigidBodyType,
+    Collider, ColliderHandle, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder,
+    RigidBodyHandle, RigidBodyType,
 };
 use shapes::Form;
 
@@ -119,6 +128,9 @@ pub struct Physics {
     /// Pairs that started touching since the last
     /// [`take_touches`](Self::take_touches).
     touches: Vec<(InstanceId, InstanceId)>,
+    /// Pairs that stopped touching since the last
+    /// [`take_touch_ends`](Self::take_touch_ends).
+    touch_ends: Vec<(InstanceId, InstanceId)>,
     /// Where MeshParts' models come from.
     assets: Assets,
     /// The joint of each enabled constraint between two bodies.
@@ -166,6 +178,44 @@ pub(crate) struct PartState {
     /// `AssemblyLinearVelocity` and `AssemblyAngularVelocity`.
     velocity: Vector3,
     spin: Vector3,
+    /// Its collision group's bit, and the groups it collides with.
+    pub(crate) groups: Groups,
+    /// False: it touches nothing (`CanTouch`).
+    can_touch: bool,
+    /// False: scripts' queries pass it by (`CanQuery`).
+    pub(crate) can_query: bool,
+}
+
+/// A part's collision group as bits: its own, and every group it collides
+/// with (see [`axcenity_core::CollisionGroups::mask`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Groups {
+    member: u32,
+    filter: u32,
+}
+
+impl Groups {
+    /// The bits of the group `name`, which is Default if it isn't registered.
+    pub(crate) fn of(world: &World, name: &str) -> Self {
+        let groups = world.collision_groups();
+        Self {
+            member: 1 << groups.index(name),
+            filter: groups.mask(name),
+        }
+    }
+
+    /// True if parts in these two groups collide.
+    pub(crate) fn collide(self, other: Self) -> bool {
+        self.member & other.filter != 0 && other.member & self.filter != 0
+    }
+
+    fn interaction(self) -> InteractionGroups {
+        InteractionGroups::new(
+            Group::from_bits_retain(self.member),
+            Group::from_bits_retain(self.filter),
+            InteractionTestMode::And,
+        )
+    }
 }
 
 impl PartState {
@@ -193,6 +243,11 @@ impl PartState {
         let wind_affected =
             instance.property("WindAffected").and_then(Value::as_bool) == Some(true);
         let massless = instance.property("Massless").and_then(Value::as_bool) == Some(true);
+        let flag = |name| instance.property(name).and_then(Value::as_bool) != Some(false);
+        let group = instance
+            .property("CollisionGroup")
+            .and_then(Value::as_str)
+            .unwrap_or(axcenity_core::DEFAULT_GROUP);
         // MeshParts have no Material, so they weigh what Plastic does.
         let material = instance
             .property("Material")
@@ -215,6 +270,9 @@ impl PartState {
             physical,
             velocity: vector("AssemblyLinearVelocity").unwrap_or_default(),
             spin: vector("AssemblyAngularVelocity").unwrap_or_default(),
+            groups: Groups::of(world, group),
+            can_touch: flag("CanTouch"),
+            can_query: flag("CanQuery"),
         };
         // A NaN or infinite velocity is ignored, not simulated.
         let placed = [state.size, state.position, state.orientation]
@@ -253,6 +311,9 @@ impl PartState {
             physical: PhysicalProperties::LEGACY,
             velocity: Vector3::default(),
             spin: Vector3::default(),
+            groups: Groups::of(world, axcenity_core::DEFAULT_GROUP),
+            can_touch: true,
+            can_query: true,
         };
         [state.size, state.position]
             .iter()
@@ -296,6 +357,7 @@ impl Physics {
             touching: BTreeMap::new(),
             started: false,
             touches: Vec::new(),
+            touch_ends: Vec::new(),
             assets,
             joints: BTreeMap::new(),
             movers: Vec::new(),
@@ -349,6 +411,15 @@ impl Physics {
     /// fires `Touched` on both parts.
     pub fn take_touches(&mut self) -> Vec<(InstanceId, InstanceId)> {
         std::mem::take(&mut self.touches)
+    }
+
+    /// Removes and returns the pairs of parts that stopped touching since
+    /// the last call, in a fixed order: a pair counts once it has been
+    /// apart for a few steps (see [`SEPARATE_STEPS`]), or at once when one
+    /// of its parts can't touch the other any more (`CanTouch` off, or set
+    /// not to collide). Frame step 4 fires `TouchEnded` on both parts.
+    pub fn take_touch_ends(&mut self) -> Vec<(InstanceId, InstanceId)> {
+        std::mem::take(&mut self.touch_ends)
     }
 
     /// How many parts are being simulated (anchored ones included).
@@ -597,7 +668,8 @@ impl Physics {
         };
         let colliders =
             shapes::foliage_colliders(&terrain.data, to_vec3(part.seen.size), &self.assets);
-        for collider in colliders {
+        for mut collider in colliders {
+            collider.set_collision_groups(part.seen.groups.interaction());
             let handle = self.rapier.colliders.insert_with_parent(
                 collider,
                 part.body,
@@ -634,6 +706,9 @@ impl Physics {
         } else if let Some(collider) = self.rapier.colliders.get_mut(part.collider) {
             if old.can_collide != state.can_collide {
                 collider.set_sensor(!state.can_collide);
+            }
+            if old.groups != state.groups {
+                collider.set_collision_groups(state.groups.interaction());
             }
             if old.physical != state.physical || old.massless != state.massless {
                 material::apply(collider, state.physical);
@@ -698,14 +773,20 @@ impl Physics {
     }
 
     /// Compares the parts touching after this step with those touching
-    /// before, and records the pairs that are new.
+    /// before, and records the pairs that are new and those that ended.
     fn find_touches(&mut self) {
         // Only contacts the solver acts on count, not pairs whose bounding
         // boxes merely overlap. A set, so the order is the same every run.
         // Parts with CanCollide off are sensors: their overlaps count too.
+        // Parts with CanTouch off touch nothing.
+        let touchable =
+            |id: InstanceId| self.parts.get(&id).is_some_and(|part| part.seen.can_touch);
         let pair_of = |one: &ColliderHandle, two: &ColliderHandle| {
             let a = *self.owners.get(one)?;
             let b = *self.owners.get(two)?;
+            if !touchable(a) || !touchable(b) {
+                return None;
+            }
             Some(if a < b { (a, b) } else { (b, a) })
         };
         let contacts = self
@@ -728,12 +809,28 @@ impl Physics {
             }
         }
         // Pairs that are apart this step stop counting once they've been
-        // apart for long enough.
-        self.touching.retain(|pair, steps_apart| {
-            if !now.contains(pair) {
+        // apart for long enough. A pair that can't touch any more (CanTouch
+        // off, or set not to collide) stops at once.
+        let parts = &self.parts;
+        let ends = &mut self.touch_ends;
+        self.touching.retain(|&(a, b), steps_apart| {
+            if !now.contains(&(a, b)) {
                 *steps_apart += 1;
+                let can_touch = match (parts.get(&a), parts.get(&b)) {
+                    (Some(a), Some(b)) => {
+                        a.seen.can_touch && b.seen.can_touch && a.seen.groups.collide(b.seen.groups)
+                    }
+                    _ => false,
+                };
+                if !can_touch {
+                    *steps_apart = SEPARATE_STEPS;
+                }
             }
-            *steps_apart < SEPARATE_STEPS
+            let ended = *steps_apart >= SEPARATE_STEPS;
+            if ended {
+                ends.push((a, b));
+            }
+            !ended
         });
         self.started = true;
     }
@@ -792,6 +889,7 @@ fn part_collider(state: &PartState, offset: Pose, weightless: bool) -> Collider 
     // A turned shape (a cylinder) keeps its turn within the part.
     collider.set_position(offset * *collider.position());
     collider.set_sensor(!state.can_collide);
+    collider.set_collision_groups(state.groups.interaction());
     material::apply(&mut collider, state.physical);
     if weightless {
         collider.set_density(0.0);
@@ -863,3 +961,6 @@ mod joint_tests;
 
 #[cfg(test)]
 mod mover_tests;
+
+#[cfg(test)]
+mod query_tests;

@@ -26,6 +26,7 @@ mod asset_fixes;
 mod assets;
 mod behavior_trees;
 mod chrome;
+mod collision_groups;
 mod commands;
 mod constraint_tool;
 mod controls_ui;
@@ -165,6 +166,8 @@ pub struct EditorApp {
     versions_open: bool,
     /// File ▸ Input…: the project's input map.
     input_settings: input_settings::InputWindow,
+    /// Model ▸ Build ▸ Collision Groups.
+    collision_groups: collision_groups::CollisionGroupsWindow,
     /// Every change made to `world` since it was opened, for undo and redo.
     /// It also knows whether the world is as saved.
     history: History,
@@ -574,6 +577,7 @@ impl EditorApp {
             selection: Vec::new(),
             versions_open: false,
             input_settings: Default::default(),
+            collision_groups: Default::default(),
             history: History::new(),
             tool: Tool::default(),
             snap: Snap::default(),
@@ -1153,6 +1157,7 @@ impl EditorApp {
             self.version_window(ctx);
         }
         self.input_window(ctx);
+        self.collision_groups_window(ctx);
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);
         self.sky_prompt(ctx);

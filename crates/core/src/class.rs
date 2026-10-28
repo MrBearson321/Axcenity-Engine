@@ -1083,6 +1083,7 @@ impl ClassName {
                     // 0 leaves the shape's own texture coordinates unscaled.
                     ("TileSize", Value::Number(8.0)),
                 ];
+                properties.extend(collision_properties());
                 properties.extend(body_properties());
                 properties
             }
@@ -1104,6 +1105,7 @@ impl ClassName {
                     ("CanCollide", Value::Bool(true)),
                     ("WindAffected", Value::Bool(false)),
                 ];
+                properties.extend(collision_properties());
                 properties.extend(body_properties());
                 properties
             }
@@ -1534,8 +1536,8 @@ impl ClassName {
             // with an event's name as it passes, which
             // `GetMarkerReachedSignal(name)` hears one name of.
             ClassName::AnimationTrack => &["Stopped", "KeyframeReached"],
-            // Fires on both parts when two parts start touching.
-            ClassName::Part | ClassName::MeshPart => &["Touched"],
+            // Fire on both parts when two parts start and stop touching.
+            ClassName::Part | ClassName::MeshPart => &["Touched", "TouchEnded"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.
             ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],
@@ -1674,8 +1676,24 @@ fn alignment_mode(enum_name: &str) -> Value {
     })
 }
 
-/// What both character controllers have: how the character moves, jumps
-/// and crouches.
+/// What Parts and MeshParts share about what they collide with, touch and
+/// are found by (Phase 38).
+fn collision_properties() -> [(&'static str, Value); 3] {
+    [
+        // The collision group it's in (`CollisionGroups`). A name that
+        // isn't registered counts as Default.
+        (
+            "CollisionGroup",
+            Value::String(crate::DEFAULT_GROUP.to_owned()),
+        ),
+        // Off, scripts' raycasts, shape casts and overlap queries pass it by.
+        ("CanQuery", Value::Bool(true)),
+        // Off, it fires no Touched or TouchEnded, and nothing touching it
+        // does for it.
+        ("CanTouch", Value::Bool(true)),
+    ]
+}
+
 /// What Parts and MeshParts share about how they move (Phase 34). Parts
 /// welded together move as one assembly (Phase 35).
 fn body_properties() -> [(&'static str, Value); 4] {

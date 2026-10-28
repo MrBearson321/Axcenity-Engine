@@ -190,6 +190,8 @@ const ENGINE_GLOBALS: &[&str] = &[
     "PhysicalProperties",
     "Random",
     "TweenInfo",
+    "RaycastParams",
+    "OverlapParams",
     "Enum",
     "task",
     "pcall",

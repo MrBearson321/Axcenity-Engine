@@ -64,6 +64,10 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::If { .. } | BlockKind::IfElse { .. } => ("Branch", &["Condition"]),
         BlockKind::StopScript => ("Stop This Script", &[]),
         BlockKind::ForEachChild { .. } => ("For Each Child", &["Variable", "Object"]),
+        BlockKind::ForEachPartInRadius { .. } => {
+            ("For Each Part In Radius", &["Variable", "Radius", "Center"])
+        }
+        BlockKind::ForEachPartTouching { .. } => ("For Each Part Touching", &["Variable", "Part"]),
         BlockKind::WaitForChild { .. } => ("Wait For Child", &["Name", "Object"]),
         BlockKind::CloneInto { .. } => ("Clone", &["Object", "Into"]),
         BlockKind::MoveTo { .. } => ("Move To", &["Part", "Position"]),
@@ -147,6 +151,9 @@ pub(super) fn value_names(expression: &Expression) -> (String, &'static [&'stati
         Expression::Not { .. } => ("Not", &["Value"]),
         Expression::Property { .. } => ("Get Property", &["Property", "Object"]),
         Expression::Raycast { .. } => ("Raycast", &["Origin", "Direction"]),
+        Expression::RaycastIgnoring { .. } => {
+            ("Raycast Ignoring", &["Origin", "Direction", "Ignore"])
+        }
         Expression::TouchingPart => ("Touching Part", &[]),
         Expression::PartUnderMouse => ("Part Under Mouse", &[]),
         Expression::KeyDown { .. } => ("Is Key Down", &["Key"]),

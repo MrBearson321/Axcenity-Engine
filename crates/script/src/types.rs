@@ -526,10 +526,11 @@ pub enum EnumType {
     ActuatorRelativeTo,
     PositionAlignmentMode,
     OrientationAlignmentMode,
+    RaycastFilterType,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 24] = [
+    pub const ALL: [EnumType; 25] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -554,6 +555,7 @@ impl EnumType {
         EnumType::ActuatorRelativeTo,
         EnumType::PositionAlignmentMode,
         EnumType::OrientationAlignmentMode,
+        EnumType::RaycastFilterType,
     ];
 
     pub fn name(self) -> &'static str {
@@ -582,6 +584,7 @@ impl EnumType {
             EnumType::ActuatorRelativeTo => "ActuatorRelativeTo",
             EnumType::PositionAlignmentMode => "PositionAlignmentMode",
             EnumType::OrientationAlignmentMode => "OrientationAlignmentMode",
+            EnumType::RaycastFilterType => "RaycastFilterType",
         }
     }
 
@@ -616,6 +619,8 @@ impl EnumType {
             EnumType::PositionAlignmentMode | EnumType::OrientationAlignmentMode => {
                 vec!["OneAttachment", "TwoAttachment"]
             }
+            // Whether a query's filter list is passed by or the only parts found.
+            EnumType::RaycastFilterType => vec!["Exclude", "Include"],
         }
     }
 
@@ -732,7 +737,8 @@ impl LuaEnumItem {
             | EnumType::ActuatorType
             | EnumType::ActuatorRelativeTo
             | EnumType::PositionAlignmentMode
-            | EnumType::OrientationAlignmentMode => None,
+            | EnumType::OrientationAlignmentMode
+            | EnumType::RaycastFilterType => None,
         }
     }
 }
@@ -1088,6 +1094,12 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
             (data.is::<crate::data::LuaDataRow>(), "DataRow"),
             (data.is::<crate::tween::LuaTween>(), "Tween"),
             (data.is::<crate::tween::LuaTweenInfo>(), "TweenInfo"),
+            (data.is::<crate::query::LuaRaycastParams>(), "RaycastParams"),
+            (data.is::<crate::query::LuaOverlapParams>(), "OverlapParams"),
+            (
+                data.is::<crate::query::LuaPhysicsService>(),
+                "PhysicsService",
+            ),
         ];
         if let Some((_, name)) = others.into_iter().find(|(is, _)| *is) {
             return name.to_owned();

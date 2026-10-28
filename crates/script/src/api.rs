@@ -1,6 +1,7 @@
 //! The engine's global names in a script: `print`, `game`, `workspace`,
 //! `script`, `Instance`, `Vector3`, `Vector2`, `Color3`, `UDim2`, `CFrame`,
-//! `PhysicalProperties`, `Random`, `TweenInfo` and `Enum`.
+//! `PhysicalProperties`, `Random`, `TweenInfo`, `RaycastParams`,
+//! `OverlapParams` and `Enum`.
 //!
 //! Every script gets its own copy of these tables, so a script that replaces
 //! `Vector3.new` only breaks itself.
@@ -27,6 +28,8 @@ pub fn install(lua: &Lua, env: &Table, ids: ScriptIds) -> mlua::Result<()> {
     env.raw_set("PhysicalProperties", crate::physical::library(lua)?)?;
     env.raw_set("Random", crate::random::library(lua)?)?;
     env.raw_set("TweenInfo", crate::tween::tween_info_library(lua)?)?;
+    env.raw_set("RaycastParams", crate::query::raycast_params_library(lua)?)?;
+    env.raw_set("OverlapParams", crate::query::overlap_params_library(lua)?)?;
     env.raw_set("Enum", LuaEnum)?;
     Ok(())
 }

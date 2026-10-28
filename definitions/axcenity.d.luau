@@ -286,6 +286,48 @@ declare extern type HttpService with
 	function GenerateGUID(self, wrapInCurlyBraces: boolean?): string
 end
 
+--- Collision groups, from `game:GetService("PhysicsService")`. Changes last until Stop; the Collision Groups window (Model tab) sets the ones a game starts with.
+declare extern type PhysicsService with
+	--- Adds a collision group (at most 32, Default included). It collides with every group until set not to. Registering one that's there does nothing.
+	function RegisterCollisionGroup(self, name: string): ()
+	--- Sets whether parts in the two groups collide (and touch). Both must be registered.
+	function CollisionGroupSetCollidable(self, group1: string, group2: string, collidable: boolean): ()
+	--- True if parts in the two groups collide. Both must be registered.
+	function CollisionGroupsAreCollidable(self, group1: string, group2: string): boolean
+end
+
+--- Which parts `workspace:Raycast`, `Spherecast`, `Blockcast` and `Shapecast` find, from `RaycastParams.new()`.
+declare extern type RaycastParams with
+	--- These Instances and everything inside them are passed by (Exclude) or the only parts found (Include). Empty at first.
+	FilterDescendantsInstances: {Instance}
+	--- `Enum.RaycastFilterType.Exclude` (the default) or `Include`.
+	FilterType: EnumRaycastFilterType
+	--- Only parts in groups that collide with this one are found. `"Default"` at first.
+	CollisionGroup: string
+	--- If true, parts with `CanCollide` off are passed by. False at first.
+	RespectCanCollide: boolean
+	--- Kept for familiarity; there's no water yet, so it changes nothing.
+	IgnoreWater: boolean
+	--- Adds an Instance, or a list of them, to `FilterDescendantsInstances`.
+	function AddToFilter(self, instances: Instance | {Instance}): ()
+end
+
+--- Which parts `workspace:GetPartBoundsInBox`, `GetPartBoundsInRadius` and `GetPartsInPart` list, from `OverlapParams.new()`.
+declare extern type OverlapParams with
+	--- These Instances and everything inside them are passed by (Exclude) or the only parts listed (Include). Empty at first.
+	FilterDescendantsInstances: {Instance}
+	--- `Enum.RaycastFilterType.Exclude` (the default) or `Include`.
+	FilterType: EnumRaycastFilterType
+	--- Only parts in groups that collide with this one are listed. `"Default"` at first.
+	CollisionGroup: string
+	--- If true, parts with `CanCollide` off are passed by. False at first.
+	RespectCanCollide: boolean
+	--- The most parts listed; 0 (the default) lists them all.
+	MaxParts: number
+	--- Adds an Instance, or a list of them, to `FilterDescendantsInstances`.
+	function AddToFilter(self, instances: Instance | {Instance}): ()
+end
+
 --- The project's data tables (`assets/data/*.data.json`, made in the Data Table tab), from `game:GetService("DataService")`. Scripts read them; they can't change them.
 declare extern type DataService with
 	--- The table named `name`: `"weapons"` is `assets/data/weapons.data.json`. A table that isn't there, or can't be read, is an error saying why.
@@ -457,7 +499,7 @@ declare extern type InputObject with
 	Delta: Vector3
 end
 
---- Where `workspace:Raycast` first met a collider, or nil when it missed.
+--- Where `workspace:Raycast` (or a shape cast) first met a collider, or nil when it missed.
 declare extern type RaycastResult with
 	--- The Part, MeshPart or Terrain the ray hit.
 	Instance: Instance
@@ -860,6 +902,16 @@ declare extern type EnumOrientationAlignmentModeItems with
 	TwoAttachment: EnumOrientationAlignmentMode
 end
 
+--- One choice of `Enum.RaycastFilterType`.
+declare extern type EnumRaycastFilterType extends EnumItem with
+end
+
+--- The choices of `Enum.RaycastFilterType`.
+declare extern type EnumRaycastFilterTypeItems with
+	Exclude: EnumRaycastFilterType
+	Include: EnumRaycastFilterType
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -886,6 +938,7 @@ declare extern type EnumLibrary with
 	ActuatorRelativeTo: EnumActuatorRelativeToItems
 	PositionAlignmentMode: EnumPositionAlignmentModeItems
 	OrientationAlignmentMode: EnumOrientationAlignmentModeItems
+	RaycastFilterType: EnumRaycastFilterTypeItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -1022,7 +1075,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 
@@ -1035,8 +1088,20 @@ declare extern type Workspace extends Instance with
 	--- The camera the player sees through. LocalScripts only.
 	CurrentCamera: Camera
 	[string]: any
-	--- The first collider along `direction` from `origin`, or nil. The direction's length is how far the ray reaches. Hits sensors (`CanCollide` off) as well as solid parts and terrain. The result has Instance, Position, Normal and Distance.
-	function Raycast(self, origin: Vector3, direction: Vector3): RaycastResult?
+	--- The first collider along `direction` from `origin`, or nil. The direction's length is how far the ray reaches. Hits sensors (`CanCollide` off) as well as solid parts and terrain, but not parts with `CanQuery` off. `params` (a `RaycastParams`) can pass by or keep to some parts, a collision group, or sensors. The result has Instance, Position, Normal and Distance.
+	function Raycast(self, origin: Vector3, direction: Vector3, params: RaycastParams?): RaycastResult?
+	--- Sweeps a ball of `radius` from `position` along `direction` (its length is how far) and returns the first part it meets, as `Raycast` does, or nil. Parts it starts inside aren't hit.
+	function Spherecast(self, position: Vector3, radius: number, direction: Vector3, params: RaycastParams?): RaycastResult?
+	--- Sweeps a box of `size` placed at `cframe` along `direction` and returns the first part it meets, as `Raycast` does, or nil. Parts it starts inside aren't hit.
+	function Blockcast(self, cframe: CFrame, size: Vector3, direction: Vector3, params: RaycastParams?): RaycastResult?
+	--- Sweeps `part`'s own shape from where it is along `direction` and returns the first other part it meets, as `Raycast` does, or nil. The part doesn't move.
+	function Shapecast(self, part: Instance, direction: Vector3, params: RaycastParams?): RaycastResult?
+	--- The parts whose bounding boxes overlap the box of `size` at `cframe`, in Explorer order. Terrain isn't listed.
+	function GetPartBoundsInBox(self, cframe: CFrame, size: Vector3, params: OverlapParams?): {Instance}
+	--- The parts whose bounding boxes are within `radius` studs of `position`, in Explorer order. Terrain isn't listed.
+	function GetPartBoundsInRadius(self, position: Vector3, radius: number, params: OverlapParams?): {Instance}
+	--- The parts whose shapes overlap `part`'s, not counting it, in Explorer order: what's inside a trigger zone. Terrain isn't listed.
+	function GetPartsInPart(self, part: Instance, params: OverlapParams?): {Instance}
 end
 
 --- The service with a Player for everyone in the game.
@@ -1137,6 +1202,12 @@ declare extern type Part extends Instance with
 	Emission: number
 	--- Studs one copy of a SurfaceAppearance's textures covers. 0 leaves the shape's own coordinates unscaled.
 	TileSize: number
+	--- The collision group it's in, `"Default"` at first. Parts in two groups set not to collide (the Collision Groups window, or `PhysicsService:CollisionGroupSetCollidable`) pass through each other and don't touch. A name that isn't registered counts as Default.
+	CollisionGroup: string
+	--- If false, scripts' raycasts, shape casts and overlap queries (`workspace:Raycast`, `GetPartsInPart`, ...) pass it by. It still collides.
+	CanQuery: boolean
+	--- If false, it fires no Touched or TouchEnded, and touching it fires neither on other parts. It still collides.
+	CanTouch: boolean
 	--- If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.
 	Massless: boolean
 	--- Its own density, friction, elasticity and their weights (`PhysicalProperties.new(...)`), or nil for its Material's. Read `CurrentPhysicalProperties` for the ones in use.
@@ -1155,6 +1226,8 @@ declare extern type Part extends Instance with
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 	Touched: Signal
+	--- Fires when another part stops touching this one: once they've been apart for a few physics steps, or at once when one of them can't touch the other any more (`CanTouch` off, or set not to collide). The handler gets the other part.
+	TouchEnded: Signal
 	[string]: any
 	--- The part, then the parts welded to it by an enabled WeldConstraint; with `recursive` true, every part in its assembly.
 	function GetConnectedParts(self, recursive: boolean?): {Instance}
@@ -1196,6 +1269,12 @@ declare extern type MeshPart extends Instance with
 	CanCollide: boolean
 	--- If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
 	WindAffected: boolean
+	--- The collision group it's in, `"Default"` at first. Parts in two groups set not to collide (the Collision Groups window, or `PhysicsService:CollisionGroupSetCollidable`) pass through each other and don't touch. A name that isn't registered counts as Default.
+	CollisionGroup: string
+	--- If false, scripts' raycasts, shape casts and overlap queries (`workspace:Raycast`, `GetPartsInPart`, ...) pass it by. It still collides.
+	CanQuery: boolean
+	--- If false, it fires no Touched or TouchEnded, and touching it fires neither on other parts. It still collides.
+	CanTouch: boolean
 	--- If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.
 	Massless: boolean
 	--- Its own density, friction, elasticity and their weights (`PhysicalProperties.new(...)`), or nil for Plastic's. Read `CurrentPhysicalProperties` for the ones in use.
@@ -1214,6 +1293,8 @@ declare extern type MeshPart extends Instance with
 	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 	Touched: Signal
+	--- Fires when another part stops touching this one: once they've been apart for a few physics steps, or at once when one of them can't touch the other any more (`CanTouch` off, or set not to collide). The handler gets the other part.
+	TouchEnded: Signal
 	[string]: any
 	--- The part, then the parts welded to it by an enabled WeldConstraint; with `recursive` true, every part in its assembly.
 	function GetConnectedParts(self, recursive: boolean?): {Instance}
@@ -3040,6 +3121,24 @@ end
 
 --- Creates TweenInfo values.
 declare TweenInfo: TweenInfoLibrary
+
+--- Creates RaycastParams values.
+declare extern type RaycastParamsLibrary with
+	--- Params that find every part scripts can query. `fields` sets some at once: `RaycastParams.new({FilterDescendantsInstances = {character}})`.
+	new: (fields: {[string]: any}?) -> RaycastParams
+end
+
+--- Creates RaycastParams values.
+declare RaycastParams: RaycastParamsLibrary
+
+--- Creates OverlapParams values.
+declare extern type OverlapParamsLibrary with
+	--- Params that list every part scripts can query. `fields` sets some at once: `OverlapParams.new({MaxParts = 10})`.
+	new: (fields: {[string]: any}?) -> OverlapParams
+end
+
+--- Creates OverlapParams values.
+declare OverlapParams: OverlapParamsLibrary
 
 --- Pauses scripts and runs functions later, without stopping the game.
 declare extern type taskLibrary with

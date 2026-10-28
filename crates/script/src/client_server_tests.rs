@@ -541,7 +541,7 @@ fn get_service_finds_services_and_lists_them_for_a_wrong_name() {
             "there is no service named \"Teams\"; choose from Workspace, Players, Lighting, \
              ReplicatedStorage, ServerScriptService, StarterPlayer, CollectionService, \
              ContextActionService, DataService, Debris, GuiService, HttpService, LocalizationService, \
-             ReplicatedFirst, RunService, \
+             PhysicsService, ReplicatedFirst, RunService, \
              SaveService, TweenService, UserGameSettings, UserInputService"
         ),
         "{}",

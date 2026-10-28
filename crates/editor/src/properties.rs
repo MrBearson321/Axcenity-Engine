@@ -83,7 +83,17 @@ const GROUPS: [(&str, &[&str]); 20] = [
             "CastShadow",
         ],
     ),
-    ("Behavior", &["Anchored", "CanCollide", "WindAffected"]),
+    (
+        "Behavior",
+        &[
+            "Anchored",
+            "CanCollide",
+            "CanTouch",
+            "CanQuery",
+            "CollisionGroup",
+            "WindAffected",
+        ],
+    ),
     (
         "Physics",
         &[
@@ -1580,6 +1590,9 @@ mod tests {
                 "CastShadow",
                 "Anchored",
                 "CanCollide",
+                "CanTouch",
+                "CanQuery",
+                "CollisionGroup",
                 "WindAffected",
                 "CustomPhysicalProperties",
                 "Massless",
