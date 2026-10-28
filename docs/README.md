@@ -11,6 +11,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | The frame loop | [architecture/frame-loop.md](architecture/frame-loop.md) |
 | Physics | [architecture/physics.md](architecture/physics.md) |
 | Fractures, the `mesh_edit` crate, or plane cutting | [architecture/fracture.md](architecture/fracture.md) |
+| Union, Negate, Intersect, Separate, `UnionOperation`, `CollisionFidelity` | [architecture/solid-modeling.md](architecture/solid-modeling.md) |
 | The navigation mesh, agents, or behavior trees | [architecture/navigation.md](architecture/navigation.md) |
 | Play and Stop | [architecture/play-mode.md](architecture/play-mode.md) |
 | Save slots, checkpoints, `SaveService` | [architecture/saves.md](architecture/saves.md) |

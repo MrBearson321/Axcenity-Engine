@@ -56,6 +56,14 @@ pub enum ClassName {
     /// A solid 3D model imported from a glTF or FBX file (or some objects
     /// in one), which it names in `MeshId`. Drawn with the file's own materials.
     MeshPart,
+    /// Parts combined into one solid by Union, Negate or Intersect (Phase
+    /// 50): drawn and collided as the model in `MeshId` (the result,
+    /// saved by the editor), with the parts it was made of inside it,
+    /// hidden, for Separate.
+    UnionOperation,
+    /// A Part that cuts itself out of the parts it's unioned with (Phase
+    /// 50). Shown pink and see-through in the editor.
+    NegateOperation,
     /// A Part that characters sit on: one that touches it while it's empty
     /// and enabled sits down (`Occupant`).
     Seat,
@@ -294,7 +302,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 92] = [
+    pub const ALL: [ClassName; 94] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -305,6 +313,8 @@ impl ClassName {
         ClassName::StarterPlayerScripts,
         ClassName::Part,
         ClassName::MeshPart,
+        ClassName::UnionOperation,
+        ClassName::NegateOperation,
         ClassName::Seat,
         ClassName::VehicleSeat,
         ClassName::DamageZone,
@@ -407,6 +417,8 @@ impl ClassName {
             ClassName::DamageZone => "DamageZone",
             ClassName::SpawnLocation => "SpawnLocation",
             ClassName::MeshPart => "MeshPart",
+            ClassName::UnionOperation => "UnionOperation",
+            ClassName::NegateOperation => "NegateOperation",
             ClassName::Script => "Script",
             ClassName::LocalScript => "LocalScript",
             ClassName::ModuleScript => "ModuleScript",
@@ -506,6 +518,12 @@ impl ClassName {
         const LAYER: &[&str] = &["LayerCollector", "GuiBase2d"];
         match self {
             ClassName::Part | ClassName::MeshPart => PART,
+            ClassName::UnionOperation | ClassName::NegateOperation => &[
+                "PartOperation",
+                "TriangleMeshPart",
+                "BasePart",
+                "PVInstance",
+            ],
             ClassName::Seat | ClassName::DamageZone | ClassName::SpawnLocation => {
                 &["Part", "BasePart", "PVInstance"]
             }
@@ -529,19 +547,26 @@ impl ClassName {
         name == "Instance" || self.as_str() == name || self.superclasses().contains(&name)
     }
 
-    /// A Part, MeshPart, Seat, VehicleSeat, DamageZone or SpawnLocation: a
-    /// solid in the world (`BasePart`).
+    /// A Part, MeshPart, UnionOperation, NegateOperation, Seat, VehicleSeat,
+    /// DamageZone or SpawnLocation: a solid in the world (`BasePart`).
     pub fn is_base_part(self) -> bool {
-        matches!(self, ClassName::MeshPart) || self.is_part()
+        self.has_model() || self.is_part()
     }
 
-    /// A Part or one of the classes that are Parts: Seat, VehicleSeat,
-    /// DamageZone and SpawnLocation. They have a `Shape`, a `Material` and
-    /// the rest.
+    /// A MeshPart or UnionOperation: drawn and collided as the model its
+    /// `MeshId` names, stretched to its `Size`, instead of by a `Shape`.
+    pub fn has_model(self) -> bool {
+        matches!(self, ClassName::MeshPart | ClassName::UnionOperation)
+    }
+
+    /// A Part or one of the classes that are Parts: NegateOperation, Seat,
+    /// VehicleSeat, DamageZone and SpawnLocation. They have a `Shape`, a
+    /// `Material` and the rest.
     pub fn is_part(self) -> bool {
         matches!(
             self,
             ClassName::Part
+                | ClassName::NegateOperation
                 | ClassName::Seat
                 | ClassName::VehicleSeat
                 | ClassName::DamageZone
@@ -1283,6 +1308,7 @@ impl ClassName {
                 ("RollOffMaxDistance", Value::Number(150.0)),
             ],
             ClassName::Part
+            | ClassName::NegateOperation
             | ClassName::Seat
             | ClassName::VehicleSeat
             | ClassName::DamageZone
@@ -1412,6 +1438,33 @@ impl ClassName {
                     ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
                     // The model is stretched so its bounding box is this size.
                     ("Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0))),
+                    ("CastShadow", Value::Bool(true)),
+                    ("Transparency", Value::Number(0.0)),
+                    ("CanCollide", Value::Bool(true)),
+                    ("WindAffected", Value::Bool(false)),
+                ];
+                properties.extend(collision_properties());
+                properties.extend(body_properties());
+                properties
+            }
+            ClassName::UnionOperation => {
+                let mut properties = vec![
+                    ("Anchored", Value::Bool(false)),
+                    // The combined solid's model, saved by the editor in
+                    // assets/models (a `.union.glb`).
+                    ("MeshId", Value::String(String::new())),
+                    ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                    ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                    // The model is stretched so its bounding box is this size.
+                    ("Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0))),
+                    // On, the whole solid is drawn in Color; off, each face
+                    // keeps the color and material of the part it came from.
+                    ("UsePartColor", Value::Bool(false)),
+                    ("Color", Value::Color3(Color3::new(0.64, 0.64, 0.64))),
+                    // What it collides as: its box, the convex hull of its
+                    // corners, or convex pieces that follow its hollows
+                    // (doorways, craters).
+                    ("CollisionFidelity", collision_fidelity("Hull")),
                     ("CastShadow", Value::Bool(true)),
                     ("Transparency", Value::Number(0.0)),
                     ("CanCollide", Value::Bool(true)),
@@ -2046,6 +2099,8 @@ impl ClassName {
             // Fire on both parts when two parts start and stop touching.
             ClassName::Part
             | ClassName::MeshPart
+            | ClassName::UnionOperation
+            | ClassName::NegateOperation
             | ClassName::Seat
             | ClassName::VehicleSeat
             | ClassName::DamageZone
@@ -2205,6 +2260,15 @@ fn alignment_mode(enum_name: &str) -> Value {
     Value::EnumItem(EnumItem {
         enum_name: enum_name.to_owned(),
         item: "TwoAttachment".to_owned(),
+    })
+}
+
+/// A UnionOperation's `CollisionFidelity` item: Box, Hull or
+/// PreciseConvexDecomposition.
+fn collision_fidelity(item: &str) -> Value {
+    Value::EnumItem(EnumItem {
+        enum_name: "CollisionFidelity".to_owned(),
+        item: item.to_owned(),
     })
 }
 

@@ -126,6 +126,10 @@ impl Context {
                 .expect("creating the body methods only fails when out of memory"),
         );
         methods.extend(
+            crate::csg::methods(&lua)
+                .expect("creating the solid modeling methods only fails when out of memory"),
+        );
+        methods.extend(
             crate::seat::methods(&lua)
                 .expect("creating Seat methods only fails when out of memory"),
         );
@@ -227,6 +231,9 @@ impl Context {
         if let Some(mut steps) = self.lua.app_data_mut::<run_service::RenderSteps>() {
             steps.forget_script(script);
         }
+        if let Some(mut jobs) = self.lua.app_data_mut::<crate::csg::CsgJobs>() {
+            jobs.forget_script(script);
+        }
     }
 
     /// Compiles `source` without running it, for its syntax errors.
@@ -308,6 +315,7 @@ impl Context {
             // frame's tweened values.
             tween::step(&self.lua, seconds);
             scheduler::step(&self.lua, seconds);
+            crate::csg::step(&self.lua);
             debris::step(&self.lua);
         });
     }

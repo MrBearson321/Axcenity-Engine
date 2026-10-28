@@ -1717,7 +1717,65 @@ const CENTER_OF_MASS_DOC: &str =
 const CURRENT_PHYSICAL_DOC: &str = "The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.";
 const PIVOT_TO_DOC: &str = "Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.";
 
+const UNION_ASYNC_DOC: &str = "Joins the part and `parts` into one solid and returns it as a new UnionOperation (its Parent is nil), with this part's look and physics. NegateOperations among `parts` are cut out. The work runs in the background and the script waits for it. Errors, saying why, if a part isn't a closed solid (a Capsule, or a model with holes). `options.CollisionFidelity` sets the union's.";
+const SUBTRACT_ASYNC_DOC: &str = "Cuts every one of `parts` out of the part and returns what's left as a new UnionOperation (its Parent is nil), with this part's look and physics: a crater where a ball was. The work runs in the background and the script waits for it. Errors, saying why, if a part isn't a closed solid or nothing is left. `options.CollisionFidelity` sets the union's.";
+const INTERSECT_ASYNC_DOC: &str = "Keeps only where the part and all of `parts` overlap, as a new UnionOperation (its Parent is nil), with this part's look and physics. The work runs in the background and the script waits for it. Errors, saying why, if a part isn't a closed solid or they don't overlap. `options.CollisionFidelity` sets the union's.";
+
 pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
+    (
+        ClassName::Part,
+        Function {
+            name: "UnionAsync",
+            doc: UNION_ASYNC_DOC,
+            params: &[("parts", "{Instance}"), ("options", "{[string]: any}?")],
+            returns: "UnionOperation",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "SubtractAsync",
+            doc: SUBTRACT_ASYNC_DOC,
+            params: &[("parts", "{Instance}"), ("options", "{[string]: any}?")],
+            returns: "UnionOperation",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "IntersectAsync",
+            doc: INTERSECT_ASYNC_DOC,
+            params: &[("parts", "{Instance}"), ("options", "{[string]: any}?")],
+            returns: "UnionOperation",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "UnionAsync",
+            doc: UNION_ASYNC_DOC,
+            params: &[("parts", "{Instance}"), ("options", "{[string]: any}?")],
+            returns: "UnionOperation",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "SubtractAsync",
+            doc: SUBTRACT_ASYNC_DOC,
+            params: &[("parts", "{Instance}"), ("options", "{[string]: any}?")],
+            returns: "UnionOperation",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "IntersectAsync",
+            doc: INTERSECT_ASYNC_DOC,
+            params: &[("parts", "{Instance}"), ("options", "{[string]: any}?")],
+            returns: "UnionOperation",
+        },
+    ),
     (
         ClassName::Seat,
         Function {

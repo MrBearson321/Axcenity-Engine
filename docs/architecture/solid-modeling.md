@@ -1,0 +1,37 @@
+# Solid modeling
+
+Union, Negate, Intersect and Separate (Phase 50): parts combined into one solid, a `UnionOperation`. The booleans are `mesh_edit` (`csg.rs`, `solid.rs`); the editor buttons `editor/src/app/solid.rs`; the script calls `script/src/csg.rs`. Fractures, the other `mesh_edit` user, are in `fracture.md`.
+
+## The classes
+
+- **UnionOperation** (`core`): a BasePart drawn and collided like a MeshPart, from the model its `MeshId` names, stretched to its `Size` (`ClassName::has_model`). Its own properties: `UsePartColor` (off: each face keeps the look of the part it came from; on: all of it in `Color`) and `CollisionFidelity` (`Box`, `Hull`, the default, or `PreciseConvexDecomposition`). The parts it was made of are its children. Every Instance inside a UnionOperation is out of the world (`core::csg::in_union`, `out_of_world`): not drawn, picked, simulated or queried. The Explorer doesn't show them.
+- **NegateOperation**: a Part (`is_part`, the same properties) that a union cuts out. The scene draws it pink at half its opacity (`NEGATE_COLOR`, `NEGATE_OPACITY`), in the editor and the game.
+
+## The booleans (`mesh_edit`)
+
+- `boolean(a, b, Operation)` is the union, difference or intersection of two closed meshes, with a BSP tree of each (as csg.js does), in f64 in a unit box so one tolerance fits any size. Splitting leaves T-junctions and hair-apart copies of a point, so corners within `SAME_POINT` are made one, each polygon gets the corners lying on its edges, and it's ear-clipped (`fill.rs`). The result is closed (`Mesh::open_edges() == 0`), so it can be combined again; `merge.rs` then refills flat faces. Each triangle keeps its source's `Surface::Outer(i)`, so the faces of a cut keep the cutting part's look.
+- `solid_of(world, assets, part)` makes a `Solid`: a Part's (or NegateOperation's) shape at its `Size` and its look (`generate::part_look`), or a MeshPart's or UnionOperation's model stretched to its `Size` with its materials. A Capsule, a model that can't load, or a mesh with open edges is refused with a message that names the part.
+- `combine(keep, cut, operation)` works in the first kept part's frame: the kept solids are unioned (or intersected), then each cut one subtracted. The result is centered: its `position`, the first part's `rotation`, and `size` its box. Looks no triangle uses are dropped. Nothing left is an error. `combine_parts` sorts the parts: NegateOperations are cut.
+- `Combined::glb()` writes one object at its size in studs; `save_union` writes `assets/models/<name>.union.glb` (numbered if taken).
+
+## The editor (Model ▸ Solid Modeling)
+
+`SolidAction`: each is one `History::record_world` step, disabled during Play. The parts are the selected parts and the parts in selected Models (`solid_parts`, not ones already inside a union).
+
+- **Union** / **Intersect** (two or more parts): `combine_parts`, then `save_union` in the project. The UnionOperation, named `Union` (numbered among its siblings), takes the first part's place, with the first part's `Anchored`, `Color`, `CastShadow`, `Transparency`, collision and physical properties; the parts are moved inside it, and it's selected. A failure goes to Output ("Could not union the parts: … Nothing was changed.") with no step and no file. Undo keeps the `.glb`, like a Fracture's pieces.
+- **Negate**: each selected Part becomes a NegateOperation and each NegateOperation a Part (`replace_class`: name, properties both have, attributes, tags and children; new IDs, selected).
+- **Separate**: each selected UnionOperation's children go back to its parent, right after it, and it leaves the tree. The move tools move a union's children with it (they're its descendants), so separated parts are where the union was moved to.
+
+## Collision fidelity (`physics`)
+
+`Form::Mesh(model, Fidelity)`: `Box` is the part's box; `Hull` the convex hull MeshParts have; `Precise` is parry's `convex_decomposition_with_params` over the model's welded triangles with full-resolution planes and exact hulls (`shapes::PRECISE`; with parry's defaults a doorway's corner got a slanted piece no character could pass). Decomposing takes a while (half a second for the example doorway, a few seconds for a crater), so pieces are kept by model key and size (`decomposed`, up to 256), and colliders built again for queries and masses reuse them. MeshParts always use `Hull`.
+
+## Scripts
+
+`part:UnionAsync(parts, options?)`, `SubtractAsync` and `IntersectAsync` exist on every BasePart class. The call reads the solids from the world (errors raise at once), then runs `combine` on a thread of its own, which also reads the `.glb` back and, for `options.CollisionFidelity = PreciseConvexDecomposition`, makes the convex pieces (`physics::prepare_precise`), and pauses the script (a Lua wrapper yields, as `InvokeServer` does). `csg::step`, in `Context::step` after the scheduler, hands back finished jobs: the model goes into the `Assets` as `:runtime/union<N>.glb` (never a file, so a save slot that keeps a runtime union reloads it as a grey box), and a new UnionOperation with Parent nil and the calling part's look and physics resumes the script; a failure raises its reason there. Union and Intersect cut NegateOperations among `parts`; Subtract cuts all of them. A stopped script's jobs are forgotten.
+
+## Example and tests
+
+`examples/hello-csg`: the Doorway (a Wall unioned with a negated Door, Precise) and a script that scoops a crater out of the Ground with `SubtractAsync` and drops a marble in.
+
+Tests: `mesh_edit/src/csg_tests.rs` (volumes, closed results, a doorway then a window, a crater, determinism, refusals), `editor/src/app/solid_tests.rs` (each button one undo step, Separate gives back the same parts unchanged, a failed union changes nothing, the Explorer hides a union's parts), `player/src/csg_tests.rs` (a character walks through the Doorway with Precise and not with Hull; the crater the marble settles in; save, reload and pack), `scene` draw-list tests (pink negates, union parts hidden, `UsePartColor`), `core::csg` tests.

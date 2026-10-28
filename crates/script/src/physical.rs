@@ -267,6 +267,8 @@ pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlu
     for class in [
         ClassName::Part,
         ClassName::MeshPart,
+        ClassName::UnionOperation,
+        ClassName::NegateOperation,
         ClassName::Seat,
         ClassName::VehicleSeat,
         ClassName::DamageZone,

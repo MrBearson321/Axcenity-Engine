@@ -50,6 +50,7 @@ mod client;
 mod collection;
 mod console;
 mod context;
+mod csg;
 mod data;
 mod debris;
 mod debugger;

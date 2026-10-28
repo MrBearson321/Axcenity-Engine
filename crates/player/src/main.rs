@@ -1486,6 +1486,8 @@ mod material_graph_tests;
 mod accessibility_tests;
 
 #[cfg(test)]
+mod csg_tests;
+#[cfg(test)]
 mod destruction_tests;
 #[cfg(test)]
 mod physics_tests;

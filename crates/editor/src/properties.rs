@@ -1641,6 +1641,8 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         }
         // How a Fracture's pieces are spread (Phase 42).
         "FracturePattern" => vec!["Uniform", "Impact"],
+        // What a UnionOperation collides as (Phase 50).
+        "CollisionFidelity" => vec!["Box", "Hull", "PreciseConvexDecomposition"],
         // Which ProximityPrompts in reach show (Phase 44).
         "ProximityPromptExclusivity" => vec!["OnePerButton", "OneGlobally", "AlwaysShow"],
         _ => {

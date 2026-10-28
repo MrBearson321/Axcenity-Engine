@@ -80,7 +80,7 @@ pub fn asset_files(world: &World) -> Vec<AssetFile> {
                 .map(str::to_owned)
         };
         match instance.class() {
-            ClassName::MeshPart => {
+            class if class.has_model() => {
                 if let Some(mesh_id) = text("MeshId") {
                     add(AssetFile::Model(mesh_id));
                 }
@@ -88,7 +88,11 @@ pub fn asset_files(world: &World) -> Vec<AssetFile> {
                     add(AssetFile::Material(path));
                 }
             }
-            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone => {
+            ClassName::Part
+            | ClassName::NegateOperation
+            | ClassName::Seat
+            | ClassName::VehicleSeat
+            | ClassName::DamageZone => {
                 if let Some(path) = text("MaterialVariant") {
                     add(AssetFile::Material(path));
                 }

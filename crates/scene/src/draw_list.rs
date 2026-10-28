@@ -309,12 +309,13 @@ pub fn build_draw_list_posed(
     for (id, instance) in world
         .descendants(world.workspace())
         .into_iter()
-        // A Tool put away in an Inventory isn't drawn (Phase 45).
-        .filter(|&id| !axcenity_core::tool::is_stored(world, id))
+        // A Tool put away in an Inventory isn't drawn (Phase 45), nor are
+        // the parts kept inside a UnionOperation (Phase 50).
+        .filter(|&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(|id| Some((id, world.get(id)?)))
     {
         match instance.class() {
-            ClassName::MeshPart => {
+            class if class.has_model() => {
                 let posed = poses.get(&id);
                 mesh_part_draw_items(world, id, instance, assets, posed, &mut items)
             }
@@ -531,7 +532,7 @@ pub(crate) fn part_placement(instance: &Instance) -> Option<(PartType, Mat4)> {
     };
     // Only parts have a Shape (or are MeshParts), so anything else stops here.
     let shape = match instance.class() {
-        ClassName::MeshPart => PartType::Block,
+        class if class.has_model() => PartType::Block,
         _ => instance.property("Shape").and_then(Value::as_part_type)?,
     };
     let orientation = instance
@@ -598,6 +599,10 @@ fn casts_shadow(instance: &Instance) -> bool {
 /// inside the part replaces its flat color with that appearance's maps;
 /// without one, a `MaterialVariant` replaces its Material (and its
 /// Metalness, Roughness and Emission), tinted by its Color.
+/// How a NegateOperation is drawn: pink, and half see-through.
+const NEGATE_COLOR: [f32; 3] = [1.0, 0.4, 0.7];
+const NEGATE_OPACITY: f32 = 0.5;
+
 fn part_draw_item(
     world: &World,
     instance: &Instance,
@@ -620,7 +625,13 @@ fn part_draw_item(
         None => material::variant_of(instance, assets),
     };
 
-    let color = [color.r, color.g, color.b];
+    // A NegateOperation shows pink and see-through (Phase 50).
+    let negated = instance.class() == ClassName::NegateOperation;
+    let color = if negated {
+        NEGATE_COLOR
+    } else {
+        [color.r, color.g, color.b]
+    };
     let material = match (appearance, variant) {
         (None, Some(standard)) => {
             let mut material = material::variant_material(&standard, assets);
@@ -630,6 +641,10 @@ fn part_draw_item(
         }
         (appearance, _) => preset_material(instance, appearance, assets, preset, color, glow)?,
     };
+    let mut material = material;
+    if negated {
+        material.opacity *= NEGATE_OPACITY;
+    }
     if material.opacity <= 0.0 {
         return None;
     }
@@ -853,6 +868,11 @@ fn mesh_part_draw_items(
         .filter(|child| child.class() == ClassName::SurfaceAppearance)
         .collect();
     let variant = material::variant_of(instance, assets);
+    // A UnionOperation with UsePartColor is drawn all in its Color.
+    let whole_color = (instance.property("UsePartColor").and_then(Value::as_bool) == Some(true))
+        .then(|| instance.property("Color").and_then(Value::as_color3))
+        .flatten()
+        .map(|color| [color.r, color.g, color.b]);
     // A pose of another model (the MeshId just changed) isn't used. Every
     // part of the model moves with the pose's joints, on the GPU.
     let skin = posed
@@ -863,11 +883,15 @@ fn mesh_part_draw_items(
             appearance.property("MaterialName").and_then(Value::as_str)
                 == Some(primitive.material.name.as_str())
         });
-        let material = match (appearance, &variant) {
+        let mut material = match (appearance, &variant) {
             (Some(appearance), _) => surface_material(&primitive.material, appearance, assets),
             (None, Some(standard)) => material::variant_material(standard, assets),
             (None, None) => model_material(&primitive.material),
         };
+        if let Some(color) = whole_color {
+            material.base_color = color;
+            material.base_color_texture = None;
+        }
         items.push(DrawItem {
             shape: Shape::Mesh(Arc::new(ModelMesh::new(&model, index))),
             transform,
@@ -1686,5 +1710,74 @@ mod tests {
         assert_ne!(half.key(), mesh.key());
         assert_eq!(half.lod_count(), 0);
         assert!(mesh.lod(3).is_none() && half.lod(1).is_none());
+    }
+
+    fn csg_assets() -> Assets {
+        Assets::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-csg"),
+        )
+    }
+
+    #[test]
+    fn a_negated_part_is_drawn_pink_and_see_through() {
+        let mut world = World::new();
+        let part = world.create(ClassName::NegateOperation).unwrap();
+        world.set_parent(part, Some(world.workspace())).unwrap();
+        let item = only_item_with(&world, &Assets::default());
+        assert_eq!(item.shape, Shape::Block);
+        assert_eq!(item.material.opacity, NEGATE_OPACITY);
+        let [r, g, b] = item.material.base_color;
+        assert!(r > g && b > g, "pink: {:?}", item.material.base_color);
+    }
+
+    #[test]
+    fn a_union_draws_its_model_and_not_the_parts_inside_it() {
+        let mut world = World::new();
+        let union = mesh_part(&mut world, "assets/models/Doorway.union.glb");
+        // Swapped for a UnionOperation with the same properties.
+        let doorway = world.create(ClassName::UnionOperation).unwrap();
+        for (name, value) in world
+            .get(union)
+            .unwrap()
+            .properties()
+            .map(|(n, v)| (n, v.clone()))
+            .collect::<Vec<_>>()
+        {
+            if world.get(doorway).unwrap().property(name).is_some() {
+                world.set_property(doorway, name, value).unwrap();
+            }
+        }
+        world.set_parent(union, None).unwrap();
+        world.set_parent(doorway, Some(world.workspace())).unwrap();
+        let wall = world.create(ClassName::Part).unwrap();
+        world.set_parent(wall, Some(doorway)).unwrap();
+
+        let assets = csg_assets();
+        let list = build_draw_list(&world, &assets, camera());
+        // One item per look: the wall's and the doorway's sides.
+        assert_eq!(list.items.len(), 2);
+        assert!(
+            list.items
+                .iter()
+                .all(|item| matches!(item.shape, Shape::Mesh(_)))
+        );
+        let colors: Vec<[f32; 3]> = list.items.iter().map(|i| i.material.base_color).collect();
+        assert_ne!(colors[0], colors[1]);
+
+        // UsePartColor paints it all in its Color.
+        world
+            .set_property(doorway, "UsePartColor", Value::Bool(true))
+            .unwrap();
+        world
+            .set_property(
+                doorway,
+                "Color",
+                Value::Color3(axcenity_core::Color3::new(0.0, 1.0, 0.0)),
+            )
+            .unwrap();
+        let list = build_draw_list(&world, &assets, camera());
+        for item in &list.items {
+            assert_eq!(item.material.base_color, [0.0, 1.0, 0.0]);
+        }
     }
 }

@@ -7,10 +7,16 @@
 //! - [`fracture`] breaks one into convex Voronoi pieces, and [`write_glb`]
 //!   saves them as one `.glb` file with a node per piece.
 //! - [`generate`] is what the editor's Fracture Generate button calls.
+//! - [`boolean`] is the union, difference or intersection of two closed
+//!   meshes, and [`combine_parts`] what the editor's Union and Intersect
+//!   (and scripts' `UnionAsync`, `SubtractAsync`, `IntersectAsync`) call.
 //!
 //! Everything here is deterministic: the same input gives the same output,
 //! bit for bit, so a project regenerates the same pieces anywhere.
 
+mod csg;
+#[cfg(test)]
+mod csg_tests;
 mod cut;
 mod fill;
 mod fracture;
@@ -18,12 +24,15 @@ mod generate;
 mod glb;
 mod merge;
 mod shapes;
+mod solid;
 #[cfg(test)]
 mod tests;
 
+pub use csg::{Operation, boolean};
 pub use fracture::{Pattern, fracture, seed_points, voronoi_pieces};
 pub use generate::{Settings, generate, generate_for};
 pub use glb::{GlbMaterial, write_glb};
+pub use solid::{Combined, Solid, combine, combine_parts, save_union, solid_of};
 
 use glam::{Vec2, Vec3};
 

@@ -13,6 +13,7 @@ mod animation;
 mod arena;
 mod class;
 mod collision_groups;
+pub mod csg;
 mod enums;
 pub mod input;
 pub mod prefab;

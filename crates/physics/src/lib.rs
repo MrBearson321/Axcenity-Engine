@@ -67,6 +67,7 @@ pub use query::{
     CastShape, ColliderOutline, Column, QueryParams, RayHit, Solid, cast_ray, cast_ray_excluding,
     debug_colliders, parts_in_box, parts_in_part, parts_in_radius, raycast, shapecast, solids,
 };
+pub use shapes::prepare_precise;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -82,7 +83,7 @@ use rapier3d::prelude::{
     Collider, ColliderHandle, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder,
     RigidBodyHandle, RigidBodyType,
 };
-use shapes::Form;
+use shapes::{Fidelity, Form};
 
 /// How long one physics step is: physics always runs at 60 steps a second.
 pub const STEP_SECONDS: f64 = 1.0 / 60.0;
@@ -288,12 +289,21 @@ impl PartState {
         if carried == Some(Carried::Stored) {
             return None;
         }
+        // The parts kept inside a UnionOperation are out of the world too
+        // (Phase 50).
+        if axcenity_core::csg::in_union(world, id) {
+            return None;
+        }
         let held = carried == Some(Carried::Held);
         let anchored = anchored || held;
         let shape = match instance.class() {
-            ClassName::MeshPart => {
+            class if class.has_model() => {
                 let mesh_id = instance.property("MeshId").and_then(Value::as_str)?;
-                Form::Mesh(assets.model(mesh_id))
+                let fidelity = match instance.property("CollisionFidelity") {
+                    Some(Value::EnumItem(item)) => Fidelity::named(&item.item),
+                    _ => Fidelity::Hull,
+                };
+                Form::Mesh(assets.model(mesh_id), fidelity)
             }
             _ => Form::Primitive(instance.property("Shape").and_then(Value::as_part_type)?),
         };

@@ -1589,10 +1589,10 @@ Blocks: "load level", "add level", "remove level".
 
 ### Acceptance criteria
 
-- [ ] A wall with a negated block unioned into it has a doorway that a character walks through, with Precise fidelity.
-- [ ] Separate gives back the original parts, unchanged.
-- [ ] Subtracting a sphere from a block at runtime with `SubtractAsync` makes a crater, and the result collides.
-- [ ] Unions save, reload and pack into a built game.
+- [x] A wall with a negated block unioned into it has a doorway that a character walks through, with Precise fidelity.
+- [x] Separate gives back the original parts, unchanged.
+- [x] Subtracting a sphere from a block at runtime with `SubtractAsync` makes a crater, and the result collides.
+- [x] Unions save, reload and pack into a built game.
 
 ---
 

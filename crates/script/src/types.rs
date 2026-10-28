@@ -529,12 +529,13 @@ pub enum EnumType {
     OrientationAlignmentMode,
     RaycastFilterType,
     FracturePattern,
+    CollisionFidelity,
     ProximityPromptExclusivity,
     HumanoidStateType,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 29] = [
+    pub const ALL: [EnumType; 30] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -562,6 +563,7 @@ impl EnumType {
         EnumType::OrientationAlignmentMode,
         EnumType::RaycastFilterType,
         EnumType::FracturePattern,
+        EnumType::CollisionFidelity,
         EnumType::ProximityPromptExclusivity,
         EnumType::HumanoidStateType,
     ];
@@ -595,6 +597,7 @@ impl EnumType {
             EnumType::OrientationAlignmentMode => "OrientationAlignmentMode",
             EnumType::RaycastFilterType => "RaycastFilterType",
             EnumType::FracturePattern => "FracturePattern",
+            EnumType::CollisionFidelity => "CollisionFidelity",
             EnumType::ProximityPromptExclusivity => "ProximityPromptExclusivity",
             EnumType::HumanoidStateType => "HumanoidStateType",
         }
@@ -636,6 +639,7 @@ impl EnumType {
             EnumType::RaycastFilterType => vec!["Exclude", "Include"],
             // How a Fracture's pieces are spread (Phase 42).
             EnumType::FracturePattern => vec!["Uniform", "Impact"],
+            EnumType::CollisionFidelity => vec!["Box", "Hull", "PreciseConvexDecomposition"],
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -765,6 +769,7 @@ impl LuaEnumItem {
             | EnumType::OrientationAlignmentMode
             | EnumType::RaycastFilterType
             | EnumType::FracturePattern
+            | EnumType::CollisionFidelity
             | EnumType::ProximityPromptExclusivity
             | EnumType::HumanoidStateType => None,
         }

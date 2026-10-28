@@ -21,6 +21,8 @@ pub enum RibbonGroup {
     Tools,
     /// Paint, Material, Anchor, Collision, Lighting, Emission and Angular.
     Build,
+    /// Union, Negate, Intersect and Separate (Phase 50).
+    Solid,
     Snapping,
     /// Block, Ball, Cylinder and Wedge.
     Parts,
@@ -45,10 +47,11 @@ pub enum RibbonGroup {
 }
 
 impl RibbonGroup {
-    pub const ALL: [RibbonGroup; 14] = [
+    pub const ALL: [RibbonGroup; 15] = [
         RibbonGroup::Game,
         RibbonGroup::Tools,
         RibbonGroup::Build,
+        RibbonGroup::Solid,
         RibbonGroup::Snapping,
         RibbonGroup::Parts,
         RibbonGroup::Effects,
@@ -68,6 +71,7 @@ impl RibbonGroup {
             RibbonGroup::Game => "Game",
             RibbonGroup::Tools => "Tools",
             RibbonGroup::Build => "Build",
+            RibbonGroup::Solid => "Solid Modeling",
             RibbonGroup::Snapping => "Snapping",
             RibbonGroup::Parts => "Parts",
             RibbonGroup::Effects => "Effects",
@@ -89,6 +93,7 @@ impl RibbonGroup {
             RibbonGroup::Build => {
                 "Paint, materials, anchor, collision, lights and the angular tool"
             }
+            RibbonGroup::Solid => "Union, negate, intersect and separate parts",
             RibbonGroup::Snapping => "Move and rotate steps",
             RibbonGroup::Parts => "Insert blocks, balls, cylinders and wedges",
             RibbonGroup::Effects => {
@@ -158,7 +163,7 @@ impl BuiltInTab {
         use RibbonGroup::*;
         match self {
             BuiltInTab::Home => &[Game, Tools, Snapping, Parts],
-            BuiltInTab::Model => &[Build, Constraints, Effects, Import],
+            BuiltInTab::Model => &[Build, Solid, Constraints, Effects, Import],
             BuiltInTab::Terrain => &[Terrain],
             BuiltInTab::Ui => &[Ui],
             BuiltInTab::Script => &[Game, Scripts],

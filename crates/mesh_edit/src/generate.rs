@@ -150,6 +150,16 @@ struct Source {
 
 /// A Part's shape at its size, in its one look.
 fn part_source(part: &Instance) -> Result<Source, String> {
+    Ok(Source {
+        mesh: part_mesh(part, "fractured")?,
+        materials: vec![part_look(part)],
+        folder: MODELS_FOLDER.to_owned(),
+    })
+}
+
+/// A Part's shape at its `Size`, centered on the origin. `verb` says what
+/// a Capsule can't be yet ("fractured").
+pub(crate) fn part_mesh(part: &Instance, verb: &str) -> Result<Mesh, String> {
     let size = part
         .property("Size")
         .and_then(Value::as_vector3)
@@ -159,17 +169,22 @@ fn part_source(part: &Instance) -> Result<Source, String> {
         .property("Shape")
         .and_then(Value::as_part_type)
         .unwrap_or(PartType::Block);
-    let mesh = match shape {
+    Ok(match shape {
         PartType::Block => Mesh::block(size),
         PartType::Wedge => Mesh::wedge(size),
         PartType::Ball => Mesh::ball(size),
         PartType::Cylinder => Mesh::cylinder(size),
         PartType::Capsule => {
-            return Err(
-                "Capsules can't be fractured yet; use a Block, Wedge, Ball or Cylinder".to_owned(),
-            );
+            return Err(format!(
+                "Capsules can't be {verb} yet; use a Block, Wedge, Ball or Cylinder"
+            ));
         }
-    };
+    })
+}
+
+/// A Part's one look: its `Color`, `Metalness`, `Roughness`, and its
+/// Material's opacity and glow.
+pub(crate) fn part_look(part: &Instance) -> GlbMaterial {
     let color = part
         .property("Color")
         .and_then(Value::as_color3)
@@ -185,7 +200,7 @@ fn part_source(part: &Instance) -> Result<Source, String> {
             .unwrap_or(default) as f32
     };
     let linear = [color.r, color.g, color.b].map(srgb_to_linear);
-    let look = GlbMaterial {
+    GlbMaterial {
         name: material.as_str().to_owned(),
         base_color: [linear[0], linear[1], linear[2], preset.opacity],
         metallic: number("Metalness", preset.metalness),
@@ -193,12 +208,7 @@ fn part_source(part: &Instance) -> Result<Source, String> {
         emissive: if preset.glows { linear } else { [0.0; 3] },
         blend: preset.opacity < 1.0,
         base_color_texture: None,
-    };
-    Ok(Source {
-        mesh,
-        materials: vec![look],
-        folder: MODELS_FOLDER.to_owned(),
-    })
+    }
 }
 
 /// A MeshPart's model in its file's units, with the model's materials. The
@@ -226,7 +236,7 @@ fn mesh_part(part: &Instance, assets: &Assets, project: &Path) -> Result<Source,
 
 /// A material for each of `model`'s primitives. A texture is kept only if
 /// its file is in `folder`, where the pieces' file will look for it.
-fn model_materials(model: &Model, folder: &Path) -> Vec<GlbMaterial> {
+pub(crate) fn model_materials(model: &Model, folder: &Path) -> Vec<GlbMaterial> {
     model
         .primitives
         .iter()

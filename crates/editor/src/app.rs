@@ -43,7 +43,9 @@ mod prefabs;
 mod probes;
 mod session;
 mod settings;
+
 mod sky;
+mod solid;
 mod tags;
 mod terrain;
 mod texture_set;
@@ -344,6 +346,8 @@ struct RibbonClicks {
     import: bool,
     /// Model ▸ Constraints ▸ Weld.
     weld: bool,
+    /// Model ▸ Solid Modeling: Union, Negate, Intersect or Separate.
+    solid: Option<crate::app::solid::SolidAction>,
     /// Model ▸ Constraints ▸ Constraint: the joint picked, or `Some(None)`
     /// to stop the tool.
     constraint: Option<Option<ClassName>>,
@@ -1265,6 +1269,8 @@ mod level_tests;
 mod ragdoll_tests;
 #[cfg(test)]
 mod relaunch_tests;
+#[cfg(test)]
+mod solid_tests;
 #[cfg(test)]
 mod state_machine_tests;
 #[cfg(test)]

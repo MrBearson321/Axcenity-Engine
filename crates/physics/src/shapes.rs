@@ -1,18 +1,21 @@
-//! Collision shapes for each `PartType`, for MeshParts and for Terrains.
+//! Collision shapes for each `PartType`, for MeshParts and UnionOperations
+//! (by their `CollisionFidelity`), and for Terrains.
 //! They match the meshes the renderer draws (`render/src/mesh.rs`),
 //! including how balls and cylinders stay round, and how terrain cells are
 //! split into triangles (`terrain/src/mesh.rs`).
 
 use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_2, TAU};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use axcenity_assets::{Assets, Model};
 use axcenity_core::{FoliageSource, PartType, PhysicalProperties, TerrainData, Vector3};
 use rapier3d::geometry::Array2;
 use rapier3d::glamx::{Quat, Vec3};
 use rapier3d::math::Pose;
-use rapier3d::prelude::{Collider, ColliderBuilder};
+use rapier3d::parry::transformation::vhacd::VHACDParameters;
+use rapier3d::parry::transformation::voxelization::FillMode;
+use rapier3d::prelude::{Collider, ColliderBuilder, SharedShape};
 
 /// Parts thinner than this collide as if they were this thick. A shape with
 /// no volume has no mass, which rapier can't simulate.
@@ -29,12 +32,38 @@ const RESTITUTION: f32 = PhysicalProperties::LEGACY.elasticity;
 pub enum Form {
     /// A Part, by its `Shape`.
     Primitive(PartType),
-    /// A MeshPart, by its model, or by its box while it has none (no
-    /// `MeshId`, or a model that can't be loaded). Models compare by which
-    /// load they are, so a model loaded later counts as a change.
-    Mesh(Option<Arc<Model>>),
+    /// A MeshPart or UnionOperation, by its model as `Fidelity` says, or
+    /// by its box while it has none (no `MeshId`, or a model that can't be
+    /// loaded). Models compare by which load they are, so a model loaded
+    /// later counts as a change.
+    Mesh(Option<Arc<Model>>, Fidelity),
     /// A Terrain's heightfield, stretched to its `Size`.
     Terrain(TerrainShape),
+}
+
+/// How closely a model's collider follows it: a UnionOperation's
+/// `CollisionFidelity` (Phase 50). MeshParts collide as their hull.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Fidelity {
+    /// Its box.
+    Box,
+    /// The convex hull of its corners, hollows filled in.
+    #[default]
+    Hull,
+    /// Convex pieces that follow its hollows (parry's convex
+    /// decomposition), so a doorway can be walked through.
+    Precise,
+}
+
+impl Fidelity {
+    /// The fidelity a `CollisionFidelity` item names; Hull for anything else.
+    pub fn named(item: &str) -> Self {
+        match item {
+            "Box" => Fidelity::Box,
+            "PreciseConvexDecomposition" => Fidelity::Precise,
+            _ => Fidelity::Hull,
+        }
+    }
 }
 
 /// A Terrain's landscape. Two compare equal while they're the same data,
@@ -82,7 +111,9 @@ pub fn colliding_model_keys(data: &TerrainData, assets: &Assets) -> Vec<(String,
 pub fn collider(form: &Form, size: Vec3) -> Collider {
     let half = size.abs().max(Vec3::splat(MIN_SIZE)) / 2.0;
     let builder = match form {
-        Form::Primitive(PartType::Block) | Form::Mesh(None) => cuboid(half),
+        Form::Primitive(PartType::Block) | Form::Mesh(None, _) | Form::Mesh(_, Fidelity::Box) => {
+            cuboid(half)
+        }
         // Balls use the smallest side, like the drawn mesh.
         Form::Primitive(PartType::Ball) => ColliderBuilder::ball(half.min_element()),
         // rapier's cylinders run along Y, ours along X: turn it 90° around Z.
@@ -96,7 +127,8 @@ pub fn collider(form: &Form, size: Vec3) -> Collider {
             let (reach, radius) = capsule(half);
             ColliderBuilder::capsule_x(reach, radius)
         }
-        Form::Mesh(Some(model)) => hull(model, half),
+        Form::Mesh(Some(model), Fidelity::Hull) => hull(model, half),
+        Form::Mesh(Some(model), Fidelity::Precise) => decomposed(model, half),
         Form::Terrain(terrain) => heightfield(&terrain.data, size),
     };
     builder.friction(FRICTION).restitution(RESTITUTION).build()
@@ -111,12 +143,15 @@ fn cuboid(half: Vec3) -> ColliderBuilder {
 pub fn wireframe(form: &Form, size: Vec3) -> Vec<(Vec3, Vec3)> {
     let half = size.abs().max(Vec3::splat(MIN_SIZE)) / 2.0;
     match form {
-        Form::Primitive(PartType::Block) | Form::Mesh(None) => cuboid_edges(half),
+        Form::Primitive(PartType::Block) | Form::Mesh(None, _) | Form::Mesh(_, Fidelity::Box) => {
+            cuboid_edges(half)
+        }
         Form::Primitive(PartType::Ball) => ball_edges(half.min_element()),
         Form::Primitive(PartType::Cylinder) => cylinder_edges(half),
         Form::Primitive(PartType::Wedge) => wedge_edges(half),
         Form::Primitive(PartType::Capsule) => capsule_edges(half),
-        Form::Mesh(Some(model)) => hull_edges(model, half),
+        Form::Mesh(Some(model), Fidelity::Hull) => hull_edges(model, half),
+        Form::Mesh(Some(model), Fidelity::Precise) => decomposed_edges(model, half),
         Form::Terrain(_) => Vec::new(),
     }
 }
@@ -358,6 +393,111 @@ fn hull(model: &Model, half: Vec3) -> ColliderBuilder {
     ColliderBuilder::convex_hull(&corners).unwrap_or_else(|| cuboid(half))
 }
 
+/// parry's convex decomposition, tighter than its defaults: with them, a
+/// doorway's corner was bridged by a slanted piece a character couldn't
+/// pass. Full-resolution cutting planes and exact hulls of the model's own
+/// triangles follow straight edges exactly.
+const PRECISE: VHACDParameters = VHACDParameters {
+    resolution: 64,
+    concavity: 0.001,
+    plane_downsampling: 1,
+    convex_hull_downsampling: 1,
+    alpha: 0.05,
+    beta: 0.05,
+    convex_hull_approximation: false,
+    max_convex_hulls: 1024,
+    fill_mode: FillMode::FloodFill {
+        detect_cavities: false,
+    },
+};
+
+/// A model's load key and the half size its pieces were made for.
+type PiecesKey = (u64, [u32; 3]);
+
+/// Convex pieces following a model's hollows, stretched like the hull.
+/// Decomposing takes a while, and colliders are built again for queries
+/// and masses, so the pieces are kept by model and size.
+fn decomposed(model: &Model, half: Vec3) -> ColliderBuilder {
+    if model.size.contains(&0.0) {
+        return cuboid(half);
+    }
+    let key = (model.key(), half.to_array().map(f32::to_bits));
+    static PIECES: LazyLock<Mutex<HashMap<PiecesKey, SharedShape>>> = LazyLock::new(Mutex::default);
+    if let Some(shape) = PIECES
+        .lock()
+        .ok()
+        .and_then(|pieces| pieces.get(&key).cloned())
+    {
+        return ColliderBuilder::new(shape);
+    }
+    let (points, triangles) = welded_triangles(model, half);
+    if triangles.is_empty() {
+        return cuboid(half);
+    }
+    let shape = SharedShape::convex_decomposition_with_params(&points, &triangles, &PRECISE);
+    if let Ok(mut pieces) = PIECES.lock() {
+        // Old sizes of a part being scaled aren't needed again.
+        if pieces.len() >= 256 {
+            pieces.clear();
+        }
+        pieces.insert(key, shape.clone());
+    }
+    ColliderBuilder::new(shape)
+}
+
+/// Builds the convex pieces a part with `model` at `size` collides as with
+/// `PreciseConvexDecomposition`, ahead of time, so the physics step that
+/// first needs them (which would otherwise wait for them) finds them made.
+/// Safe to call from any thread.
+pub fn prepare_precise(model: &Model, size: Vector3) {
+    let half = to_vec3(size).abs().max(Vec3::splat(MIN_SIZE)) / 2.0;
+    let _ = decomposed(model, half);
+}
+
+/// The edges of each convex piece of [`decomposed`].
+fn decomposed_edges(model: &Model, half: Vec3) -> Vec<(Vec3, Vec3)> {
+    let collider = decomposed(model, half).build();
+    let Some(compound) = collider.shape().as_compound() else {
+        return cuboid_edges(half);
+    };
+    let mut edges = Vec::new();
+    for (pose, shape) in compound.shapes() {
+        if let Some(poly) = shape.as_convex_polyhedron() {
+            for edge in poly.edges() {
+                let [a, b] = edge.vertices.map(|v| *pose * poly.points()[v as usize]);
+                edges.push((a, b));
+            }
+        }
+    }
+    edges
+}
+
+/// A model's triangles stretched to `half` (it fills the 1×1×1 cube), with
+/// corners at the same place made one vertex.
+fn welded_triangles(model: &Model, half: Vec3) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    let mut index: HashMap<[u32; 3], u32> = HashMap::new();
+    let mut points: Vec<Vec3> = Vec::new();
+    let mut triangles: Vec<[u32; 3]> = Vec::new();
+    for primitive in &model.primitives {
+        let mut corner = |i: u32| {
+            let at = *primitive.positions.get(i as usize)?;
+            let next = points.len() as u32;
+            let id = *index.entry(at.map(f32::to_bits)).or_insert(next);
+            if id == next {
+                points.push(Vec3::from(at) * half * 2.0);
+            }
+            Some(id)
+        };
+        for &triangle in primitive.indices.as_chunks::<3>().0 {
+            let [a, b, c] = triangle.map(&mut corner);
+            if let (Some(a), Some(b), Some(c)) = (a, b, c) {
+                triangles.push([a, b, c]);
+            }
+        }
+    }
+    (points, triangles)
+}
+
 /// The most triangles a model may have to be checked for being convex.
 const OWN_MESH_TRIANGLES: usize = 512;
 
@@ -456,7 +596,7 @@ pub fn foliage_forms(data: &TerrainData, size: Vec3, assets: &Assets) -> Vec<(Po
                     .unwrap_or(Vec3::ONE);
                 let form_size = (native * scale).abs().max(Vec3::splat(MIN_SIZE));
                 (
-                    Form::Mesh(model),
+                    Form::Mesh(model, Fidelity::Hull),
                     form_size,
                     Vec3::new(0.0, form_size.y * 0.5, 0.0),
                 )

@@ -1397,6 +1397,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Studs one copy of a SurfaceAppearance's textures covers. 0 leaves the shape's own coordinates unscaled.",
     ),
     (
+        ClassName::UnionOperation,
+        "UsePartColor",
+        "If true, the whole solid is drawn in Color. If false (the default), each face keeps the color and material of the part it came from.",
+    ),
+    (
+        ClassName::UnionOperation,
+        "Color",
+        "The color the whole solid is drawn in while UsePartColor is on. Union sets it to the first part's.",
+    ),
+    (
+        ClassName::UnionOperation,
+        "CollisionFidelity",
+        "What it collides as: `Enum.CollisionFidelity.Box` (its box), `Hull` (the default: the convex hull of its corners, hollows filled in) or `PreciseConvexDecomposition` (convex pieces that follow its hollows, so a character walks through a doorway and a ball rolls into a crater). Precise takes longer to build.",
+    ),
+    (
         ClassName::MeshPart,
         "CastShadow",
         "If false, the part casts no sun shadow. It's still shaded by other parts' shadows.",
@@ -4061,6 +4076,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::DamageZone => {
             "A Part that hurts: every Health whose Model has a part inside it loses DamagePerSecond a second, with the zone as the source. Anchored, half see-through and walked through (CanCollide off) by default. Everything a Part has, and DamagePerSecond."
+        }
+        ClassName::UnionOperation => {
+            "Parts combined into one solid by Union or Intersect (Model ▸ Solid Modeling), or by `UnionAsync`, `SubtractAsync` or `IntersectAsync`. Drawn and collided as its model, which the editor saves as `<name>.union.glb` in `assets/models`; each face keeps the color and material of the part it came from unless UsePartColor is on. The editor keeps the parts it was made of inside it, hidden, so Separate can give them back."
+        }
+        ClassName::NegateOperation => {
+            "A Part made negative by Negate (Model ▸ Solid Modeling): shown pink and see-through, and when it's unioned with other parts it cuts itself out of them, as a doorway out of a wall. Negate it again to turn it back into a Part. Everything a Part has."
         }
         ClassName::Fracture => {
             "Breaks the Part or MeshPart it's in into pieces. Generate (in its Properties) cuts the part into Pieces convex pieces by Seed and Pattern and saves them as `<name>.fracture.glb`. During Play, something hitting the part faster than Threshold, or `Shatter`, replaces the part with its pieces, which fly from the point and fade out after DebrisLifetime."

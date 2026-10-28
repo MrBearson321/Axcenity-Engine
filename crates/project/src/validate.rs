@@ -863,7 +863,7 @@ impl Scan {
 
 pub(crate) fn refs(class: ClassName) -> Vec<(&'static str, AssetKind)> {
     match class {
-        ClassName::MeshPart => vec![("MeshId", AssetKind::Model)],
+        ClassName::MeshPart | ClassName::UnionOperation => vec![("MeshId", AssetKind::Model)],
         ClassName::Sound => vec![("SoundId", AssetKind::Audio)],
         ClassName::ImageLabel => vec![("Image", AssetKind::Texture)],
         ClassName::ParticleEmitter => vec![("Texture", AssetKind::Texture)],

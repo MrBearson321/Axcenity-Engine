@@ -31,6 +31,8 @@ fn part(world: &World, assets: &Assets, id: InstanceId) -> Option<(MassPropertie
         world.get(id)?.class(),
         ClassName::Part
             | ClassName::MeshPart
+            | ClassName::UnionOperation
+            | ClassName::NegateOperation
             | ClassName::Seat
             | ClassName::VehicleSeat
             | ClassName::DamageZone

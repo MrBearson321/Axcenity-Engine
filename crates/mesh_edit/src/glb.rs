@@ -153,7 +153,7 @@ impl Vertices {
 }
 
 /// A plain white surface, for an Outer material index with no material.
-fn plain_material() -> GlbMaterial {
+pub(crate) fn plain_material() -> GlbMaterial {
     GlbMaterial {
         name: "Plain".to_owned(),
         base_color: [1.0; 4],

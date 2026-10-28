@@ -67,6 +67,9 @@ impl EditorApp {
         if clicks.weld {
             self.weld_selected();
         }
+        if let Some(action) = clicks.solid {
+            self.solid_action(action);
+        }
         if let Some(class) = clicks.constraint {
             self.pick_constraint_tool(class);
         }
@@ -523,6 +526,26 @@ impl EditorApp {
                         .clicked()
                     {
                         clicks.insert = Some(what);
+                    }
+                }
+            }),
+            RibbonGroup::Solid => ribbon::group(ui, "Solid Modeling", |ui| {
+                use crate::app::solid::SolidAction;
+                let parts = self.solid_parts();
+                for action in SolidAction::ALL {
+                    let usable = action.usable(&self.world, &parts);
+                    let button = RibbonButton::new(action.icon(), action.label());
+                    if ui
+                        .add_enabled(!playing && usable, button)
+                        .on_hover_text(action.hover())
+                        .on_disabled_hover_text(if playing {
+                            "Press Stop to edit."
+                        } else {
+                            action.needs()
+                        })
+                        .clicked()
+                    {
+                        clicks.solid = Some(action);
                     }
                 }
             }),

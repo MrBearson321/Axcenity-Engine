@@ -292,14 +292,20 @@ impl Explorer {
             return;
         };
         let expanded = self.expanded.contains(&id);
+        // A UnionOperation's parts are kept inside it for Separate, out of
+        // sight (Phase 50).
+        let union = instance.class() == ClassName::UnionOperation;
         rows.push(Row {
             id,
             name: instance.name().to_string(),
             class: instance.class(),
             depth,
-            has_children: !instance.children().is_empty(),
+            has_children: !union && !instance.children().is_empty(),
             expanded,
         });
+        if union {
+            return;
+        }
         if expanded {
             for &child in instance.children() {
                 self.add_rows(world, child, depth + 1, rows);
