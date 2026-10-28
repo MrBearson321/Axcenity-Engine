@@ -372,6 +372,7 @@ impl ScenePipeline {
             environment,
             probes,
             light_probes,
+            realtime_gi: None,
             sun_disc: true,
             no_occlusion_view,
             occlusion_sampler,
@@ -468,6 +469,7 @@ impl ScenePipeline {
             timestamp_queries: real.timestamp_queries && limits.timestamp_queries,
             software: real.software || limits.software,
             msaa_samples: real.msaa_samples & limits.msaa_samples,
+            compute_shaders: real.compute_shaders && limits.compute_shaders,
         };
         let settings = self.settings.clone();
         self.apply_graphics(&settings);
@@ -482,6 +484,10 @@ impl ScenePipeline {
         let old_samples = self.graphics.anti_aliasing.samples();
         self.settings = settings.clone();
         self.graphics = settings.effective(&self.capabilities);
+        if !self.graphics.realtime_gi && self.realtime_gi.take().is_some() {
+            // The probes traced while it was on give way to their bakes.
+            self.light_probes.restore_bakes();
+        }
         let quality = self.graphics.shadow_quality;
         if self.shadow_map.as_ref().map(|map| map.size) != quality.map() {
             self.shadow_map = None;
@@ -597,6 +603,20 @@ impl ScenePipeline {
             list.camera.position,
         ) {
             self.bind_frame();
+        }
+        // With real-time GI, a few of their probes are traced again first.
+        if self.graphics.realtime_gi && self.light_probes.count() > 0 {
+            let gi = self.realtime_gi.get_or_insert_with(|| {
+                Box::new(realtime_gi::RealtimeGi::new(
+                    &self.device,
+                    &self.queue,
+                    list,
+                    &self.settings,
+                ))
+            });
+            gi.update(list, &self.light_probes, &self.settings)?;
+        } else {
+            self.realtime_gi = None;
         }
         let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
         (frame_uniform.environment, frame_uniform.sky_light) = self.environment.uniform();
@@ -1284,6 +1304,13 @@ impl ScenePipeline {
         Arc::strong_count(&self.point_shadow_maps_alive) - 1
     }
 
+    /// How many light probes real-time GI has traced, or `None` while it
+    /// has nothing to trace (it's off, or no volumes are drawn).
+    #[cfg(test)]
+    pub(super) fn probes_traced(&self) -> Option<u32> {
+        self.realtime_gi.as_ref().map(|gi| gi.traced)
+    }
+
     /// How many sets of scene targets are alive: 1, unless one leaked.
     #[cfg(test)]
     pub(super) fn targets_alive(&self) -> usize {
@@ -1347,7 +1374,8 @@ impl ScenePipeline {
                 + shadow_bytes
                 + sheet_bytes
                 + self.environment.bytes()
-                + self.probes.bytes(),
+                + self.probes.bytes()
+                + self.realtime_gi.as_ref().map_or(0, |gi| gi.bytes()),
             buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum(),
         }
     }

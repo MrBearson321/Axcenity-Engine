@@ -405,6 +405,8 @@ declare extern type UserGameSettings with
 	ReflectionQuality: EnumReflectionQuality
 	--- Short shadows found on screen for the small gaps the shadow maps miss, such as under a part resting on the floor. On at High and Ultra.
 	ContactShadows: boolean
+	--- Light probe volumes traced again a few probes each frame, so their bounced light follows a moving sun or changing lamps. Off at every preset, and off on a GPU without compute shaders.
+	RealtimeGI: boolean
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.

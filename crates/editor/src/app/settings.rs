@@ -706,6 +706,20 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                     }
                 });
             ui.end_row();
+
+            ui.label("Real-time GI");
+            let label = |on: Option<bool>| match on {
+                Some(on) => on_off(on).to_owned(),
+                None => format!("Preset ({})", on_off(preset.realtime_gi())),
+            };
+            egui::ComboBox::from_id_salt("realtime gi")
+                .selected_text(label(settings.realtime_gi))
+                .show_ui(ui, |ui| {
+                    for choice in [None, Some(true), Some(false)] {
+                        ui.selectable_value(&mut settings.realtime_gi, choice, label(choice));
+                    }
+                });
+            ui.end_row();
         });
     ui.add_space(16.0);
     widgets::section_label(ui, "In use");
@@ -763,6 +777,11 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
         "Contact shadows: on (small gaps the shadow maps miss)"
     } else {
         "Contact shadows: off"
+    });
+    ui.label(if effective.realtime_gi {
+        "Real-time GI: on (light probe volumes traced again, two probes a frame)"
+    } else {
+        "Real-time GI: off (light probe volumes keep their bakes)"
     });
     for note in &effective.notes {
         ui.label(egui::RichText::new(note).color(palette.warning));
@@ -1059,6 +1078,7 @@ mod tests {
             ambient_occlusion: Some(AmbientOcclusion::Low),
             reflection_quality: Some(ReflectionQuality::Medium),
             contact_shadows: Some(false),
+            realtime_gi: Some(true),
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);

@@ -647,6 +647,9 @@ pub(super) struct ScenePipeline {
     pub(super) probes: probes::Probes,
     /// Light probe volumes' baked light, each uploaded once.
     pub(super) light_probes: light_probes::LightProbes,
+    /// Traces light probes again each frame while real-time GI is on and
+    /// there are probes; `None` otherwise.
+    pub(super) realtime_gi: Option<Box<realtime_gi::RealtimeGi>>,
     /// Whether the sky draws the sun's disc: false only while baking light
     /// probes.
     pub(super) sun_disc: bool,

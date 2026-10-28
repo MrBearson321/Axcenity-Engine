@@ -54,8 +54,7 @@ impl TextureRenderer {
         settings: &GraphicsSettings,
     ) -> Result<Vec<[[f32; 3]; 4]>> {
         let mut camera = ProbeCamera::new(device, queue, list, size, settings);
-        camera.list.light_probe_volumes.clear();
-        camera.renderer.scene.sun_disc = false;
+        camera.light_only();
         centers
             .iter()
             .map(|&center| Ok(cube_light(camera.size, &camera.faces(center)?)))
@@ -64,15 +63,17 @@ impl TextureRenderer {
 }
 
 /// A renderer of its own drawing what a probe sees.
-struct ProbeCamera {
-    renderer: TextureRenderer,
+pub(super) struct ProbeCamera {
+    pub(super) renderer: TextureRenderer,
     /// The scene, without UI or reflection probes.
     list: DrawList,
-    size: u32,
+    /// True for light probes, which see no light probe volumes.
+    light_only: bool,
+    pub(super) size: u32,
 }
 
 impl ProbeCamera {
-    fn new(
+    pub(super) fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         list: &DrawList,
@@ -80,19 +81,60 @@ impl ProbeCamera {
         settings: &GraphicsSettings,
     ) -> Self {
         let size = size.max(1);
-        let mut renderer = TextureRenderer::new(device, queue, size, size);
-        renderer.set_graphics(&GraphicsSettings {
+        let mut camera = Self {
+            renderer: TextureRenderer::new(device, queue, size, size),
+            list: list.clone(),
+            light_only: false,
+            size,
+        };
+        camera.set_graphics(settings);
+        camera.leave_out();
+        camera
+    }
+
+    /// Draws with `settings`, at a render scale of 100% and never tracing
+    /// light probes of its own.
+    pub(super) fn set_graphics(&mut self, settings: &GraphicsSettings) {
+        self.renderer.set_graphics(&GraphicsSettings {
             render_scale: Some(1.0),
+            realtime_gi: Some(false),
             ..settings.clone()
         });
-        let mut list = list.clone();
-        list.ui.clear();
-        list.reflection_probes.clear();
-        Self {
-            renderer,
-            list,
-            size,
+    }
+
+    /// Sees the light reaching a light probe from now on: one bounce, so
+    /// no light probe volumes, and no sun disc.
+    pub(super) fn light_only(&mut self) {
+        self.light_only = true;
+        self.renderer.scene.sun_disc = false;
+        self.leave_out();
+    }
+
+    /// Sees the scene in `list` from now on.
+    pub(super) fn show(&mut self, list: &DrawList) {
+        self.list = list.clone();
+        self.leave_out();
+    }
+
+    /// Takes out of the list what a probe doesn't see.
+    fn leave_out(&mut self) {
+        self.list.ui.clear();
+        self.list.reflection_probes.clear();
+        if self.light_only {
+            self.list.light_probe_volumes.clear();
         }
+    }
+
+    /// Draws cubemap face `face` (see [`face_camera`]) seen from `center`
+    /// into the scene's HDR target ([`ProbeCamera::hdr`]).
+    pub(super) fn draw_face(&mut self, center: Vec3, face: u32) -> Result<()> {
+        self.list.camera = face_camera(center, face);
+        self.renderer.render(&self.list)
+    }
+
+    /// The HDR picture the last face was drawn into, `size` pixels square.
+    pub(super) fn hdr(&self) -> &wgpu::Texture {
+        &self.renderer.scene.frame_targets.hdr
     }
 
     /// The six faces seen from `center` (see
@@ -101,8 +143,7 @@ impl ProbeCamera {
         let size = self.size;
         let mut faces = Vec::with_capacity((size * size * 6 * 3) as usize);
         for face in 0..6 {
-            self.list.camera = face_camera(center, face);
-            self.renderer.render(&self.list)?;
+            self.draw_face(center, face)?;
             let pixels = read_scene(&self.renderer.scene, size);
             // A camera's picture has +X to its right as it looks; a cubemap
             // face has it to the left (cubemaps look out from inside), so
@@ -154,7 +195,7 @@ fn cube_light(size: u32, rgb: &[f32]) -> [[f32; 3]; 4] {
 
 /// The direction a cubemap texel at `u`, `v` (0 to 1 across, from the top
 /// left) of `face` looks along: a copy of `face_direction` in
-/// environment.wgsl.
+/// environment.wgsl and light_probe_sum.wgsl.
 fn face_direction(face: u32, u: f32, v: f32) -> Vec3 {
     let (s, t) = (u * 2.0 - 1.0, v * 2.0 - 1.0);
     match face {

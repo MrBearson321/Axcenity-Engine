@@ -6,10 +6,11 @@
 //! for their diffuse environment light, in place of the sky's
 //! (`surrounding_diffuse` in lighting.wgsl). The buffer is rewritten only
 //! when the volumes drawn change, and shrinks back to one blank probe while
-//! there are none.
+//! there are none. With real-time GI on (Phase 20), `realtime_gi.rs`
+//! writes freshly traced probes over the baked ones in place.
 
 use bytemuck::{Pod, Zeroable};
-use glam::Vec3;
+use glam::{Quat, Vec3};
 
 use crate::draw_list::LightProbeVolume;
 
@@ -40,6 +41,14 @@ pub(super) struct VolumeRaw {
     grid: [u32; 4],
 }
 
+/// Where a drawn volume's probes stand, to trace them again.
+struct ProbeGrid {
+    center: Vec3,
+    rotation: Quat,
+    half_size: Vec3,
+    counts: [u32; 3],
+}
+
 /// The probes' buffer and which volumes it holds.
 pub(super) struct LightProbes {
     buffer: wgpu::Buffer,
@@ -47,6 +56,8 @@ pub(super) struct LightProbes {
     held: Vec<u64>,
     /// The volumes drawn this frame, smallest box first.
     drawn: Vec<VolumeRaw>,
+    /// Where their probes stand, in the same order.
+    grids: Vec<ProbeGrid>,
     /// How many times the buffer has been written, for tests.
     pub(super) uploads: u32,
 }
@@ -57,6 +68,7 @@ impl LightProbes {
             buffer: probe_buffer(device, 1),
             held: Vec::new(),
             drawn: Vec::new(),
+            grids: Vec::new(),
             uploads: 0,
         }
     }
@@ -102,9 +114,16 @@ impl LightProbes {
         }
         // The boxes may have moved although their bakes haven't.
         self.drawn.clear();
+        self.grids.clear();
         let mut first = 0;
         for volume in chosen {
             let [x, y, z] = volume.probes.counts;
+            self.grids.push(ProbeGrid {
+                center: volume.center,
+                rotation: volume.rotation,
+                half_size: volume.half_size,
+                counts: volume.probes.counts,
+            });
             self.drawn.push(VolumeRaw {
                 to_box: to_box_rows(volume.center, volume.rotation),
                 extent: volume.half_size.extend(volume.blend_distance).to_array(),
@@ -125,6 +144,39 @@ impl LightProbes {
     pub(super) fn buffer(&self) -> &wgpu::Buffer {
         &self.buffer
     }
+
+    /// How many probes the volumes drawn this frame have.
+    pub(super) fn count(&self) -> u32 {
+        self.grids
+            .iter()
+            .map(|grid| grid.counts.iter().product::<u32>())
+            .sum()
+    }
+
+    /// Where probe `index` of the buffer stands in the world, if there's
+    /// one: the middle of its cell of its volume's box.
+    pub(super) fn point(&self, mut index: u32) -> Option<Vec3> {
+        for grid in &self.grids {
+            let [x, y, z] = grid.counts;
+            if index < x * y * z {
+                let at = Vec3::new(
+                    (index % x) as f32,
+                    (index / x % y) as f32,
+                    (index / (x * y)) as f32,
+                );
+                let cell = (at + 0.5) / Vec3::new(x as f32, y as f32, z as f32) - 0.5;
+                return Some(grid.center + grid.rotation * (cell * 2.0 * grid.half_size));
+            }
+            index -= x * y * z;
+        }
+        None
+    }
+
+    /// Writes the bakes into the buffer again on the next `prepare`, over
+    /// any probes traced since.
+    pub(super) fn restore_bakes(&mut self) {
+        self.held.clear();
+    }
 }
 
 fn buffer_size(probes: usize) -> u64 {
@@ -136,7 +188,10 @@ fn probe_buffer(device: &wgpu::Device, probes: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("light probes"),
         size: buffer_size(probes),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        // Copied from only to check it in tests.
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     })
 }
@@ -177,6 +232,39 @@ mod tests {
                 probes: Arc::new(vec![[[0.0; 3]; 4]; probes]),
             },
         }
+    }
+
+    #[test]
+    fn each_probe_stands_in_the_middle_of_its_cell_of_its_volumes_turned_box() {
+        let Some((device, queue)) = crate::renderer::tests::test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut small = volume([2, 1, 3], 6);
+        small.center = Vec3::new(10.0, 0.0, 0.0);
+        small.rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        small.half_size = Vec3::new(2.0, 1.0, 3.0);
+        let mut big = volume([1, 1, 1], 1);
+        big.half_size = Vec3::splat(20.0);
+        big.probes.key = 2;
+        let mut probes = LightProbes::new(&device);
+        probes.prepare((&device, &queue), &[big, small], Vec3::ZERO);
+        assert_eq!(probes.count(), 7);
+        // The small box comes first. Its first probe is in its corner cell:
+        // a quarter of the way along its own X and a sixth along its Z, so
+        // 1 and 2 studs from the middle toward their - ends, then turned.
+        let first = probes.point(0).unwrap();
+        let turned =
+            Quat::from_rotation_y(std::f32::consts::FRAC_PI_2) * Vec3::new(-1.0, 0.0, -2.0);
+        assert!(
+            first.abs_diff_eq(Vec3::new(10.0, 0.0, 0.0) + turned, 1e-4),
+            "{first}"
+        );
+        assert!(
+            probes.point(6).unwrap().abs_diff_eq(Vec3::ZERO, 1e-4),
+            "the big box's one probe"
+        );
+        assert_eq!(probes.point(7), None);
     }
 
     #[test]

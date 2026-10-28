@@ -1071,6 +1071,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 ty: "boolean",
                 doc: "Short shadows found on screen for the small gaps the shadow maps miss, such as under a part resting on the floor. On at High and Ultra.",
             },
+            Field {
+                name: "RealtimeGI",
+                ty: "boolean",
+                doc: "Light probe volumes traced again a few probes each frame, so their bounced light follows a moving sun or changing lamps. Off at every preset, and off on a GPU without compute shaders.",
+            },
         ],
         operators: &[],
         methods: &[],

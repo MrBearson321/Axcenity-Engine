@@ -364,6 +364,10 @@ pub struct GraphicsSettings {
     /// Short shadows found on screen, for the gaps the shadow maps miss.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub contact_shadows: Option<bool>,
+    /// Light probe volumes kept up to date as the world's light changes,
+    /// a few probes each frame. Off at every preset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub realtime_gi: Option<bool>,
 }
 
 impl GraphicsSettings {
@@ -495,6 +499,12 @@ impl GraphicsSettings {
             .unwrap_or(self.quality >= Quality::High)
     }
 
+    /// Whether light probe volumes are traced again as the light changes:
+    /// the override, or off (every preset's).
+    pub fn realtime_gi(&self) -> bool {
+        self.realtime_gi.unwrap_or(false)
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -555,6 +565,15 @@ impl GraphicsSettings {
                 capabilities.max_texture_size,
             ));
         }
+        // Real-time GI sums each probe's light in a compute shader.
+        let realtime_gi = self.realtime_gi() && capabilities.compute_shaders;
+        if self.realtime_gi() && !realtime_gi {
+            notes.push(
+                "Real-time GI is off: this GPU can't run compute shaders. Light probe volumes \
+                 keep their baked light."
+                    .to_owned(),
+            );
+        }
         EffectiveGraphics {
             shadow_quality,
             shadow_distance: self.shadow_distance(),
@@ -568,6 +587,7 @@ impl GraphicsSettings {
             reflection_quality,
             // Like ambient occlusion, it reads only the prepass.
             contact_shadows: self.contact_shadows(),
+            realtime_gi,
             notes,
         }
     }
@@ -587,6 +607,8 @@ pub struct Capabilities {
     /// The samples per pixel the scene's color and depth can both be drawn
     /// with, as bits: `n` is set when `n` samples work (1 always is).
     pub msaa_samples: u32,
+    /// Whether compute shaders can run (with a storage buffer to write).
+    pub compute_shaders: bool,
 }
 
 /// The formats of the scene's HDR color and its depth, which multisampling
@@ -607,6 +629,10 @@ impl Capabilities {
             timestamp_queries: device.features().contains(wgpu::Features::TIMESTAMP_QUERY),
             software: adapter.is_some_and(|info| info.device_type == wgpu::DeviceType::Cpu),
             msaa_samples: msaa_samples(device.features()),
+            // Devices limited to WebGL 2 report no compute workgroups.
+            compute_shaders: limits.max_compute_workgroups_per_dimension > 0
+                && limits.max_compute_invocations_per_workgroup >= 64
+                && limits.max_storage_buffers_per_shader_stage > 0,
         }
     }
 
@@ -643,6 +669,7 @@ impl Default for Capabilities {
             timestamp_queries: false,
             software: false,
             msaa_samples: msaa_samples(wgpu::Features::empty()),
+            compute_shaders: true,
         }
     }
 }
@@ -665,6 +692,8 @@ pub struct EffectiveGraphics {
     pub ambient_occlusion: AmbientOcclusion,
     pub reflection_quality: ReflectionQuality,
     pub contact_shadows: bool,
+    /// Whether light probe volumes are traced again as the light changes.
+    pub realtime_gi: bool,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -940,6 +969,7 @@ mod tests {
             ambient_occlusion: Some(AmbientOcclusion::Off),
             reflection_quality: Some(ReflectionQuality::Medium),
             contact_shadows: Some(true),
+            realtime_gi: Some(true),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -1101,6 +1131,38 @@ mod tests {
     }
 
     #[test]
+    fn realtime_gi_is_off_at_every_preset_and_off_with_a_note_without_compute_shaders() {
+        for quality in Quality::ALL {
+            let preset = GraphicsSettings::preset(quality);
+            assert!(!preset.realtime_gi());
+            assert!(!preset.effective(&Capabilities::default()).realtime_gi);
+        }
+        let on = GraphicsSettings {
+            realtime_gi: Some(true),
+            ..GraphicsSettings::preset(Quality::Ultra)
+        };
+        let used = on.effective(&Capabilities::default());
+        assert!(used.realtime_gi);
+        assert!(used.notes.is_empty(), "{:?}", used.notes);
+
+        let no_compute = Capabilities {
+            compute_shaders: false,
+            ..Capabilities::default()
+        };
+        let lowered = on.effective(&no_compute);
+        assert!(!lowered.realtime_gi);
+        assert_eq!(lowered.notes.len(), 1, "{:?}", lowered.notes);
+        assert!(
+            lowered.notes[0].contains("Real-time GI is off"),
+            "{:?}",
+            lowered.notes
+        );
+        // Asking for none needs nothing, so nothing is noted.
+        let off = GraphicsSettings::preset(Quality::Ultra).effective(&no_compute);
+        assert!(!off.realtime_gi && off.notes.is_empty());
+    }
+
+    #[test]
     fn effective_never_raises_a_setting() {
         let capabilities = [
             Capabilities::default(),
@@ -1110,6 +1172,7 @@ mod tests {
                 timestamp_queries: true,
                 software: false,
                 msaa_samples: 1 | 2 | 4 | 8,
+                compute_shaders: true,
             },
             Capabilities {
                 max_texture_size: 1024,
@@ -1122,6 +1185,7 @@ mod tests {
                 timestamp_queries: false,
                 software: true,
                 msaa_samples: 1,
+                compute_shaders: false,
             },
         ];
         let modes = AntiAliasing::ALL.map(Some).into_iter().chain([None]);
@@ -1144,6 +1208,7 @@ mod tests {
                         ambient_occlusion: Some(AmbientOcclusion::Low),
                         reflection_quality: None,
                         contact_shadows: post,
+                        realtime_gi: post,
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);
@@ -1157,12 +1222,14 @@ mod tests {
                         assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
                         assert!(effective.reflection_quality <= settings.reflection_quality());
                         assert_eq!(effective.contact_shadows, settings.contact_shadows());
+                        assert!(effective.realtime_gi <= settings.realtime_gi());
                         let lowered =
                             usize::from(effective.shadow_quality != settings.shadow_quality())
                                 + usize::from(effective.anti_aliasing != settings.anti_aliasing())
                                 + usize::from(
                                     effective.reflection_quality != settings.reflection_quality(),
-                                );
+                                )
+                                + usize::from(effective.realtime_gi != settings.realtime_gi());
                         assert_eq!(effective.notes.len(), lowered);
                     }
                 }

@@ -116,6 +116,7 @@ mod tests {
             ambient_occlusion: Some(AmbientOcclusion::High),
             reflection_quality: Some(ReflectionQuality::Low),
             contact_shadows: Some(true),
+            realtime_gi: Some(true),
         };
         save(&folder, &settings).unwrap();
         assert_eq!(load(&folder), Some(settings));

@@ -12,6 +12,7 @@ mod frustum_culling;
 mod level_of_detail;
 mod light_probe_volumes;
 mod point_and_contact_shadows;
+mod realtime_gi;
 mod reflection_probes;
 mod skinning;
 mod texture_budget;
@@ -382,7 +383,7 @@ fn see_through_items_come_last_and_farthest_first() {
 
 /// A GPU device for tests, or `None` on machines without one (some CI
 /// runners have no graphics adapter at all).
-fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+pub(super) fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
     pollster::block_on(adapter.request_device(&Default::default())).ok()
@@ -3166,6 +3167,9 @@ fn every_setting_and_value() -> Vec<GraphicsSettings> {
     for on in [false, true] {
         all.push(with(&|s| s.contact_shadows = Some(on)));
     }
+    for on in [true, false] {
+        all.push(with(&|s| s.realtime_gi = Some(on)));
+    }
     // Contact shadows alone still draw the prepass.
     all.push(with(&|s| {
         s.ambient_occlusion = Some(AmbientOcclusion::Off);
@@ -3198,6 +3202,10 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             ("buffers", hub.buffers.num_kept_from_user),
             ("bind groups", hub.bind_groups.num_kept_from_user),
             ("pipelines", hub.render_pipelines.num_kept_from_user),
+            (
+                "compute pipelines",
+                hub.compute_pipelines.num_kept_from_user,
+            ),
             ("samplers", hub.samplers.num_kept_from_user),
             ("query sets", hub.query_sets.num_kept_from_user),
         ]
@@ -3217,6 +3225,19 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
     ));
     list.lights
         .push(shadowing_point_light(Vec3::new(2.0, 4.0, -8.0), 20.0));
+    // A baked volume, for real-time GI to trace.
+    list.light_probe_volumes
+        .push(crate::draw_list::LightProbeVolume {
+            center: Vec3::new(0.0, 2.0, -8.0),
+            rotation: glam::Quat::IDENTITY,
+            half_size: Vec3::splat(4.0),
+            blend_distance: 1.0,
+            probes: crate::draw_list::LightProbeGrid {
+                key: 1,
+                counts: [2, 1, 2],
+                probes: Arc::new(vec![[[0.5; 3]; 4]; 4]),
+            },
+        });
     let settings = every_setting_and_value();
     // What a renderer holds: its caches and its targets.
     let counts = |renderer: &TextureRenderer| {
@@ -3240,6 +3261,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 scene.anti_aliasing_targets_alive(),
             ),
             scene.environment.bytes(),
+            scene.probes_traced().is_some(),
         )
     };
     for round in 0..3 {
@@ -3257,7 +3279,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             renderer.set_graphics(settings);
             renderer.render(&list).unwrap();
             let used = renderer.graphics().clone();
-            let (_, _, (sun, (spot, point), targets, occlusion, (msaa, fxaa)), environment) =
+            let (_, _, (sun, (spot, point), targets, occlusion, (msaa, fxaa)), environment, gi) =
                 counts(&renderer);
             let context = format!("round {round}, step {step}: {settings:?}");
             // A ceiling of 0 studs draws no sun shadows, so needs no map.
@@ -3294,6 +3316,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 used.reflection_quality.map().is_some(),
                 "{context}"
             );
+            assert_eq!(gi, used.realtime_gi, "{context}");
         }
         // Back on High, as it started.
         assert_eq!(counts(&renderer), start, "round {round}");

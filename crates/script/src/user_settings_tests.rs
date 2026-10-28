@@ -48,7 +48,7 @@ fn a_local_script_reads_the_settings_the_host_gave() {
         "local s = game:GetService('UserGameSettings')
         print(s.GraphicsQuality, s.ShadowQuality, s.ShadowDistance, s.PostProcessing)
         print(s.RenderScale, s.TextureQuality, s.AntiAliasing, s.AmbientOcclusion)
-        print(s.ReflectionQuality, s.ContactShadows)
+        print(s.ReflectionQuality, s.ContactShadows, s.RealtimeGI)
         print(s == game.UserGameSettings, tostring(s))",
     );
     assert_eq!(
@@ -56,7 +56,7 @@ fn a_local_script_reads_the_settings_the_host_gave() {
         [
             "Enum.GraphicsQuality.Medium\tEnum.ShadowQuality.Low\t100\ttrue",
             "1.5\tEnum.TextureQuality.Half\tEnum.AntiAliasing.FXAA\tEnum.AmbientOcclusion.Low",
-            "Enum.ReflectionQuality.Medium\tfalse",
+            "Enum.ReflectionQuality.Medium\tfalse\tfalse",
             "false\tUserGameSettings",
         ]
     );
@@ -82,6 +82,7 @@ fn setting_the_quality_and_overrides_is_a_change_the_host_takes_once() {
         s.ReflectionQuality = Enum.ReflectionQuality.Ultra
         s.PostProcessing = true
         s.ContactShadows = false
+        s.RealtimeGI = true
         s.ShadowDistance = 40
         s.RenderScale = 5
         print(s.GraphicsQuality, s.ShadowQuality, s.RenderScale)",
@@ -104,6 +105,7 @@ fn setting_the_quality_and_overrides_is_a_change_the_host_takes_once() {
         ambient_occlusion: Some(AmbientOcclusion::High),
         reflection_quality: Some(ReflectionQuality::Ultra),
         contact_shadows: Some(false),
+        realtime_gi: Some(true),
     };
     assert_eq!(runtime.take_graphics_change(), Some(expected.clone()));
     assert_eq!(runtime.take_graphics_change(), None);

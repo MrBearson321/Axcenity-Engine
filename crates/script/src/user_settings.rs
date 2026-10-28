@@ -320,6 +320,13 @@ impl UserData for LuaUserGameSettings {
             change(lua, |settings, _| settings.contact_shadows = chosen);
             Ok(())
         });
+
+        fields.add_field_method_get("RealtimeGI", |lua, _| Ok(settings(lua).realtime_gi()));
+        fields.add_field_method_set("RealtimeGI", |lua, _, value: mlua::Value| {
+            let chosen = bool_choice(lua, "RealtimeGI", value)?;
+            change(lua, |settings, _| settings.realtime_gi = chosen);
+            Ok(())
+        });
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {

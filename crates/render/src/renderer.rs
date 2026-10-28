@@ -10,6 +10,8 @@
 //! sky light.
 //! `skinning.rs` uploads animated meshes' joints and weights, and each
 //! frame's joints, so the vertex shader poses them.
+//! `realtime_gi.rs` traces light probes again a few each frame, while
+//! real-time GI is on.
 //! `culling.rs` tests bounds against each view, so what a view can't see
 //! isn't drawn.
 //! `gpu_timer.rs` measures the GPU's time per frame and per pass, for the
@@ -48,6 +50,7 @@ mod occlusion;
 mod post;
 mod probe_bake;
 mod probes;
+mod realtime_gi;
 mod skinning;
 mod sprites;
 mod terrain;

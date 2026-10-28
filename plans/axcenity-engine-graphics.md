@@ -363,8 +363,8 @@ Decided by measurement and platform support. Either probe volumes update gradual
 
 ### Acceptance criteria
 
-- [ ] A moving sun updates indirect light within a few seconds with real-time GI on, and nothing changes with it off.
-- [ ] Machines without the needed capability fall back silently, with a note in the Graphics settings.
+- [x] A moving sun updates indirect light within a few seconds with real-time GI on, and nothing changes with it off.
+- [x] Machines without the needed capability fall back silently, with a note in the Graphics settings.
 
 ---
 
