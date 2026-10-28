@@ -305,7 +305,10 @@ impl Controllers {
         };
         self.active = Some(id);
         let eye = Eye::of(world, id).unwrap_or(Eye::Follow);
+        let turned = self.drive_seat(world, id, input).unwrap_or(0.0);
         let orbit = self.orbits.entry(id).or_insert_with(|| Orbit::start(eye));
+        // A camera in a car turns with it (see `seat`).
+        orbit.yaw += turned;
         orbit.look(input.look_dx, input.look_dy);
         let orbit = *orbit;
         if eye == Eye::Follow {
@@ -479,7 +482,11 @@ pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
     };
     let character = matches!(
         instance.class(),
-        ClassName::Model | ClassName::Part | ClassName::MeshPart | ClassName::Seat
+        ClassName::Model
+            | ClassName::Part
+            | ClassName::MeshPart
+            | ClassName::Seat
+            | ClassName::VehicleSeat
     );
     if !character {
         return Vec::new();

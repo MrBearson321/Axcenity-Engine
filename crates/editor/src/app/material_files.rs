@@ -41,7 +41,10 @@ impl EditorApp {
             let _ = self
                 .world
                 .set_property(id, "MaterialVariant", Value::String(path.to_owned()));
-            if matches!(class, ClassName::Part | ClassName::Seat) {
+            if matches!(
+                class,
+                ClassName::Part | ClassName::Seat | ClassName::VehicleSeat
+            ) {
                 let _ =
                     self.world
                         .set_property(id, "Color", Value::Color3(Color3::new(1.0, 1.0, 1.0)));

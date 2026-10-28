@@ -711,6 +711,8 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Part => icons::CUBE,
         ClassName::MeshPart => icons::CUBE_TRANSPARENT,
         ClassName::Seat => icons::CHAIR,
+        ClassName::VehicleSeat => icons::STEERING_WHEEL,
+        ClassName::VehicleWheel => icons::TIRE,
         ClassName::Script => icons::FILE_CODE,
         ClassName::LocalScript => icons::CODE,
         ClassName::ModuleScript => icons::PUZZLE_PIECE,
@@ -800,6 +802,7 @@ pub fn tool_icon(tool: Tool) -> &'static str {
 pub fn insert_icon(what: Insertable) -> &'static str {
     match what {
         Insertable::Part(shape) => part_icon(shape),
+        Insertable::Vehicle => icons::CAR,
         _ => class_icon(what.class()),
     }
 }
@@ -824,9 +827,11 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         mix(Color32::from_rgb(r, g, b), visuals.text_color(), 0.2)
     };
     match class {
-        ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::Model => {
-            pick((120, 160, 240), (40, 90, 190))
-        }
+        ClassName::Part
+        | ClassName::MeshPart
+        | ClassName::Seat
+        | ClassName::VehicleSeat
+        | ClassName::Model => pick((120, 160, 240), (40, 90, 190)),
         ClassName::Folder => pick((222, 182, 92), (160, 115, 10)),
         ClassName::SurfaceAppearance => pick((214, 130, 204), (150, 50, 140)),
         ClassName::ScreenGui

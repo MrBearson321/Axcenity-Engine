@@ -1,7 +1,7 @@
 //! Seats (Phase 39): `seat:Sit(controller)`. It only writes the seat's
 //! `Occupant` and the controller's `Sit`; the character controller sits
 //! the character on its next step (see `character`). `Occupant` is
-//! read-only for scripts.
+//! read-only for scripts. A VehicleSeat is a Seat, so it has the same.
 
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use mlua::{FromLua, Function, Lua};
@@ -34,7 +34,10 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
         sit(&mut world, this.0, controller);
         Ok(())
     })?;
-    Ok(vec![(ClassName::Seat, "Sit", sit)])
+    Ok(vec![
+        (ClassName::Seat, "Sit", sit.clone()),
+        (ClassName::VehicleSeat, "Sit", sit),
+    ])
 }
 
 /// Makes `controller` the occupant of `seat` and takes it off any other seat.
@@ -45,7 +48,7 @@ fn sit(world: &mut World, seat: InstanceId, controller: InstanceId) {
         .filter(|&id| {
             id != seat
                 && world.get(id).is_some_and(|other| {
-                    other.class() == ClassName::Seat
+                    other.class().is_seat()
                         && other.property("Occupant") == Some(&Value::Instance(Some(controller)))
                 })
         })

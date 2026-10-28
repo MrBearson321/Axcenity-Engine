@@ -42,6 +42,8 @@
 //! constraints join two parts' bodies with a rapier joint (see [`joints`]).
 //! LinearVelocity, AngularVelocity, VectorForce, Torque, AlignPosition and
 //! AlignOrientation push or turn a part's body every step (see `movers`).
+//! A VehicleSeat drives the body it's welded into on its VehicleWheels
+//! (see `vehicles`).
 //!
 //! [`cast_ray`], [`raycast`], [`shapecast`], the overlap queries and
 //! [`debug_colliders`] read the world the same way the simulation does,
@@ -54,6 +56,7 @@ mod material;
 mod movers;
 mod query;
 mod shapes;
+mod vehicles;
 
 pub use mass::Mass;
 pub use query::{
@@ -139,6 +142,9 @@ pub struct Physics {
     movers: Vec<movers::Mover>,
     /// What each velocity and align mover learned about contacts and joints.
     learned: BTreeMap<InstanceId, movers::Learned>,
+    /// The cars, read again every frame, and how far each wheel has rolled.
+    vehicles: Vec<vehicles::Vehicle>,
+    rolling: BTreeMap<InstanceId, vehicles::Rolling>,
 }
 
 /// One Part's collider on its assembly's rapier body, plus the part's
@@ -209,7 +215,7 @@ impl Groups {
         self.member & other.filter != 0 && other.member & self.filter != 0
     }
 
-    fn interaction(self) -> InteractionGroups {
+    pub(crate) fn interaction(self) -> InteractionGroups {
         InteractionGroups::new(
             Group::from_bits_retain(self.member),
             Group::from_bits_retain(self.filter),
@@ -362,6 +368,8 @@ impl Physics {
             joints: BTreeMap::new(),
             movers: Vec::new(),
             learned: BTreeMap::new(),
+            vehicles: Vec::new(),
+            rolling: BTreeMap::new(),
         }
     }
 
@@ -390,10 +398,17 @@ impl Physics {
                 self.rapier.gravity,
                 &mut self.learned,
             );
+            vehicles::drive(&mut self.rapier, &mut self.vehicles, &mut self.rolling);
             // The hook only runs for colliders with friction or
             // elasticity weights (see `material`).
             self.rapier.step_with_events(&material::Weighted, &());
             self.write_to_world(world);
+            vehicles::place_wheels(
+                world,
+                &mut self.parts,
+                &mut self.rapier.bodies,
+                &self.vehicles,
+            );
             self.find_touches();
             self.unsimulated_seconds = (self.unsimulated_seconds - STEP_SECONDS).max(0.0);
             steps += 1;
@@ -527,6 +542,8 @@ impl Physics {
         // they keep no state.
         self.movers = movers::read(world, &self.parts);
         movers::forget(&mut self.learned, &moved);
+        self.vehicles = vehicles::read(world, &self.parts, &self.rapier.bodies, &self.rolling);
+        self.rolling.retain(|id, _| world.contains(*id));
 
         // Parts at rest "sleep" and stop being simulated. If a script moved
         // or removed something, a sleeping part may have lost what it was
@@ -945,7 +962,7 @@ fn orientation_to_quat(orientation: Vector3) -> Quat {
     Quat::from_euler(EulerRot::YXZ, y, x, z)
 }
 
-fn quat_to_orientation(rotation: Quat) -> Vector3 {
+pub(crate) fn quat_to_orientation(rotation: Quat) -> Vector3 {
     let (y, x, z) = rotation.to_euler(EulerRot::YXZ);
     Vector3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
 }
@@ -964,3 +981,6 @@ mod mover_tests;
 
 #[cfg(test)]
 mod query_tests;
+
+#[cfg(test)]
+mod vehicle_tests;

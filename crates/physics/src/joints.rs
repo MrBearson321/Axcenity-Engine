@@ -300,8 +300,9 @@ pub(crate) fn attachment_on_part(world: &World, id: InstanceId) -> Option<(Insta
     Some((part, local_pose(attachment)?))
 }
 
-/// An Attachment's `Position` and `Orientation` on its part, if finite.
-fn local_pose(attachment: &Instance) -> Option<Pose> {
+/// An Attachment's (or VehicleWheel's) `Position` and `Orientation` on
+/// its part, if finite.
+pub(crate) fn local_pose(attachment: &Instance) -> Option<Pose> {
     let vector = |name| attachment.property(name).and_then(Value::as_vector3);
     let (position, orientation) = (vector("Position")?, vector("Orientation")?);
     crate::finite(position).then_some(())?;

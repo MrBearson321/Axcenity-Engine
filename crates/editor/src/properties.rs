@@ -570,7 +570,7 @@ pub fn show(
                                 // Who sits there is up to the game, not the editor.
                                 Value::Instance(target)
                                     if name == "Occupant"
-                                        && instance.class() == ClassName::Seat =>
+                                        && instance.class().is_seat() =>
                                 {
                                     let who = target
                                         .and_then(|target| world.full_name(target))

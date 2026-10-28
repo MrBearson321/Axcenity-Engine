@@ -397,7 +397,7 @@ impl Filter {
             Filter::Animations => class == ClassName::Animation,
             Filter::Agents => class == ClassName::NavigationAgent,
             Filter::Checkpoints => class == ClassName::Checkpoint,
-            Filter::Seats => class == ClassName::Seat,
+            Filter::Seats => class.is_seat(),
             Filter::Controllers => class.is_character_controller(),
             Filter::Gui => matches!(
                 class,

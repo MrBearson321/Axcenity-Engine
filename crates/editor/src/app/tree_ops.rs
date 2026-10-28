@@ -106,7 +106,11 @@ impl EditorApp {
             let has_body = self.world.get(parent).is_some_and(|instance| {
                 matches!(
                     instance.class(),
-                    ClassName::Model | ClassName::Part | ClassName::MeshPart | ClassName::Seat
+                    ClassName::Model
+                        | ClassName::Part
+                        | ClassName::MeshPart
+                        | ClassName::Seat
+                        | ClassName::VehicleSeat
                 )
             });
             // A character has one controller or the other. One that already
@@ -131,6 +135,19 @@ impl EditorApp {
         }
         if what == Insertable::NavigationAgent {
             self.insert_agent(near.or(self.selected));
+            return;
+        }
+        // The whole car is one undo step.
+        if what == Insertable::Vehicle {
+            let parent = tree::insert_parent(&self.world, near, what);
+            let position = self.insert_position();
+            let car = tree::vehicle(&mut self.world, position);
+            let name = tree::unique_name(&self.world, parent, "Car");
+            self.world.set_name(car, &name).expect("just made");
+            let index = self.world.get(parent).map_or(0, |p| p.children().len());
+            if self.place(car, Some(Place { parent, index }), format!("Insert {name}")) {
+                self.select_from_viewport(Some(car));
+            }
             return;
         }
         // A viewpoint is where the editor's camera is, looking the same way.
@@ -235,7 +252,11 @@ impl EditorApp {
             let ok = self.world.get(parent).is_some_and(|instance| {
                 matches!(
                     instance.class(),
-                    ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::Model
+                    ClassName::Part
+                        | ClassName::MeshPart
+                        | ClassName::Seat
+                        | ClassName::VehicleSeat
+                        | ClassName::Model
                 )
             });
             if !ok {
@@ -262,7 +283,11 @@ impl EditorApp {
         let has_body = self.world.get(parent).is_some_and(|instance| {
             matches!(
                 instance.class(),
-                ClassName::Model | ClassName::Part | ClassName::MeshPart | ClassName::Seat
+                ClassName::Model
+                    | ClassName::Part
+                    | ClassName::MeshPart
+                    | ClassName::Seat
+                    | ClassName::VehicleSeat
             )
         });
         let holder = if has_body {

@@ -1912,6 +1912,96 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "An Attachment where a sitting character's feet go, or nil for the middle of the seat's top face.",
     ),
     (
+        ClassName::VehicleSeat,
+        "MaxSpeed",
+        "Studs a second the driven wheels stop pushing at. They push less the closer the car gets.",
+    ),
+    (
+        ClassName::VehicleSeat,
+        "Torque",
+        "How hard the driven wheels push at full Throttle: studs a second squared on flat ground, whatever the car weighs. At the default 80 a car climbs slopes up to about 24°.",
+    ),
+    (
+        ClassName::VehicleSeat,
+        "TurnSpeed",
+        "Degrees a second the steering wheels turn toward where Steer points them.",
+    ),
+    (
+        ClassName::VehicleSeat,
+        "SteerAngle",
+        "Degrees the wheels with Steers on turn at full Steer.",
+    ),
+    (
+        ClassName::VehicleSeat,
+        "Throttle",
+        "-1 (full reverse) to 1 (full forward). While someone sits on the seat, the Move action sets it every frame (W and S, or a stick); scripts set it to drive an empty car. Getting out sets it to 0.",
+    ),
+    (
+        ClassName::VehicleSeat,
+        "Steer",
+        "-1 (left) to 1 (right), set like Throttle (A and D, or a stick).",
+    ),
+    (
+        ClassName::VehicleSeat,
+        "HandBrake",
+        "If true, the wheels with Brakes on hold the car still. An empty seat with no Throttle holds the car the same way; otherwise a car with no Throttle coasts, slowing a little.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "Position",
+        "The wheel's middle with its spring at rest length, in studs from the middle of its part, along the part's own axes.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "Orientation",
+        "How the wheel is turned relative to its part, in degrees like a Part's Orientation. The wheel rolls toward its -Z, turns on its X axle, and its spring is along its Y.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "Radius",
+        "The wheel's radius in studs. Its bottom is this far below its middle.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "SuspensionRestLength",
+        "Studs of spring above the wheel's middle. The car's weight squashes it; a wheel off the ground hangs at this length.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "SuspensionStiffness",
+        "How hard the spring pushes back for each stud it's squashed, whatever the car weighs. With four wheels, the default 100 squashes each half a stud at rest.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "SuspensionDamping",
+        "How much the spring holds back bouncing. Higher settles the car sooner; the engine lowers it where more would make the car rock.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "Friction",
+        "How much grip the tyre has before it slides, braking or pushing.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "Steers",
+        "If true, the wheel turns with the seat's Steer.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "Driven",
+        "If true, the wheel pushes with the seat's Throttle.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "Brakes",
+        "If true, the wheel holds the car on the HandBrake, and when nobody drives.",
+    ),
+    (
+        ClassName::VehicleWheel,
+        "WheelPart",
+        "A part moved to the wheel every frame during Play, spinning as it rolls and turning as it steers: its middle at the wheel's and its X along the axle, as a Cylinder's round faces are. Make it Anchored with CanCollide off; nil shows nothing.",
+    ),
+    (
         ClassName::FirstPersonController,
         "EyeHeight",
         "How far above the character's feet its eyes are, in studs. The camera sits there during Play.",
@@ -3442,6 +3532,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         ClassName::Part => "A solid shape in the world.",
         ClassName::Seat => {
             "A Part that characters sit on. A character that touches it while it's empty and not Disabled sits down: it's welded to the seat (so it rides along on a moving cart), plays its Animator's `Sit` state if there is one, and ignores move keys. Jump stands it up in front of the seat. Everything a Part has, and Occupant, Disabled and SeatOffset."
+        }
+        ClassName::VehicleSeat => {
+            "A Seat that drives the car it's welded into: the body made of every part welded to it, the chassis. While someone sits on it, the Move action sets Throttle and Steer, and the camera follows the car until they get out with Jump. The car rides on the VehicleWheels parented to its parts. Everything a Seat has, and MaxSpeed, Torque, TurnSpeed, SteerAngle, Throttle, Steer and HandBrake."
+        }
+        ClassName::VehicleWheel => {
+            "A wheel of the car whose part it's parented to: a spring and a ray to the ground, so no wheel collider touches it. Position and Orientation are relative to the part, as an Attachment's. Not drawn; its WheelPart is moved to it."
         }
         ClassName::MeshPart => {
             "A solid 3D model imported from a glTF or FBX file, drawn with the file's own materials (or its SurfaceAppearances'). It collides as the model's convex hull."

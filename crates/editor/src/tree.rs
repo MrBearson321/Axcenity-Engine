@@ -5,7 +5,7 @@
 //! Pure functions of the world, so the rules are easy to test. The app does
 //! the changes, and records them for undo.
 
-use axcenity_core::{ClassName, InstanceId, PartType, Value, Vector3, World};
+use axcenity_core::{ClassName, Color3, InstanceId, PartType, Value, Vector3, World};
 
 /// Something the toolbar or the Explorer's Insert menu can add.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +60,13 @@ pub enum Insertable {
     Checkpoint,
     /// A part characters sit on.
     Seat,
+    /// A ready-to-drive car: a Model with a chassis, a VehicleSeat welded
+    /// on it, four VehicleWheels and a cylinder for each (see [`vehicle`]).
+    Vehicle,
+    /// A Seat that drives the car it's welded into.
+    VehicleSeat,
+    /// A wheel on the selected part.
+    VehicleWheel,
     /// A named viewpoint scripts cut the camera to.
     Camera,
     /// A point and direction on the selected part, at its middle.
@@ -118,6 +125,12 @@ impl Insertable {
     pub const CHECKPOINTS: [Insertable; 1] = [Insertable::Checkpoint];
     /// Seats, which a character that touches them sits on.
     pub const SEATS: [Insertable; 1] = [Insertable::Seat];
+    /// A ready car, and the pieces to build one's own.
+    pub const VEHICLES: [Insertable; 3] = [
+        Insertable::Vehicle,
+        Insertable::VehicleSeat,
+        Insertable::VehicleWheel,
+    ];
     /// Camera viewpoints, placed where the editor's camera is.
     pub const CAMERAS: [Insertable; 1] = [Insertable::Camera];
     /// Points on parts, for constraints and effects.
@@ -182,6 +195,9 @@ impl Insertable {
             Insertable::NavigationAgent => "Agent",
             Insertable::Checkpoint => "Checkpoint",
             Insertable::Seat => "Seat",
+            Insertable::Vehicle => "Vehicle",
+            Insertable::VehicleSeat => "Vehicle Seat",
+            Insertable::VehicleWheel => "Wheel",
             Insertable::Camera => "Camera",
             Insertable::Attachment => "Attachment",
             Insertable::Value(class) => class.as_str(),
@@ -226,6 +242,9 @@ impl Insertable {
             Insertable::NavigationAgent => ClassName::NavigationAgent,
             Insertable::Checkpoint => ClassName::Checkpoint,
             Insertable::Seat => ClassName::Seat,
+            Insertable::Vehicle => ClassName::Model,
+            Insertable::VehicleSeat => ClassName::VehicleSeat,
+            Insertable::VehicleWheel => ClassName::VehicleWheel,
             Insertable::Camera => ClassName::Camera,
             Insertable::Attachment => ClassName::Attachment,
             Insertable::Value(class) => class,
@@ -345,7 +364,7 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
             ("Position", Value::Vector3(position)),
         ],
         Insertable::MeshPart => vec![("Position", Value::Vector3(position))],
-        Insertable::Seat => vec![
+        Insertable::Seat | Insertable::VehicleSeat => vec![
             ("Size", Value::Vector3(Vector3::new(2.0, 1.0, 2.0))),
             ("Position", Value::Vector3(position)),
         ],
@@ -360,6 +379,91 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
             .expect("every part has these properties");
     }
     id
+}
+
+/// The car Insert > Vehicle makes, with no parent yet: a Model named Car
+/// whose 6×1×10 Chassis is two studs above `position` (where its wheels
+/// stand), facing -Z, with a VehicleSeat welded on its left-hand side, so a
+/// character walking into that side sits on it, and four VehicleWheels
+/// (the front two steer), each moving an anchored, uncolliding cylinder.
+pub fn vehicle(world: &mut World, position: Vector3) -> InstanceId {
+    let at = |x: f32, y: f32, z: f32| {
+        Value::Vector3(Vector3::new(position.x + x, position.y + y, position.z + z))
+    };
+    let car = world.create(ClassName::Model).expect("not a service");
+    world.set_name(car, "Car").expect("just made");
+    let mut make = |class, name: &str, parent: InstanceId, properties: Vec<(&str, Value)>| {
+        let id = world.create(class).expect("not a service");
+        world.set_name(id, name).expect("just made");
+        for (property, value) in properties {
+            world
+                .set_property(id, property, value)
+                .expect("the class has it");
+        }
+        world.set_parent(id, Some(parent)).expect("a new Model");
+        id
+    };
+    let chassis = make(
+        ClassName::Part,
+        "Chassis",
+        car,
+        vec![
+            ("Size", Value::Vector3(Vector3::new(6.0, 1.0, 10.0))),
+            ("Position", at(0.0, 2.0, 0.0)),
+            ("Color", Value::Color3(Color3::new(0.8, 0.2, 0.18))),
+        ],
+    );
+    let seat = make(
+        ClassName::VehicleSeat,
+        "DriverSeat",
+        car,
+        vec![
+            ("Size", Value::Vector3(Vector3::new(2.0, 1.0, 2.0))),
+            ("Position", at(-2.0, 3.0, 1.0)),
+            ("Color", Value::Color3(Color3::new(0.2, 0.2, 0.22))),
+        ],
+    );
+    make(
+        ClassName::WeldConstraint,
+        "SeatWeld",
+        chassis,
+        vec![
+            ("Part0", Value::Instance(Some(chassis))),
+            ("Part1", Value::Instance(Some(seat))),
+        ],
+    );
+    for (name, x, z) in [
+        ("FrontLeft", -3.5, -3.5),
+        ("FrontRight", 3.5, -3.5),
+        ("BackLeft", -3.5, 3.5),
+        ("BackRight", 3.5, 3.5),
+    ] {
+        // A cylinder's round faces are along its X, as a wheel's axle is.
+        let shown = make(
+            ClassName::Part,
+            &format!("{name}Wheel"),
+            car,
+            vec![
+                ("Shape", Value::PartType(PartType::Cylinder)),
+                ("Size", Value::Vector3(Vector3::new(0.8, 2.0, 2.0))),
+                ("Position", at(x, 1.0, z)),
+                ("Color", Value::Color3(Color3::new(0.1, 0.1, 0.1))),
+                ("Anchored", Value::Bool(true)),
+                ("CanCollide", Value::Bool(false)),
+            ],
+        );
+        make(
+            ClassName::VehicleWheel,
+            name,
+            chassis,
+            vec![
+                ("Position", Value::Vector3(Vector3::new(x, -1.0, z))),
+                ("Steers", Value::Bool(z < 0.0)),
+                ("WheelPart", Value::Instance(Some(shown))),
+            ],
+        );
+    }
+    car
 }
 
 /// Where a new `what` goes: into `near` if it's ReplicatedStorage, or a
@@ -385,18 +489,26 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
         let is_ui_container = is_ui_container(world, id);
         let is_sound_container = matches!(
             world.get(id).map(|instance| instance.class()),
-            Some(ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::Model)
+            Some(
+                ClassName::Part
+                    | ClassName::MeshPart
+                    | ClassName::Seat
+                    | ClassName::VehicleSeat
+                    | ClassName::Model
+            )
         );
-        // An Attachment's Position is on its part, so only a part holds one.
-        let is_part = matches!(
-            world.get(id).map(|instance| instance.class()),
-            Some(ClassName::Part | ClassName::MeshPart | ClassName::Seat)
-        );
+        // An Attachment's (or wheel's) Position is on its part, so only a
+        // part holds one.
+        let is_part = world
+            .get(id)
+            .is_some_and(|instance| instance.class().is_base_part());
         id == world.replicated_storage()
             || (is_group && is_saved(world, id))
             // A Value object goes inside whatever is selected.
             || (matches!(what, Insertable::Value(_)) && is_saved(world, id))
-            || (what == Insertable::Attachment && is_part && is_saved(world, id))
+            || (matches!(what, Insertable::Attachment | Insertable::VehicleWheel)
+                && is_part
+                && is_saved(world, id))
             || (is_ui_container
                 && (what.is_ui_element() || what == Insertable::Animation)
                 && is_saved(world, id))

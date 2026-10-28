@@ -359,6 +359,31 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::VEHICLES {
+                    let hint = match what {
+                        Insertable::Vehicle => {
+                            "Insert a ready-to-drive car. During Play, walk into its seat on \
+                             the left to drive with the move keys or a stick; Jump gets out."
+                        }
+                        Insertable::VehicleSeat => {
+                            "Insert a Vehicle Seat: weld it to a car's chassis to drive it, \
+                             on wheels inserted into the chassis."
+                        }
+                        _ => {
+                            "Insert a Wheel into the selected part: a spring and tyre that \
+                             a Vehicle Seat welded to that part drives on."
+                        }
+                    };
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hint)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
                 for what in Insertable::AGENTS {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui

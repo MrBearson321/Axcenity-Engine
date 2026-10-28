@@ -1255,3 +1255,5 @@ mod ui_selection_tests;
 mod ui_text_style_tests;
 #[cfg(test)]
 mod undo_tests;
+#[cfg(test)]
+mod vehicle_tests;

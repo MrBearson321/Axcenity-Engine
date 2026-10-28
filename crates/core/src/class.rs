@@ -54,6 +54,10 @@ pub enum ClassName {
     /// A Part that characters sit on: one that touches it while it's empty
     /// and enabled sits down (`Occupant`).
     Seat,
+    /// A Seat that drives the car it's welded into: while someone sits on
+    /// it, the Move action sets `Throttle` and `Steer`, and its
+    /// VehicleWheels push, turn and hold the car.
+    VehicleSeat,
     /// Lua code that runs on the server. Its source lives in a
     /// `*.server.lua` file, not in a property.
     Script,
@@ -175,6 +179,12 @@ pub enum ClassName {
     /// with the part. `Position` and `Orientation` are relative to the
     /// part; scripts also read `WorldCFrame`. Not drawn in the game.
     Attachment,
+    /// A wheel of the car whose chassis part it's parented to: where it is
+    /// (`Position` and `Orientation`, relative to the part, as an
+    /// Attachment's), how big, how springy, and whether it steers, drives
+    /// and brakes. It rolls toward its -Z, turning about its X. Not drawn;
+    /// its `WheelPart` is moved to it.
+    VehicleWheel,
     /// Holds `Part0` and `Part1` together where they were when it was made
     /// or enabled. Welded unanchored parts move as one body: an assembly.
     WeldConstraint,
@@ -223,7 +233,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 77] = [
+    pub const ALL: [ClassName; 79] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -235,6 +245,7 @@ impl ClassName {
         ClassName::Part,
         ClassName::MeshPart,
         ClassName::Seat,
+        ClassName::VehicleSeat,
         ClassName::Script,
         ClassName::LocalScript,
         ClassName::ModuleScript,
@@ -279,6 +290,7 @@ impl ClassName {
         ClassName::Checkpoint,
         ClassName::Camera,
         ClassName::Attachment,
+        ClassName::VehicleWheel,
         ClassName::WeldConstraint,
         ClassName::HingeConstraint,
         ClassName::BallSocketConstraint,
@@ -315,6 +327,7 @@ impl ClassName {
             ClassName::StarterPlayerScripts => "StarterPlayerScripts",
             ClassName::Part => "Part",
             ClassName::Seat => "Seat",
+            ClassName::VehicleSeat => "VehicleSeat",
             ClassName::MeshPart => "MeshPart",
             ClassName::Script => "Script",
             ClassName::LocalScript => "LocalScript",
@@ -360,6 +373,7 @@ impl ClassName {
             ClassName::Checkpoint => "Checkpoint",
             ClassName::Camera => "Camera",
             ClassName::Attachment => "Attachment",
+            ClassName::VehicleWheel => "VehicleWheel",
             ClassName::WeldConstraint => "WeldConstraint",
             ClassName::HingeConstraint => "HingeConstraint",
             ClassName::BallSocketConstraint => "BallSocketConstraint",
@@ -406,6 +420,7 @@ impl ClassName {
         match self {
             ClassName::Part | ClassName::MeshPart => PART,
             ClassName::Seat => &["Part", "BasePart", "PVInstance"],
+            ClassName::VehicleSeat => &["Seat", "Part", "BasePart", "PVInstance"],
             ClassName::Model => &["PVInstance"],
             ClassName::Script | ClassName::ModuleScript => &["LuaSourceContainer"],
             ClassName::LocalScript => &["Script", "LuaSourceContainer"],
@@ -424,12 +439,18 @@ impl ClassName {
         name == "Instance" || self.as_str() == name || self.superclasses().contains(&name)
     }
 
-    /// A Part, MeshPart or Seat: a solid in the world (`BasePart`).
+    /// A Part, MeshPart, Seat or VehicleSeat: a solid in the world
+    /// (`BasePart`).
     pub fn is_base_part(self) -> bool {
         matches!(
             self,
-            ClassName::Part | ClassName::MeshPart | ClassName::Seat
+            ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::VehicleSeat
         )
+    }
+
+    /// A Seat or a VehicleSeat: a character that touches it sits on it.
+    pub fn is_seat(self) -> bool {
+        matches!(self, ClassName::Seat | ClassName::VehicleSeat)
     }
 
     /// A third- or first-person character controller.
@@ -1132,7 +1153,7 @@ impl ClassName {
                 ("RollOffMinDistance", Value::Number(10.0)),
                 ("RollOffMaxDistance", Value::Number(150.0)),
             ],
-            ClassName::Part | ClassName::Seat => {
+            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat => {
                 let material = Material::Plastic;
                 let preset = material.preset();
                 let mut properties = vec![
@@ -1170,7 +1191,7 @@ impl ClassName {
                 ];
                 properties.extend(collision_properties());
                 properties.extend(body_properties());
-                if self == ClassName::Seat {
+                if self.is_seat() {
                     properties.extend([
                         // The character controller sitting on it, or none.
                         // Read-only for scripts: `seat:Sit(controller)` sits one.
@@ -1180,6 +1201,27 @@ impl ClassName {
                         // An Attachment where the character's feet go, or
                         // none for the middle of the top face.
                         ("SeatOffset", Value::Instance(None)),
+                    ]);
+                }
+                if self == ClassName::VehicleSeat {
+                    properties.extend([
+                        // Studs a second the wheels stop pushing at.
+                        ("MaxSpeed", Value::Number(60.0)),
+                        // How hard the driven wheels push at full throttle:
+                        // studs a second squared on flat ground, whatever
+                        // the car weighs.
+                        ("Torque", Value::Number(80.0)),
+                        // Degrees a second the steering wheels turn.
+                        ("TurnSpeed", Value::Number(120.0)),
+                        // Degrees the steering wheels turn at full lock.
+                        ("SteerAngle", Value::Number(30.0)),
+                        // -1 (reverse) to 1 (forward). The Move action
+                        // sets it while someone sits here; scripts may too.
+                        ("Throttle", Value::Number(0.0)),
+                        // -1 (left) to 1 (right), set like `Throttle`.
+                        ("Steer", Value::Number(0.0)),
+                        // On, the braking wheels hold the car still.
+                        ("HandBrake", Value::Bool(false)),
                     ]);
                 }
                 properties
@@ -1336,6 +1378,31 @@ impl ClassName {
                 // it's parented to (degrees, like a Part's Orientation).
                 ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
                 ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+            ],
+            ClassName::VehicleWheel => vec![
+                // The wheel's middle with its spring at rest length, and
+                // how it's turned, relative to its part (as an Attachment).
+                ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                ("Radius", Value::Number(1.0)),
+                // Studs of spring above the wheel's middle.
+                ("SuspensionRestLength", Value::Number(1.5)),
+                // How hard the spring pushes back per stud it's squashed,
+                // and how much it holds back bouncing, whatever the car
+                // weighs. The defaults squash it half a stud at rest.
+                ("SuspensionStiffness", Value::Number(100.0)),
+                ("SuspensionDamping", Value::Number(8.0)),
+                // How much grip the tyre has before it slides.
+                ("Friction", Value::Number(2.0)),
+                // Turns with the seat's Steer.
+                ("Steers", Value::Bool(false)),
+                // Pushes with the seat's Throttle.
+                ("Driven", Value::Bool(true)),
+                // Holds with the HandBrake, and when nobody drives.
+                ("Brakes", Value::Bool(true)),
+                // A part moved to the wheel every frame, spinning as it
+                // rolls and turning as it steers, or none.
+                ("WheelPart", Value::Instance(None)),
             ],
             ClassName::WeldConstraint => vec![
                 ("Part0", Value::Instance(None)),
@@ -1596,6 +1663,7 @@ impl ClassName {
             | ClassName::Checkpoint
             | ClassName::Camera
             | ClassName::Attachment
+            | ClassName::VehicleWheel
             | ClassName::WeldConstraint
             | ClassName::HingeConstraint
             | ClassName::BallSocketConstraint
@@ -1637,7 +1705,9 @@ impl ClassName {
             // `GetMarkerReachedSignal(name)` hears one name of.
             ClassName::AnimationTrack => &["Stopped", "KeyframeReached"],
             // Fire on both parts when two parts start and stop touching.
-            ClassName::Part | ClassName::MeshPart | ClassName::Seat => &["Touched", "TouchEnded"],
+            ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::VehicleSeat => {
+                &["Touched", "TouchEnded"]
+            }
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.
             ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],

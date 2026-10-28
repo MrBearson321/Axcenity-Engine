@@ -761,6 +761,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             .chain(Insertable::ANIMATION)
             .chain(Insertable::CHARACTERS)
             .chain(Insertable::SEATS)
+            .chain(Insertable::VEHICLES)
             .chain(Insertable::AGENTS)
             .chain(Insertable::CHECKPOINTS)
             .chain(Insertable::CAMERAS)
@@ -822,9 +823,12 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     {
         chosen = Some(RowCommand::ExportPackage);
     }
-    let is_part = world
-        .get(id)
-        .is_some_and(|instance| matches!(instance.class(), ClassName::Part | ClassName::Seat));
+    let is_part = world.get(id).is_some_and(|instance| {
+        matches!(
+            instance.class(),
+            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat
+        )
+    });
     if is_part
         && ui
             .button(theme::with_icon(icons::SPHERE, "Save as Material"))

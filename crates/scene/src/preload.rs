@@ -88,7 +88,7 @@ pub fn asset_files(world: &World) -> Vec<AssetFile> {
                     add(AssetFile::Material(path));
                 }
             }
-            ClassName::Part | ClassName::Seat => {
+            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat => {
                 if let Some(path) = text("MaterialVariant") {
                     add(AssetFile::Material(path));
                 }

@@ -1325,10 +1325,10 @@ Blocks: "when someone sits on", "make … leave the seat".
 
 ### Acceptance criteria
 
-- [ ] The inserted car drives with WASD and with a gamepad, steers, brakes, and climbs a gentle terrain slope.
-- [ ] Suspension settles the car on uneven ground without jitter at rest.
-- [ ] Getting out with Jump leaves the car where it stopped, and the camera returns to the character.
-- [ ] Throttle and Steer set from Lua drive an empty car.
+- [x] The inserted car drives with WASD and with a gamepad, steers, brakes, and climbs a gentle terrain slope.
+- [x] Suspension settles the car on uneven ground without jitter at rest.
+- [x] Getting out with Jump leaves the car where it stopped, and the camera returns to the character.
+- [x] Throttle and Steer set from Lua drive an empty car.
 
 ---
 

@@ -105,7 +105,10 @@ fn surface_parameters(standard: &StandardMaterial) -> [[f32; 4]; SURFACE_PARAMET
 /// `Color` tints it.
 pub fn part_material_file(world: &World, id: InstanceId, assets: &Assets) -> Option<MaterialFile> {
     let instance = world.get(id)?;
-    if !matches!(instance.class(), ClassName::Part | ClassName::Seat) {
+    if !matches!(
+        instance.class(),
+        ClassName::Part | ClassName::Seat | ClassName::VehicleSeat
+    ) {
         return None;
     }
     let color = instance.property("Color").and_then(Value::as_color3)?;

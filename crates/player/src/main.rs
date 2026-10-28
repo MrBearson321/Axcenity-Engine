@@ -1341,3 +1341,5 @@ mod accessibility_tests;
 mod physics_tests;
 #[cfg(test)]
 mod seat_tests;
+#[cfg(test)]
+mod vehicle_tests;

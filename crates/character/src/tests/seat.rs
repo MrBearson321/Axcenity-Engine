@@ -368,3 +368,83 @@ fn a_sitting_character_plays_its_animators_sit_state_and_goes_back_after() {
     assert_eq!(requested(&mut world), None);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+fn number(world: &World, id: InstanceId, name: &str) -> f64 {
+    world
+        .get(id)
+        .unwrap()
+        .property(name)
+        .unwrap()
+        .as_number()
+        .unwrap()
+}
+
+#[test]
+fn on_a_vehicle_seat_move_sets_throttle_and_steer_and_the_camera_turns_with_the_car() {
+    let (mut world, controller, _) = standing();
+    let driver = world.create(ClassName::VehicleSeat).unwrap();
+    world.set_parent(driver, Some(world.workspace())).unwrap();
+    for (name, value) in [
+        ("Anchored", Value::Bool(true)),
+        ("Size", Value::Vector3(Vector3::new(2.0, 1.0, 2.0))),
+        ("Position", Value::Vector3(Vector3::new(0.0, 0.5, -10.0))),
+        ("Orientation", Value::Vector3(Vector3::new(0.0, 90.0, 0.0))),
+    ] {
+        world.set_property(driver, name, value).unwrap();
+    }
+    let mut controllers = Controllers::default();
+    sit_from_script(&mut world, driver, controller);
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    assert!(controllers.is_seated(controller));
+    // The camera is behind the car, looking the way it faces (-X).
+    let view = controllers.view(&world).unwrap();
+    assert!((view.orientation.y - 90.0).abs() < 1e-3, "{view:?}");
+    assert!(view.position.x > 1.0, "{view:?}");
+
+    // W and D: full throttle, steering right. A stick part way: part way.
+    let keys = MoveInput {
+        forward: true,
+        right: true,
+        ..MoveInput::default()
+    };
+    run(&mut world, &mut controllers, keys, 1);
+    assert_eq!(number(&world, driver, "Throttle"), 1.0);
+    assert_eq!(number(&world, driver, "Steer"), 1.0);
+    let stick = MoveInput {
+        stick: [-0.5, -0.25],
+        ..MoveInput::default()
+    };
+    run(&mut world, &mut controllers, stick, 1);
+    assert_eq!(number(&world, driver, "Throttle"), -0.25);
+    assert_eq!(number(&world, driver, "Steer"), -0.5);
+
+    // The car turns 30° right; the camera turns with it.
+    world
+        .set_property(
+            driver,
+            "Orientation",
+            Value::Vector3(Vector3::new(0.0, 60.0, 0.0)),
+        )
+        .unwrap();
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    let view = controllers.view(&world).unwrap();
+    assert!((view.orientation.y - 60.0).abs() < 1e-3, "{view:?}");
+
+    // Getting out lets go of the car, and the camera stops turning with it.
+    run(&mut world, &mut controllers, keys, 1);
+    run(&mut world, &mut controllers, jump(), 1);
+    assert!(!controllers.is_seated(controller));
+    assert_eq!(occupant(&world, driver), None);
+    assert_eq!(number(&world, driver, "Throttle"), 0.0);
+    assert_eq!(number(&world, driver, "Steer"), 0.0);
+    world
+        .set_property(
+            driver,
+            "Orientation",
+            Value::Vector3(Vector3::new(0.0, 0.0, 0.0)),
+        )
+        .unwrap();
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    let view = controllers.view(&world).unwrap();
+    assert!((view.orientation.y - 60.0).abs() < 1e-3, "{view:?}");
+}

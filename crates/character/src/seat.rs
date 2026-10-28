@@ -6,11 +6,19 @@
 //! carries them with it, and move keys do nothing. Jump, `Sit = false`, a
 //! new `Occupant`, or a new `Movement` stands it up a little in front of
 //! the seat.
+//!
+//! A VehicleSeat is a Seat that drives its car (Phase 40): while the
+//! character that receives input sits on it, the Move action sets its
+//! `Throttle` and `Steer`, and the camera turns with the car, so it stays
+//! behind it until the driver gets out. Getting out lets go of both.
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, PlayRequest, Value, Vector3, World};
 
-use crate::{Body, Controllers, Mode, controllers, is_driver, movement, take_jump, translate};
+use crate::{
+    Body, Controllers, Eye, Mode, MoveInput, Orbit, controllers, is_driver, movement, take_jump,
+    translate,
+};
 
 /// How close a body's box comes to a seat's to touch it, in studs: more
 /// than the gap walls leave, so walking into a seat touches it.
@@ -28,6 +36,9 @@ pub(crate) struct Seated {
     welds: Vec<InstanceId>,
     /// The Animator playing `Sit`, and the state to play when it stands.
     animator: Option<(InstanceId, String)>,
+    /// A VehicleSeat's heading when the camera last turned with it, in
+    /// radians (the camera's yaw that looks the way it faces).
+    heading: Option<f32>,
 }
 
 /// A character that sat down (`seated`) or stood up, for the host to fire
@@ -100,6 +111,30 @@ impl Controllers {
         }
     }
 
+    /// For the controller that receives input, sitting on a VehicleSeat:
+    /// sets the seat's `Throttle` and `Steer` from the Move action, and
+    /// says how far the car turned since the last call (radians, for the
+    /// camera's yaw).
+    pub(crate) fn drive_seat(
+        &mut self,
+        world: &mut World,
+        id: InstanceId,
+        input: MoveInput,
+    ) -> Option<f32> {
+        let seated = self.seated.get_mut(&id)?;
+        let last = seated.heading?;
+        let axis = |positive: bool, negative: bool| f32::from(positive) - f32::from(negative);
+        let throttle = (axis(input.forward, input.back) + input.stick[1]).clamp(-1.0, 1.0);
+        let steer = (axis(input.right, input.left) + input.stick[0]).clamp(-1.0, 1.0);
+        let _ = world.set_property(seated.seat, "Throttle", Value::Number(throttle.into()));
+        let _ = world.set_property(seated.seat, "Steer", Value::Number(steer.into()));
+        let now = vehicle_heading(world, seated.seat)?;
+        seated.heading = Some(now);
+        let turned = (now - last + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+        Some(turned)
+    }
+
     /// True while `controller` sits on a seat.
     pub fn is_seated(&self, controller: InstanceId) -> bool {
         self.seated.contains_key(&controller)
@@ -152,12 +187,22 @@ impl Controllers {
             play(world, animator, SIT_STATE);
             (animator, back)
         });
+        // The camera starts behind a car, looking the way it faces.
+        let heading = vehicle_heading(world, seat);
+        if let Some(heading) = heading {
+            let eye = Eye::of(world, id).unwrap_or(Eye::Follow);
+            self.orbits
+                .entry(id)
+                .or_insert_with(|| Orbit::start(eye))
+                .yaw = heading;
+        }
         self.seated.insert(
             id,
             Seated {
                 seat,
                 welds,
                 animator,
+                heading,
             },
         );
         self.seat_changes.push(SeatChange {
@@ -178,6 +223,11 @@ impl Controllers {
         }
         if occupant(world, seated.seat) == Some(id) {
             let _ = world.set_property(seated.seat, "Occupant", Value::Instance(None));
+        }
+        if seated.heading.is_some() && world.contains(seated.seat) {
+            for name in ["Throttle", "Steer"] {
+                let _ = world.set_property(seated.seat, name, Value::Number(0.0));
+            }
         }
         if world.contains(id) {
             let _ = world.set_property(id, "Sit", Value::Bool(false));
@@ -229,14 +279,12 @@ fn seats(world: &World) -> Vec<InstanceId> {
     world
         .descendants(world.workspace())
         .into_iter()
-        .filter(|&id| world.get(id).is_some_and(|i| i.class() == ClassName::Seat))
+        .filter(|&id| world.get(id).is_some_and(|i| i.class().is_seat()))
         .collect()
 }
 
 fn seat_in_workspace(world: &World, seat: InstanceId) -> bool {
-    world
-        .get(seat)
-        .is_some_and(|i| i.class() == ClassName::Seat)
+    world.get(seat).is_some_and(|i| i.class().is_seat())
         && world.is_descendant_of(seat, world.workspace())
 }
 
@@ -322,6 +370,20 @@ fn stand_point(world: &World, seat: InstanceId, body: &Body) -> Option<(f32, f32
     let reach = half.x * fx.abs() + half.z * fz.abs() + body.radius + STAND_GAP;
     let feet = sit_point(world, seat).map_or(center.y + half.y, |point| point.y);
     Some((center.x + fx * reach, feet, center.z + fz * reach))
+}
+
+/// The yaw of a camera looking the way a VehicleSeat faces (its -Z along
+/// the ground), or `None` for a plain Seat.
+fn vehicle_heading(world: &World, seat: InstanceId) -> Option<f32> {
+    let instance = world.get(seat)?;
+    if instance.class() != ClassName::VehicleSeat {
+        return None;
+    }
+    let orientation = instance.property("Orientation")?.as_vector3()?;
+    let front = rotate(orientation, Vector3::new(0.0, 0.0, -1.0));
+    // The camera's yaw 0 looks along -Z, turning toward -X as it grows.
+    let heading = (-front.x).atan2(-front.z);
+    heading.is_finite().then_some(heading)
 }
 
 /// `v` turned by an Orientation in degrees: Z first, then X, then Y.

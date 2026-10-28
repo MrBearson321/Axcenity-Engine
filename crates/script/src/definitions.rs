@@ -556,15 +556,24 @@ fn with_side(name: &str, doc: &str) -> String {
 }
 
 /// The class whose descriptions `class` shares for what it inherits: a
-/// Seat is a Part.
+/// Seat is a Part, and a VehicleSeat is a Seat.
 fn doc_parent(class: ClassName) -> Option<ClassName> {
-    (class == ClassName::Seat).then_some(ClassName::Part)
+    match class {
+        ClassName::Seat => Some(ClassName::Part),
+        ClassName::VehicleSeat => Some(ClassName::Seat),
+        _ => None,
+    }
+}
+
+/// `class`, then its doc parent, its doc parent's, and so on.
+fn doc_line(class: ClassName) -> impl Iterator<Item = ClassName> {
+    std::iter::successors(Some(class), |&class| doc_parent(class))
 }
 
 /// Whether an entry described for `described` belongs in `class`'s block:
-/// its own, or its doc parent's.
+/// its own, or one it inherits.
 fn documents(described: ClassName, class: ClassName) -> bool {
-    described == class || doc_parent(class) == Some(described)
+    doc_line(class).any(|class| class == described)
 }
 
 fn event_doc(class: ClassName, event: &str) -> Option<&'static str> {
@@ -574,7 +583,7 @@ fn event_doc(class: ClassName, event: &str) -> Option<&'static str> {
             .find(|(c, e, _)| *c == class && *e == event)
             .map(|(_, _, doc)| *doc)
     };
-    own(class).or_else(|| own(doc_parent(class)?))
+    doc_line(class).find_map(own)
 }
 
 fn property_doc(class: ClassName, property: &str) -> Option<&'static str> {
@@ -584,7 +593,7 @@ fn property_doc(class: ClassName, property: &str) -> Option<&'static str> {
             .find(|(c, p, _)| *c == class && *p == property)
             .map(|(_, _, doc)| *doc)
     };
-    own(class).or_else(|| own(doc_parent(class)?))
+    doc_line(class).find_map(own)
 }
 
 #[cfg(test)]

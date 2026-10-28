@@ -213,7 +213,12 @@ pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlu
         Ok(LuaInstance(assembly::root_part(&world, this.0)))
     })?;
     let mut methods = Vec::new();
-    for class in [ClassName::Part, ClassName::MeshPart, ClassName::Seat] {
+    for class in [
+        ClassName::Part,
+        ClassName::MeshPart,
+        ClassName::Seat,
+        ClassName::VehicleSeat,
+    ] {
         methods.push((class, "ApplyImpulse", apply_impulse.clone()));
         methods.push((class, "ApplyImpulseAtPosition", apply_at.clone()));
         methods.push((class, "ApplyAngularImpulse", apply_angular.clone()));
