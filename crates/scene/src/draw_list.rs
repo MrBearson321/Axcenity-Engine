@@ -301,6 +301,7 @@ pub fn build_draw_list_posed(
     let mut items = Vec::new();
     let mut lights = Vec::new();
     let mut reflection_probes = Vec::new();
+    let mut light_probe_volumes = Vec::new();
     for (id, instance) in world
         .descendants(world.workspace())
         .into_iter()
@@ -317,6 +318,9 @@ pub fn build_draw_list_posed(
             ClassName::ReflectionProbe => {
                 reflection_probes.extend(reflection_probe_of(world, instance, assets))
             }
+            ClassName::LightProbeVolume => light_probe_volumes.extend(
+                crate::light_probes::light_probe_volume_of(world, instance, assets),
+            ),
             // Drawn chunk by chunk below.
             ClassName::Terrain => {}
             class if class.is_joint() => {
@@ -357,6 +361,7 @@ pub fn build_draw_list_posed(
             })
             .collect(),
         reflection_probes,
+        light_probe_volumes,
     }
 }
 

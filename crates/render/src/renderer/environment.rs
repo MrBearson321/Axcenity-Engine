@@ -689,7 +689,7 @@ fn pixel_direction(x: u32, y: u32, width: u32, height: u32) -> Vec3 {
 
 /// The nine second-order spherical harmonics at direction `d`, in the
 /// order lighting.wgsl's `sky_irradiance` reads them.
-fn basis(d: Vec3) -> [f32; 9] {
+pub(super) fn basis(d: Vec3) -> [f32; 9] {
     [
         0.282095,
         0.488603 * d.y,

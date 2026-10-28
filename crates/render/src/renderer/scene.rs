@@ -57,6 +57,7 @@ impl ScenePipeline {
                 },
                 storage_entry(3),
                 storage_entry(4),
+                storage_entry(16),
                 skinning::joints_entry(),
                 wgpu::BindGroupLayoutEntry {
                     binding: 6,
@@ -176,10 +177,17 @@ impl ScenePipeline {
         let environment = environment::Environment::new(&device, &queue);
         let (environment_view, sky_image_view) = environment.views();
         let probes = probes::Probes::new(&device, &queue);
+        let light_probes = light_probes::LightProbes::new(&device);
         let frame_bind_group = create_frame_bind_group(
             &device,
             &frame_layout,
-            [&frame_buffer, &light_buffer, &tile_buffer, &skinning.joints],
+            [
+                &frame_buffer,
+                &light_buffer,
+                &tile_buffer,
+                &skinning.joints,
+                light_probes.buffer(),
+            ],
             [
                 &empty_shadow_view,
                 &empty_shadow_view,
@@ -363,6 +371,8 @@ impl ScenePipeline {
             occlusion,
             environment,
             probes,
+            light_probes,
+            sun_disc: true,
             no_occlusion_view,
             occlusion_sampler,
             targets_alive,
@@ -580,11 +590,22 @@ impl ScenePipeline {
         ) {
             self.bind_frame();
         }
+        // And the light probe volumes, each only when it's new.
+        if self.light_probes.prepare(
+            (&self.device, &self.queue),
+            &list.light_probe_volumes,
+            list.camera.position,
+        ) {
+            self.bind_frame();
+        }
         let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
         (frame_uniform.environment, frame_uniform.sky_light) = self.environment.uniform();
         let (probes, probe_count) = self.probes.uniform();
         frame_uniform.probes = probes;
         frame_uniform.reflection_probes[0] = probe_count;
+        let (volumes, volume_count) = self.light_probes.uniform();
+        frame_uniform.volumes = volumes;
+        frame_uniform.light_probes = [volume_count, u32::from(!self.sun_disc), 0, 0];
         let (scene_width, scene_height) = self.frame_targets.size;
         frame_uniform.ambient_occlusion[2] = 1.0 / scene_width as f32;
         frame_uniform.ambient_occlusion[3] = 1.0 / scene_height as f32;
@@ -1216,6 +1237,7 @@ impl ScenePipeline {
                     &self.light_buffer,
                     &self.tile_buffer,
                     &self.skinning.joints,
+                    self.light_probes.buffer(),
                 ],
                 [
                     sun,
@@ -1301,6 +1323,7 @@ impl ScenePipeline {
             &self.tile_buffer,
             &self.frame_buffer,
             &self.cascade_buffer,
+            self.light_probes.buffer(),
         ];
         RenderStats {
             draw_calls: counts.draw_calls,

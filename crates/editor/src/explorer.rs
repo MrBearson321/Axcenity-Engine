@@ -546,8 +546,8 @@ fn row_icon(world: &World, row: &Row) -> &'static str {
 }
 
 /// The hover text of `row`'s warning badge, if it has one: its own warnings, or,
-/// on a closed branch, a pointer to the scripts inside with warnings, so
-/// they aren't hidden.
+/// on a closed branch, a pointer to what's inside with warnings (scripts,
+/// or out-of-date light probe volumes), so they aren't hidden.
 fn warning_badge(
     warnings: &HashMap<InstanceId, String>,
     world: &World,
@@ -562,16 +562,10 @@ fn warning_badge(
     let mut inside: Vec<&str> = warnings
         .keys()
         .filter(|&&id| world.is_descendant_of(id, row.id))
-        .filter_map(|&id| world.get(id).map(|script| script.name()))
+        .filter_map(|&id| world.get(id).map(|inside| inside.name()))
         .collect();
     inside.sort_unstable();
-    (!inside.is_empty()).then(|| {
-        format!(
-            "Open this to see the warnings of {}: they use something that only works on the \
-             other side.",
-            inside.join(", ")
-        )
-    })
+    (!inside.is_empty()).then(|| format!("Open this to see the warnings of {}.", inside.join(", ")))
 }
 
 /// The text box a row turns into while it's renamed. Returns `None` while

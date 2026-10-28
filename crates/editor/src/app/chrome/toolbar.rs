@@ -268,11 +268,22 @@ impl EditorApp {
                 }
                 for what in Insertable::PROBES {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    let hover = match what {
+                        Insertable::ReflectionProbe => {
+                            "Insert a ReflectionProbe into the selected part: shiny things in \
+                             the part's box reflect what's around them there, once baked. With \
+                             no part selected, an invisible room-sized box is made for it."
+                        }
+                        _ => {
+                            "Insert a LightProbeVolume into the selected part: a grid of probes \
+                             in the part's box lights everything there, still or moving, with \
+                             the light bounced around it, once baked. With no part selected, an \
+                             invisible room-sized box is made for it."
+                        }
+                    };
                     if ui
                         .add_enabled(!playing, button)
-                        .on_hover_text(
-                            "Insert a ReflectionProbe into the selected part: shiny things in                              the part's box reflect what's around them there, once baked. With                              no part selected, an invisible room-sized box is made for it.",
-                        )
+                        .on_hover_text(hover)
                         .on_disabled_hover_text("Press Stop to edit.")
                         .clicked()
                     {
@@ -283,7 +294,9 @@ impl EditorApp {
                 if ui
                     .add_enabled(!playing, button)
                     .on_hover_text(
-                        "Bake every ReflectionProbe: what each sees from the middle of its                          part is saved in assets/probes. Bake again after changing the world.",
+                        "Bake every LightProbeVolume and ReflectionProbe: the light around \
+                         each probe is saved in assets/probes. Bake again after changing the \
+                         world: an out-of-date volume has a warning in the Explorer.",
                     )
                     .on_disabled_hover_text("Press Stop to edit.")
                     .clicked()

@@ -350,8 +350,8 @@ Indirect light without lightmap UVs. A `LightProbeVolume` part holds a grid of p
 
 ### Acceptance criteria
 
-- [ ] Inside a lit room, a moving part picks up the color bounced off a strongly colored wall, and outside the volume falls back to the sky.
-- [ ] Baking is repeatable, and a stale bake (the scene changed) is flagged in the editor.
+- [x] Inside a lit room, a moving part picks up the color bounced off a strongly colored wall, and outside the volume falls back to the sky.
+- [x] Baking is repeatable, and a stale bake (the scene changed) is flagged in the editor.
 
 ---
 

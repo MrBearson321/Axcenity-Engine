@@ -41,6 +41,8 @@ pub enum Insertable {
     SpotLight,
     /// A reflection probe, in the selected part or a new invisible box.
     ReflectionProbe,
+    /// A light probe volume, in the selected part or a new invisible box.
+    LightProbeVolume,
     ParticleEmitter,
     Animator,
     Animation,
@@ -92,7 +94,7 @@ impl Insertable {
     /// Lights shine from the part they are inside.
     pub const LIGHTS: [Insertable; 2] = [Insertable::PointLight, Insertable::SpotLight];
     /// Ribbon ▸ Lighting ▸ Reflections.
-    pub const PROBES: [Insertable; 1] = [Insertable::ReflectionProbe];
+    pub const PROBES: [Insertable; 2] = [Insertable::ReflectionProbe, Insertable::LightProbeVolume];
     /// Effects give off particles from the part they are inside.
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
     /// Animators (skeletal) and Animations (property clips).
@@ -159,6 +161,7 @@ impl Insertable {
             Insertable::PointLight => "PointLight",
             Insertable::SpotLight => "SpotLight",
             Insertable::ReflectionProbe => "Reflection Probe",
+            Insertable::LightProbeVolume => "Light Probes",
             Insertable::ParticleEmitter => "Particles",
             Insertable::Animator => "Animator",
             Insertable::Animation => "Animation",
@@ -199,6 +202,7 @@ impl Insertable {
             Insertable::PointLight => ClassName::PointLight,
             Insertable::SpotLight => ClassName::SpotLight,
             Insertable::ReflectionProbe => ClassName::ReflectionProbe,
+            Insertable::LightProbeVolume => ClassName::LightProbeVolume,
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
             Insertable::Animator => ClassName::Animator,
             Insertable::Animation => ClassName::Animation,
@@ -379,6 +383,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                         | Insertable::PointLight
                         | Insertable::SpotLight
                         | Insertable::ReflectionProbe
+                        | Insertable::LightProbeVolume
                         | Insertable::ParticleEmitter
                         | Insertable::BillboardGui
                         | Insertable::Animator

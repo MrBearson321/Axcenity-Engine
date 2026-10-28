@@ -142,6 +142,8 @@ pub(super) fn frame_uniform(
             CONTACT_SHADOW_THICKNESS,
             0.0,
         ],
+        light_probes: [0; 4],
+        volumes: Default::default(),
     }
 }
 

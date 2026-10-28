@@ -74,6 +74,13 @@ pub(super) struct FrameUniform {
     /// 1 while contact shadows are drawn, how far toward a light they look
     /// in studs, and how thick what's on screen is taken to be, then unused.
     pub(super) contact: [f32; 4],
+    /// How many light probe volumes are drawn, then 1 to leave the sun's
+    /// disc out of the sky (while baking light probes, whose sun lights
+    /// surfaces directly), then unused.
+    pub(super) light_probes: [u32; 4],
+    /// The light probe volumes drawn, smallest box first (see
+    /// `light_probes.rs`).
+    pub(super) volumes: [light_probes::VolumeRaw; light_probes::MAX_VOLUMES],
 }
 
 /// The most point and spot lights drawn at once.
@@ -638,6 +645,11 @@ pub(super) struct ScenePipeline {
     pub(super) environment: environment::Environment,
     /// Reflection probes' baked reflections, each filtered once.
     pub(super) probes: probes::Probes,
+    /// Light probe volumes' baked light, each uploaded once.
+    pub(super) light_probes: light_probes::LightProbes,
+    /// Whether the sky draws the sun's disc: false only while baking light
+    /// probes.
+    pub(super) sun_disc: bool,
     /// A 1×1 white texture, bound in place of the ambient occlusion while
     /// it's off, and the sampler the scene pass reads occlusion with.
     pub(super) no_occlusion_view: wgpu::TextureView,

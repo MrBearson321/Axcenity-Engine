@@ -240,6 +240,9 @@ pub struct EditorApp {
     /// Bake Probes was clicked: the probes are baked on the next frame,
     /// which has the GPU device.
     bake_probes_asked: bool,
+    /// The baked LightProbeVolumes out of date, as of a history revision
+    /// (`app/probes.rs`).
+    stale_light_probes: Option<((u64, bool), Vec<InstanceId>)>,
     /// The Constraint tool, while it's on (`app/constraint_tool.rs`).
     constraint_tool: Option<constraint_tool::ConstraintTool>,
     /// A model file waiting for its objects to be chosen.
@@ -598,6 +601,7 @@ impl EditorApp {
             tabs: ScriptTabs::default(),
             confirm_delete: None,
             confirm_sky: None,
+            stale_light_probes: None,
             bake_probes_asked: false,
             constraint_tool: None,
             importing: None,

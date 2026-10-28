@@ -157,15 +157,21 @@ impl EditorApp {
             );
             return;
         }
-        // A probe reflects in its part's box: with no part selected, a
+        // A probe works in its part's box: with no part selected, a
         // room-sized invisible one is made for it.
-        if what == Insertable::ReflectionProbe
-            && !tree::light_has_part_parent(&self.world, near.or(self.selected))
+        if matches!(
+            what,
+            Insertable::ReflectionProbe | Insertable::LightProbeVolume
+        ) && !tree::light_has_part_parent(&self.world, near.or(self.selected))
         {
+            let name = match what {
+                Insertable::ReflectionProbe => "ReflectionProbeBox",
+                _ => "LightProbeBox",
+            };
             self.insert_named(
                 Insertable::Part(PartType::Block),
                 near.or(self.selected),
-                "ReflectionProbeBox",
+                name,
                 vec![
                     ("Anchored", Value::Bool(true)),
                     ("Size", Value::Vector3(Vector3::new(16.0, 10.0, 16.0))),

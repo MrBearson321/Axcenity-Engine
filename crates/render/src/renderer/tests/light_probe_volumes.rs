@@ -1,0 +1,226 @@
+//! Light probe volumes: baked from inside a room with a red and a green
+//! wall, lighting a part that moves through it with the walls' color, and
+//! leaving the sky's light outside.
+
+use super::*;
+use crate::draw_list::{LightProbeGrid, LightProbeVolume};
+
+/// The room's inside: 12 studs wide and deep, 6 high, its floor at 0.
+const ROOM_MIDDLE: Vec3 = Vec3::new(0.0, 3.0, 0.0);
+const ROOM_HALF: Vec3 = Vec3::new(6.0, 3.0, 6.0);
+/// A probe every 3 studs.
+const COUNTS: [u32; 3] = [4, 2, 4];
+
+fn block(middle: Vec3, size: Vec3, base_color: [f32; 3]) -> DrawItem {
+    let mut block = item(Shape::Block, middle, 1.0);
+    block.transform = Mat4::from_scale_rotation_translation(size, glam::Quat::IDENTITY, middle);
+    block.material.base_color = base_color;
+    block
+}
+
+/// A closed room, its +X wall red and its -X wall green, the rest white,
+/// lit by a lamp under the ceiling, under the default sky and a sun.
+fn colored_room() -> DrawList {
+    let (red, green, white) = ([0.9, 0.05, 0.05], [0.05, 0.9, 0.05], [0.8, 0.8, 0.8]);
+    let (w, h) = (ROOM_HALF.x, ROOM_HALF.y);
+    let mut list = list_of(vec![
+        block(
+            Vec3::new(0.0, -0.25, 0.0),
+            Vec3::new(13.0, 0.5, 13.0),
+            white,
+        ),
+        block(
+            Vec3::new(0.0, 2.0 * h + 0.25, 0.0),
+            Vec3::new(13.0, 0.5, 13.0),
+            white,
+        ),
+        block(
+            Vec3::new(w + 0.25, h, 0.0),
+            Vec3::new(0.5, 2.0 * h, 13.0),
+            red,
+        ),
+        block(
+            Vec3::new(-w - 0.25, h, 0.0),
+            Vec3::new(0.5, 2.0 * h, 13.0),
+            green,
+        ),
+        block(
+            Vec3::new(0.0, h, w + 0.25),
+            Vec3::new(13.0, 2.0 * h, 0.5),
+            white,
+        ),
+        block(
+            Vec3::new(0.0, h, -w - 0.25),
+            Vec3::new(13.0, 2.0 * h, 0.5),
+            white,
+        ),
+    ]);
+    list.sky = Sky::default();
+    list.sun = Sun {
+        direction: Vec3::new(0.5, 1.0, 0.25),
+        color: [1.0, 0.97, 0.92],
+        intensity: 3.0,
+    };
+    list.lights = vec![Light {
+        brightness: 6.0,
+        ..point_light(Vec3::new(0.0, 5.0, 0.0), 30.0)
+    }];
+    list
+}
+
+/// Where each probe of a grid of `counts` filling the box stands, x
+/// first, then y, then z.
+fn probe_centers(counts: [u32; 3]) -> Vec<Vec3> {
+    let mut centers = Vec::new();
+    for z in 0..counts[2] {
+        for y in 0..counts[1] {
+            for x in 0..counts[0] {
+                let cell = (Vec3::new(x as f32, y as f32, z as f32) + 0.5)
+                    / Vec3::from_array(counts.map(|c| c as f32));
+                centers.push(ROOM_MIDDLE + (cell - 0.5) * 2.0 * ROOM_HALF);
+            }
+        }
+    }
+    centers
+}
+
+fn bake(device: &wgpu::Device, queue: &wgpu::Queue, list: &DrawList) -> Vec<[[f32; 3]; 4]> {
+    TextureRenderer::bake_light_probes(
+        device,
+        queue,
+        list,
+        &probe_centers(COUNTS),
+        LIGHT_PROBE_BAKE_SIZE,
+        &GraphicsSettings::default(),
+    )
+    .unwrap()
+}
+
+/// `list` with a volume filling the room, its probes `probes`.
+fn with_volume(list: &DrawList, probes: Vec<[[f32; 3]; 4]>) -> DrawList {
+    let mut list = list.clone();
+    list.light_probe_volumes.push(LightProbeVolume {
+        center: ROOM_MIDDLE,
+        rotation: glam::Quat::IDENTITY,
+        half_size: ROOM_HALF,
+        blend_distance: 0.5,
+        probes: LightProbeGrid {
+            key: 1,
+            counts: COUNTS,
+            probes: Arc::new(probes),
+        },
+    });
+    list
+}
+
+/// `list` with a white block at `at`, seen from 3 studs toward +Z: the
+/// middle pixel, on the block's face toward the camera.
+fn white_block_at(renderer: &mut TextureRenderer, list: &DrawList, at: Vec3) -> [i32; 3] {
+    let mut list = list.clone();
+    list.items
+        .push(block(at, Vec3::splat(1.5), [0.8, 0.8, 0.8]));
+    list.camera = Camera {
+        position: at + Vec3::new(0.0, 0.5, 3.0),
+        look_at: at,
+        fov_y_degrees: 30.0,
+    };
+    renderer.render(&list).unwrap();
+    let pixels = renderer.read_pixels();
+    let at = (32 * 64 + 32) * 4;
+    [0, 1, 2].map(|channel| i32::from(pixels[at + channel]))
+}
+
+#[test]
+fn a_part_moving_through_a_lit_room_takes_the_color_of_the_wall_beside_it_and_the_sky_outside() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let room = colored_room();
+    let probed = with_volume(&room, bake(&device, &queue, &room));
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+
+    // How much redder than green the block looks, with and without probes.
+    let redness = |[r, g, _]: [i32; 3]| r - g;
+    let near_red = Vec3::new(4.0, 1.0, 0.0);
+    let near_green = Vec3::new(-4.0, 1.0, 0.0);
+    let sky_red = white_block_at(&mut renderer, &room, near_red);
+    let sky_green = white_block_at(&mut renderer, &room, near_green);
+    let probe_red = white_block_at(&mut renderer, &probed, near_red);
+    let probe_green = white_block_at(&mut renderer, &probed, near_green);
+    assert!(
+        (redness(sky_red) - redness(sky_green)).abs() <= 3,
+        "lit by the sky alone it looks the same anywhere: {sky_red:?}, {sky_green:?}"
+    );
+    let [r, g, _] = probe_red;
+    assert!(
+        r > g,
+        "beside the red wall the probes light it red: {probe_red:?}"
+    );
+    let [r, g, _] = probe_green;
+    assert!(g > r, "beside the green wall, green: {probe_green:?}");
+    assert!(
+        redness(probe_red) >= redness(probe_green) + 16,
+        "moving it across the room changes its color: {probe_red:?} then {probe_green:?}"
+    );
+
+    // Outside the volume the sky lights it, just as with no volume at all.
+    let outside = Vec3::new(30.0, 1.0, 0.0);
+    assert_eq!(
+        white_block_at(&mut renderer, &probed, outside),
+        white_block_at(&mut renderer, &room, outside)
+    );
+}
+
+#[test]
+fn baking_is_repeatable_and_each_probe_sees_the_wall_beside_it() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let room = colored_room();
+    let first = bake(&device, &queue, &room);
+    let again = bake(&device, &queue, &room);
+    assert_eq!(first.len(), probe_centers(COUNTS).len());
+    for (a, b) in first.iter().zip(&again) {
+        for (a, b) in a.iter().flatten().zip(b.iter().flatten()) {
+            assert!((a - b).abs() < 1e-4, "{a} then {b}");
+        }
+    }
+    // The first probe is at the -X end of its row (by the green wall), the
+    // fourth at the +X end (by the red one). A white surface facing the
+    // wall beside each takes the wall's color.
+    let facing = |light: &[[f32; 3]; 4], x: f32| {
+        let [c0, _, _, c3] = light.map(Vec3::from_array);
+        c0 * 0.282095 + c3 * x * 0.488603
+    };
+    let green = facing(&first[0], -1.0);
+    assert!(
+        green.y > 2.0 * green.x && green.y > 2.0 * green.z,
+        "{green}"
+    );
+    let red = facing(&first[3], 1.0);
+    assert!(red.x > 2.0 * red.y && red.x > 2.0 * red.z, "{red}");
+}
+
+#[test]
+fn probes_are_uploaded_once_and_their_buffer_shrinks_without_them() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let room = colored_room();
+    let probed = with_volume(&room, vec![[[0.5; 3]; 4]; probe_centers(COUNTS).len()]);
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let blank = renderer.scene.light_probes.buffer().size();
+    for _ in 0..4 {
+        renderer.render(&probed).unwrap();
+    }
+    assert_eq!(
+        renderer.scene.light_probes.uploads, 1,
+        "once, not each frame"
+    );
+    assert!(renderer.scene.light_probes.buffer().size() > blank);
+    renderer.render(&room).unwrap();
+    assert_eq!(renderer.scene.light_probes.buffer().size(), blank);
+}

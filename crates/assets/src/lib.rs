@@ -11,6 +11,8 @@
 //!   ([`SkyImage`]).
 //! - [`Assets::reflection_probe`] reads the bake a `ReflectionProbe`'s
 //!   `Bake` names ([`ProbeImage`]).
+//! - [`Assets::light_probes`] reads the bake a `LightProbeVolume`'s `Bake`
+//!   names ([`LightProbes`]).
 //! - [`load_model`] reads a `.gltf`, `.glb` or `.fbx` file into a [`Model`]: plain
 //!   triangles, materials and textures, fitted into the 1×1×1 cube that every
 //!   part's mesh fills.
@@ -25,6 +27,7 @@
 mod data_table;
 mod fonts;
 mod import;
+mod light_probes;
 mod material;
 mod model;
 mod probe;
@@ -47,6 +50,11 @@ pub use import::{
     PROJECT_TEXTURES_FOLDER, TEXTURE_EXTENSIONS, TEXTURES_FOLDER, import_animation_file,
     import_audio, import_model, import_picks, import_sky_image, import_texture, list_model_objects,
     load_model_file, load_takes_file, safe_file_name, unique_file_name,
+};
+pub use light_probes::{
+    LIGHT_PROBES_SUFFIX, LightProbes, MAX_LIGHT_PROBES_PER_SIDE, ProbeLight, decode_light_probes,
+    encode_light_probes, is_light_probes_file, light_probes_path, read_light_probes,
+    write_light_probes,
 };
 pub use material::{
     MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MapSettings, MaterialFile, MaterialFileError,
@@ -125,6 +133,8 @@ struct Shared {
     /// Every reflection probe bake asked for so far, by its path, the same
     /// way.
     probes: HashMap<String, Option<Arc<ProbeImage>>>,
+    /// Every light probe bake asked for so far, by its path, the same way.
+    light_probes: HashMap<String, Option<Arc<LightProbes>>>,
     /// Every material file asked for so far, by its path, put together
     /// with its bases. `None` means it couldn't be read.
     materials: HashMap<String, Option<material::Resolved>>,
@@ -271,7 +281,8 @@ impl Assets {
             Ok(image) => Some(Arc::new(image)),
             Err(message) => {
                 shared.errors.push(format!(
-                    "Could not load the reflection probe bake `{path}`: {message}.                      The sky is reflected instead; bake the probe again."
+                    "Could not load the reflection probe bake `{path}`: {message}. \
+                     The sky is reflected instead; bake the probe again."
                 ));
                 None
             }
@@ -289,6 +300,46 @@ impl Assets {
             reload::remember_stamp(&mut shared, &folder, path);
         }
         shared.probes.insert(path.to_owned(), Some(Arc::new(image)));
+    }
+
+    /// The light probe bake at `path` (a LightProbeVolume's `Bake`, such as
+    /// `assets/probes/Hall.lightprobes.json`), read the first time. `None`
+    /// if `path` is empty or it can't be read; the reason goes to
+    /// [`take_errors`](Self::take_errors), once.
+    pub fn light_probes(&self, path: &str) -> Option<Arc<LightProbes>> {
+        if path.is_empty() {
+            return None;
+        }
+        let mut shared = self.lock();
+        if let Some(probes) = shared.light_probes.get(path) {
+            return probes.clone();
+        }
+        let folder = shared.folder.clone()?;
+        let probes = match read_light_probes(&folder, path) {
+            Ok(probes) => Some(Arc::new(probes)),
+            Err(message) => {
+                shared.errors.push(format!(
+                    "Could not load the light probe bake `{path}`: {message}. \
+                     The sky lights its volume instead; bake the probes again."
+                ));
+                None
+            }
+        };
+        reload::remember_stamp(&mut shared, &folder, path);
+        shared.light_probes.insert(path.to_owned(), probes.clone());
+        probes
+    }
+
+    /// Uses `probes` as the bake at `path` from now on, without reading the
+    /// file: the editor hands over each bake it saves.
+    pub fn put_light_probes(&self, path: &str, probes: LightProbes) {
+        let mut shared = self.lock();
+        if let Some(folder) = shared.folder.clone() {
+            reload::remember_stamp(&mut shared, &folder, path);
+        }
+        shared
+            .light_probes
+            .insert(path.to_owned(), Some(Arc::new(probes)));
     }
 
     /// The material file at `path` (a part's `MaterialVariant`, such as
@@ -507,6 +558,7 @@ impl Assets {
             .retain(|mesh_id, _| mesh_id.split('#').next() != Some(file));
         shared.textures.remove(file);
         shared.probes.remove(file);
+        shared.light_probes.remove(file);
         shared.takes.remove(file);
         shared.tables.remove(file);
         shared.materials.retain(|_, material| {
@@ -526,6 +578,7 @@ impl Assets {
         shared.models.retain(|_, model| model.is_some());
         shared.textures.retain(|_, texture| texture.is_some());
         shared.probes.retain(|_, probe| probe.is_some());
+        shared.light_probes.retain(|_, probes| probes.is_some());
         shared.takes.retain(|_, takes| takes.is_some());
         shared.tables.retain(|_, table| table.is_ok());
         shared

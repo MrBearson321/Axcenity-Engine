@@ -17,6 +17,7 @@ mod camera;
 mod constraints;
 mod draw_list;
 mod foliage;
+mod light_probes;
 mod material;
 mod orientation;
 mod particles;
@@ -32,6 +33,7 @@ pub use draw_list::{
     build_draw_list_with_ui, build_draw_list_with_ui_interaction, light_markers,
 };
 pub use foliage::brush_color as foliage_brush_color;
+pub use light_probes::{LightProbePoints, light_bake_fingerprint, light_probe_points};
 pub use material::part_material_file;
 pub use orientation::{orientation_from_rotation, rotation_from_orientation};
 pub use particles::{MAX_PER_EMITTER, Particles, built_in as built_in_particle};

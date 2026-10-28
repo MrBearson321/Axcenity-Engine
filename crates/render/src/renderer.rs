@@ -35,12 +35,13 @@ use glyphon::{
     TextBounds, TextRenderer as GlyphTextRenderer, Viewport as TextViewport,
 };
 pub use gpu_timer::FramePass;
-pub use probe_bake::PROBE_BAKE_SIZE;
+pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE};
 
 mod culling;
 mod environment;
 mod gpu;
 mod gpu_timer;
+mod light_probes;
 mod lighting;
 mod lod;
 mod occlusion;

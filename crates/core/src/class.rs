@@ -112,6 +112,10 @@ pub enum ClassName {
     /// Inside a Part: what's in the part's box reflects the world as the
     /// editor baked it from the part's middle (`Bake`), not the sky.
     ReflectionProbe,
+    /// Inside a Part: a grid of light probes filling the part's box, which
+    /// light what's in it with the light the editor baked around them
+    /// (`Bake`), not the sky's.
+    LightProbeVolume,
     /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
     ParticleEmitter,
     /// Inside a Part, MeshPart, Model, ScreenGui or UI element: plays
@@ -202,7 +206,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 73] = [
+    pub const ALL: [ClassName; 74] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -242,6 +246,7 @@ impl ClassName {
         ClassName::PointLight,
         ClassName::SpotLight,
         ClassName::ReflectionProbe,
+        ClassName::LightProbeVolume,
         ClassName::ParticleEmitter,
         ClassName::Animator,
         ClassName::Animation,
@@ -319,6 +324,7 @@ impl ClassName {
             ClassName::PointLight => "PointLight",
             ClassName::SpotLight => "SpotLight",
             ClassName::ReflectionProbe => "ReflectionProbe",
+            ClassName::LightProbeVolume => "LightProbeVolume",
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
@@ -638,6 +644,17 @@ impl ClassName {
                 ("Bake", Value::String(String::new())),
                 // Studs inside the box's faces over which its reflection
                 // fades in from what's around it.
+                ("BlendDistance", Value::Number(2.0)),
+            ],
+            ClassName::LightProbeVolume => vec![
+                // The bake the editor saved (Bake Probes), such as
+                // "assets/probes/Hall.lightprobes.json". Empty until it's
+                // baked, when the sky lights what's inside.
+                ("Bake", Value::String(String::new())),
+                // Studs between probes along each side of the box.
+                ("Spacing", Value::Number(4.0)),
+                // Studs inside the box's faces over which its light fades in
+                // from what's around it.
                 ("BlendDistance", Value::Number(2.0)),
             ],
             ClassName::ParticleEmitter => vec![
@@ -1471,6 +1488,7 @@ impl ClassName {
             | ClassName::PointLight
             | ClassName::SpotLight
             | ClassName::ReflectionProbe
+            | ClassName::LightProbeVolume
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer

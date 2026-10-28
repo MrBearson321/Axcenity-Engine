@@ -62,6 +62,28 @@ struct Frame {
     // x: 1 while contact shadows are drawn, y: how far toward a light they
     // look in studs, z: how thick what's on screen is taken to be.
     contact: vec4<f32>,
+    // x: how many of `volumes` are drawn, y: 1 to leave the sun's disc out
+    // of the sky (while baking light probes: the sun lights surfaces
+    // directly, so a disc seen by a probe would count it twice).
+    light_probes: vec4<u32>,
+    // The light probe volumes drawn, smallest box first.
+    volumes: array<Volume, MAX_VOLUMES>,
+}
+
+// The most light probe volumes drawn at once. Must match `MAX_VOLUMES` in
+// renderer/light_probes.rs.
+const MAX_VOLUMES: u32 = 8u;
+
+// A box of the world lit by its grid of baked light probes in place of the
+// sky's diffuse light. Must match `VolumeRaw` in renderer/light_probes.rs.
+struct Volume {
+    // Turns world space to the box's own, one row each (as `Probe.to_box`).
+    to_box: array<vec4<f32>, 3>,
+    // xyz: half the box's size, w: how far inside its faces it fades in.
+    extent: vec4<f32>,
+    // xyz: how many probes stand along the box's own axes, each in the
+    // middle of its cell, w: its first probe in `light_probes`.
+    grid: vec4<u32>,
 }
 
 // The most reflection probes drawn at once. Must match `MAX_PROBES` in
@@ -133,6 +155,11 @@ const LIGHTS_PER_TILE: u32 = 64u;
 // The prepass's depth (solid items only), for contact shadows. A 1×1
 // stand-in while they're off.
 @group(0) @binding(15) var prepass_depth: texture_depth_2d;
+// Every light probe of the volumes drawn, four entries each: its light as
+// spherical harmonics (constant, then along y, z and x; rgb), blurred over
+// the hemisphere and divided by pi, like `Frame.sky_light`. Probes run x
+// first, then y, then z. One blank probe while there are none.
+@group(0) @binding(16) var<storage, read> light_probes: array<vec4<f32>>;
 
 // Points spread evenly over a disc of radius 1 (a Poisson disc), for
 // sampling the shadow map around a point. `private` so it can be indexed
@@ -442,6 +469,9 @@ fn sky_radiance(dir: vec3<f32>, spread: f32) -> vec3<f32> {
         let level = log2(max(spread * frame.environment.w / (2.0 * PI) / across, 1.0));
         return textureSampleLevel(sky_image, environment_sampler, equirect_uv(dir), level).rgb;
     }
+    if frame.light_probes.y != 0u {
+        return sky_gradient(dir);
+    }
     let toward_sun = dot(dir, frame.sun_direction.xyz);
     let disc = smoothstep(0.99965, 0.99985, toward_sun);
     let glow = pow(max(toward_sun, 0.0), 200.0) * 0.4;
@@ -494,6 +524,58 @@ fn sky_specular(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
         return textureSampleLevel(environment_map, environment_sampler, dir, level).rgb;
     }
     return environment_specular(dir, roughness);
+}
+
+// The diffuse light reaching a surface at `position` facing `n` from all
+// around: each light probe volume whose box it's inside, from the eight
+// probes around it (blended by how near each is), fading in over the
+// volume's blend distance from its faces. Smaller boxes come first, and
+// the bigger ones and then the sky (times the environment intensity) fill
+// what they leave.
+fn surrounding_diffuse(position: vec3<f32>, n: vec3<f32>, environment: f32) -> vec3<f32> {
+    var color = vec3<f32>(0.0);
+    var left = 1.0;
+    let count = min(frame.light_probes.x, MAX_VOLUMES);
+    for (var i = 0u; i < count; i++) {
+        let volume = frame.volumes[i];
+        let p = vec4<f32>(position, 1.0);
+        let local = vec3<f32>(dot(volume.to_box[0], p), dot(volume.to_box[1], p), dot(volume.to_box[2], p));
+        let half_size = volume.extent.xyz;
+        let inside = min(min(half_size.x - abs(local.x), half_size.y - abs(local.y)), half_size.z - abs(local.z));
+        if inside <= 0.0 {
+            continue;
+        }
+        let weight = left * smoothstep(0.0, 1.0, inside / max(volume.extent.w, 0.001));
+        // Where it is in the grid, in probes: between the two probes nearest
+        // it along each axis, held at the outermost ones near the faces.
+        let counts = vec3<f32>(volume.grid.xyz);
+        let cell = clamp((local / (2.0 * half_size) + 0.5) * counts - 0.5, vec3<f32>(0.0), counts - 1.0);
+        let low = vec3<u32>(floor(cell));
+        let high = min(low + 1u, volume.grid.xyz - 1u);
+        let t = cell - floor(cell);
+        var c0 = vec3<f32>(0.0);
+        var c1 = vec3<f32>(0.0);
+        var c2 = vec3<f32>(0.0);
+        var c3 = vec3<f32>(0.0);
+        for (var corner = 0u; corner < 8u; corner++) {
+            let far = vec3<bool>((corner & 1u) != 0u, (corner & 2u) != 0u, (corner & 4u) != 0u);
+            let at = select(low, high, far);
+            let shares = select(1.0 - t, t, far);
+            let share = shares.x * shares.y * shares.z;
+            let probe = 4u * (volume.grid.w + at.x + volume.grid.x * (at.y + volume.grid.y * at.z));
+            c0 += share * light_probes[probe].rgb;
+            c1 += share * light_probes[probe + 1u].rgb;
+            c2 += share * light_probes[probe + 2u].rgb;
+            c3 += share * light_probes[probe + 3u].rgb;
+        }
+        let light = c0 * 0.282095 + (c1 * n.y + c2 * n.z + c3 * n.x) * 0.488603;
+        color += weight * max(light, vec3<f32>(0.0));
+        left -= weight;
+        if left <= 0.001 {
+            break;
+        }
+    }
+    return color + left * environment * sky_diffuse(n);
 }
 
 // What a surface at `position` of `roughness` reflects looking along
@@ -650,7 +732,7 @@ fn light_surface(
     let diffuse_color = base_color * (1.0 - metalness);
     let ambient = occlusion * (
         frame.ambient.rgb * (diffuse_color + reflectance)
-        + environment * sky_diffuse(n) * diffuse_color
+        + surrounding_diffuse(world_position, n, environment) * diffuse_color
         + reflected(world_position, reflection, roughness, environment) * reflectance);
     return sun + lit + ambient;
 }

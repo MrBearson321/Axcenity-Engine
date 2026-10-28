@@ -203,13 +203,20 @@ pub(super) fn create_shadow_views(
     (array, layers)
 }
 
-/// The frame's bindings (group 0 in lighting.wgsl): its uniform, lights
-/// and tiles, the sun's and spot lights' shadow maps, and the ambient
-/// occlusion, with a sampler for each kind of map.
+/// The frame's bindings (group 0 in lighting.wgsl): its uniform, lights,
+/// tiles, joints and light probes, the shadow maps, the ambient occlusion,
+/// the environment and probe maps and the prepass's depth, with a sampler
+/// for each kind of map.
 pub(super) fn create_frame_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-    [frame_buffer, light_buffer, tile_buffer, joint_buffer]: [&wgpu::Buffer; 4],
+    [
+        frame_buffer,
+        light_buffer,
+        tile_buffer,
+        joint_buffer,
+        light_probe_buffer,
+    ]: [&wgpu::Buffer; 5],
     [
         shadow_view,
         spot_shadow_view,
@@ -285,6 +292,10 @@ pub(super) fn create_frame_bind_group(
             wgpu::BindGroupEntry {
                 binding: 15,
                 resource: wgpu::BindingResource::TextureView(prepass_depth_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 16,
+                resource: light_probe_buffer.as_entire_binding(),
             },
         ],
     })

@@ -258,6 +258,7 @@ impl EditorApp {
         self.selected = None;
         self.selection.clear();
         self.history = History::new();
+        self.stale_light_probes = None;
         self.explorer = Explorer::new(&self.world);
         self.forget_terrain_work();
         if let Some(project) = &mut self.project {
@@ -779,6 +780,14 @@ impl EditorApp {
                     by_path.insert(script.path.clone(), warnings.to_vec());
                 }
             }
+        }
+        for volume in self.stale_light_probe_volumes() {
+            badges.insert(
+                volume,
+                "Its light probe bake is out of date: the world has changed since. Press \
+                 Bake Probes on the ribbon to bake it again."
+                    .to_owned(),
+            );
         }
         self.explorer.warnings = badges;
         self.tabs.warnings = by_path;

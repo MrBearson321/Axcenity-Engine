@@ -37,6 +37,55 @@ pub struct DrawList {
     /// their boxes in place of the sky. Only drawn while the reflection
     /// quality bakes environment maps (Medium and above).
     pub reflection_probes: Vec<ReflectionProbe>,
+    /// Grids of baked light, which light what's inside their boxes in place
+    /// of the sky's diffuse light.
+    pub light_probe_volumes: Vec<LightProbeVolume>,
+}
+
+/// A box of the world lit by a grid of probes baked inside it, in place of
+/// the sky's diffuse light (a `LightProbeVolume`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LightProbeVolume {
+    /// The middle of its box.
+    pub center: Vec3,
+    /// How its box is turned.
+    pub rotation: Quat,
+    /// Half its box's size along its own axes.
+    pub half_size: Vec3,
+    /// How far inside its box's faces, in studs, its light fades in from
+    /// what's around it.
+    pub blend_distance: f32,
+    pub probes: LightProbeGrid,
+}
+
+/// The light a volume's probes saw. The probes stand in a grid filling the
+/// box, each in the middle of its cell: probe `(x, y, z)` of `counts` is at
+/// `((x + 0.5) / counts.x - 0.5, …)` times the box's size, in the box's own
+/// space.
+#[derive(Clone)]
+pub struct LightProbeGrid {
+    /// Different for every bake, so the renderer uploads each one once.
+    pub key: u64,
+    /// How many probes stand along the box's own X, Y and Z.
+    pub counts: [u32; 3],
+    /// Each probe's light, X first, then Y, then Z: the light reaching it as
+    /// four spherical harmonics coefficients (the constant one, then along
+    /// Y, Z and X), each linear red, green and blue, already blurred over a
+    /// hemisphere and divided by π.
+    pub probes: Arc<Vec<[[f32; 3]; 4]>>,
+}
+
+impl fmt::Debug for LightProbeGrid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let [x, y, z] = self.counts;
+        write!(f, "LightProbeGrid #{} ({x}×{y}×{z})", self.key)
+    }
+}
+
+impl PartialEq for LightProbeGrid {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
 }
 
 /// A box of the world that reflects what was baked from its middle, in

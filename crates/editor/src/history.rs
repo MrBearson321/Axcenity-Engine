@@ -1084,6 +1084,13 @@ impl History {
         self.top_number() == self.saved_at
     }
 
+    /// Different after every change, undo and redo, and when a gesture
+    /// ends: the top step's number, and whether a gesture is still adding
+    /// to it.
+    pub fn revision(&self) -> (u64, bool) {
+        (self.top_number(), self.open.is_some())
+    }
+
     fn top_number(&self) -> u64 {
         self.undo.last().map_or(0, |step| step.number)
     }

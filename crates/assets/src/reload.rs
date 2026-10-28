@@ -1,7 +1,7 @@
 //! Reading a changed file again while it's in use (live asset reload).
 //!
 //! [`Assets::reload`] swaps in the new version of a model, texture,
-//! sky image, reflection probe bake, material, data table or font file. The swapped-in model or texture is a new load
+//! sky image, reflection or light probe bake, material, data table or font file. The swapped-in model or texture is a new load
 //! with a new key, so the renderer uploads it again and physics rebuilds
 //! the part's hull. A file that now fails to load keeps the last good
 //! version, and the failure is reported once, through
@@ -163,6 +163,15 @@ impl Assets {
             }
         }
 
+        let mut light_probes = None;
+        if shared.light_probes.contains_key(file) {
+            used = true;
+            match read_light_probes(&folder, file) {
+                Ok(probes) => light_probes = Some(probes),
+                Err(message) => problems.push(message),
+            }
+        }
+
         // Every material made from the file, put together again.
         let paths: Vec<String> = shared
             .materials
@@ -233,6 +242,11 @@ impl Assets {
         }
         if let Some(image) = probe {
             shared.probes.insert(file.to_owned(), Some(Arc::new(image)));
+        }
+        if let Some(probes) = light_probes {
+            shared
+                .light_probes
+                .insert(file.to_owned(), Some(Arc::new(probes)));
         }
         for (material, resolved) in materials {
             shared.materials.insert(material, Some(resolved));

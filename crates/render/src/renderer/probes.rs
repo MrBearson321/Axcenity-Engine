@@ -9,7 +9,7 @@
 //! size; at Low there are none.
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 
 use crate::draw_list::ReflectionProbe;
 use crate::graphics::ReflectionQuality;
@@ -232,8 +232,27 @@ fn usable(probe: &ReflectionProbe, max_texture_size: u32) -> bool {
 
 /// How far `point` is from `probe`'s box, 0 inside it.
 fn distance_to(probe: &ReflectionProbe, point: Vec3) -> f32 {
-    let local = probe.rotation.inverse() * (point - probe.center);
-    (local.abs() - probe.half_size).max(Vec3::ZERO).length()
+    box_distance(probe.center, probe.rotation, probe.half_size, point)
+}
+
+/// How far `point` is from the box at `center`, turned by `rotation`, with
+/// half its size `half_size` along its own axes: 0 inside it.
+pub(super) fn box_distance(center: Vec3, rotation: Quat, half_size: Vec3, point: Vec3) -> f32 {
+    let local = rotation.inverse() * (point - center);
+    (local.abs() - half_size).max(Vec3::ZERO).length()
+}
+
+/// The rows of the matrix that turns world space to a box's own (its
+/// middle, `center`, at 0, its sides along the axes, turned by `rotation`).
+/// The first three numbers of each are also a box axis in world space.
+pub(super) fn to_box_rows(center: Vec3, rotation: Quat) -> [[f32; 4]; 3] {
+    let to_box =
+        (Mat4::from_quat(rotation.inverse()) * Mat4::from_translation(-center)).transpose();
+    [
+        to_box.x_axis.to_array(),
+        to_box.y_axis.to_array(),
+        to_box.z_axis.to_array(),
+    ]
 }
 
 fn volume(probe: &ReflectionProbe) -> f32 {
@@ -241,15 +260,8 @@ fn volume(probe: &ReflectionProbe) -> f32 {
 }
 
 fn raw(probe: &ReflectionProbe, layer: u32) -> ProbeRaw {
-    let to_box = (Mat4::from_quat(probe.rotation.inverse())
-        * Mat4::from_translation(-probe.center))
-    .transpose();
     ProbeRaw {
-        to_box: [
-            to_box.x_axis.to_array(),
-            to_box.y_axis.to_array(),
-            to_box.z_axis.to_array(),
-        ],
+        to_box: to_box_rows(probe.center, probe.rotation),
         extent: probe.half_size.extend(probe.blend_distance).to_array(),
         layer: [layer, 0, 0, 0],
     }
@@ -307,8 +319,6 @@ fn upload_source(
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-
-    use glam::Quat;
 
     use super::*;
     use crate::draw_list::ProbeImage;

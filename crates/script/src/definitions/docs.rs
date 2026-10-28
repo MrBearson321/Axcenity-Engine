@@ -1041,6 +1041,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "How far inside the part's faces, in studs, its reflection fades in from what's around it.",
     ),
     (
+        ClassName::LightProbeVolume,
+        "Bake",
+        "The bake the editor saved for it (Lighting > Bake Probes), such as \"assets/probes/Hall.lightprobes.json\". Empty, or a file that's missing, leaves the sky's light instead.",
+    ),
+    (
+        ClassName::LightProbeVolume,
+        "Spacing",
+        "About how many studs apart its probes stand along each side of the part (at most 16 probes a side). Bake again after changing it.",
+    ),
+    (
+        ClassName::LightProbeVolume,
+        "BlendDistance",
+        "How far inside the part's faces, in studs, its light fades in from what's around it.",
+    ),
+    (
         ClassName::ParticleEmitter,
         "Enabled",
         "If false, it stops giving off particles; those already out live on.",
@@ -3345,6 +3360,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::ReflectionProbe => {
             "Inside a Part: shiny surfaces in the part's box reflect the world as the editor baked it from the part's middle (Lighting > Bake Probes), lined up with the box's walls, in place of the sky. Overlapping probes blend, the smaller one winning, and each fades into what's around it over its BlendDistance. Changing the world doesn't change a bake until it's baked again. Drawn at Medium reflection quality and above."
+        }
+        ClassName::LightProbeVolume => {
+            "Inside a Part: a grid of light probes filling the part's box, baked in the editor (Lighting > Bake Probes) with the light from the sun, lamps and sky and what it bounces off. Everything in the box, still or moving, is lit by the probes around it in place of the sky's even light, so a part beside a red wall picks up its red. Overlapping volumes blend, the smaller one winning, and each fades into what's around it over its BlendDistance. Changing the world doesn't change a bake until it's baked again; the Explorer warns when it's out of date."
         }
         ClassName::ParticleEmitter => {
             "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."
