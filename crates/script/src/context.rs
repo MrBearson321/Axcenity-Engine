@@ -51,6 +51,7 @@ impl Context {
         lua.set_app_data(Output::default());
         lua.set_app_data(crate::SoundActions::default());
         lua.set_app_data(crate::ParticleEmits::default());
+        lua.set_app_data(crate::Shatters::default());
         lua.set_app_data(crate::DebugRays::default());
         lua.set_app_data(Assets::default());
         lua.set_app_data(Outbox::default());
@@ -513,6 +514,13 @@ impl Context {
     pub fn take_particle_emits(&self) -> Vec<(axcenity_core::InstanceId, u32)> {
         match self.lua.app_data_mut::<crate::ParticleEmits>() {
             Some(mut emits) => std::mem::take(&mut emits.0),
+            None => Vec::new(),
+        }
+    }
+
+    pub fn take_shatters(&self) -> Vec<crate::Shatter> {
+        match self.lua.app_data_mut::<crate::Shatters>() {
+            Some(mut shatters) => std::mem::take(&mut shatters.0),
             None => Vec::new(),
         }
     }

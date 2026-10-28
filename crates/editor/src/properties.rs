@@ -53,6 +53,8 @@ pub enum Edit {
     /// Makes the selected Ragdoll's bodies and joints from its MeshPart's
     /// skeleton, replacing what was in it.
     BuildRagdoll,
+    /// Cuts the selected Fracture's part into its pieces and saves them.
+    GenerateFracture,
     /// During Play, pins (true) or unpins a value edited during Play, so
     /// Stop copies it into the edit world (see `play::kept`).
     Keep(Field, bool),
@@ -543,6 +545,17 @@ pub fn show(
                     .clicked()
             {
                 edit = Some(Edit::BuildRagdoll);
+            }
+            if !playing
+                && instance.class() == ClassName::Fracture
+                && ui
+                    .button(theme::with_icon(icons::HAMMER, "Generate"))
+                    .on_hover_text(
+                        "Cut the part into Pieces convex pieces by Seed and Pattern, and save them as <name>.fracture.glb. Generate again after changing the part or these settings.",
+                    )
+                    .clicked()
+            {
+                edit = Some(Edit::GenerateFracture);
             }
             ui.add_space(2.0);
             // Widgets remember things such as half-typed numbers by ID. Mixing in
@@ -1567,6 +1580,8 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         "PositionAlignmentMode" | "OrientationAlignmentMode" => {
             vec!["OneAttachment", "TwoAttachment"]
         }
+        // How a Fracture's pieces are spread (Phase 42).
+        "FracturePattern" => vec!["Uniform", "Impact"],
         _ => {
             ui.label(format!("{}.{}", item.enum_name, item.item));
             return None;

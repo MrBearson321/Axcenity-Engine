@@ -2016,6 +2016,81 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "GetUpState",
         "The name of the Animator's state to play (with no blend of its own) when Enabled turns false, such as a getting-up clip, or empty to carry on with the state playing.",
     ),
+    (ClassName::WeldConstraint, "BreakForce", BREAK_FORCE_DOC),
+    (ClassName::WeldConstraint, "BreakTorque", BREAK_TORQUE_DOC),
+    (ClassName::HingeConstraint, "BreakForce", BREAK_FORCE_DOC),
+    (ClassName::HingeConstraint, "BreakTorque", BREAK_TORQUE_DOC),
+    (
+        ClassName::BallSocketConstraint,
+        "BreakForce",
+        BREAK_FORCE_DOC,
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "BreakTorque",
+        BREAK_TORQUE_DOC,
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "BreakForce",
+        BREAK_FORCE_DOC,
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "BreakTorque",
+        BREAK_TORQUE_DOC,
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "BreakForce",
+        BREAK_FORCE_DOC,
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "BreakTorque",
+        BREAK_TORQUE_DOC,
+    ),
+    (ClassName::SpringConstraint, "BreakForce", BREAK_FORCE_DOC),
+    (ClassName::SpringConstraint, "BreakTorque", BREAK_TORQUE_DOC),
+    (ClassName::RopeConstraint, "BreakForce", BREAK_FORCE_DOC),
+    (ClassName::RopeConstraint, "BreakTorque", BREAK_TORQUE_DOC),
+    (ClassName::RodConstraint, "BreakForce", BREAK_FORCE_DOC),
+    (ClassName::RodConstraint, "BreakTorque", BREAK_TORQUE_DOC),
+    (
+        ClassName::Fracture,
+        "Pieces",
+        "How many pieces Generate (in its Properties) cuts the part into.",
+    ),
+    (
+        ClassName::Fracture,
+        "Seed",
+        "The same Seed always makes the same pieces; change it for a different break.",
+    ),
+    (
+        ClassName::Fracture,
+        "Pattern",
+        "`Enum.FracturePattern.Uniform` makes pieces of about one size; `Impact` makes more, smaller pieces toward the part's middle, as where something struck it.",
+    ),
+    (
+        ClassName::Fracture,
+        "InteriorMaterial",
+        "What the faces the cuts make inside the part look like, in the part's color.",
+    ),
+    (
+        ClassName::Fracture,
+        "Threshold",
+        "How fast, in studs a second, something must hit the part (the two closing at the point they touch) to shatter it. 0 or less: only `Shatter` breaks it.",
+    ),
+    (
+        ClassName::Fracture,
+        "DebrisLifetime",
+        "Seconds the pieces last once the part shatters. They fade out over the last second and are destroyed. 0 keeps them.",
+    ),
+    (
+        ClassName::Fracture,
+        "PiecesId",
+        "The pieces' file, which Generate writes: `<name>.fracture.glb` next to the MeshPart's model, or in `assets/models` for a Part. Empty until it's generated; the part can't shatter until then.",
+    ),
     (
         ClassName::FirstPersonController,
         "EyeHeight",
@@ -3282,9 +3357,26 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
 ];
 
+const BREAK_FORCE_DOC: &str = "How much force (mass times studs a second squared: a 1×1×1 plastic block weighs 196.2) holds it together before it breaks, turns off and fires Broken. 0 (the default) never breaks. A weld with a BreakForce or BreakTorque holds its parts as two bodies joined by a joint, so its parts aren't one assembly.";
+const BREAK_TORQUE_DOC: &str = "How much torque holds it together before it breaks, turns off and fires Broken; a weld's is measured halfway between its parts. 0 (the default) never breaks.";
+const BROKEN_DOC: &str = "Fires once when the force or torque holding it together goes past its BreakForce or BreakTorque. It's already off (Enabled is false). The handler gets no arguments.";
+
 /// What each event means, including what its handler receives. A test
 /// checks every event in `core` is here.
 pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
+    (ClassName::WeldConstraint, "Broken", BROKEN_DOC),
+    (ClassName::HingeConstraint, "Broken", BROKEN_DOC),
+    (ClassName::BallSocketConstraint, "Broken", BROKEN_DOC),
+    (ClassName::PrismaticConstraint, "Broken", BROKEN_DOC),
+    (ClassName::CylindricalConstraint, "Broken", BROKEN_DOC),
+    (ClassName::SpringConstraint, "Broken", BROKEN_DOC),
+    (ClassName::RopeConstraint, "Broken", BROKEN_DOC),
+    (ClassName::RodConstraint, "Broken", BROKEN_DOC),
+    (
+        ClassName::Fracture,
+        "Shattered",
+        "Fires once when the part is replaced by its pieces, hit hard enough or by `Shatter`. The handler gets no arguments; the part has left the game (its Parent is nil) and the pieces are in a Model named after it.",
+    ),
     (
         ClassName::Part,
         "Touched",
@@ -3553,6 +3645,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Ragdoll => {
             "A ragdoll for the skinned MeshPart it's in: a capsule Part per main bone, named after the bone, and a BallSocketConstraint per joint, which Build (in its Properties) makes from the skeleton with a humanoid preset's limits. While Enabled, physics moves the capsules and they pose the bones; otherwise they follow the animation and physics leaves them out."
+        }
+        ClassName::Fracture => {
+            "Breaks the Part or MeshPart it's in into pieces. Generate (in its Properties) cuts the part into Pieces convex pieces by Seed and Pattern and saves them as `<name>.fracture.glb`. During Play, something hitting the part faster than Threshold, or `Shatter`, replaces the part with its pieces, which fly from the point and fade out after DebrisLifetime."
         }
         ClassName::VehicleWheel => {
             "A wheel of the car whose part it's parented to: a spring and a ray to the ground, so no wheel collider touches it. Position and Orientation are relative to the part, as an Attachment's. Not drawn; its WheelPart is moved to it."

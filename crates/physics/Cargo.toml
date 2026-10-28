@@ -12,5 +12,9 @@ axcenity-core.workspace = true
 rapier3d.workspace = true
 axcenity-workspace-hack.workspace = true
 
+[dev-dependencies]
+# Tests generate Fractures' pieces to shatter.
+axcenity-mesh-edit.workspace = true
+
 [lints]
 workspace = true

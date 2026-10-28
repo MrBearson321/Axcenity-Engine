@@ -141,6 +141,19 @@ struct SoundActions(Vec<SoundAction>);
 #[derive(Default)]
 struct ParticleEmits(Vec<(InstanceId, u32)>);
 
+/// `fracture:Shatter(point, force)` calls waiting for the host's physics.
+#[derive(Default)]
+struct Shatters(Vec<Shatter>);
+
+/// A script's `fracture:Shatter(point, force)`: the Fracture, where the
+/// pieces fly from (`None` for the part's middle), and how hard.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shatter {
+    pub fracture: InstanceId,
+    pub point: Option<axcenity_core::Vector3>,
+    pub force: f32,
+}
+
 /// How many recent `workspace:Raycast` calls the editor overlay can show.
 const MAX_DEBUG_RAYS: usize = 64;
 
@@ -179,6 +192,8 @@ pub struct ScriptRuntime {
     sound_actions: Vec<SoundAction>,
     /// Particle bursts waiting for the game host's particles.
     particle_emits: Vec<(InstanceId, u32)>,
+    /// Shatters waiting for the game host's physics.
+    shatters: Vec<Shatter>,
     /// Whether the error for change events that never stop has been shown,
     /// so it's shown once rather than every frame.
     reported_change_loop: bool,
@@ -226,6 +241,7 @@ impl ScriptRuntime {
             output: Vec::new(),
             sound_actions: Vec::new(),
             particle_emits: Vec::new(),
+            shatters: Vec::new(),
             reported_change_loop: false,
             saves,
             started: Vec::new(),
@@ -513,6 +529,27 @@ impl ScriptRuntime {
     /// touching, the same way.
     pub fn fire_touch_ended(&mut self, world: &mut World, ends: &[(InstanceId, InstanceId)]) {
         self.fire_touch_event(world, "TouchEnded", ends);
+    }
+
+    /// Frame-order step 3, before physics steps: hands the scripts'
+    /// `fracture:Shatter(point, force)` calls to `physics`, which replaces
+    /// the parts with their pieces now (Phase 42).
+    pub fn apply_shatters(&mut self, world: &mut World, physics: &mut axcenity_physics::Physics) {
+        for shatter in std::mem::take(&mut self.shatters) {
+            physics.shatter(world, shatter.fracture, shatter.point, shatter.force);
+        }
+    }
+
+    /// Frame-order step 4, after [`fire_touch_ended`](Self::fire_touch_ended):
+    /// fires `Broken` on each joint or weld that broke in physics' steps,
+    /// then `Shattered` on each Fracture whose part shattered (Phase 42).
+    pub fn fire_breaks(&mut self, world: &mut World, physics: &mut axcenity_physics::Physics) {
+        for constraint in physics.take_broken() {
+            self.fire_instance_event(world, constraint, "Broken", &[]);
+        }
+        for fracture in physics.take_shattered() {
+            self.fire_instance_event(world, fracture, "Shattered", &[]);
+        }
     }
 
     fn fire_touch_event(
@@ -873,6 +910,13 @@ impl ScriptRuntime {
         std::mem::take(&mut self.particle_emits)
     }
 
+    /// Takes the `fracture:Shatter(point, force)` calls since the last
+    /// call, in order, for the host to hand to physics
+    /// (`Physics::shatter`) before it steps.
+    pub fn take_shatters(&mut self) -> Vec<Shatter> {
+        std::mem::take(&mut self.shatters)
+    }
+
     /// Collects what `side` printed, and hands the messages it sent to the
     /// transport.
     fn collect(&mut self, side: Side) {
@@ -883,6 +927,7 @@ impl ScriptRuntime {
         self.output.extend(context.take_output());
         self.sound_actions.extend(context.take_sound_actions());
         self.particle_emits.extend(context.take_particle_emits());
+        self.shatters.extend(context.take_shatters());
         for (copy, original) in context.take_cloned_scripts() {
             // A clone of a clone that hasn't started yet has its code too.
             let code = self

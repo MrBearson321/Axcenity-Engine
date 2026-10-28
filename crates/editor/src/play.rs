@@ -415,7 +415,10 @@ impl Session {
             // for this step. Gravity and friction of other parts are unchanged.
             self.characters.keep_kinematic(&mut self.world);
             self.agents.keep_kinematic(&mut self.world);
-            // 3. Step physics at a fixed 60 Hz (0 to N steps this frame).
+            // 3. Step physics at a fixed 60 Hz (0 to N steps this frame),
+            //    after the parts scripts shattered are replaced.
+            self.scripts
+                .apply_shatters(&mut self.world, &mut self.physics);
             cost.physics_steps = self.physics.step(&mut self.world, seconds);
             cost.physics += lap();
             // 4. Fire `Touched` for parts that started touching (and
@@ -425,6 +428,7 @@ impl Session {
             self.scripts.fire_touched(&mut self.world, &touches);
             let ends = self.physics.take_touch_ends();
             self.scripts.fire_touch_ended(&mut self.world, &ends);
+            self.scripts.fire_breaks(&mut self.world, &mut self.physics);
             if self.scripts.pause().is_none() {
                 self.scripts.heartbeat(&mut self.world, seconds);
             }

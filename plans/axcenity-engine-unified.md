@@ -1368,9 +1368,9 @@ A **Ragdoll** Instance under a skinned Model.
 
 ### Acceptance criteria
 
-- [ ] A glass pane with 30 pieces shatters when a fast crate hits it, and leaves no gaps or overlaps in the pieces at rest.
-- [ ] A shelf welded with `BreakForce` holds light crates and breaks under heavy ones, firing `Broken` once.
-- [ ] The same Seed makes the same pieces, and a fractured part's pieces are gone after `DebrisLifetime`.
+- [x] A glass pane with 30 pieces shatters when a fast crate hits it, and leaves no gaps or overlaps in the pieces at rest.
+- [x] A shelf welded with `BreakForce` holds light crates and breaks under heavy ones, firing `Broken` once.
+- [x] The same Seed makes the same pieces, and a fractured part's pieces are gone after `DebrisLifetime`.
 
 ---
 

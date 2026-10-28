@@ -1,0 +1,5 @@
+# `mesh_edit`
+
+- Edits triangle meshes on the CPU: plane cuts that close their holes (`cut.rs`, filled by ear clipping in `fill.rs`; then `merge.rs` refills flat faces so repeated cuts don't pile up needle triangles), shapes to cut (`shapes.rs`), convex Voronoi fracture pieces (`fracture.rs`), the pieces' `.glb` writer (`glb.rs`) and the editor's Generate glue (`generate.rs`). Behavior: `docs/architecture/fracture.md`.
+- Deterministic: the same mesh, count, seed and pattern give the same pieces. Never iterate a `HashMap` into output; use the built-in PRNG, not `rand`.
+- Depends on `core` and `assets` only, never `render` or `physics`. Meshes are matched by position (vertices may be split), so a cut point is computed the same way from either side of an edge.

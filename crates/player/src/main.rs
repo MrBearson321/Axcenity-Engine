@@ -1132,6 +1132,8 @@ impl ApplicationHandler for App {
                 //    for this step. Other parts keep their gravity.
                 self.characters.keep_kinematic(&mut self.world);
                 self.agents.keep_kinematic(&mut self.world);
+                self.scripts
+                    .apply_shatters(&mut self.world, &mut self.physics);
                 self.physics.step(&mut self.world, f64::from(seconds));
 
                 // 4. Fire `Touched` for parts that started touching during
@@ -1143,6 +1145,9 @@ impl ApplicationHandler for App {
                 self.scripts.fire_touched(&mut self.world, &touches);
                 let ends = self.physics.take_touch_ends();
                 self.scripts.fire_touch_ended(&mut self.world, &ends);
+                //    Then `Broken` and `Shattered`, for joints and parts
+                //    that broke.
+                self.scripts.fire_breaks(&mut self.world, &mut self.physics);
                 self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
                 let heard = listener_of_view(self.shown_view());
@@ -1338,7 +1343,10 @@ mod material_graph_tests;
 mod accessibility_tests;
 
 #[cfg(test)]
+mod destruction_tests;
+#[cfg(test)]
 mod physics_tests;
+
 #[cfg(test)]
 mod ragdoll_tests;
 #[cfg(test)]

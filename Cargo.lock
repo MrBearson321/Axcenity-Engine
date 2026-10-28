@@ -629,6 +629,7 @@ dependencies = [
  "axcenity-blocks",
  "axcenity-character",
  "axcenity-core",
+ "axcenity-mesh-edit",
  "axcenity-nav",
  "axcenity-physics",
  "axcenity-project",
@@ -659,6 +660,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axcenity-mesh-edit"
+version = "0.1.0"
+dependencies = [
+ "axcenity-assets",
+ "axcenity-core",
+ "axcenity-workspace-hack",
+ "glam 0.34.1",
+ "serde_json",
+]
+
+[[package]]
 name = "axcenity-nav"
 version = "0.1.0"
 dependencies = [
@@ -677,6 +689,7 @@ version = "0.1.0"
 dependencies = [
  "axcenity-assets",
  "axcenity-core",
+ "axcenity-mesh-edit",
  "axcenity-workspace-hack",
  "rapier3d",
 ]
@@ -691,6 +704,7 @@ dependencies = [
  "axcenity-audio",
  "axcenity-character",
  "axcenity-core",
+ "axcenity-mesh-edit",
  "axcenity-nav",
  "axcenity-physics",
  "axcenity-project",

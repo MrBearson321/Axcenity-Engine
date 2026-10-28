@@ -39,7 +39,10 @@
 //! anchors its whole assembly.
 //!
 //! Hinge, ball socket, prismatic, cylindrical, spring, rope and rod
-//! constraints join two parts' bodies with a rapier joint (see [`joints`]).
+//! constraints join two parts' bodies with a rapier joint (see [`joints`]),
+//! as do welds that can break. One held past its `BreakForce` or
+//! `BreakTorque` turns off; the host collects it with
+//! [`Physics::take_broken`] and fires `Broken`.
 //! LinearVelocity, AngularVelocity, VectorForce, Torque, AlignPosition and
 //! AlignOrientation push or turn a part's body every step (see `movers`).
 //! A VehicleSeat drives the body it's welded into on its VehicleWheels
@@ -50,6 +53,7 @@
 //! without stepping it or writing back.
 
 pub mod assembly;
+mod fracture;
 pub mod joints;
 mod mass;
 mod material;
@@ -147,6 +151,43 @@ pub struct Physics {
     rolling: BTreeMap<InstanceId, vehicles::Rolling>,
     /// The bodies of the Ragdolls that are on, at the last sync.
     ragdoll_bodies: HashSet<InstanceId>,
+    /// Constraints that broke since the last
+    /// [`take_broken`](Self::take_broken).
+    broken: Vec<InstanceId>,
+    /// Parts with a generated Fracture, at the last sync.
+    breakables: BTreeMap<InstanceId, fracture::Breakable>,
+    /// The pieces of each shatter, until their `DebrisLifetime` is up.
+    debris: Vec<fracture::Debris>,
+    /// Fractures that shattered since the last
+    /// [`take_shattered`](Self::take_shattered).
+    shattered: Vec<InstanceId>,
+}
+
+/// How a body moved before a step: its velocities and center of mass.
+#[derive(Clone, Copy)]
+struct Motion {
+    velocity: Vec3,
+    spin: Vec3,
+    center: Vec3,
+}
+
+impl Motion {
+    /// How fast the body's point `at` moves.
+    fn at(self, at: Vec3) -> Vec3 {
+        self.velocity + self.spin.cross(at - self.center)
+    }
+}
+
+/// The fastest impact on a breakable part in a step.
+struct Impact {
+    point: Vec3,
+    speed: f32,
+    /// The momentum it brought: its speed times the reduced mass of the two.
+    force: f32,
+    /// The body that hit it and how it moved before, so it carries on.
+    hitter: Option<(RigidBodyHandle, Vec3)>,
+    /// How the part moved before.
+    velocity: Vec3,
 }
 
 /// One Part's collider on its assembly's rapier body, plus the part's
@@ -373,6 +414,10 @@ impl Physics {
             vehicles: Vec::new(),
             rolling: BTreeMap::new(),
             ragdoll_bodies: HashSet::new(),
+            broken: Vec::new(),
+            breakables: BTreeMap::new(),
+            debris: Vec::new(),
+            shattered: Vec::new(),
         }
     }
 
@@ -402,9 +447,15 @@ impl Physics {
                 &mut self.learned,
             );
             vehicles::drive(&mut self.rapier, &mut self.vehicles, &mut self.rolling);
+            let before = self.motions_before_step();
             // The hook only runs for colliders with friction or
             // elasticity weights (see `material`).
             self.rapier.step_with_events(&material::Weighted, &());
+            self.broken.extend(joints::break_overloaded(
+                world,
+                &mut self.rapier,
+                &mut self.joints,
+            ));
             self.write_to_world(world);
             vehicles::place_wheels(
                 world,
@@ -413,6 +464,8 @@ impl Physics {
                 &self.vehicles,
             );
             self.find_touches();
+            self.shatter_hit_parts(world, &before);
+            fracture::age(world, &mut self.debris, STEP_SECONDS);
             self.unsimulated_seconds = (self.unsimulated_seconds - STEP_SECONDS).max(0.0);
             steps += 1;
         }
@@ -438,6 +491,175 @@ impl Physics {
     /// not to collide). Frame step 4 fires `TouchEnded` on both parts.
     pub fn take_touch_ends(&mut self) -> Vec<(InstanceId, InstanceId)> {
         std::mem::take(&mut self.touch_ends)
+    }
+
+    /// Removes and returns the joints and welds that broke past their
+    /// `BreakForce` or `BreakTorque` since the last call, each once, in the
+    /// order they broke. Physics has already turned them off; the host
+    /// fires `Broken` on each.
+    pub fn take_broken(&mut self) -> Vec<InstanceId> {
+        std::mem::take(&mut self.broken)
+    }
+
+    /// Replaces the part the Fracture `fracture` is in with its pieces now
+    /// (`fracture:Shatter(point, force)`), flying from `point` (the part's
+    /// middle if `None`) with up to `force` ÷ the part's mass studs a
+    /// second, on top of the part's own velocity. The pieces join the
+    /// simulation at the next step. False, changing nothing, if the
+    /// Fracture isn't in a part or its pieces aren't generated or can't be
+    /// loaded.
+    pub fn shatter(
+        &mut self,
+        world: &mut World,
+        fracture: InstanceId,
+        point: Option<Vector3>,
+        force: f32,
+    ) -> bool {
+        let part = world
+            .get(fracture)
+            .and_then(Instance::parent)
+            .and_then(|part| world.get(part));
+        let vector = |name| part?.property(name).and_then(Value::as_vector3);
+        let Some(point) = point.or_else(|| vector("Position")) else {
+            return false;
+        };
+        let velocity = vector("AssemblyLinearVelocity").unwrap_or_default();
+        let shattered = fracture::shatter(world, &self.assets, fracture, point, force, velocity);
+        let Some(debris) = shattered else {
+            return false;
+        };
+        self.shattered.push(fracture);
+        self.debris.push(debris);
+        true
+    }
+
+    /// Removes and returns the Fractures whose parts shattered since the
+    /// last call, in order. The host fires `Shattered` on each.
+    pub fn take_shattered(&mut self) -> Vec<InstanceId> {
+        std::mem::take(&mut self.shattered)
+    }
+
+    /// The pieces of each shatter that hasn't reached its `DebrisLifetime`
+    /// yet, with its Fracture.
+    pub fn debris(&self) -> Vec<(InstanceId, Vec<InstanceId>)> {
+        self.debris
+            .iter()
+            .map(|shatter| (shatter.fracture, shatter.pieces().collect()))
+            .collect()
+    }
+
+    /// How every dynamic body moves before a step, when a breakable part
+    /// might be hit in it.
+    fn motions_before_step(&self) -> HashMap<RigidBodyHandle, Motion> {
+        if self.breakables.is_empty() {
+            return HashMap::new();
+        }
+        self.rapier
+            .bodies
+            .iter()
+            .filter(|(_, body)| body.is_dynamic())
+            .map(|(handle, body)| {
+                let motion = Motion {
+                    velocity: body.linvel(),
+                    spin: body.angvel(),
+                    center: body.center_of_mass(),
+                };
+                (handle, motion)
+            })
+            .collect()
+    }
+
+    /// After a step: shatters each breakable part that something hit
+    /// faster than its Fracture's `Threshold`, where it was hit hardest,
+    /// and lets what hit it carry on as it was going. The speed is how
+    /// fast the two points in contact were closing before the step.
+    fn shatter_hit_parts(&mut self, world: &mut World, before: &HashMap<RigidBodyHandle, Motion>) {
+        if self.breakables.is_empty() {
+            return;
+        }
+        let mut impacts: BTreeMap<InstanceId, Impact> = BTreeMap::new();
+        for pair in self.rapier.contact_pairs() {
+            if !pair.has_any_active_contact() {
+                continue;
+            }
+            let (Some(&one), Some(&two)) = (
+                self.owners.get(&pair.collider1),
+                self.owners.get(&pair.collider2),
+            ) else {
+                continue;
+            };
+            if !self.breakables.contains_key(&one) && !self.breakables.contains_key(&two) {
+                continue;
+            }
+            let (Some((manifold, contact)), Some(collider)) = (
+                pair.find_deepest_contact(),
+                self.rapier.colliders.get(pair.collider1),
+            ) else {
+                continue;
+            };
+            let point = *collider.position() * contact.local_p1;
+            let motion = |part: InstanceId| {
+                let body = self.parts.get(&part)?.body;
+                let motion = before.get(&body)?;
+                let mass = self.rapier.bodies.get(body)?.mass();
+                Some((body, *motion, mass))
+            };
+            let (a, b) = (motion(one), motion(two));
+            let speed_of = |m: Option<(RigidBodyHandle, Motion, f32)>| {
+                m.map_or(Vec3::ZERO, |(_, motion, _)| motion.at(point))
+            };
+            let speed = (speed_of(a) - speed_of(b)).dot(manifold.data.normal).abs();
+            // Momentum passed between them: the reduced mass, or the moving
+            // one's own mass against something anchored.
+            let reduced = match (a.map(|m| m.2), b.map(|m| m.2)) {
+                (Some(m1), Some(m2)) if m1 + m2 > 0.0 => m1 * m2 / (m1 + m2),
+                (Some(m), None) | (None, Some(m)) => m,
+                _ => 0.0,
+            };
+            for (part, own, other) in [(one, a, b), (two, b, a)] {
+                let Some(breakable) = self.breakables.get(&part) else {
+                    continue;
+                };
+                let faster = impacts.get(&part).is_none_or(|hit| speed > hit.speed);
+                if speed <= breakable.threshold || !faster {
+                    continue;
+                }
+                let impact = Impact {
+                    point,
+                    speed,
+                    force: speed * reduced,
+                    hitter: other.map(|(body, motion, _)| (body, motion.velocity)),
+                    velocity: own.map_or(Vec3::ZERO, |(_, motion, _)| motion.velocity),
+                };
+                impacts.insert(part, impact);
+            }
+        }
+        if impacts.is_empty() {
+            return;
+        }
+        for (part, impact) in impacts {
+            let fracture = self.breakables[&part].fracture;
+            let Some(debris) = fracture::shatter(
+                world,
+                &self.assets,
+                fracture,
+                to_vector3(impact.point),
+                impact.force,
+                to_vector3(impact.velocity),
+            ) else {
+                continue;
+            };
+            self.shattered.push(fracture);
+            self.debris.push(debris);
+            // It goes through, as if the part had never been there.
+            if let Some((body, velocity)) = impact.hitter
+                && let Some(body) = self.rapier.bodies.get_mut(body)
+            {
+                body.set_linvel(velocity, true);
+            }
+        }
+        // The part goes and its pieces come before the next step.
+        self.sync_from_world(world);
     }
 
     /// How many parts are being simulated (anchored ones included).
@@ -550,6 +772,7 @@ impl Physics {
         movers::forget(&mut self.learned, &moved);
         self.vehicles = vehicles::read(world, &self.parts, &self.rapier.bodies, &self.rolling);
         self.rolling.retain(|id, _| world.contains(*id));
+        self.breakables = fracture::breakables(world, self.parts.keys().copied());
 
         // Parts at rest "sleep" and stop being simulated. If a script moved
         // or removed something, a sleeping part may have lost what it was
@@ -1018,3 +1241,9 @@ mod query_tests;
 
 #[cfg(test)]
 mod vehicle_tests;
+
+#[cfg(test)]
+mod break_tests;
+
+#[cfg(test)]
+mod fracture_tests;

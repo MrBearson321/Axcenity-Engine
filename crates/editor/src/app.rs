@@ -1218,6 +1218,8 @@ mod constraint_tests;
 #[cfg(test)]
 mod data_table_tests;
 #[cfg(test)]
+mod fracture_tests;
+#[cfg(test)]
 mod hot_patch_tests;
 #[cfg(test)]
 mod ik_tests;
@@ -1235,6 +1237,7 @@ mod navigation_tests;
 mod play_tests;
 #[cfg(test)]
 mod posing_tests;
+
 #[cfg(test)]
 mod ragdoll_tests;
 #[cfg(test)]

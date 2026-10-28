@@ -15,6 +15,12 @@
 //! its target at its speed, and a winch pays the rope out at its speed, or
 //! reels it in with a motor that pulls the load at its speed (with at most
 //! its force) while the rope shortens behind it.
+//!
+//! Phase 42: a joint, or a WeldConstraint, with a `BreakForce` or
+//! `BreakTorque` breaks when the force or torque holding it together goes
+//! past it: physics turns it off and reports it for `Broken`. A breakable
+//! weld isn't part of an assembly; it's a fixed joint between two bodies,
+//! so there is a force to measure.
 
 use std::collections::BTreeMap;
 
@@ -56,6 +62,35 @@ pub(crate) struct Joint {
     drive: Drive,
     /// Where its servos and winch are now.
     setpoints: Setpoints,
+    /// What breaks it.
+    strength: Strength,
+}
+
+/// The most force (mass times studs a second squared) and torque a joint
+/// takes before it breaks: infinite for one that never does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Strength {
+    force: f32,
+    torque: f32,
+}
+
+impl Strength {
+    /// A constraint's `BreakForce` and `BreakTorque`, where 0 (or less, or
+    /// NaN) is never.
+    fn of(constraint: &Instance) -> Self {
+        let limit = |name| match constraint.property(name).and_then(Value::as_number) {
+            Some(n) if n > 0.0 => n as f32,
+            _ => f32::INFINITY,
+        };
+        Self {
+            force: limit("BreakForce"),
+            torque: limit("BreakTorque"),
+        }
+    }
+
+    fn breaks(self) -> bool {
+        self.force.is_finite() || self.torque.is_finite()
+    }
 }
 
 /// Where a joint's servos and winch have got to. A servo's setpoint moves
@@ -102,13 +137,24 @@ struct Described {
     drive: Drive,
 }
 
-/// The constraints in `world` that hold two parts with bodies, by ID.
+/// The constraints in `world` that hold two parts with bodies, by ID:
+/// joints, and welds that can break.
 fn constraints(world: &World) -> Vec<InstanceId> {
     world
         .descendants(world.workspace())
         .into_iter()
-        .filter(|&id| world.get(id).is_some_and(|i| i.class().is_joint()))
+        .filter(|&id| {
+            world
+                .get(id)
+                .is_some_and(|i| i.class().is_joint() || is_breakable_weld(i))
+        })
         .collect()
+}
+
+/// True for a WeldConstraint with a `BreakForce` or `BreakTorque`: physics
+/// holds its parts with a joint rather than in one assembly.
+pub(crate) fn is_breakable_weld(constraint: &Instance) -> bool {
+    constraint.class() == ClassName::WeldConstraint && Strength::of(constraint).breaks()
 }
 
 /// Makes, updates and removes joints to match the enabled constraints.
@@ -126,15 +172,29 @@ pub(crate) fn sync(
         let Some((bodies, frames)) = ends(world, constraint, parts) else {
             continue;
         };
+        let strength = Strength::of(constraint);
+        // A weld holds its parts where they were when it was made, not
+        // where they've sagged to since.
+        if let Some(joint) = joints.get(&id)
+            && joint.bodies == bodies
+            && constraint.class() == ClassName::WeldConstraint
+        {
+            let kept = Described {
+                data: joint.built,
+                drive: Drive::default(),
+            };
+            wanted.insert(id, (bodies, kept, strength));
+            continue;
+        }
         if let Some(described) = describe(constraint, frames) {
-            wanted.insert(id, (bodies, described));
+            wanted.insert(id, (bodies, described, strength));
         }
     }
     // Joints whose constraint is gone or disabled, or whose bodies changed.
     joints.retain(|id, joint| {
         let keep = wanted
             .get(id)
-            .is_some_and(|(bodies, _)| *bodies == joint.bodies)
+            .is_some_and(|(bodies, ..)| *bodies == joint.bodies)
             && rapier.impulse_joints.get(joint.handle).is_some();
         if !keep {
             // Its body may be gone already, taking the joint with it.
@@ -143,9 +203,10 @@ pub(crate) fn sync(
         }
         keep
     });
-    for (id, (bodies, described)) in wanted {
+    for (id, (bodies, described, strength)) in wanted {
         match joints.get_mut(&id) {
             Some(joint) => {
+                joint.strength = strength;
                 if joint.built != described.data {
                     if let Some(live) = rapier.impulse_joints.get_mut(joint.handle, true) {
                         live.data = described.data;
@@ -182,6 +243,7 @@ pub(crate) fn sync(
                             reeled: described.drive.winch.map(|winch| winch.length),
                             ..Setpoints::default()
                         },
+                        strength,
                     },
                 );
                 changed = true;
@@ -189,6 +251,50 @@ pub(crate) fn sync(
         }
     }
     changed
+}
+
+/// After a step: removes each joint that held with more than its
+/// `BreakForce` or `BreakTorque`, turns its constraint off in `world`, and
+/// returns the constraints that broke, in ID order.
+///
+/// rapier keeps the impulse each locked axis and limit gave in the step's
+/// last substep, in the joint's own axes, so the force is the linear ones'
+/// length over a substep's time, and the torque the angular ones'. Motors
+/// don't count: a motor pushing at its max doesn't break its joint.
+pub(crate) fn break_overloaded(
+    world: &mut World,
+    rapier: &mut PhysicsWorld,
+    joints: &mut BTreeMap<InstanceId, Joint>,
+) -> Vec<InstanceId> {
+    let substeps = rapier.integration_parameters.num_solver_iterations.max(1);
+    let dt = STEP_SECONDS as f32 / substeps as f32;
+    let mut broken = Vec::new();
+    for (&id, joint) in joints.iter() {
+        if !joint.strength.breaks() {
+            continue;
+        }
+        let Some(live) = rapier.impulse_joints.get(joint.handle) else {
+            continue;
+        };
+        let mut impulse = [0.0f32; 6];
+        for (axis, total) in impulse.iter_mut().enumerate() {
+            *total = live.impulses[axis] + live.data.limits[axis].impulse;
+        }
+        let length = |axes: &[f32]| axes.iter().map(|a| a * a).sum::<f32>().sqrt();
+        let force = length(&impulse[..3]) / dt;
+        let torque = length(&impulse[3..]) / dt;
+        if force > joint.strength.force || torque > joint.strength.torque {
+            broken.push(id);
+        }
+    }
+    for id in &broken {
+        if let Some(joint) = joints.remove(id) {
+            rapier.impulse_joints.remove(joint.handle, true);
+        }
+        // Off, so the next sync doesn't join it again.
+        let _ = world.set_property(*id, "Enabled", Value::Bool(false));
+    }
+    broken
 }
 
 /// Moves each servo's setpoint and each winch's rope length on by a step,
@@ -275,6 +381,20 @@ fn ends(
     if constraint.property("Enabled") != Some(&Value::Bool(true)) {
         return None;
     }
+    if constraint.class() == ClassName::WeldConstraint {
+        // The parts are held where they are now, about the point halfway
+        // between their middles, which is where its torque is measured.
+        let part = |name| parts.get(&constraint.property(name)?.as_instance()?);
+        let (part0, part1) = (part("Part0")?, part("Part1")?);
+        let (pose0, pose1) = (part0.seen.pose(), part1.seen.pose());
+        let middle = Pose::from_parts(
+            (pose0.translation + pose1.translation) / 2.0,
+            pose0.rotation,
+        );
+        let frame0 = part0.offset * (pose0.inverse() * middle);
+        let frame1 = part1.offset * (pose1.inverse() * middle);
+        return (part0.body != part1.body).then_some(((part0.body, part1.body), (frame0, frame1)));
+    }
     let end = |name| {
         let attachment = constraint.property(name)?.as_instance()?;
         let (part, local) = attachment_on_part(world, attachment)?;
@@ -343,6 +463,7 @@ fn describe(constraint: &Instance, (frame0, frame1): (Pose, Pose)) -> Option<Des
         ClassName::SpringConstraint | ClassName::RopeConstraint | ClassName::RodConstraint => {
             JointAxesMask::empty()
         }
+        ClassName::WeldConstraint => JointAxesMask::LOCKED_FIXED_AXES,
         _ => return None,
     };
     let mut joint = GenericJointBuilder::new(locked)

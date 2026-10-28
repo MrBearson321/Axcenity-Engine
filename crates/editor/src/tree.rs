@@ -53,6 +53,9 @@ pub enum Insertable {
     /// A ragdoll for the selected skinned MeshPart; Build in its Properties
     /// makes its bodies and joints.
     Ragdoll,
+    /// Breaks the selected part into pieces; Generate in its Properties
+    /// cuts them.
+    Fracture,
     /// A kinematic third-person character controller.
     ThirdPersonController,
     /// The same movement, with the camera at the character's eyes.
@@ -122,6 +125,8 @@ impl Insertable {
         Insertable::Animation,
         Insertable::Ragdoll,
     ];
+    /// Fractures, which shatter the part they're inside.
+    pub const BREAKING: [Insertable; 1] = [Insertable::Fracture];
     /// The character controllers: a character has one or the other.
     pub const CHARACTERS: [Insertable; 2] = [
         Insertable::ThirdPersonController,
@@ -199,6 +204,7 @@ impl Insertable {
             Insertable::ParticleEmitter => "Particles",
             Insertable::Animator => "Animator",
             Insertable::Ragdoll => "Ragdoll",
+            Insertable::Fracture => "Fracture",
             Insertable::Animation => "Animation",
             Insertable::ThirdPersonController => "Third Person",
             Insertable::FirstPersonController => "First Person",
@@ -247,6 +253,7 @@ impl Insertable {
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
             Insertable::Animator => ClassName::Animator,
             Insertable::Ragdoll => ClassName::Ragdoll,
+            Insertable::Fracture => ClassName::Fracture,
             Insertable::Animation => ClassName::Animation,
             Insertable::ThirdPersonController => ClassName::ThirdPersonController,
             Insertable::FirstPersonController => ClassName::FirstPersonController,
@@ -535,6 +542,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                         | Insertable::BillboardGui
                         | Insertable::Animator
                         | Insertable::Ragdoll
+                        | Insertable::Fracture
                         | Insertable::Animation
                         | Insertable::ThirdPersonController
                         | Insertable::FirstPersonController

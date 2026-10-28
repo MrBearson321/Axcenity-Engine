@@ -29,5 +29,9 @@ serde_json.workspace = true
 winit.workspace = true
 axcenity-workspace-hack.workspace = true
 
+[dev-dependencies]
+# Tests check the example's Fracture pieces match what Generate makes.
+axcenity-mesh-edit.workspace = true
+
 [lints]
 workspace = true

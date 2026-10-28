@@ -1817,6 +1817,15 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Fracture,
+        Function {
+            name: "Shatter",
+            doc: "Replaces the part with its pieces before the next physics step, flying away from `point` (the part's middle if nil) at up to `force` ÷ the part's mass studs a second: that much for the nearest pieces, half for the farthest. Fires Shattered. Does nothing until Generate has made the pieces.",
+            params: &[("point", "Vector3?"), ("force", "number?")],
+            returns: "()",
+        },
+    ),
+    (
         ClassName::Ragdoll,
         Function {
             name: "ApplyImpulse",

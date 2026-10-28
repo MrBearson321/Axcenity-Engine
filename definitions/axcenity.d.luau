@@ -929,6 +929,16 @@ declare extern type EnumRaycastFilterTypeItems with
 	Include: EnumRaycastFilterType
 end
 
+--- One choice of `Enum.FracturePattern`.
+declare extern type EnumFracturePattern extends EnumItem with
+end
+
+--- The choices of `Enum.FracturePattern`.
+declare extern type EnumFracturePatternItems with
+	Uniform: EnumFracturePattern
+	Impact: EnumFracturePattern
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -957,6 +967,7 @@ declare extern type EnumLibrary with
 	PositionAlignmentMode: EnumPositionAlignmentModeItems
 	OrientationAlignmentMode: EnumOrientationAlignmentModeItems
 	RaycastFilterType: EnumRaycastFilterTypeItems
+	FracturePattern: EnumFracturePatternItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -2874,6 +2885,29 @@ declare extern type Ragdoll extends Instance with
 	function ApplyImpulse(self, bone: string, impulse: Vector3): ()
 end
 
+--- Breaks the Part or MeshPart it's in into pieces. Generate (in its Properties) cuts the part into Pieces convex pieces by Seed and Pattern and saves them as `<name>.fracture.glb`. During Play, something hitting the part faster than Threshold, or `Shatter`, replaces the part with its pieces, which fly from the point and fade out after DebrisLifetime.
+declare extern type Fracture extends Instance with
+	--- How many pieces Generate (in its Properties) cuts the part into.
+	Pieces: number
+	--- The same Seed always makes the same pieces; change it for a different break.
+	Seed: number
+	--- `Enum.FracturePattern.Uniform` makes pieces of about one size; `Impact` makes more, smaller pieces toward the part's middle, as where something struck it.
+	Pattern: EnumFracturePattern | "Uniform" | "Impact"
+	--- What the faces the cuts make inside the part look like, in the part's color.
+	InteriorMaterial: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	--- How fast, in studs a second, something must hit the part (the two closing at the point they touch) to shatter it. 0 or less: only `Shatter` breaks it.
+	Threshold: number
+	--- Seconds the pieces last once the part shatters. They fade out over the last second and are destroyed. 0 keeps them.
+	DebrisLifetime: number
+	--- The pieces' file, which Generate writes: `<name>.fracture.glb` next to the MeshPart's model, or in `assets/models` for a Part. Empty until it's generated; the part can't shatter until then.
+	PiecesId: string
+	--- Fires once when the part is replaced by its pieces, hit hard enough or by `Shatter`. The handler gets no arguments; the part has left the game (its Parent is nil) and the pieces are in a Model named after it.
+	Shattered: Signal
+	[string]: any
+	--- Replaces the part with its pieces before the next physics step, flying away from `point` (the part's middle if nil) at up to `force` ÷ the part's mass studs a second: that much for the nearest pieces, half for the farthest. Fires Shattered. Does nothing until Generate has made the pieces.
+	function Shatter(self, point: Vector3?, force: number?): ()
+end
+
 --- Holds `Part0` and `Part1` together where they were when it was made (or enabled). Parts welded together move as one body, an assembly: they fall and tumble together, and an anchored part anchors the whole assembly. `part:GetConnectedParts()` and `part:GetRootPart()` follow welds. Setting a welded part's Position or CFrame moves that part alone, and the weld holds it where it lands.
 declare extern type WeldConstraint extends Instance with
 	--- One of the two parts it holds together.
@@ -2882,6 +2916,12 @@ declare extern type WeldConstraint extends Instance with
 	Part1: Instance?
 	--- On (the default), it holds the parts together. Off, they move apart; turned on again, it welds them where they are then.
 	Enabled: boolean
+	--- How much force (mass times studs a second squared: a 1×1×1 plastic block weighs 196.2) holds it together before it breaks, turns off and fires Broken. 0 (the default) never breaks. A weld with a BreakForce or BreakTorque holds its parts as two bodies joined by a joint, so its parts aren't one assembly.
+	BreakForce: number
+	--- How much torque holds it together before it breaks, turns off and fires Broken; a weld's is measured halfway between its parts. 0 (the default) never breaks.
+	BreakTorque: number
+	--- Fires once when the force or torque holding it together goes past its BreakForce or BreakTorque. It's already off (Enabled is false). The handler gets no arguments.
+	Broken: Signal
 	[string]: any
 end
 
@@ -2897,6 +2937,10 @@ declare extern type HingeConstraint extends Instance with
 	Visible: boolean
 	--- The color it's drawn in while Visible.
 	Color: Color3
+	--- How much force (mass times studs a second squared: a 1×1×1 plastic block weighs 196.2) holds it together before it breaks, turns off and fires Broken. 0 (the default) never breaks. A weld with a BreakForce or BreakTorque holds its parts as two bodies joined by a joint, so its parts aren't one assembly.
+	BreakForce: number
+	--- How much torque holds it together before it breaks, turns off and fires Broken; a weld's is measured halfway between its parts. 0 (the default) never breaks.
+	BreakTorque: number
 	--- On, Attachment1 only turns between LowerAngle and UpperAngle.
 	LimitsEnabled: boolean
 	--- While LimitsEnabled is on, the farthest it turns one way, in degrees.
@@ -2917,6 +2961,8 @@ declare extern type HingeConstraint extends Instance with
 	ServoMaxTorque: number
 	--- How far Attachment1 is turned from Attachment0 around the axis now, in degrees from -180 to 180 (read-only).
 	CurrentAngle: number
+	--- Fires once when the force or torque holding it together goes past its BreakForce or BreakTorque. It's already off (Enabled is false). The handler gets no arguments.
+	Broken: Signal
 	[string]: any
 end
 
@@ -2932,6 +2978,10 @@ declare extern type BallSocketConstraint extends Instance with
 	Visible: boolean
 	--- The color it's drawn in while Visible.
 	Color: Color3
+	--- How much force (mass times studs a second squared: a 1×1×1 plastic block weighs 196.2) holds it together before it breaks, turns off and fires Broken. 0 (the default) never breaks. A weld with a BreakForce or BreakTorque holds its parts as two bodies joined by a joint, so its parts aren't one assembly.
+	BreakForce: number
+	--- How much torque holds it together before it breaks, turns off and fires Broken; a weld's is measured halfway between its parts. 0 (the default) never breaks.
+	BreakTorque: number
 	--- On, Attachment1's axis can only lean UpperAngle from Attachment0's.
 	LimitsEnabled: boolean
 	--- While LimitsEnabled is on, how far Attachment1's axis can lean from Attachment0's, in degrees.
@@ -2942,6 +2992,8 @@ declare extern type BallSocketConstraint extends Instance with
 	TwistLowerAngle: number
 	--- While TwistLimitsEnabled is on, the farthest it twists the other way, in degrees.
 	TwistUpperAngle: number
+	--- Fires once when the force or torque holding it together goes past its BreakForce or BreakTorque. It's already off (Enabled is false). The handler gets no arguments.
+	Broken: Signal
 	[string]: any
 end
 
@@ -2957,6 +3009,10 @@ declare extern type PrismaticConstraint extends Instance with
 	Visible: boolean
 	--- The color it's drawn in while Visible.
 	Color: Color3
+	--- How much force (mass times studs a second squared: a 1×1×1 plastic block weighs 196.2) holds it together before it breaks, turns off and fires Broken. 0 (the default) never breaks. A weld with a BreakForce or BreakTorque holds its parts as two bodies joined by a joint, so its parts aren't one assembly.
+	BreakForce: number
+	--- How much torque holds it together before it breaks, turns off and fires Broken; a weld's is measured halfway between its parts. 0 (the default) never breaks.
+	BreakTorque: number
 	--- On, Attachment1 only slides between LowerLimit and UpperLimit along the axis.
 	LimitsEnabled: boolean
 	--- While LimitsEnabled is on, the closest Attachment1 can be to Attachment0 along the axis, in studs (negative is behind it).
@@ -2977,6 +3033,8 @@ declare extern type PrismaticConstraint extends Instance with
 	ServoMaxForce: number
 	--- How far Attachment1 is from Attachment0 along the axis now, in studs (read-only).
 	CurrentPosition: number
+	--- Fires once when the force or torque holding it together goes past its BreakForce or BreakTorque. It's already off (Enabled is false). The handler gets no arguments.
+	Broken: Signal
 	[string]: any
 end
 
@@ -2992,6 +3050,10 @@ declare extern type CylindricalConstraint extends Instance with
 	Visible: boolean
 	--- The color it's drawn in while Visible.
 	Color: Color3
+	--- How much force (mass times studs a second squared: a 1×1×1 plastic block weighs 196.2) holds it together before it breaks, turns off and fires Broken. 0 (the default) never breaks. A weld with a BreakForce or BreakTorque holds its parts as two bodies joined by a joint, so its parts aren't one assembly.
+	BreakForce: number
+	--- How much torque holds it together before it breaks, turns off and fires Broken; a weld's is measured halfway between its parts. 0 (the default) never breaks.
+	BreakTorque: number
 	--- On, Attachment1 only slides between LowerLimit and UpperLimit along the axis.
 	LimitsEnabled: boolean
 	--- While LimitsEnabled is on, the closest Attachment1 can be to Attachment0 along the axis, in studs (negative is behind it).
@@ -3032,6 +3094,8 @@ declare extern type CylindricalConstraint extends Instance with
 	CurrentAngle: number
 	--- How far Attachment1 is from Attachment0 along the axis now, in studs (read-only).
 	CurrentPosition: number
+	--- Fires once when the force or torque holding it together goes past its BreakForce or BreakTorque. It's already off (Enabled is false). The handler gets no arguments.
+	Broken: Signal
 	[string]: any
 end
 
@@ -3047,6 +3111,10 @@ declare extern type SpringConstraint extends Instance with
 	Visible: boolean
 	--- The color it's drawn in while Visible.
 	Color: Color3
+	--- How much force (mass times studs a second squared: a 1×1×1 plastic block weighs 196.2) holds it together before it breaks, turns off and fires Broken. 0 (the default) never breaks. A weld with a BreakForce or BreakTorque holds its parts as two bodies joined by a joint, so its parts aren't one assembly.
+	BreakForce: number
+	--- How much torque holds it together before it breaks, turns off and fires Broken; a weld's is measured halfway between its parts. 0 (the default) never breaks.
+	BreakTorque: number
 	--- How hard it pulls or pushes toward FreeLength: force per stud it's stretched or squashed.
 	Stiffness: number
 	--- How much it resists moving, so it stops bouncing: force per stud a second of stretching.
@@ -3065,6 +3133,8 @@ declare extern type SpringConstraint extends Instance with
 	Thickness: number
 	--- How far apart the attachments are now, in studs (read-only).
 	CurrentLength: number
+	--- Fires once when the force or torque holding it together goes past its BreakForce or BreakTorque. It's already off (Enabled is false). The handler gets no arguments.
+	Broken: Signal
 	[string]: any
 end
 
@@ -3080,6 +3150,10 @@ declare extern type RopeConstraint extends Instance with
 	Visible: boolean
 	--- The color it's drawn in while Visible.
 	Color: Color3
+	--- How much force (mass times studs a second squared: a 1×1×1 plastic block weighs 196.2) holds it together before it breaks, turns off and fires Broken. 0 (the default) never breaks. A weld with a BreakForce or BreakTorque holds its parts as two bodies joined by a joint, so its parts aren't one assembly.
+	BreakForce: number
+	--- How much torque holds it together before it breaks, turns off and fires Broken; a weld's is measured halfway between its parts. 0 (the default) never breaks.
+	BreakTorque: number
 	--- The farthest apart the attachments can be, in studs. Closer, the rope is slack.
 	Length: number
 	--- On, a winch reels the rope in or out toward WinchTarget, starting from Length.
@@ -3094,6 +3168,8 @@ declare extern type RopeConstraint extends Instance with
 	Thickness: number
 	--- How far apart the attachments are now, in studs (read-only).
 	CurrentLength: number
+	--- Fires once when the force or torque holding it together goes past its BreakForce or BreakTorque. It's already off (Enabled is false). The handler gets no arguments.
+	Broken: Signal
 	[string]: any
 end
 
@@ -3109,12 +3185,18 @@ declare extern type RodConstraint extends Instance with
 	Visible: boolean
 	--- The color it's drawn in while Visible.
 	Color: Color3
+	--- How much force (mass times studs a second squared: a 1×1×1 plastic block weighs 196.2) holds it together before it breaks, turns off and fires Broken. 0 (the default) never breaks. A weld with a BreakForce or BreakTorque holds its parts as two bodies joined by a joint, so its parts aren't one assembly.
+	BreakForce: number
+	--- How much torque holds it together before it breaks, turns off and fires Broken; a weld's is measured halfway between its parts. 0 (the default) never breaks.
+	BreakTorque: number
 	--- How far apart the attachments are held, in studs.
 	Length: number
 	--- How thick it's drawn while Visible, in studs.
 	Thickness: number
 	--- How far apart the attachments are now, in studs (read-only).
 	CurrentLength: number
+	--- Fires once when the force or torque holding it together goes past its BreakForce or BreakTorque. It's already off (Enabled is false). The handler gets no arguments.
+	Broken: Signal
 	[string]: any
 end
 
@@ -3306,7 +3388,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

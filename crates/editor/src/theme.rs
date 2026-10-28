@@ -714,6 +714,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::VehicleSeat => icons::STEERING_WHEEL,
         ClassName::VehicleWheel => icons::TIRE,
         ClassName::Ragdoll => icons::PERSON_SIMPLE,
+        ClassName::Fracture => icons::HAMMER,
         ClassName::Script => icons::FILE_CODE,
         ClassName::LocalScript => icons::CODE,
         ClassName::ModuleScript => icons::PUZZLE_PIECE,

@@ -13,6 +13,7 @@ axcenity-audio.workspace = true
 axcenity-blocks.workspace = true
 axcenity-character.workspace = true
 axcenity-core.workspace = true
+axcenity-mesh-edit.workspace = true
 axcenity-nav.workspace = true
 axcenity-physics.workspace = true
 axcenity-project.workspace = true

@@ -13,7 +13,8 @@ use axcenity_core::{ClassName, Instance, InstanceId, Value, World};
 
 /// The pairs of parts each enabled WeldConstraint in the game holds
 /// together, in tree order. A weld missing a part, or welding a part to
-/// itself, holds nothing.
+/// itself, holds nothing. A weld that can break (Phase 42) isn't listed:
+/// physics holds its parts with a joint instead (see [`crate::joints`]).
 pub fn welds(world: &World) -> Vec<(InstanceId, InstanceId)> {
     world
         .descendants(world.root())
@@ -22,6 +23,7 @@ pub fn welds(world: &World) -> Vec<(InstanceId, InstanceId)> {
             let weld = world.get(id)?;
             if weld.class() != ClassName::WeldConstraint
                 || weld.property("Enabled") != Some(&Value::Bool(true))
+                || crate::joints::is_breakable_weld(weld)
             {
                 return None;
             }

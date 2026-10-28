@@ -528,10 +528,11 @@ pub enum EnumType {
     PositionAlignmentMode,
     OrientationAlignmentMode,
     RaycastFilterType,
+    FracturePattern,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 26] = [
+    pub const ALL: [EnumType; 27] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -558,6 +559,7 @@ impl EnumType {
         EnumType::PositionAlignmentMode,
         EnumType::OrientationAlignmentMode,
         EnumType::RaycastFilterType,
+        EnumType::FracturePattern,
     ];
 
     pub fn name(self) -> &'static str {
@@ -588,6 +590,7 @@ impl EnumType {
             EnumType::PositionAlignmentMode => "PositionAlignmentMode",
             EnumType::OrientationAlignmentMode => "OrientationAlignmentMode",
             EnumType::RaycastFilterType => "RaycastFilterType",
+            EnumType::FracturePattern => "FracturePattern",
         }
     }
 
@@ -625,6 +628,8 @@ impl EnumType {
             }
             // Whether a query's filter list is passed by or the only parts found.
             EnumType::RaycastFilterType => vec!["Exclude", "Include"],
+            // How a Fracture's pieces are spread (Phase 42).
+            EnumType::FracturePattern => vec!["Uniform", "Impact"],
         }
     }
 
@@ -743,7 +748,8 @@ impl LuaEnumItem {
             | EnumType::ActuatorRelativeTo
             | EnumType::PositionAlignmentMode
             | EnumType::OrientationAlignmentMode
-            | EnumType::RaycastFilterType => None,
+            | EnumType::RaycastFilterType
+            | EnumType::FracturePattern => None,
         }
     }
 }

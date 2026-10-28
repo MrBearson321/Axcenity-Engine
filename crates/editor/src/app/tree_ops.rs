@@ -247,6 +247,17 @@ impl EditorApp {
                 );
             }
         }
+        if what == Insertable::Fracture {
+            let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
+            let in_part = self.world.get(parent).is_some_and(|instance| {
+                instance.class().is_base_part() && instance.class() != ClassName::Terrain
+            });
+            if !in_part {
+                self.output.warning(
+                    "A Fracture breaks the Part or MeshPart it's inside: select one first.",
+                );
+            }
+        }
         if what == Insertable::Animator {
             let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
             let in_mesh_part = self

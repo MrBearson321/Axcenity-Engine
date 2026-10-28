@@ -191,6 +191,12 @@ pub enum ClassName {
     /// `Enabled`, physics moves the capsules and they pose the bones;
     /// otherwise they follow the animation and physics leaves them out.
     Ragdoll,
+    /// Breaks the Part or MeshPart it's parented to into pieces (Phase 42):
+    /// Generate in the editor cuts it into `Pieces` Voronoi pieces, saved
+    /// as `<name>.fracture.glb` (`PiecesId`). An impact faster than
+    /// `Threshold`, or `Shatter(point, force)`, replaces the part with its
+    /// pieces, which fly from the point and fade after `DebrisLifetime`.
+    Fracture,
     /// Holds `Part0` and `Part1` together where they were when it was made
     /// or enabled. Welded unanchored parts move as one body: an assembly.
     WeldConstraint,
@@ -239,7 +245,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 80] = [
+    pub const ALL: [ClassName; 81] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -298,6 +304,7 @@ impl ClassName {
         ClassName::Attachment,
         ClassName::VehicleWheel,
         ClassName::Ragdoll,
+        ClassName::Fracture,
         ClassName::WeldConstraint,
         ClassName::HingeConstraint,
         ClassName::BallSocketConstraint,
@@ -382,6 +389,7 @@ impl ClassName {
             ClassName::Attachment => "Attachment",
             ClassName::VehicleWheel => "VehicleWheel",
             ClassName::Ragdoll => "Ragdoll",
+            ClassName::Fracture => "Fracture",
             ClassName::WeldConstraint => "WeldConstraint",
             ClassName::HingeConstraint => "HingeConstraint",
             ClassName::BallSocketConstraint => "BallSocketConstraint",
@@ -1422,13 +1430,35 @@ impl ClassName {
                 // The Animator state to play when it's turned off, or "".
                 ("GetUpState", Value::String(String::new())),
             ],
-            ClassName::WeldConstraint => vec![
-                ("Part0", Value::Instance(None)),
-                ("Part1", Value::Instance(None)),
-                // Off, the two parts move apart; on again, they're welded
-                // where they are then.
-                ("Enabled", Value::Bool(true)),
+            ClassName::Fracture => vec![
+                // How many pieces Generate cuts the part into.
+                ("Pieces", Value::Number(12.0)),
+                // The same Seed always makes the same pieces.
+                ("Seed", Value::Number(0.0)),
+                // Uniform: pieces of a size; Impact: smaller toward the middle.
+                ("Pattern", fracture_pattern("Uniform")),
+                // What the faces inside the part, which the cuts make, look like.
+                ("InteriorMaterial", Value::Material(Material::Plastic)),
+                // Studs a second something must hit the part at to shatter it.
+                ("Threshold", Value::Number(60.0)),
+                // Seconds the pieces last before they fade out and are
+                // destroyed. 0 keeps them.
+                ("DebrisLifetime", Value::Number(5.0)),
+                // The pieces' file, set by Generate, such as
+                // "assets/models/Pane.fracture.glb". Empty: not generated yet.
+                ("PiecesId", Value::String(String::new())),
             ],
+            ClassName::WeldConstraint => {
+                let mut properties = vec![
+                    ("Part0", Value::Instance(None)),
+                    ("Part1", Value::Instance(None)),
+                    // Off, the two parts move apart; on again, they're welded
+                    // where they are then.
+                    ("Enabled", Value::Bool(true)),
+                ];
+                properties.extend(break_properties());
+                properties
+            }
             ClassName::HingeConstraint => {
                 let mut properties = joint_properties();
                 properties.extend([
@@ -1683,14 +1713,6 @@ impl ClassName {
             | ClassName::Attachment
             | ClassName::VehicleWheel
             | ClassName::Ragdoll
-            | ClassName::WeldConstraint
-            | ClassName::HingeConstraint
-            | ClassName::BallSocketConstraint
-            | ClassName::PrismaticConstraint
-            | ClassName::CylindricalConstraint
-            | ClassName::SpringConstraint
-            | ClassName::RopeConstraint
-            | ClassName::RodConstraint
             | ClassName::LinearVelocity
             | ClassName::AngularVelocity
             | ClassName::VectorForce
@@ -1711,6 +1733,17 @@ impl ClassName {
             // Fires with "Sight" or "Hearing" when it starts seeing or
             // hearing the player character.
             ClassName::NavigationAgent => &["PlayerSensed"],
+            // Fires once when it breaks past its BreakForce or BreakTorque.
+            ClassName::WeldConstraint
+            | ClassName::HingeConstraint
+            | ClassName::BallSocketConstraint
+            | ClassName::PrismaticConstraint
+            | ClassName::CylindricalConstraint
+            | ClassName::SpringConstraint
+            | ClassName::RopeConstraint
+            | ClassName::RodConstraint => &["Broken"],
+            // Fires when its part is replaced by its pieces.
+            ClassName::Fracture => &["Shattered"],
             // Fires when a sound that isn't looped plays to its end.
             ClassName::Sound => &["Ended"],
             // `StateChanged` fires with the new state's name and the old
@@ -1785,7 +1818,7 @@ fn widget_properties(
 /// What every joint constraint has (Phase 36): the Attachments it joins,
 /// whether it acts, and whether the game draws it.
 fn joint_properties() -> Vec<(&'static str, Value)> {
-    vec![
+    let mut properties = vec![
         ("Attachment0", Value::Instance(None)),
         ("Attachment1", Value::Instance(None)),
         // Off, it doesn't hold the parts at all.
@@ -1793,7 +1826,27 @@ fn joint_properties() -> Vec<(&'static str, Value)> {
         // On, the game draws it (a coil, rope, rod or axle) in `Color`.
         ("Visible", Value::Bool(false)),
         ("Color", Value::Color3(Color3::new(0.62, 0.64, 0.68))),
+    ];
+    properties.extend(break_properties());
+    properties
+}
+
+/// What makes a joint or weld break (Phase 42): past `BreakForce` (mass
+/// times studs a second squared) or `BreakTorque` it turns itself off and
+/// fires `Broken`. 0 never breaks.
+fn break_properties() -> [(&'static str, Value); 2] {
+    [
+        ("BreakForce", Value::Number(0.0)),
+        ("BreakTorque", Value::Number(0.0)),
     ]
+}
+
+/// A Fracture's `Pattern` item: Uniform or Impact.
+fn fracture_pattern(item: &str) -> Value {
+    Value::EnumItem(EnumItem {
+        enum_name: "FracturePattern".to_owned(),
+        item: item.to_owned(),
+    })
 }
 
 /// What turns a hinge, or a cylindrical constraint around its axis:

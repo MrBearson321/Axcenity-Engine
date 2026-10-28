@@ -19,6 +19,7 @@ axcenity-blocks = { path = "crates/blocks" }
 axcenity-blocks-runtime = { path = "crates/blocks-runtime" }
 axcenity-character = { path = "crates/character" }
 axcenity-core = { path = "crates/core" }
+axcenity-mesh-edit = { path = "crates/mesh_edit" }
 axcenity-nav = { path = "crates/nav" }
 axcenity-physics = { path = "crates/physics" }
 axcenity-project = { path = "crates/project" }
@@ -144,4 +145,9 @@ opt-level = 3
 # Building the navigation mesh walks every column of the world: 0.3 s for a
 # 512-stud terrain unoptimized, 50 ms optimized.
 [profile.dev.package.axcenity-nav]
+opt-level = 3
+
+# Generating a Fracture's pieces cuts the mesh hundreds of times: about 10
+# times faster optimized.
+[profile.dev.package.axcenity-mesh-edit]
 opt-level = 3

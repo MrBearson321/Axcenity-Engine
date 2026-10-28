@@ -3,6 +3,7 @@
 //! including how balls and cylinders stay round, and how terrain cells are
 //! split into triangles (`terrain/src/mesh.rs`).
 
+use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_2, TAU};
 use std::sync::Arc;
 
@@ -345,6 +346,9 @@ fn hull(model: &Model, half: Vec3) -> ColliderBuilder {
     if flat {
         return cuboid(half);
     }
+    if let Some(own) = own_convex_mesh(model, half) {
+        return own;
+    }
     // The model fills the 1×1×1 cube, so doubling the half size stretches it to the part.
     let corners: Vec<Vec3> = model
         .hull_points
@@ -352,6 +356,55 @@ fn hull(model: &Model, half: Vec3) -> ColliderBuilder {
         .map(|&corner| Vec3::from(corner) * half * 2.0)
         .collect();
     ColliderBuilder::convex_hull(&corners).unwrap_or_else(|| cuboid(half))
+}
+
+/// The most triangles a model may have to be checked for being convex.
+const OWN_MESH_TRIANGLES: usize = 512;
+
+/// A small model that's already convex (a Fracture's piece, Phase 42)
+/// collides as its own triangles, stretched like the hull. parry's hull of
+/// the corners can come out with faces that sink through the floor when an
+/// outline has nearly straight corners; the model's own faces don't.
+/// `None` for a bigger model, or one that isn't convex.
+fn own_convex_mesh(model: &Model, half: Vec3) -> Option<ColliderBuilder> {
+    let count: usize = model.primitives.iter().map(|p| p.indices.len() / 3).sum();
+    if count > OWN_MESH_TRIANGLES || model.rig.is_some() {
+        return None;
+    }
+    // Corners shared between primitives (a piece's outside and inside) are
+    // the same bits, so they become one vertex.
+    let mut index: HashMap<[u32; 3], u32> = HashMap::new();
+    let mut points: Vec<Vec3> = Vec::new();
+    let mut triangles: Vec<[u32; 3]> = Vec::new();
+    for primitive in &model.primitives {
+        let mut corner = |i: u32| {
+            let at = *primitive.positions.get(i as usize)?;
+            let next = points.len() as u32;
+            let id = *index.entry(at.map(f32::to_bits)).or_insert(next);
+            if id == next {
+                points.push(Vec3::from(at) * half * 2.0);
+            }
+            Some(id)
+        };
+        for &triangle in primitive.indices.as_chunks::<3>().0 {
+            let [a, b, c] = triangle.map(&mut corner);
+            triangles.push([a?, b?, c?]);
+        }
+    }
+    // Convex: every corner is on or behind every face.
+    let reach = (half * 2.0).max_element() * 1e-4;
+    for &[a, b, c] in &triangles {
+        let (a, b, c) = (points[a as usize], points[b as usize], points[c as usize]);
+        let normal = (b - a).cross(c - a);
+        if normal.length_squared() == 0.0 {
+            continue;
+        }
+        let normal = normal.normalize();
+        if points.iter().any(|&p| (p - a).dot(normal) > reach) {
+            return None;
+        }
+    }
+    ColliderBuilder::convex_mesh(points, &triangles)
 }
 
 /// A Terrain's heights as a heightfield `size` studs across, centered on

@@ -144,6 +144,10 @@ impl EditorApp {
                 self.build_ragdoll(id);
                 return;
             }
+            Edit::GenerateFracture => {
+                self.generate_fracture(id);
+                return;
+            }
             Edit::PickClip => {
                 if let Some(path) = self.pick_property_clip() {
                     self.apply(id, Edit::Property("Clip", Value::String(path)));
@@ -885,6 +889,30 @@ impl EditorApp {
         }
     }
 
+    /// Cuts the part the Fracture `id` is in into its pieces (Phase 42),
+    /// saves them, and sets its `PiecesId` as one undo step, or says why
+    /// it can't. The file stays when the step is undone.
+    pub(super) fn generate_fracture(&mut self, id: InstanceId) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            self.output
+                .warning("Open or save a project first: the pieces are saved in it.");
+            return;
+        };
+        match axcenity_mesh_edit::generate(&self.world, &self.assets, &folder, id) {
+            Ok(path) => {
+                let before = self.world.clone();
+                let _ = self
+                    .world
+                    .set_property(id, "PiecesId", Value::String(path.clone()));
+                let pieces = self.world.get(id).map_or("", |f| f.name()).to_owned();
+                self.history
+                    .record_world(&mut self.world, format!("Generate {pieces}"), before);
+                self.output.info(format!("Saved the pieces in {path}."));
+            }
+            Err(problem) => self.output.warning(problem),
+        }
+    }
+
     pub(super) fn change(&mut self, id: InstanceId, key: Field, label: String, edits: Vec<Edit>) {
         if self.play.is_some() {
             self.change_in_play(id, edits);
@@ -1146,6 +1174,7 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::OpenClip
         | Edit::Animate
         | Edit::BuildRagdoll
+        | Edit::GenerateFracture
         | Edit::PreviewSound(_)
         | Edit::Keep(..)
         | Edit::Attribute(..)

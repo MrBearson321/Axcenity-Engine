@@ -2,7 +2,9 @@
 //! library, a part's `ApplyImpulse`, `ApplyImpulseAtPosition`,
 //! `ApplyAngularImpulse` and `GetMass`, and its read-only `AssemblyMass`,
 //! `AssemblyCenterOfMass` and `CurrentPhysicalProperties`; and a Ragdoll's
-//! `ApplyImpulse(bone, impulse)` (Phase 41), which pushes one body.
+//! `ApplyImpulse(bone, impulse)` (Phase 41), which pushes one body; and a
+//! Fracture's `Shatter(point, force)` (Phase 42), which the host hands to
+//! physics before its next step.
 //!
 //! An impulse doesn't reach physics directly: it changes the part's
 //! `AssemblyLinearVelocity` and `AssemblyAngularVelocity` by the impulse
@@ -231,7 +233,37 @@ pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlu
             add_velocity(lua, body, "AssemblyLinearVelocity", change)
         },
     )?;
-    let mut methods = vec![(ClassName::Ragdoll, "ApplyImpulse", knock)];
+    let shatter = lua.create_function(
+        |lua, (this, point, force): (LuaInstance, mlua::Value, Option<f64>)| {
+            let call = "Shatter(point, force)";
+            let point = match point {
+                mlua::Value::Nil => None,
+                point => Some(vector_arg(lua, point, call)?),
+            };
+            let force = force.unwrap_or(0.0);
+            if !force.is_finite()
+                || point.is_some_and(|p| ![p.x, p.y, p.z].iter().all(|c| c.is_finite()))
+            {
+                return Err(mlua::Error::runtime(
+                    "Shatter needs a finite point and force",
+                ));
+            }
+            world(lua)?.get(this.0).ok_or_else(destroyed)?;
+            let mut shatters = lua
+                .app_data_mut::<crate::Shatters>()
+                .ok_or_else(|| mlua::Error::runtime("physics isn't ready"))?;
+            shatters.0.push(crate::Shatter {
+                fracture: this.0,
+                point,
+                force: force as f32,
+            });
+            Ok(())
+        },
+    )?;
+    let mut methods = vec![
+        (ClassName::Ragdoll, "ApplyImpulse", knock),
+        (ClassName::Fracture, "Shatter", shatter),
+    ];
     for class in [
         ClassName::Part,
         ClassName::MeshPart,
