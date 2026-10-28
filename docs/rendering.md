@@ -15,4 +15,4 @@ Map only. `render` draws a draw list. It does not know about Instances. Open the
 - Measuring drawing (`RenderStats`, per-pass GPU time, the benchmarks and their baseline): [rendering/performance.md](rendering/performance.md)
 - Sun shadows, and how shadow quality, render scale, anti-aliasing and ambient occlusion draw: [rendering/shadows.md](rendering/shadows.md)
 
-The Animation panel in the editor is [editor/import.md](editor/import.md). The Lua API is [scripting/api-animation.md](scripting/api-animation.md). Clip and state machine files are [project/animation-files.md](project/animation-files.md).
+The Animation panel in the editor is [editor/import.md](editor/import.md). The Lua API is [scripting/api-animation.md](scripting/api-animation.md). Clip and state machine files are [project/animation-files.md](project/animation-files.md). Cutscene sequences and the Sequencer tab are [project/sequences.md](project/sequences.md).

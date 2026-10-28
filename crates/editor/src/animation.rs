@@ -28,14 +28,14 @@
 mod clip_editor;
 mod controller_editor;
 mod graph;
-mod object_preview;
+pub(crate) mod object_preview;
 mod posing;
 pub(crate) mod preview;
-mod property_editor;
+pub(crate) mod property_editor;
 pub mod store;
 #[cfg(test)]
 mod testing;
-mod timeline;
+pub(crate) mod timeline;
 
 #[cfg(test)]
 pub use graph::{Node, words::when_words};

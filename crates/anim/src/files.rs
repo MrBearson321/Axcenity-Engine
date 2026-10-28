@@ -305,11 +305,13 @@ pub enum PropertyName {
     TextColor3,
     TextSize,
     ImageTransparency,
+    /// A Camera's (and a sequence's own camera keys', Phase 51).
+    FieldOfView,
     Bone,
 }
 
 impl PropertyName {
-    pub const ALL: [PropertyName; 11] = [
+    pub const ALL: [PropertyName; 12] = [
         PropertyName::Position,
         PropertyName::Orientation,
         PropertyName::Size,
@@ -320,6 +322,7 @@ impl PropertyName {
         PropertyName::TextColor3,
         PropertyName::TextSize,
         PropertyName::ImageTransparency,
+        PropertyName::FieldOfView,
         PropertyName::Bone,
     ];
 
@@ -335,6 +338,7 @@ impl PropertyName {
             PropertyName::TextColor3 => "TextColor3",
             PropertyName::TextSize => "TextSize",
             PropertyName::ImageTransparency => "ImageTransparency",
+            PropertyName::FieldOfView => "FieldOfView",
             PropertyName::Bone => "Bone",
         }
     }
@@ -357,7 +361,8 @@ impl PropertyName {
             PropertyName::Transparency
             | PropertyName::BackgroundTransparency
             | PropertyName::TextSize
-            | PropertyName::ImageTransparency => &[1],
+            | PropertyName::ImageTransparency
+            | PropertyName::FieldOfView => &[1],
             PropertyName::Bone => &[10],
         }
     }

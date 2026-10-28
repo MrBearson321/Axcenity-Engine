@@ -149,6 +149,10 @@ impl Context {
             crate::players::methods(&lua)
                 .expect("creating Player methods only fails when out of memory"),
         );
+        methods.extend(
+            crate::sequence::methods(&lua)
+                .expect("creating Sequence methods only fails when out of memory"),
+        );
         methods.push((
             axcenity_core::ClassName::DataModel,
             "GetService",

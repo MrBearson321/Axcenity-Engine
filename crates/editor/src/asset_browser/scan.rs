@@ -32,6 +32,9 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
     if lower.ends_with(axcenity_assets::DATA_TABLE_SUFFIX) {
         return Some(AssetKind::DataTable);
     }
+    if lower.ends_with(axcenity_anim::sequence::SEQUENCE_EXTENSION) {
+        return Some(AssetKind::Sequence);
+    }
     // Reflection probe bakes belong to their probes, and aren't picked here.
     if axcenity_assets::is_probe_file(&lower) {
         return None;

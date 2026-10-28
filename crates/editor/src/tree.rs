@@ -53,6 +53,8 @@ pub enum Insertable {
     ParticleEmitter,
     Animator,
     Animation,
+    /// Plays a cutscene sequence (Phase 51), in the Workspace.
+    Sequence,
     /// A ragdoll for the selected skinned MeshPart; Build in its Properties
     /// makes its bodies and joints.
     Ragdoll,
@@ -147,10 +149,12 @@ impl Insertable {
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
     /// Animators (skeletal) and Animations (property clips).
     /// Ragdolls go in a skinned MeshPart too.
-    pub const ANIMATION: [Insertable; 3] = [
+    /// A Sequence plays a cutscene, from the Workspace.
+    pub const ANIMATION: [Insertable; 4] = [
         Insertable::Animator,
         Insertable::Animation,
         Insertable::Ragdoll,
+        Insertable::Sequence,
     ];
     /// Fractures, which shatter the part they're inside.
     pub const BREAKING: [Insertable; 1] = [Insertable::Fracture];
@@ -246,6 +250,7 @@ impl Insertable {
             Insertable::Ragdoll => "Ragdoll",
             Insertable::Fracture => "Fracture",
             Insertable::Animation => "Animation",
+            Insertable::Sequence => "Sequence",
             Insertable::ThirdPersonController => "Third Person",
             Insertable::FirstPersonController => "First Person",
             Insertable::NavigationAgent => "Agent",
@@ -306,6 +311,7 @@ impl Insertable {
             Insertable::Ragdoll => ClassName::Ragdoll,
             Insertable::Fracture => ClassName::Fracture,
             Insertable::Animation => ClassName::Animation,
+            Insertable::Sequence => ClassName::Sequence,
             Insertable::ThirdPersonController => ClassName::ThirdPersonController,
             Insertable::FirstPersonController => ClassName::FirstPersonController,
             Insertable::NavigationAgent => ClassName::NavigationAgent,

@@ -82,6 +82,8 @@ pub enum AssetKind {
     BehaviorTree,
     /// A data table scripts read (`assets/data/*.data.json`).
     DataTable,
+    /// A cutscene sequence (`*.sequence.json`, Phase 51).
+    Sequence,
     /// A sky image (`.exr` or `.hdr`) for Lighting's `SkyImage`.
     Sky,
 }
@@ -101,6 +103,7 @@ impl AssetKind {
             AssetKind::Controller => theme::AnimKind::StateMachine.icon(),
             AssetKind::BehaviorTree => icons::BRAIN,
             AssetKind::DataTable => icons::TABLE,
+            AssetKind::Sequence => icons::FILM_SLATE,
             AssetKind::Sky => icons::SUN_HORIZON,
         }
     }
@@ -120,6 +123,7 @@ impl AssetKind {
             AssetKind::Controller => theme::AnimKind::StateMachine.color(visuals),
             AssetKind::BehaviorTree => theme::class_color(ClassName::NavigationAgent, visuals),
             AssetKind::DataTable => theme::class_color(ClassName::Script, visuals),
+            AssetKind::Sequence => theme::AnimKind::Clip.color(visuals),
             AssetKind::Sky => theme::class_color(ClassName::Lighting, visuals),
         }
     }
@@ -140,6 +144,7 @@ impl AssetKind {
             AssetKind::Controller => "State machine",
             AssetKind::BehaviorTree => "Behavior tree",
             AssetKind::DataTable => "Data table",
+            AssetKind::Sequence => "Sequence",
             AssetKind::Sky => "Sky",
         }
     }
@@ -180,6 +185,9 @@ impl AssetKind {
             AssetKind::DataTable => {
                 "Double-click to open it in the Data Table tab. Scripts read it with \
                  DataService:GetTable."
+            }
+            AssetKind::Sequence => {
+                "Double-click to open it in the Sequencer tab. A Sequence Instance plays it."
             }
             AssetKind::Sky => {
                 "Double-click, or drag into the viewport or onto Lighting's SkyImage, to use it \
@@ -302,7 +310,10 @@ impl Category {
             Category::Audio => kind == AssetKind::Audio,
             Category::Particles => kind == AssetKind::Particle,
             Category::Animations => {
-                matches!(kind, AssetKind::Animation | AssetKind::Controller)
+                matches!(
+                    kind,
+                    AssetKind::Animation | AssetKind::Controller | AssetKind::Sequence
+                )
             }
             Category::Skies => kind == AssetKind::Sky,
             // Which files are global is the path's, checked by the panel.

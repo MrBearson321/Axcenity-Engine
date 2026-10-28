@@ -275,6 +275,10 @@ impl Writer {
             BlockKind::WhenSoundEnded { sound, body } => {
                 (format!("{}.Ended:Connect(function()", target(sound)?), body)
             }
+            BlockKind::WhenCutsceneFinished { sequence, body } => (
+                format!("{}.Completed:Connect(function()", target(sequence)?),
+                body,
+            ),
             BlockKind::WhenStateChanged { animator, body } => (
                 format!(
                     "{}.StateChanged:Connect(function(state, previous)",
@@ -743,6 +747,9 @@ impl Writer {
                 self.line(format!("{}.{property} = {value}", target(t)?));
             }
             BlockKind::PlaySound { target: t } => self.line(format!("{}:Play()", target(t)?)),
+            BlockKind::PlayCutscene { sequence } => {
+                self.line(format!("{}:Play()", target(sequence)?))
+            }
             BlockKind::StopSound { target: t } => self.line(format!("{}:Stop()", target(t)?)),
             BlockKind::PauseSound { target: t } => self.line(format!("{}:Pause()", target(t)?)),
             BlockKind::ResumeSound { target: t } => {
@@ -891,6 +898,7 @@ impl Writer {
             | BlockKind::BeforeRender { .. }
             | BlockKind::WhenEventFired { .. }
             | BlockKind::WhenSoundEnded { .. }
+            | BlockKind::WhenCutsceneFinished { .. }
             | BlockKind::WhenStateChanged { .. }
             | BlockKind::WhenAnimationEvent { .. }
             | BlockKind::WhenAgentSenses { .. }

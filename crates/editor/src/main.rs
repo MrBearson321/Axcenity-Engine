@@ -50,6 +50,7 @@ mod ribbon;
 mod ribbon_tabs;
 mod screen;
 mod scripts;
+mod sequencer;
 mod side_warnings;
 #[cfg(test)]
 mod snapshot;

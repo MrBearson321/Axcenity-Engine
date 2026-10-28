@@ -54,6 +54,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::BeforeRender { .. }
         | BlockKind::WhenEventFired { .. }
         | BlockKind::WhenSoundEnded { .. }
+        | BlockKind::WhenCutsceneFinished { .. }
         | BlockKind::WhenStateChanged { .. }
         | BlockKind::WhenAnimationEvent { .. }
         | BlockKind::WhenAgentSenses { .. }
@@ -135,9 +136,10 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::LoadLevel { .. } => 70,
         BlockKind::AddLevel { .. } => 71,
         BlockKind::RemoveLevel { .. } => 72,
+        BlockKind::PlayCutscene { .. } => 73,
     })
 }
-const STATEMENT_COUNT: usize = 73;
+const STATEMENT_COUNT: usize = 74;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -513,6 +515,12 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
             "LevelService:RemoveLevel(\"Dungeon\")",
         ),
         (
+            BlockKind::PlayCutscene {
+                sequence: "Intro".to_owned(),
+            },
+            "workspace.Intro:Play()",
+        ),
+        (
             BlockKind::SetToneMapping {
                 curve: "Filmic".to_owned(),
             },
@@ -832,6 +840,13 @@ fn translation_covers_every_event_block() {
                 body: quiet(43),
             },
         ),
+        block(
+            90,
+            BlockKind::WhenCutsceneFinished {
+                sequence: "Intro".to_owned(),
+                body: quiet(91),
+            },
+        ),
     ];
     let source = translate(&script(blocks)).unwrap().source;
     for lua in [
@@ -845,6 +860,7 @@ fn translation_covers_every_event_block() {
         "workspace.Menu.Start.Activated:Connect(function()",
         "RunService.Heartbeat:Connect(function(deltaTime)",
         "workspace.Music.Ended:Connect(function()",
+        "workspace.Intro.Completed:Connect(function()",
         "workspace.Hero.Animator.StateChanged:Connect(function(state, previous)",
         "workspace.Hero.Animator.AnimationEvent:Connect(function(name)",
         "    if name == \"Footstep\" then",
@@ -864,7 +880,7 @@ fn translation_covers_every_event_block() {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 17, "{source}");
+    assert_eq!(source.matches("do return end").count(), 18, "{source}");
 }
 
 #[test]
@@ -1717,6 +1733,13 @@ fn every_block_script() -> BlockScript {
             15,
             BlockKind::WhenEventFired {
                 event: "Events.Scored".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            19,
+            BlockKind::WhenCutsceneFinished {
+                sequence: "Intro".to_owned(),
                 body: body(),
             },
         ),

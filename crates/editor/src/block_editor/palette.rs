@@ -446,6 +446,13 @@ pub(super) fn palette(
                     animator: animator.clone(),
                     animation: first(Filter::Animations),
                 }),
+                B(BlockKind::PlayCutscene {
+                    sequence: first(Filter::Sequences),
+                }),
+                B(BlockKind::WhenCutsceneFinished {
+                    sequence: first(Filter::Sequences),
+                    body: Vec::new(),
+                }),
                 B(BlockKind::WhenStateChanged {
                     animator: animator.clone(),
                     body: Vec::new(),

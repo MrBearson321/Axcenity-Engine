@@ -56,6 +56,9 @@ pub enum Pane {
     Tags,
     /// The project's levels (`levels.rs`, Phase 48). Starts closed.
     Levels,
+    /// A cutscene sequence on a timeline (`sequencer.rs`, Phase 51).
+    /// Starts closed; opening a sequence opens it.
+    Sequencer,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -63,7 +66,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 14] = [
+    pub const CLOSABLE: [Pane; 15] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -78,6 +81,7 @@ impl Pane {
         Pane::Material,
         Pane::Tags,
         Pane::Levels,
+        Pane::Sequencer,
     ];
 
     pub fn label(self) -> &'static str {
@@ -97,6 +101,7 @@ impl Pane {
             Pane::Material => "Material",
             Pane::Tags => "Tags",
             Pane::Levels => "Levels",
+            Pane::Sequencer => "Sequencer",
             Pane::Script(_) => "Script",
         }
     }
@@ -118,6 +123,7 @@ impl Pane {
             Pane::Material => icons::SPHERE,
             Pane::Tags => icons::TAG,
             Pane::Levels => icons::STACK,
+            Pane::Sequencer => icons::FILM_SLATE,
             Pane::Script(_) => icons::CODE,
         }
     }
@@ -185,7 +191,8 @@ impl Layout {
             | Pane::UiDesigner
             | Pane::BehaviorTree
             | Pane::DataTable
-            | Pane::Material => Some(Pane::Scene),
+            | Pane::Material
+            | Pane::Sequencer => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain | Pane::Tags | Pane::Levels => Some(Pane::Properties),
             Pane::Script(_) => Some(Pane::Scene),
@@ -427,6 +434,7 @@ mod tests {
                     | Pane::Material
                     | Pane::Tags
                     | Pane::Levels
+                    | Pane::Sequencer
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;

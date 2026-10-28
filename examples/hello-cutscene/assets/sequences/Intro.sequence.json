@@ -1,0 +1,267 @@
+{
+  "format_version": 1,
+  "duration": 20.0,
+  "camera_cuts": [
+    {
+      "id": "wide",
+      "time": 0.0,
+      "camera": "Workspace/ShotWide"
+    },
+    {
+      "id": "door",
+      "time": 7.0,
+      "camera": "Workspace/ShotDoor"
+    },
+    {
+      "id": "follow",
+      "time": 13.0,
+      "camera": ""
+    }
+  ],
+  "tracks": [
+    {
+      "id": "hero-walk",
+      "target": "tag:Hero",
+      "property": "Position",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 0.0,
+          "value": [
+            -10.0,
+            2.6,
+            4.0
+          ],
+          "interp": "Linear"
+        },
+        {
+          "id": "k2",
+          "time": 12.0,
+          "value": [
+            0.0,
+            2.6,
+            -6.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    },
+    {
+      "id": "hero-turn",
+      "target": "tag:Hero",
+      "property": "Orientation",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 0.0,
+          "value": [
+            0.0,
+            -45.0,
+            0.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    },
+    {
+      "id": "door-open",
+      "target": "Workspace/Door",
+      "property": "Position",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 8.0,
+          "value": [
+            0.0,
+            3.0,
+            -9.4
+          ],
+          "interp": "Ease",
+          "easing": {
+            "style": "Quad",
+            "direction": "InOut"
+          }
+        },
+        {
+          "id": "k2",
+          "time": 11.0,
+          "value": [
+            4.2,
+            3.0,
+            -9.4
+          ],
+          "interp": "Linear"
+        }
+      ]
+    },
+    {
+      "id": "camera-position",
+      "target": "@Camera",
+      "property": "Position",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 13.0,
+          "value": [
+            -7.0,
+            5.0,
+            6.0
+          ],
+          "interp": "Ease",
+          "easing": {
+            "style": "Sine",
+            "direction": "InOut"
+          }
+        },
+        {
+          "id": "k2",
+          "time": 20.0,
+          "value": [
+            0.0,
+            5.0,
+            1.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    },
+    {
+      "id": "camera-turn",
+      "target": "@Camera",
+      "property": "Orientation",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 13.0,
+          "value": [
+            -8.0,
+            -28.0,
+            0.0
+          ],
+          "interp": "Ease",
+          "easing": {
+            "style": "Sine",
+            "direction": "InOut"
+          }
+        },
+        {
+          "id": "k2",
+          "time": 20.0,
+          "value": [
+            -9.0,
+            0.0,
+            0.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    },
+    {
+      "id": "camera-lens",
+      "target": "@Camera",
+      "property": "FieldOfView",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 13.0,
+          "value": [
+            50.0
+          ],
+          "interp": "Ease",
+          "easing": {
+            "style": "Sine",
+            "direction": "InOut"
+          }
+        },
+        {
+          "id": "k2",
+          "time": 20.0,
+          "value": [
+            35.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    }
+  ],
+  "animations": [
+    {
+      "id": "walk",
+      "start": 0.0,
+      "end": 12.0,
+      "target": "tag:Hero",
+      "clip": "assets/animations/Hero/Walk.anim.json",
+      "blend_in": 0.3,
+      "blend_out": 0.3
+    }
+  ],
+  "audio": [
+    {
+      "id": "music",
+      "start": 0.0,
+      "end": 20.0,
+      "sound": "Workspace/Music"
+    }
+  ],
+  "events": [
+    {
+      "time": 8.0,
+      "name": "DoorOpens"
+    },
+    {
+      "time": 12.0,
+      "name": "Arrived"
+    }
+  ],
+  "fades": [
+    {
+      "id": "fade-in",
+      "start": 0.0,
+      "end": 1.5,
+      "from": 1.0,
+      "to": 0.0,
+      "color": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "fade-out",
+      "start": 18.5,
+      "end": 20.0,
+      "from": 0.0,
+      "to": 1.0,
+      "color": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "letterbox": [
+    {
+      "id": "bars",
+      "start": 0.0,
+      "end": 20.0,
+      "size": 0.1,
+      "ramp": 1.0
+    }
+  ],
+  "subtitles": [
+    {
+      "id": "line1",
+      "start": 2.0,
+      "end": 6.0,
+      "key": "intro.line1",
+      "text": "Where does this door lead?"
+    },
+    {
+      "id": "line2",
+      "start": 9.0,
+      "end": 13.0,
+      "key": "intro.line2",
+      "text": "Only one way to find out."
+    }
+  ]
+}

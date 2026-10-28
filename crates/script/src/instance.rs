@@ -184,6 +184,13 @@ pub(crate) fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Va
         let state = world.animator(id).map(|s| s.current_state.clone());
         return state.unwrap_or_default().into_lua(lua);
     }
+    // A Sequence's live playback (see `sequence.rs`).
+    if class == ClassName::Sequence
+        && crate::sequence::is_field(key)
+        && let Some(value) = crate::sequence::get(lua, id, key)?
+    {
+        return Ok(value);
+    }
     // A track's live playback (see `core::AnimationTrackState`).
     if class == ClassName::AnimationTrack
         && let Some(track) = world.animation_track(id)
@@ -304,6 +311,9 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
             )))
         }
         "Health" if class == Some(ClassName::Health) => crate::health::set(lua, id, value),
+        key if class == Some(ClassName::Sequence) && crate::sequence::is_field(key) => {
+            crate::sequence::set(lua, id, key, value)
+        }
         "Team" if class == Some(ClassName::Player) => crate::players::set(lua, id, value),
         key if class == Some(ClassName::Humanoid) && crate::humanoid::is_field(key) => {
             crate::humanoid::set(lua, id, key, value)

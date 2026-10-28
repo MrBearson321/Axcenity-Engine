@@ -259,6 +259,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WhenEventFired { .. }
         | BlockKind::FireEvent { .. }
         | BlockKind::WhenSoundEnded { .. }
+        | BlockKind::WhenCutsceneFinished { .. }
         | BlockKind::WhenPromptTriggered { .. }
         | BlockKind::WhenPartClicked { .. }
         | BlockKind::Unattached { .. } => Category::Events,
@@ -320,7 +321,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetAnimatorTrigger { .. }
         | BlockKind::ResetAnimatorTrigger { .. }
         | BlockKind::PlayAnimatorState { .. }
-        | BlockKind::PlayAnimation { .. } => Category::Animation,
+        | BlockKind::PlayAnimation { .. }
+        | BlockKind::PlayCutscene { .. } => Category::Animation,
         BlockKind::Tween { .. }
         | BlockKind::SlideIn { .. }
         | BlockKind::FadeIn { .. }
@@ -372,6 +374,7 @@ enum Filter {
     Gui,
     Animators,
     Animations,
+    Sequences,
     /// NavigationAgents.
     Agents,
     Checkpoints,
@@ -402,6 +405,7 @@ impl Filter {
             Filter::Widgets => class.is_value_widget(),
             Filter::Animators => class == ClassName::Animator,
             Filter::Animations => class == ClassName::Animation,
+            Filter::Sequences => class == ClassName::Sequence,
             Filter::Agents => class == ClassName::NavigationAgent,
             Filter::Checkpoints => class == ClassName::Checkpoint,
             Filter::Seats => class.is_seat(),
@@ -443,6 +447,7 @@ impl Filter {
             Filter::Gui => "Frame",
             Filter::Animators => "Model.Animator",
             Filter::Animations => "Model.Animation",
+            Filter::Sequences => "Sequence",
             Filter::Agents => "Model.NavigationAgent",
             Filter::Checkpoints => "Checkpoint",
             Filter::Seats => "Seat",
@@ -614,6 +619,11 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("when"),
             Object(sound, Filter::Sounds),
             label("ends"),
+        ])],
+        BlockKind::WhenCutsceneFinished { sequence, .. } => vec![Row(vec![
+            label("when cutscene"),
+            Object(sequence, Filter::Sequences),
+            label("finishes"),
         ])],
         BlockKind::WhenStateChanged { animator, .. } => vec![Row(vec![
             label("when"),
@@ -1029,6 +1039,12 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             vec![Row(vec![
                 label("play sound"),
                 Object(target, Filter::Sounds),
+            ])]
+        }
+        BlockKind::PlayCutscene { sequence } => {
+            vec![Row(vec![
+                label("play cutscene"),
+                Object(sequence, Filter::Sequences),
             ])]
         }
         BlockKind::StopSound { target } => {

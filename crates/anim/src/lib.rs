@@ -17,6 +17,9 @@
 //!   in a world each frame, posing skeletons ([`Poses`]) and setting keyed
 //!   properties; owned by the host like physics.
 //!
+//! - [`sequence`]: cutscene sequences (`*.sequence.json`) and putting a
+//!   world where one has it at a time, shared by the editor's preview and
+//!   the Sequence Instance.
 //! - [`ragdoll`]: building a Ragdoll's capsules and joints from a skeleton,
 //!   and the pose its bodies give the bones while physics moves them.
 //!
@@ -32,6 +35,7 @@ pub mod files;
 pub mod ik;
 mod property_clip;
 pub mod ragdoll;
+pub mod sequence;
 
 pub use animators::{AnimatorEvent, Animators, Poses, load_clip, read_state_machine};
 pub use bones::{

@@ -106,6 +106,7 @@ impl EditorApp {
             AssetKind::Controller => self.drop_controller(entry, spot),
             AssetKind::BehaviorTree => self.drop_behavior_tree(&entry.path, spot.part),
             AssetKind::DataTable => self.open_data_table(&entry.path),
+            AssetKind::Sequence => self.open_sequence(&entry.path),
             AssetKind::Sky => self.ask_sky(entry.path.clone()),
         }
     }
@@ -626,6 +627,9 @@ impl EditorApp {
             }
             Some(AssetKind::DataTable) => {
                 Err("data tables are made with New table in the Data Table tab".to_owned())
+            }
+            Some(AssetKind::Sequence) => {
+                Err("sequences are made with New in the Sequencer tab".to_owned())
             }
             Some(AssetKind::TextureSet) => {
                 Err("texture sets are saved with Get texture in the Assets panel".to_owned())

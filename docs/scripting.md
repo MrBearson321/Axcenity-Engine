@@ -18,6 +18,7 @@ Map only. Luau and block scripts (shown as blocks or as a graph) share one runti
 - TweenService, TweenInfo and Tweens: [scripting/api-tween.md](scripting/api-tween.md)
 - SaveService, save slots and Checkpoints: [architecture/saves.md](architecture/saves.md)
 - LevelService (levels, `LoadLevel`, `AddLevel`): [project/levels.md](project/levels.md)
+- Sequence (cutscenes: `Play`, `Completed`, `EventReached`, skipping, locked input): [project/sequences.md](project/sequences.md)
 - DataService and data tables: [project/data-tables.md](project/data-tables.md)
 - LocalizationService, the string table and `TextKey`: [ui.md](ui.md)
 - GuiService (text scale, contrast, reduced motion) and `AccessibleName`: [ui.md](ui.md)

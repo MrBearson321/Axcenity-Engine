@@ -194,7 +194,7 @@ fn load(levels: &mut Levels, world: &mut World, name: &str) -> mlua::Result<()> 
 }
 
 /// Copies the level `name` into a new Model of that name in the Workspace.
-fn add(levels: &mut Levels, world: &mut World, name: &str) -> mlua::Result<InstanceId> {
+pub(crate) fn add(levels: &mut Levels, world: &mut World, name: &str) -> mlua::Result<InstanceId> {
     if levels.added.iter().any(|(added, _)| added == name) {
         return Err(mlua::Error::runtime(format!(
             "the level \"{name}\" is added already; RemoveLevel(\"{name}\") takes it out"
@@ -221,7 +221,7 @@ fn add(levels: &mut Levels, world: &mut World, name: &str) -> mlua::Result<Insta
 }
 
 /// Takes the added level `name` out of the Workspace.
-fn remove(levels: &mut Levels, world: &mut World, name: &str) -> mlua::Result<()> {
+pub(crate) fn remove(levels: &mut Levels, world: &mut World, name: &str) -> mlua::Result<()> {
     let Some(index) = levels.added.iter().position(|(added, _)| added == name) else {
         return Err(mlua::Error::runtime(format!(
             "the level \"{name}\" isn't added; AddLevel(\"{name}\") adds it"

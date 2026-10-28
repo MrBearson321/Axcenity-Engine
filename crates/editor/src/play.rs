@@ -412,6 +412,12 @@ impl Session {
             if self.panic_next_frame {
                 panic!("a deliberate engine panic, from Debug > Panic during Play");
             }
+            // A Sequence that locks input leaves the character still.
+            let motion = if self.scripts.input_locked(&self.world) {
+                MoveInput::default()
+            } else {
+                motion
+            };
             self.characters
                 .step(&mut self.world, &self.assets, motion, seconds as f32);
             let seats: Vec<_> = self

@@ -171,6 +171,10 @@ pub enum ClassName {
     /// One Animation loaded on an Animator (`animator:LoadAnimation`), to
     /// play, stop and blend. Made by the engine, never saved.
     AnimationTrack,
+    /// Plays a cutscene sequence (`*.sequence.json`, Phase 51): its camera
+    /// cuts, property keys, clips, sounds, events, fades, letterbox,
+    /// subtitles and levels, from `Play` until `Completed`.
+    Sequence,
     /// A landscape: a heightfield (kept beside the Instance, see
     /// [`TerrainData`](crate::TerrainData)) shaded by its TerrainLayers.
     Terrain,
@@ -302,7 +306,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 94] = [
+    pub const ALL: [ClassName; 95] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -355,6 +359,7 @@ impl ClassName {
         ClassName::Animator,
         ClassName::Animation,
         ClassName::AnimationTrack,
+        ClassName::Sequence,
         ClassName::Terrain,
         ClassName::TerrainLayer,
         ClassName::ThirdPersonController,
@@ -455,6 +460,7 @@ impl ClassName {
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
             ClassName::AnimationTrack => "AnimationTrack",
+            ClassName::Sequence => "Sequence",
             ClassName::Terrain => "Terrain",
             ClassName::TerrainLayer => "TerrainLayer",
             ClassName::ThirdPersonController => "ThirdPersonController",
@@ -1289,6 +1295,18 @@ impl ClassName {
                 // LoadAnimation uses the clip's own.
                 ("Looped", Value::Bool(false)),
             ],
+            ClassName::Sequence => vec![
+                // The sequence file, such as
+                // "assets/sequences/Intro.sequence.json".
+                ("SequenceId", Value::String(String::new())),
+                // On, it plays when the game starts.
+                ("AutoPlay", Value::Bool(false)),
+                // On, the Menu action jumps it to its end.
+                ("Skippable", Value::Bool(true)),
+                // On, the player can't move the character or use the game's
+                // input while it plays.
+                ("LockPlayerInput", Value::Bool(true)),
+            ],
             ClassName::Sound => vec![
                 ("SoundId", Value::String(String::new())),
                 ("Volume", Value::Number(1.0)),
@@ -2096,6 +2114,9 @@ impl ClassName {
             // with an event's name as it passes, which
             // `GetMarkerReachedSignal(name)` hears one name of.
             ClassName::AnimationTrack => &["Stopped", "KeyframeReached"],
+            // `Completed` once when it reaches its end (or is skipped there);
+            // `EventReached` with an event track's name as it passes.
+            ClassName::Sequence => &["Completed", "EventReached"],
             // Fire on both parts when two parts start and stop touching.
             ClassName::Part
             | ClassName::MeshPart

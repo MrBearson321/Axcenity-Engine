@@ -1,0 +1,16 @@
+{
+  "languages": [
+    "English",
+    "Français"
+  ],
+  "entries": {
+    "intro.line1": {
+      "English": "Where does this door lead?",
+      "Français": "Où mène cette porte ?"
+    },
+    "intro.line2": {
+      "English": "Only one way to find out.",
+      "Français": "Un seul moyen de le savoir."
+    }
+  }
+}

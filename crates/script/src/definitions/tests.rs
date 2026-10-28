@@ -327,6 +327,7 @@ fn described_fields_and_methods_exist() {
         (ClassName::Players, "game:GetService('Players')"),
         (ClassName::Team, "Instance.new('Team')"),
         (ClassName::Animation, "Instance.new('Animation')"),
+        (ClassName::Sequence, "Instance.new('Sequence')"),
         (
             ClassName::AnimationTrack,
             "Instance.new('Animator'):LoadAnimation(Instance.new('Animation'))",

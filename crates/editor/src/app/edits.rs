@@ -1073,6 +1073,7 @@ impl EditorApp {
         {
             self.follow_start_level();
         }
+        self.sync_sequence(&files);
         self.animation.sync_after_history(
             &project,
             &self.assets,

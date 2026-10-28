@@ -461,6 +461,15 @@ impl<'a> Converter<'a> {
                 let body = self.body(&function.body, Scope::default());
                 Some(Block::new(BlockKind::WhenSoundEnded { sound, body }))
             }
+            "Completed" => {
+                let sequence = self.target(object)?;
+                let function = self.handler(handler, 0)?;
+                let body = self.body(&function.body, Scope::default());
+                Some(Block::new(BlockKind::WhenCutsceneFinished {
+                    sequence,
+                    body,
+                }))
+            }
             "StateChanged" => {
                 let animator = self.target(object)?;
                 let function = self.handler(handler, 2)?;

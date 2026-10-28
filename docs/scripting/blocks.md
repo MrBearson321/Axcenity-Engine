@@ -21,6 +21,7 @@ How each block becomes Lua. One-way: blocks translate to Lua, and there is one r
 | | when *widget* value changes (a Slider, Toggle, Dropdown or ProgressBar) | `widget.ValueChanged:Connect(function() … end)`; the body reads the new value as the widget's `Value` property |
 | | every frame | `RunService.Heartbeat:Connect(function(deltaTime) … end)` |
 | | when *sound* ends | `sound.Ended:Connect(function() … end)` |
+| | when cutscene *sequence* finishes (Phase 51) | `sequence.Completed:Connect(function() … end)` ([../project/sequences.md](../project/sequences.md)) |
 | | every frame, before physics; every frame, before drawing (client) (Phase 32) | `RunService.Stepped:Connect(function(time, deltaTime) … end)`; `RunService.RenderStepped:Connect(function(deltaTime) … end)` |
 | | when event *name* fires, fire event *name* (Phase 32) | `game.ReplicatedStorage.name.Event:Connect(function() … end)`; `game.ReplicatedStorage.name:Fire()`. *name* is a BindableEvent's dotted path in ReplicatedStorage (`translate::stored`); the menu suggests the ones there (the editor's ReplicatedStorage entry in the objects, `block_editor::STORAGE_PATH`) |
 | Control | wait, wait until | `task.wait(n)`; `while not (c) do task.wait() end` |
@@ -45,6 +46,7 @@ How each block becomes Lua. One-way: blocks translate to Lua, and there is one r
 | Animation | set trigger *name* of *animator*, reset trigger, set *bool* of *animator* to *true/false*, set *number* of *animator* to *n*, play state *s* of *animator*, play animation *animation* on *animator* | `animator:SetTrigger("name")`, `:ResetTrigger("name")`, `:SetBool("name", v)`, `:SetNumber("name", n)`, `:Play("s")`, `animator:LoadAnimation(animation):Play()` |
 | | when *animator* changes state, when *animator* reaches event *e* | `animator.StateChanged:Connect(function(state, previous) … end)`; `animator.AnimationEvent:Connect(function(name) if name == "e" then … end end)` |
 | | *bool* of *animator*, *number* of *animator*, CurrentState of *animator* | `animator:GetBool("name")` (pointed), `animator:GetNumber("name")`, `animator.CurrentState` (the property reporter, set to CurrentState) |
+| | play cutscene *sequence* (Phase 51) | `sequence:Play()` ([../project/sequences.md](../project/sequences.md)); switched from Code back to Blocks it reads as play sound, the same Lua |
 | Tweens | tween *property* of *object* to *v* over *n* seconds *style* *direction* | `TweenService:Create(object, TweenInfo.new(n, Enum.EasingStyle.Style, Enum.EasingDirection.Direction), {Property = v}):Play()` |
 | | slide *object* in from left / right / top / bottom over *n* seconds | `do local info = TweenInfo.new(n) local goal = object.Position object.Position = goal - UDim2.fromScale(1, 0) TweenService:Create(object, info, {Position = goal}):Play() end` (on its own lines; `+` for right and bottom, `fromScale(0, 1)` for top and bottom) |
 | | fade *object* in / out over *n* seconds | `TweenService:Create(object, TweenInfo.new(n), {BackgroundTransparency = 0})` (1 for out) `:Play()` |

@@ -764,6 +764,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Animator => AnimKind::Animator.icon(),
         ClassName::Animation => AnimKind::Animation.icon(),
         ClassName::AnimationTrack => icons::PLAY_CIRCLE,
+        ClassName::Sequence => icons::FILM_SLATE,
         ClassName::Terrain => icons::MOUNTAINS,
         ClassName::TerrainLayer => icons::STACK,
         ClassName::ThirdPersonController => icons::PERSON_SIMPLE_WALK,

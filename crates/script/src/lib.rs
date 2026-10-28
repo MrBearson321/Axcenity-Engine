@@ -77,6 +77,7 @@ mod sandbox;
 mod save;
 mod scheduler;
 mod seat;
+mod sequence;
 mod sides;
 mod task;
 mod tool;
@@ -109,6 +110,7 @@ pub use input::KeyEvent;
 pub use levels::Levels;
 pub use prompt::ShownPrompt;
 pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
+pub use sequence::sound_actions as sequence_sound_actions;
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
 pub use watchdog::DEFAULT_LIMIT as WATCHDOG_LIMIT;
 
@@ -229,6 +231,8 @@ pub struct ScriptRuntime {
     levels: levels::SharedLevels,
     /// Levels loaded since the host last asked, for its loading screen.
     level_loads: Vec<String>,
+    /// Sequences played on either side (Phase 51).
+    sequences: sequence::SharedSequences,
     /// Every script and ModuleScript started, in the order they first
     /// started, with the code they run now, so they can run again.
     started: Vec<Started>,
@@ -266,6 +270,9 @@ impl ScriptRuntime {
         client.lua.set_app_data(saves.clone());
         server.lua.set_app_data(levels.clone());
         client.lua.set_app_data(levels.clone());
+        let sequences = sequence::SharedSequences::default();
+        server.lua.set_app_data(sequences.clone());
+        client.lua.set_app_data(sequences.clone());
         Self {
             server,
             client,
@@ -285,6 +292,7 @@ impl ScriptRuntime {
             saves,
             levels,
             level_loads: Vec::new(),
+            sequences,
             started: Vec::new(),
             clones: Vec::new(),
             starting_clones: false,
@@ -657,6 +665,31 @@ impl ScriptRuntime {
     pub fn input_events(&mut self, world: &mut World, events: &[InputEvent]) {
         // Changes made since the last frame, such as by the editor.
         self.fire_changes(world);
+        // The Menu action skips a skippable Sequence (and goes no further);
+        // a Sequence that locks input lets only releases through.
+        let menu = self.input_map();
+        let skips = events.iter().any(|event| presses(&menu, "Menu", event))
+            && self.sequences.0.borrow().skippable(world);
+        if skips {
+            let stepped = {
+                let mut camera = self.client_camera();
+                self.sequences.0.borrow_mut().skip(world, &mut camera)
+            };
+            self.after_sequences(world, stepped);
+        }
+        let kept: Vec<InputEvent>;
+        let events = if skips || self.input_locked(world) {
+            let locked = self.input_locked(world);
+            kept = events
+                .iter()
+                .filter(|event| !(skips && presses(&menu, "Menu", event)))
+                .filter(|event| !locked || releases(event))
+                .cloned()
+                .collect();
+            &kept[..]
+        } else {
+            events
+        };
         // Even with no events, so `GetMouseDelta` is this frame's.
         self.client.fire_input(world, events);
         let tab = self.client.prompt_input().game.is_down(KeyCode::Tab);
@@ -704,6 +737,71 @@ impl ScriptRuntime {
             self.context(side).step(world, messages, seconds);
             self.collect(side);
             self.fire_changes(world);
+        }
+        // Then Sequences move on, after scripts that play them.
+        let assets = self
+            .client
+            .lua
+            .app_data_ref::<Assets>()
+            .map(|assets| assets.clone())
+            .unwrap_or_default();
+        let stepped = {
+            let mut camera = self.client_camera();
+            self.sequences
+                .0
+                .borrow_mut()
+                .step(world, &assets, &mut camera, seconds)
+        };
+        self.after_sequences(world, stepped);
+    }
+
+    /// Whether a Sequence with `LockPlayerInput` is playing (or paused):
+    /// hosts then give the character controllers no movement, and scripts
+    /// see only releases.
+    pub fn input_locked(&self, world: &World) -> bool {
+        self.sequences.0.borrow().input_locked(world)
+    }
+
+    /// The client's `workspace.CurrentCamera`.
+    fn client_camera(&self) -> mlua::AppDataRefMut<'_, camera::Camera> {
+        self.client
+            .lua
+            .app_data_mut::<camera::Camera>()
+            .expect("the client side has a camera")
+    }
+
+    /// Does what stepping the Sequences left: Sounds, levels, warnings and
+    /// their events.
+    fn after_sequences(&mut self, world: &mut World, stepped: sequence::Stepped) {
+        let actions = sequence::sound_actions(world, stepped.sounds);
+        self.sound_actions.extend(actions);
+        {
+            let mut levels = self.levels.0.borrow_mut();
+            for name in &stepped.remove_levels {
+                let _ = levels::remove(&mut levels, world, name);
+            }
+            for name in &stepped.add_levels {
+                if let Err(why) = levels::add(&mut levels, world, name) {
+                    self.output.push(OutputLine {
+                        kind: OutputKind::Warning,
+                        text: format!("a sequence couldn't add a level: {why}"),
+                        trace: Vec::new(),
+                    });
+                }
+            }
+            if !(stepped.add_levels.is_empty() && stepped.remove_levels.is_empty()) {
+                self.saves.0.borrow_mut().levels = levels.saved();
+            }
+        }
+        for warning in stepped.warnings {
+            self.output.push(OutputLine {
+                kind: OutputKind::Warning,
+                text: warning,
+                trace: Vec::new(),
+            });
+        }
+        for (id, event, args) in stepped.events {
+            self.fire_instance_event(world, id, event, &args);
         }
     }
 
@@ -1491,6 +1589,8 @@ mod localization_tests;
 mod reload_tests;
 #[cfg(test)]
 mod save_tests;
+#[cfg(test)]
+mod sequence_tests;
 
 #[cfg(test)]
 mod user_settings_tests;
@@ -1522,3 +1622,40 @@ mod seat_tests;
 mod tool_tests;
 #[cfg(test)]
 mod utilities_tests;
+
+/// Whether `event` presses something bound to the action `name`.
+fn presses(map: &InputMap, name: &str, event: &InputEvent) -> bool {
+    use axcenity_core::input::{Input, InputKind};
+    let Some(action) = map.action(name) else {
+        return false;
+    };
+    let pressed = match event.kind {
+        InputKind::Key { key, pressed: true }
+        | InputKind::PadButton {
+            key, pressed: true, ..
+        } => key,
+        _ => return false,
+    };
+    action.inputs.iter().any(|input| match input {
+        Input::Key(key) => *key == pressed,
+        Input::Keys(keys) => keys.contains(&pressed),
+        _ => false,
+    })
+}
+
+/// Whether `event` lets go of something (or a controller comes or goes),
+/// which gets through while input is locked so nothing stays held.
+fn releases(event: &InputEvent) -> bool {
+    use axcenity_core::UserInputState;
+    use axcenity_core::input::InputKind;
+    match event.kind {
+        InputKind::Key { pressed, .. }
+        | InputKind::MouseButton { pressed, .. }
+        | InputKind::PadButton { pressed, .. } => !pressed,
+        InputKind::Touch { state, .. } => {
+            matches!(state, UserInputState::End | UserInputState::Cancel)
+        }
+        InputKind::PadConnected(_) | InputKind::PadDisconnected(_) => true,
+        InputKind::MouseMove { .. } | InputKind::Wheel { .. } | InputKind::PadStick { .. } => false,
+    }
+}

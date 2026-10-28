@@ -1622,9 +1622,9 @@ Live preview scrubs in the editor without entering Play. Blocks: "play cutscene"
 
 ### Acceptance criteria
 
-- [ ] A 20-second cutscene with three camera cuts, a character walking with a clip, a door opening by property, music and two subtitles plays the same in the preview, in Play and in a built game.
-- [ ] Skipping jumps to the end state: properties at their final values and `Completed` fired once.
-- [ ] Input is locked while it plays when `LockPlayerInput` is on, and control returns after.
+- [x] A 20-second cutscene with three camera cuts, a character walking with a clip, a door opening by property, music and two subtitles plays the same in the preview, in Play and in a built game.
+- [x] Skipping jumps to the end state: properties at their final values and `Completed` fired once.
+- [x] Input is locked while it plays when `LockPlayerInput` is on, and control returns after.
 
 ---
 

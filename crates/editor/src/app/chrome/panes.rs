@@ -713,13 +713,19 @@ impl EditorApp {
     ) -> ViewportOutput {
         let ctx = ui.ctx().clone();
         self.refresh_nav_mesh(&ctx);
-        let world = shown(&self.world, &self.play);
+        self.update_sequence_preview();
+        // The Sequencer's preview, outside Play (Phase 51): its own copy
+        // of the world, posed and seen from its camera cut.
+        let sequence = (!self.playing() && self.layout.is_open(Pane::Sequencer))
+            .then(|| self.sequencer.shown())
+            .flatten();
+        let world = sequence.map_or_else(|| shown(&self.world, &self.play), |p| &p.world);
         let stylesheets = self
             .project
             .as_ref()
             .map_or(&[][..], |project| project.stylesheets.as_slice());
-        // No tool during Play, so nothing can be dragged.
-        let tool = (!self.playing()).then_some(self.tool);
+        // No tool during Play or the preview, so nothing can be dragged.
+        let tool = (!self.playing() && sequence.is_none()).then_some(self.tool);
         let preview = self.angular_preview();
         let terrain_brush = self.terrain_brush_view(&ctx);
         let emits = std::mem::take(&mut self.pending_emits);
@@ -762,22 +768,34 @@ impl EditorApp {
                             debug_rays: &debug_rays,
                             nav_mesh: self.nav_mesh.as_ref().map(|cache| &cache.mesh),
                             agent_paths: &agent_paths,
-                            poses: self.play.as_ref().map(Session::poses),
+                            poses: sequence
+                                .map(crate::sequencer::Preview::poses)
+                                .or(self.play.as_ref().map(Session::poses)),
                             terrain_brush,
                             constraint_pick: self
                                 .constraint_tool
                                 .as_ref()
                                 .map(|tool| tool.first.map(|first| first.point)),
-                            play_camera: self.play.as_ref().map(|session| {
-                                let (position, orientation) = self.viewport.camera_view();
-                                crate::viewport::PlayCamera {
-                                    shown: session.shown_camera(axcenity_script::CameraState {
-                                        position,
-                                        orientation,
-                                    }),
-                                    holds: session.holds_camera(),
-                                }
-                            }),
+                            play_camera: match sequence.and_then(|p| p.camera) {
+                                Some(shot) => Some(crate::viewport::PlayCamera {
+                                    shown: axcenity_script::CameraView {
+                                        position: shot.position,
+                                        orientation: shot.orientation,
+                                        field_of_view: shot.field_of_view,
+                                    },
+                                    holds: true,
+                                }),
+                                None => self.play.as_ref().map(|session| {
+                                    let (position, orientation) = self.viewport.camera_view();
+                                    crate::viewport::PlayCamera {
+                                        shown: session.shown_camera(axcenity_script::CameraState {
+                                            position,
+                                            orientation,
+                                        }),
+                                        holds: session.holds_camera(),
+                                    }
+                                }),
+                            },
                             // A LocalScript's change lasts until Stop.
                             graphics: self
                                 .play

@@ -276,6 +276,11 @@ pub enum BlockKind {
         sound: String,
         body: Vec<Block>,
     },
+    /// When a Sequence reaches its end, or is skipped there (`Completed`).
+    WhenCutsceneFinished {
+        sequence: String,
+        body: Vec<Block>,
+    },
     /// When an Animator moves to another state (`StateChanged`).
     WhenStateChanged {
         animator: String,
@@ -634,6 +639,10 @@ pub enum BlockKind {
         animator: String,
         animation: String,
     },
+    /// Plays a Sequence (`sequence:Play()`, Phase 51).
+    PlayCutscene {
+        sequence: String,
+    },
 
     // Tweens: a property moving smoothly (`TweenService`).
     /// Moves one property of an object to `value` over `seconds`, eased by
@@ -805,6 +814,7 @@ impl BlockKind {
                 | BlockKind::BeforeRender { .. }
                 | BlockKind::WhenEventFired { .. }
                 | BlockKind::WhenSoundEnded { .. }
+                | BlockKind::WhenCutsceneFinished { .. }
                 | BlockKind::WhenStateChanged { .. }
                 | BlockKind::WhenAnimationEvent { .. }
                 | BlockKind::WhenAgentSenses { .. }
@@ -846,6 +856,7 @@ impl BlockKind {
             | BlockKind::BeforeRender { body }
             | BlockKind::WhenEventFired { body, .. }
             | BlockKind::WhenSoundEnded { body, .. }
+            | BlockKind::WhenCutsceneFinished { body, .. }
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::WhenAgentSenses { body, .. }
@@ -883,6 +894,7 @@ impl BlockKind {
             | BlockKind::BeforeRender { body }
             | BlockKind::WhenEventFired { body, .. }
             | BlockKind::WhenSoundEnded { body, .. }
+            | BlockKind::WhenCutsceneFinished { body, .. }
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::WhenAgentSenses { body, .. }

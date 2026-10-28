@@ -144,7 +144,7 @@ pub fn order(kind: AssetKind) -> u8 {
     match kind {
         AssetKind::Model | AssetKind::Prefab | AssetKind::Prop => 0,
         AssetKind::Controller => 1,
-        AssetKind::Animation => 2,
+        AssetKind::Animation | AssetKind::Sequence => 2,
         AssetKind::TextureSet | AssetKind::Material => 3,
         AssetKind::Texture | AssetKind::Image | AssetKind::Particle => 4,
         AssetKind::Audio | AssetKind::BehaviorTree | AssetKind::DataTable | AssetKind::Sky => 5,

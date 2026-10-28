@@ -1156,6 +1156,26 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Plays everything this many times as fast (1 is normal, 0 pauses).",
     ),
     (
+        ClassName::Sequence,
+        "SequenceId",
+        "The sequence file inside the project folder, such as \"assets/sequences/Intro.sequence.json\".",
+    ),
+    (
+        ClassName::Sequence,
+        "AutoPlay",
+        "If true, it plays when the game starts.",
+    ),
+    (
+        ClassName::Sequence,
+        "Skippable",
+        "If true, the Menu action (Escape, or Start on a controller) jumps it to its end while it plays: what it keys is left at its last values and Completed fires once.",
+    ),
+    (
+        ClassName::Sequence,
+        "LockPlayerInput",
+        "If true, the character doesn't move and scripts and prompts get no presses from the player while it plays or is paused. Control comes back when it ends or stops.",
+    ),
+    (
         ClassName::Animation,
         "Clip",
         "The clip file inside the project folder, such as \"assets/animations/Door/Open.anim.json\".",
@@ -3923,6 +3943,16 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires when the agent starts seeing or hearing the player character. The handler gets the sense: \"Sight\" or \"Hearing\".",
     ),
     (
+        ClassName::Sequence,
+        "Completed",
+        "Fires once when it reaches its end, or is skipped there. The handler gets no arguments.",
+    ),
+    (
+        ClassName::Sequence,
+        "EventReached",
+        "Fires with an event's name as it passes the event on its Events track. Events skipped over aren't fired.",
+    ),
+    (
         ClassName::Animation,
         "Completed",
         "Fires when `animation:Play()` reaches the end of a clip that doesn't loop. The handler gets no arguments.",
@@ -4185,6 +4215,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::AnimationTrack => {
             "One Animation loaded on an Animator, from `animator:LoadAnimation(animation)`: play, stop and blend it over the state machine."
+        }
+        ClassName::Sequence => {
+            "Plays a cutscene: a `*.sequence.json` file made in the editor's Sequencer tab, with camera cuts, keyed properties, clips on Animators, Sounds, events, fades, letterbox bars, subtitles from the string table and levels added for a while. Play, Pause and Stop it; EventReached fires as it passes each event and Completed once at its end. With Skippable, the Menu action jumps it to its end; with LockPlayerInput, the player can't move or use the game's input while it plays."
         }
         ClassName::Terrain => {
             "A landscape: a heightfield shaped in the editor's Terrain Studio, drawn with its TerrainLayers and colliding as its ground. Position is the middle of its footprint at the bottom of its height range; Size is its width, height range and length."

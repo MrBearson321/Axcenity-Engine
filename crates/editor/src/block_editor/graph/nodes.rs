@@ -51,6 +51,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::FireEvent { .. } => ("Fire Event", &["Event"]),
         BlockKind::DestroyAfter { .. } => ("Destroy After", &["Object", "Seconds"]),
         BlockKind::WhenSoundEnded { .. } => ("When Sound Ends", &["Sound"]),
+        BlockKind::WhenCutsceneFinished { .. } => ("When Cutscene Finishes", &["Sequence"]),
         BlockKind::WhenStateChanged { .. } => ("When State Changes", &["Animator"]),
         BlockKind::WhenAnimationEvent { .. } => ("When Animation Event", &["Animator", "Event"]),
         BlockKind::WhenAgentSenses { .. } => ("When Agent Senses Player", &["Agent", "Sense"]),
@@ -108,6 +109,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::ResetAnimatorTrigger { .. } => ("Reset Trigger", &["Trigger", "Animator"]),
         BlockKind::PlayAnimatorState { .. } => ("Play State", &["State", "Animator"]),
         BlockKind::PlayAnimation { .. } => ("Play Animation", &["Animation", "Animator"]),
+        BlockKind::PlayCutscene { .. } => ("Play Cutscene", &["Sequence"]),
         BlockKind::Tween { .. } => (
             "Tween",
             &[

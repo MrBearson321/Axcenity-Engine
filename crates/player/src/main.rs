@@ -595,6 +595,23 @@ impl App {
     /// Shows the game's loading screen again for its minimum time when a
     /// script loaded a level (`LevelService:LoadLevel`, or a slot saved in
     /// another level). Its ScreenGui stays through the load.
+    /// Frame step 1's input for the character controllers: the input
+    /// map's actions with the player's rebinds, and the mouse look and
+    /// wheel since the last frame. None while a TextBox is typed in or a
+    /// Sequence locks input (Phase 51).
+    fn controller_input(&mut self, seconds: f32) -> MoveInput {
+        self.input.map = self.scripts.input_map();
+        let look = [self.look_dx, self.look_dy];
+        let zoom = self.zoom;
+        self.look_dx = 0.0;
+        self.look_dy = 0.0;
+        self.zoom = 0.0;
+        if self.text_focus.is_some() || self.scripts.input_locked(&self.world) {
+            return MoveInput::default();
+        }
+        self.input.motion_input(look, zoom, seconds)
+    }
+
     fn follow_level_loads(&mut self) {
         if self.scripts.take_level_loads().is_empty() {
             return;
@@ -1179,16 +1196,7 @@ impl ApplicationHandler for App {
                 //    the camera, by the input map's actions (with the
                 //    player's rebinds). Otherwise the fly camera moves, and
                 //    LocalScripts see that.
-                self.input.map = self.scripts.input_map();
-                let motion = if self.text_focus.is_some() {
-                    MoveInput::default()
-                } else {
-                    self.input
-                        .motion_input([self.look_dx, self.look_dy], self.zoom, seconds)
-                };
-                self.look_dx = 0.0;
-                self.look_dy = 0.0;
-                self.zoom = 0.0;
+                let motion = self.controller_input(seconds);
                 self.characters
                     .step(&mut self.world, &self.assets, motion, seconds);
                 fire_seated(&mut self.scripts, &mut self.world, &mut self.characters);
@@ -1487,6 +1495,8 @@ mod accessibility_tests;
 
 #[cfg(test)]
 mod csg_tests;
+#[cfg(test)]
+mod cutscene_tests;
 #[cfg(test)]
 mod destruction_tests;
 #[cfg(test)]

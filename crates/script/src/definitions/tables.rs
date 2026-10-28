@@ -2451,6 +2451,33 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Sequence,
+        Function {
+            name: "Play",
+            doc: "Plays it: from its start if it hasn't played, has ended or was stopped; from where it is if it's paused.",
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Sequence,
+        Function {
+            name: "Pause",
+            doc: "Holds it where it is, with the camera and everything it keys still there. Play carries on.",
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Sequence,
+        Function {
+            name: "Stop",
+            doc: "Stops it and goes back to its start: its clips, Sounds, fades, subtitles and levels go, and the camera comes back. Keyed properties stay where they are. Completed doesn't fire.",
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
         ClassName::AnimationTrack,
         Function {
             name: "Play",
@@ -2971,6 +2998,30 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "HealthDisplayDistance",
             ty: "number",
             doc: "Its Health's HealthDisplayDistance.",
+        },
+    ),
+    (
+        ClassName::Sequence,
+        Field {
+            name: "TimePosition",
+            ty: "number",
+            doc: "Seconds from its start. Set it to jump there (the events between aren't fired).",
+        },
+    ),
+    (
+        ClassName::Sequence,
+        Field {
+            name: "IsPlaying",
+            ty: "boolean",
+            doc: "True from Play until it's paused, stopped or ends (read-only).",
+        },
+    ),
+    (
+        ClassName::Sequence,
+        Field {
+            name: "Length",
+            ty: "number",
+            doc: "Its file's duration in seconds (read-only; 0 if the file can't be read).",
         },
     ),
     (

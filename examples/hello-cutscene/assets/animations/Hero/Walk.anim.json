@@ -1,0 +1,98 @@
+{
+  "format_version": 2,
+  "duration": 1.0,
+  "loop": true,
+  "tracks": [
+    {
+      "id": "left",
+      "target": "LeftLeg",
+      "property": "Orientation",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 0.0,
+          "value": [
+            30.0,
+            -45.0,
+            0.0
+          ],
+          "interp": "Ease",
+          "easing": {
+            "style": "Sine",
+            "direction": "InOut"
+          }
+        },
+        {
+          "id": "k2",
+          "time": 0.5,
+          "value": [
+            -30.0,
+            -45.0,
+            0.0
+          ],
+          "interp": "Ease",
+          "easing": {
+            "style": "Sine",
+            "direction": "InOut"
+          }
+        },
+        {
+          "id": "k3",
+          "time": 1.0,
+          "value": [
+            30.0,
+            -45.0,
+            0.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    },
+    {
+      "id": "right",
+      "target": "RightLeg",
+      "property": "Orientation",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 0.0,
+          "value": [
+            -30.0,
+            -45.0,
+            0.0
+          ],
+          "interp": "Ease",
+          "easing": {
+            "style": "Sine",
+            "direction": "InOut"
+          }
+        },
+        {
+          "id": "k2",
+          "time": 0.5,
+          "value": [
+            30.0,
+            -45.0,
+            0.0
+          ],
+          "interp": "Ease",
+          "easing": {
+            "style": "Sine",
+            "direction": "InOut"
+          }
+        },
+        {
+          "id": "k3",
+          "time": 1.0,
+          "value": [
+            -30.0,
+            -45.0,
+            0.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    }
+  ],
+  "events": []
+}
