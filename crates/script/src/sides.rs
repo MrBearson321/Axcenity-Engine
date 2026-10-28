@@ -179,6 +179,12 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         instead: "call InvokeServer from a LocalScript to ask the server",
     },
     SideOnlyApi {
+        name: "LoadCharacter",
+        side: Side::Server,
+        because: "the server gives each player their character",
+        instead: "ask the server with a RemoteEvent's FireServer, and call it there",
+    },
+    SideOnlyApi {
         name: "OnServerEvent",
         side: Side::Server,
         because: "it receives what LocalScripts send to the server",

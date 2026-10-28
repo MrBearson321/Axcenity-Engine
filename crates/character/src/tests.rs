@@ -1123,3 +1123,20 @@ fn a_dead_character_is_left_to_physics() {
 }
 
 mod seat;
+
+#[test]
+fn a_players_character_comes_before_the_first_controller() {
+    let (mut world, controller, _) = standing();
+    let first = world.get(controller).unwrap().parent();
+    assert_eq!(player_character(&world), first);
+    let second = rig::character(&mut world, Vector3::new(10.0, 0.0, 0.0), "");
+    world.set_parent(second, Some(world.workspace())).unwrap();
+    assert_eq!(player_character(&world), first);
+
+    let player = world.create(ClassName::Player).unwrap();
+    world.set_parent(player, Some(world.players())).unwrap();
+    world
+        .set_property(player, "Character", Value::Instance(Some(second)))
+        .unwrap();
+    assert_eq!(player_character(&world), Some(second));
+}

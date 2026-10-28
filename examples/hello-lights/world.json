@@ -82,5 +82,12 @@
       "SkyHorizonColor": [0.2, 0.18, 0.3],
       "SkyTopColor": [0.03, 0.04, 0.1]
     }
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false,
+      "LeaderboardEnabled": true,
+      "RespawnTime": 5
+    }
   }
 }

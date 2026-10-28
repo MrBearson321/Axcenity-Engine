@@ -57,6 +57,8 @@ impl Context {
         lua.set_app_data(crate::tool::ToolChanges::default());
         lua.set_app_data(crate::humanoid::Requests::default());
         lua.set_app_data(crate::humanoid::States::default());
+        lua.set_app_data(crate::players::Spawned::default());
+        lua.set_app_data(crate::players::Spawning::default());
         lua.set_app_data(crate::DebugRays::default());
         lua.set_app_data(Assets::default());
         lua.set_app_data(Outbox::default());
@@ -138,6 +140,10 @@ impl Context {
         methods.extend(
             crate::humanoid::methods(&lua)
                 .expect("creating Humanoid methods only fails when out of memory"),
+        );
+        methods.extend(
+            crate::players::methods(&lua)
+                .expect("creating Player methods only fails when out of memory"),
         );
         methods.push((
             axcenity_core::ClassName::DataModel,
@@ -405,6 +411,47 @@ impl Context {
     pub fn mouse_ray(&self, mouse: [f32; 2]) -> Option<crate::camera::Ray> {
         let camera = self.lua.app_data_ref::<Camera>()?;
         Some(camera.ray(mouse[0], mouse[1]))
+    }
+
+    /// Fires `event` of `owner` with the Instance `arg`, if `owner` is
+    /// still there, such as `CharacterAdded(character)` on a Player.
+    pub fn fire_with_instance(
+        &self,
+        world: &mut World,
+        owner: InstanceId,
+        event: &'static str,
+        arg: InstanceId,
+    ) {
+        with_world(&self.lua, world, || {
+            if instance::world(&self.lua).is_ok_and(|world| world.contains(owner)) {
+                let owner = events::Owner::Instance(owner);
+                events::fire(&self.lua, owner, event, instance::LuaInstance(arg));
+            }
+        });
+    }
+
+    /// `player:LoadCharacter()` from the runtime (server): a join or a
+    /// respawn. Its events wait in [`Self::take_spawned`].
+    pub fn load_character(&self, world: &mut World, player: InstanceId) {
+        with_world(&self.lua, world, || {
+            let _ = crate::players::load_character(&self.lua, player);
+        });
+    }
+
+    /// Notes `template` as what players respawn as without a
+    /// StarterCharacter: the copy of a character placed in the Workspace.
+    pub fn set_respawn_template(&self, template: InstanceId) {
+        if let Some(mut spawning) = self.lua.app_data_mut::<crate::players::Spawning>() {
+            spawning.template = Some(template);
+        }
+    }
+
+    /// What `LoadCharacter` did since the last call.
+    pub fn take_spawned(&self) -> crate::players::Spawned {
+        self.lua
+            .app_data_mut::<crate::players::Spawned>()
+            .map(|mut spawned| std::mem::take(&mut *spawned))
+            .unwrap_or_default()
     }
 
     /// Fires `Landed(speed)` on a character controller that's still there.

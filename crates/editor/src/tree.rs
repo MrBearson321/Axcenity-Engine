@@ -84,6 +84,10 @@ pub enum Insertable {
     Inventory,
     /// A Roblox-familiar front for the selected character's pieces.
     Humanoid,
+    /// A pad players' characters spawn on (Phase 47).
+    SpawnLocation,
+    /// A side players are on, always in Teams.
+    Team,
     /// A ready character: a Model of six parts with a Humanoid, a
     /// third-person controller, Health, Inventory and Animator (see
     /// [`character`]).
@@ -169,6 +173,8 @@ impl Insertable {
         [Insertable::ProximityPrompt, Insertable::ClickDetector];
     /// A ready character, and the Humanoid that fronts one's pieces.
     pub const HUMANOIDS: [Insertable; 2] = [Insertable::Character, Insertable::Humanoid];
+    /// Where players' characters spawn, and the teams they're on.
+    pub const SPAWNING: [Insertable; 2] = [Insertable::SpawnLocation, Insertable::Team];
     /// Tools, and the Inventory a character carries them in.
     pub const TOOLS: [Insertable; 2] = [Insertable::Tool, Insertable::Inventory];
     /// A ready car, and the pieces to build one's own.
@@ -252,6 +258,8 @@ impl Insertable {
             Insertable::Tool => "Tool",
             Insertable::Inventory => "Inventory",
             Insertable::Humanoid => "Humanoid",
+            Insertable::SpawnLocation => "Spawn",
+            Insertable::Team => "Team",
             Insertable::Character => "Character",
             Insertable::Vehicle => "Vehicle",
             Insertable::VehicleSeat => "Vehicle Seat",
@@ -310,6 +318,8 @@ impl Insertable {
             Insertable::Tool => ClassName::Tool,
             Insertable::Inventory => ClassName::Inventory,
             Insertable::Humanoid => ClassName::Humanoid,
+            Insertable::SpawnLocation => ClassName::SpawnLocation,
+            Insertable::Team => ClassName::Team,
             Insertable::Character => ClassName::Model,
             Insertable::Vehicle => ClassName::Model,
             Insertable::VehicleSeat => ClassName::VehicleSeat,
@@ -445,6 +455,11 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
                 Value::Vector3(Vector3::new(position.x, position.y + 2.0, position.z)),
             ),
         ],
+        // A pad with its bottom on the ground.
+        Insertable::SpawnLocation => vec![(
+            "Position",
+            Value::Vector3(Vector3::new(position.x, position.y + 0.5, position.z)),
+        )],
         // Scales with the screen, laid out over all of it, so a UI made at
         // one size looks the same at any other.
         Insertable::ScreenGui => vec![("ScaleMode", Value::String("Scale".to_owned()))],
@@ -543,88 +558,7 @@ pub fn vehicle(world: &mut World, position: Vector3) -> InstanceId {
     car
 }
 
-/// The Animator states Insert > Character's state machine has, each with an
-/// empty clip to replace with the character's own.
-pub const CHARACTER_STATES: [&str; 6] = ["Idle", "Walk", "Run", "Jump", "Fall", "Sit"];
-
-/// The character Insert > Character makes, with no parent yet: a Model
-/// named Character whose feet are at `position`, facing -Z, of six parts
-/// (Torso, Head, Left Arm, Right Arm, Left Leg and Right Leg, 5 studs tall)
-/// welded to the Torso, with a Humanoid, a ThirdPersonController, a Health,
-/// an Inventory and an Animator playing `state_machine` (empty for none).
-pub fn character(world: &mut World, position: Vector3, state_machine: &str) -> InstanceId {
-    let model = world.create(ClassName::Model).expect("not a service");
-    world.set_name(model, "Character").expect("just made");
-    let mut make = |class, name: &str, parent: InstanceId, properties: Vec<(&str, Value)>| {
-        let id = world.create(class).expect("not a service");
-        world.set_name(id, name).expect("just made");
-        for (property, value) in properties {
-            world
-                .set_property(id, property, value)
-                .expect("the class has it");
-        }
-        world.set_parent(id, Some(parent)).expect("a new Model");
-        id
-    };
-    let skin = Color3::new(0.96, 0.8, 0.41);
-    let shirt = Color3::new(0.29, 0.45, 0.78);
-    let trousers = Color3::new(0.2, 0.25, 0.35);
-    let part = |size: (f32, f32, f32), at: (f32, f32, f32), color: Color3| {
-        vec![
-            ("Size", Value::Vector3(Vector3::new(size.0, size.1, size.2))),
-            (
-                "Position",
-                Value::Vector3(Vector3::new(
-                    position.x + at.0,
-                    position.y + at.1,
-                    position.z + at.2,
-                )),
-            ),
-            ("Color", Value::Color3(color)),
-        ]
-    };
-    let torso = make(
-        ClassName::Part,
-        "Torso",
-        model,
-        part((2.0, 2.0, 1.0), (0.0, 3.0, 0.0), shirt),
-    );
-    let limbs = [
-        ("Head", (2.0, 1.0, 1.0), (0.0, 4.5, 0.0), skin),
-        ("Left Arm", (1.0, 2.0, 1.0), (-1.5, 3.0, 0.0), skin),
-        ("Right Arm", (1.0, 2.0, 1.0), (1.5, 3.0, 0.0), skin),
-        ("Left Leg", (1.0, 2.0, 1.0), (-0.5, 1.0, 0.0), trousers),
-        ("Right Leg", (1.0, 2.0, 1.0), (0.5, 1.0, 0.0), trousers),
-    ];
-    for (name, size, at, color) in limbs {
-        let limb = make(ClassName::Part, name, model, part(size, at, color));
-        make(
-            ClassName::WeldConstraint,
-            &format!("{name}Weld"),
-            torso,
-            vec![
-                ("Part0", Value::Instance(Some(torso))),
-                ("Part1", Value::Instance(Some(limb))),
-            ],
-        );
-    }
-    make(ClassName::Humanoid, "Humanoid", model, Vec::new());
-    make(
-        ClassName::ThirdPersonController,
-        "ThirdPersonController",
-        model,
-        Vec::new(),
-    );
-    make(ClassName::Health, "Health", model, Vec::new());
-    make(ClassName::Inventory, "Inventory", model, Vec::new());
-    make(
-        ClassName::Animator,
-        "Animator",
-        model,
-        vec![("StateMachine", Value::String(state_machine.to_owned()))],
-    );
-    model
-}
+pub use axcenity_character::rig::{CHARACTER_STATES, character};
 
 /// The Tool Insert > Tool makes, with no parent yet: a Tool with a Handle
 /// part (a 1 × 1 × 4 stick lying along -Z, centred on `position`) and a
@@ -847,10 +781,13 @@ pub fn health_bar(world: &mut World, health: Option<InstanceId>) -> HealthBar {
 /// RemoteEvent (or RemoteFunction, BindableEvent or BindableFunction) goes
 /// into ReplicatedStorage (where both sides find it, as in Roblox), and
 /// anything else into the Workspace. An Atmosphere or Clouds always goes
-/// into Lighting.
+/// into Lighting, and a Team into Teams.
 pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) -> InstanceId {
     if matches!(what, Insertable::Atmosphere | Insertable::Clouds) {
         return world.lighting();
+    }
+    if what == Insertable::Team {
+        return world.teams();
     }
     let default = match what {
         Insertable::RemoteEvent | Insertable::Messenger(_) => world.replicated_storage(),
@@ -862,17 +799,9 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             matches!(instance.class(), ClassName::Model | ClassName::Folder)
         });
         let is_ui_container = is_ui_container(world, id);
-        let is_sound_container = matches!(
-            world.get(id).map(|instance| instance.class()),
-            Some(
-                ClassName::Part
-                    | ClassName::MeshPart
-                    | ClassName::Seat
-                    | ClassName::VehicleSeat
-                    | ClassName::DamageZone
-                    | ClassName::Model
-            )
-        );
+        let is_sound_container = world.get(id).is_some_and(|instance| {
+            instance.class().is_base_part() || instance.class() == ClassName::Model
+        });
         // An Attachment's (or wheel's) Position is on its part, so only a
         // part holds one.
         let is_part = world
@@ -970,11 +899,12 @@ pub fn needs_screen_gui(world: &World, near: Option<InstanceId>, what: Insertabl
     what.is_ui_element() && !is_ui_container(world, insert_parent(world, near, what))
 }
 
-/// True if `id` is in the Workspace or ReplicatedStorage: the only places
-/// the world file saves.
+/// True if `id` is in the Workspace, ReplicatedStorage or Teams: the
+/// places the world file saves what's inside.
 pub fn is_saved(world: &World, id: InstanceId) -> bool {
     world.is_descendant_of(id, world.workspace())
         || world.is_descendant_of(id, world.replicated_storage())
+        || world.is_descendant_of(id, world.teams())
 }
 
 /// A name that none of `parent`'s children has: `wanted` itself if it's

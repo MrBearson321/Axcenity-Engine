@@ -12,8 +12,9 @@
 //! physics does not tip or drop them, and so gravity and friction of other
 //! parts stay as they are.
 //!
-//! The first such controller in the Workspace that has a body receives the
-//! input and owns the camera: behind the character, zoomed with the mouse
+//! The controller of the player's `Character`, or else the first such
+//! controller in the Workspace that has a body, receives the input and
+//! owns the camera: behind the character, zoomed with the mouse
 //! wheel, for a third-person one, or at its eyes for a first-person one.
 
 use std::collections::BTreeMap;
@@ -23,6 +24,7 @@ use axcenity_core::input::{InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_physics::{GRAVITY, QueryParams, RayHit, gravity, raycast};
 
+pub mod rig;
 mod seat;
 
 pub use seat::SeatChange;
@@ -608,11 +610,31 @@ pub fn player_character(world: &World) -> Option<InstanceId> {
     world.get(active_id(world)?)?.parent()
 }
 
-/// The first controller in the Workspace whose parent is a character.
+/// The controller of the first Player's `Character` (Phase 47), or else
+/// the first controller in the Workspace whose parent is a character.
 fn active_id(world: &World) -> Option<InstanceId> {
-    controllers(world)
+    let drivers: Vec<InstanceId> = controllers(world)
         .into_iter()
-        .find(|&id| is_driver(world, id))
+        .filter(|&id| is_driver(world, id))
+        .collect();
+    let characters = world.get(world.players()).into_iter().flat_map(|players| {
+        players.children().iter().filter_map(|&player| {
+            match world.get(player)?.property("Character")? {
+                Value::Instance(character) => *character,
+                _ => None,
+            }
+        })
+    });
+    for character in characters {
+        let driver = drivers
+            .iter()
+            .copied()
+            .find(|&id| world.get(id).and_then(|c| c.parent()) == Some(character));
+        if driver.is_some() {
+            return driver;
+        }
+    }
+    drivers.first().copied()
 }
 
 /// The Part and MeshPart descendants of the controller's parent, plus the

@@ -34,6 +34,7 @@ mod migrate_animation;
 mod migrate_physics;
 mod package;
 mod packed;
+mod starter_character;
 mod terrain_files;
 mod validate;
 mod versions;
@@ -77,6 +78,7 @@ pub use package::{
     write_package,
 };
 pub use packed::{PackError, pack_game, unpack_game};
+pub use starter_character::load_starter_character;
 pub use terrain_files::{
     TERRAIN_FOLDER, data_folder, is_safe_folder, keep_terrain_folder, load_terrains,
     new_terrain_folder, save_terrain, terrain_folder_path,

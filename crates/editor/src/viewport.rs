@@ -279,6 +279,8 @@ pub struct ViewportScene<'a> {
     /// The player character's Inventory during Play, whose hotbar is drawn
     /// over the game UI.
     pub hotbar: Option<InstanceId>,
+    /// Whether the default leaderboard is drawn during Play (Tab hides it).
+    pub leaderboard: bool,
     /// The ProximityPrompts that show during Play, drawn over the game UI.
     pub prompts: Vec<axcenity_ui::PromptView>,
     /// The cursor over a ClickDetector during Play (a CSS cursor name).
@@ -696,6 +698,7 @@ impl Viewport {
             focused_text,
             loading_screen,
             hotbar,
+            leaderboard,
             prompts,
             click_cursor,
             light_cones,
@@ -990,6 +993,14 @@ impl Viewport {
             draw_list.ui.extend(axcenity_ui::hotbar_items(
                 world,
                 inventory,
+                stylesheets,
+                width,
+                height,
+            ));
+        }
+        if leaderboard {
+            draw_list.ui.extend(axcenity_ui::leaderboard_items(
+                world,
                 stylesheets,
                 width,
                 height,

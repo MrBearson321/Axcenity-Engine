@@ -65,6 +65,7 @@ mod instance;
 mod localization;
 mod modules;
 mod physical;
+mod players;
 mod prompt;
 mod query;
 mod random;
@@ -91,7 +92,7 @@ use std::time::Duration;
 use axcenity_assets::Assets;
 use axcenity_audio::SoundAction;
 use axcenity_core::input::{InputEvent, InputMap};
-use axcenity_core::{ClassName, InstanceId, MouseBehavior, Value, Vector3, World};
+use axcenity_core::{ClassName, InstanceId, KeyCode, MouseBehavior, Value, Vector3, World};
 use axcenity_physics::RayHit;
 use axcenity_render::{Capabilities, GraphicsSettings};
 use axcenity_save::Saves;
@@ -211,6 +212,10 @@ pub struct ScriptRuntime {
     tools: tool::Tools,
     /// Humanoids' walks and states (Phase 46).
     humanoids: humanoid::Humanoids,
+    /// Respawns, spawn ForceFields and the leaderboard's Tab (Phase 47).
+    players: players::Players,
+    /// Player events waiting to fire on both sides.
+    player_events: Vec<players::PlayerEvent>,
     /// Whether the error for change events that never stop has been shown,
     /// so it's shown once rather than every frame.
     reported_change_loop: bool,
@@ -264,6 +269,8 @@ impl ScriptRuntime {
             clicks: click::Clicks::default(),
             tools: tool::Tools::default(),
             humanoids: humanoid::Humanoids::default(),
+            players: players::Players::default(),
+            player_events: Vec::new(),
             reported_change_loop: false,
             saves,
             started: Vec::new(),
@@ -430,7 +437,9 @@ impl ScriptRuntime {
     }
 
     /// The player on this device joins the game, once: a Player Instance
-    /// named `Player` goes into `Players`, and becomes `LocalPlayer`.
+    /// named `Player` goes into `Players`, and becomes `LocalPlayer`. It
+    /// goes on the AutoAssignable Team with the fewest players, and
+    /// `PlayerAdded` fires (Phase 47).
     fn join(&mut self, world: &mut World) {
         if self.client.local_player().is_some() {
             return;
@@ -443,6 +452,124 @@ impl ScriptRuntime {
             .set_parent(player, Some(world.players()))
             .expect("both exist");
         self.client.set_local_player(player);
+        players::assign_team(world, player);
+        self.player_events
+            .push(players::PlayerEvent::Added { player });
+        self.fire_changes(world);
+    }
+
+    /// Makes `character`, placed in the Workspace before Play, `player`'s,
+    /// and keeps a copy of it (with no parent, so out of the game) to
+    /// respawn as. Its scripts' copies start when a copy goes in.
+    fn adopt(&mut self, world: &mut World, player: InstanceId, character: InstanceId) {
+        if let Ok(template) = world.duplicate(character) {
+            let originals = std::iter::once(character).chain(world.descendants(character));
+            let copies = std::iter::once(template).chain(world.descendants(template));
+            for (original, copy) in originals.zip(copies) {
+                let code = self
+                    .started
+                    .iter()
+                    .find(|started| started.script == original)
+                    .map(|started| (started.path.clone(), started.source.clone()));
+                if let Some((path, source)) = code {
+                    self.clones.push(Started {
+                        script: copy,
+                        path,
+                        source,
+                    });
+                }
+            }
+            self.server.set_respawn_template(template);
+        }
+        let _ = world.set_property(player, "Character", Value::Instance(Some(character)));
+        self.player_events
+            .push(players::PlayerEvent::CharacterAdded { player, character });
+    }
+
+    /// Fires the player events `LoadCharacter`, joining and respawns
+    /// queued, on both sides: an old character is destroyed once its
+    /// `CharacterRemoving` has fired.
+    fn fire_player_events(&mut self, world: &mut World) {
+        for _ in 0..MAX_CHANGE_ROUNDS {
+            if self.player_events.is_empty() {
+                return;
+            }
+            for event in std::mem::take(&mut self.player_events) {
+                let (owner, name, arg) = match event {
+                    players::PlayerEvent::Added { player } => {
+                        (world.players(), "PlayerAdded", player)
+                    }
+                    players::PlayerEvent::CharacterRemoving { player, character } => {
+                        (player, "CharacterRemoving", character)
+                    }
+                    players::PlayerEvent::CharacterAdded { player, character } => {
+                        (player, "CharacterAdded", character)
+                    }
+                };
+                for side in [Side::Server, Side::Client] {
+                    self.context(side)
+                        .fire_with_instance(world, owner, name, arg);
+                    self.collect(side);
+                    self.fire_change_rounds(world);
+                }
+                if let players::PlayerEvent::CharacterRemoving { character, .. } = event
+                    && world.get(character).is_some_and(|c| c.parent().is_none())
+                {
+                    let _ = world.destroy(character);
+                }
+            }
+        }
+    }
+
+    /// Frame step 1, after [`step_humanoids`](Self::step_humanoids)
+    /// (Phase 47). The first time, the player joins and gets a character:
+    /// one already in the Workspace becomes theirs (and a copy of it, out
+    /// of the game, is what they respawn as), or else, with
+    /// `Players.CharacterAutoLoads` on, a copy of the StarterCharacter
+    /// spawns. Then spawn ForceFields whose time is up go, and players
+    /// whose `RespawnTime` has passed since their Humanoid died get a new
+    /// character. `CharacterAdded` and the rest fire in Scripts and then in
+    /// LocalScripts.
+    pub fn step_players(&mut self, world: &mut World, seconds: f64) {
+        self.fire_changes(world);
+        let placed = if self.players.started {
+            None
+        } else {
+            axcenity_character::player_character(world)
+        };
+        self.join(world);
+        let auto_loads = |world: &World| {
+            world
+                .get(world.players())
+                .and_then(|service| service.property("CharacterAutoLoads"))
+                .and_then(Value::as_bool)
+                != Some(false)
+        };
+        let mut due = Vec::new();
+        if !self.players.started {
+            self.players.started = true;
+            let player = self.local_player().expect("just joined");
+            match placed {
+                Some(character) => self.adopt(world, player, character),
+                None if auto_loads(world) => due.push(player),
+                None => {}
+            }
+        }
+        due.extend(self.players.step(world, seconds));
+        for player in due {
+            if auto_loads(world) {
+                self.server.load_character(world, player);
+                self.collect(Side::Server);
+            }
+        }
+        self.fire_changes(world);
+    }
+
+    /// Whether to draw the default leaderboard (`ui::leaderboard_items`):
+    /// Tab shows and hides it. Its `Players.LeaderboardEnabled` is the
+    /// leaderboard's own to check.
+    pub fn leaderboard_shown(&self) -> bool {
+        !self.players.leaderboard_hidden
     }
 
     /// The Player of whoever plays on this device, once they've joined.
@@ -477,6 +604,8 @@ impl ScriptRuntime {
         self.fire_changes(world);
         // Even with no events, so `GetMouseDelta` is this frame's.
         self.client.fire_input(world, events);
+        let tab = self.client.prompt_input().game.is_down(KeyCode::Tab);
+        self.players.follow_tab(tab);
         if events.is_empty() {
             return;
         }
@@ -755,6 +884,12 @@ impl ScriptRuntime {
         if events.is_empty() {
             return;
         }
+        // A player's character dying respawns them later (Phase 47).
+        for event in events {
+            if let humanoid::HumanoidEvent::Died { humanoid } = *event {
+                self.players.died(world, humanoid);
+            }
+        }
         for side in [Side::Server, Side::Client] {
             self.context(side).fire_humanoid_events(world, events);
             self.collect(side);
@@ -916,6 +1051,7 @@ impl ScriptRuntime {
         self.fire_change_rounds(world);
         self.fire_health_events(world);
         self.fire_tool_events(world);
+        self.fire_player_events(world);
         self.stop_destroyed_scripts(world);
         self.start_clones(world);
     }
@@ -1143,6 +1279,8 @@ impl ScriptRuntime {
         self.health.pending.extend(context.take_health_events());
         self.tools.note(context.take_tool_changes());
         self.humanoids.note(context.take_humanoid_requests());
+        self.player_events
+            .extend(self.players.note(context.take_spawned()));
         for (copy, original) in context.take_cloned_scripts() {
             // A clone of a clone that hasn't started yet has its code too.
             let code = self

@@ -281,6 +281,29 @@ fn ui_elements_inserted_with_no_screen_gui_get_one() {
 }
 
 #[test]
+fn a_spawn_location_goes_on_the_ground_and_a_team_into_teams() {
+    let folder = copy_of_example("hello-part", "spawn-insert");
+    let mut app = EditorApp::new(Some(&folder));
+    app.insert(Insertable::SpawnLocation, None);
+    let spawn = app.selected.unwrap();
+    let instance = app.world.get(spawn).unwrap();
+    assert_eq!(instance.class(), ClassName::SpawnLocation);
+    assert_eq!(instance.parent(), Some(app.world.workspace()));
+    assert_eq!(instance.property("Anchored"), Some(&Value::Bool(true)));
+    // With the SpawnLocation selected, a Team still goes into Teams.
+    app.insert(Insertable::Team, None);
+    let team = app.selected.unwrap();
+    assert_eq!(app.world.get(team).unwrap().class(), ClassName::Team);
+    assert_eq!(
+        app.world.get(team).unwrap().parent(),
+        Some(app.world.teams())
+    );
+    assert!(tree::check_editable(&app.world, team).is_ok());
+    drop(app);
+    std::fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
 fn the_whole_editor_draws_in_each_theme_and_density() {
     let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
     for (name, appearance) in [

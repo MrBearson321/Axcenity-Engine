@@ -1,0 +1,85 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Position": [0, -0.5, 0],
+          "Size": [120, 1, 60],
+          "Color": [0.35, 0.37, 0.4],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "SpawnLocation",
+        "name": "RedSpawn",
+        "properties": {
+          "Position": [-20, 0.5, 0],
+          "Color": [0.85, 0.2, 0.2],
+          "Neutral": false,
+          "TeamColor": [0.85, 0.2, 0.2],
+          "Duration": 3
+        }
+      },
+      {
+        "class": "SpawnLocation",
+        "name": "BlueSpawn",
+        "properties": {
+          "Position": [20, 0.5, 0],
+          "Color": [0.2, 0.4, 0.9],
+          "Neutral": false,
+          "TeamColor": [0.2, 0.4, 0.9],
+          "Duration": 3
+        }
+      },
+      {
+        "class": "DamageZone",
+        "name": "Lava",
+        "properties": {
+          "Position": [0, 2, -16],
+          "Size": [10, 4, 10],
+          "DamagePerSecond": 60
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Coin",
+        "properties": {
+          "Shape": "Ball",
+          "Position": [-8, 1.5, 10],
+          "Size": [2, 2, 2],
+          "Color": [1, 0.8, 0.2],
+          "Material": "Neon",
+          "Anchored": true,
+          "CanCollide": false
+        }
+      }
+    ]
+  },
+  "players": {
+    "properties": {
+      "RespawnTime": 3
+    }
+  },
+  "teams": {
+    "children": [
+      {
+        "class": "Team",
+        "name": "Red",
+        "properties": {
+          "TeamColor": [0.85, 0.2, 0.2]
+        }
+      },
+      {
+        "class": "Team",
+        "name": "Blue",
+        "properties": {
+          "TeamColor": [0.2, 0.4, 0.9],
+          "AutoAssignable": false
+        }
+      }
+    ]
+  }
+}

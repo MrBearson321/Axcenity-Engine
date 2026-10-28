@@ -58,5 +58,12 @@
       "Exposure": 1.1,
       "BloomIntensity": 0.5
     }
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false,
+      "LeaderboardEnabled": true,
+      "RespawnTime": 5
+    }
   }
 }

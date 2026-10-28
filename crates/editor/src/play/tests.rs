@@ -1,4 +1,4 @@
-use axcenity_core::ClassName;
+use axcenity_core::{ClassName, Value};
 
 use super::*;
 
@@ -262,6 +262,7 @@ end",
 #[test]
 fn each_frame_reports_its_steps_cost_and_the_load_for_the_profiler() {
     let mut world = World::new();
+    no_character(&mut world);
     for _ in 0..3 {
         let part = world.create(ClassName::Part).unwrap();
         world.set_parent(part, Some(world.workspace())).unwrap();
@@ -303,6 +304,13 @@ fn each_frame_reports_its_steps_cost_and_the_load_for_the_profiler() {
     assert_eq!(load.bodies, 3);
     assert_eq!(load.sounds_playing, 0);
     assert!(load.lua_bytes > 0);
+}
+
+/// Play spawns no character in `world` (Phase 47).
+fn no_character(world: &mut World) {
+    world
+        .set_property(world.players(), "CharacterAutoLoads", Value::Bool(false))
+        .unwrap();
 }
 
 fn key(key: egui::Key, pressed: bool) -> egui::Event {
@@ -350,6 +358,8 @@ fn game_keys_report_presses_releases_and_modifiers_once() {
 #[test]
 fn a_local_script_in_play_reads_keys_and_moves_the_camera() {
     let mut world = World::new();
+    // With a character, its controller would hold the camera.
+    no_character(&mut world);
     let instance = world.create(ClassName::LocalScript).unwrap();
     world
         .set_parent(instance, Some(world.starter_player_scripts()))

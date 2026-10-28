@@ -19,14 +19,18 @@
 //! }
 //! ```
 //!
-//! Only the Workspace, ReplicatedStorage and Lighting (its settings and
-//! what's inside it, such as an Atmosphere) are saved.
+//! Only the Workspace, ReplicatedStorage, Lighting (its settings and
+//! what's inside it, such as an Atmosphere), and the settings of Players,
+//! StarterPlayer and Teams (with its Teams) are saved.
 //! The Workspace's own properties (`GlobalWind`) are only written when they
 //! aren't their defaults, so `"workspace": {}` stays as short as ever.
 //! `replicated_storage` can be left out, and is only written when it has
 //! something in it. `lighting` (`{ "properties": { "ShadowsEnabled": false } }`,
 //! with `children` like the Workspace's) can be left out too, and is only
 //! written when a setting isn't its default or something is inside it.
+//! So are `players` (`CharacterAutoLoads`, `RespawnTime`,
+//! `LeaderboardEnabled`), `starter_player` (`StarterCharacter`) and `teams`
+//! (its Team children), in the same shape (Phase 47).
 //!
 //! Property values are plain JSON. Their meaning comes from the class: the
 //! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`,
@@ -122,6 +126,13 @@ struct WorldFile {
     replicated_storage: ServiceNode,
     #[serde(default)]
     lighting: ServiceNode,
+    // Phase 47: spawning settings, the StarterCharacter, and the Teams.
+    #[serde(default)]
+    players: ServiceNode,
+    #[serde(default)]
+    starter_player: ServiceNode,
+    #[serde(default)]
+    teams: ServiceNode,
 }
 
 #[derive(Default, Deserialize)]
@@ -220,6 +231,9 @@ pub fn parse_world(text: &str) -> Result<World, WorldError> {
         (world.workspace(), &file.workspace),
         (world.replicated_storage(), &file.replicated_storage),
         (world.lighting(), &file.lighting),
+        (world.players(), &file.players),
+        (world.starter_player(), &file.starter_player),
+        (world.teams(), &file.teams),
     ];
     for (service, node) in services {
         apply_properties(&mut world, service, &node.properties, &mut references)?;
@@ -642,25 +656,33 @@ pub fn write_world(world: &World) -> String {
         out.push_str(",\n  \"replicated_storage\": ");
         write_instance(world, replicated, 1, &roots, &mut out);
     }
-    // Left out while every setting is its default and nothing is inside,
-    // for the same reason.
-    let lighting = world.lighting();
-    let changed = world.get(lighting).is_some_and(|instance| {
-        let defaults = ClassName::Lighting.default_properties();
-        instance
-            .properties()
-            .any(|(name, value)| defaults.iter().any(|(n, v)| *n == name && v != value))
-    });
-    if changed || !saved_children(world, lighting).is_empty() {
-        out.push_str(",\n  \"lighting\": ");
-        write_instance(world, lighting, 1, &roots, &mut out);
+    // Each left out while every setting is its default and nothing is
+    // inside, for the same reason.
+    let services = [
+        ("lighting", world.lighting()),
+        ("players", world.players()),
+        ("starter_player", world.starter_player()),
+        ("teams", world.teams()),
+    ];
+    for (key, service) in services {
+        let changed = world.get(service).is_some_and(|instance| {
+            let defaults = instance.class().default_properties();
+            instance
+                .properties()
+                .any(|(name, value)| defaults.iter().any(|(n, v)| *n == name && v != value))
+        });
+        if changed || !saved_children(world, service).is_empty() {
+            out.push_str(&format!(",\n  \"{key}\": "));
+            write_instance(world, service, 1, &roots, &mut out);
+        }
     }
     out.push_str("\n}\n");
     out
 }
 
 /// The children of `id` that go in the world file. Scripts are saved as
-/// their own `.lua` files, and Players only exist while the game runs.
+/// their own `.lua` files, Players only exist while the game runs, and a
+/// service inside another (StarterPlayerScripts) is always there.
 fn saved_children(world: &World, id: InstanceId) -> Vec<InstanceId> {
     world.get(id).map_or_else(Vec::new, |instance| {
         instance
@@ -668,9 +690,11 @@ fn saved_children(world: &World, id: InstanceId) -> Vec<InstanceId> {
             .iter()
             .copied()
             .filter(|&child| {
-                world
-                    .get(child)
-                    .is_some_and(|c| !c.class().is_script() && c.class() != ClassName::Player)
+                world.get(child).is_some_and(|c| {
+                    !c.class().is_script()
+                        && !c.class().is_service()
+                        && c.class() != ClassName::Player
+                })
             })
             .collect()
     })

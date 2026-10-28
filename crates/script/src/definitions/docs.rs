@@ -2282,6 +2282,71 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If true, dying turns on every Ragdoll in the character.",
     ),
     (
+        ClassName::Players,
+        "CharacterAutoLoads",
+        "If true, each player gets a character as they join (unless one is already in the Workspace, which becomes theirs) and a new one RespawnTime seconds after their character's Humanoid dies. If false, characters come only from `LoadCharacter`.",
+    ),
+    (
+        ClassName::Players,
+        "RespawnTime",
+        "Seconds between a character's Humanoid dying and its player getting a new character, while CharacterAutoLoads is on.",
+    ),
+    (
+        ClassName::Players,
+        "LeaderboardEnabled",
+        "If false, the default leaderboard isn't drawn, for a game that makes its own. It shows each Player's `leaderstats` Folder of Value objects, top right, and Tab shows and hides it.",
+    ),
+    (
+        ClassName::StarterPlayer,
+        "StarterCharacter",
+        "The prefab (`assets/prefabs/*.prefab.json`) each player's character is a copy of. Empty uses the character Insert > Character makes: six welded parts with a Humanoid, a ThirdPersonController, a Health, an Inventory and an Animator.",
+    ),
+    (
+        ClassName::Player,
+        "Character",
+        "The character Model the player plays as, or nil. Set by spawning and `LoadCharacter`; a character placed in the Workspace before Play becomes the player's.",
+    ),
+    (
+        ClassName::Player,
+        "Team",
+        "The Team the player is on, or nil. Setting it also sets Neutral (false on a team, true on nil). Players join the AutoAssignable Team with the fewest players.",
+    ),
+    (
+        ClassName::Player,
+        "Neutral",
+        "If true, the player is on no team, and spawns only on Neutral SpawnLocations.",
+    ),
+    (
+        ClassName::Team,
+        "TeamColor",
+        "The team's color: its players spawn on SpawnLocations of this TeamColor.",
+    ),
+    (
+        ClassName::Team,
+        "AutoAssignable",
+        "If true, players joining are put on this team, or on the AutoAssignable team with the fewest players when there are several.",
+    ),
+    (
+        ClassName::SpawnLocation,
+        "Enabled",
+        "If false, nobody spawns here.",
+    ),
+    (
+        ClassName::SpawnLocation,
+        "Neutral",
+        "If true, any player can spawn here: neutral players, and players whose team has no enabled SpawnLocation of its own. If false, only players on the Team of its TeamColor.",
+    ),
+    (
+        ClassName::SpawnLocation,
+        "TeamColor",
+        "While Neutral is off, the players of the Team with this TeamColor spawn here.",
+    ),
+    (
+        ClassName::SpawnLocation,
+        "Duration",
+        "Seconds a ForceField keeps a character spawned here from losing Health. 0 gives none.",
+    ),
+    (
         ClassName::DamageZone,
         "DamagePerSecond",
         "Health a second taken from every Health whose Model has a part inside the zone (once each, however many of its parts are in). The damage's source is the zone. 0 or less does nothing.",
@@ -3753,6 +3818,21 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires once when the character's Health reaches 0, after the Health's own Died and StateChanged to Dead. By then the controller has stopped and RagdollOnDeath and BreakJointsOnDeath are done.",
     ),
     (
+        ClassName::Players,
+        "PlayerAdded",
+        "Fires with the Player when someone joins, after they're put on a team and before their first character spawns.",
+    ),
+    (
+        ClassName::Player,
+        "CharacterAdded",
+        "Fires with the character Model once it's in the Workspace: when the player first gets one, after each respawn and after `LoadCharacter`.",
+    ),
+    (
+        ClassName::Player,
+        "CharacterRemoving",
+        "Fires with the old character Model just before it's destroyed to make way for a new one. It's already out of the Workspace (its Parent is nil).",
+    ),
+    (
         ClassName::ProximityPrompt,
         "Triggered",
         "Fires with the Player when the action is pressed on a showing prompt (HoldDuration 0) or held for HoldDuration. Once per press: hold on and it doesn't fire again.",
@@ -3936,7 +4016,17 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "The service that holds server scripts (`scripts/*.server.lua`)."
         }
         ClassName::StarterPlayer => {
-            "The service with what each player starts with, such as StarterPlayerScripts."
+            "The service with what each player starts with: StarterPlayerScripts, and the StarterCharacter each character is a copy of."
+        }
+        ClassName::Teams => "The service that holds the Teams players can be on.",
+        ClassName::Team => {
+            "A side players can be on, in Teams. Its players spawn on SpawnLocations of its TeamColor; players joining go on the AutoAssignable team with the fewest players. `GetPlayers` lists them."
+        }
+        ClassName::SpawnLocation => {
+            "A Part characters spawn on: a player's character goes on top of an Enabled SpawnLocation of their team's TeamColor (or a Neutral one when the team has none), chosen at random. With none, it goes at the origin and Output warns. Anchored and 12 × 1 × 12 by default. Everything a Part has, and Enabled, Neutral, TeamColor and Duration."
+        }
+        ClassName::ForceField => {
+            "Keeps the Health of the Model it's in from losing any: TakeDamage, DamageZones and falls do nothing. A SpawnLocation puts one in each character it spawns, for its Duration seconds."
         }
         ClassName::StarterPlayerScripts => {
             "Holds the LocalScripts (`scripts/*.client.lua`), which run on the player's side."

@@ -13,6 +13,7 @@ Map only. Luau and block scripts (shown as blocks or as a graph) share one runti
 - ProximityPrompt and ClickDetector: [scripting/api-character.md](scripting/api-character.md)
 - Tool, Inventory and the hotbar: [scripting/api-character.md](scripting/api-character.md)
 - Humanoid (MoveTo, states, dying) and Insert ▸ Character: [scripting/api-character.md](scripting/api-character.md)
+- Players, SpawnLocations, Teams, respawning and the leaderboard: [scripting/api-character.md](scripting/api-character.md)
 - NavigationAgent (Destination, Velocity, Status, sight and hearing, PlayerSensed): [architecture/navigation.md](architecture/navigation.md)
 - TweenService, TweenInfo and Tweens: [scripting/api-tween.md](scripting/api-tween.md)
 - SaveService, save slots and Checkpoints: [architecture/saves.md](architecture/saves.md)

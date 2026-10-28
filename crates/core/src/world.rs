@@ -104,6 +104,11 @@ impl Instance {
 /// The longest attribute name, as in Roblox.
 pub const MAX_ATTRIBUTE_NAME: usize = 100;
 
+/// The name of the Model in StarterPlayer each player's character is a
+/// copy of, when there is one: hosts put `StarterPlayer.StarterCharacter`'s
+/// prefab there for Play (Phase 47).
+pub const STARTER_CHARACTER: &str = "StarterCharacter";
+
 #[derive(Debug, PartialEq, thiserror::Error)]
 pub enum AttributeError {
     #[error("the Instance no longer exists")]
@@ -214,6 +219,7 @@ pub struct World {
     replicated_storage: InstanceId,
     server_script_service: InstanceId,
     starter_player_scripts: InstanceId,
+    teams: InstanceId,
     changes: ChangeLog,
     /// Each Animator's live state (see [`AnimatorState`]), made the first
     /// time something asks for it.
@@ -238,8 +244,8 @@ pub struct World {
 impl World {
     /// Creates a world with `game` and its services, in the order the
     /// Explorer shows them: `Workspace`, `Players`, `Lighting`, `ReplicatedStorage`,
-    /// `ServerScriptService` and `StarterPlayer` (with
-    /// `StarterPlayerScripts` inside).
+    /// `ServerScriptService`, `StarterPlayer` (with `StarterPlayerScripts`
+    /// inside) and `Teams`.
     pub fn new() -> Self {
         let mut instances = Arena::new();
         let mut game = Instance::new(ClassName::DataModel);
@@ -267,6 +273,7 @@ impl World {
         let server_script_service = add_service(ClassName::ServerScriptService, root);
         let starter_player = add_service(ClassName::StarterPlayer, root);
         let starter_player_scripts = add_service(ClassName::StarterPlayerScripts, starter_player);
+        let teams = add_service(ClassName::Teams, root);
 
         Self {
             instances,
@@ -277,6 +284,7 @@ impl World {
             replicated_storage,
             server_script_service,
             starter_player_scripts,
+            teams,
             changes: ChangeLog::default(),
             animators: HashMap::new(),
             property_animations: HashMap::new(),
@@ -521,6 +529,18 @@ impl World {
         self.starter_player_scripts
     }
 
+    /// What each player starts with: their character and StarterPlayerScripts.
+    pub fn starter_player(&self) -> InstanceId {
+        self.get(self.starter_player_scripts)
+            .and_then(|scripts| scripts.parent)
+            .expect("StarterPlayerScripts is always in StarterPlayer")
+    }
+
+    /// Holds the Teams players can be on.
+    pub fn teams(&self) -> InstanceId {
+        self.teams
+    }
+
     /// The service (or `game` itself) of class `class`, if `class` is one.
     pub fn service(&self, class: ClassName) -> Option<InstanceId> {
         let id = match class {
@@ -532,6 +552,7 @@ impl World {
             ClassName::ServerScriptService => self.server_script_service,
             ClassName::StarterPlayer => self.get(self.starter_player_scripts)?.parent?,
             ClassName::StarterPlayerScripts => self.starter_player_scripts,
+            ClassName::Teams => self.teams,
             _ => return None,
         };
         Some(id)

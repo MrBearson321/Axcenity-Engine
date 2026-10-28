@@ -40,6 +40,7 @@ fn new_world_has_game_and_its_services() {
     let game = world.get(world.root()).unwrap();
     assert_eq!(game.class(), ClassName::DataModel);
     let starter_player = world.service(ClassName::StarterPlayer).unwrap();
+    assert_eq!(world.starter_player(), starter_player);
     assert_eq!(
         game.children(),
         &[
@@ -49,6 +50,7 @@ fn new_world_has_game_and_its_services() {
             world.replicated_storage(),
             world.server_script_service(),
             starter_player,
+            world.teams(),
         ]
     );
     assert_eq!(

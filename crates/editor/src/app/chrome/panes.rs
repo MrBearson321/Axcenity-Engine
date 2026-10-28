@@ -753,6 +753,7 @@ impl EditorApp {
                             focused_text: self.focused_text,
                             loading_screen: self.play.as_ref().and_then(Session::loading_screen),
                             hotbar: self.play.as_ref().and_then(Session::hotbar),
+                            leaderboard: self.play.as_ref().is_some_and(Session::leaderboard),
                             prompts: self.play.as_ref().map(Session::prompts).unwrap_or_default(),
                             click_cursor: self.play.as_ref().and_then(Session::click_cursor),
                             light_cones: self.light_cones,

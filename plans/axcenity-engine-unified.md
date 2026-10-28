@@ -1507,9 +1507,9 @@ Insert > **Character** makes a rigged character with a Humanoid, a third-person 
 
 ### Acceptance criteria
 
-- [ ] With no script, Play spawns the StarterCharacter on a SpawnLocation, and it respawns there after dying.
-- [ ] A player on the Red team spawns only on red SpawnLocations.
-- [ ] An IntValue named Coins in `leaderstats` shows on the leaderboard and updates when a script changes it.
+- [x] With no script, Play spawns the StarterCharacter on a SpawnLocation, and it respawns there after dying.
+- [x] A player on the Red team spawns only on red SpawnLocations.
+- [x] An IntValue named Coins in `leaderstats` shows on the leaderboard and updates when a script changes it.
 
 ---
 

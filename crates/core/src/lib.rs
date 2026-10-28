@@ -44,5 +44,5 @@ pub use value::{
 };
 pub use world::{
     AttributeError, Change, Instance, InstanceId, MAX_ATTRIBUTE_NAME, PropertyError,
-    RecordedChange, TreeError, World, is_attribute_name,
+    RecordedChange, STARTER_CHARACTER, TreeError, World, is_attribute_name,
 };

@@ -556,10 +556,10 @@ fn with_side(name: &str, doc: &str) -> String {
 }
 
 /// The class whose descriptions `class` shares for what it inherits: a
-/// Seat (or DamageZone) is a Part, and a VehicleSeat is a Seat.
+/// Seat (or DamageZone, or SpawnLocation) is a Part, and a VehicleSeat is a Seat.
 fn doc_parent(class: ClassName) -> Option<ClassName> {
     match class {
-        ClassName::Seat | ClassName::DamageZone => Some(ClassName::Part),
+        ClassName::Seat | ClassName::DamageZone | ClassName::SpawnLocation => Some(ClassName::Part),
         ClassName::VehicleSeat => Some(ClassName::Seat),
         ClassName::Tool => Some(ClassName::Model),
         _ => None,

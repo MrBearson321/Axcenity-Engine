@@ -135,6 +135,13 @@ impl Session {
                 loading.screen_gui
             ));
         }
+        // The character each player spawns as (Phase 47), before scripts
+        // look for it.
+        if let Some(folder) = session.assets.folder()
+            && let Err(err) = axcenity_project::load_starter_character(&folder, &mut session.world)
+        {
+            output.warning(err);
+        }
         session.scripts.set_assets(session.assets.clone());
         session.scripts.set_save_folder(save_folder);
         session.scripts.set_input_map(input_map.clone());
@@ -173,6 +180,12 @@ impl Session {
     /// viewport draws.
     pub fn hotbar(&self) -> Option<InstanceId> {
         self.scripts.player_inventory(&self.world)
+    }
+
+    /// Whether the viewport draws the default leaderboard (Phase 47): Tab
+    /// hides and shows it.
+    pub fn leaderboard(&self) -> bool {
+        self.scripts.leaderboard_shown()
     }
 
     /// The ProximityPrompts that show (Phase 44), for the viewport to draw.
@@ -398,6 +411,9 @@ impl Session {
             // Then Humanoids: MoveTo, states and dying (Phase 46).
             self.scripts
                 .step_humanoids(&mut self.world, &self.characters, seconds);
+            // Then players: their first character, respawns and spawn
+            // ForceFields (Phase 47).
+            self.scripts.step_players(&mut self.world, seconds);
             // Then navigation agents, toward their destinations.
             self.agents
                 .step(&mut self.world, &self.assets, seconds as f32);

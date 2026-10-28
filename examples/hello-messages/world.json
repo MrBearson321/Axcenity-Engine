@@ -30,5 +30,12 @@
       { "class": "BindableEvent", "name": "Scored" },
       { "class": "BindableFunction", "name": "Double" }
     ]
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false,
+      "LeaderboardEnabled": true,
+      "RespawnTime": 5
+    }
   }
 }

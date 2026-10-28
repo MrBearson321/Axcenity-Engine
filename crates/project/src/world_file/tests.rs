@@ -67,6 +67,46 @@ fn lighting_settings_round_trip_and_default_ones_are_not_written() {
 }
 
 #[test]
+fn players_starter_player_and_teams_round_trip() {
+    let world = parse_world(r#"{ "format_version": 1 }"#).unwrap();
+    let text = write_world(&world);
+    for key in ["players", "starter_player", "teams"] {
+        assert!(!text.contains(key), "{key} has only defaults");
+    }
+
+    let world = parse_world(
+        r#"{ "format_version": 1,
+             "players": { "properties": { "RespawnTime": 2, "LeaderboardEnabled": false } },
+             "starter_player": { "properties": { "StarterCharacter": "assets/prefabs/Hero.prefab.json" } },
+             "teams": { "children": [
+               { "class": "Team", "name": "Red", "properties": { "TeamColor": [1, 0, 0] } }
+             ] } }"#,
+    )
+    .unwrap();
+    let reloaded = parse_world(&write_world(&world)).unwrap();
+    let players = reloaded.get(reloaded.players()).unwrap();
+    assert_eq!(players.property("RespawnTime"), Some(&Value::Number(2.0)));
+    assert_eq!(
+        players.property("LeaderboardEnabled"),
+        Some(&Value::Bool(false))
+    );
+    assert_eq!(
+        reloaded
+            .get(reloaded.starter_player())
+            .unwrap()
+            .property("StarterCharacter"),
+        Some(&Value::String("assets/prefabs/Hero.prefab.json".to_owned()))
+    );
+    let red = reloaded.find_first_child(reloaded.teams(), "Red").unwrap();
+    assert_eq!(
+        reloaded.get(red).unwrap().property("TeamColor"),
+        Some(&Value::Color3(Color3::new(1.0, 0.0, 0.0)))
+    );
+    // StarterPlayerScripts is always there, so it isn't written.
+    assert!(!write_world(&reloaded).contains("StarterPlayerScripts"));
+}
+
+#[test]
 fn part_with_properties_and_nested_child() {
     let world = parse_world(
         r#"{

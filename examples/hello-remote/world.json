@@ -28,5 +28,12 @@
     "children": [
       { "class": "RemoteEvent", "name": "MoveRequest" }
     ]
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false,
+      "LeaderboardEnabled": true,
+      "RespawnTime": 5
+    }
   }
 }

@@ -708,6 +708,10 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::ServerScriptService => icons::HARD_DRIVES,
         ClassName::StarterPlayer => icons::USER_CIRCLE,
         ClassName::StarterPlayerScripts => icons::USER_GEAR,
+        ClassName::Teams => icons::USERS_THREE,
+        ClassName::Team => icons::FLAG_BANNER,
+        ClassName::SpawnLocation => icons::MAP_PIN,
+        ClassName::ForceField => icons::SHIELD,
         ClassName::Part => icons::CUBE,
         ClassName::MeshPart => icons::CUBE_TRANSPARENT,
         ClassName::Seat => icons::CHAIR,
@@ -892,7 +896,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::RemoteFunction
         | ClassName::BindableEvent
         | ClassName::BindableFunction => pick((232, 130, 170), (175, 50, 105)),
-        ClassName::Player => pick((125, 195, 125), (45, 125, 55)),
+        ClassName::Player | ClassName::Team => pick((125, 195, 125), (45, 125, 55)),
         _ => visuals.weak_text_color(),
     }
 }

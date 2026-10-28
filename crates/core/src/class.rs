@@ -46,6 +46,11 @@ pub enum ClassName {
     /// Holds the LocalScripts, which run on the player's side. Inside
     /// StarterPlayer, and can't be moved, like a service.
     StarterPlayerScripts,
+    /// The service that holds the Teams (Phase 47).
+    Teams,
+    /// A side players are on, in Teams: they spawn on the SpawnLocations
+    /// of its `TeamColor`.
+    Team,
     /// A solid shape in the world.
     Part,
     /// A solid 3D model imported from a glTF or FBX file (or some objects
@@ -62,6 +67,10 @@ pub enum ClassName {
     /// inside it loses `DamagePerSecond` a second. Anchored, see-through
     /// and walked through by default.
     DamageZone,
+    /// A Part characters spawn on (Phase 47): an `Enabled` one of their
+    /// team's `TeamColor`, or a `Neutral` one, chosen at random. For
+    /// `Duration` seconds after, a ForceField keeps them from harm.
+    SpawnLocation,
     /// Lua code that runs on the server. Its source lives in a
     /// `*.server.lua` file, not in a property.
     Script,
@@ -233,6 +242,10 @@ pub enum ClassName {
     /// of its own but `BreakJointsOnDeath` and `RagdollOnDeath`. Fires
     /// `MoveToFinished`, `StateChanged` and `Died`.
     Humanoid,
+    /// Keeps the Health of the Model it's in from losing any (Phase 47).
+    /// A SpawnLocation puts one on each character it spawns, for its
+    /// `Duration`.
+    ForceField,
     /// Holds `Part0` and `Part1` together where they were when it was made
     /// or enabled. Welded unanchored parts move as one body: an assembly.
     WeldConstraint,
@@ -281,7 +294,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 88] = [
+    pub const ALL: [ClassName; 92] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -295,6 +308,7 @@ impl ClassName {
         ClassName::Seat,
         ClassName::VehicleSeat,
         ClassName::DamageZone,
+        ClassName::SpawnLocation,
         ClassName::Script,
         ClassName::LocalScript,
         ClassName::ModuleScript,
@@ -348,6 +362,9 @@ impl ClassName {
         ClassName::Tool,
         ClassName::Inventory,
         ClassName::Humanoid,
+        ClassName::ForceField,
+        ClassName::Teams,
+        ClassName::Team,
         ClassName::WeldConstraint,
         ClassName::HingeConstraint,
         ClassName::BallSocketConstraint,
@@ -382,10 +399,13 @@ impl ClassName {
             ClassName::ServerScriptService => "ServerScriptService",
             ClassName::StarterPlayer => "StarterPlayer",
             ClassName::StarterPlayerScripts => "StarterPlayerScripts",
+            ClassName::Teams => "Teams",
+            ClassName::Team => "Team",
             ClassName::Part => "Part",
             ClassName::Seat => "Seat",
             ClassName::VehicleSeat => "VehicleSeat",
             ClassName::DamageZone => "DamageZone",
+            ClassName::SpawnLocation => "SpawnLocation",
             ClassName::MeshPart => "MeshPart",
             ClassName::Script => "Script",
             ClassName::LocalScript => "LocalScript",
@@ -440,6 +460,7 @@ impl ClassName {
             ClassName::Tool => "Tool",
             ClassName::Inventory => "Inventory",
             ClassName::Humanoid => "Humanoid",
+            ClassName::ForceField => "ForceField",
             ClassName::WeldConstraint => "WeldConstraint",
             ClassName::HingeConstraint => "HingeConstraint",
             ClassName::BallSocketConstraint => "BallSocketConstraint",
@@ -485,7 +506,9 @@ impl ClassName {
         const LAYER: &[&str] = &["LayerCollector", "GuiBase2d"];
         match self {
             ClassName::Part | ClassName::MeshPart => PART,
-            ClassName::Seat | ClassName::DamageZone => &["Part", "BasePart", "PVInstance"],
+            ClassName::Seat | ClassName::DamageZone | ClassName::SpawnLocation => {
+                &["Part", "BasePart", "PVInstance"]
+            }
             ClassName::VehicleSeat => &["Seat", "Part", "BasePart", "PVInstance"],
             ClassName::Model => &["PVInstance"],
             ClassName::Tool => &["Model", "PVInstance"],
@@ -506,18 +529,23 @@ impl ClassName {
         name == "Instance" || self.as_str() == name || self.superclasses().contains(&name)
     }
 
-    /// A Part, MeshPart, Seat, VehicleSeat or DamageZone: a solid in the
-    /// world (`BasePart`).
+    /// A Part, MeshPart, Seat, VehicleSeat, DamageZone or SpawnLocation: a
+    /// solid in the world (`BasePart`).
     pub fn is_base_part(self) -> bool {
         matches!(self, ClassName::MeshPart) || self.is_part()
     }
 
-    /// A Part or one of the classes that are Parts: Seat, VehicleSeat and
-    /// DamageZone. They have a `Shape`, a `Material` and the rest.
+    /// A Part or one of the classes that are Parts: Seat, VehicleSeat,
+    /// DamageZone and SpawnLocation. They have a `Shape`, a `Material` and
+    /// the rest.
     pub fn is_part(self) -> bool {
         matches!(
             self,
-            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone
+            ClassName::Part
+                | ClassName::Seat
+                | ClassName::VehicleSeat
+                | ClassName::DamageZone
+                | ClassName::SpawnLocation
         )
     }
 
@@ -578,6 +606,7 @@ impl ClassName {
                 | ClassName::ServerScriptService
                 | ClassName::StarterPlayer
                 | ClassName::StarterPlayerScripts
+                | ClassName::Teams
         )
     }
 
@@ -675,11 +704,11 @@ impl ClassName {
     fn own_properties(self) -> Vec<(&'static str, Value)> {
         match self {
             ClassName::DataModel
-            | ClassName::Players
             | ClassName::ReplicatedStorage
             | ClassName::ServerScriptService
-            | ClassName::StarterPlayer
             | ClassName::StarterPlayerScripts
+            | ClassName::Teams
+            | ClassName::ForceField
             | ClassName::Script
             | ClassName::LocalScript
             | ClassName::ModuleScript
@@ -687,12 +716,39 @@ impl ClassName {
             | ClassName::RemoteFunction
             | ClassName::BindableEvent
             | ClassName::BindableFunction
-            | ClassName::Player
             | ClassName::Model
             | ClassName::Folder
             | ClassName::AnimationTrack => Vec::new(),
             // An IntValue's number is always whole (`World::set_property`
             // rounds it).
+            ClassName::Players => vec![
+                // On, each player gets a character when they join and
+                // again `RespawnTime` seconds after it dies.
+                ("CharacterAutoLoads", Value::Bool(true)),
+                ("RespawnTime", Value::Number(5.0)),
+                // Off, the default leaderboard (each Player's `leaderstats`)
+                // isn't drawn, for a game's own.
+                ("LeaderboardEnabled", Value::Bool(true)),
+            ],
+            ClassName::StarterPlayer => vec![
+                // The prefab each player's character is a copy of, such as
+                // "assets/prefabs/Hero.prefab.json"; empty for the
+                // character Insert > Character makes.
+                ("StarterCharacter", Value::String(String::new())),
+            ],
+            ClassName::Player => vec![
+                // The character Model it plays as, or none.
+                ("Character", Value::Instance(None)),
+                // The Team it's on; on none while `Neutral`.
+                ("Team", Value::Instance(None)),
+                ("Neutral", Value::Bool(true)),
+            ],
+            ClassName::Team => vec![
+                ("TeamColor", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                // On, players joining are put on it (on the one with the
+                // fewest players, when several are).
+                ("AutoAssignable", Value::Bool(true)),
+            ],
             ClassName::IntValue | ClassName::NumberValue => vec![("Value", Value::Number(0.0))],
             ClassName::StringValue => vec![("Value", Value::String(String::new()))],
             ClassName::BoolValue => vec![("Value", Value::Bool(false))],
@@ -1226,7 +1282,11 @@ impl ClassName {
                 ("RollOffMinDistance", Value::Number(10.0)),
                 ("RollOffMaxDistance", Value::Number(150.0)),
             ],
-            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone => {
+            ClassName::Part
+            | ClassName::Seat
+            | ClassName::VehicleSeat
+            | ClassName::DamageZone
+            | ClassName::SpawnLocation => {
                 let material = Material::Plastic;
                 let preset = material.preset();
                 let mut properties = vec![
@@ -1291,6 +1351,30 @@ impl ClassName {
                     }
                     // Health a second taken from each Health inside it.
                     properties.push(("DamagePerSecond", Value::Number(10.0)));
+                }
+                if self == ClassName::SpawnLocation {
+                    // A pad to stand on.
+                    for (name, value) in [
+                        ("Anchored", Value::Bool(true)),
+                        ("Size", Value::Vector3(Vector3::new(12.0, 1.0, 12.0))),
+                    ] {
+                        if let Some(slot) = properties.iter_mut().find(|(n, _)| *n == name) {
+                            slot.1 = value;
+                        }
+                    }
+                    properties.extend([
+                        // Off, nobody spawns here.
+                        ("Enabled", Value::Bool(true)),
+                        // On, players on any team (or none) spawn here, when
+                        // their team has no SpawnLocation of its own.
+                        ("Neutral", Value::Bool(true)),
+                        // The Team whose players spawn here, by its
+                        // TeamColor, while `Neutral` is off.
+                        ("TeamColor", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                        // Seconds a ForceField keeps a character spawned
+                        // here from harm; 0 for none.
+                        ("Duration", Value::Number(10.0)),
+                    ]);
                 }
                 if self == ClassName::VehicleSeat {
                     properties.extend([
@@ -1848,18 +1932,19 @@ impl ClassName {
         match self {
             ClassName::DataModel
             | ClassName::Workspace
-            | ClassName::Players
             | ClassName::Lighting
             | ClassName::ReplicatedStorage
             | ClassName::ServerScriptService
             | ClassName::StarterPlayer
             | ClassName::StarterPlayerScripts
+            | ClassName::Teams
+            | ClassName::Team
+            | ClassName::ForceField
             | ClassName::Script
             | ClassName::LocalScript
             | ClassName::ModuleScript
             | ClassName::RemoteFunction
             | ClassName::BindableFunction
-            | ClassName::Player
             | ClassName::Model
             | ClassName::Inventory
             | ClassName::Folder
@@ -1908,6 +1993,11 @@ impl ClassName {
             // with the old and new `Enum.HumanoidStateType`, and `Died`
             // once when its Health reaches 0.
             ClassName::Humanoid => &["MoveToFinished", "StateChanged", "Died"],
+            // Each with the Player, as they join (Phase 47).
+            ClassName::Players => &["PlayerAdded"],
+            // Each with the character Model: `CharacterAdded` once it's in
+            // the Workspace, `CharacterRemoving` as it goes.
+            ClassName::Player => &["CharacterAdded", "CharacterRemoving"],
             // Each with the Player, but `PromptShown` and `PromptHidden`.
             ClassName::ProximityPrompt => &[
                 "Triggered",
@@ -1958,7 +2048,8 @@ impl ClassName {
             | ClassName::MeshPart
             | ClassName::Seat
             | ClassName::VehicleSeat
-            | ClassName::DamageZone => &["Touched", "TouchEnded"],
+            | ClassName::DamageZone
+            | ClassName::SpawnLocation => &["Touched", "TouchEnded"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.
             ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],

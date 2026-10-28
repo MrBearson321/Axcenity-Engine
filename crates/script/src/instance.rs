@@ -303,6 +303,7 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
             )))
         }
         "Health" if class == Some(ClassName::Health) => crate::health::set(lua, id, value),
+        "Team" if class == Some(ClassName::Player) => crate::players::set(lua, id, value),
         key if class == Some(ClassName::Humanoid) && crate::humanoid::is_field(key) => {
             crate::humanoid::set(lua, id, key, value)
         }

@@ -163,6 +163,10 @@ fn main() -> Result<()> {
     // their defaults) before any script runs, so scripts can read them.
     let mut animators = Animators::new();
     animators.update(&mut world, &assets, 0.0);
+    // The character each player spawns as, before scripts look for it.
+    if let Err(err) = axcenity_project::load_starter_character(&project.folder, &mut world) {
+        eprintln!("warning: {err}");
+    }
     // The project's actions, before any LocalScript asks about them.
     scripts.set_input_map(project.input_map.clone());
     start_scripts(&mut scripts, &mut world, &project.scripts);
@@ -1149,6 +1153,10 @@ impl ApplicationHandler for App {
                 //    Then Humanoids: MoveTo, states and dying (Phase 46).
                 self.scripts
                     .step_humanoids(&mut self.world, &self.characters, f64::from(seconds));
+                //    Then players: their first character, respawns and
+                //    spawn ForceFields (Phase 47).
+                self.scripts
+                    .step_players(&mut self.world, f64::from(seconds));
                 // Then navigation agents, toward their destinations.
                 self.agents.step(&mut self.world, &self.assets, seconds);
                 for warning in self.agents.take_warnings() {
@@ -1300,12 +1308,22 @@ impl ApplicationHandler for App {
                     self.cursor = cursor;
                     window.set_cursor(cursor);
                 }
-                // The hotbar, then ProximityPrompts that show, over the
-                // rest of the UI.
+                // The hotbar, the leaderboard, then ProximityPrompts that
+                // show, over the rest of the UI.
                 if let Some(inventory) = self.scripts.player_inventory(&self.world) {
                     draw_list.ui.extend(axcenity_ui::hotbar_items(
                         &self.world,
                         inventory,
+                        &self.stylesheets,
+                        size.width,
+                        size.height,
+                    ));
+                }
+                // The leaderboard (each Player's `leaderstats`), unless Tab
+                // hid it.
+                if self.scripts.leaderboard_shown() {
+                    draw_list.ui.extend(axcenity_ui::leaderboard_items(
+                        &self.world,
                         &self.stylesheets,
                         size.width,
                         size.height,
@@ -1437,6 +1455,8 @@ mod prompt_tests;
 mod ragdoll_tests;
 #[cfg(test)]
 mod seat_tests;
+#[cfg(test)]
+mod spawn_tests;
 #[cfg(test)]
 mod tool_tests;
 #[cfg(test)]

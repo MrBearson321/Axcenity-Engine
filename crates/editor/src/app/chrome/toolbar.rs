@@ -417,6 +417,25 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::SPAWNING {
+                    let hint = if what == Insertable::SpawnLocation {
+                        "Insert a SpawnLocation: a pad players' characters spawn on during \
+                         Play, and respawn on after dying. Turn Neutral off and set its \
+                         TeamColor to keep it for one team."
+                    } else {
+                        "Insert a Team into Teams: players join the AutoAssignable team with \
+                         the fewest players, and spawn on SpawnLocations of its TeamColor."
+                    };
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hint)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
                 for what in Insertable::TOOLS {
                     let hint = if what == Insertable::Tool {
                         "Insert a Tool: a Handle part with a Grip. During Play, a character \

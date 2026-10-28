@@ -1889,6 +1889,33 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Player,
+        Function {
+            name: "LoadCharacter",
+            doc: "Scripts only: gives the player a new character. The old one (if any) leaves the Workspace, fires CharacterRemoving and is destroyed; a copy of the StarterCharacter stands on one of the player's team's SpawnLocations (or a Neutral one), chosen at random, with a ForceField for its Duration, and CharacterAdded fires. With no SpawnLocation it stands at the origin and Output warns.",
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Players,
+        Function {
+            name: "GetPlayers",
+            doc: "Every Player in the game.",
+            params: &[],
+            returns: "{Player}",
+        },
+    ),
+    (
+        ClassName::Team,
+        Function {
+            name: "GetPlayers",
+            doc: "The Players on this team (their Team is it, and Neutral is off).",
+            params: &[],
+            returns: "{Player}",
+        },
+    ),
+    (
         ClassName::Humanoid,
         Function {
             name: "MoveTo",

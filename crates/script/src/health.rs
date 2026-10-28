@@ -98,8 +98,8 @@ pub fn set_health(world: &mut World, id: InstanceId, to: f64) -> Vec<HealthEvent
     events
 }
 
-/// `TakeDamage(amount, source)`: nothing when it's Invulnerable, already
-/// dead, or `amount` isn't above 0. Otherwise `HealthChanged`, `Damaged`
+/// `TakeDamage(amount, source)`: nothing when it's Invulnerable, has a
+/// ForceField beside it, is already dead, or `amount` isn't above 0. Otherwise `HealthChanged`, `Damaged`
 /// (with what it lost) and maybe `Died`.
 pub fn damage(
     world: &mut World,
@@ -110,6 +110,7 @@ pub fn damage(
     let old = number(world, id, "Health");
     if !is_health(world, id)
         || flag(world, id, "Invulnerable")
+        || shielded(world, id)
         || old <= 0.0
         || !(amount > 0.0 && amount.is_finite())
     {
@@ -127,6 +128,22 @@ pub fn damage(
         },
     );
     events
+}
+
+/// Whether a ForceField sits beside the Health `id`, in its Model
+/// (Phase 47: a SpawnLocation's spawn shield).
+fn shielded(world: &World, id: InstanceId) -> bool {
+    world
+        .get(id)
+        .and_then(|health| health.parent())
+        .and_then(|holder| world.get(holder))
+        .is_some_and(|holder| {
+            holder.children().iter().any(|&child| {
+                world
+                    .get(child)
+                    .is_some_and(|c| c.class() == ClassName::ForceField)
+            })
+        })
 }
 
 /// `Heal(amount)`: up to MaxHealth. Nothing once it's dead.

@@ -12,6 +12,7 @@ mod css;
 mod gamepad;
 mod hotbar;
 mod interact;
+mod leaderboard;
 mod loading;
 mod paint;
 mod prompt;
@@ -29,6 +30,7 @@ pub use interact::{
     FOCUS_RING_COLOR, NavKey, SCROLL_DRAG_SLOP, TOOLTIP_DELAY, UiCursor, UiEvent, UiInput,
     UiInteraction, UiNavigated, UiScrolled, UiState,
 };
+pub use leaderboard::{LEADERSTATS, leaderboard_items};
 pub use loading::LoadingGui;
 use paint::*;
 pub use prompt::{PromptView, prompt_items, prompt_text};

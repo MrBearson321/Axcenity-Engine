@@ -323,6 +323,9 @@ fn described_fields_and_methods_exist() {
             "(function() local h = Instance.new('Humanoid'); h.Parent = Instance.new('Model'); return h end)()",
         ),
         (ClassName::DamageZone, "Instance.new('DamageZone')"),
+        (ClassName::SpawnLocation, "Instance.new('SpawnLocation')"),
+        (ClassName::Players, "game:GetService('Players')"),
+        (ClassName::Team, "Instance.new('Team')"),
         (ClassName::Animation, "Instance.new('Animation')"),
         (
             ClassName::AnimationTrack,
@@ -356,6 +359,17 @@ fn described_fields_and_methods_exist() {
             .expect("add a sample Instance for the new class")
     };
     for (class, method) in CLASS_METHODS {
+        // Scripts have no LocalPlayer: they reach a Player once it joins.
+        if (*class, method.name) == (ClassName::Player, "LoadCharacter") {
+            check(
+                method.name,
+                "game.Players.PlayerAdded:Connect(function(player)\n\
+                 assert(type(player.LoadCharacter) == 'function', 'Player:LoadCharacter')\n\
+                 print('checked player')\nend)"
+                    .to_owned(),
+            );
+            continue;
+        }
         check(
             side_of(*class, method.name),
             format!(
@@ -496,7 +510,9 @@ fn described_fields_and_methods_exist() {
         .map(|line| line.text.as_str())
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
-    assert_eq!(output.last().unwrap().text, "checked input");
+    let printed: Vec<&str> = output.iter().map(|line| line.text.as_str()).collect();
+    assert!(printed.contains(&"checked input"), "{printed:?}");
+    assert!(printed.contains(&"checked player"), "{printed:?}");
 }
 
 #[test]

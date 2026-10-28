@@ -189,6 +189,11 @@ impl Assets {
         assets
     }
 
+    /// The project folder, or `None` when no project is open.
+    pub fn folder(&self) -> Option<PathBuf> {
+        self.lock().folder.clone()
+    }
+
     /// The model at `mesh_id` (a MeshPart's `MeshId`, such as
     /// `assets/models/chair.glb`), loading it the first time. `None` if
     /// `mesh_id` is empty or the model can't be loaded; the reason goes to

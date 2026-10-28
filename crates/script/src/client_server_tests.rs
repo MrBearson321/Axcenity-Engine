@@ -530,7 +530,7 @@ fn get_service_finds_services_and_lists_them_for_a_wrong_name() {
         "scripts/services.server.lua",
         r#"
         print(game:GetService("Players") == game.Players, game:GetService("Lighting") == game.Lighting)
-        print(pcall(game.GetService, game, "Teams"))
+        print(pcall(game.GetService, game, "Teamz"))
         print(pcall(Instance.new, "Player"))
         "#,
     );
@@ -538,8 +538,8 @@ fn get_service_finds_services_and_lists_them_for_a_wrong_name() {
     assert_eq!(output[0], "true\ttrue");
     assert!(
         output[1].ends_with(
-            "there is no service named \"Teams\"; choose from Workspace, Players, Lighting, \
-             ReplicatedStorage, ServerScriptService, StarterPlayer, CollectionService, \
+            "there is no service named \"Teamz\"; choose from Workspace, Players, Lighting, \
+             ReplicatedStorage, ServerScriptService, StarterPlayer, Teams, CollectionService, \
              ContextActionService, DataService, Debris, GuiService, HttpService, LocalizationService, \
              PhysicsService, ReplicatedFirst, RunService, \
              SaveService, TweenService, UserGameSettings, UserInputService"
