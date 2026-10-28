@@ -1,0 +1,28 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "when_part_clicked",
+        "detector": "Button.ClickDetector",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "set_color",
+              "target": "Button",
+              "color": { "type": "color3", "r": 0.2, "g": 0.8, "b": 0.3 }
+            }
+          },
+          {
+            "id": 3,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "the button was clicked" }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

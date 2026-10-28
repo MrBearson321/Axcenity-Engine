@@ -404,6 +404,22 @@ impl<'a> Converter<'a> {
                 }
                 Some(Block::new(BlockKind::WhenTouched { part, body }))
             }
+            "Triggered" | "MouseClick" => {
+                let target = self.target(object)?;
+                let function = self.handler(handler, 0)?;
+                let body = self.body(&function.body, Scope::default());
+                Some(Block::new(if event == "Triggered" {
+                    BlockKind::WhenPromptTriggered {
+                        prompt: target,
+                        body,
+                    }
+                } else {
+                    BlockKind::WhenPartClicked {
+                        detector: target,
+                        body,
+                    }
+                }))
+            }
             "Activated" => {
                 let button = self.target(object)?;
                 let function = self.handler(handler, 0)?;

@@ -116,6 +116,70 @@ impl Action {
     pub fn is_ui(&self) -> bool {
         self.name.starts_with("UI")
     }
+
+    /// What a prompt shows for this action: its first controller button
+    /// when `gamepad` (a controller was used last), else its first key or
+    /// mouse button, such as `E`, `X` or `Shift`. Its first input when it
+    /// has none of that device's; empty when it has none at all.
+    pub fn label(&self, gamepad: bool) -> String {
+        let on_pad = |input: &Input| match input {
+            Input::Key(key) => key.is_gamepad(),
+            Input::Keys(keys) => keys[0].is_gamepad(),
+            Input::Mouse(_) | Input::MouseMovement => false,
+        };
+        let input = self
+            .inputs
+            .iter()
+            .find(|input| on_pad(input) == gamepad)
+            .or(self.inputs.first());
+        match input {
+            Some(Input::Key(key)) => key_label(*key),
+            Some(Input::Mouse(UserInputType::MouseButton1)) => "Click".to_owned(),
+            Some(Input::Mouse(UserInputType::MouseButton2)) => "Right Click".to_owned(),
+            Some(input) => input.name(),
+            None => String::new(),
+        }
+    }
+}
+
+/// A key's or button's short name, as a prompt shows it: `ButtonX` is
+/// `X`, `ButtonL1` is `LB`, `Return` is `Enter`, `Seven` is `7`.
+pub fn key_label(key: KeyCode) -> String {
+    let short = match key {
+        KeyCode::ButtonA => "A",
+        KeyCode::ButtonB => "B",
+        KeyCode::ButtonX => "X",
+        KeyCode::ButtonY => "Y",
+        KeyCode::ButtonL1 => "LB",
+        KeyCode::ButtonR1 => "RB",
+        KeyCode::ButtonL2 => "LT",
+        KeyCode::ButtonR2 => "RT",
+        KeyCode::ButtonL3 => "LS",
+        KeyCode::ButtonR3 => "RS",
+        KeyCode::ButtonStart => "Menu",
+        KeyCode::ButtonSelect => "View",
+        KeyCode::DPadUp => "Up",
+        KeyCode::DPadDown => "Down",
+        KeyCode::DPadLeft => "Left",
+        KeyCode::DPadRight => "Right",
+        KeyCode::Zero => "0",
+        KeyCode::One => "1",
+        KeyCode::Two => "2",
+        KeyCode::Three => "3",
+        KeyCode::Four => "4",
+        KeyCode::Five => "5",
+        KeyCode::Six => "6",
+        KeyCode::Seven => "7",
+        KeyCode::Eight => "8",
+        KeyCode::Nine => "9",
+        KeyCode::Return => "Enter",
+        KeyCode::Escape => "Esc",
+        KeyCode::LeftShift | KeyCode::RightShift => "Shift",
+        KeyCode::LeftControl | KeyCode::RightControl => "Ctrl",
+        KeyCode::LeftAlt | KeyCode::RightAlt => "Alt",
+        other => other.as_str(),
+    };
+    short.to_owned()
 }
 
 /// The UI's navigation actions, which the focus system reads.
@@ -609,6 +673,22 @@ mod tests {
         assert_eq!(Input::parse("Jump"), None);
         assert_eq!(Input::parse("W,A,S"), None);
         assert_eq!(parse_binding("E Nope"), None);
+    }
+
+    #[test]
+    fn interact_is_labelled_by_the_device_used_last() {
+        let map = InputMap::default();
+        let interact = map.action("Interact").expect("a default action");
+        assert_eq!(interact.label(false), "E");
+        assert_eq!(interact.label(true), "X");
+        // An action with only keys shows its key on a controller too.
+        let keys_only = Action::new("Open", false, &["LeftShift"]);
+        assert_eq!(keys_only.label(true), "Shift");
+        assert_eq!(
+            Action::new("Use", false, &["MouseButton1"]).label(false),
+            "Click"
+        );
+        assert_eq!(Action::new("None", false, &[]).label(false), "");
     }
 
     #[test]

@@ -259,6 +259,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WhenEventFired { .. }
         | BlockKind::FireEvent { .. }
         | BlockKind::WhenSoundEnded { .. }
+        | BlockKind::WhenPromptTriggered { .. }
+        | BlockKind::WhenPartClicked { .. }
         | BlockKind::Unattached { .. } => Category::Events,
         BlockKind::Wait { .. }
         | BlockKind::WaitUntil { .. }
@@ -371,6 +373,8 @@ enum Filter {
     Agents,
     Checkpoints,
     Seats,
+    Prompts,
+    ClickDetectors,
     /// ThirdPersonControllers and FirstPersonControllers.
     Controllers,
     Any,
@@ -398,6 +402,8 @@ impl Filter {
             Filter::Agents => class == ClassName::NavigationAgent,
             Filter::Checkpoints => class == ClassName::Checkpoint,
             Filter::Seats => class.is_seat(),
+            Filter::Prompts => class == ClassName::ProximityPrompt,
+            Filter::ClickDetectors => class == ClassName::ClickDetector,
             Filter::Controllers => class.is_character_controller(),
             Filter::Gui => matches!(
                 class,
@@ -437,6 +443,8 @@ impl Filter {
             Filter::Agents => "Model.NavigationAgent",
             Filter::Checkpoints => "Checkpoint",
             Filter::Seats => "Seat",
+            Filter::Prompts => "Part.ProximityPrompt",
+            Filter::ClickDetectors => "Part.ClickDetector",
             Filter::Controllers => "Character.ThirdPersonController",
         }
     }
@@ -899,6 +907,16 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Object(agent, Filter::Agents),
             label("senses the player by"),
             Part::Choice(sense, &axcenity_blocks::SENSES),
+        ])],
+        BlockKind::WhenPromptTriggered { prompt, .. } => vec![Row(vec![
+            label("when prompt"),
+            Object(prompt, Filter::Prompts),
+            label("is triggered"),
+        ])],
+        BlockKind::WhenPartClicked { detector, .. } => vec![Row(vec![
+            label("when"),
+            Object(detector, Filter::ClickDetectors),
+            label("is clicked"),
         ])],
         BlockKind::WhenSeatOccupied { seat, .. } => vec![Row(vec![
             label("when someone sits on"),

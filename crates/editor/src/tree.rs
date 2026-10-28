@@ -73,6 +73,10 @@ pub enum Insertable {
     DamageZone,
     /// A part characters sit on.
     Seat,
+    /// A prompt on the selected part or Attachment, held to do something.
+    ProximityPrompt,
+    /// Makes the selected part clickable.
+    ClickDetector,
     /// A ready-to-drive car: a Model with a chassis, a VehicleSeat welded
     /// on it, four VehicleWheels and a cylinder for each (see [`vehicle`]).
     Vehicle,
@@ -148,6 +152,10 @@ impl Insertable {
     pub const HEALTH: [Insertable; 2] = [Insertable::Health, Insertable::DamageZone];
     /// Seats, which a character that touches them sits on.
     pub const SEATS: [Insertable; 1] = [Insertable::Seat];
+    /// What the player uses things with: a prompt to hold a key at, and a
+    /// part to click.
+    pub const INTERACTION: [Insertable; 2] =
+        [Insertable::ProximityPrompt, Insertable::ClickDetector];
     /// A ready car, and the pieces to build one's own.
     pub const VEHICLES: [Insertable; 3] = [
         Insertable::Vehicle,
@@ -224,6 +232,8 @@ impl Insertable {
             Insertable::Health => "Health",
             Insertable::DamageZone => "Damage Zone",
             Insertable::Seat => "Seat",
+            Insertable::ProximityPrompt => "Prompt",
+            Insertable::ClickDetector => "Click Detector",
             Insertable::Vehicle => "Vehicle",
             Insertable::VehicleSeat => "Vehicle Seat",
             Insertable::VehicleWheel => "Wheel",
@@ -276,6 +286,8 @@ impl Insertable {
             Insertable::Health => ClassName::Health,
             Insertable::DamageZone => ClassName::DamageZone,
             Insertable::Seat => ClassName::Seat,
+            Insertable::ProximityPrompt => ClassName::ProximityPrompt,
+            Insertable::ClickDetector => ClassName::ClickDetector,
             Insertable::Vehicle => ClassName::Model,
             Insertable::VehicleSeat => ClassName::VehicleSeat,
             Insertable::VehicleWheel => ClassName::VehicleWheel,
@@ -734,8 +746,17 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             || (is_group && is_saved(world, id))
             // A Value object goes inside whatever is selected.
             || (matches!(what, Insertable::Value(_)) && is_saved(world, id))
-            || (matches!(what, Insertable::Attachment | Insertable::VehicleWheel)
-                && is_part
+            || (matches!(
+                what,
+                Insertable::Attachment | Insertable::VehicleWheel | Insertable::ClickDetector
+            ) && is_part
+                && is_saved(world, id))
+            // A prompt shows over its part or Attachment.
+            || (what == Insertable::ProximityPrompt
+                && (is_part
+                    || world
+                        .get(id)
+                        .is_some_and(|instance| instance.class() == ClassName::Attachment))
                 && is_saved(world, id))
             || (is_ui_container
                 && (what.is_ui_element() || what == Insertable::Animation)
@@ -956,6 +977,22 @@ mod tests {
         }
         let model = create(&mut world, Insertable::Model, at);
         assert_eq!(world.get(model).unwrap().class(), ClassName::Model);
+    }
+
+    #[test]
+    fn prompts_go_on_a_part_or_attachment_and_click_detectors_on_a_part() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let door = child(&mut world, workspace, ClassName::Part, "Door");
+        let handle = child(&mut world, door, ClassName::Attachment, "Handle");
+        let sound = child(&mut world, door, ClassName::Sound, "Creak");
+        let prompt = Insertable::ProximityPrompt;
+        let detector = Insertable::ClickDetector;
+        assert_eq!(insert_parent(&world, Some(door), prompt), door);
+        assert_eq!(insert_parent(&world, Some(handle), prompt), handle);
+        assert_eq!(insert_parent(&world, Some(door), detector), door);
+        assert_eq!(insert_parent(&world, Some(handle), detector), workspace);
+        assert_eq!(insert_parent(&world, Some(sound), prompt), workspace);
     }
 
     #[test]

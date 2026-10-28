@@ -752,6 +752,8 @@ impl EditorApp {
                             stylesheets,
                             focused_text: self.focused_text,
                             loading_screen: self.play.as_ref().and_then(Session::loading_screen),
+                            prompts: self.play.as_ref().map(Session::prompts).unwrap_or_default(),
+                            click_cursor: self.play.as_ref().and_then(Session::click_cursor),
                             light_cones: self.light_cones,
                             overlays: self.overlays,
                             debug_rays: &debug_rays,

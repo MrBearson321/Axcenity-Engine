@@ -1,0 +1,126 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Position": [0, -0.5, 0],
+          "Size": [80, 1, 60],
+          "Color": [0.35, 0.37, 0.4],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Character",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Position": [0, 2.5, 10],
+              "Size": [2, 5, 1],
+              "Color": [0.2, 0.55, 0.9]
+            }
+          },
+          {
+            "class": "ThirdPersonController",
+            "name": "ThirdPersonController"
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Door",
+        "properties": {
+          "Position": [0, 3.5, -2],
+          "Size": [5, 7, 0.5],
+          "Color": [0.55, 0.36, 0.2],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "ProximityPrompt",
+            "name": "ProximityPrompt",
+            "properties": {
+              "ActionText": "Open",
+              "ObjectText": "Door",
+              "HoldDuration": 0.5
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Wall",
+        "properties": {
+          "Position": [12, 4, 0],
+          "Size": [1, 8, 12],
+          "Color": [0.62, 0.6, 0.56],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Chest",
+        "properties": {
+          "Position": [15, 1, 0],
+          "Size": [3, 2, 2],
+          "Color": [0.8, 0.62, 0.2],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Lid",
+            "properties": {
+              "Position": [0, 1.5, 0]
+            },
+            "children": [
+              {
+                "class": "ProximityPrompt",
+                "name": "ProximityPrompt",
+                "properties": {
+                  "ActionText": "Search",
+                  "ObjectText": "Chest"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Pillar",
+        "properties": {
+          "Position": [-8, 1.5, -2],
+          "Size": [1.5, 3, 1.5],
+          "Color": [0.62, 0.6, 0.56],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Button",
+        "properties": {
+          "Position": [-8, 3.25, -2],
+          "Size": [1.2, 0.5, 1.2],
+          "Color": [0.85, 0.2, 0.15],
+          "Material": "Neon",
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "ClickDetector",
+            "name": "ClickDetector",
+            "properties": {
+              "MaxActivationDistance": 24
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

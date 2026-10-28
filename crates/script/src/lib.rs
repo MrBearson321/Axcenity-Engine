@@ -45,6 +45,7 @@ mod bindable;
 mod camera;
 mod cframe;
 mod changes;
+mod click;
 mod client;
 mod collection;
 mod console;
@@ -63,6 +64,7 @@ mod instance;
 mod localization;
 mod modules;
 mod physical;
+mod prompt;
 mod query;
 mod random;
 mod remote;
@@ -99,6 +101,7 @@ pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, Gam
 pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
 pub use definitions::{ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions};
 pub use input::KeyEvent;
+pub use prompt::ShownPrompt;
 pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
 pub use watchdog::DEFAULT_LIMIT as WATCHDOG_LIMIT;
@@ -197,6 +200,10 @@ pub struct ScriptRuntime {
     shatters: Vec<Shatter>,
     /// Every Health's regeneration wait, and their events waiting to fire.
     health: health::Healths,
+    /// The ProximityPrompts showing and their holds (Phase 44).
+    prompts: prompt::Prompts,
+    /// What the mouse points at and presses, for ClickDetectors.
+    clicks: click::Clicks,
     /// Whether the error for change events that never stop has been shown,
     /// so it's shown once rather than every frame.
     reported_change_loop: bool,
@@ -246,6 +253,8 @@ impl ScriptRuntime {
             particle_emits: Vec::new(),
             shatters: Vec::new(),
             health: health::Healths::default(),
+            prompts: prompt::Prompts::default(),
+            clicks: click::Clicks::default(),
             reported_change_loop: false,
             saves,
             started: Vec::new(),
@@ -574,6 +583,44 @@ impl ScriptRuntime {
                 self.fire_changes(world);
             }
         }
+    }
+
+    /// Frame step 1, after [`input_events`](Self::input_events) (Phase
+    /// 44): ProximityPrompts in reach of the player character show and
+    /// follow their actions, and ClickDetectors follow the mouse, through
+    /// the camera; their events fire with the Player, in Scripts and then
+    /// in LocalScripts. Then [`shown_prompts`](Self::shown_prompts) and
+    /// [`click_cursor`](Self::click_cursor) say what to draw.
+    pub fn step_prompts(&mut self, world: &mut World, seconds: f64) {
+        self.fire_changes(world);
+        let input = self.client.prompt_input();
+        let ray = self.client.mouse_ray(input.mouse);
+        let camera = ray.map(|ray| cframe::to_vec3(ray.origin));
+        let assets = self.server.assets();
+        let mut fired = self.prompts.step(world, &assets, &input, camera, seconds);
+        fired.extend(self.clicks.step(world, &assets, &input, ray));
+        if fired.is_empty() {
+            return;
+        }
+        self.join(world);
+        let player = self.local_player();
+        for side in [Side::Server, Side::Client] {
+            self.context(side).fire_prompt_events(world, &fired, player);
+            self.collect(side);
+            self.fire_changes(world);
+        }
+    }
+
+    /// The ProximityPrompts showing, as of [`step_prompts`](Self::step_prompts).
+    pub fn shown_prompts(&self) -> &[ShownPrompt] {
+        self.prompts.shown()
+    }
+
+    /// The cursor over the ClickDetector the mouse points at (its
+    /// `CursorIcon`, a CSS cursor name, `pointer` by default), or `None`
+    /// when it points at none.
+    pub fn click_cursor(&self, world: &World) -> Option<String> {
+        self.clicks.cursor(world)
     }
 
     /// Frame-order step 4, after [`fire_breaks`](Self::fire_breaks) and
@@ -1159,6 +1206,8 @@ mod joint_tests;
 mod mover_tests;
 #[cfg(test)]
 mod physical_tests;
+#[cfg(test)]
+mod prompt_tests;
 #[cfg(test)]
 mod query_tests;
 #[cfg(test)]

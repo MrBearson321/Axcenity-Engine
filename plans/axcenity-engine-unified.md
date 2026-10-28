@@ -1425,8 +1425,8 @@ Blocks: "when prompt … is triggered", "when … is clicked".
 ### Acceptance criteria
 
 - [ ] Walking up to a door shows "Open · Door", and holding E for `HoldDuration` fires `Triggered` once. With a gamepad, it shows and uses the bound button.
-- [ ] A prompt behind a wall with `RequiresLineOfSight` doesn't show.
-- [ ] Clicking a part with a ClickDetector fires `MouseClick`, the cursor changes on hover, and a click outside `MaxActivationDistance` does nothing.
+- [x] A prompt behind a wall with `RequiresLineOfSight` doesn't show.
+- [x] Clicking a part with a ClickDetector fires `MouseClick`, the cursor changes on hover, and a click outside `MaxActivationDistance` does nothing.
 
 ---
 

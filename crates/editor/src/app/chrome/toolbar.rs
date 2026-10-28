@@ -378,6 +378,25 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::INTERACTION {
+                    let hint = if what == Insertable::ProximityPrompt {
+                        "Insert a Prompt into the selected part or Attachment. During Play, \
+                         walking up to it shows ActionText with the Interact key, and \
+                         holding that for HoldDuration fires Triggered."
+                    } else {
+                        "Insert a Click Detector into the selected part. During Play, \
+                         clicking the part fires MouseClick, and the cursor changes over it."
+                    };
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hint)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
                 for what in Insertable::VEHICLES {
                     let hint = match what {
                         Insertable::Vehicle => {

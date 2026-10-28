@@ -319,6 +319,27 @@ fn fire_seated(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut 
     }
 }
 
+/// The draw items for the ProximityPrompts `shown` (Phase 44), in a view
+/// `size` big.
+fn prompt_items(
+    world: &World,
+    shown: &[axcenity_script::ShownPrompt],
+    stylesheets: &[axcenity_ui::Stylesheet],
+    camera: &axcenity_render::Camera,
+    size: winit::dpi::PhysicalSize<u32>,
+) -> Vec<axcenity_render::UiDrawItem> {
+    let views: Vec<_> = shown
+        .iter()
+        .map(|shown| axcenity_ui::PromptView {
+            prompt: shown.prompt,
+            position: [shown.position.x, shown.position.y, shown.position.z],
+            progress: shown.progress,
+            key: shown.key.clone(),
+        })
+        .collect();
+    axcenity_ui::prompt_items(world, &views, stylesheets, camera, size.width, size.height)
+}
+
 /// Fires `Landed` on each controller whose character just landed, after
 /// fall damage (Phase 43).
 fn fire_landed(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut Controllers) {
@@ -463,7 +484,7 @@ struct App {
     /// Buttons' hover and click sounds, played with the frame's audio.
     ui_sounds: Vec<SoundAction>,
     /// The cursor last shown, so it's only set when it changes.
-    cursor: UiCursor,
+    cursor: CursorIcon,
     /// When the previous frame was drawn, to measure how much time passed.
     last_frame: Option<Instant>,
     /// Seconds of frames run, which moving surface shaders read.
@@ -526,7 +547,7 @@ impl App {
             ui: UiInteraction::default(),
             nav_keys: Vec::new(),
             ui_sounds: Vec::new(),
-            cursor: UiCursor::Default,
+            cursor: CursorIcon::Default,
             last_frame: None,
             shader_time: 0.0,
             watcher: None,
@@ -1126,6 +1147,9 @@ impl ApplicationHandler for App {
                 let pointer = self.apply_cursor((size.width, size.height));
                 let events = self.input.take_events(pointer);
                 self.scripts.input_events(&mut self.world, &events);
+                //    Then ProximityPrompts and ClickDetectors, by that input.
+                self.scripts
+                    .step_prompts(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
 
                 // 2. Resume scripts whose wait is over (and due `task.delay`s).
@@ -1246,12 +1270,25 @@ impl ApplicationHandler for App {
                         &mut self.terrain,
                     );
                 self.note_ui_warnings(&ui_layout.warnings);
-                if ui_layout.cursor != self.cursor
+                // The UI's cursor, else a ClickDetector's under the mouse.
+                let cursor = match (ui_layout.cursor, self.scripts.click_cursor(&self.world)) {
+                    (UiCursor::Default, Some(name)) => name.parse().unwrap_or(CursorIcon::Pointer),
+                    (cursor, _) => cursor_icon(cursor),
+                };
+                if cursor != self.cursor
                     && let Some(window) = &self.window
                 {
-                    self.cursor = ui_layout.cursor;
-                    window.set_cursor(cursor_icon(self.cursor));
+                    self.cursor = cursor;
+                    window.set_cursor(cursor);
                 }
+                // ProximityPrompts that show, over the rest of the UI.
+                draw_list.ui.extend(prompt_items(
+                    &self.world,
+                    self.scripts.shown_prompts(),
+                    &self.stylesheets,
+                    &render_camera,
+                    size,
+                ));
                 draw_list.sprites = self.particles.sprites(&self.world, &self.assets);
                 self.shader_time += seconds;
                 draw_list.time = self.shader_time;
@@ -1363,6 +1400,8 @@ mod physics_tests;
 
 #[cfg(test)]
 mod health_tests;
+#[cfg(test)]
+mod prompt_tests;
 #[cfg(test)]
 mod ragdoll_tests;
 #[cfg(test)]

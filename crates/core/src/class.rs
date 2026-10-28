@@ -206,6 +206,16 @@ pub enum ClassName {
     /// and by regenerating `RegenRate` a second once `RegenDelay` seconds
     /// pass without damage. At 0 it fires `Died` once.
     Health,
+    /// A prompt to do something, under a part or an Attachment (Phase 44):
+    /// when the player character comes within `MaxActivationDistance`, the
+    /// nearest one shows `ActionText` and `ObjectText` with the key or
+    /// button bound to its input map `Action`, and holding that for
+    /// `HoldDuration` seconds fires `Triggered`.
+    ProximityPrompt,
+    /// Makes the part it's parented to clickable (Phase 44): `MouseClick`
+    /// and `RightMouseClick` fire when the mouse clicks it from within
+    /// `MaxActivationDistance`, and the cursor turns to `CursorIcon` over it.
+    ClickDetector,
     /// Holds `Part0` and `Part1` together where they were when it was made
     /// or enabled. Welded unanchored parts move as one body: an assembly.
     WeldConstraint,
@@ -254,7 +264,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 83] = [
+    pub const ALL: [ClassName; 85] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -316,6 +326,8 @@ impl ClassName {
         ClassName::Ragdoll,
         ClassName::Fracture,
         ClassName::Health,
+        ClassName::ProximityPrompt,
+        ClassName::ClickDetector,
         ClassName::WeldConstraint,
         ClassName::HingeConstraint,
         ClassName::BallSocketConstraint,
@@ -403,6 +415,8 @@ impl ClassName {
             ClassName::Ragdoll => "Ragdoll",
             ClassName::Fracture => "Fracture",
             ClassName::Health => "Health",
+            ClassName::ProximityPrompt => "ProximityPrompt",
+            ClassName::ClickDetector => "ClickDetector",
             ClassName::WeldConstraint => "WeldConstraint",
             ClassName::HingeConstraint => "HingeConstraint",
             ClassName::BallSocketConstraint => "BallSocketConstraint",
@@ -1501,6 +1515,40 @@ impl ClassName {
                 ("FallDamageThreshold", Value::Number(60.0)),
                 ("FallDamageScale", Value::Number(1.0)),
             ],
+            ClassName::ProximityPrompt => vec![
+                // What it does, such as "Open", and to what, such as "Door".
+                ("ActionText", Value::String("Interact".to_owned())),
+                ("ObjectText", Value::String(String::new())),
+                // The input map action that uses it.
+                ("Action", Value::String("Interact".to_owned())),
+                // Seconds the action is held before it triggers. 0 triggers
+                // on the press.
+                ("HoldDuration", Value::Number(0.0)),
+                // Studs from the player character it shows within.
+                ("MaxActivationDistance", Value::Number(10.0)),
+                // On, it doesn't show while something solid is between it
+                // and the character.
+                ("RequiresLineOfSight", Value::Bool(true)),
+                ("Enabled", Value::Bool(true)),
+                // Which prompts in reach show: the nearest for each action
+                // (OnePerButton), the nearest of all (OneGlobally), or this
+                // one whenever it's in reach (AlwaysShow).
+                (
+                    "Exclusivity",
+                    Value::EnumItem(EnumItem {
+                        enum_name: "ProximityPromptExclusivity".to_owned(),
+                        item: "OnePerButton".to_owned(),
+                    }),
+                ),
+            ],
+            ClassName::ClickDetector => vec![
+                // Studs from the player character (or the camera, with no
+                // character) a click reaches.
+                ("MaxActivationDistance", Value::Number(32.0)),
+                // The cursor over its part, as a CSS cursor name such as
+                // "pointer" or "crosshair". Empty is the pointing hand.
+                ("CursorIcon", Value::String(String::new())),
+            ],
             ClassName::WeldConstraint => {
                 let mut properties = vec![
                     ("Part0", Value::Instance(None)),
@@ -1790,6 +1838,22 @@ impl ClassName {
             // `HealthChanged` with the new health and the old, `Damaged`
             // with how much and what did it (or nil), `Died` once at 0.
             ClassName::Health => &["HealthChanged", "Damaged", "Died"],
+            // Each with the Player, but `PromptShown` and `PromptHidden`.
+            ClassName::ProximityPrompt => &[
+                "Triggered",
+                "TriggerEnded",
+                "PromptShown",
+                "PromptHidden",
+                "PromptButtonHoldBegan",
+                "PromptButtonHoldEnded",
+            ],
+            // Each with the Player who clicked or pointed.
+            ClassName::ClickDetector => &[
+                "MouseClick",
+                "RightMouseClick",
+                "MouseHoverEnter",
+                "MouseHoverLeave",
+            ],
             // Fires with "Sight" or "Hearing" when it starts seeing or
             // hearing the player character.
             ClassName::NavigationAgent => &["PlayerSensed"],

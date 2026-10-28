@@ -309,6 +309,14 @@ impl Writer {
                 self.line("end)");
                 return Ok(());
             }
+            BlockKind::WhenPromptTriggered { prompt, body } => (
+                format!("{}.Triggered:Connect(function()", target(prompt)?),
+                body,
+            ),
+            BlockKind::WhenPartClicked { detector, body } => (
+                format!("{}.MouseClick:Connect(function()", target(detector)?),
+                body,
+            ),
             BlockKind::WhenSeatOccupied { seat, body } => {
                 let seat = target(seat)?;
                 self.line(format!(
@@ -862,6 +870,8 @@ impl Writer {
             | BlockKind::WhenAnimationEvent { .. }
             | BlockKind::WhenAgentSenses { .. }
             | BlockKind::WhenSeatOccupied { .. }
+            | BlockKind::WhenPromptTriggered { .. }
+            | BlockKind::WhenPartClicked { .. }
             | BlockKind::Unattached { .. }
             | BlockKind::TopCode { .. } => {
                 return Err(TranslateError::InvalidEventPlacement);

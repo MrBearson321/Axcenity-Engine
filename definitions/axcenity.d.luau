@@ -939,6 +939,17 @@ declare extern type EnumFracturePatternItems with
 	Impact: EnumFracturePattern
 end
 
+--- One choice of `Enum.ProximityPromptExclusivity`.
+declare extern type EnumProximityPromptExclusivity extends EnumItem with
+end
+
+--- The choices of `Enum.ProximityPromptExclusivity`.
+declare extern type EnumProximityPromptExclusivityItems with
+	OnePerButton: EnumProximityPromptExclusivity
+	OneGlobally: EnumProximityPromptExclusivity
+	AlwaysShow: EnumProximityPromptExclusivity
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -968,6 +979,7 @@ declare extern type EnumLibrary with
 	OrientationAlignmentMode: EnumOrientationAlignmentModeItems
 	RaycastFilterType: EnumRaycastFilterTypeItems
 	FracturePattern: EnumFracturePatternItems
+	ProximityPromptExclusivity: EnumProximityPromptExclusivityItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -3026,6 +3038,56 @@ declare extern type Health extends Instance with
 	function Heal(self, amount: number): ()
 end
 
+--- A prompt to do something, under a part or an Attachment. When the player character is within MaxActivationDistance (and, with RequiresLineOfSight, nothing solid is between them), the nearest prompt for its Action shows ActionText · ObjectText over it with the bound key or controller button, and holding that action for HoldDuration seconds fires Triggered. Styled in CSS as `ProximityPrompt`, with `::key` and `::ring`.
+declare extern type ProximityPrompt extends Instance with
+	--- What it does, such as "Open", shown in the prompt before ObjectText.
+	ActionText: string
+	--- What it does it to, such as "Door": the prompt shows "Open · Door". Empty shows ActionText alone.
+	ObjectText: string
+	--- The input map action that uses it: Interact (E, or X on a controller) by default. The prompt shows the key, or the controller button once a controller was used last, with the player's rebinds.
+	Action: string
+	--- Seconds the action is held before Triggered fires; the prompt's ring fills meanwhile. 0 triggers on the press.
+	HoldDuration: number
+	--- Studs from the middle of the player character (or the camera, with no character) it shows within.
+	MaxActivationDistance: number
+	--- If true, it doesn't show while a part that can be hit by queries is between it and the character. Its own part and the character don't count.
+	RequiresLineOfSight: boolean
+	--- If false, it never shows, and one showing hides.
+	Enabled: boolean
+	--- `Enum.ProximityPromptExclusivity`: OnePerButton shows the nearest prompt for each action, OneGlobally the nearest of all, and AlwaysShow shows this one whenever it's in reach.
+	Exclusivity: EnumProximityPromptExclusivity | "OnePerButton" | "OneGlobally" | "AlwaysShow"
+	--- Fires with the Player when the action is pressed on a showing prompt (HoldDuration 0) or held for HoldDuration. Once per press: hold on and it doesn't fire again.
+	Triggered: Signal
+	--- Fires with the Player when the action that triggered it is let go, or the prompt hides.
+	TriggerEnded: Signal
+	--- Fires when the prompt starts showing.
+	PromptShown: Signal
+	--- Fires when the prompt stops showing: out of reach, out of sight, Enabled off, or another is nearer.
+	PromptHidden: Signal
+	--- Fires with the Player when the action is pressed on a showing prompt whose HoldDuration is above 0.
+	PromptButtonHoldBegan: Signal
+	--- Fires with the Player when a hold ends: let go early, the prompt hid, or HoldDuration was reached (just before Triggered).
+	PromptButtonHoldEnded: Signal
+	[string]: any
+end
+
+--- Makes the part it's in clickable. Pointing at the part from within MaxActivationDistance fires MouseHoverEnter and shows CursorIcon; a left click fires MouseClick and a right click RightMouseClick. Clicks the game UI takes don't count.
+declare extern type ClickDetector extends Instance with
+	--- Studs from the middle of the player character (or the camera, with no character) to the point clicked. Farther clicks, and pointing from farther, do nothing.
+	MaxActivationDistance: number
+	--- The cursor over the part, as a CSS cursor name such as "pointer", "crosshair" or "grab". Empty is the pointing hand.
+	CursorIcon: string
+	--- Fires with the Player when the left button is pressed and let go on the part, from within MaxActivationDistance.
+	MouseClick: Signal
+	--- Fires with the Player when the right button is pressed and let go on the part, from within MaxActivationDistance.
+	RightMouseClick: Signal
+	--- Fires with the Player when the mouse starts pointing at the part from within reach.
+	MouseHoverEnter: Signal
+	--- Fires with the Player when the mouse stops pointing at the part, or goes out of reach.
+	MouseHoverLeave: Signal
+	[string]: any
+end
+
 --- Holds `Part0` and `Part1` together where they were when it was made (or enabled). Parts welded together move as one body, an assembly: they fall and tumble together, and an anchored part anchors the whole assembly. `part:GetConnectedParts()` and `part:GetRootPart()` follow welds. Setting a welded part's Position or CFrame moves that part alone, and the weld holds it where it lands.
 declare extern type WeldConstraint extends Instance with
 	--- One of the two parts it holds together.
@@ -3506,7 +3568,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

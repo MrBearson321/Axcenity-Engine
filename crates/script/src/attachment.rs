@@ -34,6 +34,13 @@ fn part_frame(world: &World, attachment: &Instance) -> LuaCFrame {
         .unwrap_or(LuaCFrame::IDENTITY)
 }
 
+/// Where the Attachment `id` is in the world (`WorldPosition`).
+pub fn world_position(world: &World, id: InstanceId) -> Option<Vec3> {
+    let instance = world.get(id)?;
+    let offset = LuaCFrame::of_instance(instance).unwrap_or(LuaCFrame::IDENTITY);
+    Some((part_frame(world, instance) * offset).position)
+}
+
 /// The Attachment's offset and its part's frame, or `None` if `id` isn't
 /// an Attachment or `key` isn't one of [`FIELDS`].
 fn frames(

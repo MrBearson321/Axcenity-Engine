@@ -70,6 +70,14 @@ pub(super) fn palette(
                 key: "Space".to_owned(),
                 body: Vec::new(),
             }),
+            B(BlockKind::WhenPromptTriggered {
+                prompt: first(Filter::Prompts),
+                body: Vec::new(),
+            }),
+            B(BlockKind::WhenPartClicked {
+                detector: first(Filter::ClickDetectors),
+                body: Vec::new(),
+            }),
             B(BlockKind::WhenClicked {
                 button: first(Filter::Buttons),
                 body: Vec::new(),

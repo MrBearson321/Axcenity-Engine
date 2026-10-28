@@ -276,6 +276,10 @@ pub struct ViewportScene<'a> {
     pub focused_text: Option<InstanceId>,
     /// The game's loading screen during Play, drawn over the other UI.
     pub loading_screen: Option<InstanceId>,
+    /// The ProximityPrompts that show during Play, drawn over the game UI.
+    pub prompts: Vec<axcenity_ui::PromptView>,
+    /// The cursor over a ClickDetector during Play (a CSS cursor name).
+    pub click_cursor: Option<String>,
     /// Show every light's reach, not just the selected ones' (View > Light Cones).
     pub light_cones: bool,
     /// Editor-only visual-debug overlays (View > Overlays).
@@ -688,6 +692,8 @@ impl Viewport {
             stylesheets,
             focused_text,
             loading_screen,
+            prompts,
+            click_cursor,
             light_cones,
             overlays,
             debug_rays,
@@ -841,6 +847,10 @@ impl Viewport {
         // During Play, the UI's cursor (CSS `cursor`): a hand on buttons.
         if tool.is_none() && response.hovered() && !self.looking {
             ui.ctx().set_cursor_icon(match ui_layout.cursor {
+                // Over a ClickDetector's part, its CursorIcon.
+                axcenity_ui::UiCursor::Default if click_cursor.is_some() => {
+                    css_cursor(click_cursor.as_deref().unwrap_or_default())
+                }
                 axcenity_ui::UiCursor::Default => egui::CursorIcon::Default,
                 axcenity_ui::UiCursor::Pointer => egui::CursorIcon::PointingHand,
                 axcenity_ui::UiCursor::Text => egui::CursorIcon::Text,
@@ -972,6 +982,14 @@ impl Viewport {
             axcenity_scene::build_draw_list_posed(world, assets, camera, poses, &mut self.terrain);
         draw_list.sprites = self.particles.sprites(world, assets);
         draw_list.ui = ui_layout.draw_items.clone();
+        draw_list.ui.extend(axcenity_ui::prompt_items(
+            world,
+            &prompts,
+            stylesheets,
+            &camera,
+            width,
+            height,
+        ));
         axcenity_scene::attach_ui_textures(&mut draw_list.ui, assets);
         draw_list.time = shader_time(ui, &draw_list);
         if let Err(error) = target.renderer.render(&draw_list) {
@@ -1218,6 +1236,28 @@ pub fn start_view() -> axcenity_render::Camera {
 
 /// How visible the speed pop-up is, from 1 (fully) to 0 (gone), `age`
 /// seconds after the speed last changed.
+/// The egui cursor for a CSS cursor name, as a ClickDetector's
+/// `CursorIcon` gives it. A name it doesn't know is the pointing hand.
+fn css_cursor(name: &str) -> egui::CursorIcon {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "default" | "auto" => egui::CursorIcon::Default,
+        "none" => egui::CursorIcon::None,
+        "help" => egui::CursorIcon::Help,
+        "wait" => egui::CursorIcon::Wait,
+        "progress" => egui::CursorIcon::Progress,
+        "crosshair" => egui::CursorIcon::Crosshair,
+        "cell" => egui::CursorIcon::Cell,
+        "text" => egui::CursorIcon::Text,
+        "move" => egui::CursorIcon::Move,
+        "not-allowed" => egui::CursorIcon::NotAllowed,
+        "grab" => egui::CursorIcon::Grab,
+        "grabbing" => egui::CursorIcon::Grabbing,
+        "zoom-in" => egui::CursorIcon::ZoomIn,
+        "zoom-out" => egui::CursorIcon::ZoomOut,
+        _ => egui::CursorIcon::PointingHand,
+    }
+}
+
 fn popup_opacity(age: f64) -> f32 {
     let fading = (age - POPUP_SECONDS) / POPUP_FADE_SECONDS;
     (1.0 - fading).clamp(0.0, 1.0) as f32

@@ -301,6 +301,17 @@ pub enum BlockKind {
         seat: String,
         body: Vec<Block>,
     },
+    /// When a ProximityPrompt is triggered: its action pressed, or held
+    /// for its `HoldDuration` (Phase 44).
+    WhenPromptTriggered {
+        prompt: String,
+        body: Vec<Block>,
+    },
+    /// When a ClickDetector's part is clicked (`MouseClick`).
+    WhenPartClicked {
+        detector: String,
+        body: Vec<Block>,
+    },
     /// Loose blocks on the canvas, under no event. They don't run.
     Unattached {
         body: Vec<Block>,
@@ -782,6 +793,8 @@ impl BlockKind {
                 | BlockKind::WhenAnimationEvent { .. }
                 | BlockKind::WhenAgentSenses { .. }
                 | BlockKind::WhenSeatOccupied { .. }
+                | BlockKind::WhenPromptTriggered { .. }
+                | BlockKind::WhenPartClicked { .. }
                 | BlockKind::Unattached { .. }
                 | BlockKind::TopCode { .. }
         )
@@ -821,6 +834,8 @@ impl BlockKind {
             | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::WhenAgentSenses { body, .. }
             | BlockKind::WhenSeatOccupied { body, .. }
+            | BlockKind::WhenPromptTriggered { body, .. }
+            | BlockKind::WhenPartClicked { body, .. }
             | BlockKind::Unattached { body }
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }
@@ -856,6 +871,8 @@ impl BlockKind {
             | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::WhenAgentSenses { body, .. }
             | BlockKind::WhenSeatOccupied { body, .. }
+            | BlockKind::WhenPromptTriggered { body, .. }
+            | BlockKind::WhenPartClicked { body, .. }
             | BlockKind::Unattached { body }
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }

@@ -53,6 +53,12 @@ pub struct Inputs {
     bound: Vec<BoundAction>,
     /// Counts up, so a later bind wins a tie in priority.
     next_order: u64,
+    /// True when a controller was used last, rather than the keyboard or
+    /// mouse, so prompts show its buttons (Phase 44).
+    gamepad: bool,
+    /// The mouse buttons the game pressed (true) and let go of this frame,
+    /// in order, for ClickDetectors. Clicks the UI took aren't here.
+    clicks: Vec<(UserInputType, bool)>,
 }
 
 impl Default for Inputs {
@@ -65,6 +71,8 @@ impl Default for Inputs {
             mouse_icon_enabled: true,
             bound: Vec::new(),
             next_order: 0,
+            gamepad: false,
+            clicks: Vec::new(),
         }
     }
 }
@@ -99,6 +107,41 @@ impl BoundAction {
     }
 }
 
+/// What ProximityPrompts and ClickDetectors read of a frame's input
+/// (Phase 44).
+pub struct PromptInput {
+    /// What the game holds, the UI's presses left out.
+    pub game: InputState,
+    /// The input map with the player's rebinds.
+    pub map: InputMap,
+    /// True when a controller was used last.
+    pub gamepad: bool,
+    /// The game's mouse presses and releases this frame.
+    pub clicks: Vec<(UserInputType, bool)>,
+    pub mouse: [f32; 2],
+}
+
+/// This frame's [`PromptInput`], after [`fire_input`].
+pub fn prompt_input(lua: &Lua) -> PromptInput {
+    let map = input_map(lua);
+    match lua.app_data_ref::<Inputs>() {
+        Some(inputs) => PromptInput {
+            game: inputs.game.clone(),
+            map,
+            gamepad: inputs.gamepad,
+            clicks: inputs.clicks.clone(),
+            mouse: inputs.all.mouse_position,
+        },
+        None => PromptInput {
+            game: InputState::default(),
+            map,
+            gamepad: false,
+            clicks: Vec::new(),
+            mouse: [0.0, 0.0],
+        },
+    }
+}
+
 /// The input map with the player's rebinds (the `Input/...` settings) applied.
 pub fn input_map(lua: &Lua) -> InputMap {
     let Some(inputs) = lua.app_data_ref::<Inputs>() else {
@@ -126,6 +169,7 @@ pub fn fire_input(lua: &Lua, events: &[InputEvent]) {
     if let Some(mut inputs) = lua.app_data_mut::<Inputs>() {
         inputs.all.end_frame();
         inputs.game.end_frame();
+        inputs.clicks.clear();
     }
     for event in events {
         let Some((input, old_stick, game)) = follow(lua, event) else {
@@ -201,6 +245,25 @@ fn follow(lua: &Lua, event: &InputEvent) -> Option<(LuaInputObject, [f32; 2], bo
         _ => [0.0, 0.0],
     };
     let game = inputs.game.follow(event);
+    match event.kind {
+        InputKind::PadButton { .. } => inputs.gamepad = true,
+        InputKind::PadStick { position, .. }
+            if position[0].hypot(position[1]) > axcenity_core::input::STICK_DEAD_ZONE =>
+        {
+            inputs.gamepad = true;
+        }
+        InputKind::Key { .. } | InputKind::MouseButton { .. } | InputKind::Wheel { .. } => {
+            inputs.gamepad = false;
+        }
+        _ => {}
+    }
+    if game
+        && let InputKind::MouseButton {
+            button, pressed, ..
+        } = event.kind
+    {
+        inputs.clicks.push((button, pressed));
+    }
     if !inputs.all.apply(&event.kind) {
         return None;
     }

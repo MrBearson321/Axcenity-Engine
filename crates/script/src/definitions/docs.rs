@@ -2132,6 +2132,56 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Health lost for each stud a second a landing is over FallDamageThreshold.",
     ),
     (
+        ClassName::ProximityPrompt,
+        "ActionText",
+        "What it does, such as \"Open\", shown in the prompt before ObjectText.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "ObjectText",
+        "What it does it to, such as \"Door\": the prompt shows \"Open · Door\". Empty shows ActionText alone.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "Action",
+        "The input map action that uses it: Interact (E, or X on a controller) by default. The prompt shows the key, or the controller button once a controller was used last, with the player's rebinds.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "HoldDuration",
+        "Seconds the action is held before Triggered fires; the prompt's ring fills meanwhile. 0 triggers on the press.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "MaxActivationDistance",
+        "Studs from the middle of the player character (or the camera, with no character) it shows within.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "RequiresLineOfSight",
+        "If true, it doesn't show while a part that can be hit by queries is between it and the character. Its own part and the character don't count.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "Enabled",
+        "If false, it never shows, and one showing hides.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "Exclusivity",
+        "`Enum.ProximityPromptExclusivity`: OnePerButton shows the nearest prompt for each action, OneGlobally the nearest of all, and AlwaysShow shows this one whenever it's in reach.",
+    ),
+    (
+        ClassName::ClickDetector,
+        "MaxActivationDistance",
+        "Studs from the middle of the player character (or the camera, with no character) to the point clicked. Farther clicks, and pointing from farther, do nothing.",
+    ),
+    (
+        ClassName::ClickDetector,
+        "CursorIcon",
+        "The cursor over the part, as a CSS cursor name such as \"pointer\", \"crosshair\" or \"grab\". Empty is the pointing hand.",
+    ),
+    (
         ClassName::DamageZone,
         "DamagePerSecond",
         "Health a second taken from every Health whose Model has a part inside the zone (once each, however many of its parts are in). The damage's source is the zone. 0 or less does nothing.",
@@ -3588,6 +3638,56 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires once when Health reaches 0, after HealthChanged, however many hits landed that frame. Nothing else happens to the Model: scripts decide what dying does. It can fire again only after a script sets Health above 0.",
     ),
     (
+        ClassName::ProximityPrompt,
+        "Triggered",
+        "Fires with the Player when the action is pressed on a showing prompt (HoldDuration 0) or held for HoldDuration. Once per press: hold on and it doesn't fire again.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "TriggerEnded",
+        "Fires with the Player when the action that triggered it is let go, or the prompt hides.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "PromptShown",
+        "Fires when the prompt starts showing.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "PromptHidden",
+        "Fires when the prompt stops showing: out of reach, out of sight, Enabled off, or another is nearer.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "PromptButtonHoldBegan",
+        "Fires with the Player when the action is pressed on a showing prompt whose HoldDuration is above 0.",
+    ),
+    (
+        ClassName::ProximityPrompt,
+        "PromptButtonHoldEnded",
+        "Fires with the Player when a hold ends: let go early, the prompt hid, or HoldDuration was reached (just before Triggered).",
+    ),
+    (
+        ClassName::ClickDetector,
+        "MouseClick",
+        "Fires with the Player when the left button is pressed and let go on the part, from within MaxActivationDistance.",
+    ),
+    (
+        ClassName::ClickDetector,
+        "RightMouseClick",
+        "Fires with the Player when the right button is pressed and let go on the part, from within MaxActivationDistance.",
+    ),
+    (
+        ClassName::ClickDetector,
+        "MouseHoverEnter",
+        "Fires with the Player when the mouse starts pointing at the part from within reach.",
+    ),
+    (
+        ClassName::ClickDetector,
+        "MouseHoverLeave",
+        "Fires with the Player when the mouse stops pointing at the part, or goes out of reach.",
+    ),
+    (
         ClassName::NavigationAgent,
         "PlayerSensed",
         "Fires when the agent starts seeing or hearing the player character. The handler gets the sense: \"Sight\" or \"Hearing\".",
@@ -3718,6 +3818,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Health => {
             "How much a Model can take: Health out of MaxHealth, put in any Model. TakeDamage, DamageZones and falls (with FallDamage on) lower it; Heal and regeneration (RegenRate, after RegenDelay seconds without damage) raise it. At 0 it fires Died once and the Model is left for scripts to handle."
+        }
+        ClassName::ProximityPrompt => {
+            "A prompt to do something, under a part or an Attachment. When the player character is within MaxActivationDistance (and, with RequiresLineOfSight, nothing solid is between them), the nearest prompt for its Action shows ActionText · ObjectText over it with the bound key or controller button, and holding that action for HoldDuration seconds fires Triggered. Styled in CSS as `ProximityPrompt`, with `::key` and `::ring`."
+        }
+        ClassName::ClickDetector => {
+            "Makes the part it's in clickable. Pointing at the part from within MaxActivationDistance fires MouseHoverEnter and shows CursorIcon; a left click fires MouseClick and a right click RightMouseClick. Clicks the game UI takes don't count."
         }
         ClassName::DamageZone => {
             "A Part that hurts: every Health whose Model has a part inside it loses DamagePerSecond a second, with the zone as the source. Anchored, half see-through and walked through (CanCollide off) by default. Everything a Part has, and DamagePerSecond."

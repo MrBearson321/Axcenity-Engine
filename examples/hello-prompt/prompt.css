@@ -1,0 +1,13 @@
+/* Every ProximityPrompt's box, its key cap and the ring that fills while
+   the key is held. Without this file the prompt has the same layout in
+   white on dark grey. */
+ProximityPrompt {
+  background-color: rgba(20, 24, 32, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+ProximityPrompt::key {
+  background-color: #f4f1e8;
+}
+ProximityPrompt::ring {
+  color: #f2b84b;
+}

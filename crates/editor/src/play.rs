@@ -169,6 +169,26 @@ impl Session {
         self.loading_gui.as_ref().and_then(LoadingGui::on_top)
     }
 
+    /// The ProximityPrompts that show (Phase 44), for the viewport to draw.
+    pub fn prompts(&self) -> Vec<axcenity_ui::PromptView> {
+        self.scripts
+            .shown_prompts()
+            .iter()
+            .map(|shown| axcenity_ui::PromptView {
+                prompt: shown.prompt,
+                position: [shown.position.x, shown.position.y, shown.position.z],
+                progress: shown.progress,
+                key: shown.key.clone(),
+            })
+            .collect()
+    }
+
+    /// The cursor over the ClickDetector the mouse points at, as a CSS
+    /// cursor name, if it points at one.
+    pub fn click_cursor(&self) -> Option<String> {
+        self.scripts.click_cursor(&self.world)
+    }
+
     /// The world as the game has it now, for the panels and the viewport.
     pub fn world(&self) -> &World {
         &self.world
@@ -397,6 +417,8 @@ impl Session {
             let seen = self.script_camera(camera);
             self.scripts.set_camera(seen);
             self.scripts.input_events(&mut self.world, input);
+            // Then ProximityPrompts and ClickDetectors, by that input.
+            self.scripts.step_prompts(&mut self.world, seconds);
             self.forward_output(output);
             if self.scripts.pause().is_some() {
                 cost.scripts += lap();

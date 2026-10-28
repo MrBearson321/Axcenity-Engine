@@ -529,10 +529,11 @@ pub enum EnumType {
     OrientationAlignmentMode,
     RaycastFilterType,
     FracturePattern,
+    ProximityPromptExclusivity,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 27] = [
+    pub const ALL: [EnumType; 28] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -560,6 +561,7 @@ impl EnumType {
         EnumType::OrientationAlignmentMode,
         EnumType::RaycastFilterType,
         EnumType::FracturePattern,
+        EnumType::ProximityPromptExclusivity,
     ];
 
     pub fn name(self) -> &'static str {
@@ -591,6 +593,7 @@ impl EnumType {
             EnumType::OrientationAlignmentMode => "OrientationAlignmentMode",
             EnumType::RaycastFilterType => "RaycastFilterType",
             EnumType::FracturePattern => "FracturePattern",
+            EnumType::ProximityPromptExclusivity => "ProximityPromptExclusivity",
         }
     }
 
@@ -630,6 +633,10 @@ impl EnumType {
             EnumType::RaycastFilterType => vec!["Exclude", "Include"],
             // How a Fracture's pieces are spread (Phase 42).
             EnumType::FracturePattern => vec!["Uniform", "Impact"],
+            // Which ProximityPrompts in reach show (Phase 44).
+            EnumType::ProximityPromptExclusivity => {
+                vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
+            }
         }
     }
 
@@ -749,7 +756,8 @@ impl LuaEnumItem {
             | EnumType::PositionAlignmentMode
             | EnumType::OrientationAlignmentMode
             | EnumType::RaycastFilterType
-            | EnumType::FracturePattern => None,
+            | EnumType::FracturePattern
+            | EnumType::ProximityPromptExclusivity => None,
         }
     }
 }

@@ -52,6 +52,8 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenAnimationEvent { .. }
         | BlockKind::WhenAgentSenses { .. }
         | BlockKind::WhenSeatOccupied { .. }
+        | BlockKind::WhenPromptTriggered { .. }
+        | BlockKind::WhenPartClicked { .. }
         | BlockKind::Unattached { .. }
         | BlockKind::TopCode { .. } => return None,
         BlockKind::Wait { .. } => 0,
@@ -779,6 +781,20 @@ fn translation_covers_every_event_block() {
                 body: quiet(45),
             },
         ),
+        block(
+            46,
+            BlockKind::WhenPromptTriggered {
+                prompt: "Door.ProximityPrompt".to_owned(),
+                body: quiet(47),
+            },
+        ),
+        block(
+            48,
+            BlockKind::WhenPartClicked {
+                detector: "Button.ClickDetector".to_owned(),
+                body: quiet(49),
+            },
+        ),
         block(38, BlockKind::BeforePhysics { body: quiet(39) }),
         block(40, BlockKind::BeforeRender { body: quiet(41) }),
         block(
@@ -811,6 +827,8 @@ fn translation_covers_every_event_block() {
         "    if sense == \"Sight\" then",
         "workspace.Chair:GetPropertyChangedSignal(\"Occupant\"):Connect(function()",
         "    if workspace.Chair.Occupant then",
+        "workspace.Door.ProximityPrompt.Triggered:Connect(function()",
+        "workspace.Button.ClickDetector.MouseClick:Connect(function()",
         "RunService.Stepped:Connect(function(time, deltaTime)",
         "RunService.RenderStepped:Connect(function(deltaTime)",
         "game.ReplicatedStorage.Scored.Event:Connect(function()",
@@ -818,7 +836,7 @@ fn translation_covers_every_event_block() {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 15, "{source}");
+    assert_eq!(source.matches("do return end").count(), 17, "{source}");
 }
 
 #[test]
@@ -1648,6 +1666,20 @@ fn every_block_script() -> BlockScript {
             16,
             BlockKind::WhenSeatOccupied {
                 seat: "Cart.Seat".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            17,
+            BlockKind::WhenPromptTriggered {
+                prompt: "Door.ProximityPrompt".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            18,
+            BlockKind::WhenPartClicked {
+                detector: "Button.ClickDetector".to_owned(),
                 body: body(),
             },
         ),

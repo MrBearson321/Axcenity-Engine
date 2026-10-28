@@ -13,6 +13,7 @@ mod gamepad;
 mod interact;
 mod loading;
 mod paint;
+mod prompt;
 mod rich;
 mod scroll;
 mod transition;
@@ -28,6 +29,7 @@ pub use interact::{
 };
 pub use loading::LoadingGui;
 use paint::*;
+pub use prompt::{PromptView, prompt_items, prompt_text};
 pub use rich::{RichSpan, RichStroke, RichStyle, parse_rich_text, rich_text_plain};
 pub use scroll::{ScrollBar, UiScroll, scroll_bars};
 pub use turn::UiTurn;
@@ -1728,6 +1730,8 @@ mod accessibility_tests;
 mod focus_tests;
 #[cfg(test)]
 mod layering_tests;
+#[cfg(test)]
+mod prompt_tests;
 #[cfg(test)]
 mod shape_tests;
 #[cfg(test)]

@@ -122,7 +122,7 @@ pub(crate) fn options(instance: &Instance) -> Vec<String> {
         .collect()
 }
 
-fn px(pixels: f32) -> String {
+pub(crate) fn px(pixels: f32) -> String {
     format!("{pixels}px")
 }
 
@@ -138,7 +138,10 @@ fn css_rgba([r, g, b, a]: [f32; 4]) -> String {
 
 /// `styles` with each of `defaults` (a property and its value) filled in
 /// where its CSS doesn't set it.
-fn with_defaults(mut styles: ResolvedStyles, defaults: &[(&str, String)]) -> ResolvedStyles {
+pub(crate) fn with_defaults(
+    mut styles: ResolvedStyles,
+    defaults: &[(&str, String)],
+) -> ResolvedStyles {
     for (name, value) in defaults {
         styles
             .values
@@ -150,7 +153,12 @@ fn with_defaults(mut styles: ResolvedStyles, defaults: &[(&str, String)]) -> Res
 
 /// A part's box from its CSS: its background (or gradient), corners,
 /// border and shadows, faded by `opacity` and its own CSS `opacity`.
-fn paint_part(rect: UiRect, styles: &ResolvedStyles, opacity: f32, out: &mut Vec<UiDrawItem>) {
+pub(crate) fn paint_part(
+    rect: UiRect,
+    styles: &ResolvedStyles,
+    opacity: f32,
+    out: &mut Vec<UiDrawItem>,
+) {
     let opacity = opacity * css_number(styles, "opacity").unwrap_or(1.0).clamp(0.0, 1.0);
     if opacity <= 0.0 {
         return;

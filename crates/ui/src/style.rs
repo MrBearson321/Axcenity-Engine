@@ -99,7 +99,8 @@ pub(crate) struct PseudoClasses<'a> {
 /// pseudo-element: a ScrollingFrame's bar (`::scrollbar`) and the thumb
 /// dragged along it (`::thumb`, also a Slider's and a switch's knob), and
 /// the widgets' parts (`::track`, `::fill`, `::check`, and a Dropdown's
-/// `::list` and each `::option` in it).
+/// `::list` and each `::option` in it), and a ProximityPrompt's `::key`
+/// cap and hold `::ring`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PseudoElement {
     Scrollbar,
@@ -109,6 +110,8 @@ pub(crate) enum PseudoElement {
     Check,
     List,
     Option,
+    Key,
+    Ring,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -732,6 +735,8 @@ fn parse_selector(selector: &str) -> Option<Selector> {
                         "check" => PseudoElement::Check,
                         "list" => PseudoElement::List,
                         "option" => PseudoElement::Option,
+                        "key" => PseudoElement::Key,
+                        "ring" => PseudoElement::Ring,
                         _ => return None,
                     });
                     specificity.2 += 1;

@@ -360,6 +360,42 @@ impl Context {
         });
     }
 
+    /// Fires each prompt and click detector event on its Instance, with
+    /// `player` for those that pass the Player, skipping Instances that
+    /// are gone (Phase 44).
+    pub fn fire_prompt_events(
+        &self,
+        world: &mut World,
+        fired: &[crate::prompt::Fired],
+        player: Option<InstanceId>,
+    ) {
+        with_world(&self.lua, world, || {
+            for event in fired {
+                if !instance::world(&self.lua).is_ok_and(|world| world.contains(event.instance)) {
+                    continue;
+                }
+                let owner = events::Owner::Instance(event.instance);
+                if event.with_player {
+                    let player = player.map(instance::LuaInstance);
+                    events::fire(&self.lua, owner, event.event, player);
+                } else {
+                    events::fire(&self.lua, owner, event.event, ());
+                }
+            }
+        });
+    }
+
+    /// This frame's input for prompts and click detectors (client).
+    pub fn prompt_input(&self) -> input::PromptInput {
+        input::prompt_input(&self.lua)
+    }
+
+    /// The camera's place, and the ray through `mouse` (client).
+    pub fn mouse_ray(&self, mouse: [f32; 2]) -> Option<crate::camera::Ray> {
+        let camera = self.lua.app_data_ref::<Camera>()?;
+        Some(camera.ray(mouse[0], mouse[1]))
+    }
+
     /// Fires `Landed(speed)` on a character controller that's still there.
     pub fn fire_landed(&self, world: &mut World, controller: InstanceId, speed: f64) {
         with_world(&self.lua, world, || {
