@@ -38,6 +38,8 @@
 //! - [`ScriptRuntime::reload_script`] runs a script's changed file in place
 //!   while the game runs: its handlers and waiting coroutines go, and the
 //!   new code runs against the same world.
+//! - [`ScriptRuntime::start_spec`] runs a game test's spec file for the
+//!   `testing` crate's runner (see `spec`).
 
 mod api;
 mod attachment;
@@ -80,6 +82,7 @@ mod scheduler;
 mod seat;
 mod sequence;
 mod sides;
+mod spec;
 mod task;
 mod tool;
 mod tree;
@@ -113,6 +116,7 @@ pub use prompt::ShownPrompt;
 pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
 pub use sequence::sound_actions as sequence_sound_actions;
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
+pub use spec::{FoundTest, TestReport, TestRequest};
 pub use watchdog::DEFAULT_LIMIT as WATCHDOG_LIMIT;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

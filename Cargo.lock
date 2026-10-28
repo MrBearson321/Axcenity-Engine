@@ -638,6 +638,7 @@ dependencies = [
  "axcenity-scene",
  "axcenity-script",
  "axcenity-terrain",
+ "axcenity-testing",
  "axcenity-ui",
  "axcenity-workspace-hack",
  "dioxus-cli-config",
@@ -810,6 +811,21 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "axcenity-testing"
+version = "0.1.0"
+dependencies = [
+ "axcenity-anim",
+ "axcenity-assets",
+ "axcenity-character",
+ "axcenity-core",
+ "axcenity-nav",
+ "axcenity-physics",
+ "axcenity-project",
+ "axcenity-script",
+ "axcenity-workspace-hack",
 ]
 
 [[package]]

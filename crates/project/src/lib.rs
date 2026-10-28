@@ -279,6 +279,7 @@ pub(crate) fn update_manifest(
 }
 
 /// A script file from the project's `scripts` folder.
+#[derive(Clone)]
 pub struct ScriptFile {
     /// The Script made for this file, in `ServerScriptService`, the
     /// LocalScript, in `StarterPlayer.StarterPlayerScripts`, or the

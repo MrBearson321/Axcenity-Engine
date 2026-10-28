@@ -470,6 +470,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::Terrain => app.terrain_pane(ui),
                         Pane::Profiler => app.profiler.show(ui),
                         Pane::Mixer => app.mixer_pane(ui),
+                        Pane::Tests => app.tests_pane(ui),
                         Pane::AssetCheck => {
                             let _ = app.asset_check.show(ui, app.project.is_some(), true);
                         }

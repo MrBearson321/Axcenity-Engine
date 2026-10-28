@@ -1,0 +1,25 @@
+[package]
+name = "axcenity-testing"
+description = "The Axcenity Engine's game test runner: spec files run against a headless copy of a game."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "axcenity-test"
+path = "src/main.rs"
+
+[dependencies]
+axcenity-anim.workspace = true
+axcenity-assets.workspace = true
+axcenity-character.workspace = true
+axcenity-core.workspace = true
+axcenity-nav.workspace = true
+axcenity-physics.workspace = true
+axcenity-project.workspace = true
+axcenity-script.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true

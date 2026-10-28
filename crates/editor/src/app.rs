@@ -34,6 +34,7 @@ mod data_tables;
 mod edits;
 mod engine;
 mod files;
+mod game_tests;
 mod input_settings;
 mod levels;
 mod material_files;
@@ -237,6 +238,8 @@ pub struct EditorApp {
     profiler: Profiler,
     /// The Mixer panel's meters, mute and solo.
     mixer: crate::mixer::Mixer,
+    /// The Tests panel's tree and the run going now (Phase 53).
+    game_tests: crate::game_tests::GameTests,
     /// The last asset check, for the Asset Check panel.
     asset_check: AssetCheck,
     /// The Tags panel's rename box.
@@ -408,6 +411,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Tags => self.app.tags_pane(ui),
             Pane::Levels => self.app.levels_pane(ui),
             Pane::Sequencer => self.app.sequencer_pane(ui),
+            Pane::Tests => self.app.tests_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
         }
     }
@@ -632,6 +636,7 @@ impl EditorApp {
             last_frame: None,
             profiler: Profiler::default(),
             mixer: crate::mixer::Mixer::default(),
+            game_tests: crate::game_tests::GameTests::default(),
             asset_check: AssetCheck::default(),
             tags: crate::tags::TagsPanel::default(),
             tabs: ScriptTabs::default(),
@@ -1251,6 +1256,8 @@ mod constraint_tests;
 mod data_table_tests;
 #[cfg(test)]
 mod fracture_tests;
+#[cfg(test)]
+mod game_tests_tests;
 #[cfg(test)]
 mod health_tests;
 #[cfg(test)]

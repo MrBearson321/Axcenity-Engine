@@ -22,6 +22,7 @@ axcenity-save.workspace = true
 axcenity-scene.workspace = true
 axcenity-script.workspace = true
 axcenity-terrain.workspace = true
+axcenity-testing.workspace = true
 axcenity-ui.workspace = true
 anyhow.workspace = true
 eframe.workspace = true

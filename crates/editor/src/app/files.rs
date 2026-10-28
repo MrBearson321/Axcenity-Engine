@@ -255,6 +255,7 @@ impl EditorApp {
                         .warning(format!("Saved, but could not keep a version: {err}")),
                 }
             }
+            self.tests_saved();
         }
         // The project list shows the picture taken at the last save.
         self.thumbnail_wanted.get_or_insert(false);
@@ -323,6 +324,7 @@ impl EditorApp {
         let saved = self.write_tab(path);
         if saved {
             self.output.info(format!("Saved `{path}`."));
+            self.tests_saved();
         }
         saved
     }
@@ -395,6 +397,19 @@ impl EditorApp {
     fn write_tab(&mut self, path: &str) -> bool {
         if project::is_block_script(path) {
             return self.write_block_tab(path);
+        }
+        // A game test's spec is only a file: no Script runs it in the game.
+        if axcenity_testing::is_spec_file(path) {
+            let (Some(project), Some(tab)) = (&self.project, self.tabs.get_mut(path)) else {
+                return false;
+            };
+            if let Err(err) = project::write_script(&project.folder, path, &tab.text) {
+                self.output
+                    .error(format!("Could not save: {}", chain(&err)));
+                return false;
+            }
+            tab.mark_saved();
+            return true;
         }
         if project::is_stylesheet(path) {
             let (Some(project), Some(tab)) = (&self.project, self.tabs.get(path)) else {

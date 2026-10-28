@@ -20,6 +20,7 @@ When behavior changes, update the topic file. Keep each crate `CLAUDE.md` under 
 
 - Player: `cargo run -p axcenity-player -- examples/hello-part`
 - Editor: `cargo run -p axcenity-editor -- examples/hello-touched`
+- Game tests: `cargo run -p axcenity-testing -- examples/hello-character`
 - Build: `cargo build --workspace`
 - Test: `cargo nextest run --workspace` (one crate: `-p axcenity-x`). Doc tests: `cargo test --workspace --doc`
 - After changing dependencies: `cargo hakari generate` ([docs/development.md](docs/development.md))

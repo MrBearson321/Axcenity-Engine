@@ -24,6 +24,7 @@ mod css_syntax;
 mod data_table;
 mod dialog;
 mod explorer;
+mod game_tests;
 mod gizmo;
 mod global_assets;
 mod history;

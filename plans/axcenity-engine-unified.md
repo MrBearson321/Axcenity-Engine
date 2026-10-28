@@ -1683,9 +1683,9 @@ Live preview scrubs in the editor without entering Play. Blocks: "play cutscene"
 
 ### Acceptance criteria
 
-- [ ] A spec that holds W for one second and expects the character to have moved more than 5 studs passes. Changing `WalkSpeed` to 0 makes it fail with the line and the values.
+- [x] A spec that holds W for one second and expects the character to have moved more than 5 studs passes. Changing `WalkSpeed` to 0 makes it fail with the line and the values.
 - [ ] `axcenity-test examples/hello-character` runs the same tests as the editor panel, with the same results, on Windows, macOS and Linux.
-- [ ] Tests don't change the project's files, and a test that errors doesn't stop the others.
+- [x] Tests don't change the project's files, and a test that errors doesn't stop the others.
 
 ---
 

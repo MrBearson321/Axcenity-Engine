@@ -62,6 +62,9 @@ pub enum Pane {
     /// A cutscene sequence on a timeline (`sequencer.rs`, Phase 51).
     /// Starts closed; opening a sequence opens it.
     Sequencer,
+    /// The project's game tests and how they went (`game_tests.rs`,
+    /// Phase 53). Starts closed.
+    Tests,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -69,7 +72,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 16] = [
+    pub const CLOSABLE: [Pane; 17] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -86,6 +89,7 @@ impl Pane {
         Pane::Tags,
         Pane::Levels,
         Pane::Sequencer,
+        Pane::Tests,
     ];
 
     pub fn label(self) -> &'static str {
@@ -107,6 +111,7 @@ impl Pane {
             Pane::Tags => "Tags",
             Pane::Levels => "Levels",
             Pane::Sequencer => "Sequencer",
+            Pane::Tests => "Tests",
             Pane::Script(_) => "Script",
         }
     }
@@ -130,6 +135,7 @@ impl Pane {
             Pane::Tags => icons::TAG,
             Pane::Levels => icons::STACK,
             Pane::Sequencer => icons::FILM_SLATE,
+            Pane::Tests => icons::FLASK,
             Pane::Script(_) => icons::CODE,
         }
     }
@@ -191,7 +197,9 @@ impl Layout {
             Pane::Explorer => Some(Pane::Properties),
             Pane::Properties => Some(Pane::Explorer),
             Pane::Console => Some(Pane::Assets),
-            Pane::Assets | Pane::Profiler | Pane::Mixer | Pane::AssetCheck => Some(Pane::Console),
+            Pane::Assets | Pane::Profiler | Pane::Mixer | Pane::AssetCheck | Pane::Tests => {
+                Some(Pane::Console)
+            }
             // A tab beside the Scene, with room for a preview and a graph.
             Pane::Animation
             | Pane::UiDesigner
@@ -442,6 +450,7 @@ mod tests {
                     | Pane::Levels
                     | Pane::Sequencer
                     | Pane::Mixer
+                    | Pane::Tests
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;
