@@ -759,6 +759,12 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::SpringConstraint => icons::SCRIBBLE_LOOP,
         ClassName::RopeConstraint => icons::SCRIBBLE,
         ClassName::RodConstraint => icons::LINE_SEGMENT,
+        ClassName::LinearVelocity => icons::NAVIGATION_ARROW,
+        ClassName::AngularVelocity => icons::ARROWS_CLOCKWISE,
+        ClassName::VectorForce => icons::ARROW_FAT_UP,
+        ClassName::Torque => icons::ARROW_ARC_RIGHT,
+        ClassName::AlignPosition => icons::CROSSHAIR,
+        ClassName::AlignOrientation => icons::COMPASS,
         ClassName::IntValue | ClassName::NumberValue => icons::HASH,
         ClassName::StringValue => icons::TEXT_AA,
         ClassName::BoolValue => icons::TOGGLE_LEFT,
@@ -849,7 +855,8 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         class
             if class == ClassName::Attachment
                 || class == ClassName::WeldConstraint
-                || class.is_joint() =>
+                || class.is_joint()
+                || class.is_mover() =>
         {
             pick((200, 170, 120), (130, 95, 40))
         }

@@ -1,6 +1,10 @@
 //! The Constraint tool (Phase 36): pick a joint in the ribbon, click a
 //! surface on one part, then on another. The two Attachments and the joint
 //! are made as one undo step (`constraints::new_joint`).
+//!
+//! Phase 37: a mover takes one click, which makes its Attachment and the
+//! mover; an align takes a second, on the part it follows
+//! (`constraints::new_mover`).
 
 use super::*;
 use crate::viewport::SurfacePick;
@@ -8,7 +12,7 @@ use crate::viewport::SurfacePick;
 /// The Constraint tool while it's on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ConstraintTool {
-    /// The joint it makes.
+    /// The joint or mover it makes.
     pub class: ClassName,
     /// The first surface clicked, waiting for the second.
     pub first: Option<SurfacePick>,
@@ -19,15 +23,18 @@ impl EditorApp {
     pub(super) fn pick_constraint_tool(&mut self, class: Option<ClassName>) {
         self.constraint_tool = class.map(|class| ConstraintTool { class, first: None });
         if let Some(class) = class {
-            self.output.info(format!(
-                "{class}: click a surface on one part, then a surface on another. Esc stops."
-            ));
+            let clicks = if crate::constraints::takes_two_surfaces(class) {
+                "click a surface on one part, then a surface on another"
+            } else {
+                "click a surface on the part it moves"
+            };
+            self.output.info(format!("{class}: {clicks}. Esc stops."));
         }
     }
 
     /// A surface clicked with the Constraint tool: the first is remembered,
-    /// and the second makes the joint and selects it. The tool stays on for
-    /// the next one.
+    /// and the second makes the joint and selects it. A mover other than an
+    /// align is made on the first. The tool stays on for the next one.
     pub(super) fn constraint_surface(&mut self, pick: SurfacePick) {
         if self.playing() {
             return;
@@ -35,20 +42,34 @@ impl EditorApp {
         let Some(tool) = self.constraint_tool.as_mut() else {
             return;
         };
-        let Some(first) = tool.first else {
-            tool.first = Some(pick);
-            return;
+        let class = tool.class;
+        let (first, second) = match tool.first {
+            None if crate::constraints::takes_two_surfaces(class) => {
+                tool.first = Some(pick);
+                return;
+            }
+            None => (pick, None),
+            Some(first) => (first, Some(pick)),
         };
-        if first.part == pick.part {
+        if second.is_some_and(|second| second.part == first.part) {
             self.output
                 .warning("Click a surface on a different part to join it to.");
             return;
         }
-        let class = tool.class;
         tool.first = None;
-        let ids = crate::constraints::new_joint(&mut self.world, class, first, pick);
-        // Each Attachment goes in its part, and the joint in the first part.
-        let parents = [first.part, pick.part, first.part];
+        let ids = match second {
+            Some(second) if class.is_joint() => {
+                crate::constraints::new_joint(&mut self.world, class, first, second).to_vec()
+            }
+            _ => crate::constraints::new_mover(&mut self.world, class, first, second),
+        };
+        // Each Attachment goes in its part, and the constraint in the first
+        // part.
+        let parents = match second {
+            Some(second) => vec![first.part, second.part, first.part],
+            None => vec![first.part, first.part],
+        };
+        let made = *ids.last().expect("the constraint");
         let mut moves = Vec::new();
         for (id, parent) in ids.into_iter().zip(parents) {
             let wanted = self.world.get(id).map(|i| i.class().as_str()).unwrap_or("");
@@ -66,6 +87,6 @@ impl EditorApp {
         }
         self.history
             .record_tree(&mut self.world, format!("Insert {class}"), moves);
-        self.select_from_viewport(Some(ids[2]));
+        self.select_from_viewport(Some(made));
     }
 }

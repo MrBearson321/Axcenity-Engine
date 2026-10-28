@@ -11,6 +11,10 @@
 //! Phase 36: the Constraint tool joins two clicked surfaces with a joint
 //! ([`new_joint`]), and the overlay draws each joint's axis, limits, coil
 //! or line.
+//!
+//! Phase 37: it also puts a mover on a clicked surface ([`new_mover`]; an
+//! align takes a second surface to follow), and the overlay draws each
+//! mover's push, turn or target.
 
 use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
 use axcenity_render::glam::{Quat, Vec3};
@@ -36,6 +40,7 @@ const WELD_COLOR: egui::Color32 = egui::Color32::from_rgb(120, 220, 255);
 const DISABLED_WELD_COLOR: egui::Color32 = egui::Color32::from_rgb(150, 150, 150);
 const JOINT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 150, 60);
 const LIMIT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 220, 90);
+const MOVER_COLOR: egui::Color32 = egui::Color32::from_rgb(120, 255, 170);
 /// How far a joint's axis and limit arcs reach, in points on screen.
 const JOINT_POINTS: f32 = 26.0;
 
@@ -49,6 +54,28 @@ pub const JOINTS: [ClassName; 7] = [
     ClassName::RopeConstraint,
     ClassName::RodConstraint,
 ];
+
+/// The movers the Constraint tool makes, in the order the ribbon lists them.
+pub const MOVERS: [ClassName; 6] = [
+    ClassName::LinearVelocity,
+    ClassName::AngularVelocity,
+    ClassName::VectorForce,
+    ClassName::Torque,
+    ClassName::AlignPosition,
+    ClassName::AlignOrientation,
+];
+
+/// True if the Constraint tool makes `class` from two surfaces: a joint,
+/// or an align following Attachment1. Other movers take one.
+pub fn takes_two_surfaces(class: ClassName) -> bool {
+    !matches!(
+        class,
+        ClassName::LinearVelocity
+            | ClassName::AngularVelocity
+            | ClassName::VectorForce
+            | ClassName::Torque
+    )
+}
 
 fn to_vec3(v: Vector3) -> Vec3 {
     Vec3::new(v.x, v.y, v.z)
@@ -225,33 +252,9 @@ pub fn new_joint(
     first: SurfacePick,
     second: SurfacePick,
 ) -> [InstanceId; 3] {
-    let turn = Quat::from_rotation_arc(Vec3::X, first.normal.normalize_or(Vec3::Y));
-    let mut attachment = |pick: SurfacePick| {
-        let (at, part_turn) = world
-            .get(pick.part)
-            .and_then(Pose::of)
-            .map_or((Vec3::ZERO, Quat::IDENTITY), |pose| {
-                (pose.position, pose.rotation)
-            });
-        let id = world
-            .create(ClassName::Attachment)
-            .expect("an Attachment isn't a service");
-        let inverse = part_turn.inverse();
-        let local = [
-            ("Position", to_value(inverse * (pick.point - at))),
-            (
-                "Orientation",
-                Value::Vector3(orientation_from_rotation(inverse * turn)),
-            ),
-        ];
-        for (name, value) in local {
-            world
-                .set_property(id, name, value)
-                .expect("an Attachment has Position and Orientation");
-        }
-        id
-    };
-    let (a0, a1) = (attachment(first), attachment(second));
+    let turn = surface_turn(first);
+    let a0 = surface_attachment(world, first, turn);
+    let a1 = surface_attachment(world, second, turn);
     let joint = world.create(class).expect("a joint isn't a service");
     let apart = f64::from(first.point.distance(second.point));
     let lengths: &[&str] = match class {
@@ -269,6 +272,64 @@ pub fn new_joint(
             .expect("joints have their attachments and lengths");
     }
     [a0, a1, joint]
+}
+
+/// Turned so its X axis points out of the surface `pick`.
+fn surface_turn(pick: SurfacePick) -> Quat {
+    Quat::from_rotation_arc(Vec3::X, pick.normal.normalize_or(Vec3::Y))
+}
+
+/// A new Attachment at the point `pick`, turned `turn` in the world, as an
+/// offset on its part. Not in the tree yet.
+fn surface_attachment(world: &mut World, pick: SurfacePick, turn: Quat) -> InstanceId {
+    let (at, part_turn) = world
+        .get(pick.part)
+        .and_then(Pose::of)
+        .map_or((Vec3::ZERO, Quat::IDENTITY), |pose| {
+            (pose.position, pose.rotation)
+        });
+    let id = world
+        .create(ClassName::Attachment)
+        .expect("an Attachment isn't a service");
+    let inverse = part_turn.inverse();
+    let local = [
+        ("Position", to_value(inverse * (pick.point - at))),
+        (
+            "Orientation",
+            Value::Vector3(orientation_from_rotation(inverse * turn)),
+        ),
+    ];
+    for (name, value) in local {
+        world
+            .set_property(id, name, value)
+            .expect("an Attachment has Position and Orientation");
+    }
+    id
+}
+
+/// A new mover of `class` on the surface `first`, not in the tree yet: an
+/// Attachment there with its X axis out of the surface, and the mover on
+/// it. An align also gets an Attachment at `second` (turned the same way)
+/// to follow. Returns the Attachments and then the mover.
+pub fn new_mover(
+    world: &mut World,
+    class: ClassName,
+    first: SurfacePick,
+    second: Option<SurfacePick>,
+) -> Vec<InstanceId> {
+    let turn = surface_turn(first);
+    let mut ids = vec![surface_attachment(world, first, turn)];
+    if let Some(second) = second {
+        ids.push(surface_attachment(world, second, turn));
+    }
+    let mover = world.create(class).expect("a mover isn't a service");
+    for (name, id) in ["Attachment0", "Attachment1"].into_iter().zip(&ids) {
+        world
+            .set_property(mover, name, Value::Instance(Some(*id)))
+            .expect("movers have their attachments");
+    }
+    ids.push(mover);
+    ids
 }
 
 /// Draws the selected Attachments, and with `overlay` on (View >
@@ -297,6 +358,9 @@ pub fn paint(
             ClassName::WeldConstraint if overlay => paint_weld(painter, screen, world, instance),
             class if class.is_joint() && (overlay || selection.contains(&id)) => {
                 paint_joint(painter, screen, world, instance);
+            }
+            class if class.is_mover() && (overlay || selection.contains(&id)) => {
+                paint_mover(painter, screen, world, instance);
             }
             _ => {}
         }
@@ -421,6 +485,128 @@ fn paint_joint(painter: &egui::Painter, screen: &Screen, world: &World, joint: &
         if let Some(at) = screen.point(at) {
             painter.circle_filled(at, 3.0, dim(JOINT_COLOR));
         }
+    }
+}
+
+/// A mover: an arrow along a LinearVelocity's or VectorForce's vector, a
+/// circling arrow around an AngularVelocity's or Torque's axis, and a line
+/// from an align's Attachment0 to its target, with a cross there for an
+/// AlignPosition and the target's X and Y axes for an AlignOrientation.
+/// Grey when disabled.
+fn paint_mover(painter: &egui::Painter, screen: &Screen, world: &World, mover: &Instance) {
+    let end = |name| match mover.property(name) {
+        Some(Value::Instance(Some(id))) => world_pose(world, *id),
+        _ => None,
+    };
+    let Some((a, turn0)) = end("Attachment0") else {
+        return;
+    };
+    let end1 = end("Attachment1");
+    let color = if mover.property("Enabled") == Some(&Value::Bool(false)) {
+        DISABLED_WELD_COLOR
+    } else {
+        MOVER_COLOR
+    };
+    let stroke = egui::Stroke::new(2.0_f32, color);
+    let reach = screen.studs_per_point(a) * JOINT_POINTS * 1.5;
+    let segment = |from: Vec3, to: Vec3| {
+        if let Some(line) = screen.line(from, to) {
+            painter.line_segment(line, stroke);
+        }
+    };
+    let arrow = |from: Vec3, to: Vec3| {
+        segment(from, to);
+        let along = to - from;
+        let side = along.any_orthonormal_vector() * along.length() * 0.15;
+        for side in [side, -side] {
+            segment(to, to - along * 0.25 + side);
+        }
+    };
+    let vector = |name| {
+        mover
+            .property(name)
+            .and_then(Value::as_vector3)
+            .map_or(Vec3::ZERO, to_vec3)
+    };
+    let item = |name| match mover.property(name) {
+        Some(Value::EnumItem(item)) => item.item.as_str(),
+        _ => "",
+    };
+    // A vector in the mover's RelativeTo axes, in the world's.
+    let turned = |v: Vec3| match item("RelativeTo") {
+        "Attachment0" => Some(turn0 * v),
+        "Attachment1" => end1.map(|(_, turn1)| turn1 * v),
+        _ => Some(v),
+    };
+    let one_attachment = item("Mode") == "OneAttachment";
+    match mover.class() {
+        ClassName::LinearVelocity | ClassName::VectorForce => {
+            let name = match mover.class() {
+                ClassName::VectorForce => "Force",
+                _ => "VectorVelocity",
+            };
+            if let Some(way) = turned(vector(name)).and_then(Vec3::try_normalize) {
+                arrow(a, a + way * reach);
+            }
+        }
+        ClassName::AngularVelocity | ClassName::Torque => {
+            let name = match mover.class() {
+                ClassName::Torque => "Torque",
+                _ => "AngularVelocity",
+            };
+            if let Some(axis) = turned(vector(name)).and_then(Vec3::try_normalize) {
+                // The axis, and three quarters of a circle around it the way
+                // it turns (right-handed), ending in an arrowhead.
+                segment(a, a + axis * reach);
+                let spoke = axis.any_orthonormal_vector() * reach * 0.5;
+                let point = |i: usize| {
+                    let angle = i as f32 / 12.0 * std::f32::consts::TAU * 0.75;
+                    a + axis * reach * 0.5 + Quat::from_axis_angle(axis, angle) * spoke
+                };
+                for i in 0..11 {
+                    segment(point(i), point(i + 1));
+                }
+                arrow(point(11), point(12));
+            }
+        }
+        ClassName::AlignPosition => {
+            let goal = if one_attachment {
+                Some(vector("Position"))
+            } else {
+                end1.map(|(at, _)| at)
+            };
+            if let Some(goal) = goal {
+                segment(a, goal);
+                let cross = screen.studs_per_point(goal) * 6.0;
+                for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+                    segment(goal - axis * cross, goal + axis * cross);
+                }
+            }
+        }
+        ClassName::AlignOrientation => {
+            let goal = if one_attachment {
+                mover
+                    .property("CFrame")
+                    .and_then(Value::as_cframe)
+                    .map(|cframe| Quat::from_array(cframe.rotation).normalize())
+            } else {
+                end1.map(|(at, turn)| {
+                    segment(a, at);
+                    turn
+                })
+            };
+            // Which way its X and Y axes are being turned to, from
+            // Attachment0.
+            if let Some(goal) = goal.filter(|goal| goal.is_finite()) {
+                for axis in [Vec3::X, Vec3::Y] {
+                    arrow(a, a + goal * axis * reach);
+                }
+            }
+        }
+        _ => {}
+    }
+    if let Some(at) = screen.point(a) {
+        painter.circle_filled(at, 3.0, color);
     }
 }
 

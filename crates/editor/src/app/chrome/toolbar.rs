@@ -376,14 +376,22 @@ impl EditorApp {
                     .on_hover_text(
                         "Join two parts with a hinge, ball socket, slider, spring, rope or rod: \
                          pick one, click a surface on one part, then a surface on another. \
-                         Both Attachments and the constraint are one undo step. Esc stops.",
+                         Or push and turn a part with a mover: click a surface on it (an \
+                         align then takes a surface on the part it follows). The \
+                         Attachments and the constraint are one undo step. Esc stops.",
                     )
                     .on_disabled_hover_text("Press Stop to edit.");
                 egui::Popup::menu(&button).show(|ui| {
-                    for class in crate::constraints::JOINTS {
-                        let label = format!("{} {}", theme::class_icon(class), class);
-                        if ui.selectable_label(active == Some(class), label).clicked() {
-                            clicks.constraint = Some(Some(class));
+                    let groups = [&crate::constraints::JOINTS[..], &crate::constraints::MOVERS];
+                    for (i, classes) in groups.into_iter().enumerate() {
+                        if i > 0 {
+                            ui.separator();
+                        }
+                        for &class in classes {
+                            let label = format!("{} {}", theme::class_icon(class), class);
+                            if ui.selectable_label(active == Some(class), label).clicked() {
+                                clicks.constraint = Some(Some(class));
+                            }
                         }
                     }
                     if active.is_some() && ui.button("Stop").clicked() {

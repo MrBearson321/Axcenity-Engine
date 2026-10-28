@@ -523,10 +523,13 @@ pub enum EnumType {
     CameraType,
     RenderPriority,
     ActuatorType,
+    ActuatorRelativeTo,
+    PositionAlignmentMode,
+    OrientationAlignmentMode,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 21] = [
+    pub const ALL: [EnumType; 24] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -548,6 +551,9 @@ impl EnumType {
         EnumType::CameraType,
         EnumType::RenderPriority,
         EnumType::ActuatorType,
+        EnumType::ActuatorRelativeTo,
+        EnumType::PositionAlignmentMode,
+        EnumType::OrientationAlignmentMode,
     ];
 
     pub fn name(self) -> &'static str {
@@ -573,6 +579,9 @@ impl EnumType {
             EnumType::CameraType => "CameraType",
             EnumType::RenderPriority => "RenderPriority",
             EnumType::ActuatorType => "ActuatorType",
+            EnumType::ActuatorRelativeTo => "ActuatorRelativeTo",
+            EnumType::PositionAlignmentMode => "PositionAlignmentMode",
+            EnumType::OrientationAlignmentMode => "OrientationAlignmentMode",
         }
     }
 
@@ -601,6 +610,12 @@ impl EnumType {
             EnumType::RenderPriority => RENDER_PRIORITIES.iter().map(|(name, _)| *name).collect(),
             // What drives a hinge, prismatic or cylindrical constraint.
             EnumType::ActuatorType => vec!["None", "Motor", "Servo"],
+            // The axes a mover's vector is in.
+            EnumType::ActuatorRelativeTo => vec!["Attachment0", "Attachment1", "World"],
+            // What an align follows: Attachment1, or its own target.
+            EnumType::PositionAlignmentMode | EnumType::OrientationAlignmentMode => {
+                vec!["OneAttachment", "TwoAttachment"]
+            }
         }
     }
 
@@ -714,7 +729,10 @@ impl LuaEnumItem {
             | EnumType::MouseBehavior
             | EnumType::CameraType
             | EnumType::RenderPriority
-            | EnumType::ActuatorType => None,
+            | EnumType::ActuatorType
+            | EnumType::ActuatorRelativeTo
+            | EnumType::PositionAlignmentMode
+            | EnumType::OrientationAlignmentMode => None,
         }
     }
 }

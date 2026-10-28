@@ -177,6 +177,20 @@ pub enum ClassName {
     RopeConstraint,
     /// Keeps the attachments exactly `Length` apart; they turn freely.
     RodConstraint,
+    /// Pushes `Attachment0`'s part to move at `VectorVelocity`, with at most
+    /// `MaxForce`.
+    LinearVelocity,
+    /// Turns `Attachment0`'s part to spin at `AngularVelocity`, with at most
+    /// `MaxTorque`.
+    AngularVelocity,
+    /// Pushes `Attachment0`'s part with a constant `Force`.
+    VectorForce,
+    /// Turns `Attachment0`'s part with a constant `Torque`.
+    Torque,
+    /// Moves `Attachment0` toward `Attachment1`, or toward `Position`.
+    AlignPosition,
+    /// Turns `Attachment0` to face the way `Attachment1` does, or `CFrame`.
+    AlignOrientation,
     IntValue,
     NumberValue,
     StringValue,
@@ -188,7 +202,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 67] = [
+    pub const ALL: [ClassName; 73] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -248,6 +262,12 @@ impl ClassName {
         ClassName::SpringConstraint,
         ClassName::RopeConstraint,
         ClassName::RodConstraint,
+        ClassName::LinearVelocity,
+        ClassName::AngularVelocity,
+        ClassName::VectorForce,
+        ClassName::Torque,
+        ClassName::AlignPosition,
+        ClassName::AlignOrientation,
         ClassName::IntValue,
         ClassName::NumberValue,
         ClassName::StringValue,
@@ -319,6 +339,12 @@ impl ClassName {
             ClassName::SpringConstraint => "SpringConstraint",
             ClassName::RopeConstraint => "RopeConstraint",
             ClassName::RodConstraint => "RodConstraint",
+            ClassName::LinearVelocity => "LinearVelocity",
+            ClassName::AngularVelocity => "AngularVelocity",
+            ClassName::VectorForce => "VectorForce",
+            ClassName::Torque => "Torque",
+            ClassName::AlignPosition => "AlignPosition",
+            ClassName::AlignOrientation => "AlignOrientation",
             ClassName::IntValue => "IntValue",
             ClassName::NumberValue => "NumberValue",
             ClassName::StringValue => "StringValue",
@@ -356,7 +382,7 @@ impl ClassName {
             ClassName::TextButton => &["GuiButton", "GuiObject", "GuiBase2d"],
             ClassName::ScreenGui | ClassName::BillboardGui => LAYER,
             ClassName::PointLight | ClassName::SpotLight => &["Light"],
-            class if class.is_joint() => &["Constraint"],
+            class if class.is_joint() || class.is_mover() => &["Constraint"],
             class if class.is_value_object() => &["ValueBase"],
             class if class.is_screen_element() => GUI,
             _ => &[],
@@ -389,6 +415,20 @@ impl ClassName {
                 | ClassName::SpringConstraint
                 | ClassName::RopeConstraint
                 | ClassName::RodConstraint
+        )
+    }
+
+    /// A constraint that pushes or turns `Attachment0`'s part (Phase 37):
+    /// a linear or angular velocity, a force, a torque, or an align.
+    pub fn is_mover(self) -> bool {
+        matches!(
+            self,
+            ClassName::LinearVelocity
+                | ClassName::AngularVelocity
+                | ClassName::VectorForce
+                | ClassName::Torque
+                | ClassName::AlignPosition
+                | ClassName::AlignOrientation
         )
     }
 
@@ -1275,6 +1315,87 @@ impl ClassName {
                 ]);
                 properties
             }
+            ClassName::LinearVelocity => {
+                let mut properties = mover_properties();
+                properties.extend([
+                    // Studs a second, in the RelativeTo frame's axes.
+                    (
+                        "VectorVelocity",
+                        Value::Vector3(Vector3::new(0.0, 0.0, 0.0)),
+                    ),
+                    // The most force it pushes with to keep that speed.
+                    ("MaxForce", Value::Number(100_000.0)),
+                    ("RelativeTo", relative_to("World")),
+                ]);
+                properties
+            }
+            ClassName::AngularVelocity => {
+                let mut properties = mover_properties();
+                properties.extend([
+                    // Radians a second around each axis of the RelativeTo
+                    // frame.
+                    (
+                        "AngularVelocity",
+                        Value::Vector3(Vector3::new(0.0, 0.0, 0.0)),
+                    ),
+                    ("MaxTorque", Value::Number(100_000.0)),
+                    ("RelativeTo", relative_to("World")),
+                ]);
+                properties
+            }
+            ClassName::VectorForce => {
+                let mut properties = mover_properties();
+                properties.extend([
+                    ("Force", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                    ("RelativeTo", relative_to("Attachment0")),
+                    // Off, it pushes at Attachment0, so a force off the
+                    // center of mass turns the part too.
+                    ("ApplyAtCenterOfMass", Value::Bool(false)),
+                ]);
+                properties
+            }
+            ClassName::Torque => {
+                let mut properties = mover_properties();
+                properties.extend([
+                    ("Torque", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                    ("RelativeTo", relative_to("Attachment0")),
+                ]);
+                properties
+            }
+            ClassName::AlignPosition => {
+                let mut properties = mover_properties();
+                properties.extend([
+                    // TwoAttachment follows Attachment1; OneAttachment goes
+                    // to `Position`, in the world.
+                    ("Mode", alignment_mode("PositionAlignmentMode")),
+                    ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                    ("MaxForce", Value::Number(100_000.0)),
+                    // Studs a second.
+                    ("MaxVelocity", Value::Number(100_000.0)),
+                    // How quickly it gets there: about 1/Responsiveness
+                    // seconds to close most of the gap.
+                    ("Responsiveness", Value::Number(10.0)),
+                    // On, it gets there as fast as MaxForce and MaxVelocity
+                    // allow, whatever Responsiveness says.
+                    ("RigidityEnabled", Value::Bool(false)),
+                ]);
+                properties
+            }
+            ClassName::AlignOrientation => {
+                let mut properties = mover_properties();
+                properties.extend([
+                    // TwoAttachment turns to Attachment1; OneAttachment to
+                    // `CFrame`'s rotation, in the world.
+                    ("Mode", alignment_mode("OrientationAlignmentMode")),
+                    ("CFrame", Value::CFrame(CFrame::IDENTITY)),
+                    ("MaxTorque", Value::Number(100_000.0)),
+                    // Radians a second.
+                    ("MaxAngularVelocity", Value::Number(100_000.0)),
+                    ("Responsiveness", Value::Number(10.0)),
+                    ("RigidityEnabled", Value::Bool(false)),
+                ]);
+                properties
+            }
             ClassName::Camera => vec![
                 // Where the viewpoint is and which way it looks, in degrees
                 // like a Part's (Z, rolling, isn't drawn).
@@ -1366,6 +1487,12 @@ impl ClassName {
             | ClassName::SpringConstraint
             | ClassName::RopeConstraint
             | ClassName::RodConstraint
+            | ClassName::LinearVelocity
+            | ClassName::AngularVelocity
+            | ClassName::VectorForce
+            | ClassName::Torque
+            | ClassName::AlignPosition
+            | ClassName::AlignOrientation
             | ClassName::IntValue
             | ClassName::NumberValue
             | ClassName::StringValue
@@ -1498,6 +1625,34 @@ fn actuator_type(item: &str) -> Value {
     Value::EnumItem(EnumItem {
         enum_name: "ActuatorType".to_owned(),
         item: item.to_owned(),
+    })
+}
+
+/// What every mover has (Phase 37): the Attachment it acts on, the one it
+/// may follow or measure from, and whether it acts.
+fn mover_properties() -> Vec<(&'static str, Value)> {
+    vec![
+        ("Attachment0", Value::Instance(None)),
+        ("Attachment1", Value::Instance(None)),
+        ("Enabled", Value::Bool(true)),
+    ]
+}
+
+/// An `ActuatorRelativeTo` item: the frame a mover's vector is in
+/// (World, Attachment0 or Attachment1).
+fn relative_to(item: &str) -> Value {
+    Value::EnumItem(EnumItem {
+        enum_name: "ActuatorRelativeTo".to_owned(),
+        item: item.to_owned(),
+    })
+}
+
+/// An align's `Mode` (`enum_name` is PositionAlignmentMode or
+/// OrientationAlignmentMode), TwoAttachment to start with.
+fn alignment_mode(enum_name: &str) -> Value {
+    Value::EnumItem(EnumItem {
+        enum_name: enum_name.to_owned(),
+        item: "TwoAttachment".to_owned(),
     })
 }
 

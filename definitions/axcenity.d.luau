@@ -827,6 +827,37 @@ declare extern type EnumActuatorTypeItems with
 	Servo: EnumActuatorType
 end
 
+--- One choice of `Enum.ActuatorRelativeTo`.
+declare extern type EnumActuatorRelativeTo extends EnumItem with
+end
+
+--- The choices of `Enum.ActuatorRelativeTo`.
+declare extern type EnumActuatorRelativeToItems with
+	Attachment0: EnumActuatorRelativeTo
+	Attachment1: EnumActuatorRelativeTo
+	World: EnumActuatorRelativeTo
+end
+
+--- One choice of `Enum.PositionAlignmentMode`.
+declare extern type EnumPositionAlignmentMode extends EnumItem with
+end
+
+--- The choices of `Enum.PositionAlignmentMode`.
+declare extern type EnumPositionAlignmentModeItems with
+	OneAttachment: EnumPositionAlignmentMode
+	TwoAttachment: EnumPositionAlignmentMode
+end
+
+--- One choice of `Enum.OrientationAlignmentMode`.
+declare extern type EnumOrientationAlignmentMode extends EnumItem with
+end
+
+--- The choices of `Enum.OrientationAlignmentMode`.
+declare extern type EnumOrientationAlignmentModeItems with
+	OneAttachment: EnumOrientationAlignmentMode
+	TwoAttachment: EnumOrientationAlignmentMode
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -850,6 +881,9 @@ declare extern type EnumLibrary with
 	CameraType: EnumCameraTypeItems
 	RenderPriority: EnumRenderPriorityItems
 	ActuatorType: EnumActuatorTypeItems
+	ActuatorRelativeTo: EnumActuatorRelativeToItems
+	PositionAlignmentMode: EnumPositionAlignmentModeItems
+	OrientationAlignmentMode: EnumOrientationAlignmentModeItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -2690,6 +2724,118 @@ declare extern type RodConstraint extends Instance with
 	[string]: any
 end
 
+--- Keeps Attachment0's part (and everything welded to it) moving at VectorVelocity, pushing with at most MaxForce through its center of mass. It holds the part up against gravity too, so a zero VectorVelocity holds it still in the air.
+declare extern type LinearVelocity extends Instance with
+	--- The Attachment it pushes or turns, on the part it moves (with everything welded to it).
+	Attachment0: Instance?
+	--- The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.
+	Attachment1: Instance?
+	--- On (the default), it acts. Off, it does nothing.
+	Enabled: boolean
+	--- The velocity it keeps Attachment0's part at, in studs a second, in RelativeTo's axes. Zero holds the part still in the air.
+	VectorVelocity: Vector3
+	--- The most force it pushes with, gravity included. A part too heavy for it sinks; `math.huge` has no limit.
+	MaxForce: number
+	--- Which axes its vector is in: `Enum.ActuatorRelativeTo.World`, `Attachment0` (turning with the part) or `Attachment1`. World by default.
+	RelativeTo: EnumActuatorRelativeTo | "Attachment0" | "Attachment1" | "World"
+	[string]: any
+end
+
+--- Keeps Attachment0's part spinning at AngularVelocity (radians a second), turning it with at most MaxTorque.
+declare extern type AngularVelocity extends Instance with
+	--- The Attachment it pushes or turns, on the part it moves (with everything welded to it).
+	Attachment0: Instance?
+	--- The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.
+	Attachment1: Instance?
+	--- On (the default), it acts. Off, it does nothing.
+	Enabled: boolean
+	--- How fast it spins Attachment0's part around each axis, in radians a second, in RelativeTo's axes.
+	AngularVelocity: Vector3
+	--- The most torque it turns with. `math.huge` has no limit.
+	MaxTorque: number
+	--- Which axes its vector is in: `Enum.ActuatorRelativeTo.World`, `Attachment0` (turning with the part) or `Attachment1`. World by default.
+	RelativeTo: EnumActuatorRelativeTo | "Attachment0" | "Attachment1" | "World"
+	[string]: any
+end
+
+--- Pushes Attachment0's part with a constant Force every physics step, at Attachment0 or (ApplyAtCenterOfMass) its center of mass. A force of its mass times `workspace.Gravity` upward makes it hover.
+declare extern type VectorForce extends Instance with
+	--- The Attachment it pushes or turns, on the part it moves (with everything welded to it).
+	Attachment0: Instance?
+	--- The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.
+	Attachment1: Instance?
+	--- On (the default), it acts. Off, it does nothing.
+	Enabled: boolean
+	--- The force it pushes with every step. Its part's mass times `workspace.Gravity` upward makes the part hover.
+	Force: Vector3
+	--- Which axes its vector is in: `Enum.ActuatorRelativeTo.World`, `Attachment0` (turning with the part) or `Attachment1`. Attachment0 by default.
+	RelativeTo: EnumActuatorRelativeTo | "Attachment0" | "Attachment1" | "World"
+	--- On, it pushes at the center of mass, so it never turns the part. Off (the default), it pushes at Attachment0.
+	ApplyAtCenterOfMass: boolean
+	[string]: any
+end
+
+--- Turns Attachment0's part with a constant Torque every physics step.
+declare extern type Torque extends Instance with
+	--- The Attachment it pushes or turns, on the part it moves (with everything welded to it).
+	Attachment0: Instance?
+	--- The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.
+	Attachment1: Instance?
+	--- On (the default), it acts. Off, it does nothing.
+	Enabled: boolean
+	--- The torque it turns its part with every step, around RelativeTo's axes.
+	Torque: Vector3
+	--- Which axes its vector is in: `Enum.ActuatorRelativeTo.World`, `Attachment0` (turning with the part) or `Attachment1`. Attachment0 by default.
+	RelativeTo: EnumActuatorRelativeTo | "Attachment0" | "Attachment1" | "World"
+	[string]: any
+end
+
+--- Moves Attachment0's part so Attachment0 reaches Attachment1 (TwoAttachment Mode) or Position (OneAttachment), smoothly, closing most of the gap in about 1/Responsiveness seconds, with at most MaxForce and MaxVelocity. It holds the part up against gravity.
+declare extern type AlignPosition extends Instance with
+	--- The Attachment it pushes or turns, on the part it moves (with everything welded to it).
+	Attachment0: Instance?
+	--- The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.
+	Attachment1: Instance?
+	--- On (the default), it acts. Off, it does nothing.
+	Enabled: boolean
+	--- `Enum.PositionAlignmentMode.TwoAttachment` (the default) moves Attachment0 to Attachment1, following it; `OneAttachment` moves it to Position.
+	Mode: EnumPositionAlignmentMode | "OneAttachment" | "TwoAttachment"
+	--- Where it moves Attachment0 in OneAttachment Mode, in the world.
+	Position: Vector3
+	--- The most force it pushes with, gravity included. `math.huge` has no limit.
+	MaxForce: number
+	--- The fastest it moves Attachment0 toward its target, in studs a second.
+	MaxVelocity: number
+	--- How quickly it gets there, from 5 to 200: it closes most of the gap in about 1/Responsiveness seconds, smoothly, without overshooting.
+	Responsiveness: number
+	--- On, it gets there as fast as MaxForce and MaxVelocity allow, ignoring Responsiveness.
+	RigidityEnabled: boolean
+	[string]: any
+end
+
+--- Turns Attachment0's part so Attachment0 faces the way Attachment1 does (TwoAttachment Mode) or CFrame's rotation (OneAttachment), smoothly, in about 1/Responsiveness seconds, with at most MaxTorque and MaxAngularVelocity. A level CFrame keeps a drone level.
+declare extern type AlignOrientation extends Instance with
+	--- The Attachment it pushes or turns, on the part it moves (with everything welded to it).
+	Attachment0: Instance?
+	--- The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.
+	Attachment1: Instance?
+	--- On (the default), it acts. Off, it does nothing.
+	Enabled: boolean
+	--- `Enum.OrientationAlignmentMode.TwoAttachment` (the default) turns Attachment0 to face the way Attachment1 does; `OneAttachment` turns it to CFrame's rotation.
+	Mode: EnumOrientationAlignmentMode | "OneAttachment" | "TwoAttachment"
+	--- The rotation it turns Attachment0 to in OneAttachment Mode, in the world. Its position is ignored.
+	CFrame: CFrame
+	--- The most torque it turns with. `math.huge` has no limit.
+	MaxTorque: number
+	--- The fastest it turns Attachment0 toward its target, in radians a second.
+	MaxAngularVelocity: number
+	--- How quickly it gets there, from 5 to 200: it closes most of the turn in about 1/Responsiveness seconds, smoothly, without overshooting.
+	Responsiveness: number
+	--- On, it turns there as fast as MaxTorque and MaxAngularVelocity allow, ignoring Responsiveness.
+	RigidityEnabled: boolean
+	[string]: any
+end
+
 --- Holds one whole number in Value (other numbers are rounded). Its `Changed` fires with the new value.
 declare extern type IntValue extends Instance with
 	--- The whole number it holds; others are rounded. 0 by default.
@@ -2766,7 +2912,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

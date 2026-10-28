@@ -2820,6 +2820,211 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Orientation",
         "\"Horizontal\" (fills from the left) or \"Vertical\" (fills from the bottom). Style the filled part with CSS ProgressBar::fill, which can be a linear-gradient.",
     ),
+    (
+        ClassName::LinearVelocity,
+        "Attachment0",
+        "The Attachment it pushes or turns, on the part it moves (with everything welded to it).",
+    ),
+    (
+        ClassName::LinearVelocity,
+        "Attachment1",
+        "The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.",
+    ),
+    (
+        ClassName::LinearVelocity,
+        "Enabled",
+        "On (the default), it acts. Off, it does nothing.",
+    ),
+    (
+        ClassName::LinearVelocity,
+        "VectorVelocity",
+        "The velocity it keeps Attachment0's part at, in studs a second, in RelativeTo's axes. Zero holds the part still in the air.",
+    ),
+    (
+        ClassName::LinearVelocity,
+        "MaxForce",
+        "The most force it pushes with, gravity included. A part too heavy for it sinks; `math.huge` has no limit.",
+    ),
+    (
+        ClassName::LinearVelocity,
+        "RelativeTo",
+        "Which axes its vector is in: `Enum.ActuatorRelativeTo.World`, `Attachment0` (turning with the part) or `Attachment1`. World by default.",
+    ),
+    (
+        ClassName::AngularVelocity,
+        "Attachment0",
+        "The Attachment it pushes or turns, on the part it moves (with everything welded to it).",
+    ),
+    (
+        ClassName::AngularVelocity,
+        "Attachment1",
+        "The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.",
+    ),
+    (
+        ClassName::AngularVelocity,
+        "Enabled",
+        "On (the default), it acts. Off, it does nothing.",
+    ),
+    (
+        ClassName::AngularVelocity,
+        "AngularVelocity",
+        "How fast it spins Attachment0's part around each axis, in radians a second, in RelativeTo's axes.",
+    ),
+    (
+        ClassName::AngularVelocity,
+        "MaxTorque",
+        "The most torque it turns with. `math.huge` has no limit.",
+    ),
+    (
+        ClassName::AngularVelocity,
+        "RelativeTo",
+        "Which axes its vector is in: `Enum.ActuatorRelativeTo.World`, `Attachment0` (turning with the part) or `Attachment1`. World by default.",
+    ),
+    (
+        ClassName::VectorForce,
+        "Attachment0",
+        "The Attachment it pushes or turns, on the part it moves (with everything welded to it).",
+    ),
+    (
+        ClassName::VectorForce,
+        "Attachment1",
+        "The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.",
+    ),
+    (
+        ClassName::VectorForce,
+        "Enabled",
+        "On (the default), it acts. Off, it does nothing.",
+    ),
+    (
+        ClassName::VectorForce,
+        "Force",
+        "The force it pushes with every step. Its part's mass times `workspace.Gravity` upward makes the part hover.",
+    ),
+    (
+        ClassName::VectorForce,
+        "RelativeTo",
+        "Which axes its vector is in: `Enum.ActuatorRelativeTo.World`, `Attachment0` (turning with the part) or `Attachment1`. Attachment0 by default.",
+    ),
+    (
+        ClassName::VectorForce,
+        "ApplyAtCenterOfMass",
+        "On, it pushes at the center of mass, so it never turns the part. Off (the default), it pushes at Attachment0.",
+    ),
+    (
+        ClassName::Torque,
+        "Attachment0",
+        "The Attachment it pushes or turns, on the part it moves (with everything welded to it).",
+    ),
+    (
+        ClassName::Torque,
+        "Attachment1",
+        "The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.",
+    ),
+    (
+        ClassName::Torque,
+        "Enabled",
+        "On (the default), it acts. Off, it does nothing.",
+    ),
+    (
+        ClassName::Torque,
+        "Torque",
+        "The torque it turns its part with every step, around RelativeTo's axes.",
+    ),
+    (
+        ClassName::Torque,
+        "RelativeTo",
+        "Which axes its vector is in: `Enum.ActuatorRelativeTo.World`, `Attachment0` (turning with the part) or `Attachment1`. Attachment0 by default.",
+    ),
+    (
+        ClassName::AlignPosition,
+        "Attachment0",
+        "The Attachment it pushes or turns, on the part it moves (with everything welded to it).",
+    ),
+    (
+        ClassName::AlignPosition,
+        "Attachment1",
+        "The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.",
+    ),
+    (
+        ClassName::AlignPosition,
+        "Enabled",
+        "On (the default), it acts. Off, it does nothing.",
+    ),
+    (
+        ClassName::AlignPosition,
+        "Mode",
+        "`Enum.PositionAlignmentMode.TwoAttachment` (the default) moves Attachment0 to Attachment1, following it; `OneAttachment` moves it to Position.",
+    ),
+    (
+        ClassName::AlignPosition,
+        "Position",
+        "Where it moves Attachment0 in OneAttachment Mode, in the world.",
+    ),
+    (
+        ClassName::AlignPosition,
+        "MaxForce",
+        "The most force it pushes with, gravity included. `math.huge` has no limit.",
+    ),
+    (
+        ClassName::AlignPosition,
+        "MaxVelocity",
+        "The fastest it moves Attachment0 toward its target, in studs a second.",
+    ),
+    (
+        ClassName::AlignPosition,
+        "Responsiveness",
+        "How quickly it gets there, from 5 to 200: it closes most of the gap in about 1/Responsiveness seconds, smoothly, without overshooting.",
+    ),
+    (
+        ClassName::AlignPosition,
+        "RigidityEnabled",
+        "On, it gets there as fast as MaxForce and MaxVelocity allow, ignoring Responsiveness.",
+    ),
+    (
+        ClassName::AlignOrientation,
+        "Attachment0",
+        "The Attachment it pushes or turns, on the part it moves (with everything welded to it).",
+    ),
+    (
+        ClassName::AlignOrientation,
+        "Attachment1",
+        "The Attachment it measures from with RelativeTo Attachment1, or follows in TwoAttachment Mode. Optional.",
+    ),
+    (
+        ClassName::AlignOrientation,
+        "Enabled",
+        "On (the default), it acts. Off, it does nothing.",
+    ),
+    (
+        ClassName::AlignOrientation,
+        "Mode",
+        "`Enum.OrientationAlignmentMode.TwoAttachment` (the default) turns Attachment0 to face the way Attachment1 does; `OneAttachment` turns it to CFrame's rotation.",
+    ),
+    (
+        ClassName::AlignOrientation,
+        "CFrame",
+        "The rotation it turns Attachment0 to in OneAttachment Mode, in the world. Its position is ignored.",
+    ),
+    (
+        ClassName::AlignOrientation,
+        "MaxTorque",
+        "The most torque it turns with. `math.huge` has no limit.",
+    ),
+    (
+        ClassName::AlignOrientation,
+        "MaxAngularVelocity",
+        "The fastest it turns Attachment0 toward its target, in radians a second.",
+    ),
+    (
+        ClassName::AlignOrientation,
+        "Responsiveness",
+        "How quickly it gets there, from 5 to 200: it closes most of the turn in about 1/Responsiveness seconds, smoothly, without overshooting.",
+    ),
+    (
+        ClassName::AlignOrientation,
+        "RigidityEnabled",
+        "On, it turns there as fast as MaxTorque and MaxAngularVelocity allow, ignoring Responsiveness.",
+    ),
 ];
 
 /// What each event means, including what its handler receives. A test
@@ -3221,6 +3426,22 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::RodConstraint => {
             "Keeps its attachments exactly Length apart, letting them turn freely. `CurrentLength` (read-only) is how far apart they are."
+        }
+        ClassName::LinearVelocity => {
+            "Keeps Attachment0's part (and everything welded to it) moving at VectorVelocity, pushing with at most MaxForce through its center of mass. It holds the part up against gravity too, so a zero VectorVelocity holds it still in the air."
+        }
+        ClassName::AngularVelocity => {
+            "Keeps Attachment0's part spinning at AngularVelocity (radians a second), turning it with at most MaxTorque."
+        }
+        ClassName::VectorForce => {
+            "Pushes Attachment0's part with a constant Force every physics step, at Attachment0 or (ApplyAtCenterOfMass) its center of mass. A force of its mass times `workspace.Gravity` upward makes it hover."
+        }
+        ClassName::Torque => "Turns Attachment0's part with a constant Torque every physics step.",
+        ClassName::AlignPosition => {
+            "Moves Attachment0's part so Attachment0 reaches Attachment1 (TwoAttachment Mode) or Position (OneAttachment), smoothly, closing most of the gap in about 1/Responsiveness seconds, with at most MaxForce and MaxVelocity. It holds the part up against gravity."
+        }
+        ClassName::AlignOrientation => {
+            "Turns Attachment0's part so Attachment0 faces the way Attachment1 does (TwoAttachment Mode) or CFrame's rotation (OneAttachment), smoothly, in about 1/Responsiveness seconds, with at most MaxTorque and MaxAngularVelocity. A level CFrame keeps a drone level."
         }
         ClassName::Checkpoint => {
             "A place in the world to come back to. `SaveService:SetCheckpoint(checkpoint)` makes it the active one and captures the player data and world state there; `SaveService:RestoreCheckpoint()` puts them back and stands the player character at its Position. A save slot keeps the active checkpoint."

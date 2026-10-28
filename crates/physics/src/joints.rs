@@ -287,7 +287,7 @@ fn ends(
 }
 
 /// The part an Attachment is on, and its pose on the part.
-fn attachment_on_part(world: &World, id: InstanceId) -> Option<(InstanceId, Pose)> {
+pub(crate) fn attachment_on_part(world: &World, id: InstanceId) -> Option<(InstanceId, Pose)> {
     let attachment = world.get(id)?;
     if attachment.class() != ClassName::Attachment {
         return None;

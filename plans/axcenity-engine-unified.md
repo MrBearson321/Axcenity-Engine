@@ -1256,9 +1256,9 @@ They use the Phase 36 tool and overlay. They're stepped with physics, in the fix
 
 ### Acceptance criteria
 
-- [ ] A part with AlignPosition follows a moving target smoothly, and reaches it faster with higher `Responsiveness`.
-- [ ] A VectorForce equal to the part's weight upward makes it hover.
-- [ ] An AlignOrientation keeps a hovering drone level while LinearVelocity flies it forward.
+- [x] A part with AlignPosition follows a moving target smoothly, and reaches it faster with higher `Responsiveness`.
+- [x] A VectorForce equal to the part's weight upward makes it hover.
+- [x] An AlignOrientation keeps a hovering drone level while LinearVelocity flies it forward.
 
 ---
 

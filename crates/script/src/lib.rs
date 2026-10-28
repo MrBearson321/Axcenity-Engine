@@ -1021,6 +1021,8 @@ mod data_tests;
 #[cfg(test)]
 mod joint_tests;
 #[cfg(test)]
+mod mover_tests;
+#[cfg(test)]
 mod physical_tests;
 #[cfg(test)]
 mod utilities_tests;

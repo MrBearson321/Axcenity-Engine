@@ -34,6 +34,8 @@
 //!
 //! Hinge, ball socket, prismatic, cylindrical, spring, rope and rod
 //! constraints join two parts' bodies with a rapier joint (see [`joints`]).
+//! LinearVelocity, AngularVelocity, VectorForce, Torque, AlignPosition and
+//! AlignOrientation push or turn a part's body every step (see `movers`).
 //!
 //! [`cast_ray`] and [`debug_colliders`] read the world the same way the
 //! simulation does, without stepping it or writing back.
@@ -42,6 +44,7 @@ pub mod assembly;
 pub mod joints;
 mod mass;
 mod material;
+mod movers;
 mod query;
 mod shapes;
 
@@ -50,7 +53,7 @@ pub use query::{
     ColliderOutline, Column, RayHit, Solid, cast_ray, cast_ray_excluding, debug_colliders, solids,
 };
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use axcenity_assets::Assets;
 use axcenity_core::{
@@ -120,6 +123,10 @@ pub struct Physics {
     assets: Assets,
     /// The joint of each enabled constraint between two bodies.
     joints: BTreeMap<InstanceId, joints::Joint>,
+    /// The enabled movers, read again every frame.
+    movers: Vec<movers::Mover>,
+    /// What each velocity and align mover learned about contacts and joints.
+    learned: BTreeMap<InstanceId, movers::Learned>,
 }
 
 /// One Part's collider on its assembly's rapier body, plus the part's
@@ -291,6 +298,8 @@ impl Physics {
             touches: Vec::new(),
             assets,
             joints: BTreeMap::new(),
+            movers: Vec::new(),
+            learned: BTreeMap::new(),
         }
     }
 
@@ -312,6 +321,13 @@ impl Physics {
             }
             self.blow(wind);
             joints::drive(&mut self.rapier, &mut self.joints);
+            // After the wind, which `blow` adds once the forces are reset.
+            movers::apply(
+                &mut self.rapier.bodies,
+                &self.movers,
+                self.rapier.gravity,
+                &mut self.learned,
+            );
             // The hook only runs for colliders with friction or
             // elasticity weights (see `material`).
             self.rapier.step_with_events(&material::Weighted, &());
@@ -405,6 +421,8 @@ impl Physics {
         self.touching
             .retain(|(a, b), _| current.contains_key(a) && current.contains_key(b));
 
+        // Bodies a script moved, threw or otherwise changed.
+        let mut moved = HashSet::new();
         for ((members, root), rebuild) in groups.iter().zip(rebuild) {
             if rebuild {
                 self.build_assembly(members, *root, &current, &old);
@@ -424,6 +442,7 @@ impl Physics {
                     self.owners.remove(handle);
                 }
                 self.apply_change(&mut part, state.clone(), weightless);
+                moved.insert(part.body);
                 self.owners.insert(part.collider, *id);
                 self.attach_foliage(*id, &mut part);
                 self.parts.insert(*id, part);
@@ -433,6 +452,10 @@ impl Physics {
 
         // Joints go between the bodies just made, so they come after them.
         anything_changed |= joints::sync(world, &mut self.rapier, &self.parts, &mut self.joints);
+        // Movers act on those bodies too, read again every frame since
+        // they keep no state.
+        self.movers = movers::read(world, &self.parts);
+        movers::forget(&mut self.learned, &moved);
 
         // Parts at rest "sleep" and stop being simulated. If a script moved
         // or removed something, a sleeping part may have lost what it was
@@ -837,3 +860,6 @@ mod assembly_tests;
 
 #[cfg(test)]
 mod joint_tests;
+
+#[cfg(test)]
+mod mover_tests;

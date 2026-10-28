@@ -1214,6 +1214,8 @@ mod joint_tests;
 #[cfg(test)]
 mod live_script_tests;
 #[cfg(test)]
+mod mover_tests;
+#[cfg(test)]
 mod navigation_tests;
 #[cfg(test)]
 mod play_tests;

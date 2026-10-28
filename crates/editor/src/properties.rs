@@ -1470,6 +1470,11 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         "ToneMapping" => ToneMapping::ALL.iter().map(|t| t.as_str()).collect(),
         // What drives a joint (Phase 36).
         "ActuatorType" => vec!["None", "Motor", "Servo"],
+        // A mover's axes and an align's target (Phase 37).
+        "ActuatorRelativeTo" => vec!["Attachment0", "Attachment1", "World"],
+        "PositionAlignmentMode" | "OrientationAlignmentMode" => {
+            vec!["OneAttachment", "TwoAttachment"]
+        }
         _ => {
             ui.label(format!("{}.{}", item.enum_name, item.item));
             return None;
