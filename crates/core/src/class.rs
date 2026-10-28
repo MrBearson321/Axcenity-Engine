@@ -185,6 +185,12 @@ pub enum ClassName {
     /// and brakes. It rolls toward its -Z, turning about its X. Not drawn;
     /// its `WheelPart` is moved to it.
     VehicleWheel,
+    /// A ragdoll for the skinned MeshPart it's parented to (Phase 41): a
+    /// capsule Part per main bone (named after the bone) and a
+    /// BallSocketConstraint per joint, made by Build in the editor. While
+    /// `Enabled`, physics moves the capsules and they pose the bones;
+    /// otherwise they follow the animation and physics leaves them out.
+    Ragdoll,
     /// Holds `Part0` and `Part1` together where they were when it was made
     /// or enabled. Welded unanchored parts move as one body: an assembly.
     WeldConstraint,
@@ -233,7 +239,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 79] = [
+    pub const ALL: [ClassName; 80] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -291,6 +297,7 @@ impl ClassName {
         ClassName::Camera,
         ClassName::Attachment,
         ClassName::VehicleWheel,
+        ClassName::Ragdoll,
         ClassName::WeldConstraint,
         ClassName::HingeConstraint,
         ClassName::BallSocketConstraint,
@@ -374,6 +381,7 @@ impl ClassName {
             ClassName::Camera => "Camera",
             ClassName::Attachment => "Attachment",
             ClassName::VehicleWheel => "VehicleWheel",
+            ClassName::Ragdoll => "Ragdoll",
             ClassName::WeldConstraint => "WeldConstraint",
             ClassName::HingeConstraint => "HingeConstraint",
             ClassName::BallSocketConstraint => "BallSocketConstraint",
@@ -1404,6 +1412,16 @@ impl ClassName {
                 // rolls and turning as it steers, or none.
                 ("WheelPart", Value::Instance(None)),
             ],
+            ClassName::Ragdoll => vec![
+                // On, physics moves the capsules and they pose the bones;
+                // off, the Animator does.
+                ("Enabled", Value::Bool(false)),
+                // Seconds to blend from the ragdoll back to the Animator's
+                // pose once it's turned off.
+                ("BlendTime", Value::Number(0.5)),
+                // The Animator state to play when it's turned off, or "".
+                ("GetUpState", Value::String(String::new())),
+            ],
             ClassName::WeldConstraint => vec![
                 ("Part0", Value::Instance(None)),
                 ("Part1", Value::Instance(None)),
@@ -1664,6 +1682,7 @@ impl ClassName {
             | ClassName::Camera
             | ClassName::Attachment
             | ClassName::VehicleWheel
+            | ClassName::Ragdoll
             | ClassName::WeldConstraint
             | ClassName::HingeConstraint
             | ClassName::BallSocketConstraint

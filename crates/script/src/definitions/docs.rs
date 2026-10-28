@@ -2002,6 +2002,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "A part moved to the wheel every frame during Play, spinning as it rolls and turning as it steers: its middle at the wheel's and its X along the axle, as a Cylinder's round faces are. Make it Anchored with CanCollide off; nil shows nothing.",
     ),
     (
+        ClassName::Ragdoll,
+        "Enabled",
+        "If true, physics moves the ragdoll's capsules and they pose the bones (the MeshPart follows the hips across the ground). Setting it false blends back to the Animator's pose over BlendTime, after playing GetUpState.",
+    ),
+    (
+        ClassName::Ragdoll,
+        "BlendTime",
+        "Seconds to blend from where the ragdoll lies back to the Animator's pose once Enabled is false.",
+    ),
+    (
+        ClassName::Ragdoll,
+        "GetUpState",
+        "The name of the Animator's state to play (with no blend of its own) when Enabled turns false, such as a getting-up clip, or empty to carry on with the state playing.",
+    ),
+    (
         ClassName::FirstPersonController,
         "EyeHeight",
         "How far above the character's feet its eyes are, in studs. The camera sits there during Play.",
@@ -3535,6 +3550,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::VehicleSeat => {
             "A Seat that drives the car it's welded into: the body made of every part welded to it, the chassis. While someone sits on it, the Move action sets Throttle and Steer, and the camera follows the car until they get out with Jump. The car rides on the VehicleWheels parented to its parts. Everything a Seat has, and MaxSpeed, Torque, TurnSpeed, SteerAngle, Throttle, Steer and HandBrake."
+        }
+        ClassName::Ragdoll => {
+            "A ragdoll for the skinned MeshPart it's in: a capsule Part per main bone, named after the bone, and a BallSocketConstraint per joint, which Build (in its Properties) makes from the skeleton with a humanoid preset's limits. While Enabled, physics moves the capsules and they pose the bones; otherwise they follow the animation and physics leaves them out."
         }
         ClassName::VehicleWheel => {
             "A wheel of the car whose part it's parented to: a spring and a ray to the ground, so no wheel collider touches it. Position and Orientation are relative to the part, as an Attachment's. Not drawn; its WheelPart is moved to it."

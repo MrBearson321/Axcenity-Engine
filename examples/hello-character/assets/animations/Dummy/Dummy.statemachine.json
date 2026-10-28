@@ -1,0 +1,19 @@
+{
+  "format_version": 2,
+  "parameters": [],
+  "default_state": "Idle",
+  "states": [
+    {
+      "name": "Idle",
+      "motion": {
+        "clip": "assets/animations/Dummy/Idle.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        20.0,
+        6.0
+      ]
+    }
+  ],
+  "transitions": []
+}

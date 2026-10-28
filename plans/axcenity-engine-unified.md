@@ -1348,8 +1348,8 @@ A **Ragdoll** Instance under a skinned Model.
 ### Acceptance criteria
 
 - [ ] A Mixamo character's generated ragdoll collapses believably when enabled, with no limb bending past its limit.
-- [ ] Disabling the ragdoll blends back to the idle animation over `BlendTime`, without a snap.
-- [ ] An impulse on the head knocks the ragdoll backward. Its pose is the same in the editor Play and the player.
+- [x] Disabling the ragdoll blends back to the idle animation over `BlendTime`, without a snap.
+- [x] An impulse on the head knocks the ragdoll backward. Its pose is the same in the editor Play and the player.
 
 ---
 

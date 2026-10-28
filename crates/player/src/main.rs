@@ -1340,6 +1340,8 @@ mod accessibility_tests;
 #[cfg(test)]
 mod physics_tests;
 #[cfg(test)]
+mod ragdoll_tests;
+#[cfg(test)]
 mod seat_tests;
 #[cfg(test)]
 mod vehicle_tests;

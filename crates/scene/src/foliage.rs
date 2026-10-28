@@ -288,7 +288,7 @@ fn mesh_scale(shape: PartType, size: Vec3) -> Vec3 {
     match shape {
         PartType::Block | PartType::Wedge => size,
         PartType::Ball => Vec3::splat(size.min_element()),
-        PartType::Cylinder => {
+        PartType::Cylinder | PartType::Capsule => {
             let diameter = size.y.min(size.z);
             Vec3::new(size.x, diameter, diameter)
         }
@@ -299,7 +299,7 @@ fn shape_of(part: PartType) -> Shape {
     match part {
         PartType::Block => Shape::Block,
         PartType::Ball => Shape::Sphere,
-        PartType::Cylinder => Shape::Cylinder,
+        PartType::Cylinder | PartType::Capsule => Shape::Cylinder,
         PartType::Wedge => Shape::Wedge,
     }
 }

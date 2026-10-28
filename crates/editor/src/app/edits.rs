@@ -140,6 +140,10 @@ impl EditorApp {
                 self.animate(id);
                 return;
             }
+            Edit::BuildRagdoll => {
+                self.build_ragdoll(id);
+                return;
+            }
             Edit::PickClip => {
                 if let Some(path) = self.pick_property_clip() {
                     self.apply(id, Edit::Property("Clip", Value::String(path)));
@@ -864,6 +868,23 @@ impl EditorApp {
     /// instead: the game's scripts see them (`Changed` fires), there's no
     /// undo step, and Stop throws them away with the rest of the game,
     /// unless they're kept (see `play::kept`).
+    /// Builds the Ragdoll `id` from its MeshPart's skeleton (Phase 41), as
+    /// one undo step, or says why it can't.
+    pub(super) fn build_ragdoll(&mut self, id: InstanceId) {
+        let before = self.world.clone();
+        match axcenity_anim::ragdoll::build(&mut self.world, &self.assets, id) {
+            Ok(bodies) => {
+                let name = self.world.get(id).map_or("", |r| r.name()).to_owned();
+                self.history
+                    .record_world(&mut self.world, format!("Build {name}"), before);
+                self.output.info(format!(
+                    "Built {name}: {bodies} capsules and their joints. Select one to change its Size, or a joint to change its limits."
+                ));
+            }
+            Err(problem) => self.output.warning(problem),
+        }
+    }
+
     pub(super) fn change(&mut self, id: InstanceId, key: Field, label: String, edits: Vec<Edit>) {
         if self.play.is_some() {
             self.change_in_play(id, edits);
@@ -1124,6 +1145,7 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::PickClip
         | Edit::OpenClip
         | Edit::Animate
+        | Edit::BuildRagdoll
         | Edit::PreviewSound(_)
         | Edit::Keep(..)
         | Edit::Attribute(..)

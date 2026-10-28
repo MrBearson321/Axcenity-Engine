@@ -10,7 +10,9 @@
 //!    Animations played with `animation:Play()` (or `AutoPlay`).
 //!
 //! On a MeshPart with a skeleton they pose its bones; on anything they set
-//! the properties their tracks key. Properties keep the value last given
+//! the properties their tracks key. A Ragdoll in the MeshPart overrides the
+//! pose while it's on, and blends back to it over `BlendTime` once it's
+//! off (see [`crate::ragdoll`]). Properties keep the value last given
 //! when nothing plays them any more; bones go back to what plays under them.
 //!
 //! A clip, state machine or model file that changed on disk
@@ -21,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axcenity_assets::{Assets, Model, ModelFormat, Posed, Rig, Take};
-use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
+use axcenity_core::{ClassName, InstanceId, PlayRequest, Value, Vector3, World};
 use glam::{EulerRot, Quat, Vec3};
 
 use crate::clip::{Clip, RootMotion};
@@ -30,6 +32,7 @@ use crate::files::{
     CLIP_EXTENSION, ClipFile, DEFAULT_BLEND, STATE_MACHINE_EXTENSION, StateMachineFile,
 };
 use crate::property_clip::{Applied, apply_evaluated, blend_evaluated};
+use crate::ragdoll;
 
 /// Each animated MeshPart's posed model, by the MeshPart. The draw list
 /// uses these in place of the model's still triangles.
@@ -126,6 +129,21 @@ struct Running {
     /// Where each track and Animation was after the last frame, in seconds,
     /// so a script's seek doesn't fire the events it jumps over.
     seen: HashMap<InstanceId, f64>,
+    ragdoll: RagdollRun,
+}
+
+/// Where a thing's Ragdoll has got to.
+#[derive(Default)]
+struct RagdollRun {
+    /// It was on at the last update.
+    on: bool,
+    /// The pose physics gave it last, blended from as it lets go.
+    held: Option<axcenity_assets::Pose>,
+    /// Seconds since it was turned off.
+    since: f64,
+    /// Where its first body was at the last update, while it's on: the
+    /// MeshPart follows it across the ground.
+    root_at: Option<Vec3>,
 }
 
 /// An Animator's state machine and where it is in it.
@@ -151,6 +169,7 @@ struct Layer {
 struct Parts {
     animator: Option<InstanceId>,
     animations: Vec<InstanceId>,
+    ragdoll: Option<InstanceId>,
 }
 
 impl Animators {
@@ -246,7 +265,10 @@ impl Animators {
                 continue;
             };
             let class = instance.class();
-            if class != ClassName::Animator && class != ClassName::Animation {
+            if !matches!(
+                class,
+                ClassName::Animator | ClassName::Animation | ClassName::Ragdoll
+            ) {
                 continue;
             }
             let Some(mut owner) = instance.parent() else {
@@ -271,10 +293,14 @@ impl Animators {
                 }
             };
             let parts = &mut owners[index].1;
-            if class == ClassName::Animator {
-                parts.animator.get_or_insert(id);
-            } else {
-                parts.animations.push(id);
+            match class {
+                ClassName::Animator => {
+                    parts.animator.get_or_insert(id);
+                }
+                ClassName::Ragdoll => {
+                    parts.ragdoll.get_or_insert(id);
+                }
+                _ => parts.animations.push(id),
             }
         }
         let alive: HashSet<InstanceId> = owners.iter().map(|(owner, _)| *owner).collect();
@@ -310,6 +336,9 @@ impl Animators {
         let rig = model.as_ref().and_then(|model| model.rig.clone());
         let model_key = model.as_ref().map(|model| model.key());
         let (enabled, speed) = parts.animator.map_or((true, 1.0), |id| settings(world, id));
+        // The game's time, for the ragdoll, which the Animator's speed
+        // doesn't change.
+        let game_dt = dt;
         let dt = if enabled { dt * speed } else { 0.0 };
         // Reduced motion: a UI element's clips don't move (see `Motion`).
         let motion = if world.ui_settings().reduced_motion
@@ -343,6 +372,27 @@ impl Animators {
                 .is_some_and(|machine| models || machine.uses(|used| changed.contains(used)));
             if stale {
                 was_in = running.machine.take().map(RunningMachine::where_it_is);
+            }
+        }
+
+        // A ragdoll just turned off gets up with its `GetUpState`.
+        if let (Some(ragdoll), Some(animator)) = (parts.ragdoll, parts.animator)
+            && running.ragdoll.on
+            && !is_on(world, ragdoll)
+        {
+            let state = world
+                .get(ragdoll)
+                .and_then(|r| r.property("GetUpState"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            if !state.is_empty()
+                && let Some(live) = world.animator_mut(animator)
+            {
+                live.play = Some(PlayRequest {
+                    state,
+                    blend: Some(0.0),
+                });
             }
         }
 
@@ -491,7 +541,7 @@ impl Animators {
                 .iter()
                 .filter(|layer| layer.clip.animated_bones().iter().any(|&moved| moved))
                 .collect();
-            if running.machine.is_some() || !bone_layers.is_empty() {
+            if running.machine.is_some() || !bone_layers.is_empty() || parts.ragdoll.is_some() {
                 let mut pose = match (&running.machine, parts.animator) {
                     (Some(machine), Some(animator)) => {
                         let parameters = world
@@ -512,6 +562,17 @@ impl Animators {
                             *under = under.lerp(over, layer.weight);
                         }
                     }
+                }
+                if let Some(ragdoll) = parts.ragdoll {
+                    pose = run_ragdoll(
+                        world,
+                        owner,
+                        ragdoll,
+                        rig,
+                        pose,
+                        &mut running.ragdoll,
+                        game_dt,
+                    );
                 }
                 if let Some(pose) = model.pose(&pose) {
                     self.poses.insert(owner, Arc::new(pose));
@@ -897,6 +958,97 @@ impl Animators {
             self.errors.push(message);
         }
     }
+}
+
+/// Whether the Ragdoll `ragdoll` is on.
+fn is_on(world: &World, ragdoll: InstanceId) -> bool {
+    world
+        .get(ragdoll)
+        .and_then(|r| r.property("Enabled"))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+/// The pose of the MeshPart `owner` with its Ragdoll `ragdoll`, over the
+/// Animator's `base` pose. While it's on, physics moves the bodies and they
+/// pose their bones, and the MeshPart follows the first body (the hips)
+/// across the ground. Once it's off, the pose blends from the ragdoll's last
+/// back to `base` over `BlendTime` seconds, and the bodies follow the pose,
+/// so they're where the animation is when it's turned on again.
+fn run_ragdoll(
+    world: &mut World,
+    owner: InstanceId,
+    ragdoll: InstanceId,
+    rig: &Rig,
+    base: axcenity_assets::Pose,
+    run: &mut RagdollRun,
+    dt: f64,
+) -> axcenity_assets::Pose {
+    let bodies = ragdoll::bodies(world, ragdoll, rig);
+    if is_on(world, ragdoll) {
+        let root = bodies.first().and_then(|body| {
+            let at = world.get(body.part)?.property("Position")?.as_vector3()?;
+            Some(Vec3::new(at.x, at.y, at.z))
+        });
+        if let (Some(now), Some(before), true) = (root, run.root_at, run.on) {
+            let travel = now - before;
+            if let Some(at) = world
+                .get(owner)
+                .and_then(|p| p.property("Position"))
+                .and_then(Value::as_vector3)
+                && travel.is_finite()
+            {
+                let moved = Vector3::new(at.x + travel.x, at.y, at.z + travel.z);
+                let _ = world.set_property(owner, "Position", Value::Vector3(moved));
+            }
+        }
+        run.root_at = root;
+        run.on = true;
+        run.since = 0.0;
+        let Some(place) = ragdoll::placement(world, owner, rig) else {
+            return base;
+        };
+        let pose = ragdoll::pose_from_bodies(world, rig, place, &base, &bodies);
+        run.held = Some(pose.clone());
+        return pose;
+    }
+    if run.on {
+        // Physics takes the MeshPart back from rest.
+        run.on = false;
+        run.root_at = None;
+        let still = Value::Vector3(Vector3::new(0.0, 0.0, 0.0));
+        let _ = world.set_property(owner, "AssemblyLinearVelocity", still.clone());
+        let _ = world.set_property(owner, "AssemblyAngularVelocity", still);
+    }
+    let blend_time = world
+        .get(ragdoll)
+        .and_then(|r| r.property("BlendTime"))
+        .and_then(Value::as_number)
+        .filter(|t| t.is_finite())
+        .unwrap_or(0.0)
+        .max(0.0);
+    let mut pose = base;
+    if let Some(held) = &run.held {
+        run.since += dt;
+        let weight = if blend_time > 0.0 {
+            1.0 - run.since / blend_time
+        } else {
+            0.0
+        };
+        if weight > 0.0 {
+            for (bone, from) in pose.iter_mut().zip(held) {
+                *bone = bone.lerp(from, weight as f32);
+            }
+        } else {
+            run.held = None;
+        }
+    }
+    if let Some(place) = ragdoll::placement(world, owner, rig) {
+        for (part, position, rotation) in ragdoll::body_places(rig, place, &pose, &bodies) {
+            ragdoll::move_body(world, part, position, rotation, dt);
+        }
+    }
+    pose
 }
 
 /// `Enabled` and `Speed` of an Animator or Animation.

@@ -1,0 +1,13 @@
+{
+  "format_version": 2,
+  "duration": 1.0,
+  "loop": true,
+  "link": {
+    "source": "assets/models/Walking/Walking.fbx",
+    "take": "mixamo.com",
+    "start": 0.5,
+    "end": 0.5
+  },
+  "tracks": [],
+  "events": []
+}

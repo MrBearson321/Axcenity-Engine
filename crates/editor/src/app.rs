@@ -1236,6 +1236,8 @@ mod play_tests;
 #[cfg(test)]
 mod posing_tests;
 #[cfg(test)]
+mod ragdoll_tests;
+#[cfg(test)]
 mod relaunch_tests;
 #[cfg(test)]
 mod state_machine_tests;

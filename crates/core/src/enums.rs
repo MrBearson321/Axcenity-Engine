@@ -15,14 +15,19 @@ pub enum PartType {
     /// A ramp. The bottom and back (+Z) faces are full rectangles, and the
     /// slope rises from the bottom front edge to the top back edge.
     Wedge,
+    /// A cylinder with round ends, along the X axis like a Cylinder:
+    /// `Size.X` is its whole length, ends included, and its diameter is the
+    /// smaller of `Size.Y` and `Size.Z`. Ragdolls are made of these.
+    Capsule,
 }
 
 impl PartType {
-    pub const ALL: [PartType; 4] = [
+    pub const ALL: [PartType; 5] = [
         PartType::Block,
         PartType::Ball,
         PartType::Cylinder,
         PartType::Wedge,
+        PartType::Capsule,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -31,6 +36,7 @@ impl PartType {
             PartType::Ball => "Ball",
             PartType::Cylinder => "Cylinder",
             PartType::Wedge => "Wedge",
+            PartType::Capsule => "Capsule",
         }
     }
 

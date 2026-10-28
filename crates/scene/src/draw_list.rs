@@ -337,7 +337,19 @@ pub fn build_draw_list_posed(
                             *channel = (*channel + added).min(4.0);
                         }
                     }
-                    items.push(item);
+                    // A capsule is a cylinder and a ball at each end.
+                    let shape = instance.property("Shape").and_then(Value::as_part_type);
+                    if shape == Some(PartType::Capsule) {
+                        for (piece, transform) in part_pieces(PartType::Capsule, item.transform) {
+                            items.push(DrawItem {
+                                shape: built_in_shape(piece),
+                                transform,
+                                ..item.clone()
+                            });
+                        }
+                    } else {
+                        items.push(item);
+                    }
                 }
             }
         }
@@ -531,6 +543,48 @@ pub(crate) fn part_placement(instance: &Instance) -> Option<(PartType, Mat4)> {
     Some((shape, transform))
 }
 
+/// The built-in mesh drawn for a part shape (a capsule's middle).
+fn built_in_shape(shape: PartType) -> Shape {
+    match shape {
+        PartType::Block => Shape::Block,
+        PartType::Ball => Shape::Sphere,
+        PartType::Cylinder | PartType::Capsule => Shape::Cylinder,
+        PartType::Wedge => Shape::Wedge,
+    }
+}
+
+/// The shapes a part of `shape` placed by `transform` (from
+/// [`part_placement`]) is made of, each with its own transform: the part
+/// itself, or for a capsule, the cylinder between its round ends and a
+/// ball at each end. Drawing and picking both use these.
+pub(crate) fn part_pieces(shape: PartType, transform: Mat4) -> Vec<(PartType, Mat4)> {
+    if shape != PartType::Capsule {
+        return vec![(shape, transform)];
+    }
+    // The capsule's box is its length along X by its diameter twice, so in
+    // the 1×1×1 mesh's space the ends are `reach` from the middle.
+    let length = transform.x_axis.truncate().length();
+    let diameter = transform.y_axis.truncate().length();
+    if !(length > 0.0 && diameter > 0.0) {
+        return vec![(PartType::Cylinder, transform)];
+    }
+    let reach = ((length - diameter) / 2.0).max(0.0) / length;
+    let ball = diameter / length;
+    let mut pieces = vec![(
+        PartType::Cylinder,
+        transform * Mat4::from_scale(Vec3::new(2.0 * reach, 1.0, 1.0)),
+    )];
+    for end in [-reach, reach] {
+        pieces.push((
+            PartType::Ball,
+            transform
+                * Mat4::from_translation(Vec3::new(end, 0.0, 0.0))
+                * Mat4::from_scale(Vec3::new(ball, 1.0, 1.0)),
+        ));
+    }
+    pieces
+}
+
 /// Whether a Part or MeshPart casts a sun shadow: its `CastShadow`, on
 /// unless it's been turned off.
 fn casts_shadow(instance: &Instance) -> bool {
@@ -588,12 +642,7 @@ fn part_draw_item(
         0.0
     };
     Some(DrawItem {
-        shape: match shape {
-            PartType::Block => Shape::Block,
-            PartType::Ball => Shape::Sphere,
-            PartType::Cylinder => Shape::Cylinder,
-            PartType::Wedge => Shape::Wedge,
-        },
+        shape: built_in_shape(shape),
         transform,
         material,
         uv_tile,
@@ -1115,7 +1164,7 @@ fn mesh_scale(shape: PartType, size: Vec3) -> Vec3 {
     match shape {
         PartType::Block | PartType::Wedge => size,
         PartType::Ball => Vec3::splat(size.min_element()),
-        PartType::Cylinder => {
+        PartType::Cylinder | PartType::Capsule => {
             let diameter = size.y.min(size.z);
             Vec3::new(size.x, diameter, diameter)
         }
@@ -1319,9 +1368,18 @@ mod tests {
             .iter()
             .map(|item| item.shape.clone())
             .collect();
+        // A capsule is a cylinder and a ball at each end.
         assert_eq!(
             shapes,
-            [Shape::Block, Shape::Sphere, Shape::Cylinder, Shape::Wedge]
+            [
+                Shape::Block,
+                Shape::Sphere,
+                Shape::Cylinder,
+                Shape::Wedge,
+                Shape::Cylinder,
+                Shape::Sphere,
+                Shape::Sphere
+            ]
         );
     }
 

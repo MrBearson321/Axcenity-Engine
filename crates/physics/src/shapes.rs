@@ -90,6 +90,11 @@ pub fn collider(form: &Form, size: Vec3) -> Collider {
                 .rotation(Vec3::new(0.0, 0.0, FRAC_PI_2))
         }
         Form::Primitive(PartType::Wedge) => wedge(half),
+        // rapier's capsule along X: its round ends' middles, and its radius.
+        Form::Primitive(PartType::Capsule) => {
+            let (reach, radius) = capsule(half);
+            ColliderBuilder::capsule_x(reach, radius)
+        }
         Form::Mesh(Some(model)) => hull(model, half),
         Form::Terrain(terrain) => heightfield(&terrain.data, size),
     };
@@ -109,6 +114,7 @@ pub fn wireframe(form: &Form, size: Vec3) -> Vec<(Vec3, Vec3)> {
         Form::Primitive(PartType::Ball) => ball_edges(half.min_element()),
         Form::Primitive(PartType::Cylinder) => cylinder_edges(half),
         Form::Primitive(PartType::Wedge) => wedge_edges(half),
+        Form::Primitive(PartType::Capsule) => capsule_edges(half),
         Form::Mesh(Some(model)) => hull_edges(model, half),
         Form::Terrain(_) => Vec::new(),
     }
@@ -230,6 +236,32 @@ fn cylinder_edges(half: Vec3) -> Vec<(Vec3, Vec3)> {
             Vec3::new(-half.x, 0.0, 0.0) + rim,
             Vec3::new(half.x, 0.0, 0.0) + rim,
         ));
+    }
+    edges
+}
+
+/// A capsule of half-size `half` (along X): how far from its middle the
+/// centers of its round ends are, and its radius. A capsule shorter than
+/// it is wide is a ball.
+pub fn capsule(half: Vec3) -> (f32, f32) {
+    let radius = half.y.min(half.z);
+    ((half.x - radius).max(0.0), radius)
+}
+
+fn capsule_edges(half: Vec3) -> Vec<(Vec3, Vec3)> {
+    let (reach, radius) = capsule(half);
+    let mut edges = cylinder_edges(Vec3::new(reach, radius, radius));
+    for end in [-reach, reach] {
+        let middle = Vec3::new(end, 0.0, 0.0);
+        // Only the half of each circle beyond the cylinder's end.
+        let outside = |p: Vec3| (p.x - end) * end.signum() >= -1e-4;
+        for b in [Vec3::Y, Vec3::Z] {
+            edges.extend(
+                circle(middle, Vec3::X, b, radius)
+                    .into_iter()
+                    .filter(|(p, q)| outside(*p) && outside(*q)),
+            );
+        }
     }
     edges
 }

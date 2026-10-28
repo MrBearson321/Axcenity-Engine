@@ -318,6 +318,13 @@ impl Controllers {
             // The seat holds it; the camera still turns and zooms.
             return self.view(world);
         }
+        if ragdolled(world, id) {
+            // Its Ragdoll is on (Phase 41): physics has the body, and it
+            // lands wherever it lies once the ragdoll lets go.
+            take_jump(world, id);
+            self.falls.remove(&id);
+            return self.view(world);
+        }
         if self.mode(world, id) == Mode::Custom {
             // Scripts and blocks move the character. A jump asked for now is
             // used up, and the built-in mode starts in the air, so it lands
@@ -472,9 +479,39 @@ fn parts_of(world: &World, controller: InstanceId) -> Vec<InstanceId> {
     }
 }
 
+/// Whether the character `controller` drives has a Ragdoll that's on.
+fn ragdolled(world: &World, controller: InstanceId) -> bool {
+    let Some(holder) = world.get(controller).and_then(|c| c.parent()) else {
+        return false;
+    };
+    world.descendants(holder).into_iter().any(|id| {
+        world.get(id).is_some_and(|ragdoll| {
+            ragdoll.class() == ClassName::Ragdoll
+                && ragdoll.property("Enabled").and_then(Value::as_bool) == Some(true)
+        })
+    })
+}
+
+/// True if `id` is inside a Ragdoll.
+fn in_ragdoll(world: &World, id: InstanceId) -> bool {
+    let mut at = world.get(id).and_then(|i| i.parent());
+    while let Some(parent) = at {
+        let Some(instance) = world.get(parent) else {
+            return false;
+        };
+        if instance.class() == ClassName::Ragdoll {
+            return true;
+        }
+        at = instance.parent();
+    }
+    false
+}
+
 /// The parts of the character `holder` is: a Model's Part and MeshPart
-/// descendants, or a Part or MeshPart and the parts inside it. Empty for
-/// anything else. Navigation agents move their parent's body the same way.
+/// descendants, or a Part or MeshPart and the parts inside it, leaving out
+/// a Ragdoll's bodies (Phase 41: they follow the animation, or physics).
+/// Empty for anything else. Navigation agents move their parent's body the
+/// same way.
 pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
     let parent = holder;
     let Some(instance) = world.get(parent) else {
@@ -499,6 +536,7 @@ pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
         if world
             .get(id)
             .is_some_and(|child| child.class().is_base_part())
+            && !in_ragdoll(world, id)
         {
             parts.push(id);
         }

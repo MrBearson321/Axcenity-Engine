@@ -1817,6 +1817,15 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Ragdoll,
+        Function {
+            name: "ApplyImpulse",
+            doc: "Pushes the body of the bone named `bone` (`\"Head\"` finds `mixamorig:Head`) through its center of mass: its velocity changes by `impulse` over its mass. Turn the ragdoll on in the same frame (or before) for the push to knock it.",
+            params: &[("bone", "string"), ("impulse", "Vector3")],
+            returns: "()",
+        },
+    ),
+    (
         ClassName::Part,
         Function {
             name: "ApplyImpulse",

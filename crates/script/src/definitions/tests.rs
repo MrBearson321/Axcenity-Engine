@@ -291,6 +291,7 @@ fn described_fields_and_methods_exist() {
         (ClassName::Seat, "Instance.new('Seat')"),
         (ClassName::VehicleSeat, "Instance.new('VehicleSeat')"),
         (ClassName::VehicleWheel, "Instance.new('VehicleWheel')"),
+        (ClassName::Ragdoll, "Instance.new('Ragdoll')"),
         (ClassName::MeshPart, "Instance.new('MeshPart')"),
         (ClassName::Model, "Instance.new('Model')"),
         (ClassName::Attachment, "Instance.new('Attachment')"),

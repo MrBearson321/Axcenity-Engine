@@ -421,16 +421,24 @@ fn describe(constraint: &Instance, (frame0, frame1): (Pose, Pose)) -> Option<Des
     match constraint.class() {
         ClassName::BallSocketConstraint => {
             if flag("LimitsEnabled") {
-                let lean = degrees("UpperAngle").abs();
-                for axis in [JointAxis::AngY, JointAxis::AngZ] {
-                    joint.set_limits(axis, [-lean, lean]);
-                }
+                // A real cone (Phase 41): the angle between the attachments'
+                // X axes, not each of its two ways on its own, which let a
+                // limb stick where both were near their limits.
+                let lean = degrees("UpperAngle").abs().min(std::f32::consts::PI);
+                joint.coupled_axes |= JointAxesMask::ANG_Y | JointAxesMask::ANG_Z;
+                joint.set_limits(JointAxis::AngY, [0.0, lean]);
             }
             if flag("TwistLimitsEnabled") {
-                joint.set_limits(
-                    JointAxis::AngX,
-                    ordered(degrees("TwistLowerAngle"), degrees("TwistUpperAngle")),
-                );
+                // rapier measures the cone's two ways as parts of the whole
+                // turn, so a twist far from 0 (a knee bent 140°) stretches
+                // them and the cone fights it. The twist is measured from
+                // the middle of its range instead, by turning Attachment0's
+                // frame there (Phase 41).
+                let [lower, upper] =
+                    ordered(degrees("TwistLowerAngle"), degrees("TwistUpperAngle"));
+                let middle = (lower + upper) / 2.0;
+                joint.set_local_frame1(frame0 * Pose::rotation(Vec3::X * middle));
+                joint.set_limits(JointAxis::AngX, [lower - middle, upper - middle]);
             }
         }
         ClassName::SpringConstraint => {

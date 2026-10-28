@@ -235,6 +235,18 @@ impl EditorApp {
             self.output
                 .warning("BillboardGui shows when it is inside a part.");
         }
+        if what == Insertable::Ragdoll {
+            let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
+            let in_mesh_part = self
+                .world
+                .get(parent)
+                .is_some_and(|instance| instance.class() == ClassName::MeshPart);
+            if !in_mesh_part {
+                self.output.warning(
+                    "A Ragdoll is built from the skinned MeshPart it's inside: select an imported character first.",
+                );
+            }
+        }
         if what == Insertable::Animator {
             let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
             let in_mesh_part = self

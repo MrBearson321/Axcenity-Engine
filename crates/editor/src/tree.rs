@@ -50,6 +50,9 @@ pub enum Insertable {
     ParticleEmitter,
     Animator,
     Animation,
+    /// A ragdoll for the selected skinned MeshPart; Build in its Properties
+    /// makes its bodies and joints.
+    Ragdoll,
     /// A kinematic third-person character controller.
     ThirdPersonController,
     /// The same movement, with the camera at the character's eyes.
@@ -113,7 +116,12 @@ impl Insertable {
     /// Effects give off particles from the part they are inside.
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
     /// Animators (skeletal) and Animations (property clips).
-    pub const ANIMATION: [Insertable; 2] = [Insertable::Animator, Insertable::Animation];
+    /// Ragdolls go in a skinned MeshPart too.
+    pub const ANIMATION: [Insertable; 3] = [
+        Insertable::Animator,
+        Insertable::Animation,
+        Insertable::Ragdoll,
+    ];
     /// The character controllers: a character has one or the other.
     pub const CHARACTERS: [Insertable; 2] = [
         Insertable::ThirdPersonController,
@@ -160,6 +168,7 @@ impl Insertable {
             Insertable::Part(PartType::Ball) => "Sphere",
             Insertable::Part(PartType::Cylinder) => "Cylinder",
             Insertable::Part(PartType::Wedge) => "Wedge",
+            Insertable::Part(PartType::Capsule) => "Capsule",
             Insertable::MeshPart => "MeshPart",
             Insertable::Model => "Model",
             Insertable::Folder => "Folder",
@@ -189,6 +198,7 @@ impl Insertable {
             Insertable::Clouds => "Clouds",
             Insertable::ParticleEmitter => "Particles",
             Insertable::Animator => "Animator",
+            Insertable::Ragdoll => "Ragdoll",
             Insertable::Animation => "Animation",
             Insertable::ThirdPersonController => "Third Person",
             Insertable::FirstPersonController => "First Person",
@@ -236,6 +246,7 @@ impl Insertable {
             Insertable::Clouds => ClassName::Clouds,
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
             Insertable::Animator => ClassName::Animator,
+            Insertable::Ragdoll => ClassName::Ragdoll,
             Insertable::Animation => ClassName::Animation,
             Insertable::ThirdPersonController => ClassName::ThirdPersonController,
             Insertable::FirstPersonController => ClassName::FirstPersonController,
@@ -347,7 +358,7 @@ fn new_part_size(shape: PartType) -> Vector3 {
     match shape {
         PartType::Block | PartType::Wedge => Vector3::new(4.0, 1.0, 2.0),
         PartType::Ball => Vector3::new(2.0, 2.0, 2.0),
-        PartType::Cylinder => Vector3::new(4.0, 2.0, 2.0),
+        PartType::Cylinder | PartType::Capsule => Vector3::new(4.0, 2.0, 2.0),
     }
 }
 
@@ -523,6 +534,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                         | Insertable::ParticleEmitter
                         | Insertable::BillboardGui
                         | Insertable::Animator
+                        | Insertable::Ragdoll
                         | Insertable::Animation
                         | Insertable::ThirdPersonController
                         | Insertable::FirstPersonController

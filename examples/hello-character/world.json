@@ -679,6 +679,995 @@
             ]
           }
         ]
+      },
+      {
+        "class": "MeshPart",
+        "name": "Dummy",
+        "properties": {
+          "Anchored": true,
+          "AssemblyAngularVelocity": [0, 0, 0],
+          "AssemblyLinearVelocity": [0, 0, 0],
+          "CanCollide": true,
+          "CanQuery": true,
+          "CanTouch": true,
+          "CastShadow": true,
+          "CollisionGroup": "Default",
+          "CustomPhysicalProperties": null,
+          "Massless": false,
+          "MaterialVariant": "",
+          "MeshId": "assets/models/Walking/Walking.fbx",
+          "Orientation": [0, 180, 0],
+          "Position": [-8, 1.8924235, -20],
+          "Size": [3.8939824, 3.784847, 0.7229666],
+          "Transparency": 0,
+          "WindAffected": false
+        },
+        "children": [
+          {
+            "class": "SurfaceAppearance",
+            "name": "Shoesmat",
+            "properties": {
+              "AmbientOcclusionChannel": "Red",
+              "AmbientOcclusionMap": "",
+              "AmbientOcclusionStrength": 1,
+              "Color": [1, 1, 1],
+              "ColorMap": "assets/models/Walking/textures/Remy_Shoes_Diffuse.png",
+              "EmissiveMap": "",
+              "EmissiveStrength": 1,
+              "InvertOpacity": false,
+              "InvertRoughness": true,
+              "MaterialName": "Shoesmat",
+              "MetalnessChannel": "Red",
+              "MetalnessMap": "",
+              "NormalMap": "assets/models/Walking/textures/Remy_Shoes_Normal.png",
+              "NormalMapDirectX": false,
+              "NormalStrength": 1,
+              "Offset": [0, 0],
+              "OpacityChannel": "Alpha",
+              "OpacityMap": "",
+              "RoughnessChannel": "Red",
+              "RoughnessMap": "assets/models/Walking/textures/Remy_Shoes_Gloss.png",
+              "SpecularMap": "assets/models/Walking/textures/Remy_Shoes_Specular.png",
+              "Tiling": [1, 1]
+            }
+          },
+          {
+            "class": "SurfaceAppearance",
+            "name": "Topmat",
+            "properties": {
+              "AmbientOcclusionChannel": "Red",
+              "AmbientOcclusionMap": "",
+              "AmbientOcclusionStrength": 1,
+              "Color": [1, 1, 1],
+              "ColorMap": "assets/models/Walking/textures/Remy_Top_Diffuse.png",
+              "EmissiveMap": "",
+              "EmissiveStrength": 1,
+              "InvertOpacity": false,
+              "InvertRoughness": true,
+              "MaterialName": "Topmat",
+              "MetalnessChannel": "Red",
+              "MetalnessMap": "",
+              "NormalMap": "assets/models/Walking/textures/Remy_Top_Normal.png",
+              "NormalMapDirectX": false,
+              "NormalStrength": 1,
+              "Offset": [0, 0],
+              "OpacityChannel": "Alpha",
+              "OpacityMap": "",
+              "RoughnessChannel": "Red",
+              "RoughnessMap": "assets/models/Walking/textures/Remy_Top_Gloss.png",
+              "SpecularMap": "assets/models/Walking/textures/Remy_Top_Specular.png",
+              "Tiling": [1, 1]
+            }
+          },
+          {
+            "class": "SurfaceAppearance",
+            "name": "Bottommat",
+            "properties": {
+              "AmbientOcclusionChannel": "Red",
+              "AmbientOcclusionMap": "",
+              "AmbientOcclusionStrength": 1,
+              "Color": [1, 1, 1],
+              "ColorMap": "assets/models/Walking/textures/Remy_Bottom_Diffuse.png",
+              "EmissiveMap": "",
+              "EmissiveStrength": 1,
+              "InvertOpacity": false,
+              "InvertRoughness": true,
+              "MaterialName": "Bottommat",
+              "MetalnessChannel": "Red",
+              "MetalnessMap": "",
+              "NormalMap": "assets/models/Walking/textures/Remy_Bottom_Normal.png",
+              "NormalMapDirectX": false,
+              "NormalStrength": 1,
+              "Offset": [0, 0],
+              "OpacityChannel": "Alpha",
+              "OpacityMap": "",
+              "RoughnessChannel": "Red",
+              "RoughnessMap": "assets/models/Walking/textures/Remy_Bottom_Gloss.png",
+              "SpecularMap": "assets/models/Walking/textures/Remy_Bottom_Specular.png",
+              "Tiling": [1, 1]
+            }
+          },
+          {
+            "class": "SurfaceAppearance",
+            "name": "Hairmat",
+            "properties": {
+              "AmbientOcclusionChannel": "Red",
+              "AmbientOcclusionMap": "",
+              "AmbientOcclusionStrength": 1,
+              "Color": [1, 1, 1],
+              "ColorMap": "assets/models/Walking/textures/Remy_Hair_Diffuse.png",
+              "EmissiveMap": "",
+              "EmissiveStrength": 1,
+              "InvertOpacity": false,
+              "InvertRoughness": true,
+              "MaterialName": "Hairmat",
+              "MetalnessChannel": "Red",
+              "MetalnessMap": "",
+              "NormalMap": "assets/models/Walking/textures/Remy_Hair_Normal.png",
+              "NormalMapDirectX": false,
+              "NormalStrength": 1,
+              "Offset": [0, 0],
+              "OpacityChannel": "Red",
+              "OpacityMap": "assets/models/Walking/textures/Remy_Hair_Opacity.png",
+              "RoughnessChannel": "Red",
+              "RoughnessMap": "assets/models/Walking/textures/Remy_Hair_Gloss.png",
+              "SpecularMap": "assets/models/Walking/textures/Remy_Hair_Specular.png",
+              "Tiling": [1, 1]
+            }
+          },
+          {
+            "class": "SurfaceAppearance",
+            "name": "Bodymat",
+            "properties": {
+              "AmbientOcclusionChannel": "Red",
+              "AmbientOcclusionMap": "",
+              "AmbientOcclusionStrength": 1,
+              "Color": [1, 1, 1],
+              "ColorMap": "assets/models/Walking/textures/Remy_Body_Diffuse.png",
+              "EmissiveMap": "",
+              "EmissiveStrength": 1,
+              "InvertOpacity": false,
+              "InvertRoughness": true,
+              "MaterialName": "Bodymat",
+              "MetalnessChannel": "Red",
+              "MetalnessMap": "",
+              "NormalMap": "assets/models/Walking/textures/Remy_Body_Normal.png",
+              "NormalMapDirectX": false,
+              "NormalStrength": 1,
+              "Offset": [0, 0],
+              "OpacityChannel": "Alpha",
+              "OpacityMap": "",
+              "RoughnessChannel": "Red",
+              "RoughnessMap": "assets/models/Walking/textures/Remy_Body_Gloss.png",
+              "SpecularMap": "assets/models/Walking/textures/Remy_Body_Specular.png",
+              "Tiling": [1, 1]
+            }
+          },
+          {
+            "class": "SurfaceAppearance",
+            "name": "Eyelashmat",
+            "properties": {
+              "AmbientOcclusionChannel": "Red",
+              "AmbientOcclusionMap": "",
+              "AmbientOcclusionStrength": 1,
+              "Color": [1, 1, 1],
+              "ColorMap": "assets/models/Walking/textures/Remy_Body_Diffuse.png",
+              "EmissiveMap": "",
+              "EmissiveStrength": 1,
+              "InvertOpacity": false,
+              "InvertRoughness": true,
+              "MaterialName": "Eyelashmat",
+              "MetalnessChannel": "Red",
+              "MetalnessMap": "",
+              "NormalMap": "assets/models/Walking/textures/Remy_Body_Normal.png",
+              "NormalMapDirectX": false,
+              "NormalStrength": 1,
+              "Offset": [0, 0],
+              "OpacityChannel": "Red",
+              "OpacityMap": "assets/models/Walking/textures/Remy_Body_Opacity.png",
+              "RoughnessChannel": "Red",
+              "RoughnessMap": "assets/models/Walking/textures/Remy_Body_Gloss.png",
+              "SpecularMap": "assets/models/Walking/textures/Remy_Body_Specular.png",
+              "Tiling": [1, 1]
+            }
+          },
+          {
+            "class": "Animator",
+            "name": "Animator",
+            "properties": {
+              "Enabled": true,
+              "Speed": 1,
+              "StateMachine": "assets/animations/Dummy/Dummy.statemachine.json"
+            }
+          },
+          {
+            "class": "Ragdoll",
+            "name": "Ragdoll",
+            "properties": {
+              "BlendTime": 0.5,
+              "Enabled": false,
+              "GetUpState": ""
+            },
+            "children": [
+              {
+                "class": "Part",
+                "name": "mixamorig:Hips",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [-0.86693084, -93.87375, 84.0682],
+                  "Position": [-7.9832454, 2.4469984, -19.906502],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [0.9373587, 0.44464377, 0.44464377],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [-82.87022, -57.026752, -33.63944],
+                      "Position": [-0.35751832, 0.0000019073486, 0.0000009536743]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "WaistAttachment",
+                    "properties": {
+                      "Orientation": [-0.0000022144754, -2.4330323, 12.743201],
+                      "Position": [0.35751808, 0.0000038146973, 0.0000009536743]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "LeftHipAttachment",
+                    "properties": {
+                      "Orientation": [-0.0000021477745, 178.78316, 18.0748],
+                      "Position": [-0.49940705, -0.00061798096, 0.18450356]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "RightHipAttachment",
+                    "properties": {
+                      "Orientation": [-0.0000042688685, 179.54716, 19.719105],
+                      "Position": [-0.49953318, -0.00061798096, -0.18603134]
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Part",
+                "name": "mixamorig:Spine2",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [1.5530763, -94.12522, 96.80989],
+                  "Position": [-7.9832387, 2.9578712, -19.888084],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [0.5723163, 0.518751, 0.518751],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [-85.846115, 0.00011786695, -90.00019],
+                      "Position": [-0.15647078, -0.0000019073486, -0.0000009536743]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "WaistAttachment",
+                    "properties": {
+                      "Orientation": [-0.00000000000000000000002369698, 0.00000010672171, 0.000000000000025444438],
+                      "Position": [-0.15647078, -0.0000019073486, -0.0000009536743]
+                    }
+                  },
+                  {
+                    "class": "BallSocketConstraint",
+                    "name": "Waist",
+                    "properties": {
+                      "Attachment0": ["Workspace", "Dummy", "Ragdoll", "mixamorig:Hips", "WaistAttachment"],
+                      "Attachment1": ["Workspace", "Dummy", "Ragdoll", "mixamorig:Spine2", "WaistAttachment"],
+                      "Color": [0.62, 0.64, 0.68],
+                      "Enabled": true,
+                      "LimitsEnabled": true,
+                      "TwistLimitsEnabled": true,
+                      "TwistLowerAngle": -30,
+                      "TwistUpperAngle": 30,
+                      "UpperAngle": 25,
+                      "Visible": false
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "NeckAttachment",
+                    "properties": {
+                      "Orientation": [0.03634129, 0.16068046, 8.910772],
+                      "Position": [0.3851514, 0.037363052, 0.009045601]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "LeftShoulderAttachment",
+                    "properties": {
+                      "Orientation": [-9.997015, -128.79015, 4.9441576],
+                      "Position": [0.044285297, -0.066207886, 0.3846693]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "RightShoulderAttachment",
+                    "properties": {
+                      "Orientation": [9.428841, 132.75093, 11.650918],
+                      "Position": [0.027797222, -0.02633667, -0.39623928]
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Part",
+                "name": "mixamorig:Head",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [1.389219, -94.10818, 105.72105],
+                  "Position": [-7.997292, 3.5270522, -20.026157],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [0.597193, 0.39812866, 0.39812866],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [-86.38327, -8.268248, -84.10868],
+                      "Position": [-0.1990633, 0.0000019073486, 0]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "NeckAttachment",
+                    "properties": {
+                      "Orientation": [0.00000021344341, -0.000000053360854, -0.000000000000000099392335],
+                      "Position": [-0.1990633, 0.0000019073486, 0]
+                    }
+                  },
+                  {
+                    "class": "BallSocketConstraint",
+                    "name": "Neck",
+                    "properties": {
+                      "Attachment0": ["Workspace", "Dummy", "Ragdoll", "mixamorig:Spine2", "NeckAttachment"],
+                      "Attachment1": ["Workspace", "Dummy", "Ragdoll", "mixamorig:Head", "NeckAttachment"],
+                      "Color": [0.62, 0.64, 0.68],
+                      "Enabled": true,
+                      "LimitsEnabled": true,
+                      "TwistLimitsEnabled": true,
+                      "TwistLowerAngle": -45,
+                      "TwistUpperAngle": 45,
+                      "UpperAngle": 35,
+                      "Visible": false
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Part",
+                "name": "mixamorig:LeftArm",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [84.05477, 179.99953, -0.00047847885],
+                  "Position": [-8.648162, 2.9992502, -19.855515],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [0.6624381, 0.22232188, 0.22232188],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [5.945236, 0.000023176548, -90.000046],
+                      "Position": [-0.27563858, 0, -0.000000059604645]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "LeftShoulderAttachment",
+                    "properties": {
+                      "Orientation": [0.000000000000000000000000000044800266, -0.0000000000015651933, 0.000000000000003279935],
+                      "Position": [-0.27563858, 0, -0.000000059604645]
+                    }
+                  },
+                  {
+                    "class": "BallSocketConstraint",
+                    "name": "LeftShoulder",
+                    "properties": {
+                      "Attachment0": ["Workspace", "Dummy", "Ragdoll", "mixamorig:Spine2", "LeftShoulderAttachment"],
+                      "Attachment1": ["Workspace", "Dummy", "Ragdoll", "mixamorig:LeftArm", "LeftShoulderAttachment"],
+                      "Color": [0.62, 0.64, 0.68],
+                      "Enabled": true,
+                      "LimitsEnabled": true,
+                      "TwistLimitsEnabled": true,
+                      "TwistLowerAngle": -45,
+                      "TwistUpperAngle": 45,
+                      "UpperAngle": 70,
+                      "Visible": false
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "LeftElbowAttachment",
+                    "properties": {
+                      "Orientation": [-89.99999, -89.999954, 0],
+                      "Position": [0.27563858, 0, -0.000000059604645]
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Part",
+                "name": "mixamorig:LeftForeArm",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [84.05477, -180, 0],
+                  "Position": [-9.187667, 2.99925, -19.855515],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [0.62036693, 0.18526822, 0.18526822],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [5.9452357, -0.000026395512, -90.000046],
+                      "Position": [-0.26386642, -0.0000019073486, -0.00000011920929]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "LeftElbowAttachment",
+                    "properties": {
+                      "Orientation": [-89.99999, -90, 0],
+                      "Position": [-0.26386642, -0.0000019073486, -0.00000011920929]
+                    }
+                  },
+                  {
+                    "class": "HingeConstraint",
+                    "name": "LeftElbow",
+                    "properties": {
+                      "ActuatorType": "ActuatorType.None",
+                      "AngularSpeed": 2,
+                      "AngularVelocity": 0,
+                      "Attachment0": ["Workspace", "Dummy", "Ragdoll", "mixamorig:LeftArm", "LeftElbowAttachment"],
+                      "Attachment1": ["Workspace", "Dummy", "Ragdoll", "mixamorig:LeftForeArm", "LeftElbowAttachment"],
+                      "Color": [0.62, 0.64, 0.68],
+                      "Enabled": true,
+                      "LimitsEnabled": true,
+                      "LowerAngle": -3,
+                      "MotorMaxTorque": 100000,
+                      "ServoMaxTorque": 100000,
+                      "TargetAngle": 0,
+                      "UpperAngle": 140,
+                      "Visible": false
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Part",
+                "name": "mixamorig:RightArm",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [-84.05477, -0.00019548576, -0.00000023545165],
+                  "Position": [-7.311433, 2.9993234, -19.836853],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [0.6695878, 0.22232188, 0.22232188],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [5.9452343, 180, 89.999855],
+                      "Position": [-0.2792139, 0.0000019073486, -0.00000029802322]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "RightShoulderAttachment",
+                    "properties": {
+                      "Orientation": [0, 0, -0.000000000013027552],
+                      "Position": [-0.2792139, 0.0000019073486, -0.00000029802322]
+                    }
+                  },
+                  {
+                    "class": "BallSocketConstraint",
+                    "name": "RightShoulder",
+                    "properties": {
+                      "Attachment0": ["Workspace", "Dummy", "Ragdoll", "mixamorig:Spine2", "RightShoulderAttachment"],
+                      "Attachment1": ["Workspace", "Dummy", "Ragdoll", "mixamorig:RightArm", "RightShoulderAttachment"],
+                      "Color": [0.62, 0.64, 0.68],
+                      "Enabled": true,
+                      "LimitsEnabled": true,
+                      "TwistLimitsEnabled": true,
+                      "TwistLowerAngle": -45,
+                      "TwistUpperAngle": 45,
+                      "UpperAngle": 70,
+                      "Visible": false
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "RightElbowAttachment",
+                    "properties": {
+                      "Orientation": [-89.99981, -92.082565, 3.0664856],
+                      "Position": [0.27921295, 0.0000019073486, -0.00000029802322]
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Part",
+                "name": "mixamorig:RightForeArm",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [-84.05477, -0, 0],
+                  "Position": [-6.780651, 2.9993234, -19.836853],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [0.5957707, 0.18526822, 0.18526822],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [5.9452295, 180, 90.00005],
+                      "Position": [-0.2515688, 0, -0.00000011920929]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "RightElbowAttachment",
+                    "properties": {
+                      "Orientation": [-89.99999, -90, 0],
+                      "Position": [-0.2515688, 0, -0.00000011920929]
+                    }
+                  },
+                  {
+                    "class": "HingeConstraint",
+                    "name": "RightElbow",
+                    "properties": {
+                      "ActuatorType": "ActuatorType.None",
+                      "AngularSpeed": 2,
+                      "AngularVelocity": 0,
+                      "Attachment0": ["Workspace", "Dummy", "Ragdoll", "mixamorig:RightArm", "RightElbowAttachment"],
+                      "Attachment1": ["Workspace", "Dummy", "Ragdoll", "mixamorig:RightForeArm", "RightElbowAttachment"],
+                      "Color": [0.62, 0.64, 0.68],
+                      "Enabled": true,
+                      "LimitsEnabled": true,
+                      "LowerAngle": -3,
+                      "MotorMaxTorque": 100000,
+                      "ServoMaxTorque": 100000,
+                      "TargetAngle": 0,
+                      "UpperAngle": 140,
+                      "Visible": false
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Part",
+                "name": "mixamorig:LeftUpLeg",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [-0.3434018, 86.000496, -90.99397],
+                  "Position": [-8.169329, 1.5268931, -19.962795],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [1.0006709, 0.29642916, 0.29642916],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [-85.9951, -179.99948, 89.99951],
+                      "Position": [-0.4262284, 0, 0.0000009536743]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "LeftHipAttachment",
+                    "properties": {
+                      "Orientation": [-0.00000064033037, -0.000006066463, -0.00000069369116],
+                      "Position": [-0.4262284, 0, 0.0000009536743]
+                    }
+                  },
+                  {
+                    "class": "BallSocketConstraint",
+                    "name": "LeftHip",
+                    "properties": {
+                      "Attachment0": ["Workspace", "Dummy", "Ragdoll", "mixamorig:Hips", "LeftHipAttachment"],
+                      "Attachment1": ["Workspace", "Dummy", "Ragdoll", "mixamorig:LeftUpLeg", "LeftHipAttachment"],
+                      "Color": [0.62, 0.64, 0.68],
+                      "Enabled": true,
+                      "LimitsEnabled": true,
+                      "TwistLimitsEnabled": true,
+                      "TwistLowerAngle": -30,
+                      "TwistUpperAngle": 30,
+                      "UpperAngle": 50,
+                      "Visible": false
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "LeftKneeAttachment",
+                    "properties": {
+                      "Orientation": [87.53409, -88.44851, -178.85349],
+                      "Position": [0.42622805, 0, 0.0000019073486]
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Part",
+                "name": "mixamorig:LeftLeg",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [0.06352589, 86.042786, -93.45932],
+                  "Position": [-8.16955, 0.6736609, -19.92952],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [0.96687245, 0.22232188, 0.22232188],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [-86.05377, 179.9995, 90.000595],
+                      "Position": [-0.42785597, 0, 0]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "LeftKneeAttachment",
+                    "properties": {
+                      "Orientation": [90, 90, 0],
+                      "Position": [-0.42785597, 0, 0]
+                    }
+                  },
+                  {
+                    "class": "HingeConstraint",
+                    "name": "LeftKnee",
+                    "properties": {
+                      "ActuatorType": "ActuatorType.None",
+                      "AngularSpeed": 2,
+                      "AngularVelocity": 0,
+                      "Attachment0": ["Workspace", "Dummy", "Ragdoll", "mixamorig:LeftUpLeg", "LeftKneeAttachment"],
+                      "Attachment1": ["Workspace", "Dummy", "Ragdoll", "mixamorig:LeftLeg", "LeftKneeAttachment"],
+                      "Color": [0.62, 0.64, 0.68],
+                      "Enabled": true,
+                      "LimitsEnabled": true,
+                      "LowerAngle": -3,
+                      "MotorMaxTorque": 100000,
+                      "ServoMaxTorque": 100000,
+                      "TargetAngle": 0,
+                      "UpperAngle": 140,
+                      "Visible": false
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Part",
+                "name": "mixamorig:RightUpLeg",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [0.4165, 86.07945, -89.34962],
+                  "Position": [-7.8044605, 1.523258, -19.950348],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [0.9964116, 0.29642916, 0.29642916],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [-86.07488, 179.99983, 90.0002],
+                      "Position": [-0.4240985, 0, 0]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "RightHipAttachment",
+                    "properties": {
+                      "Orientation": [-0.0000032016517, 0.000009383174, 0.0000006670105],
+                      "Position": [-0.4240985, 0, 0]
+                    }
+                  },
+                  {
+                    "class": "BallSocketConstraint",
+                    "name": "RightHip",
+                    "properties": {
+                      "Attachment0": ["Workspace", "Dummy", "Ragdoll", "mixamorig:Hips", "RightHipAttachment"],
+                      "Attachment1": ["Workspace", "Dummy", "Ragdoll", "mixamorig:RightUpLeg", "RightHipAttachment"],
+                      "Color": [0.62, 0.64, 0.68],
+                      "Enabled": true,
+                      "LimitsEnabled": true,
+                      "TwistLimitsEnabled": true,
+                      "TwistLowerAngle": -30,
+                      "TwistUpperAngle": 30,
+                      "UpperAngle": 50,
+                      "Visible": false
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "RightKneeAttachment",
+                    "properties": {
+                      "Orientation": [85.922295, -92.43324, 178.62285],
+                      "Position": [0.4240983, 0, 0]
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Part",
+                "name": "mixamorig:RightLeg",
+                "properties": {
+                  "Anchored": false,
+                  "AssemblyAngularVelocity": [0, 0, 0],
+                  "AssemblyLinearVelocity": [0, 0, 0],
+                  "CanCollide": true,
+                  "CanQuery": true,
+                  "CanTouch": true,
+                  "CastShadow": false,
+                  "CollisionGroup": "Default",
+                  "Color": [0.64, 0.64, 0.64],
+                  "CustomPhysicalProperties": { "Density": 1, "Friction": 0.8, "Elasticity": 0, "FrictionWeight": 1, "ElasticityWeight": 100 },
+                  "Emission": 0,
+                  "EmissiveColor": [1, 1, 1],
+                  "Massless": false,
+                  "Material": "Plastic",
+                  "MaterialVariant": "",
+                  "Metalness": 0,
+                  "Orientation": [-0.64176774, 85.969505, -93.425026],
+                  "Position": [-7.8042374, 0.67289054, -19.929573],
+                  "Roughness": 0.5,
+                  "Shape": "Capsule",
+                  "Size": [0.965355, 0.22232188, 0.22232188],
+                  "TileSize": 8,
+                  "Transparency": 1,
+                  "WindAffected": false
+                },
+                "children": [
+                  {
+                    "class": "Attachment",
+                    "name": "Bone",
+                    "properties": {
+                      "Orientation": [-85.93828, -179.99951, 89.99952],
+                      "Position": [-0.42709672, 0, 0.0000009536743]
+                    }
+                  },
+                  {
+                    "class": "Attachment",
+                    "name": "RightKneeAttachment",
+                    "properties": {
+                      "Orientation": [90, 90, 0],
+                      "Position": [-0.42709672, 0, 0.0000009536743]
+                    }
+                  },
+                  {
+                    "class": "HingeConstraint",
+                    "name": "RightKnee",
+                    "properties": {
+                      "ActuatorType": "ActuatorType.None",
+                      "AngularSpeed": 2,
+                      "AngularVelocity": 0,
+                      "Attachment0": ["Workspace", "Dummy", "Ragdoll", "mixamorig:RightUpLeg", "RightKneeAttachment"],
+                      "Attachment1": ["Workspace", "Dummy", "Ragdoll", "mixamorig:RightLeg", "RightKneeAttachment"],
+                      "Color": [0.62, 0.64, 0.68],
+                      "Enabled": true,
+                      "LimitsEnabled": true,
+                      "LowerAngle": -3,
+                      "MotorMaxTorque": 100000,
+                      "ServoMaxTorque": 100000,
+                      "TargetAngle": 0,
+                      "UpperAngle": 140,
+                      "Visible": false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   }

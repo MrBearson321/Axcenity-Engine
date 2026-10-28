@@ -15,6 +15,10 @@
 //! Phase 37: it also puts a mover on a clicked surface ([`new_mover`]; an
 //! align takes a second surface to follow), and the overlay draws each
 //! mover's push, turn or target.
+//!
+//! Phase 41: a Ragdoll shows its capsules and its joints' limits (a ball
+//! socket's cone, a hinge's arc) while it, its MeshPart or something in it
+//! is selected, or the overlay is on.
 
 use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
 use axcenity_render::glam::{Quat, Vec3};
@@ -41,6 +45,7 @@ const DISABLED_WELD_COLOR: egui::Color32 = egui::Color32::from_rgb(150, 150, 150
 const JOINT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 150, 60);
 const LIMIT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 220, 90);
 const MOVER_COLOR: egui::Color32 = egui::Color32::from_rgb(120, 255, 170);
+const RAGDOLL_COLOR: egui::Color32 = egui::Color32::from_rgb(230, 120, 255);
 /// How far a joint's axis and limit arcs reach, in points on screen.
 const JOINT_POINTS: f32 = 26.0;
 
@@ -347,10 +352,46 @@ pub fn paint(
     } else {
         selection.to_vec()
     };
+    // The ragdolls to show: every one with the overlay, otherwise those
+    // selected, in a selected MeshPart, or with something in them selected.
+    let ragdolls: Vec<InstanceId> = world
+        .descendants(world.workspace())
+        .into_iter()
+        .filter(|&id| {
+            world
+                .get(id)
+                .is_some_and(|i| i.class() == ClassName::Ragdoll)
+        })
+        .filter(|&id| {
+            overlay
+                || selection.iter().any(|&chosen| {
+                    chosen == id
+                        || world.get(id).and_then(Instance::parent) == Some(chosen)
+                        || is_inside(world, chosen, id)
+                })
+        })
+        .collect();
+    let mut shown_joints = Vec::new();
+    for &ragdoll in &ragdolls {
+        for id in world.descendants(ragdoll) {
+            let Some(instance) = world.get(id) else {
+                continue;
+            };
+            if instance.class().is_base_part() {
+                paint_capsule(painter, screen, instance);
+            } else if instance.class().is_joint() && !overlay {
+                paint_joint(painter, screen, world, instance);
+                shown_joints.push(id);
+            }
+        }
+    }
     for &id in &ids {
         let Some(instance) = world.get(id) else {
             continue;
         };
+        if shown_joints.contains(&id) {
+            continue;
+        }
         match instance.class() {
             ClassName::Attachment => {
                 paint_attachment(painter, screen, world, id, selection.contains(&id));
@@ -364,6 +405,65 @@ pub fn paint(
             }
             _ => {}
         }
+    }
+}
+
+/// True if `id` is inside `ancestor`.
+fn is_inside(world: &World, id: InstanceId, ancestor: InstanceId) -> bool {
+    let mut at = world.get(id).and_then(Instance::parent);
+    while let Some(parent) = at {
+        if parent == ancestor {
+            return true;
+        }
+        at = world.get(parent).and_then(Instance::parent);
+    }
+    false
+}
+
+/// A ragdoll body: its capsule (or other shape, as its box's middle line
+/// and rings) as a wireframe: a ring at each end of its middle, lines
+/// between them, and its round ends.
+fn paint_capsule(painter: &egui::Painter, screen: &Screen, part: &Instance) {
+    let Some(pose) = Pose::of(part) else {
+        return;
+    };
+    let Some(size) = part.property("Size").and_then(Value::as_vector3) else {
+        return;
+    };
+    let radius = size.y.min(size.z) / 2.0;
+    let reach = (size.x / 2.0 - radius).max(0.0);
+    let stroke = egui::Stroke::new(1.5_f32, RAGDOLL_COLOR);
+    let at = |local: Vec3| pose.position + pose.rotation * local;
+    let segment = |a: Vec3, b: Vec3| {
+        if let Some(line) = screen.line(at(a), at(b)) {
+            painter.line_segment(line, stroke);
+        }
+    };
+    const STEPS: usize = 16;
+    let round = |i: usize| i as f32 / STEPS as f32 * std::f32::consts::TAU;
+    for end in [-reach, reach] {
+        let middle = Vec3::new(end, 0.0, 0.0);
+        for i in 0..STEPS {
+            let ring = |i: usize| middle + Vec3::new(0.0, round(i).cos(), round(i).sin()) * radius;
+            segment(ring(i), ring(i + 1));
+        }
+        // The round end: half circles beyond the ring, in two planes.
+        let out = if end < 0.0 { -1.0 } else { 1.0 };
+        for side in [Vec3::Y, Vec3::Z] {
+            for i in 0..STEPS / 2 {
+                let half = |i: usize| {
+                    let angle = round(i) - std::f32::consts::FRAC_PI_2;
+                    middle + (Vec3::X * out * angle.cos() + side * angle.sin()) * radius
+                };
+                segment(half(i), half(i + 1));
+            }
+        }
+    }
+    for side in [Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z] {
+        segment(
+            Vec3::new(-reach, 0.0, 0.0) + side * radius,
+            Vec3::new(reach, 0.0, 0.0) + side * radius,
+        );
     }
 }
 
@@ -480,6 +580,23 @@ fn paint_joint(painter: &egui::Painter, screen: &Screen, world: &World, joint: &
         }
         segment(a, spoke(lower), limit);
         segment(a, spoke(upper), limit);
+    }
+    // A ball socket's cone: how far Attachment1's X may lean from
+    // Attachment0's, as a ring with four spokes.
+    if joint.class() == ClassName::BallSocketConstraint && flag("LimitsEnabled") {
+        let cone = number("UpperAngle").abs().min(180.0).to_radians();
+        let limit = egui::Stroke::new(1.5_f32, dim(LIMIT_COLOR));
+        let (side, up) = (turn * Vec3::Y, turn * Vec3::Z);
+        let rim = |i: usize| {
+            let around = i as f32 / 24.0 * std::f32::consts::TAU;
+            a + (axis * cone.cos() + (side * around.cos() + up * around.sin()) * cone.sin()) * reach
+        };
+        for i in 0..24 {
+            segment(rim(i), rim(i + 1), limit);
+        }
+        for i in [0, 6, 12, 18] {
+            segment(a, rim(i), limit);
+        }
     }
     for at in [a, b] {
         if let Some(at) = screen.point(at) {

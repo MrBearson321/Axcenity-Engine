@@ -50,6 +50,9 @@ pub enum Edit {
     /// Plays the selected Sound in the editor, to hear it without pressing
     /// Play, or (false) stops that.
     PreviewSound(bool),
+    /// Makes the selected Ragdoll's bodies and joints from its MeshPart's
+    /// skeleton, replacing what was in it.
+    BuildRagdoll,
     /// During Play, pins (true) or unpins a value edited during Play, so
     /// Stop copies it into the edit world (see `play::kept`).
     Keep(Field, bool),
@@ -529,6 +532,17 @@ pub fn show(
                 {
                     edit = Some(Edit::Animate);
                 }
+            }
+            if !playing
+                && instance.class() == ClassName::Ragdoll
+                && ui
+                    .button(theme::with_icon(icons::PERSON_SIMPLE, "Build"))
+                    .on_hover_text(
+                        "Make a capsule for each main bone of the MeshPart's skeleton and a joint between them, with a humanoid's limits. Replaces what's in the Ragdoll.",
+                    )
+                    .clicked()
+            {
+                edit = Some(Edit::BuildRagdoll);
             }
             ui.add_space(2.0);
             // Widgets remember things such as half-typed numbers by ID. Mixing in

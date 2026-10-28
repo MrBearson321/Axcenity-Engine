@@ -1,7 +1,8 @@
 //! Bodies from scripts (Phase 34): the `PhysicalProperties` type and
 //! library, a part's `ApplyImpulse`, `ApplyImpulseAtPosition`,
 //! `ApplyAngularImpulse` and `GetMass`, and its read-only `AssemblyMass`,
-//! `AssemblyCenterOfMass` and `CurrentPhysicalProperties`.
+//! `AssemblyCenterOfMass` and `CurrentPhysicalProperties`; and a Ragdoll's
+//! `ApplyImpulse(bone, impulse)` (Phase 41), which pushes one body.
 //!
 //! An impulse doesn't reach physics directly: it changes the part's
 //! `AssemblyLinearVelocity` and `AssemblyAngularVelocity` by the impulse
@@ -167,7 +168,8 @@ fn vector_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<Vector3
 
 /// `ApplyImpulse`, `ApplyImpulseAtPosition`, `ApplyAngularImpulse`,
 /// `GetMass`, `GetConnectedParts` and `GetRootPart`, on Parts and
-/// MeshParts. Impulses push the part's whole assembly.
+/// MeshParts, and a Ragdoll's `ApplyImpulse(bone, impulse)`. Impulses push
+/// the part's whole assembly.
 pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlua::Function)>> {
     let apply_impulse =
         lua.create_function(|lua, (this, impulse): (LuaInstance, mlua::Value)| {
@@ -212,7 +214,24 @@ pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlu
         world.get(this.0).ok_or_else(destroyed)?;
         Ok(LuaInstance(assembly::root_part(&world, this.0)))
     })?;
-    let mut methods = Vec::new();
+    let knock = lua.create_function(
+        |lua, (this, bone, impulse): (LuaInstance, String, mlua::Value)| {
+            let impulse = vector_arg(lua, impulse, "ApplyImpulse(bone, impulse)")?;
+            let body = {
+                let world = world(lua)?;
+                world.get(this.0).ok_or_else(destroyed)?;
+                axcenity_anim::ragdoll::body_of(&world, this.0, &bone)
+            };
+            let body = body.ok_or_else(|| {
+                mlua::Error::runtime(format!(
+                    "ApplyImpulse: the Ragdoll has no body for the bone `{bone}` (Build makes one per main bone, named after it)"
+                ))
+            })?;
+            let change = mass(lua, body)?.velocity_change(impulse);
+            add_velocity(lua, body, "AssemblyLinearVelocity", change)
+        },
+    )?;
+    let mut methods = vec![(ClassName::Ragdoll, "ApplyImpulse", knock)];
     for class in [
         ClassName::Part,
         ClassName::MeshPart,

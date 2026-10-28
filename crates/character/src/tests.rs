@@ -994,4 +994,27 @@ fn holding_run_runs_a_walking_character() {
     assert!((ran.z + 32.0).abs() < 1e-3, "{ran:?}");
 }
 
+#[test]
+fn a_ragdoll_s_bodies_are_not_the_character_and_a_ragdoll_that_s_on_holds_it() {
+    let (mut world, controller, body) = standing();
+    let ragdoll = world.create(ClassName::Ragdoll).unwrap();
+    world.set_parent(ragdoll, Some(body)).unwrap();
+    let capsule = world.create(ClassName::Part).unwrap();
+    world.set_parent(capsule, Some(ragdoll)).unwrap();
+    let model = world.get(body).unwrap().parent().unwrap();
+    assert_eq!(body_parts(&world, model), vec![body]);
+
+    // Off, it walks; on, it stays where physics has it.
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, forward(), 30);
+    let walked = pos(&world, body);
+    assert!(walked.z < -1.0, "{walked:?}");
+    world
+        .set_property(ragdoll, "Enabled", Value::Bool(true))
+        .unwrap();
+    run(&mut world, &mut controllers, forward(), 30);
+    assert_eq!(pos(&world, body), walked);
+    let _ = controller;
+}
+
 mod seat;

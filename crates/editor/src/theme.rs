@@ -713,6 +713,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Seat => icons::CHAIR,
         ClassName::VehicleSeat => icons::STEERING_WHEEL,
         ClassName::VehicleWheel => icons::TIRE,
+        ClassName::Ragdoll => icons::PERSON_SIMPLE,
         ClassName::Script => icons::FILE_CODE,
         ClassName::LocalScript => icons::CODE,
         ClassName::ModuleScript => icons::PUZZLE_PIECE,
@@ -814,6 +815,7 @@ pub fn part_icon(shape: PartType) -> &'static str {
         PartType::Ball => icons::SPHERE,
         PartType::Cylinder => icons::CYLINDER,
         PartType::Wedge => icons::TRIANGLE,
+        PartType::Capsule => icons::PILL,
     }
 }
 

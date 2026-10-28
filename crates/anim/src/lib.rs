@@ -17,6 +17,9 @@
 //!   in a world each frame, posing skeletons ([`Poses`]) and setting keyed
 //!   properties; owned by the host like physics.
 //!
+//! - [`ragdoll`]: building a Ragdoll's capsules and joints from a skeleton,
+//!   and the pose its bodies give the bones while physics moves them.
+//!
 //! Poses come from `assets` ([`axcenity_assets::Model::pose`]); `scene`
 //! draws them.
 
@@ -28,6 +31,7 @@ mod easing;
 pub mod files;
 pub mod ik;
 mod property_clip;
+pub mod ragdoll;
 
 pub use animators::{AnimatorEvent, Animators, Poses, load_clip, read_state_machine};
 pub use bones::{

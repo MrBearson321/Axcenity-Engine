@@ -145,6 +145,8 @@ pub struct Physics {
     /// The cars, read again every frame, and how far each wheel has rolled.
     vehicles: Vec<vehicles::Vehicle>,
     rolling: BTreeMap<InstanceId, vehicles::Rolling>,
+    /// The bodies of the Ragdolls that are on, at the last sync.
+    ragdoll_bodies: HashSet<InstanceId>,
 }
 
 /// One Part's collider on its assembly's rapier body, plus the part's
@@ -370,6 +372,7 @@ impl Physics {
             learned: BTreeMap::new(),
             vehicles: Vec::new(),
             rolling: BTreeMap::new(),
+            ragdoll_bodies: HashSet::new(),
         }
     }
 
@@ -446,9 +449,12 @@ impl Physics {
     /// applies anything a script changed since the last step, and welds or
     /// unwelds assemblies.
     fn sync_from_world(&mut self, world: &World) {
+        let (ragdolled, ragdoll_bodies) = ragdoll_parts(world);
+        self.ragdoll_bodies = ragdoll_bodies;
         let current: BTreeMap<InstanceId, PartState> = world
             .descendants(world.workspace())
             .into_iter()
+            .filter(|id| !ragdolled.contains(id))
             .filter_map(|id| Some((id, PartState::read(world, id, &self.assets)?)))
             .collect();
         let ids: Vec<InstanceId> = current.keys().copied().collect();
@@ -628,12 +634,15 @@ impl Physics {
             RigidBodyType::Dynamic
         };
         let root_pose = root_state.pose();
+        let ragdolled = members.iter().any(|id| self.ragdoll_bodies.contains(id));
+        let extra_iterations = if ragdolled { RAGDOLL_ITERATIONS } else { 0 };
         let body = RigidBodyBuilder::new(body_type)
             .pose(root_pose)
             // Continuous collision detection: fast parts can't skip through
             // thin ones between two steps.
             .ccd_enabled(true)
             .angular_damping(ANGULAR_DAMPING)
+            .additional_solver_iterations(extra_iterations)
             .linvel(to_vec3(velocity))
             .angvel(to_vec3(spin))
             .build();
@@ -921,6 +930,31 @@ impl Default for Physics {
 }
 
 /// The Workspace's `GlobalWind`, or none if it isn't a finite vector.
+/// Extra solver iterations for a ragdoll's bodies, so a long chain of
+/// light limbs holds its joints when it lands. Many more (32) made a
+/// knocked ragdoll leap off the ground.
+const RAGDOLL_ITERATIONS: usize = 16;
+
+/// The parts physics leaves to Ragdolls (Phase 41): the bodies of a
+/// Ragdoll that's off follow the animation, and the MeshPart of one that's
+/// on follows its bodies, so it doesn't push them apart. Then the bodies of
+/// the Ragdolls that are on.
+fn ragdoll_parts(world: &World) -> (HashSet<InstanceId>, HashSet<InstanceId>) {
+    let (mut left, mut bodies) = (HashSet::new(), HashSet::new());
+    for id in world.descendants(world.workspace()) {
+        let Some(ragdoll) = world.get(id).filter(|i| i.class() == ClassName::Ragdoll) else {
+            continue;
+        };
+        if ragdoll.property("Enabled").and_then(Value::as_bool) == Some(true) {
+            left.extend(ragdoll.parent());
+            bodies.extend(world.descendants(id));
+        } else {
+            left.extend(world.descendants(id));
+        }
+    }
+    (left, bodies)
+}
+
 fn global_wind(world: &World) -> Vec3 {
     world
         .get(world.workspace())

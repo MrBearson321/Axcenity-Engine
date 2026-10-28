@@ -9,7 +9,7 @@ use axcenity_render::Camera;
 use axcenity_render::glam::camera::rh;
 use axcenity_render::glam::{Mat3, Mat4, Vec2, Vec3};
 
-use crate::draw_list::part_placement;
+use crate::draw_list::{part_pieces, part_placement};
 
 /// Lines are cut off this close to the camera before they're projected,
 /// because points at or behind the camera have no place on the screen.
@@ -316,6 +316,13 @@ fn hit_distance(shape: PartType, transform: Mat4, ray: Ray) -> Option<f32> {
 /// How far along `ray` it first enters this part, and which way the surface
 /// faces there (in the world, one stud long), if it does.
 fn hit_surface(shape: PartType, transform: Mat4, ray: Ray) -> Option<(f32, Vec3)> {
+    // A capsule is hit where the nearest of its pieces is.
+    if shape == PartType::Capsule {
+        return part_pieces(shape, transform)
+            .into_iter()
+            .filter_map(|(piece, transform)| hit_surface(piece, transform, ray))
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+    }
     // A part with no size (or broken numbers) can't be hit, and its
     // transform can't be undone.
     if !transform.determinant().is_normal() {
@@ -337,6 +344,8 @@ fn hit_surface(shape: PartType, transform: Mat4, ray: Ray) -> Option<(f32, Vec3)
             inside_flat_side(origin, direction, Vec3::new(0.0, 1.0, -1.0), 0.0)?,
         ),
         PartType::Ball => inside_radius(origin, direction),
+        // Split into pieces above.
+        PartType::Capsule => None,
         // A cylinder along X: round in Y and Z, cut off at x = ±0.5.
         PartType::Cylinder => {
             let round = Vec3::new(0.0, 1.0, 1.0);
@@ -562,7 +571,8 @@ mod tests {
             let middle = pick(&world, ray_along_z(0.0, 0.0));
             let corner = pick(&world, ray_along_z(0.9, 0.9));
             match shape {
-                PartType::Ball => assert_eq!(corner, None),
+                // A capsule as long as it's wide is a ball.
+                PartType::Ball | PartType::Capsule => assert_eq!(corner, None),
                 // A cylinder lies along X, so from the front it looks square.
                 PartType::Block | PartType::Cylinder => assert_eq!(corner, Some(id), "{shape:?}"),
                 // The wedge's top front corner is cut away by its slope,
@@ -585,6 +595,24 @@ mod tests {
         assert_eq!(pick(&world, along_x(0.0, 0.0)), Some(id));
         assert_eq!(pick(&world, along_x(0.9, 0.0)), Some(id));
         assert_eq!(pick(&world, along_x(0.9, 0.9)), None);
+    }
+
+    #[test]
+    fn a_capsule_has_round_ends() {
+        let mut world = World::new();
+        // 6 long, 2 across: a cylinder from x = -2 to 2, balls beyond.
+        let id = part(
+            &mut world,
+            PartType::Capsule,
+            Vec3::ZERO,
+            Vec3::new(6.0, 2.0, 2.0),
+        );
+        let hit = |x: f32, y: f32| pick(&world, ray_along_z(x, y));
+        assert_eq!(hit(0.0, 0.9), Some(id), "the middle is a cylinder");
+        assert_eq!(hit(1.9, 0.9), Some(id));
+        assert_eq!(hit(2.9, 0.0), Some(id), "the end's tip");
+        assert_eq!(hit(2.9, 0.9), None, "the box's corner, outside the end");
+        assert_eq!(hit(3.1, 0.0), None);
     }
 
     #[test]
