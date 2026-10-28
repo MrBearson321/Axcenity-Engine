@@ -51,6 +51,9 @@ pub enum ClassName {
     /// A solid 3D model imported from a glTF or FBX file (or some objects
     /// in one), which it names in `MeshId`. Drawn with the file's own materials.
     MeshPart,
+    /// A Part that characters sit on: one that touches it while it's empty
+    /// and enabled sits down (`Occupant`).
+    Seat,
     /// Lua code that runs on the server. Its source lives in a
     /// `*.server.lua` file, not in a property.
     Script,
@@ -220,7 +223,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 76] = [
+    pub const ALL: [ClassName; 77] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -231,6 +234,7 @@ impl ClassName {
         ClassName::StarterPlayerScripts,
         ClassName::Part,
         ClassName::MeshPart,
+        ClassName::Seat,
         ClassName::Script,
         ClassName::LocalScript,
         ClassName::ModuleScript,
@@ -310,6 +314,7 @@ impl ClassName {
             ClassName::StarterPlayer => "StarterPlayer",
             ClassName::StarterPlayerScripts => "StarterPlayerScripts",
             ClassName::Part => "Part",
+            ClassName::Seat => "Seat",
             ClassName::MeshPart => "MeshPart",
             ClassName::Script => "Script",
             ClassName::LocalScript => "LocalScript",
@@ -400,6 +405,7 @@ impl ClassName {
         const LAYER: &[&str] = &["LayerCollector", "GuiBase2d"];
         match self {
             ClassName::Part | ClassName::MeshPart => PART,
+            ClassName::Seat => &["Part", "BasePart", "PVInstance"],
             ClassName::Model => &["PVInstance"],
             ClassName::Script | ClassName::ModuleScript => &["LuaSourceContainer"],
             ClassName::LocalScript => &["Script", "LuaSourceContainer"],
@@ -416,6 +422,14 @@ impl ClassName {
     /// Whether this class is `name` or inherits from it (`IsA` in scripts).
     pub fn is_a(self, name: &str) -> bool {
         name == "Instance" || self.as_str() == name || self.superclasses().contains(&name)
+    }
+
+    /// A Part, MeshPart or Seat: a solid in the world (`BasePart`).
+    pub fn is_base_part(self) -> bool {
+        matches!(
+            self,
+            ClassName::Part | ClassName::MeshPart | ClassName::Seat
+        )
     }
 
     /// A third- or first-person character controller.
@@ -1118,7 +1132,7 @@ impl ClassName {
                 ("RollOffMinDistance", Value::Number(10.0)),
                 ("RollOffMaxDistance", Value::Number(150.0)),
             ],
-            ClassName::Part => {
+            ClassName::Part | ClassName::Seat => {
                 let material = Material::Plastic;
                 let preset = material.preset();
                 let mut properties = vec![
@@ -1156,6 +1170,18 @@ impl ClassName {
                 ];
                 properties.extend(collision_properties());
                 properties.extend(body_properties());
+                if self == ClassName::Seat {
+                    properties.extend([
+                        // The character controller sitting on it, or none.
+                        // Read-only for scripts: `seat:Sit(controller)` sits one.
+                        ("Occupant", Value::Instance(None)),
+                        // On, touching it doesn't sit anyone; `Sit` still does.
+                        ("Disabled", Value::Bool(false)),
+                        // An Attachment where the character's feet go, or
+                        // none for the middle of the top face.
+                        ("SeatOffset", Value::Instance(None)),
+                    ]);
+                }
                 properties
             }
             ClassName::MeshPart => {
@@ -1567,8 +1593,6 @@ impl ClassName {
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer
-            | ClassName::ThirdPersonController
-            | ClassName::FirstPersonController
             | ClassName::Checkpoint
             | ClassName::Camera
             | ClassName::Attachment
@@ -1594,6 +1618,9 @@ impl ClassName {
             | ClassName::Color3Value
             | ClassName::CFrameValue
             | ClassName::ObjectValue => &[],
+            // Fires with true and the Seat when the character sits, and
+            // with false and the Seat it left when it stands.
+            ClassName::ThirdPersonController | ClassName::FirstPersonController => &["Seated"],
             // Fires with "Sight" or "Hearing" when it starts seeing or
             // hearing the player character.
             ClassName::NavigationAgent => &["PlayerSensed"],
@@ -1610,7 +1637,7 @@ impl ClassName {
             // `GetMarkerReachedSignal(name)` hears one name of.
             ClassName::AnimationTrack => &["Stopped", "KeyframeReached"],
             // Fire on both parts when two parts start and stop touching.
-            ClassName::Part | ClassName::MeshPart => &["Touched", "TouchEnded"],
+            ClassName::Part | ClassName::MeshPart | ClassName::Seat => &["Touched", "TouchEnded"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.
             ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],
@@ -1816,6 +1843,8 @@ fn movement_properties() -> Vec<(&'static str, Value)> {
         ("CrouchHeight", Value::Number(3.0)),
         // 0 to 1: how much of its walk or run speed it keeps crouched.
         ("CrouchSpeedScale", Value::Number(0.5)),
+        // True while it sits on a Seat. Set false to stand it up.
+        ("Sit", Value::Bool(false)),
     ]
 }
 

@@ -385,7 +385,12 @@ pub fn pivot_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, ml
         Ok(())
     })?;
     let mut methods = Vec::new();
-    for class in [ClassName::Part, ClassName::MeshPart, ClassName::Model] {
+    for class in [
+        ClassName::Part,
+        ClassName::MeshPart,
+        ClassName::Seat,
+        ClassName::Model,
+    ] {
         methods.push((class, "GetPivot", get_pivot.clone()));
         methods.push((class, "PivotTo", pivot_to.clone()));
     }

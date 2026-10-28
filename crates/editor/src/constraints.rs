@@ -86,7 +86,7 @@ fn to_value(v: Vec3) -> Value {
 }
 
 fn is_part(instance: &Instance) -> bool {
-    matches!(instance.class(), ClassName::Part | ClassName::MeshPart)
+    instance.class().is_base_part()
 }
 
 /// The part an Attachment is on, if its parent is one.

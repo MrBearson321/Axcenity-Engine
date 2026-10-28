@@ -417,7 +417,7 @@ pub fn fingerprint(world: &World) -> u64 {
         let class = instance.class();
         if !matches!(
             class,
-            ClassName::Part | ClassName::MeshPart | ClassName::Terrain
+            ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::Terrain
         ) || skip.contains(&id)
         {
             continue;

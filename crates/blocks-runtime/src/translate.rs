@@ -309,6 +309,19 @@ impl Writer {
                 self.line("end)");
                 return Ok(());
             }
+            BlockKind::WhenSeatOccupied { seat, body } => {
+                let seat = target(seat)?;
+                self.line(format!(
+                    "{seat}:GetPropertyChangedSignal(\"Occupant\"):Connect(function()"
+                ));
+                self.indent += 1;
+                self.line(format!("if {seat}.Occupant then"));
+                self.nested(body, ids)?;
+                self.line("end");
+                self.indent -= 1;
+                self.line("end)");
+                return Ok(());
+            }
             BlockKind::TopCode { code } => {
                 self.code(code);
                 return Ok(());
@@ -605,6 +618,9 @@ impl Writer {
                 let value = self.expression(velocity)?;
                 self.line(format!("{}.Velocity = {value}", target(agent)?));
             }
+            BlockKind::LeaveSeat { controller } => {
+                self.line(format!("{}.Sit = false", target(controller)?));
+            }
             BlockKind::SaveSlot { slot } => {
                 let slot = self.expression(slot)?;
                 self.line(format!("SaveService:SaveSlot({slot})"));
@@ -845,6 +861,7 @@ impl Writer {
             | BlockKind::WhenStateChanged { .. }
             | BlockKind::WhenAnimationEvent { .. }
             | BlockKind::WhenAgentSenses { .. }
+            | BlockKind::WhenSeatOccupied { .. }
             | BlockKind::Unattached { .. }
             | BlockKind::TopCode { .. } => {
                 return Err(TranslateError::InvalidEventPlacement);

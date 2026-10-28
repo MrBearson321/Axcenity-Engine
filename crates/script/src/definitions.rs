@@ -423,7 +423,7 @@ fn write() -> Writer {
             let doc = property_doc(class, name).unwrap_or("");
             w.member(ApiKind::Property, name, &property_type(&default), doc);
         }
-        for (_, field) in CLASS_FIELDS.iter().filter(|(c, _)| *c == class) {
+        for (_, field) in CLASS_FIELDS.iter().filter(|(c, _)| documents(*c, class)) {
             w.field(field);
         }
         for &event in class.events() {
@@ -431,7 +431,7 @@ fn write() -> Writer {
             w.member(ApiKind::Event, event, "Signal", &with_side(event, doc));
         }
         w.line(CHILD_INDEXER);
-        for (_, method) in CLASS_METHODS.iter().filter(|(c, _)| *c == class) {
+        for (_, method) in CLASS_METHODS.iter().filter(|(c, _)| documents(*c, class)) {
             w.method(method);
         }
         w.end();
@@ -555,18 +555,36 @@ fn with_side(name: &str, doc: &str) -> String {
     }
 }
 
+/// The class whose descriptions `class` shares for what it inherits: a
+/// Seat is a Part.
+fn doc_parent(class: ClassName) -> Option<ClassName> {
+    (class == ClassName::Seat).then_some(ClassName::Part)
+}
+
+/// Whether an entry described for `described` belongs in `class`'s block:
+/// its own, or its doc parent's.
+fn documents(described: ClassName, class: ClassName) -> bool {
+    described == class || doc_parent(class) == Some(described)
+}
+
 fn event_doc(class: ClassName, event: &str) -> Option<&'static str> {
-    EVENT_DOCS
-        .iter()
-        .find(|(c, e, _)| *c == class && *e == event)
-        .map(|(_, _, doc)| *doc)
+    let own = |class| {
+        EVENT_DOCS
+            .iter()
+            .find(|(c, e, _)| *c == class && *e == event)
+            .map(|(_, _, doc)| *doc)
+    };
+    own(class).or_else(|| own(doc_parent(class)?))
 }
 
 fn property_doc(class: ClassName, property: &str) -> Option<&'static str> {
-    PROPERTY_DOCS
-        .iter()
-        .find(|(c, p, _)| *c == class && *p == property)
-        .map(|(_, _, doc)| *doc)
+    let own = |class| {
+        PROPERTY_DOCS
+            .iter()
+            .find(|(c, p, _)| *c == class && *p == property)
+            .map(|(_, _, doc)| *doc)
+    };
+    own(class).or_else(|| own(doc_parent(class)?))
 }
 
 #[cfg(test)]

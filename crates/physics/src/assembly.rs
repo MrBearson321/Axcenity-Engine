@@ -154,5 +154,5 @@ impl Rank {
 }
 
 fn is_part(instance: &Instance) -> bool {
-    matches!(instance.class(), ClassName::Part | ClassName::MeshPart)
+    instance.class().is_base_part()
 }

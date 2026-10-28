@@ -29,7 +29,7 @@ fn part_frame(world: &World, attachment: &Instance) -> LuaCFrame {
     attachment
         .parent()
         .and_then(|parent| world.get(parent))
-        .filter(|part| matches!(part.class(), ClassName::Part | ClassName::MeshPart))
+        .filter(|part| part.class().is_base_part())
         .and_then(LuaCFrame::of_instance)
         .unwrap_or(LuaCFrame::IDENTITY)
 }

@@ -29,7 +29,7 @@ pub mod files;
 pub mod ik;
 mod property_clip;
 
-pub use animators::{AnimatorEvent, Animators, Poses, load_clip};
+pub use animators::{AnimatorEvent, Animators, Poses, load_clip, read_state_machine};
 pub use bones::{
     bone_from_numbers, bone_numbers, bone_paths, convert_to_keys, find_bone, pose_bones, take_bones,
 };

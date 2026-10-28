@@ -68,7 +68,7 @@ impl Viewport {
                 let ray = screen.ray(pointer);
                 let hit = axcenity_scene::pick_hit(world, ray, None)?;
                 let class = world.get(hit.part)?.class();
-                matches!(class, ClassName::Part | ClassName::MeshPart).then(|| SurfacePick {
+                class.is_base_part().then(|| SurfacePick {
                     part: hit.part,
                     point: ray.at(hit.distance),
                     normal: hit.normal,

@@ -370,7 +370,7 @@ fn subject_frame(world: &World, id: InstanceId) -> Option<LuaCFrame> {
     let class = world.get(holder)?.class();
     if !matches!(
         class,
-        ClassName::Model | ClassName::Part | ClassName::MeshPart
+        ClassName::Model | ClassName::Part | ClassName::MeshPart | ClassName::Seat
     ) {
         return None;
     }

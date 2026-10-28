@@ -105,6 +105,7 @@ pub fn can_animate(class: ClassName) -> bool {
         class,
         ClassName::Part
             | ClassName::MeshPart
+            | ClassName::Seat
             | ClassName::Model
             | ClassName::ScreenGui
             | ClassName::Frame

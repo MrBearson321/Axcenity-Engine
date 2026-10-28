@@ -69,6 +69,7 @@ mod run_service;
 mod sandbox;
 mod save;
 mod scheduler;
+mod seat;
 mod sides;
 mod task;
 mod tree;
@@ -493,6 +494,18 @@ impl ScriptRuntime {
     /// Changes physics made (parts moving) fire their change events first.
     pub fn fire_touched(&mut self, world: &mut World, touches: &[(InstanceId, InstanceId)]) {
         self.fire_touch_event(world, "Touched", touches);
+    }
+
+    /// Frame step 1, after the character controllers step: fires
+    /// `Seated(active, seat)` on each controller that sat down (`true`) or
+    /// stood up (`false`), in Scripts and then in LocalScripts.
+    pub fn fire_seated(&mut self, world: &mut World, changes: &[(InstanceId, bool, InstanceId)]) {
+        self.fire_changes(world);
+        for side in [Side::Server, Side::Client] {
+            self.context(side).fire_seated(world, changes);
+            self.collect(side);
+            self.fire_changes(world);
+        }
     }
 
     /// Frame-order step 4, after [`fire_touched`](Self::fire_touched):
@@ -1043,5 +1056,7 @@ mod mover_tests;
 mod physical_tests;
 #[cfg(test)]
 mod query_tests;
+#[cfg(test)]
+mod seat_tests;
 #[cfg(test)]
 mod utilities_tests;

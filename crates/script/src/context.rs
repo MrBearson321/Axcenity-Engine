@@ -117,6 +117,10 @@ impl Context {
             crate::physical::body_methods(&lua)
                 .expect("creating the body methods only fails when out of memory"),
         );
+        methods.extend(
+            crate::seat::methods(&lua)
+                .expect("creating Seat methods only fails when out of memory"),
+        );
         methods.push((
             axcenity_core::ClassName::DataModel,
             "GetService",
@@ -326,6 +330,24 @@ impl Context {
                             instance::LuaInstance(other),
                         );
                     }
+                }
+            }
+        });
+    }
+
+    /// Frame step 1: fires `Seated(active, seat)` on each controller.
+    pub fn fire_seated(&self, world: &mut World, changes: &[(InstanceId, bool, InstanceId)]) {
+        with_world(&self.lua, world, || {
+            for &(controller, active, seat) in changes {
+                let exists = instance::world(&self.lua)
+                    .is_ok_and(|world| world.contains(controller) && world.contains(seat));
+                if exists {
+                    events::fire(
+                        &self.lua,
+                        events::Owner::Instance(controller),
+                        "Seated",
+                        (active, instance::LuaInstance(seat)),
+                    );
                 }
             }
         });

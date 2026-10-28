@@ -387,7 +387,7 @@ impl EditorApp {
             if !self
                 .world
                 .get(part)
-                .is_some_and(|i| matches!(i.class(), ClassName::Part | ClassName::MeshPart))
+                .is_some_and(|i| i.class().is_base_part())
             {
                 continue;
             }

@@ -58,6 +58,8 @@ pub enum Insertable {
     NavigationAgent,
     /// A place a character is put back at.
     Checkpoint,
+    /// A part characters sit on.
+    Seat,
     /// A named viewpoint scripts cut the camera to.
     Camera,
     /// A point and direction on the selected part, at its middle.
@@ -114,6 +116,8 @@ impl Insertable {
     pub const AGENTS: [Insertable; 1] = [Insertable::NavigationAgent];
     /// Checkpoints, which a game returns the player character to.
     pub const CHECKPOINTS: [Insertable; 1] = [Insertable::Checkpoint];
+    /// Seats, which a character that touches them sits on.
+    pub const SEATS: [Insertable; 1] = [Insertable::Seat];
     /// Camera viewpoints, placed where the editor's camera is.
     pub const CAMERAS: [Insertable; 1] = [Insertable::Camera];
     /// Points on parts, for constraints and effects.
@@ -177,6 +181,7 @@ impl Insertable {
             Insertable::FirstPersonController => "First Person",
             Insertable::NavigationAgent => "Agent",
             Insertable::Checkpoint => "Checkpoint",
+            Insertable::Seat => "Seat",
             Insertable::Camera => "Camera",
             Insertable::Attachment => "Attachment",
             Insertable::Value(class) => class.as_str(),
@@ -220,6 +225,7 @@ impl Insertable {
             Insertable::FirstPersonController => ClassName::FirstPersonController,
             Insertable::NavigationAgent => ClassName::NavigationAgent,
             Insertable::Checkpoint => ClassName::Checkpoint,
+            Insertable::Seat => ClassName::Seat,
             Insertable::Camera => ClassName::Camera,
             Insertable::Attachment => ClassName::Attachment,
             Insertable::Value(class) => class,
@@ -312,7 +318,7 @@ pub fn page_layout_for(world: &World, near: Option<InstanceId>) -> Option<Instan
 pub fn light_has_part_parent(world: &World, near: Option<InstanceId>) -> bool {
     world
         .get(insert_parent(world, near, Insertable::PointLight))
-        .is_some_and(|instance| matches!(instance.class(), ClassName::Part | ClassName::MeshPart))
+        .is_some_and(|instance| instance.class().is_base_part())
 }
 
 /// The size a new part of each shape starts with, in studs. Blocks and
@@ -339,6 +345,10 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
             ("Position", Value::Vector3(position)),
         ],
         Insertable::MeshPart => vec![("Position", Value::Vector3(position))],
+        Insertable::Seat => vec![
+            ("Size", Value::Vector3(Vector3::new(2.0, 1.0, 2.0))),
+            ("Position", Value::Vector3(position)),
+        ],
         // Scales with the screen, laid out over all of it, so a UI made at
         // one size looks the same at any other.
         Insertable::ScreenGui => vec![("ScaleMode", Value::String("Scale".to_owned()))],
@@ -375,12 +385,12 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
         let is_ui_container = is_ui_container(world, id);
         let is_sound_container = matches!(
             world.get(id).map(|instance| instance.class()),
-            Some(ClassName::Part | ClassName::MeshPart | ClassName::Model)
+            Some(ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::Model)
         );
         // An Attachment's Position is on its part, so only a part holds one.
         let is_part = matches!(
             world.get(id).map(|instance| instance.class()),
-            Some(ClassName::Part | ClassName::MeshPart)
+            Some(ClassName::Part | ClassName::MeshPart | ClassName::Seat)
         );
         id == world.replicated_storage()
             || (is_group && is_saved(world, id))
@@ -415,7 +425,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
 /// Checkpoint goes. `None` for anything else.
 pub fn top_of(world: &World, id: Option<InstanceId>) -> Option<Vector3> {
     let instance = world.get(id?)?;
-    if !matches!(instance.class(), ClassName::Part | ClassName::MeshPart) {
+    if !instance.class().is_base_part() {
         return None;
     }
     let position = instance.property("Position")?.as_vector3()?;

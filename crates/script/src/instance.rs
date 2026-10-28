@@ -283,8 +283,7 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
             crate::attachment::set(lua, id, key, value)
         }
         key if crate::physical::COMPUTED.contains(&key)
-            && class
-                .is_some_and(|class| matches!(class, ClassName::Part | ClassName::MeshPart)) =>
+            && class.is_some_and(|class| class.is_base_part()) =>
         {
             Err(mlua::Error::runtime(format!(
                 "{key} is read-only: it comes from the part's size, shape and physical properties"
@@ -294,6 +293,9 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
             Err(mlua::Error::runtime(format!(
                 "{key} is read-only: it's where the constraint's attachments are now"
             )))
+        }
+        "Occupant" if class == Some(ClassName::Seat) => {
+            Err(mlua::Error::runtime(crate::seat::OCCUPANT_READ_ONLY))
         }
         "CurrentState"
             if world(lua)?

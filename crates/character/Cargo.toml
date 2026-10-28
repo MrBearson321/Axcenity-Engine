@@ -7,6 +7,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+axcenity-anim.workspace = true
 axcenity-assets.workspace = true
 axcenity-core.workspace = true
 axcenity-physics.workspace = true

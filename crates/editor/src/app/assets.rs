@@ -162,9 +162,9 @@ impl EditorApp {
     /// (adding an Animator if it has none), as one undo step.
     fn drop_controller(&mut self, entry: &AssetEntry, spot: Spot) {
         let part = spot.part.filter(|&part| {
-            self.world.get(part).is_some_and(|instance| {
-                matches!(instance.class(), ClassName::Part | ClassName::MeshPart)
-            })
+            self.world
+                .get(part)
+                .is_some_and(|instance| instance.class().is_base_part())
         });
         let Some(part) = part else {
             self.output
@@ -684,9 +684,7 @@ fn prefab_diff(
 }
 
 fn is_part(world: &World, id: InstanceId) -> bool {
-    world
-        .get(id)
-        .is_some_and(|i| matches!(i.class(), ClassName::Part | ClassName::MeshPart))
+    world.get(id).is_some_and(|i| i.class().is_base_part())
 }
 
 /// True if the selection has something [`can_be_prefab`].

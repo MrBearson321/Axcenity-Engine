@@ -316,7 +316,7 @@ fn emitter_position(world: &World, sound: InstanceId, fallback: [f32; 3]) -> [f3
         };
         if matches!(
             instance.class(),
-            ClassName::Part | ClassName::MeshPart | ClassName::Terrain
+            ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::Terrain
         ) && instance.property("Position").is_some()
         {
             return vector(instance);

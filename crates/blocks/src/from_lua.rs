@@ -377,6 +377,12 @@ impl<'a> Converter<'a> {
         let [handler] = args.as_slice() else {
             return None;
         };
+        if let ExprKind::Method(object, method, args) = &signal.kind
+            && method == "GetPropertyChangedSignal"
+            && matches!(args.as_slice(), [Expr { kind: ExprKind::Str(name), .. }] if name == "Occupant")
+        {
+            return self.seat_occupied(object, handler);
+        }
         let ExprKind::Field(object, event) = &signal.kind else {
             return None;
         };
@@ -543,6 +549,33 @@ impl<'a> Converter<'a> {
     /// A handler of one parameter whose whole body is `if param == "name"
     /// then ... end`, as the blocks for events that name something write
     /// it: the name, and the branch as blocks, which mustn't use the parameter.
+    /// `seat:GetPropertyChangedSignal("Occupant"):Connect(function() if
+    /// seat.Occupant then ... end end)`: when someone sits on the seat.
+    fn seat_occupied(&self, object: &Expr, handler: &Expr) -> Option<Block> {
+        let seat = self.target(object)?;
+        let function = self.handler(handler, 0)?;
+        let [
+            Stat {
+                kind: StatKind::If { arms, otherwise },
+                ..
+            },
+        ] = function.body.as_slice()
+        else {
+            return None;
+        };
+        let ([(condition, inner)], None) = (arms.as_slice(), otherwise) else {
+            return None;
+        };
+        let ExprKind::Field(checked, field) = &condition.kind else {
+            return None;
+        };
+        if field != "Occupant" || self.target(checked)? != seat {
+            return None;
+        }
+        let body = self.body(inner, Scope::default());
+        Some(Block::new(BlockKind::WhenSeatOccupied { seat, body }))
+    }
+
     fn one_name_branch(&self, handler: &Expr) -> Option<(String, Vec<Block>)> {
         let function = self.handler(handler, 1)?;
         let param = function.params.first()?;
@@ -1491,6 +1524,9 @@ impl<'a> Converter<'a> {
                 agent: path,
                 velocity: converted(),
             },
+            "Sit" if matches!(value.kind, ExprKind::False) => {
+                BlockKind::LeaveSeat { controller: path }
+            }
             "AssemblyLinearVelocity" => BlockKind::SetPartVelocity {
                 target: path,
                 velocity: converted(),

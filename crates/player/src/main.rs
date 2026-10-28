@@ -306,6 +306,19 @@ fn apply_audio(
     }
 }
 
+/// Fires `Seated` on each controller whose character just sat down or
+/// stood up.
+fn fire_seated(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut Controllers) {
+    let changes: Vec<_> = characters
+        .take_seat_changes()
+        .into_iter()
+        .map(|change| (change.controller, change.seated, change.seat))
+        .collect();
+    if !changes.is_empty() {
+        scripts.fire_seated(world, &changes);
+    }
+}
+
 /// Fires `PlayerSensed` on each agent that has just started seeing or
 /// hearing the player character, with the sense's name.
 fn fire_sensed(scripts: &mut ScriptRuntime, world: &mut World, agents: &mut Agents) {
@@ -1091,6 +1104,7 @@ impl ApplicationHandler for App {
                 self.zoom = 0.0;
                 self.characters
                     .step(&mut self.world, &self.assets, motion, seconds);
+                fire_seated(&mut self.scripts, &mut self.world, &mut self.characters);
                 // Then navigation agents, toward their destinations.
                 self.agents.step(&mut self.world, &self.assets, seconds);
                 for warning in self.agents.take_warnings() {
@@ -1325,3 +1339,5 @@ mod accessibility_tests;
 
 #[cfg(test)]
 mod physics_tests;
+#[cfg(test)]
+mod seat_tests;

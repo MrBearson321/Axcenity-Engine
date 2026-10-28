@@ -23,6 +23,10 @@ use axcenity_core::input::{InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_physics::{GRAVITY, QueryParams, RayHit, gravity, raycast};
 
+mod seat;
+
+pub use seat::SeatChange;
+
 /// Gap left between the character and a wall or ceiling, in studs. Ground
 /// probes also start this far above the surface they look for.
 const SKIN: f32 = 0.05;
@@ -182,6 +186,8 @@ enum Mode {
     Run,
     /// Walks, crouched.
     Crouch,
+    /// Sits on a Seat (see `seat`). Only the controller sets it.
+    Seated,
     /// Any other name: the controller doesn't move the character.
     Custom,
 }
@@ -202,6 +208,8 @@ impl Mode {
             Some(Mode::Run)
         } else if name.eq_ignore_ascii_case("crouch") {
             Some(Mode::Crouch)
+        } else if name.eq_ignore_ascii_case("seated") {
+            Some(Mode::Seated)
         } else {
             Some(Mode::Custom)
         }
@@ -261,6 +269,9 @@ pub struct Controllers {
     /// The built-in `Movement` each controller last had, put back when a
     /// custom mode is cleared. Not saved.
     built_in: BTreeMap<InstanceId, String>,
+    /// The controllers whose characters sit on a seat.
+    seated: BTreeMap<InstanceId, seat::Seated>,
+    seat_changes: Vec<SeatChange>,
     /// The controller that last received input, if it is still in the world.
     active: Option<InstanceId>,
 }
@@ -286,7 +297,9 @@ impl Controllers {
         self.falls.retain(|id, _| world.get(*id).is_some());
         self.crouches.retain(|id, _| world.get(*id).is_some());
         self.built_in.retain(|id, _| world.get(*id).is_some());
-        let Some(id) = active_id(world) else {
+        let active = active_id(world);
+        self.update_seats(world, assets, active, input.jump);
+        let Some(id) = active else {
             self.active = None;
             return None;
         };
@@ -297,6 +310,10 @@ impl Controllers {
         let orbit = *orbit;
         if eye == Eye::Follow {
             zoom(world, id, input.zoom);
+        }
+        if self.seated.contains_key(&id) {
+            // The seat holds it; the camera still turns and zooms.
+            return self.view(world);
         }
         if self.mode(world, id) == Mode::Custom {
             // Scripts and blocks move the character. A jump asked for now is
@@ -343,13 +360,15 @@ impl Controllers {
             .cloned();
         match Mode::parse(value.as_ref()) {
             Some(Mode::Custom) => Mode::Custom,
-            Some(mode) => {
+            // "Seated" off a seat (stood up, or set by a script) goes back
+            // to the built-in mode, as "" does.
+            Some(mode) if mode != Mode::Seated => {
                 if let Some(Value::String(name)) = value {
                     self.built_in.insert(id, name);
                 }
                 mode
             }
-            None => {
+            _ => {
                 let name = self
                     .built_in
                     .get(&id)
@@ -380,9 +399,13 @@ impl Controllers {
     /// Anchors every part a character controller moves, so the physics
     /// step does not treat the character as a dynamic body. Parts that are
     /// already anchored are left alone. Other parts, gravity, and friction
-    /// are not touched.
+    /// are not touched. A sitting character's parts stay unanchored, welded
+    /// to its seat.
     pub fn keep_kinematic(&self, world: &mut World) {
         for id in controllers(world) {
+            if self.seated.contains_key(&id) {
+                continue;
+            }
             for part in parts_of(world, id) {
                 let anchored = world
                     .get(part)
@@ -456,19 +479,19 @@ pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
     };
     let character = matches!(
         instance.class(),
-        ClassName::Model | ClassName::Part | ClassName::MeshPart
+        ClassName::Model | ClassName::Part | ClassName::MeshPart | ClassName::Seat
     );
     if !character {
         return Vec::new();
     }
     let mut parts = Vec::new();
-    if matches!(instance.class(), ClassName::Part | ClassName::MeshPart) {
+    if instance.class().is_base_part() {
         parts.push(parent);
     }
     for id in world.descendants(parent) {
         if world
             .get(id)
-            .is_some_and(|child| matches!(child.class(), ClassName::Part | ClassName::MeshPart))
+            .is_some_and(|child| child.class().is_base_part())
         {
             parts.push(id);
         }

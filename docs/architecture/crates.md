@@ -14,7 +14,7 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 | `scene` | Instance tree → draw list (`build_draw_list`, including terrain chunks and UI layout), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `assets`, `render`, `terrain`, `ui` |
 | `terrain` | terrain algorithms over `core::TerrainData`: brushes, generation, erosion, chunk meshes, file codecs | `core` |
 | `physics` | `rapier3d` integration | `core`, `assets` |
-| `character` | kinematic third-person walk and run; queries physics, never the reverse | `core`, `assets`, `physics` |
+| `character` | kinematic third-person walk and run, and seats (which play an Animator's `Sit` state, read with `anim`); queries physics, never the reverse | `core`, `anim`, `assets`, `physics` |
 | `nav` | the navigation mesh, built from `physics::solids`, paths across it, the `NavigationAgent` stepper, and behavior trees (checked and run, read from their files with `serde_json`); neither `physics` nor `character` may depend on it | `core`, `assets`, `physics`, `character` |
 | `save` | save slots and checkpoints: `Saves` (player data, settings, the active checkpoint), world state snapshots and their restore, slot files in the player's data for the game (`game_folder`); never the project folder | `core` |
 | `script` | Luau (`mlua`), sandbox, scheduler, engine API, TweenService (eased by `anim`'s curves), SaveService (over `save`; places the player character found by `character`), UserGameSettings (holds `render`'s plain `GraphicsSettings` and `Capabilities` data, nothing else of it) | `anim`, `audio`, `character`, `core`, `physics`, `assets`, `render`, `save` (and `glam` for CFrame math) |

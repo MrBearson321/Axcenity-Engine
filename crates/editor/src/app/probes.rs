@@ -82,7 +82,7 @@ impl EditorApp {
                     return None;
                 }
                 let part = self.world.get(probe.parent()?)?;
-                if !matches!(part.class(), ClassName::Part | ClassName::MeshPart) {
+                if !part.class().is_base_part() {
                     return None;
                 }
                 let bake = probe

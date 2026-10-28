@@ -993,3 +993,5 @@ fn holding_run_runs_a_walking_character() {
     let ran = pos(&world, body);
     assert!((ran.z + 32.0).abs() < 1e-3, "{ran:?}");
 }
+
+mod seat;

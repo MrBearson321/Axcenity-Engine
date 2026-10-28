@@ -1682,6 +1682,15 @@ const PIVOT_TO_DOC: &str = "Moves and turns it so its pivot is at `target`. A Mo
 
 pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
     (
+        ClassName::Seat,
+        Function {
+            name: "Sit",
+            doc: "Sits `controller`'s character on the seat at its next step, even if the seat is Disabled. Whoever sat there stands up, and the character leaves any other seat.",
+            params: &[("controller", "Instance")],
+            returns: "()",
+        },
+    ),
+    (
         ClassName::Part,
         Function {
             name: "GetConnectedParts",

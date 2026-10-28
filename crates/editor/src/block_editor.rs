@@ -286,6 +286,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetDestination { .. }
         | BlockKind::SetVelocity { .. }
         | BlockKind::WhenAgentSenses { .. }
+        | BlockKind::WhenSeatOccupied { .. }
+        | BlockKind::LeaveSeat { .. }
         | BlockKind::SetCameraType { .. }
         | BlockKind::PointCameraAt { .. }
         | BlockKind::ShakeCamera { .. } => Category::Motion,
@@ -368,6 +370,9 @@ enum Filter {
     /// NavigationAgents.
     Agents,
     Checkpoints,
+    Seats,
+    /// ThirdPersonControllers and FirstPersonControllers.
+    Controllers,
     Any,
     /// Anything, or the Workspace itself (an empty path): where children are.
     Places,
@@ -376,7 +381,7 @@ enum Filter {
 impl Filter {
     fn matches(self, class: ClassName) -> bool {
         match self {
-            Filter::Parts => matches!(class, ClassName::Part | ClassName::MeshPart),
+            Filter::Parts => class.is_base_part(),
             Filter::Sounds => class == ClassName::Sound,
             Filter::Buttons => class == ClassName::TextButton,
             Filter::Texts => {
@@ -392,6 +397,8 @@ impl Filter {
             Filter::Animations => class == ClassName::Animation,
             Filter::Agents => class == ClassName::NavigationAgent,
             Filter::Checkpoints => class == ClassName::Checkpoint,
+            Filter::Seats => class == ClassName::Seat,
+            Filter::Controllers => class.is_character_controller(),
             Filter::Gui => matches!(
                 class,
                 ClassName::ScreenGui
@@ -429,6 +436,8 @@ impl Filter {
             Filter::Animations => "Model.Animation",
             Filter::Agents => "Model.NavigationAgent",
             Filter::Checkpoints => "Checkpoint",
+            Filter::Seats => "Seat",
+            Filter::Controllers => "Character.ThirdPersonController",
         }
     }
 }
@@ -890,6 +899,15 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Object(agent, Filter::Agents),
             label("senses the player by"),
             Part::Choice(sense, &axcenity_blocks::SENSES),
+        ])],
+        BlockKind::WhenSeatOccupied { seat, .. } => vec![Row(vec![
+            label("when someone sits on"),
+            Object(seat, Filter::Seats),
+        ])],
+        BlockKind::LeaveSeat { controller } => vec![Row(vec![
+            label("make"),
+            Object(controller, Filter::Controllers),
+            label("leave the seat"),
         ])],
         BlockKind::SetDestination { agent, position } => vec![Row(vec![
             label("walk"),

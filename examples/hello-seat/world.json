@@ -1,0 +1,116 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Position": [0, -0.5, 0],
+          "Size": [120, 1, 60],
+          "Color": [0.35, 0.37, 0.4],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Character",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Position": [0, 2.5, 0],
+              "Size": [2, 5, 1],
+              "Color": [0.2, 0.55, 0.9]
+            }
+          },
+          {
+            "class": "ThirdPersonController",
+            "name": "ThirdPersonController"
+          }
+        ]
+      },
+      {
+        "class": "Seat",
+        "name": "Chair",
+        "properties": {
+          "Position": [0, 1, -10],
+          "Orientation": [0, 180, 0],
+          "Size": [2, 2, 2],
+          "Color": [0.55, 0.35, 0.2],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Part",
+        "name": "ChairBack",
+        "properties": {
+          "Position": [0, 3, -11.25],
+          "Size": [2, 6, 0.5],
+          "Color": [0.55, 0.35, 0.2],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Seat",
+        "name": "Bench",
+        "properties": {
+          "Position": [12, 0.75, -10],
+          "Orientation": [0, 180, 0],
+          "Size": [6, 1.5, 2],
+          "Color": [0.5, 0.5, 0.52],
+          "Anchored": true,
+          "Disabled": true
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Cart",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Base",
+            "properties": {
+              "Position": [-14, 0.5, 10],
+              "Size": [6, 1, 4],
+              "Color": [0.8, 0.25, 0.2]
+            },
+            "children": [
+              {
+                "class": "Attachment",
+                "name": "Middle"
+              },
+              {
+                "class": "WeldConstraint",
+                "name": "SeatWeld",
+                "properties": {
+                  "Part0": ["Workspace", "Cart", "Base"],
+                  "Part1": ["Workspace", "Cart", "Seat"]
+                }
+              },
+              {
+                "class": "LinearVelocity",
+                "name": "Drive",
+                "properties": {
+                  "Attachment0": ["Workspace", "Cart", "Base", "Middle"],
+                  "VectorVelocity": [-6, 0, 0],
+                  "Enabled": false
+                }
+              }
+            ]
+          },
+          {
+            "class": "Seat",
+            "name": "Seat",
+            "properties": {
+              "Position": [-14, 1.5, 10],
+              "Size": [2, 1, 2],
+              "Color": [0.9, 0.85, 0.75]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

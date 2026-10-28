@@ -1887,6 +1887,31 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "0 to 1: how much of WalkSpeed or RunSpeed the character keeps while crouched.",
     ),
     (
+        ClassName::ThirdPersonController,
+        "Sit",
+        "True while the character sits on a Seat (its Movement reads \"Seated\"). Set it false to stand the character up a little in front of the seat, as Jump does. Setting it true does nothing; use `seat:Sit(controller)`.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "Sit",
+        "True while the character sits on a Seat (its Movement reads \"Seated\"). Set it false to stand the character up a little in front of the seat, as Jump does. Setting it true does nothing; use `seat:Sit(controller)`.",
+    ),
+    (
+        ClassName::Seat,
+        "Occupant",
+        "The character controller sitting on the seat, or nil. Read-only: `seat:Sit(controller)` sits one, and `controller.Sit = false` stands it up.",
+    ),
+    (
+        ClassName::Seat,
+        "Disabled",
+        "If true, characters that touch the seat don't sit on it. `seat:Sit(controller)` still works.",
+    ),
+    (
+        ClassName::Seat,
+        "SeatOffset",
+        "An Attachment where a sitting character's feet go, or nil for the middle of the seat's top face.",
+    ),
+    (
         ClassName::FirstPersonController,
         "EyeHeight",
         "How far above the character's feet its eyes are, in studs. The camera sits there during Play.",
@@ -3286,6 +3311,16 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires when a playing clip passes one of its animation events. The handler gets the event's name.",
     ),
     (
+        ClassName::ThirdPersonController,
+        "Seated",
+        "Fires when the character sits down (true and the Seat) or stands up (false and the Seat it left).",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "Seated",
+        "Fires when the character sits down (true and the Seat) or stands up (false and the Seat it left).",
+    ),
+    (
         ClassName::NavigationAgent,
         "PlayerSensed",
         "Fires when the agent starts seeing or hearing the player character. The handler gets the sense: \"Sight\" or \"Hearing\".",
@@ -3405,6 +3440,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "Holds the LocalScripts (`scripts/*.client.lua`), which run on the player's side."
         }
         ClassName::Part => "A solid shape in the world.",
+        ClassName::Seat => {
+            "A Part that characters sit on. A character that touches it while it's empty and not Disabled sits down: it's welded to the seat (so it rides along on a moving cart), plays its Animator's `Sit` state if there is one, and ignores move keys. Jump stands it up in front of the seat. Everything a Part has, and Occupant, Disabled and SeatOffset."
+        }
         ClassName::MeshPart => {
             "A solid 3D model imported from a glTF or FBX file, drawn with the file's own materials (or its SurfaceAppearances'). It collides as the model's convex hull."
         }

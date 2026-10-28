@@ -1030,7 +1030,7 @@ fn is_model_file(path: &str) -> bool {
 }
 
 /// Reads the state machine file at `path`.
-fn read_state_machine(assets: &Assets, path: &str) -> Result<StateMachineFile, String> {
+pub fn read_state_machine(assets: &Assets, path: &str) -> Result<StateMachineFile, String> {
     let bytes = assets.read_file(path)?;
     let text = String::from_utf8(bytes).map_err(|_| "it isn't text".to_owned())?;
     StateMachineFile::from_json(&text).map_err(|err| err.0)

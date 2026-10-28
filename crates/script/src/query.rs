@@ -353,7 +353,7 @@ fn part(lua: &Lua, value: mlua::Value, method: &str) -> mlua::Result<InstanceId>
         .filter(|instance| {
             world
                 .get(instance.0)
-                .is_some_and(|part| matches!(part.class(), ClassName::Part | ClassName::MeshPart))
+                .is_some_and(|part| part.class().is_base_part())
         })
         .map(|instance| instance.0)
         .ok_or_else(|| {

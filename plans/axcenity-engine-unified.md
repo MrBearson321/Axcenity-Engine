@@ -1302,9 +1302,9 @@ Blocks: "when someone sits on", "make … leave the seat".
 
 ### Acceptance criteria
 
-- [ ] Walking into a chair seats the character, and Jump stands it up beside the chair.
-- [ ] A disabled seat ignores touches, and `seat:Sit` from Lua still works on it.
-- [ ] A seat on an unanchored cart carries the sitting character as the cart moves.
+- [x] Walking into a chair seats the character, and Jump stands it up beside the chair.
+- [x] A disabled seat ignores touches, and `seat:Sit` from Lua still works on it.
+- [x] A seat on an unanchored cart carries the sitting character as the cart moves.
 
 ---
 

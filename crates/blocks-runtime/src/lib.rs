@@ -295,6 +295,12 @@ pub enum BlockKind {
         sense: String,
         body: Vec<Block>,
     },
+    /// When a character sits on a Seat: its `Occupant` changes to a
+    /// controller (not to nil).
+    WhenSeatOccupied {
+        seat: String,
+        body: Vec<Block>,
+    },
     /// Loose blocks on the canvas, under no event. They don't run.
     Unattached {
         body: Vec<Block>,
@@ -467,6 +473,11 @@ pub enum BlockKind {
     SetDestination {
         agent: String,
         position: Expression,
+    },
+    /// Stands a character controller's character up from its seat: sets
+    /// its `Sit` to false.
+    LeaveSeat {
+        controller: String,
     },
     /// Moves a NavigationAgent straight at `velocity` studs a second, with
     /// no path: sets its `Velocity`. Zero stops it where it is.
@@ -770,6 +781,7 @@ impl BlockKind {
                 | BlockKind::WhenStateChanged { .. }
                 | BlockKind::WhenAnimationEvent { .. }
                 | BlockKind::WhenAgentSenses { .. }
+                | BlockKind::WhenSeatOccupied { .. }
                 | BlockKind::Unattached { .. }
                 | BlockKind::TopCode { .. }
         )
@@ -808,6 +820,7 @@ impl BlockKind {
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::WhenAgentSenses { body, .. }
+            | BlockKind::WhenSeatOccupied { body, .. }
             | BlockKind::Unattached { body }
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }
@@ -842,6 +855,7 @@ impl BlockKind {
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::WhenAgentSenses { body, .. }
+            | BlockKind::WhenSeatOccupied { body, .. }
             | BlockKind::Unattached { body }
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }

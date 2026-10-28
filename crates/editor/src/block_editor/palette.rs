@@ -206,6 +206,13 @@ pub(super) fn palette(
                 sense: axcenity_blocks::SENSES[0].to_owned(),
                 body: Vec::new(),
             }),
+            B(BlockKind::WhenSeatOccupied {
+                seat: first(Filter::Seats),
+                body: Vec::new(),
+            }),
+            B(BlockKind::LeaveSeat {
+                controller: first(Filter::Controllers),
+            }),
             B(BlockKind::SetCameraType {
                 camera_type: axcenity_blocks::CAMERA_TYPES[0].to_owned(),
             }),

@@ -294,7 +294,7 @@ pub(crate) fn attachment_on_part(world: &World, id: InstanceId) -> Option<(Insta
     }
     let part = attachment.parent()?;
     let class = world.get(part)?.class();
-    if !matches!(class, ClassName::Part | ClassName::MeshPart) {
+    if !class.is_base_part() {
         return None;
     }
     Some((part, local_pose(attachment)?))
@@ -557,16 +557,18 @@ pub fn has_current(class: ClassName, name: &str) -> bool {
 /// `None` unless both are on parts.
 pub fn attachment_points(world: &World, id: InstanceId) -> Option<(Vector3, Vector3)> {
     let constraint = world.get(id)?;
-    let point = |name| {
-        let attachment = constraint.property(name)?.as_instance()?;
-        let (part, local) = attachment_on_part(world, attachment)?;
-        let part = world.get(part)?;
-        let vector = |name| part.property(name).and_then(Value::as_vector3);
-        let pose = Pose::from_parts(
-            to_vec3(vector("Position")?),
-            orientation_to_quat(vector("Orientation")?),
-        );
-        Some(crate::to_vector3((pose * local).translation))
-    };
+    let point = |name| attachment_point(world, constraint.property(name)?.as_instance()?);
     Some((point("Attachment0")?, point("Attachment1")?))
+}
+
+/// Where an Attachment is in the world: `None` unless it's on a part.
+pub fn attachment_point(world: &World, attachment: InstanceId) -> Option<Vector3> {
+    let (part, local) = attachment_on_part(world, attachment)?;
+    let part = world.get(part)?;
+    let vector = |name| part.property(name).and_then(Value::as_vector3);
+    let pose = Pose::from_parts(
+        to_vec3(vector("Position")?),
+        orientation_to_quat(vector("Orientation")?),
+    );
+    Some(crate::to_vector3((pose * local).translation))
 }

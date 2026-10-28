@@ -365,7 +365,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
     let mut sections: Vec<Section> = GROUPS
         .iter()
         .filter(|(title, _)| match *title {
-            "Part" => matches!(instance.class(), ClassName::Part | ClassName::MeshPart),
+            "Part" => instance.class().is_base_part(),
             "Surface" | "Map Settings" => matches!(
                 instance.class(),
                 ClassName::SurfaceAppearance | ClassName::TerrainLayer
@@ -567,6 +567,20 @@ pub fn show(
                                 edit = Some(Edit::Keep(field, keep));
                             }
                             let made = match value {
+                                // Who sits there is up to the game, not the editor.
+                                Value::Instance(target)
+                                    if name == "Occupant"
+                                        && instance.class() == ClassName::Seat =>
+                                {
+                                    let who = target
+                                        .and_then(|target| world.full_name(target))
+                                        .unwrap_or_else(|| "None".to_owned());
+                                    ui.label(who).on_hover_text(
+                                        "The controller sitting here during Play: set by \
+                                         walking into the seat or by seat:Sit(controller).",
+                                    );
+                                    None
+                                }
                                 // An ObjectValue's Value picks from the world.
                                 Value::Instance(target) => object_control(ui, world, id, target)
                                     .map(|target| Edit::Property(name, Value::Instance(target))),

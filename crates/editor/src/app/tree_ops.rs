@@ -106,7 +106,7 @@ impl EditorApp {
             let has_body = self.world.get(parent).is_some_and(|instance| {
                 matches!(
                     instance.class(),
-                    ClassName::Model | ClassName::Part | ClassName::MeshPart
+                    ClassName::Model | ClassName::Part | ClassName::MeshPart | ClassName::Seat
                 )
             });
             // A character has one controller or the other. One that already
@@ -235,7 +235,7 @@ impl EditorApp {
             let ok = self.world.get(parent).is_some_and(|instance| {
                 matches!(
                     instance.class(),
-                    ClassName::Part | ClassName::MeshPart | ClassName::Model
+                    ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::Model
                 )
             });
             if !ok {
@@ -262,7 +262,7 @@ impl EditorApp {
         let has_body = self.world.get(parent).is_some_and(|instance| {
             matches!(
                 instance.class(),
-                ClassName::Model | ClassName::Part | ClassName::MeshPart
+                ClassName::Model | ClassName::Part | ClassName::MeshPart | ClassName::Seat
             )
         });
         let holder = if has_body {

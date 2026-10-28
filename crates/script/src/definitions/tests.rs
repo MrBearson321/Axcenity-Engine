@@ -56,10 +56,21 @@ fn definitions_are_well_formed() {
 
 #[test]
 fn every_property_has_a_description() {
+    // What a class inherits is described once, for its doc parent.
+    let inherited = |class: ClassName, name: &str| {
+        super::doc_parent(class).is_some_and(|parent| {
+            parent
+                .default_properties()
+                .iter()
+                .any(|(property, _)| *property == name)
+        })
+    };
     let mut in_core = BTreeSet::new();
     for class in ClassName::ALL {
         for (name, _) in class.default_properties() {
-            in_core.insert((class.as_str(), name));
+            if !inherited(class, name) {
+                in_core.insert((class.as_str(), name));
+            }
         }
     }
     let described: BTreeSet<_> = PROPERTY_DOCS
@@ -76,7 +87,14 @@ fn every_property_has_a_description() {
 fn every_event_has_a_description() {
     let in_core: BTreeSet<_> = ClassName::ALL
         .into_iter()
-        .flat_map(|class| class.events().iter().map(move |e| (class.as_str(), *e)))
+        .flat_map(|class| {
+            let parent = super::doc_parent(class).map_or(&[][..], ClassName::events);
+            class
+                .events()
+                .iter()
+                .filter(move |e| !parent.contains(e))
+                .map(move |e| (class.as_str(), *e))
+        })
         .collect();
     let described: BTreeSet<_> = EVENT_DOCS
         .iter()
@@ -270,6 +288,7 @@ fn described_fields_and_methods_exist() {
         ),
         (ClassName::Animator, "Instance.new('Animator')"),
         (ClassName::Part, "Instance.new('Part')"),
+        (ClassName::Seat, "Instance.new('Seat')"),
         (ClassName::MeshPart, "Instance.new('MeshPart')"),
         (ClassName::Model, "Instance.new('Model')"),
         (ClassName::Attachment, "Instance.new('Attachment')"),

@@ -345,6 +345,20 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::SEATS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(
+                            "Insert a Seat: a part a character sits on when it walks into \
+                             it during Play. Jump stands it up.",
+                        )
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
                 for what in Insertable::AGENTS {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui

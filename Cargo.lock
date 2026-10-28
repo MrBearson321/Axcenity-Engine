@@ -603,6 +603,7 @@ dependencies = [
 name = "axcenity-character"
 version = "0.1.0"
 dependencies = [
+ "axcenity-anim",
  "axcenity-assets",
  "axcenity-core",
  "axcenity-physics",

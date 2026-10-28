@@ -104,7 +104,7 @@ pub fn library(lua: &Lua) -> mlua::Result<Table> {
 fn is_part(lua: &Lua, id: InstanceId) -> mlua::Result<bool> {
     let world = world(lua)?;
     let class = world.get(id).ok_or_else(destroyed)?.class();
-    Ok(matches!(class, ClassName::Part | ClassName::MeshPart))
+    Ok(class.is_base_part())
 }
 
 /// The mass of the part's assembly (everything welded to it) as physics
@@ -213,7 +213,7 @@ pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlu
         Ok(LuaInstance(assembly::root_part(&world, this.0)))
     })?;
     let mut methods = Vec::new();
-    for class in [ClassName::Part, ClassName::MeshPart] {
+    for class in [ClassName::Part, ClassName::MeshPart, ClassName::Seat] {
         methods.push((class, "ApplyImpulse", apply_impulse.clone()));
         methods.push((class, "ApplyImpulseAtPosition", apply_at.clone()));
         methods.push((class, "ApplyAngularImpulse", apply_angular.clone()));

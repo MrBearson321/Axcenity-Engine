@@ -1,0 +1,72 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "when_seat_occupied",
+        "seat": "Cart.Seat",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "set_property",
+              "target": "Cart.Base.Drive",
+              "property": "Enabled",
+              "value": {
+                "type": "boolean",
+                "value": true
+              }
+            }
+          },
+          {
+            "id": 3,
+            "kind": {
+              "type": "wait",
+              "seconds": {
+                "type": "number",
+                "value": 3
+              }
+            }
+          },
+          {
+            "id": 4,
+            "kind": {
+              "type": "set_property",
+              "target": "Cart.Base.Drive",
+              "property": "Enabled",
+              "value": {
+                "type": "boolean",
+                "value": false
+              }
+            }
+          },
+          {
+            "id": 5,
+            "kind": {
+              "type": "leave_seat",
+              "controller": "Character.ThirdPersonController"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "kind": {
+        "type": "when_started",
+        "body": [
+          {
+            "id": 7,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "text",
+                "value": "Walk into the brown chair to sit, Space to stand. B sits on the grey bench, which walking into doesn't. Sit on the red cart for a ride."
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

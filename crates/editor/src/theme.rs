@@ -710,6 +710,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::StarterPlayerScripts => icons::USER_GEAR,
         ClassName::Part => icons::CUBE,
         ClassName::MeshPart => icons::CUBE_TRANSPARENT,
+        ClassName::Seat => icons::CHAIR,
         ClassName::Script => icons::FILE_CODE,
         ClassName::LocalScript => icons::CODE,
         ClassName::ModuleScript => icons::PUZZLE_PIECE,
@@ -823,7 +824,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         mix(Color32::from_rgb(r, g, b), visuals.text_color(), 0.2)
     };
     match class {
-        ClassName::Part | ClassName::MeshPart | ClassName::Model => {
+        ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::Model => {
             pick((120, 160, 240), (40, 90, 190))
         }
         ClassName::Folder => pick((222, 182, 92), (160, 115, 10)),

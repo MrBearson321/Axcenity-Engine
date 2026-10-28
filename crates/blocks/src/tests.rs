@@ -51,6 +51,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenStateChanged { .. }
         | BlockKind::WhenAnimationEvent { .. }
         | BlockKind::WhenAgentSenses { .. }
+        | BlockKind::WhenSeatOccupied { .. }
         | BlockKind::Unattached { .. }
         | BlockKind::TopCode { .. } => return None,
         BlockKind::Wait { .. } => 0,
@@ -122,9 +123,10 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::ForEachPartTouching { .. } => 66,
         BlockKind::SetClockTime { .. } => 67,
         BlockKind::SetAtmosphere { .. } => 68,
+        BlockKind::LeaveSeat { .. } => 69,
     })
 }
-const STATEMENT_COUNT: usize = 69;
+const STATEMENT_COUNT: usize = 70;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -446,6 +448,12 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
             "workspace.Guard.NavigationAgent.Destination = Vector3.new(20, 0, -5)",
         ),
         (
+            BlockKind::LeaveSeat {
+                controller: "Character.ThirdPersonController".to_owned(),
+            },
+            "workspace.Character.ThirdPersonController.Sit = false",
+        ),
+        (
             BlockKind::SetVelocity {
                 agent: "Guard.NavigationAgent".to_owned(),
                 velocity: Expression::Vector3 {
@@ -764,6 +772,13 @@ fn translation_covers_every_event_block() {
                 body: quiet(37),
             },
         ),
+        block(
+            44,
+            BlockKind::WhenSeatOccupied {
+                seat: "Chair".to_owned(),
+                body: quiet(45),
+            },
+        ),
         block(38, BlockKind::BeforePhysics { body: quiet(39) }),
         block(40, BlockKind::BeforeRender { body: quiet(41) }),
         block(
@@ -794,6 +809,8 @@ fn translation_covers_every_event_block() {
         "workspace.Settings.Volume.ValueChanged:Connect(function()",
         "workspace.Guard.NavigationAgent.PlayerSensed:Connect(function(sense)",
         "    if sense == \"Sight\" then",
+        "workspace.Chair:GetPropertyChangedSignal(\"Occupant\"):Connect(function()",
+        "    if workspace.Chair.Occupant then",
         "RunService.Stepped:Connect(function(time, deltaTime)",
         "RunService.RenderStepped:Connect(function(deltaTime)",
         "game.ReplicatedStorage.Scored.Event:Connect(function()",
@@ -801,7 +818,7 @@ fn translation_covers_every_event_block() {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 14, "{source}");
+    assert_eq!(source.matches("do return end").count(), 15, "{source}");
 }
 
 #[test]
@@ -1624,6 +1641,13 @@ fn every_block_script() -> BlockScript {
             BlockKind::WhenAgentSenses {
                 agent: "Guard.NavigationAgent".to_owned(),
                 sense: "Hearing".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            16,
+            BlockKind::WhenSeatOccupied {
+                seat: "Cart.Seat".to_owned(),
                 body: body(),
             },
         ),

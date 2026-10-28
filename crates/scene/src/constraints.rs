@@ -93,7 +93,7 @@ fn attachment_pose(world: &World, constraint: &Instance, name: &str) -> Option<(
         return None;
     }
     let part = world.get(attachment.parent()?)?;
-    if !matches!(part.class(), ClassName::Part | ClassName::MeshPart) {
+    if !part.class().is_base_part() {
         return None;
     }
     let vector = |instance: &Instance, name| {

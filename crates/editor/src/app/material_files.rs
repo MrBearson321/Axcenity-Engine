@@ -34,14 +34,14 @@ impl EditorApp {
             let Some(class) = self.world.get(id).map(|instance| instance.class()) else {
                 continue;
             };
-            if !matches!(class, ClassName::Part | ClassName::MeshPart) {
+            if !class.is_base_part() {
                 continue;
             }
             let before = history::snapshot(&self.world, id);
             let _ = self
                 .world
                 .set_property(id, "MaterialVariant", Value::String(path.to_owned()));
-            if class == ClassName::Part {
+            if matches!(class, ClassName::Part | ClassName::Seat) {
                 let _ =
                     self.world
                         .set_property(id, "Color", Value::Color3(Color3::new(1.0, 1.0, 1.0)));

@@ -356,6 +356,15 @@ impl Session {
             }
             self.characters
                 .step(&mut self.world, &self.assets, motion, seconds as f32);
+            let seats: Vec<_> = self
+                .characters
+                .take_seat_changes()
+                .into_iter()
+                .map(|change| (change.controller, change.seated, change.seat))
+                .collect();
+            if !seats.is_empty() {
+                self.scripts.fire_seated(&mut self.world, &seats);
+            }
             // Then navigation agents, toward their destinations.
             self.agents
                 .step(&mut self.world, &self.assets, seconds as f32);

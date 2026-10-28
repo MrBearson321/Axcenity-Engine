@@ -1341,6 +1341,95 @@ declare extern type MeshPart extends Instance with
 	function GetMass(self): number
 end
 
+--- A Part that characters sit on. A character that touches it while it's empty and not Disabled sits down: it's welded to the seat (so it rides along on a moving cart), plays its Animator's `Sit` state if there is one, and ignores move keys. Jump stands it up in front of the seat. Everything a Part has, and Occupant, Disabled and SeatOffset.
+declare extern type Seat extends Instance with
+	--- If true, the part stays where it is. If false, it falls and collides with other parts.
+	Anchored: boolean
+	--- Block, Ball, Cylinder (along X) or Wedge.
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge"
+	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
+	Position: Vector3
+	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
+	Orientation: Vector3
+	--- The part's size in studs along X, Y and Z.
+	Size: Vector3
+	--- The part's color.
+	Color: Color3
+	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
+	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
+	MaterialVariant: string
+	--- From 0 (not metal) to 1 (metal).
+	Metalness: number
+	--- From 0 (mirror-smooth) to 1 (matte).
+	Roughness: number
+	--- If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
+	CastShadow: boolean
+	--- From 0 (as solid as its material) to 1 (invisible).
+	Transparency: number
+	--- If false, other parts pass through it. It still fires Touched. An unanchored part that can't collide falls through the floor.
+	CanCollide: boolean
+	--- If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
+	WindAffected: boolean
+	--- The color the part glows in when Emission is above 0.
+	EmissiveColor: Color3
+	--- How brightly the part glows in EmissiveColor: 0 is no glow, 1 as bright as a white surface in full light, higher values bloom.
+	Emission: number
+	--- Studs one copy of a SurfaceAppearance's textures covers. 0 leaves the shape's own coordinates unscaled.
+	TileSize: number
+	--- The collision group it's in, `"Default"` at first. Parts in two groups set not to collide (the Collision Groups window, or `PhysicsService:CollisionGroupSetCollidable`) pass through each other and don't touch. A name that isn't registered counts as Default.
+	CollisionGroup: string
+	--- If false, scripts' raycasts, shape casts and overlap queries (`workspace:Raycast`, `GetPartsInPart`, ...) pass it by. It still collides.
+	CanQuery: boolean
+	--- If false, it fires no Touched or TouchEnded, and touching it fires neither on other parts. It still collides.
+	CanTouch: boolean
+	--- If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.
+	Massless: boolean
+	--- Its own density, friction, elasticity and their weights (`PhysicalProperties.new(...)`), or nil for its Material's. Read `CurrentPhysicalProperties` for the ones in use.
+	CustomPhysicalProperties: PhysicalProperties?
+	--- How fast the part moves, in studs a second. Physics updates it as the part moves; setting it throws the part. Anchored parts don't move.
+	AssemblyLinearVelocity: Vector3
+	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
+	AssemblyAngularVelocity: Vector3
+	--- The character controller sitting on the seat, or nil. Read-only: `seat:Sit(controller)` sits one, and `controller.Sit = false` stands it up.
+	Occupant: Instance?
+	--- If true, characters that touch the seat don't sit on it. `seat:Sit(controller)` still works.
+	Disabled: boolean
+	--- An Attachment where a sitting character's feet go, or nil for the middle of the seat's top face.
+	SeatOffset: Instance?
+	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
+	CFrame: CFrame
+	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
+	AssemblyMass: number
+	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
+	AssemblyCenterOfMass: Vector3
+	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
+	CurrentPhysicalProperties: PhysicalProperties
+	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
+	Touched: Signal
+	--- Fires when another part stops touching this one: once they've been apart for a few physics steps, or at once when one of them can't touch the other any more (`CanTouch` off, or set not to collide). The handler gets the other part.
+	TouchEnded: Signal
+	[string]: any
+	--- Sits `controller`'s character on the seat at its next step, even if the seat is Disabled. Whoever sat there stands up, and the character leaves any other seat.
+	function Sit(self, controller: Instance): ()
+	--- The part, then the parts welded to it by an enabled WeldConstraint; with `recursive` true, every part in its assembly.
+	function GetConnectedParts(self, recursive: boolean?): {Instance}
+	--- The root of its assembly: an anchored part if there is one, then one that isn't Massless, then the largest. A part alone is its own root.
+	function GetRootPart(self): Instance
+	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
+	function GetPivot(self): CFrame
+	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
+	function PivotTo(self, target: CFrame): ()
+	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
+	function ApplyImpulse(self, impulse: Vector3): ()
+	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
+	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
+	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
+	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
+	function GetMass(self): number
+end
+
 --- Lua code that runs on the server, from a `.server.lua` file.
 declare extern type Script extends Instance with
 	[string]: any
@@ -2503,6 +2592,8 @@ declare extern type ThirdPersonController extends Instance with
 	CrouchHeight: number
 	--- 0 to 1: how much of WalkSpeed or RunSpeed the character keeps while crouched.
 	CrouchSpeedScale: number
+	--- True while the character sits on a Seat (its Movement reads "Seated"). Set it false to stand the character up a little in front of the seat, as Jump does. Setting it true does nothing; use `seat:Sit(controller)`.
+	Sit: boolean
 	--- How far behind the character the camera sits during Play, in studs. The mouse wheel zooms it between CameraMinZoomDistance and CameraMaxZoomDistance and keeps the zoom here.
 	CameraDistance: number
 	--- The closest the mouse wheel zooms the camera, in studs (at least 0.5). Set it to CameraMaxZoomDistance to lock the distance.
@@ -2511,6 +2602,8 @@ declare extern type ThirdPersonController extends Instance with
 	CameraMaxZoomDistance: number
 	--- How far above the character's feet the camera looks, in studs.
 	CameraHeight: number
+	--- Fires when the character sits down (true and the Seat) or stands up (false and the Seat it left).
+	Seated: Signal
 	[string]: any
 end
 
@@ -2536,8 +2629,12 @@ declare extern type FirstPersonController extends Instance with
 	CrouchHeight: number
 	--- 0 to 1: how much of WalkSpeed or RunSpeed the character keeps while crouched.
 	CrouchSpeedScale: number
+	--- True while the character sits on a Seat (its Movement reads "Seated"). Set it false to stand the character up a little in front of the seat, as Jump does. Setting it true does nothing; use `seat:Sit(controller)`.
+	Sit: boolean
 	--- How far above the character's feet its eyes are, in studs. The camera sits there during Play.
 	EyeHeight: number
+	--- Fires when the character sits down (true and the Seat) or stands up (false and the Seat it left).
+	Seated: Signal
 	[string]: any
 end
 
@@ -3065,7 +3162,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.
