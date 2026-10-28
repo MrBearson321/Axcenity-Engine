@@ -1468,6 +1468,8 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         "TextureChannel" => TextureChannel::ALL.iter().map(|c| c.as_str()).collect(),
         "ParticleType" => ParticleType::ALL.iter().map(|t| t.as_str()).collect(),
         "ToneMapping" => ToneMapping::ALL.iter().map(|t| t.as_str()).collect(),
+        // What drives a joint (Phase 36).
+        "ActuatorType" => vec!["None", "Motor", "Servo"],
         _ => {
             ui.label(format!("{}.{}", item.enum_name, item.item));
             return None;

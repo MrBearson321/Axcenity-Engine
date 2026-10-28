@@ -816,6 +816,17 @@ declare extern type EnumRenderPriorityItems with
 	Last: EnumRenderPriority
 end
 
+--- One choice of `Enum.ActuatorType`.
+declare extern type EnumActuatorType extends EnumItem with
+end
+
+--- The choices of `Enum.ActuatorType`.
+declare extern type EnumActuatorTypeItems with
+	None: EnumActuatorType
+	Motor: EnumActuatorType
+	Servo: EnumActuatorType
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -838,6 +849,7 @@ declare extern type EnumLibrary with
 	MouseBehavior: EnumMouseBehaviorItems
 	CameraType: EnumCameraTypeItems
 	RenderPriority: EnumRenderPriorityItems
+	ActuatorType: EnumActuatorTypeItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -2445,6 +2457,239 @@ declare extern type WeldConstraint extends Instance with
 	[string]: any
 end
 
+--- Joins two parts at their attachments so Attachment1's part turns around Attachment0's X axis (its `Axis`), like a door or a wheel. LimitsEnabled keeps it between LowerAngle and UpperAngle; ActuatorType Motor spins it at AngularVelocity, Servo turns it to TargetAngle and holds it. `CurrentAngle` (read-only) is how far it's turned, in degrees.
+declare extern type HingeConstraint extends Instance with
+	--- The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).
+	Attachment0: Instance?
+	--- The Attachment on the second part, held to Attachment0.
+	Attachment1: Instance?
+	--- On (the default), it joins the attachments' parts. Off, it holds nothing.
+	Enabled: boolean
+	--- On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.
+	Visible: boolean
+	--- The color it's drawn in while Visible.
+	Color: Color3
+	--- On, Attachment1 only turns between LowerAngle and UpperAngle.
+	LimitsEnabled: boolean
+	--- While LimitsEnabled is on, the farthest it turns one way, in degrees.
+	LowerAngle: number
+	--- While LimitsEnabled is on, the farthest it turns the other way, in degrees.
+	UpperAngle: number
+	--- What turns it: `Enum.ActuatorType.None` (free), `Motor` (spins at AngularVelocity) or `Servo` (turns to TargetAngle and holds it).
+	ActuatorType: EnumActuatorType | "None" | "Motor" | "Servo"
+	--- With a Motor actuator, how fast it turns Attachment1 around the axis, in radians a second.
+	AngularVelocity: number
+	--- With a Motor actuator, the most torque it turns with. `math.huge` has no limit.
+	MotorMaxTorque: number
+	--- With a Servo actuator, the angle it turns Attachment1 to and holds, in degrees.
+	TargetAngle: number
+	--- With a Servo actuator, the fastest it turns toward TargetAngle, in radians a second.
+	AngularSpeed: number
+	--- With a Servo actuator, the most torque it turns and holds with. Too little, and a heavy load drags it.
+	ServoMaxTorque: number
+	--- How far Attachment1 is turned from Attachment0 around the axis now, in degrees from -180 to 180 (read-only).
+	CurrentAngle: number
+	[string]: any
+end
+
+--- Holds two attachments together and lets them turn any way, like a shoulder or a pendulum. LimitsEnabled keeps Attachment1's axis within UpperAngle of Attachment0's; TwistLimitsEnabled limits twisting around it.
+declare extern type BallSocketConstraint extends Instance with
+	--- The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).
+	Attachment0: Instance?
+	--- The Attachment on the second part, held to Attachment0.
+	Attachment1: Instance?
+	--- On (the default), it joins the attachments' parts. Off, it holds nothing.
+	Enabled: boolean
+	--- On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.
+	Visible: boolean
+	--- The color it's drawn in while Visible.
+	Color: Color3
+	--- On, Attachment1's axis can only lean UpperAngle from Attachment0's.
+	LimitsEnabled: boolean
+	--- While LimitsEnabled is on, how far Attachment1's axis can lean from Attachment0's, in degrees.
+	UpperAngle: number
+	--- On, Attachment1 can only twist around its axis between TwistLowerAngle and TwistUpperAngle.
+	TwistLimitsEnabled: boolean
+	--- While TwistLimitsEnabled is on, the farthest it twists one way, in degrees.
+	TwistLowerAngle: number
+	--- While TwistLimitsEnabled is on, the farthest it twists the other way, in degrees.
+	TwistUpperAngle: number
+	[string]: any
+end
+
+--- Lets Attachment1's part slide along Attachment0's X axis only, like a drawer or a piston. LimitsEnabled keeps it between LowerLimit and UpperLimit; ActuatorType Motor slides it at Velocity, Servo to TargetPosition. `CurrentPosition` (read-only) is how far along it is, in studs.
+declare extern type PrismaticConstraint extends Instance with
+	--- The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).
+	Attachment0: Instance?
+	--- The Attachment on the second part, held to Attachment0.
+	Attachment1: Instance?
+	--- On (the default), it joins the attachments' parts. Off, it holds nothing.
+	Enabled: boolean
+	--- On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.
+	Visible: boolean
+	--- The color it's drawn in while Visible.
+	Color: Color3
+	--- On, Attachment1 only slides between LowerLimit and UpperLimit along the axis.
+	LimitsEnabled: boolean
+	--- While LimitsEnabled is on, the closest Attachment1 can be to Attachment0 along the axis, in studs (negative is behind it).
+	LowerLimit: number
+	--- While LimitsEnabled is on, the farthest Attachment1 can slide along the axis, in studs.
+	UpperLimit: number
+	--- What slides it: `Enum.ActuatorType.None` (free), `Motor` (slides at Velocity) or `Servo` (slides to TargetPosition and holds it).
+	ActuatorType: EnumActuatorType | "None" | "Motor" | "Servo"
+	--- With a Motor ActuatorType, how fast it slides Attachment1 along the axis, in studs a second.
+	Velocity: number
+	--- With a Motor ActuatorType, the most force it slides with. `math.huge` has no limit.
+	MotorMaxForce: number
+	--- With a Servo ActuatorType, how far along the axis it slides Attachment1 to and holds, in studs.
+	TargetPosition: number
+	--- With a Servo ActuatorType, the fastest it slides toward TargetPosition, in studs a second.
+	Speed: number
+	--- With a Servo ActuatorType, the most force it slides and holds with.
+	ServoMaxForce: number
+	--- How far Attachment1 is from Attachment0 along the axis now, in studs (read-only).
+	CurrentPosition: number
+	[string]: any
+end
+
+--- Lets Attachment1's part slide along and turn around Attachment0's X axis, like a drill or a screw. It has a prismatic constraint's limits and actuator for sliding and a hinge's (AngularLimitsEnabled, AngularActuatorType) for turning. `CurrentPosition` and `CurrentAngle` are read-only.
+declare extern type CylindricalConstraint extends Instance with
+	--- The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).
+	Attachment0: Instance?
+	--- The Attachment on the second part, held to Attachment0.
+	Attachment1: Instance?
+	--- On (the default), it joins the attachments' parts. Off, it holds nothing.
+	Enabled: boolean
+	--- On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.
+	Visible: boolean
+	--- The color it's drawn in while Visible.
+	Color: Color3
+	--- On, Attachment1 only slides between LowerLimit and UpperLimit along the axis.
+	LimitsEnabled: boolean
+	--- While LimitsEnabled is on, the closest Attachment1 can be to Attachment0 along the axis, in studs (negative is behind it).
+	LowerLimit: number
+	--- While LimitsEnabled is on, the farthest Attachment1 can slide along the axis, in studs.
+	UpperLimit: number
+	--- What slides it: `Enum.ActuatorType.None` (free), `Motor` (slides at Velocity) or `Servo` (slides to TargetPosition and holds it).
+	ActuatorType: EnumActuatorType | "None" | "Motor" | "Servo"
+	--- With a Motor ActuatorType, how fast it slides Attachment1 along the axis, in studs a second.
+	Velocity: number
+	--- With a Motor ActuatorType, the most force it slides with. `math.huge` has no limit.
+	MotorMaxForce: number
+	--- With a Servo ActuatorType, how far along the axis it slides Attachment1 to and holds, in studs.
+	TargetPosition: number
+	--- With a Servo ActuatorType, the fastest it slides toward TargetPosition, in studs a second.
+	Speed: number
+	--- With a Servo ActuatorType, the most force it slides and holds with.
+	ServoMaxForce: number
+	--- On, it only turns between LowerAngle and UpperAngle.
+	AngularLimitsEnabled: boolean
+	--- While AngularLimitsEnabled is on, the farthest it turns one way, in degrees.
+	LowerAngle: number
+	--- While AngularLimitsEnabled is on, the farthest it turns the other way, in degrees.
+	UpperAngle: number
+	--- What turns it around the axis: `Enum.ActuatorType.None` (free), `Motor` (spins at AngularVelocity) or `Servo` (turns to TargetAngle).
+	AngularActuatorType: EnumActuatorType | "None" | "Motor" | "Servo"
+	--- With a Motor actuator, how fast it turns Attachment1 around the axis, in radians a second.
+	AngularVelocity: number
+	--- With a Motor actuator, the most torque it turns with. `math.huge` has no limit.
+	MotorMaxTorque: number
+	--- With a Servo actuator, the angle it turns Attachment1 to and holds, in degrees.
+	TargetAngle: number
+	--- With a Servo actuator, the fastest it turns toward TargetAngle, in radians a second.
+	AngularSpeed: number
+	--- With a Servo actuator, the most torque it turns and holds with. Too little, and a heavy load drags it.
+	ServoMaxTorque: number
+	--- How far Attachment1 is turned from Attachment0 around the axis now, in degrees from -180 to 180 (read-only).
+	CurrentAngle: number
+	--- How far Attachment1 is from Attachment0 along the axis now, in studs (read-only).
+	CurrentPosition: number
+	[string]: any
+end
+
+--- Pulls or pushes its attachments toward FreeLength apart with Stiffness, slowed by Damping, never shorter than MinLength or longer than MaxLength. `CurrentLength` (read-only) is how far apart they are. Visible draws a coil.
+declare extern type SpringConstraint extends Instance with
+	--- The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).
+	Attachment0: Instance?
+	--- The Attachment on the second part, held to Attachment0.
+	Attachment1: Instance?
+	--- On (the default), it joins the attachments' parts. Off, it holds nothing.
+	Enabled: boolean
+	--- On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.
+	Visible: boolean
+	--- The color it's drawn in while Visible.
+	Color: Color3
+	--- How hard it pulls or pushes toward FreeLength: force per stud it's stretched or squashed.
+	Stiffness: number
+	--- How much it resists moving, so it stops bouncing: force per stud a second of stretching.
+	Damping: number
+	--- The length it settles at with nothing pulling on it, in studs.
+	FreeLength: number
+	--- The shortest it can be squashed, in studs.
+	MinLength: number
+	--- The longest it can be stretched, in studs.
+	MaxLength: number
+	--- How many turns the drawn coil has.
+	Coils: number
+	--- The drawn coil's radius, in studs.
+	Radius: number
+	--- How thick it's drawn while Visible, in studs.
+	Thickness: number
+	--- How far apart the attachments are now, in studs (read-only).
+	CurrentLength: number
+	[string]: any
+end
+
+--- Keeps its attachments at most Length apart; closer, it's slack. With WinchEnabled, a winch reels it toward WinchTarget at WinchSpeed, lifting loads up to WinchForce. `CurrentLength` (read-only) is how far apart they are.
+declare extern type RopeConstraint extends Instance with
+	--- The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).
+	Attachment0: Instance?
+	--- The Attachment on the second part, held to Attachment0.
+	Attachment1: Instance?
+	--- On (the default), it joins the attachments' parts. Off, it holds nothing.
+	Enabled: boolean
+	--- On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.
+	Visible: boolean
+	--- The color it's drawn in while Visible.
+	Color: Color3
+	--- The farthest apart the attachments can be, in studs. Closer, the rope is slack.
+	Length: number
+	--- On, a winch reels the rope in or out toward WinchTarget, starting from Length.
+	WinchEnabled: boolean
+	--- The length the winch reels the rope to, in studs.
+	WinchTarget: number
+	--- How fast the winch reels, in studs a second.
+	WinchSpeed: number
+	--- The most the winch pulls with: a heavier load stops it reeling in (it still holds).
+	WinchForce: number
+	--- How thick it's drawn while Visible, in studs.
+	Thickness: number
+	--- How far apart the attachments are now, in studs (read-only).
+	CurrentLength: number
+	[string]: any
+end
+
+--- Keeps its attachments exactly Length apart, letting them turn freely. `CurrentLength` (read-only) is how far apart they are.
+declare extern type RodConstraint extends Instance with
+	--- The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).
+	Attachment0: Instance?
+	--- The Attachment on the second part, held to Attachment0.
+	Attachment1: Instance?
+	--- On (the default), it joins the attachments' parts. Off, it holds nothing.
+	Enabled: boolean
+	--- On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.
+	Visible: boolean
+	--- The color it's drawn in while Visible.
+	Color: Color3
+	--- How far apart the attachments are held, in studs.
+	Length: number
+	--- How thick it's drawn while Visible, in studs.
+	Thickness: number
+	--- How far apart the attachments are now, in studs (read-only).
+	CurrentLength: number
+	[string]: any
+end
+
 --- Holds one whole number in Value (other numbers are rounded). Its `Changed` fires with the new value.
 declare extern type IntValue extends Instance with
 	--- The whole number it holds; others are rounded. 0 by default.
@@ -2521,7 +2766,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

@@ -3,7 +3,7 @@
 use std::fmt;
 
 use crate::enums::{Material, PartType, ParticleType, TextureChannel, ToneMapping};
-use crate::value::{CFrame, Color3, UDim2, Value, Vector2, Vector3};
+use crate::value::{CFrame, Color3, EnumItem, UDim2, Value, Vector2, Vector3};
 
 /// Events every Instance has, whatever its class. `Changed` fires with the
 /// name of a property that got a new value, `ChildAdded` and `ChildRemoved`
@@ -157,6 +157,26 @@ pub enum ClassName {
     /// Holds `Part0` and `Part1` together where they were when it was made
     /// or enabled. Welded unanchored parts move as one body: an assembly.
     WeldConstraint,
+    /// Lets `Attachment1`'s part turn around `Attachment0`'s X axis (its
+    /// `Axis`), within limits, and turns it with a motor or a servo.
+    HingeConstraint,
+    /// Holds the two attachments together and lets them turn freely, within
+    /// a cone and a twist when limited.
+    BallSocketConstraint,
+    /// Lets the parts slide along `Attachment0`'s X axis only, within limits,
+    /// and slides them with a motor or a servo.
+    PrismaticConstraint,
+    /// Lets the parts slide along, and turn around, `Attachment0`'s X axis,
+    /// each with its own limits, motor or servo.
+    CylindricalConstraint,
+    /// Pulls or pushes the attachments toward `FreeLength` apart, kept between
+    /// `MinLength` and `MaxLength`.
+    SpringConstraint,
+    /// Keeps the attachments at most `Length` apart, and reels the rope in or
+    /// out with a winch.
+    RopeConstraint,
+    /// Keeps the attachments exactly `Length` apart; they turn freely.
+    RodConstraint,
     IntValue,
     NumberValue,
     StringValue,
@@ -168,7 +188,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 60] = [
+    pub const ALL: [ClassName; 67] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -221,6 +241,13 @@ impl ClassName {
         ClassName::Camera,
         ClassName::Attachment,
         ClassName::WeldConstraint,
+        ClassName::HingeConstraint,
+        ClassName::BallSocketConstraint,
+        ClassName::PrismaticConstraint,
+        ClassName::CylindricalConstraint,
+        ClassName::SpringConstraint,
+        ClassName::RopeConstraint,
+        ClassName::RodConstraint,
         ClassName::IntValue,
         ClassName::NumberValue,
         ClassName::StringValue,
@@ -285,6 +312,13 @@ impl ClassName {
             ClassName::Camera => "Camera",
             ClassName::Attachment => "Attachment",
             ClassName::WeldConstraint => "WeldConstraint",
+            ClassName::HingeConstraint => "HingeConstraint",
+            ClassName::BallSocketConstraint => "BallSocketConstraint",
+            ClassName::PrismaticConstraint => "PrismaticConstraint",
+            ClassName::CylindricalConstraint => "CylindricalConstraint",
+            ClassName::SpringConstraint => "SpringConstraint",
+            ClassName::RopeConstraint => "RopeConstraint",
+            ClassName::RodConstraint => "RodConstraint",
             ClassName::IntValue => "IntValue",
             ClassName::NumberValue => "NumberValue",
             ClassName::StringValue => "StringValue",
@@ -322,6 +356,7 @@ impl ClassName {
             ClassName::TextButton => &["GuiButton", "GuiObject", "GuiBase2d"],
             ClassName::ScreenGui | ClassName::BillboardGui => LAYER,
             ClassName::PointLight | ClassName::SpotLight => &["Light"],
+            class if class.is_joint() => &["Constraint"],
             class if class.is_value_object() => &["ValueBase"],
             class if class.is_screen_element() => GUI,
             _ => &[],
@@ -338,6 +373,22 @@ impl ClassName {
         matches!(
             self,
             ClassName::ThirdPersonController | ClassName::FirstPersonController
+        )
+    }
+
+    /// A constraint between two Attachments that physics turns into a joint
+    /// (Phase 36): a hinge, ball socket, prismatic, cylindrical, spring,
+    /// rope or rod.
+    pub fn is_joint(self) -> bool {
+        matches!(
+            self,
+            ClassName::HingeConstraint
+                | ClassName::BallSocketConstraint
+                | ClassName::PrismaticConstraint
+                | ClassName::CylindricalConstraint
+                | ClassName::SpringConstraint
+                | ClassName::RopeConstraint
+                | ClassName::RodConstraint
         )
     }
 
@@ -1137,6 +1188,93 @@ impl ClassName {
                 // where they are then.
                 ("Enabled", Value::Bool(true)),
             ],
+            ClassName::HingeConstraint => {
+                let mut properties = joint_properties();
+                properties.extend([
+                    // Degrees `Attachment1` may turn from `Attachment0`
+                    // around the axis, while LimitsEnabled is on.
+                    ("LimitsEnabled", Value::Bool(false)),
+                    ("LowerAngle", Value::Number(-45.0)),
+                    ("UpperAngle", Value::Number(45.0)),
+                ]);
+                properties.extend(turn_actuator("ActuatorType"));
+                properties
+            }
+            ClassName::BallSocketConstraint => {
+                let mut properties = joint_properties();
+                properties.extend([
+                    // How far, in degrees, Attachment1's axis may lean from
+                    // Attachment0's, while LimitsEnabled is on.
+                    ("LimitsEnabled", Value::Bool(false)),
+                    ("UpperAngle", Value::Number(45.0)),
+                    // How far, in degrees, it may twist around its axis,
+                    // while TwistLimitsEnabled is on.
+                    ("TwistLimitsEnabled", Value::Bool(false)),
+                    ("TwistLowerAngle", Value::Number(-45.0)),
+                    ("TwistUpperAngle", Value::Number(45.0)),
+                ]);
+                properties
+            }
+            ClassName::PrismaticConstraint => {
+                let mut properties = joint_properties();
+                properties.extend(slide_actuator());
+                properties
+            }
+            ClassName::CylindricalConstraint => {
+                let mut properties = joint_properties();
+                properties.extend(slide_actuator());
+                properties.extend([
+                    ("AngularLimitsEnabled", Value::Bool(false)),
+                    ("LowerAngle", Value::Number(-45.0)),
+                    ("UpperAngle", Value::Number(45.0)),
+                ]);
+                properties.extend(turn_actuator("AngularActuatorType"));
+                properties
+            }
+            ClassName::SpringConstraint => {
+                let mut properties = joint_properties();
+                properties.extend([
+                    // Force per stud it's stretched or squashed from
+                    // FreeLength, and force per stud a second of stretching.
+                    ("Stiffness", Value::Number(1000.0)),
+                    ("Damping", Value::Number(20.0)),
+                    // The length it pulls or pushes toward, in studs.
+                    ("FreeLength", Value::Number(5.0)),
+                    // It never gets shorter or longer than these.
+                    ("MinLength", Value::Number(0.0)),
+                    ("MaxLength", Value::Number(1000.0)),
+                    // How the coil is drawn while Visible.
+                    ("Coils", Value::Number(8.0)),
+                    ("Radius", Value::Number(0.4)),
+                    ("Thickness", Value::Number(0.1)),
+                ]);
+                properties
+            }
+            ClassName::RopeConstraint => {
+                let mut properties = joint_properties();
+                properties.extend([
+                    // The farthest the attachments can be apart, in studs.
+                    ("Length", Value::Number(5.0)),
+                    // On, a winch reels the rope toward WinchTarget at
+                    // WinchSpeed studs a second, while lifting needs no
+                    // more than WinchForce.
+                    ("WinchEnabled", Value::Bool(false)),
+                    ("WinchTarget", Value::Number(5.0)),
+                    ("WinchSpeed", Value::Number(2.0)),
+                    ("WinchForce", Value::Number(100_000.0)),
+                    ("Thickness", Value::Number(0.1)),
+                ]);
+                properties
+            }
+            ClassName::RodConstraint => {
+                let mut properties = joint_properties();
+                properties.extend([
+                    // How far apart the attachments are held, in studs.
+                    ("Length", Value::Number(5.0)),
+                    ("Thickness", Value::Number(0.1)),
+                ]);
+                properties
+            }
             ClassName::Camera => vec![
                 // Where the viewpoint is and which way it looks, in degrees
                 // like a Part's (Z, rolling, isn't drawn).
@@ -1221,6 +1359,13 @@ impl ClassName {
             | ClassName::Camera
             | ClassName::Attachment
             | ClassName::WeldConstraint
+            | ClassName::HingeConstraint
+            | ClassName::BallSocketConstraint
+            | ClassName::PrismaticConstraint
+            | ClassName::CylindricalConstraint
+            | ClassName::SpringConstraint
+            | ClassName::RopeConstraint
+            | ClassName::RodConstraint
             | ClassName::IntValue
             | ClassName::NumberValue
             | ClassName::StringValue
@@ -1299,6 +1444,61 @@ fn widget_properties(
         // Layout doesn't change.
         ("Rotation", Value::Number(0.0)),
     ]
+}
+
+/// What every joint constraint has (Phase 36): the Attachments it joins,
+/// whether it acts, and whether the game draws it.
+fn joint_properties() -> Vec<(&'static str, Value)> {
+    vec![
+        ("Attachment0", Value::Instance(None)),
+        ("Attachment1", Value::Instance(None)),
+        // Off, it doesn't hold the parts at all.
+        ("Enabled", Value::Bool(true)),
+        // On, the game draws it (a coil, rope, rod or axle) in `Color`.
+        ("Visible", Value::Bool(false)),
+        ("Color", Value::Color3(Color3::new(0.62, 0.64, 0.68))),
+    ]
+}
+
+/// What turns a hinge, or a cylindrical constraint around its axis:
+/// `actuator` is None, Motor (spins at `AngularVelocity` radians a second,
+/// with at most `MotorMaxTorque`) or Servo (turns to `TargetAngle` degrees
+/// at up to `AngularSpeed` radians a second, with at most `ServoMaxTorque`).
+fn turn_actuator(actuator: &'static str) -> [(&'static str, Value); 6] {
+    [
+        (actuator, actuator_type("None")),
+        ("AngularVelocity", Value::Number(0.0)),
+        ("MotorMaxTorque", Value::Number(100_000.0)),
+        ("TargetAngle", Value::Number(0.0)),
+        ("AngularSpeed", Value::Number(2.0)),
+        ("ServoMaxTorque", Value::Number(100_000.0)),
+    ]
+}
+
+/// What slides a prismatic or cylindrical constraint along its axis: limits
+/// in studs along `Attachment0`'s X axis, and a motor (`Velocity` studs a
+/// second, with at most `MotorMaxForce`) or a servo (to `TargetPosition` at
+/// up to `Speed`, with at most `ServoMaxForce`).
+fn slide_actuator() -> [(&'static str, Value); 9] {
+    [
+        ("LimitsEnabled", Value::Bool(false)),
+        ("LowerLimit", Value::Number(-5.0)),
+        ("UpperLimit", Value::Number(5.0)),
+        ("ActuatorType", actuator_type("None")),
+        ("Velocity", Value::Number(0.0)),
+        ("MotorMaxForce", Value::Number(100_000.0)),
+        ("TargetPosition", Value::Number(0.0)),
+        ("Speed", Value::Number(5.0)),
+        ("ServoMaxForce", Value::Number(100_000.0)),
+    ]
+}
+
+/// An `ActuatorType` item: None, Motor or Servo.
+fn actuator_type(item: &str) -> Value {
+    Value::EnumItem(EnumItem {
+        enum_name: "ActuatorType".to_owned(),
+        item: item.to_owned(),
+    })
 }
 
 /// What both character controllers have: how the character moves, jumps

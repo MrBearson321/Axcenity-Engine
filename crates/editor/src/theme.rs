@@ -752,6 +752,13 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Camera => icons::VIDEO_CAMERA,
         ClassName::Attachment => icons::CROSSHAIR_SIMPLE,
         ClassName::WeldConstraint => icons::LINK_SIMPLE,
+        ClassName::HingeConstraint => icons::DOOR_OPEN,
+        ClassName::BallSocketConstraint => icons::CIRCLE_NOTCH,
+        ClassName::PrismaticConstraint => icons::ARROWS_HORIZONTAL,
+        ClassName::CylindricalConstraint => icons::CYLINDER,
+        ClassName::SpringConstraint => icons::SCRIBBLE_LOOP,
+        ClassName::RopeConstraint => icons::SCRIBBLE,
+        ClassName::RodConstraint => icons::LINE_SEGMENT,
         ClassName::IntValue | ClassName::NumberValue => icons::HASH,
         ClassName::StringValue => icons::TEXT_AA,
         ClassName::BoolValue => icons::TOGGLE_LEFT,
@@ -839,7 +846,13 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::NavigationAgent
         | ClassName::Checkpoint
         | ClassName::Camera => pick((90, 200, 160), (20, 130, 100)),
-        ClassName::Attachment | ClassName::WeldConstraint => pick((200, 170, 120), (130, 95, 40)),
+        class
+            if class == ClassName::Attachment
+                || class == ClassName::WeldConstraint
+                || class.is_joint() =>
+        {
+            pick((200, 170, 120), (130, 95, 40))
+        }
         ClassName::Script => pick((226, 145, 82), (185, 95, 10)),
         ClassName::LocalScript => pick((90, 190, 175), (10, 120, 110)),
         ClassName::ModuleScript => pick((170, 145, 240), (105, 75, 190)),

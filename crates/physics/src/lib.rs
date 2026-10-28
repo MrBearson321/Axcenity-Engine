@@ -32,10 +32,14 @@
 //! rapier body with a collider per part (see [`assembly`]). An anchored part
 //! anchors its whole assembly.
 //!
+//! Hinge, ball socket, prismatic, cylindrical, spring, rope and rod
+//! constraints join two parts' bodies with a rapier joint (see [`joints`]).
+//!
 //! [`cast_ray`] and [`debug_colliders`] read the world the same way the
 //! simulation does, without stepping it or writing back.
 
 pub mod assembly;
+pub mod joints;
 mod mass;
 mod material;
 mod query;
@@ -114,6 +118,8 @@ pub struct Physics {
     touches: Vec<(InstanceId, InstanceId)>,
     /// Where MeshParts' models come from.
     assets: Assets,
+    /// The joint of each enabled constraint between two bodies.
+    joints: BTreeMap<InstanceId, joints::Joint>,
 }
 
 /// One Part's collider on its assembly's rapier body, plus the part's
@@ -284,6 +290,7 @@ impl Physics {
             started: false,
             touches: Vec::new(),
             assets,
+            joints: BTreeMap::new(),
         }
     }
 
@@ -304,6 +311,7 @@ impl Physics {
                 break;
             }
             self.blow(wind);
+            joints::drive(&mut self.rapier, &mut self.joints);
             // The hook only runs for colliders with friction or
             // elasticity weights (see `material`).
             self.rapier.step_with_events(&material::Weighted, &());
@@ -422,6 +430,9 @@ impl Physics {
                 anything_changed = true;
             }
         }
+
+        // Joints go between the bodies just made, so they come after them.
+        anything_changed |= joints::sync(world, &mut self.rapier, &self.parts, &mut self.joints);
 
         // Parts at rest "sleep" and stop being simulated. If a script moved
         // or removed something, a sleeping part may have lost what it was
@@ -823,3 +834,6 @@ mod tests;
 
 #[cfg(test)]
 mod assembly_tests;
+
+#[cfg(test)]
+mod joint_tests;

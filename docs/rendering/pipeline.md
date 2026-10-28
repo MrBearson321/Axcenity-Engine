@@ -24,6 +24,7 @@ How Part properties map onto these (decided in Phase 3):
 - `Transparency` (Phase 35, Parts and MeshParts, 0 to 1) multiplies the preset's (or the model's) opacity by `1 - Transparency`; a fully transparent part isn't drawn at all, but can still be picked in the editor.
 - `EmissiveColor` and `Emission` (Phase 35, Parts) add `EmissiveColor × Emission` to the emissive light on top of any Neon glow, so any material can glow in any color; above 1 it blooms.
 - Metals reflect the sky through environment lighting (stage 4).
+- Joint constraints with `Visible` on (Phase 36, `scene/src/constraints.rs`) are drawn in their `Color` from built-in cylinders: a spring as a coil of 12 pieces a turn (`Coils`, `Radius`, `Thickness`), a rope, rod or prismatic as a cylinder between its attachments, a hinge or cylindrical as a short axle along its axis, a ball socket as a ball. They cast no shadow.
 
 Transparency: opaque items are drawn first. Then see-through items are drawn, farthest to nearest by their centers, with blending on and depth writes off. Overlapping see-through items can still blend in the wrong order; that's accepted for now.
 

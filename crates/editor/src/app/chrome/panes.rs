@@ -758,6 +758,10 @@ impl EditorApp {
                             agent_paths: &agent_paths,
                             poses: self.play.as_ref().map(Session::poses),
                             terrain_brush,
+                            constraint_pick: self
+                                .constraint_tool
+                                .as_ref()
+                                .map(|tool| tool.first.map(|first| first.point)),
                             play_camera: self.play.as_ref().map(|session| {
                                 let (position, orientation) = self.viewport.camera_view();
                                 crate::viewport::PlayCamera {

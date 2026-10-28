@@ -166,6 +166,10 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
     if let Some(value) = crate::physical::computed(lua, id, key)? {
         return Ok(value);
     }
+    // Worked out from where a joint's attachments are now.
+    if let Some(value) = axcenity_physics::joints::current(&world, id, key) {
+        return value.into_lua(lua);
+    }
     let class = instance.class();
     // Live animator state, not a saved property (see `core::AnimatorState`).
     if class == ClassName::Animator && key == "CurrentState" {
@@ -287,6 +291,11 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
                 "{key} is read-only: it comes from the part's size, shape and physical properties"
             )))
         }
+        key if class.is_some_and(|class| axcenity_physics::joints::has_current(class, key)) => {
+            Err(mlua::Error::runtime(format!(
+                "{key} is read-only: it's where the constraint's attachments are now"
+            )))
+        }
         "CurrentState"
             if world(lua)?
                 .get(id)
@@ -305,12 +314,19 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
             set_track_field(lua, id, key, value)
         }
         _ => {
-            let (class, kind) = {
+            let (class, kind, enum_name) = {
                 let world = world(lua)?;
                 let instance = world.get(id).ok_or_else(destroyed)?;
                 let class = instance.class();
                 match instance.property(key) {
-                    Some(current) => (class, current.kind()),
+                    Some(current) => (
+                        class,
+                        current.kind(),
+                        match current {
+                            Value::EnumItem(item) => Some(item.enum_name.clone()),
+                            _ => None,
+                        },
+                    ),
                     None if class.events().contains(&key) || INSTANCE_EVENTS.contains(&key) => {
                         return Err(mlua::Error::runtime(format!(
                             "{class}.{key} is an event and can't be set; use {key}:Connect(function) to react to it"
@@ -319,8 +335,13 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
                     None => return Err(not_a_member(&world, id, key)),
                 }
             };
-            let new_value = value_from_lua(lua, value, kind)
-                .map_err(|message| mlua::Error::runtime(format!("{class}.{key} {message}")))?;
+            // An enum item property (`ActuatorType`) takes an item of its
+            // own enum, or that item's name.
+            let new_value = match enum_name {
+                Some(enum_name) => crate::types::enum_item_from_lua(lua, value, &enum_name),
+                None => value_from_lua(lua, value, kind),
+            }
+            .map_err(|message| mlua::Error::runtime(format!("{class}.{key} {message}")))?;
             if key == "CurrentPage"
                 && class == ClassName::PageLayout
                 && let Value::String(name) = &new_value

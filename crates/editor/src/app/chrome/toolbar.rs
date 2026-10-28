@@ -67,6 +67,9 @@ impl EditorApp {
         if clicks.weld {
             self.weld_selected();
         }
+        if let Some(class) = clicks.constraint {
+            self.pick_constraint_tool(class);
+        }
         if clicks.bake_probes {
             self.bake_probes_asked = true;
         }
@@ -365,6 +368,28 @@ impl EditorApp {
                         "Select two or more parts to weld."
                     })
                     .clicked();
+                let active = self.constraint_tool.map(|tool| tool.class);
+                let icon = active.map_or(icons::DOOR_OPEN, theme::class_icon);
+                let button = RibbonButton::new(icon, "Constraint").selected(active.is_some());
+                let button = ui
+                    .add_enabled(!playing, button)
+                    .on_hover_text(
+                        "Join two parts with a hinge, ball socket, slider, spring, rope or rod: \
+                         pick one, click a surface on one part, then a surface on another. \
+                         Both Attachments and the constraint are one undo step. Esc stops.",
+                    )
+                    .on_disabled_hover_text("Press Stop to edit.");
+                egui::Popup::menu(&button).show(|ui| {
+                    for class in crate::constraints::JOINTS {
+                        let label = format!("{} {}", theme::class_icon(class), class);
+                        if ui.selectable_label(active == Some(class), label).clicked() {
+                            clicks.constraint = Some(Some(class));
+                        }
+                    }
+                    if active.is_some() && ui.button("Stop").clicked() {
+                        clicks.constraint = Some(None);
+                    }
+                });
                 for what in Insertable::CONSTRAINTS {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui

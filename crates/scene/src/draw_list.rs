@@ -319,6 +319,9 @@ pub fn build_draw_list_posed(
             }
             // Drawn chunk by chunk below.
             ClassName::Terrain => {}
+            class if class.is_joint() => {
+                items.extend(crate::constraints::draw_items(world, instance))
+            }
             _ => {
                 if let Some(mut item) = part_draw_item(world, instance, assets, glow) {
                     if let Some(extra) = fixture_glow(world, instance) {

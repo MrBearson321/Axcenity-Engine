@@ -27,6 +27,7 @@ mod assets;
 mod behavior_trees;
 mod chrome;
 mod commands;
+mod constraint_tool;
 mod controls_ui;
 mod data_tables;
 mod edits;
@@ -239,6 +240,8 @@ pub struct EditorApp {
     /// Bake Probes was clicked: the probes are baked on the next frame,
     /// which has the GPU device.
     bake_probes_asked: bool,
+    /// The Constraint tool, while it's on (`app/constraint_tool.rs`).
+    constraint_tool: Option<constraint_tool::ConstraintTool>,
     /// A model file waiting for its objects to be chosen.
     importing: Option<ImportDialog>,
     /// Model files imported together, waiting for the dialog to be free.
@@ -325,6 +328,9 @@ struct RibbonClicks {
     import: bool,
     /// Model ▸ Constraints ▸ Weld.
     weld: bool,
+    /// Model ▸ Constraints ▸ Constraint: the joint picked, or `Some(None)`
+    /// to stop the tool.
+    constraint: Option<Option<ClassName>>,
     /// Bake Probes, beside Reflection Probe.
     bake_probes: bool,
     check_assets: bool,
@@ -593,6 +599,7 @@ impl EditorApp {
             confirm_delete: None,
             confirm_sky: None,
             bake_probes_asked: false,
+            constraint_tool: None,
             importing: None,
             import_queue: VecDeque::new(),
             game_keys: GameKeys::default(),
@@ -1045,6 +1052,15 @@ impl EditorApp {
             self.terrain_pointer(pointer);
             ctx.request_repaint();
         }
+        if let Some(pick) = output.surface {
+            self.constraint_surface(pick);
+            ctx.request_repaint();
+        }
+        if self.constraint_tool.is_some()
+            && (self.playing() || ctx.input(|input| input.key_pressed(egui::Key::Escape)))
+        {
+            self.pick_constraint_tool(None);
+        }
         if output.activated.is_some() {
             self.pending_ui_activation = output.activated;
         }
@@ -1193,6 +1209,8 @@ mod hot_patch_tests;
 mod ik_tests;
 #[cfg(test)]
 mod imported_clip_tests;
+#[cfg(test)]
+mod joint_tests;
 #[cfg(test)]
 mod live_script_tests;
 #[cfg(test)]

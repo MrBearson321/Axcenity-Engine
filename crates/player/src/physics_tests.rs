@@ -1,5 +1,6 @@
 //! Phase 34: worlds saved before physical properties simulate the same.
 //! Phase 35: the hello-welds example's welded table and crate.
+//! Phase 36: the hello-joints example's hinges, spring, rope and the rest.
 
 use std::path::Path;
 
@@ -119,4 +120,51 @@ fn hello_welds_table_lands_in_one_piece_and_its_script_drops_and_holds_the_crate
         output.contains(&"5 parts in the table, rooted at TableTop".to_owned()),
         "{output:?}"
     );
+}
+
+/// The angular velocity of the part `name`.
+fn spin_of(world: &World, name: &str) -> Vector3 {
+    let id = world.find_first_child(world.workspace(), name).unwrap();
+    world
+        .get(id)
+        .unwrap()
+        .property("AssemblyAngularVelocity")
+        .and_then(Value::as_vector3)
+        .unwrap()
+}
+
+#[test]
+fn hello_joints_door_servo_motor_spring_and_winch_work() {
+    let (mut world, mut scripts) = start_example("hello-joints");
+    let mut physics = Physics::new();
+    let mut clock = 0;
+    run_until(&mut world, &mut scripts, &mut physics, &mut clock, 5.5);
+
+    let output: Vec<String> = scripts
+        .take_output()
+        .into_iter()
+        .map(|line| line.text.replace('\t', " "))
+        .collect();
+    // The door stopped at its limit, the servo holds the arm up, the
+    // spring settled at its free length and the winch lifted the crate.
+    assert!(
+        output.contains(&"door 110, arm -45, spring 5.0, rope 4.0".to_owned()),
+        "{output:?}"
+    );
+    let y = |name| position_of(&world, name).y;
+    assert!((y("Crate") - 14.5).abs() < 0.2, "{}", y("Crate"));
+    assert!((y("Bob") - 8.0).abs() < 0.05, "{}", y("Bob"));
+    // The motor spins the wheel around its axle at 4 radians a second.
+    assert!((spin_of(&world, "Wheel").x - 4.0).abs() < 0.1);
+    // The lift rose to its target, and the drill slid to its limit, spinning.
+    assert!((y("Lift") - 7.75).abs() < 0.05, "{}", y("Lift"));
+    assert!((position_of(&world, "Bit").x - 60.0).abs() < 0.05);
+    assert!((spin_of(&world, "Bit").x - 3.0).abs() < 0.1);
+    // The pendulums hang from their pins, 6 and 2.5 studs out.
+    let weight = position_of(&world, "Weight");
+    let from_pin =
+        ((weight.x - 20.0).powi(2) + (weight.y - 14.0).powi(2) + weight.z.powi(2)).sqrt();
+    assert!((from_pin - 6.0).abs() < 0.1, "{weight:?}");
+    let pendulum = position_of(&world, "Pendulum");
+    assert!(pendulum.y < 13.0, "it swung down: {pendulum:?}");
 }

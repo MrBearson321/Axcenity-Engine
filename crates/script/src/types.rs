@@ -522,10 +522,11 @@ pub enum EnumType {
     MouseBehavior,
     CameraType,
     RenderPriority,
+    ActuatorType,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 20] = [
+    pub const ALL: [EnumType; 21] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -546,6 +547,7 @@ impl EnumType {
         EnumType::MouseBehavior,
         EnumType::CameraType,
         EnumType::RenderPriority,
+        EnumType::ActuatorType,
     ];
 
     pub fn name(self) -> &'static str {
@@ -570,6 +572,7 @@ impl EnumType {
             EnumType::MouseBehavior => "MouseBehavior",
             EnumType::CameraType => "CameraType",
             EnumType::RenderPriority => "RenderPriority",
+            EnumType::ActuatorType => "ActuatorType",
         }
     }
 
@@ -596,6 +599,8 @@ impl EnumType {
             EnumType::MouseBehavior => MouseBehavior::ALL.iter().map(|b| b.as_str()).collect(),
             EnumType::CameraType => CameraType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::RenderPriority => RENDER_PRIORITIES.iter().map(|(name, _)| *name).collect(),
+            // What drives a hinge, prismatic or cylindrical constraint.
+            EnumType::ActuatorType => vec!["None", "Motor", "Servo"],
         }
     }
 
@@ -708,7 +713,8 @@ impl LuaEnumItem {
             | EnumType::UserInputState
             | EnumType::MouseBehavior
             | EnumType::CameraType
-            | EnumType::RenderPriority => None,
+            | EnumType::RenderPriority
+            | EnumType::ActuatorType => None,
         }
     }
 }
@@ -946,6 +952,37 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
         _ => None,
     };
     converted.ok_or_else(|| wrong_type(&value))
+}
+
+/// A Lua value as an item of the enum `enum_name`, for a property that
+/// holds one (`HingeConstraint.ActuatorType`): the item, or its name.
+pub fn enum_item_from_lua(lua: &Lua, value: mlua::Value, enum_name: &str) -> Result<Value, String> {
+    let Some(enum_type) = EnumType::ALL
+        .into_iter()
+        .find(|enum_type| enum_type.name() == enum_name)
+    else {
+        return value_from_lua(lua, value, ValueKind::EnumItem);
+    };
+    let item = match &value {
+        mlua::Value::String(s) => {
+            let name = s.to_string_lossy();
+            LuaEnumItem::find(enum_type, &name)
+                .ok_or_else(|| format!("can't be \"{name}\": {}", not_an_item(enum_type, &name)))?
+        }
+        _ => LuaEnumItem::from_lua(value.clone(), lua)
+            .ok()
+            .filter(|item| item.enum_type == enum_type)
+            .ok_or_else(|| {
+                format!(
+                    "must be an Enum.{enum_name} item, not a {}",
+                    type_name(lua, &value)
+                )
+            })?,
+    };
+    Ok(Value::EnumItem(axcenity_core::EnumItem {
+        enum_name: enum_name.to_owned(),
+        item: item.name.to_owned(),
+    }))
 }
 
 /// A Lua value as whichever property value it is, for places that keep any

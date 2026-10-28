@@ -49,6 +49,52 @@ impl Viewport {
         }
     }
 
+    /// The Constraint tool: marks the part surface under the mouse (and
+    /// `first`, the surface already picked), and gives the one clicked.
+    /// Alt+left-drag still orbits the camera.
+    pub(super) fn surface_input(
+        &self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        rect: egui::Rect,
+        screen: &Screen,
+        world: &World,
+        first: Option<Vec3>,
+    ) -> Option<SurfacePick> {
+        let (pointer, alt) = ui.input(|input| (input.pointer.latest_pos(), input.modifiers.alt));
+        let hover = pointer
+            .filter(|_| response.contains_pointer())
+            .and_then(|pointer| {
+                let ray = screen.ray(pointer);
+                let hit = axcenity_scene::pick_hit(world, ray, None)?;
+                let class = world.get(hit.part)?.class();
+                matches!(class, ClassName::Part | ClassName::MeshPart).then(|| SurfacePick {
+                    part: hit.part,
+                    point: ray.at(hit.distance),
+                    normal: hit.normal,
+                })
+            });
+        let painter = ui.painter_at(rect);
+        let stroke = egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR);
+        for point in first.into_iter().chain(hover.map(|pick| pick.point)) {
+            if let Some(at) = screen.point(point) {
+                painter.circle_stroke(at, 7.0, stroke);
+                painter.circle_filled(at, 2.5, SELECTION_COLOR);
+            }
+        }
+        if let (Some(first), Some(hover)) = (first, hover)
+            && let Some(line) = screen.line(first, hover.point)
+        {
+            painter.line_segment(line, egui::Stroke::new(1.5_f32, SELECTION_COLOR));
+        }
+        if hover.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        (response.clicked_by(egui::PointerButton::Primary) && !alt)
+            .then_some(hover)
+            .flatten()
+    }
+
     /// Where an asset dragged from another panel would land, if one is
     /// being dragged and the mouse is over the viewport.
     pub(super) fn drop_target(

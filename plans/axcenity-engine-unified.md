@@ -1231,10 +1231,10 @@ Blocks: "push … with force", "set velocity", "set friction".
 
 ### Acceptance criteria
 
-- [ ] A door on a HingeConstraint with limits of 0 to 110° swings when pushed and stops at its limits.
-- [ ] A servo hinge turns to `TargetAngle` set from Lua and holds it under load. A motor hinge spins a wheel at `AngularVelocity`.
-- [ ] A part on a SpringConstraint bounces and settles at `FreeLength`. A rope winch lifts a crate.
-- [ ] Every constraint saves, reloads and simulates the same in the editor Play and the player.
+- [x] A door on a HingeConstraint with limits of 0 to 110° swings when pushed and stops at its limits.
+- [x] A servo hinge turns to `TargetAngle` set from Lua and holds it under load. A motor hinge spins a wheel at `AngularVelocity`.
+- [x] A part on a SpringConstraint bounces and settles at `FreeLength`. A rope winch lifts a crate.
+- [x] Every constraint saves, reloads and simulates the same in the editor Play and the player.
 
 ---
 

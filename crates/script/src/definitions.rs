@@ -18,7 +18,7 @@
 //! luau-lsp calls the format unstable and undocumented; it is Luau's own
 //! definition syntax, as in luau-lsp's Roblox definitions.
 
-use axcenity_core::{ClassName, ValueKind, World};
+use axcenity_core::{ClassName, Value, ValueKind, World};
 
 use crate::sides::{Side, side_only};
 
@@ -48,6 +48,34 @@ fn enum_item_class(enum_type: EnumType) -> String {
     format!("Enum{}", enum_type.name())
 }
 
+/// The Luau type for a property that starts at `default`: an enum item
+/// property (`ActuatorType`) takes its own enum's items and their names.
+fn property_type(default: &Value) -> String {
+    let enum_type = match default {
+        Value::EnumItem(item) => EnumType::ALL
+            .into_iter()
+            .find(|enum_type| enum_type.name() == item.enum_name),
+        _ => None,
+    };
+    match enum_type {
+        Some(enum_type) => enum_options(enum_type),
+        None => luau_type(default.kind()),
+    }
+}
+
+/// An enum's item class or any of its item names, such as
+/// `EnumMaterial | "Plastic" | ...`.
+fn enum_options(enum_type: EnumType) -> String {
+    let mut options = vec![enum_item_class(enum_type)];
+    options.extend(
+        enum_type
+            .item_names()
+            .iter()
+            .map(|name| format!("\"{name}\"")),
+    );
+    options.join(" | ")
+}
+
 /// The Luau type for a property of this kind.
 fn luau_type(kind: ValueKind) -> String {
     match kind {
@@ -59,7 +87,7 @@ fn luau_type(kind: ValueKind) -> String {
         ValueKind::UDim2 => "UDim2".to_owned(),
         ValueKind::Color3 => "Color3".to_owned(),
         ValueKind::CFrame => "CFrame".to_owned(),
-        // No property holds one yet; attributes do (`GetAttribute` is `any`).
+        // Attributes hold any enum's items (`GetAttribute` is `any`).
         ValueKind::EnumItem => "any".to_owned(),
         ValueKind::Instance => "Instance?".to_owned(),
         ValueKind::PhysicalProperties => "PhysicalProperties?".to_owned(),
@@ -68,17 +96,7 @@ fn luau_type(kind: ValueKind) -> String {
         | ValueKind::PartType
         | ValueKind::TextureChannel
         | ValueKind::ParticleType
-        | ValueKind::ToneMapping => {
-            let enum_type = EnumType::of_kind(kind).expect("an enum kind");
-            let mut options = vec![enum_item_class(enum_type)];
-            options.extend(
-                enum_type
-                    .item_names()
-                    .iter()
-                    .map(|name| format!("\"{name}\"")),
-            );
-            options.join(" | ")
-        }
+        | ValueKind::ToneMapping => enum_options(EnumType::of_kind(kind).expect("an enum kind")),
     }
 }
 
@@ -403,7 +421,7 @@ fn write() -> Writer {
         }
         for (name, default) in class.default_properties() {
             let doc = property_doc(class, name).unwrap_or("");
-            w.member(ApiKind::Property, name, &luau_type(default.kind()), doc);
+            w.member(ApiKind::Property, name, &property_type(&default), doc);
         }
         for (_, field) in CLASS_FIELDS.iter().filter(|(c, _)| *c == class) {
             w.field(field);

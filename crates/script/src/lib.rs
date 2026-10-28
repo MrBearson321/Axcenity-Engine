@@ -1019,6 +1019,8 @@ mod collection_tests;
 #[cfg(test)]
 mod data_tests;
 #[cfg(test)]
+mod joint_tests;
+#[cfg(test)]
 mod physical_tests;
 #[cfg(test)]
 mod utilities_tests;

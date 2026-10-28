@@ -2447,6 +2447,62 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             doc: "The Animation it was loaded from (read-only).",
         },
     ),
+    (
+        ClassName::HingeConstraint,
+        Field {
+            name: "CurrentAngle",
+            ty: "number",
+            doc: "How far Attachment1 is turned from Attachment0 around the axis now, in degrees from -180 to 180 (read-only).",
+        },
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        Field {
+            name: "CurrentAngle",
+            ty: "number",
+            doc: "How far Attachment1 is turned from Attachment0 around the axis now, in degrees from -180 to 180 (read-only).",
+        },
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        Field {
+            name: "CurrentPosition",
+            ty: "number",
+            doc: "How far Attachment1 is from Attachment0 along the axis now, in studs (read-only).",
+        },
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        Field {
+            name: "CurrentPosition",
+            ty: "number",
+            doc: "How far Attachment1 is from Attachment0 along the axis now, in studs (read-only).",
+        },
+    ),
+    (
+        ClassName::SpringConstraint,
+        Field {
+            name: "CurrentLength",
+            ty: "number",
+            doc: "How far apart the attachments are now, in studs (read-only).",
+        },
+    ),
+    (
+        ClassName::RopeConstraint,
+        Field {
+            name: "CurrentLength",
+            ty: "number",
+            doc: "How far apart the attachments are now, in studs (read-only).",
+        },
+    ),
+    (
+        ClassName::RodConstraint,
+        Field {
+            name: "CurrentLength",
+            ty: "number",
+            doc: "How far apart the attachments are now, in studs (read-only).",
+        },
+    ),
 ];
 
 pub(super) const LIBRARIES: &[Library] = &[

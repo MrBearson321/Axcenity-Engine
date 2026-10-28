@@ -273,6 +273,24 @@ fn described_fields_and_methods_exist() {
         (ClassName::MeshPart, "Instance.new('MeshPart')"),
         (ClassName::Model, "Instance.new('Model')"),
         (ClassName::Attachment, "Instance.new('Attachment')"),
+        (
+            ClassName::HingeConstraint,
+            "Instance.new('HingeConstraint')",
+        ),
+        (
+            ClassName::PrismaticConstraint,
+            "Instance.new('PrismaticConstraint')",
+        ),
+        (
+            ClassName::CylindricalConstraint,
+            "Instance.new('CylindricalConstraint')",
+        ),
+        (
+            ClassName::SpringConstraint,
+            "Instance.new('SpringConstraint')",
+        ),
+        (ClassName::RopeConstraint, "Instance.new('RopeConstraint')"),
+        (ClassName::RodConstraint, "Instance.new('RodConstraint')"),
         (ClassName::Animation, "Instance.new('Animation')"),
         (
             ClassName::AnimationTrack,

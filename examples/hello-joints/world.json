@@ -1,0 +1,462 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Position": [0, -0.5, 0],
+          "Size": [130, 1, 40],
+          "Color": [0.35, 0.37, 0.4],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Part",
+        "name": "DoorPost",
+        "properties": {
+          "Position": [-40, 5, 0],
+          "Size": [1, 10, 1],
+          "Color": [0.45, 0.47, 0.52],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Hinge",
+            "properties": {
+              "Position": [0.5, 0, 0],
+              "Orientation": [0, 0, 90]
+            }
+          },
+          {
+            "class": "HingeConstraint",
+            "name": "DoorHinge",
+            "properties": {
+              "Attachment0": ["Workspace", "DoorPost", "Hinge"],
+              "Attachment1": ["Workspace", "Door", "Hinge"],
+              "LimitsEnabled": true,
+              "LowerAngle": 0,
+              "UpperAngle": 110
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Door",
+        "properties": {
+          "Position": [-37.5, 5, 0],
+          "Size": [4, 8, 0.5],
+          "Color": [0.6, 0.4, 0.22]
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Hinge",
+            "properties": {
+              "Position": [-2, 0, 0],
+              "Orientation": [0, 0, 90]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "ArmPost",
+        "properties": {
+          "Position": [-28, 6, 0],
+          "Size": [1, 1, 1],
+          "Color": [0.45, 0.47, 0.52],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Shoulder",
+            "properties": {
+              "Position": [0.5, 0, 0]
+            }
+          },
+          {
+            "class": "HingeConstraint",
+            "name": "Servo",
+            "properties": {
+              "Attachment0": ["Workspace", "ArmPost", "Shoulder"],
+              "Attachment1": ["Workspace", "Arm", "Shoulder"],
+              "ActuatorType": "ActuatorType.Servo",
+              "AngularSpeed": 2
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Arm",
+        "properties": {
+          "Position": [-27, 6, 3],
+          "Size": [1, 1, 5],
+          "Color": [0.2, 0.5, 0.85]
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Shoulder",
+            "properties": {
+              "Position": [-0.5, 0, -3]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Axle",
+        "properties": {
+          "Position": [-16, 4, 0],
+          "Size": [1, 1, 1],
+          "Color": [0.45, 0.47, 0.52],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Hub",
+            "properties": {
+              "Position": [0.5, 0, 0]
+            }
+          },
+          {
+            "class": "HingeConstraint",
+            "name": "Motor",
+            "properties": {
+              "Attachment0": ["Workspace", "Axle", "Hub"],
+              "Attachment1": ["Workspace", "Wheel", "Hub"],
+              "ActuatorType": "ActuatorType.Motor",
+              "AngularVelocity": 4,
+              "Visible": true
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Wheel",
+        "properties": {
+          "Position": [-15, 4, 0],
+          "Size": [1, 4, 4],
+          "Color": [0.15, 0.15, 0.17],
+          "Shape": "Cylinder"
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Hub",
+            "properties": {
+              "Position": [-0.5, 0, 0]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "SpringTop",
+        "properties": {
+          "Position": [-4, 14, 0],
+          "Size": [2, 1, 2],
+          "Color": [0.45, 0.47, 0.52],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Hook",
+            "properties": {
+              "Position": [0, -0.5, 0]
+            }
+          },
+          {
+            "class": "SpringConstraint",
+            "name": "Spring",
+            "properties": {
+              "Attachment0": ["Workspace", "SpringTop", "Hook"],
+              "Attachment1": ["Workspace", "Bob", "Hook"],
+              "Stiffness": 20000,
+              "Damping": 4,
+              "FreeLength": 5,
+              "Visible": true
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Bob",
+        "properties": {
+          "Position": [-4, 6, 0],
+          "Size": [1, 1, 1],
+          "Color": [0.9, 0.75, 0.2]
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Hook",
+            "properties": {
+              "Position": [0, 0.5, 0]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Beam",
+        "properties": {
+          "Position": [8, 20, 0],
+          "Size": [4, 1, 1],
+          "Color": [0.45, 0.47, 0.52],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Pulley",
+            "properties": {
+              "Position": [0, -0.5, 0]
+            }
+          },
+          {
+            "class": "RopeConstraint",
+            "name": "Winch",
+            "properties": {
+              "Attachment0": ["Workspace", "Beam", "Pulley"],
+              "Attachment1": ["Workspace", "Crate", "Hook"],
+              "Length": 17.5,
+              "WinchTarget": 4,
+              "WinchSpeed": 4,
+              "Visible": true,
+              "Color": [0.75, 0.62, 0.4]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Crate",
+        "properties": {
+          "Position": [8, 1, 0],
+          "Size": [2, 2, 2],
+          "Color": [0.85, 0.2, 0.2]
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Hook",
+            "properties": {
+              "Position": [0, 1, 0]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "RodTop",
+        "properties": {
+          "Position": [20, 14, 0],
+          "Size": [1, 1, 1],
+          "Color": [0.45, 0.47, 0.52],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Pin",
+            "properties": {
+              "Position": [0, 0, 0]
+            }
+          },
+          {
+            "class": "RodConstraint",
+            "name": "Rod",
+            "properties": {
+              "Attachment0": ["Workspace", "RodTop", "Pin"],
+              "Attachment1": ["Workspace", "Weight", "Pin"],
+              "Length": 6,
+              "Visible": true
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Weight",
+        "properties": {
+          "Position": [26, 14, 0],
+          "Size": [1, 1, 1],
+          "Color": [0.3, 0.7, 0.4]
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Pin",
+            "properties": {
+              "Position": [0, 0, 0]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Pivot",
+        "properties": {
+          "Position": [32, 14, 0],
+          "Size": [1, 1, 1],
+          "Color": [0.45, 0.47, 0.52],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Socket",
+            "properties": {
+              "Position": [0.5, 0, 0]
+            }
+          },
+          {
+            "class": "BallSocketConstraint",
+            "name": "Socket",
+            "properties": {
+              "Attachment0": ["Workspace", "Pivot", "Socket"],
+              "Attachment1": ["Workspace", "Pendulum", "Socket"],
+              "Visible": true
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Pendulum",
+        "properties": {
+          "Position": [35, 14, 0],
+          "Size": [5, 1, 1],
+          "Color": [0.7, 0.3, 0.7]
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Socket",
+            "properties": {
+              "Position": [-2.5, 0, 0]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Rail",
+        "properties": {
+          "Position": [44, 1, 0],
+          "Size": [1, 1, 1],
+          "Color": [0.45, 0.47, 0.52],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Slide",
+            "properties": {
+              "Position": [0, 0.5, 0],
+              "Orientation": [0, 0, 90]
+            }
+          },
+          {
+            "class": "PrismaticConstraint",
+            "name": "Elevator",
+            "properties": {
+              "Attachment0": ["Workspace", "Rail", "Slide"],
+              "Attachment1": ["Workspace", "Lift", "Slide"],
+              "LimitsEnabled": true,
+              "LowerLimit": 0,
+              "UpperLimit": 8,
+              "ActuatorType": "ActuatorType.Servo",
+              "TargetPosition": 6,
+              "Speed": 3,
+              "Visible": true
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Lift",
+        "properties": {
+          "Position": [44, 1.75, 0],
+          "Size": [3, 0.5, 3],
+          "Color": [0.25, 0.6, 0.65]
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Slide",
+            "properties": {
+              "Position": [0, -0.25, 0],
+              "Orientation": [0, 0, 90]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Guide",
+        "properties": {
+          "Position": [54, 8, 0],
+          "Size": [1, 1, 1],
+          "Color": [0.45, 0.47, 0.52],
+          "Anchored": true
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Chuck",
+            "properties": {
+              "Position": [0.5, 0, 0]
+            }
+          },
+          {
+            "class": "CylindricalConstraint",
+            "name": "Drill",
+            "properties": {
+              "Attachment0": ["Workspace", "Guide", "Chuck"],
+              "Attachment1": ["Workspace", "Bit", "Chuck"],
+              "LimitsEnabled": true,
+              "LowerLimit": 0,
+              "UpperLimit": 4,
+              "ActuatorType": "ActuatorType.Motor",
+              "Velocity": 1,
+              "AngularActuatorType": "ActuatorType.Motor",
+              "AngularVelocity": 3,
+              "Visible": true
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Bit",
+        "properties": {
+          "Position": [56, 8, 0],
+          "Size": [3, 1, 1],
+          "Color": [0.8, 0.8, 0.85]
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Chuck",
+            "properties": {
+              "Position": [-1.5, 0, 0]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

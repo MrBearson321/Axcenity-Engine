@@ -1887,6 +1887,466 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "On (the default), it holds the parts together. Off, they move apart; turned on again, it welds them where they are then.",
     ),
     (
+        ClassName::HingeConstraint,
+        "Attachment0",
+        "The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "Attachment1",
+        "The Attachment on the second part, held to Attachment0.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "Enabled",
+        "On (the default), it joins the attachments' parts. Off, it holds nothing.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "Visible",
+        "On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "Color",
+        "The color it's drawn in while Visible.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "LimitsEnabled",
+        "On, Attachment1 only turns between LowerAngle and UpperAngle.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "LowerAngle",
+        "While LimitsEnabled is on, the farthest it turns one way, in degrees.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "UpperAngle",
+        "While LimitsEnabled is on, the farthest it turns the other way, in degrees.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "ActuatorType",
+        "What turns it: `Enum.ActuatorType.None` (free), `Motor` (spins at AngularVelocity) or `Servo` (turns to TargetAngle and holds it).",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "AngularVelocity",
+        "With a Motor actuator, how fast it turns Attachment1 around the axis, in radians a second.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "MotorMaxTorque",
+        "With a Motor actuator, the most torque it turns with. `math.huge` has no limit.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "TargetAngle",
+        "With a Servo actuator, the angle it turns Attachment1 to and holds, in degrees.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "AngularSpeed",
+        "With a Servo actuator, the fastest it turns toward TargetAngle, in radians a second.",
+    ),
+    (
+        ClassName::HingeConstraint,
+        "ServoMaxTorque",
+        "With a Servo actuator, the most torque it turns and holds with. Too little, and a heavy load drags it.",
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "Attachment0",
+        "The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).",
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "Attachment1",
+        "The Attachment on the second part, held to Attachment0.",
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "Enabled",
+        "On (the default), it joins the attachments' parts. Off, it holds nothing.",
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "Visible",
+        "On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.",
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "Color",
+        "The color it's drawn in while Visible.",
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "LimitsEnabled",
+        "On, Attachment1's axis can only lean UpperAngle from Attachment0's.",
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "UpperAngle",
+        "While LimitsEnabled is on, how far Attachment1's axis can lean from Attachment0's, in degrees.",
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "TwistLimitsEnabled",
+        "On, Attachment1 can only twist around its axis between TwistLowerAngle and TwistUpperAngle.",
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "TwistLowerAngle",
+        "While TwistLimitsEnabled is on, the farthest it twists one way, in degrees.",
+    ),
+    (
+        ClassName::BallSocketConstraint,
+        "TwistUpperAngle",
+        "While TwistLimitsEnabled is on, the farthest it twists the other way, in degrees.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "Attachment0",
+        "The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "Attachment1",
+        "The Attachment on the second part, held to Attachment0.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "Enabled",
+        "On (the default), it joins the attachments' parts. Off, it holds nothing.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "Visible",
+        "On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "Color",
+        "The color it's drawn in while Visible.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "LimitsEnabled",
+        "On, Attachment1 only slides between LowerLimit and UpperLimit along the axis.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "LowerLimit",
+        "While LimitsEnabled is on, the closest Attachment1 can be to Attachment0 along the axis, in studs (negative is behind it).",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "UpperLimit",
+        "While LimitsEnabled is on, the farthest Attachment1 can slide along the axis, in studs.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "ActuatorType",
+        "What slides it: `Enum.ActuatorType.None` (free), `Motor` (slides at Velocity) or `Servo` (slides to TargetPosition and holds it).",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "Velocity",
+        "With a Motor ActuatorType, how fast it slides Attachment1 along the axis, in studs a second.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "MotorMaxForce",
+        "With a Motor ActuatorType, the most force it slides with. `math.huge` has no limit.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "TargetPosition",
+        "With a Servo ActuatorType, how far along the axis it slides Attachment1 to and holds, in studs.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "Speed",
+        "With a Servo ActuatorType, the fastest it slides toward TargetPosition, in studs a second.",
+    ),
+    (
+        ClassName::PrismaticConstraint,
+        "ServoMaxForce",
+        "With a Servo ActuatorType, the most force it slides and holds with.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "Attachment0",
+        "The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "Attachment1",
+        "The Attachment on the second part, held to Attachment0.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "Enabled",
+        "On (the default), it joins the attachments' parts. Off, it holds nothing.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "Visible",
+        "On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "Color",
+        "The color it's drawn in while Visible.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "LimitsEnabled",
+        "On, Attachment1 only slides between LowerLimit and UpperLimit along the axis.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "LowerLimit",
+        "While LimitsEnabled is on, the closest Attachment1 can be to Attachment0 along the axis, in studs (negative is behind it).",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "UpperLimit",
+        "While LimitsEnabled is on, the farthest Attachment1 can slide along the axis, in studs.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "ActuatorType",
+        "What slides it: `Enum.ActuatorType.None` (free), `Motor` (slides at Velocity) or `Servo` (slides to TargetPosition and holds it).",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "Velocity",
+        "With a Motor ActuatorType, how fast it slides Attachment1 along the axis, in studs a second.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "MotorMaxForce",
+        "With a Motor ActuatorType, the most force it slides with. `math.huge` has no limit.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "TargetPosition",
+        "With a Servo ActuatorType, how far along the axis it slides Attachment1 to and holds, in studs.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "Speed",
+        "With a Servo ActuatorType, the fastest it slides toward TargetPosition, in studs a second.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "ServoMaxForce",
+        "With a Servo ActuatorType, the most force it slides and holds with.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "AngularLimitsEnabled",
+        "On, it only turns between LowerAngle and UpperAngle.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "LowerAngle",
+        "While AngularLimitsEnabled is on, the farthest it turns one way, in degrees.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "UpperAngle",
+        "While AngularLimitsEnabled is on, the farthest it turns the other way, in degrees.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "AngularActuatorType",
+        "What turns it around the axis: `Enum.ActuatorType.None` (free), `Motor` (spins at AngularVelocity) or `Servo` (turns to TargetAngle).",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "AngularVelocity",
+        "With a Motor actuator, how fast it turns Attachment1 around the axis, in radians a second.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "MotorMaxTorque",
+        "With a Motor actuator, the most torque it turns with. `math.huge` has no limit.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "TargetAngle",
+        "With a Servo actuator, the angle it turns Attachment1 to and holds, in degrees.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "AngularSpeed",
+        "With a Servo actuator, the fastest it turns toward TargetAngle, in radians a second.",
+    ),
+    (
+        ClassName::CylindricalConstraint,
+        "ServoMaxTorque",
+        "With a Servo actuator, the most torque it turns and holds with. Too little, and a heavy load drags it.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "Attachment0",
+        "The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "Attachment1",
+        "The Attachment on the second part, held to Attachment0.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "Enabled",
+        "On (the default), it joins the attachments' parts. Off, it holds nothing.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "Visible",
+        "On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "Color",
+        "The color it's drawn in while Visible.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "Stiffness",
+        "How hard it pulls or pushes toward FreeLength: force per stud it's stretched or squashed.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "Damping",
+        "How much it resists moving, so it stops bouncing: force per stud a second of stretching.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "FreeLength",
+        "The length it settles at with nothing pulling on it, in studs.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "MinLength",
+        "The shortest it can be squashed, in studs.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "MaxLength",
+        "The longest it can be stretched, in studs.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "Coils",
+        "How many turns the drawn coil has.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "Radius",
+        "The drawn coil's radius, in studs.",
+    ),
+    (
+        ClassName::SpringConstraint,
+        "Thickness",
+        "How thick it's drawn while Visible, in studs.",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "Attachment0",
+        "The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "Attachment1",
+        "The Attachment on the second part, held to Attachment0.",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "Enabled",
+        "On (the default), it joins the attachments' parts. Off, it holds nothing.",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "Visible",
+        "On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "Color",
+        "The color it's drawn in while Visible.",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "Length",
+        "The farthest apart the attachments can be, in studs. Closer, the rope is slack.",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "WinchEnabled",
+        "On, a winch reels the rope in or out toward WinchTarget, starting from Length.",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "WinchTarget",
+        "The length the winch reels the rope to, in studs.",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "WinchSpeed",
+        "How fast the winch reels, in studs a second.",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "WinchForce",
+        "The most the winch pulls with: a heavier load stops it reeling in (it still holds).",
+    ),
+    (
+        ClassName::RopeConstraint,
+        "Thickness",
+        "How thick it's drawn while Visible, in studs.",
+    ),
+    (
+        ClassName::RodConstraint,
+        "Attachment0",
+        "The Attachment on the first part. The joint's axis is this attachment's X axis (its `Axis`).",
+    ),
+    (
+        ClassName::RodConstraint,
+        "Attachment1",
+        "The Attachment on the second part, held to Attachment0.",
+    ),
+    (
+        ClassName::RodConstraint,
+        "Enabled",
+        "On (the default), it joins the attachments' parts. Off, it holds nothing.",
+    ),
+    (
+        ClassName::RodConstraint,
+        "Visible",
+        "On, the game draws it in Color: a coil for a spring, a line for a rope or rod, an axle or ball for the others. Off by default; the editor's Constraints overlay always shows it.",
+    ),
+    (
+        ClassName::RodConstraint,
+        "Color",
+        "The color it's drawn in while Visible.",
+    ),
+    (
+        ClassName::RodConstraint,
+        "Length",
+        "How far apart the attachments are held, in studs.",
+    ),
+    (
+        ClassName::RodConstraint,
+        "Thickness",
+        "How thick it's drawn while Visible, in studs.",
+    ),
+    (
         ClassName::Camera,
         "Position",
         "Where the camera is, in studs.",
@@ -2740,6 +3200,27 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::WeldConstraint => {
             "Holds `Part0` and `Part1` together where they were when it was made (or enabled). Parts welded together move as one body, an assembly: they fall and tumble together, and an anchored part anchors the whole assembly. `part:GetConnectedParts()` and `part:GetRootPart()` follow welds. Setting a welded part's Position or CFrame moves that part alone, and the weld holds it where it lands."
+        }
+        ClassName::HingeConstraint => {
+            "Joins two parts at their attachments so Attachment1's part turns around Attachment0's X axis (its `Axis`), like a door or a wheel. LimitsEnabled keeps it between LowerAngle and UpperAngle; ActuatorType Motor spins it at AngularVelocity, Servo turns it to TargetAngle and holds it. `CurrentAngle` (read-only) is how far it's turned, in degrees."
+        }
+        ClassName::BallSocketConstraint => {
+            "Holds two attachments together and lets them turn any way, like a shoulder or a pendulum. LimitsEnabled keeps Attachment1's axis within UpperAngle of Attachment0's; TwistLimitsEnabled limits twisting around it."
+        }
+        ClassName::PrismaticConstraint => {
+            "Lets Attachment1's part slide along Attachment0's X axis only, like a drawer or a piston. LimitsEnabled keeps it between LowerLimit and UpperLimit; ActuatorType Motor slides it at Velocity, Servo to TargetPosition. `CurrentPosition` (read-only) is how far along it is, in studs."
+        }
+        ClassName::CylindricalConstraint => {
+            "Lets Attachment1's part slide along and turn around Attachment0's X axis, like a drill or a screw. It has a prismatic constraint's limits and actuator for sliding and a hinge's (AngularLimitsEnabled, AngularActuatorType) for turning. `CurrentPosition` and `CurrentAngle` are read-only."
+        }
+        ClassName::SpringConstraint => {
+            "Pulls or pushes its attachments toward FreeLength apart with Stiffness, slowed by Damping, never shorter than MinLength or longer than MaxLength. `CurrentLength` (read-only) is how far apart they are. Visible draws a coil."
+        }
+        ClassName::RopeConstraint => {
+            "Keeps its attachments at most Length apart; closer, it's slack. With WinchEnabled, a winch reels it toward WinchTarget at WinchSpeed, lifting loads up to WinchForce. `CurrentLength` (read-only) is how far apart they are."
+        }
+        ClassName::RodConstraint => {
+            "Keeps its attachments exactly Length apart, letting them turn freely. `CurrentLength` (read-only) is how far apart they are."
         }
         ClassName::Checkpoint => {
             "A place in the world to come back to. `SaveService:SetCheckpoint(checkpoint)` makes it the active one and captures the player data and world state there; `SaveService:RestoreCheckpoint()` puts them back and stands the player character at its Position. A save slot keeps the active checkpoint."

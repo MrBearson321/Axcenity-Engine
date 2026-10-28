@@ -182,6 +182,8 @@ pub struct ViewportOutput {
     /// The mouse over the terrain being brushed, while a Terrain Studio
     /// brush is on.
     pub terrain: Option<TerrainPointer>,
+    /// With the Constraint tool on: the part surface clicked, if any.
+    pub surface: Option<SurfacePick>,
     /// What drawing the scene took, for the Profiler.
     pub render: Option<RenderCost>,
 }
@@ -213,6 +215,15 @@ pub struct TerrainPointer {
     pub modifiers: egui::Modifiers,
     /// Seconds since the last frame.
     pub seconds: f32,
+}
+
+/// A point clicked on a part's surface, for the Constraint tool.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SurfacePick {
+    pub part: InstanceId,
+    pub point: Vec3,
+    /// Which way the surface faces there, one stud long.
+    pub normal: Vec3,
 }
 
 /// What's under the mouse while an asset is dragged over the viewport.
@@ -277,6 +288,10 @@ pub struct ViewportScene<'a> {
     pub poses: Option<&'a axcenity_scene::Poses>,
     /// A Terrain Studio brush, which takes the left button while it's on.
     pub terrain_brush: Option<TerrainBrush>,
+    /// The Constraint tool, when it's on: the left button picks part
+    /// surfaces instead of selecting or dragging. Holds the first surface
+    /// once it's picked, to mark it.
+    pub constraint_pick: Option<Option<Vec3>>,
     /// The camera during Play (`Session::shown_camera`, with whether the
     /// game holds the view). A controller's or a script's camera doesn't
     /// move the fly camera, so Stop shows it where it was.
@@ -677,12 +692,19 @@ impl Viewport {
             agent_paths,
             poses,
             terrain_brush,
+            constraint_pick,
             play_camera,
             graphics,
         } = scene;
         // A brush takes the left button: no handles, dragging or picking.
         let brush = terrain_brush.filter(|_| tool.is_some());
-        let drag_tool = if brush.is_some() { None } else { tool };
+        // So does the Constraint tool, which picks surfaces.
+        let picking = constraint_pick.filter(|_| tool.is_some());
+        let drag_tool = if brush.is_some() || picking.is_some() {
+            None
+        } else {
+            tool
+        };
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         self.last_rect = rect;
@@ -877,7 +899,7 @@ impl Viewport {
                 modifiers,
                 keep_group: selection.contains(&part),
             }),
-            None if drag.in_use || brush.is_some() => None,
+            None if drag.in_use || brush.is_some() || picking.is_some() => None,
             None => self.clicked_part(ui, &response, &screen, world, &ui_scene, &lights),
         };
         let playing = tool.is_none() && response.clicked_by(egui::PointerButton::Primary);
@@ -1085,6 +1107,8 @@ impl Viewport {
             painter.circle_stroke(at, 9.0, egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR));
             painter.circle_filled(at, 3.0, SELECTION_COLOR);
         }
+        let surface = picking
+            .and_then(|first| self.surface_input(ui, &response, rect, &screen, world, first));
         ViewportOutput {
             clicked,
             activated,
@@ -1100,6 +1124,7 @@ impl Viewport {
             drag_released: drag.released,
             drop,
             terrain,
+            surface,
             render: Some(render),
         }
     }
