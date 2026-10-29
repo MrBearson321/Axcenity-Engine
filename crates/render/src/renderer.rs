@@ -52,6 +52,7 @@ mod fog;
 mod gpu;
 mod gpu_timer;
 mod grading;
+mod lens;
 mod light_probes;
 mod lighting;
 mod lod;

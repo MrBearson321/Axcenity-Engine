@@ -1471,6 +1471,86 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "An image in the project whose colors (up to 64) every pixel is snapped to the nearest of, for a retro look. \"\" for none.",
     ),
     (
+        ClassName::DepthOfFieldEffect,
+        "Enabled",
+        "Whether it blurs anything. Off (or with no DepthOfFieldEffect in Lighting) it costs nothing.",
+    ),
+    (
+        ClassName::DepthOfFieldEffect,
+        "FocusDistance",
+        "How far from the camera, in studs, the middle of what's sharp is (20 by default).",
+    ),
+    (
+        ClassName::DepthOfFieldEffect,
+        "InFocusRadius",
+        "How far either side of FocusDistance stays sharp, in studs (10 by default).",
+    ),
+    (
+        ClassName::DepthOfFieldEffect,
+        "NearIntensity",
+        "How blurred what's nearer than the sharp range gets, from 0 (not at all) to 1, growing toward the camera. 0.75 by default.",
+    ),
+    (
+        ClassName::DepthOfFieldEffect,
+        "FarIntensity",
+        "How blurred what's farther than the sharp range gets, from 0 (not at all) to 1, reached at twice the sharp range's far edge, the sky included. 0.75 by default.",
+    ),
+    (
+        ClassName::VignetteEffect,
+        "Enabled",
+        "Whether it's drawn. Off (or with no VignetteEffect in Lighting) it costs nothing.",
+    ),
+    (
+        ClassName::VignetteEffect,
+        "Intensity",
+        "How much of Color the corners take, from 0 to 1 (0.5 by default).",
+    ),
+    (
+        ClassName::VignetteEffect,
+        "Size",
+        "Where the darkening starts, from the middle (0) to the corners (1). 0.5 by default.",
+    ),
+    (
+        ClassName::VignetteEffect,
+        "Color",
+        "What the corners turn toward. Black by default.",
+    ),
+    (
+        ClassName::FilmGrainEffect,
+        "Enabled",
+        "Whether it's drawn. Off (or with no FilmGrainEffect in Lighting) it costs nothing.",
+    ),
+    (
+        ClassName::FilmGrainEffect,
+        "Intensity",
+        "How strong the noise is, from 0 to 1 (0.3 by default).",
+    ),
+    (
+        ClassName::FilmGrainEffect,
+        "Size",
+        "Each grain's size, in pixels of a view 1080 pixels tall (1 by default), scaled with the view's height and never under one pixel.",
+    ),
+    (
+        ClassName::ChromaticAberrationEffect,
+        "Enabled",
+        "Whether it's drawn. Off (or with no ChromaticAberrationEffect in Lighting) it costs nothing.",
+    ),
+    (
+        ClassName::ChromaticAberrationEffect,
+        "Intensity",
+        "How far red and blue drift apart toward the picture's edges: 1 parts them by 1% of its width at the left and right edges, and nothing in the middle. 0.5 by default.",
+    ),
+    (
+        ClassName::SharpenEffect,
+        "Enabled",
+        "Whether it's drawn. Off (or with no SharpenEffect in Lighting) it costs nothing.",
+    ),
+    (
+        ClassName::SharpenEffect,
+        "Intensity",
+        "How much crisper the edges between colors get, from 0 (no change) to 1 (strong). 0.5 by default.",
+    ),
+    (
         ClassName::Weather,
         "Precipitation",
         "What falls around the camera (`Enum.Precipitation`): None, Rain (the default) or Snow. Rain wets surfaces as it falls, up to its Intensity; snow covers the ones facing up.",
@@ -4650,6 +4730,21 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::ColorCorrectionEffect => {
             "Inside Lighting: changes the colors of the finished picture, after tone mapping. Brightness, Contrast, Saturation and TintColor come first, then the LookupTable, Posterize and the Palette. Several in Lighting add up (their tints multiply). Inside a GraphicsVolume, those in the volume replace Lighting's while the camera is there."
+        }
+        ClassName::DepthOfFieldEffect => {
+            "Inside Lighting: blurs what's nearer or farther than the distance in focus, as a camera's lens does: sharp from FocusDistance - InFocusRadius to FocusDistance + InFocusRadius studs away, blurring toward the camera by NearIntensity and away from it by FarIntensity. The first enabled one in Lighting is used. The player's graphics settings choose how finely it's drawn (UserGameSettings.DepthOfField); it's off at Low."
+        }
+        ClassName::VignetteEffect => {
+            "Inside Lighting: darkens the picture toward its corners, or tints them with its Color. The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.Vignette)."
+        }
+        ClassName::FilmGrainEffect => {
+            "Inside Lighting: moving noise over the picture, as on film, changing every frame. The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.FilmGrain)."
+        }
+        ClassName::ChromaticAberrationEffect => {
+            "Inside Lighting: red and blue drift apart toward the picture's edges, as through a cheap lens. The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.ChromaticAberration)."
+        }
+        ClassName::SharpenEffect => {
+            "Inside Lighting: makes the edges between colors crisper (useful with a render scale below 100%). The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.Sharpen)."
         }
         ClassName::OutlineEffect => {
             "Inside Lighting: lines drawn along the edges of everything solid, around each silhouette and along creases where a surface turns sharply, found on screen from what's drawn, so no part needs any setup. A material file's outline draws a line around its own parts instead (see docs/rendering/stylized.md)."

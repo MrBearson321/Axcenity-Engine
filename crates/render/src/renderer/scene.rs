@@ -218,7 +218,7 @@ impl ScenePipeline {
             (&post, &occlusion),
             scene_size((width, height), &graphics, &capabilities),
             (width, height),
-            targets_used(&graphics, false),
+            targets_used(&graphics, false, false),
             &targets_alive,
         );
         let ui_pipeline = create_ui_pipeline(&device, color_format);
@@ -268,6 +268,7 @@ impl ScenePipeline {
             outline_pipeline,
             edge_pipeline,
             edges: false,
+            depth_of_field: false,
             surface_shaders: Default::default(),
             sprites,
             post,
@@ -461,11 +462,11 @@ impl ScenePipeline {
 
     /// Remakes the scene's targets if they weren't made for this output
     /// size, render scale, anti-aliasing, ambient occlusion, contact
-    /// shadows, volumetric fog and screen-space outlines. The old ones are
-    /// freed.
+    /// shadows, volumetric fog, screen-space outlines and depth of field.
+    /// The old ones are freed.
     fn fit_targets(&mut self) {
         let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
-        let used = targets_used(&self.graphics, self.edges);
+        let used = targets_used(&self.graphics, self.edges, self.depth_of_field);
         let targets = &self.frame_targets;
         let made_for = (
             targets.size,
@@ -474,6 +475,7 @@ impl ScenePipeline {
                 targets.samples,
                 targets.fxaa.is_some(),
                 targets.occlusion.is_some(),
+                targets.depth_of_field.is_some(),
             ),
         );
         if made_for != (size, self.output_size, used) {
@@ -501,8 +503,11 @@ impl ScenePipeline {
     ) -> Result<()> {
         // Screen-space outlines keep the prepass's targets alive while the
         // world has them.
-        if self.edges != list.edges.is_some() {
+        // So does depth of field, with a target of its own.
+        let depth_of_field = lens::wants_depth_of_field(&list.lens);
+        if self.edges != list.edges.is_some() || self.depth_of_field != depth_of_field {
             self.edges = list.edges.is_some();
+            self.depth_of_field = depth_of_field;
             self.fit_targets();
         }
         // Lights are planned in the scene's pixels, which the render scale
@@ -683,11 +688,25 @@ impl ScenePipeline {
             );
         }
         let post = post_drawn(&list.post, &self.graphics);
-        self.queue.write_buffer(
-            &self.post.settings,
-            0,
-            bytemuck::bytes_of(&post_uniform(&post)),
+        let mut post_settings = post_uniform(&post);
+        lens::add_lens(
+            &mut post_settings,
+            &list.lens,
+            &self.graphics,
+            (aspect, self.output_size.1),
+            self.frame,
         );
+        self.queue
+            .write_buffer(&self.post.settings, 0, bytemuck::bytes_of(&post_settings));
+        if self.frame_targets.depth_of_field.is_some() {
+            self.post.depth_of_field.prepare(
+                &self.queue,
+                list,
+                aspect,
+                self.frame_targets.size.1,
+                self.graphics.depth_of_field,
+            );
+        }
         self.post
             .grading
             .prepare(&self.device, &self.queue, list.grading.as_ref());
@@ -1129,6 +1148,9 @@ impl ScenePipeline {
         }
         mark(&mut encoder, FramePass::PostProcessing);
 
+        if let Some(target) = &self.frame_targets.depth_of_field {
+            self.post.depth_of_field.draw(&mut encoder, target);
+        }
         self.post.draw(
             &mut encoder,
             &self.frame_targets,
@@ -1410,6 +1432,13 @@ impl ScenePipeline {
     #[cfg(test)]
     pub(super) fn occlusion_targets_alive(&self) -> usize {
         Arc::strong_count(&self.targets_alive.occlusion) - 1
+    }
+
+    /// How many of depth of field's blurred copies of the scene are alive:
+    /// 0 or 1, unless one leaked.
+    #[cfg(test)]
+    pub(super) fn depth_of_field_targets_alive(&self) -> usize {
+        Arc::strong_count(&self.targets_alive.depth_of_field) - 1
     }
 
     /// How many sets of volumetric fog grids are alive: 0 or 1, unless one
@@ -2167,19 +2196,29 @@ fn frame_layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     ]
 }
 
-/// The scene's samples per pixel, whether FXAA needs its target, and
-/// whether ambient occlusion needs the prepass's and its own (contact
-/// shadows and volumetric fog need only the prepass's depth, and
-/// screen-space outlines, the draw list's `edges`, its depth and normals).
-fn targets_used(graphics: &EffectiveGraphics, edges: bool) -> (u32, bool, bool) {
+/// The scene's samples per pixel, whether FXAA needs its target, whether
+/// ambient occlusion needs the prepass's and its own (contact shadows and
+/// volumetric fog need only the prepass's depth, and screen-space outlines,
+/// the draw list's `edges`, its depth and normals), and whether depth of
+/// field (`wants_depth_of_field`, if its setting allows) needs its target
+/// and the prepass's depth.
+fn targets_used(
+    graphics: &EffectiveGraphics,
+    edges: bool,
+    wants_depth_of_field: bool,
+) -> (u32, bool, bool, bool) {
     let anti_aliasing = graphics.anti_aliasing;
+    let depth_of_field =
+        wants_depth_of_field && graphics.depth_of_field != crate::DepthOfFieldQuality::Off;
     (
         anti_aliasing.samples(),
         anti_aliasing == crate::AntiAliasing::Fxaa,
         graphics.ambient_occlusion != crate::AmbientOcclusion::Off
             || graphics.contact_shadows
             || graphics.volumetric_fog
-            || edges,
+            || edges
+            || depth_of_field,
+        depth_of_field,
     )
 }
 

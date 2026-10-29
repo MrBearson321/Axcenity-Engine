@@ -7,6 +7,7 @@
 
 use super::gpu::{create_depth_view, target_bytes};
 use super::grading::GradingPass;
+use super::lens::{DepthOfFieldPass, DepthOfFieldTarget};
 use super::{
     BLOOM_LEVELS, DEPTH_FORMAT, FXAA_FORMAT, FrameTargets, FxaaTarget, HDR_FORMAT, MsaaTarget,
     OcclusionPasses, OcclusionTargets, PostPasses, PostUniform, TargetsAlive,
@@ -147,6 +148,7 @@ impl PostPasses {
             ),
             fxaa: pipeline("FXAA", &[&layout], "fs_fxaa", color_format, None),
             grading,
+            depth_of_field: DepthOfFieldPass::new(device),
             sampler,
             layout,
             composite_layout,
@@ -253,15 +255,16 @@ impl FrameTargets {
     /// Makes the HDR and depth textures for a `width` × `height` scene with
     /// `samples` per pixel and the bloom levels below it, down to
     /// [`BLOOM_LEVELS`] halvings of the `output`'s size, with the bind
-    /// groups that connect them, FXAA's target if `fxaa`, and the prepass's
-    /// and ambient occlusion's if `occlusion`. Each target holds a clone of
-    /// its counter in `alive`.
+    /// groups that connect them, FXAA's target if `fxaa`, the prepass's and
+    /// ambient occlusion's if `occlusion`, and depth of field's if
+    /// `depth_of_field` (which needs the prepass's). Each target holds a
+    /// clone of its counter in `alive`.
     pub(super) fn new(
         device: &wgpu::Device,
         (post, occlusion_passes): (&PostPasses, &OcclusionPasses),
         (width, height): (u32, u32),
         output: (u32, u32),
-        (samples, fxaa, occlusion): (u32, bool, bool),
+        (samples, fxaa, occlusion, depth_of_field): (u32, bool, bool, bool),
         alive: &TargetsAlive,
     ) -> Self {
         // Bytes of every texture made, for `RenderStats::target_bytes`.
@@ -348,7 +351,27 @@ impl FrameTargets {
                 entries: &entries,
             })
         };
-        let prefilter_group = group(&post.layout, &hdr_view, None);
+        let occlusion = occlusion.then(|| {
+            OcclusionTargets::new(device, occlusion_passes, (width, height), &alive.occlusion)
+        });
+        let depth_of_field = occlusion
+            .as_ref()
+            .filter(|_| depth_of_field)
+            .map(|prepass| {
+                DepthOfFieldTarget::new(
+                    device,
+                    &post.depth_of_field,
+                    (&hdr_view, &prepass.depth_view),
+                    make("depth of field", width, height),
+                    &alive.depth_of_field,
+                )
+            });
+        // What bloom and the composite pass read: the scene, or with depth
+        // of field its blurred copy.
+        let scene = depth_of_field
+            .as_ref()
+            .map_or(&hdr_view, |target| &target.view);
+        let prefilter_group = group(&post.layout, scene, None);
         // Index 0 is never used, but keeps the lists indexed by level.
         let downsample_groups = (0..levels.len())
             .map(|level| group(&post.layout, &levels[level.saturating_sub(1)], None))
@@ -356,7 +379,7 @@ impl FrameTargets {
         let upsample_groups = (0..levels.len())
             .map(|level| group(&post.layout, &levels[level], None))
             .collect();
-        let composite_group = group(&post.composite_layout, &hdr_view, Some(&levels[0]));
+        let composite_group = group(&post.composite_layout, scene, Some(&levels[0]));
         let fxaa = fxaa.then(|| {
             let view = texture("tone mapped (FXAA)", output, FXAA_FORMAT, 1);
             FxaaTarget {
@@ -364,9 +387,6 @@ impl FrameTargets {
                 view,
                 _alive: alive.fxaa.clone(),
             }
-        });
-        let occlusion = occlusion.then(|| {
-            OcclusionTargets::new(device, occlusion_passes, (width, height), &alive.occlusion)
         });
         let depth_bytes = target_bytes((width, height, 1), DEPTH_FORMAT, samples);
         Self {
@@ -381,6 +401,7 @@ impl FrameTargets {
             depth_view: create_depth_view(device, width, height, samples),
             fxaa,
             occlusion,
+            depth_of_field,
             levels,
             prefilter_group,
             downsample_groups,

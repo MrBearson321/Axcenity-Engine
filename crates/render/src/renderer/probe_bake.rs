@@ -120,6 +120,8 @@ impl ProbeCamera {
     fn leave_out(&mut self) {
         self.list.ui.clear();
         self.list.reflection_probes.clear();
+        // A probe reads the scene before the lens: blur would only cost.
+        self.list.lens = crate::LensEffects::default();
         if self.light_only {
             self.list.light_probe_volumes.clear();
         }

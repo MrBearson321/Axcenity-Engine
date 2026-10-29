@@ -83,7 +83,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 29] = [
+const GROUPS: [(&str, &[&str]); 30] = [
     (
         "Appearance",
         &[
@@ -307,6 +307,19 @@ const GROUPS: [(&str, &[&str]); 29] = [
             "Palette",
         ],
     ),
+    (
+        "Lens",
+        &[
+            "Enabled",
+            "FocusDistance",
+            "InFocusRadius",
+            "NearIntensity",
+            "FarIntensity",
+            "Intensity",
+            "Size",
+            "Color",
+        ],
+    ),
     ("Graphics Volume", &["Enabled", "BlendDistance", "Priority"]),
     (
         "Effect",
@@ -437,6 +450,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
             "Weather" => instance.class() == ClassName::Weather,
             "Outlines" => instance.class() == ClassName::OutlineEffect,
             "Color Correction" => instance.class() == ClassName::ColorCorrectionEffect,
+            "Lens" => instance.class().is_lens_effect(),
             "Graphics Volume" => instance.class() == ClassName::GraphicsVolume,
             "Effect" => matches!(
                 instance.class(),
@@ -449,7 +463,10 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
             "Emitter" | "Particles" => instance.class() == ClassName::ParticleEmitter,
             "Animation" => matches!(instance.class(), ClassName::Animator | ClassName::Animation),
             "Movement" => instance.class().is_character_controller(),
-            "Appearance" | "Behavior" => instance.class() != ClassName::ParticleEmitter,
+            // A lens effect's Color is in its own section.
+            "Appearance" | "Behavior" => {
+                instance.class() != ClassName::ParticleEmitter && !instance.class().is_lens_effect()
+            }
             _ => true,
         })
         .map(|&(title, names)| Section {
@@ -930,6 +947,7 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Weather" => icons::CLOUD_RAIN,
         "Outlines" => icons::PEN_NIB,
         "Color Correction" => icons::SWATCHES,
+        "Lens" => icons::APERTURE,
         "Graphics Volume" => icons::BOUNDING_BOX,
         "Effect" => icons::APERTURE,
         "Post-processing" => icons::SPARKLE,

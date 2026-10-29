@@ -90,8 +90,8 @@ pub fn keep(folder: &Path, settings: &GraphicsSettings) {
 mod tests {
     use super::*;
     use axcenity_render::{
-        AmbientOcclusion, AntiAliasing, CloudQuality, Quality, ReflectionQuality, ShadowQuality,
-        TextureQuality,
+        AmbientOcclusion, AntiAliasing, CloudQuality, DepthOfFieldQuality, Quality,
+        ReflectionQuality, ShadowQuality, TextureQuality,
     };
 
     fn temp_folder(test: &str) -> std::path::PathBuf {
@@ -120,6 +120,11 @@ mod tests {
             realtime_gi: Some(true),
             volumetric_fog: Some(false),
             cloud_quality: Some(CloudQuality::Medium),
+            depth_of_field: Some(DepthOfFieldQuality::Low),
+            vignette: Some(false),
+            film_grain: Some(true),
+            chromatic_aberration: Some(false),
+            sharpen: None,
         };
         save(&folder, &settings).unwrap();
         assert_eq!(load(&folder), Some(settings));

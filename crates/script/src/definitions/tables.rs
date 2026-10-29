@@ -1270,6 +1270,31 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 ty: "EnumCloudQuality",
                 doc: "How Lighting's Clouds are drawn: Low as a flat sheet, Medium, High and Ultra looked through in 16, 32 or 64 steps (High and Ultra with fine detail and light traced toward the sun). Every quality casts the same shadows.",
             },
+            Field {
+                name: "DepthOfField",
+                ty: "EnumDepthOfField",
+                doc: "How a DepthOfFieldEffect blurs: Off, Low (16 samples per pixel) or High (32). Off at Low, Low at Medium, High above.",
+            },
+            Field {
+                name: "Vignette",
+                ty: "boolean",
+                doc: "Whether a VignetteEffect is drawn. Off at Low, on above.",
+            },
+            Field {
+                name: "FilmGrain",
+                ty: "boolean",
+                doc: "Whether a FilmGrainEffect is drawn. Off at Low, on above.",
+            },
+            Field {
+                name: "ChromaticAberration",
+                ty: "boolean",
+                doc: "Whether a ChromaticAberrationEffect is drawn. Off at Low, on above.",
+            },
+            Field {
+                name: "Sharpen",
+                ty: "boolean",
+                doc: "Whether a SharpenEffect is drawn. Off at Low, on above.",
+            },
         ],
         operators: &[],
         methods: &[],

@@ -769,24 +769,33 @@ pub const ATMOSPHERE_NUMBERS: [&str; 4] = ["Density", "Offset", "Glare", "Haze"]
 /// `Enum.GraphicsQuality`'s items, which the graphics quality block offers.
 pub const GRAPHICS_QUALITIES: [&str; 5] = ["Automatic", "Low", "Medium", "High", "Ultra"];
 /// The `UserGameSettings` overrides the graphics option block sets.
-pub const GRAPHICS_OPTIONS: [&str; 10] = [
+pub const GRAPHICS_OPTIONS: [&str; 15] = [
     "ShadowQuality",
     "AntiAliasing",
     "TextureQuality",
     "AmbientOcclusion",
     "ReflectionQuality",
     "CloudQuality",
+    "DepthOfField",
     "PostProcessing",
     "ContactShadows",
     "RealtimeGI",
     "VolumetricFog",
+    "Vignette",
+    "FilmGrain",
+    "ChromaticAberration",
+    "Sharpen",
 ];
 /// The [`GRAPHICS_OPTIONS`] that are on or off (booleans in Lua), not enums.
-pub const GRAPHICS_SWITCHES: [&str; 4] = [
+pub const GRAPHICS_SWITCHES: [&str; 8] = [
     "PostProcessing",
     "ContactShadows",
     "RealtimeGI",
     "VolumetricFog",
+    "Vignette",
+    "FilmGrain",
+    "ChromaticAberration",
+    "Sharpen",
 ];
 /// The `UserGameSettings` overrides the graphics number block sets.
 pub const GRAPHICS_NUMBERS: [&str; 2] = ["ShadowDistance", "RenderScale"];
@@ -801,11 +810,16 @@ pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
         "ShadowQuality" => &["Off", "Low", "Medium", "High", "Ultra", PRESET],
         "AntiAliasing" => &["Off", "FXAA", "MSAA2", "MSAA4", PRESET],
         "TextureQuality" => &["Quarter", "Half", "Full", PRESET],
-        "AmbientOcclusion" => &["Off", "Low", "High", PRESET],
+        "AmbientOcclusion" | "DepthOfField" => &["Off", "Low", "High", PRESET],
         "ReflectionQuality" | "CloudQuality" => &["Low", "Medium", "High", "Ultra", PRESET],
-        "PostProcessing" | "ContactShadows" | "RealtimeGI" | "VolumetricFog" => {
-            &["On", "Off", PRESET]
-        }
+        "PostProcessing"
+        | "ContactShadows"
+        | "RealtimeGI"
+        | "VolumetricFog"
+        | "Vignette"
+        | "FilmGrain"
+        | "ChromaticAberration"
+        | "Sharpen" => &["On", "Off", PRESET],
         _ => &[],
     }
 }

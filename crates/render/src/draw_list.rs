@@ -43,6 +43,10 @@ pub struct DrawList {
     /// (Lighting's `ColorCorrectionEffect`). `None` leaves them as they are,
     /// and costs nothing.
     pub grading: Option<ColorGrading>,
+    /// Depth of field, a vignette, film grain, chromatic aberration and
+    /// sharpening (Lighting's lens effects). The default has none, and
+    /// costs nothing.
+    pub lens: LensEffects,
     pub items: Vec<DrawItem>,
     /// Pictures that always face the camera, such as particles, drawn
     /// after every item. They aren't lit or shadowed.
@@ -722,6 +726,55 @@ impl Default for ColorGrading {
             palette: Vec::new(),
         }
     }
+}
+
+/// Effects of a camera's lens on the picture, each `None` when the world
+/// has none (`docs/rendering/post.md`). Each is drawn only while its
+/// graphics setting allows it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LensEffects {
+    pub depth_of_field: Option<DepthOfField>,
+    pub vignette: Option<Vignette>,
+    pub film_grain: Option<FilmGrain>,
+    /// How far red and blue part at the screen's edges: 1 is 1% of the
+    /// screen's width each way at the left and right edges.
+    pub chromatic_aberration: Option<f32>,
+    /// How much the edges between colors are sharpened: 0 none, 1 strong.
+    pub sharpen: Option<f32>,
+}
+
+/// Blur by distance from the camera: sharp from `focus_distance -
+/// in_focus_radius` to `focus_distance + in_focus_radius` studs, blurring
+/// toward the camera by `near_intensity` and away from it by
+/// `far_intensity` (each 0 none, 1 full).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DepthOfField {
+    pub focus_distance: f32,
+    pub in_focus_radius: f32,
+    pub near_intensity: f32,
+    pub far_intensity: f32,
+}
+
+/// The picture darkened (or tinted) toward its corners.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Vignette {
+    /// How much of `color` the corners take, 0 to 1.
+    pub intensity: f32,
+    /// Where the darkening starts, as a share of the way from the middle to
+    /// a corner (0 to 1).
+    pub size: f32,
+    /// sRGB.
+    pub color: [f32; 3],
+}
+
+/// Moving noise over the picture, as on film.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FilmGrain {
+    /// How strong the noise is, 0 to 1.
+    pub intensity: f32,
+    /// Each grain's size, in pixels of a view 1080 pixels tall (scaled with
+    /// the view's height, never under one pixel).
+    pub size: f32,
 }
 
 /// A color lookup table: a cube of `size` entries a side mapping each

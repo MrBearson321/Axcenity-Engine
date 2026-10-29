@@ -551,7 +551,7 @@ A `GraphicsVolume` part (its box, a blend distance and a priority) holds effect 
 
 ### Acceptance criteria
 
-- [ ] Each effect does what it says on a reference scene and costs nothing when absent.
+- [x] Each effect does what it says on a reference scene and costs nothing when absent.
 
 ---
 

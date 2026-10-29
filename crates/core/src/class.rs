@@ -205,6 +205,18 @@ pub enum ClassName {
     /// contrast, saturation, a tint, a lookup table, posterizing and a
     /// palette), after tone mapping.
     ColorCorrectionEffect,
+    /// Inside Lighting: blurs what's nearer or farther than the distance in
+    /// focus, as a camera's lens does.
+    DepthOfFieldEffect,
+    /// Inside Lighting: darkens (or tints) the picture toward its corners.
+    VignetteEffect,
+    /// Inside Lighting: moving noise over the picture, as on film.
+    FilmGrainEffect,
+    /// Inside Lighting: red and blue drift apart toward the picture's
+    /// edges, as through a cheap lens.
+    ChromaticAberrationEffect,
+    /// Inside Lighting: makes the edges between colors crisper.
+    SharpenEffect,
     /// An invisible part that changes the look while the camera is inside
     /// it, fading in over `BlendDistance` outside it: the effects inside it
     /// (color correction, exposure, fog, atmosphere and bloom) replace the
@@ -365,7 +377,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 115] = [
+    pub const ALL: [ClassName; 120] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -428,6 +440,11 @@ impl ClassName {
         ClassName::Weather,
         ClassName::OutlineEffect,
         ClassName::ColorCorrectionEffect,
+        ClassName::DepthOfFieldEffect,
+        ClassName::VignetteEffect,
+        ClassName::FilmGrainEffect,
+        ClassName::ChromaticAberrationEffect,
+        ClassName::SharpenEffect,
         ClassName::GraphicsVolume,
         ClassName::ExposureEffect,
         ClassName::FogEffect,
@@ -551,6 +568,11 @@ impl ClassName {
             ClassName::Weather => "Weather",
             ClassName::OutlineEffect => "OutlineEffect",
             ClassName::ColorCorrectionEffect => "ColorCorrectionEffect",
+            ClassName::DepthOfFieldEffect => "DepthOfFieldEffect",
+            ClassName::VignetteEffect => "VignetteEffect",
+            ClassName::FilmGrainEffect => "FilmGrainEffect",
+            ClassName::ChromaticAberrationEffect => "ChromaticAberrationEffect",
+            ClassName::SharpenEffect => "SharpenEffect",
             ClassName::GraphicsVolume => "GraphicsVolume",
             ClassName::ExposureEffect => "ExposureEffect",
             ClassName::FogEffect => "FogEffect",
@@ -682,6 +704,19 @@ impl ClassName {
                 | ClassName::ReverbZone
                 | ClassName::GraphicsVolume
                 | ClassName::SpawnLocation
+        )
+    }
+
+    /// Whether this is a lens effect (graphics Phase 34), which works
+    /// inside Lighting.
+    pub fn is_lens_effect(self) -> bool {
+        matches!(
+            self,
+            ClassName::DepthOfFieldEffect
+                | ClassName::VignetteEffect
+                | ClassName::FilmGrainEffect
+                | ClassName::ChromaticAberrationEffect
+                | ClassName::SharpenEffect
         )
     }
 
@@ -1110,6 +1145,43 @@ impl ClassName {
                 ("Posterize", Value::Number(0.0)),
                 // An image whose colors every pixel is snapped to, or "".
                 ("Palette", Value::String(String::new())),
+            ],
+            ClassName::DepthOfFieldEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // Studs from the camera to the middle of what's sharp, and
+                // how far either side of it stays sharp.
+                ("FocusDistance", Value::Number(20.0)),
+                ("InFocusRadius", Value::Number(10.0)),
+                // How blurred what's nearer and farther gets, 0 to 1: full
+                // at the camera, and at twice the sharp range's far edge.
+                ("NearIntensity", Value::Number(0.75)),
+                ("FarIntensity", Value::Number(0.75)),
+            ],
+            ClassName::VignetteEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // How much of Color the corners take, 0 to 1.
+                ("Intensity", Value::Number(0.5)),
+                // Where it starts, from the middle (0) to the corners (1).
+                ("Size", Value::Number(0.5)),
+                ("Color", Value::Color3(Color3::new(0.0, 0.0, 0.0))),
+            ],
+            ClassName::FilmGrainEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // How strong the noise is, 0 to 1.
+                ("Intensity", Value::Number(0.3)),
+                // Each grain's size in pixels of a view 1080 pixels tall.
+                ("Size", Value::Number(1.0)),
+            ],
+            ClassName::ChromaticAberrationEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // 1 parts red and blue by 1% of the picture's width at its
+                // left and right edges.
+                ("Intensity", Value::Number(0.5)),
+            ],
+            ClassName::SharpenEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // 0 changes nothing, 1 is strong.
+                ("Intensity", Value::Number(0.5)),
             ],
             ClassName::ExposureEffect => vec![
                 ("Enabled", Value::Bool(true)),
@@ -2375,6 +2447,11 @@ impl ClassName {
             | ClassName::Weather
             | ClassName::OutlineEffect
             | ClassName::ColorCorrectionEffect
+            | ClassName::DepthOfFieldEffect
+            | ClassName::VignetteEffect
+            | ClassName::FilmGrainEffect
+            | ClassName::ChromaticAberrationEffect
+            | ClassName::SharpenEffect
             | ClassName::ExposureEffect
             | ClassName::FogEffect
             | ClassName::BloomEffect

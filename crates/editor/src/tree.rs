@@ -65,6 +65,9 @@ pub enum Insertable {
     /// Color grading of the finished picture, in Lighting or the selected
     /// GraphicsVolume.
     ColorCorrectionEffect,
+    /// A lens effect (depth of field, vignette, film grain, chromatic
+    /// aberration or sharpening), always in Lighting.
+    LensEffect(ClassName),
     /// An invisible box that changes the look while the camera is in it.
     GraphicsVolume,
     /// A GraphicsVolume's exposure, fog and bloom, in the selected volume
@@ -189,6 +192,14 @@ impl Insertable {
         Insertable::Weather,
         Insertable::OutlineEffect,
         Insertable::ColorCorrectionEffect,
+    ];
+    /// Ribbon ▸ Lighting ▸ Lens.
+    pub const LENS: [Insertable; 5] = [
+        Insertable::LensEffect(ClassName::DepthOfFieldEffect),
+        Insertable::LensEffect(ClassName::VignetteEffect),
+        Insertable::LensEffect(ClassName::FilmGrainEffect),
+        Insertable::LensEffect(ClassName::ChromaticAberrationEffect),
+        Insertable::LensEffect(ClassName::SharpenEffect),
     ];
     /// Whether a selected GraphicsVolume holds a new one: what changes the
     /// look there.
@@ -325,6 +336,12 @@ impl Insertable {
             Insertable::Weather => "Weather",
             Insertable::OutlineEffect => "Outlines",
             Insertable::ColorCorrectionEffect => "Color Correction",
+            Insertable::LensEffect(ClassName::DepthOfFieldEffect) => "Depth of Field",
+            Insertable::LensEffect(ClassName::VignetteEffect) => "Vignette",
+            Insertable::LensEffect(ClassName::FilmGrainEffect) => "Film Grain",
+            Insertable::LensEffect(ClassName::ChromaticAberrationEffect) => "Aberration",
+            Insertable::LensEffect(ClassName::SharpenEffect) => "Sharpen",
+            Insertable::LensEffect(class) => class.as_str(),
             Insertable::GraphicsVolume => "Graphics Volume",
             Insertable::ExposureEffect => "Exposure",
             Insertable::FogEffect => "Fog",
@@ -396,6 +413,7 @@ impl Insertable {
             Insertable::Weather => ClassName::Weather,
             Insertable::OutlineEffect => ClassName::OutlineEffect,
             Insertable::ColorCorrectionEffect => ClassName::ColorCorrectionEffect,
+            Insertable::LensEffect(class) => class,
             Insertable::GraphicsVolume => ClassName::GraphicsVolume,
             Insertable::ExposureEffect => ClassName::ExposureEffect,
             Insertable::FogEffect => ClassName::FogEffect,
@@ -887,7 +905,8 @@ pub fn health_bar(world: &mut World, health: Option<InstanceId>) -> HealthBar {
 /// RemoteEvent (or RemoteFunction, BindableEvent or BindableFunction) goes
 /// into ReplicatedStorage (where both sides find it, as in Roblox), and
 /// anything else into the Workspace. An Atmosphere, Clouds, Weather,
-/// OutlineEffect or ColorCorrectionEffect goes into Lighting, and a Team
+/// OutlineEffect, ColorCorrectionEffect or lens effect goes into Lighting,
+/// and a Team
 /// into Teams; an Atmosphere, ColorCorrectionEffect, ExposureEffect,
 /// FogEffect or BloomEffect goes into the selected GraphicsVolume. A
 /// SoundGroup goes into the selected SoundGroup, and a sound effect into
@@ -905,6 +924,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             | Insertable::Weather
             | Insertable::OutlineEffect
             | Insertable::ColorCorrectionEffect
+            | Insertable::LensEffect(_)
     ) {
         return world.lighting();
     }

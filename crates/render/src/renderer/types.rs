@@ -178,6 +178,15 @@ pub(super) struct PostUniform {
     /// 1 if bloom is on, 1 if tone mapping is on, and which curve
     /// ([`crate::ToneMapping`]).
     pub(super) flags: [f32; 4],
+    /// Lens effects ([`super::lens::add_lens`]): chromatic aberration (how
+    /// far red and blue part, per unit from the middle), sharpening, film
+    /// grain's strength and its size in output pixels. 0 is off.
+    pub(super) lens: [f32; 4],
+    /// The vignette's strength (0 off) and where it starts, the output's
+    /// aspect, and the grain's seed for this frame.
+    pub(super) vignette: [f32; 4],
+    /// The vignette's color (sRGB), then unused.
+    pub(super) vignette_color: [f32; 4],
 }
 
 /// The largest shadow cascade, in texels per side (Ultra's). The graphics
@@ -557,6 +566,8 @@ pub(super) struct PostPasses {
     pub(super) fxaa: wgpu::RenderPipeline,
     /// Color grading's values and lookup table, for the composite pass.
     pub(super) grading: super::grading::GradingPass,
+    /// Depth of field, drawn before bloom while the world has it.
+    pub(super) depth_of_field: super::lens::DepthOfFieldPass,
 }
 
 /// The depth and normal prepass's and the ambient occlusion passes'
@@ -615,6 +626,8 @@ pub(super) struct TargetsAlive {
     pub(super) volumetric_fog: Arc<()>,
     /// Water's copies of the scene.
     pub(super) water: Arc<()>,
+    /// Depth of field's blurred copies of the scene.
+    pub(super) depth_of_field: Arc<()>,
 }
 
 /// The multisampled color the scene is drawn into while MSAA is on. Its
@@ -661,10 +674,13 @@ pub(super) struct FrameTargets {
     pub(super) depth_view: wgpu::TextureView,
     /// Only while FXAA is on.
     pub(super) fxaa: Option<FxaaTarget>,
-    /// Only while ambient occlusion, contact shadows, volumetric fog or
-    /// screen-space outlines are on (all but the first read only what the
-    /// prepass drew).
+    /// Only while ambient occlusion, contact shadows, volumetric fog,
+    /// screen-space outlines or depth of field are on (all but the first
+    /// read only what the prepass drew).
     pub(super) occlusion: Option<OcclusionTargets>,
+    /// Only while depth of field is drawn: the blurred scene, which bloom
+    /// and the composite pass read in `hdr_view`'s place.
+    pub(super) depth_of_field: Option<super::lens::DepthOfFieldTarget>,
     /// Bloom levels from half the scene's size down, each half the one before.
     pub(super) levels: Vec<wgpu::TextureView>,
     /// Scene to the first level.
@@ -714,6 +730,9 @@ pub(super) struct ScenePipeline {
     /// Whether the last draw list asked for screen-space outlines, which
     /// keep the prepass's targets alive.
     pub(super) edges: bool,
+    /// Whether the last draw list asked for depth of field, which (while
+    /// its setting allows it) keeps the prepass's targets and its own alive.
+    pub(super) depth_of_field: bool,
     /// Pipelines for materials' own surface shaders.
     pub(super) surface_shaders: surface_shaders::SurfaceShaders,
     /// Camera-facing pictures, such as particles.

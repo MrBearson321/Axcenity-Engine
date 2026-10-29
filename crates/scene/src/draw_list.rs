@@ -381,6 +381,7 @@ pub fn build_draw_list_posed(
         post: look.post,
         edges: crate::outlines::edges_of(world),
         grading: look.grading,
+        lens: crate::lens::lens_of(world),
         items,
         sprites: Vec::new(),
         ui: Vec::new(),

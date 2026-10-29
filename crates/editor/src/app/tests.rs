@@ -376,6 +376,36 @@ fn graphics_volumes_hold_the_effects_inserted_into_them() {
     std::fs::remove_dir_all(folder).unwrap();
 }
 
+/// Graphics Phase 34: each lens effect goes into Lighting, wherever the
+/// selection is, and its properties sit together in one section.
+#[test]
+fn lens_effects_go_into_lighting_with_their_own_properties_section() {
+    let folder = copy_of_example("hello-part", "lens-insert");
+    let mut app = EditorApp::new(Some(&folder));
+    let part = app
+        .world
+        .descendants(app.world.workspace())
+        .into_iter()
+        .find(|&id| app.world.get(id).unwrap().class() == ClassName::Part)
+        .unwrap();
+    for what in Insertable::LENS {
+        app.insert(what, Some(part));
+        let effect = app.selected.unwrap();
+        let instance = app.world.get(effect).unwrap();
+        assert_eq!(instance.class(), what.class());
+        assert!(instance.class().is_lens_effect());
+        assert_eq!(instance.parent(), Some(app.world.lighting()));
+        let sections = crate::properties::sections(instance);
+        let titles: Vec<&str> = sections.iter().map(|section| section.title).collect();
+        assert!(titles.contains(&"Lens"), "{titles:?}");
+        assert!(!titles.contains(&"Appearance"), "{titles:?}");
+        let lens = sections.iter().find(|s| s.title == "Lens").unwrap();
+        assert!(lens.properties.iter().any(|(name, _)| *name == "Enabled"));
+    }
+    drop(app);
+    std::fs::remove_dir_all(folder).unwrap();
+}
+
 #[test]
 fn the_whole_editor_draws_in_each_theme_and_density() {
     let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);

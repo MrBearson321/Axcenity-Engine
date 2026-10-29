@@ -9,8 +9,9 @@ use super::*;
 use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, type_scale};
 use crate::widgets;
 use axcenity_render::{
-    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, GraphicsSettings, Quality,
-    RENDER_SCALE_RANGE, ReflectionQuality, ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
+    GraphicsSettings, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowQuality,
+    TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 
 /// Ctrl+, (Cmd+, on macOS) opens Settings, as in most desktop apps.
@@ -748,6 +749,46 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                     }
                 });
             ui.end_row();
+
+            ui.label("Depth of field");
+            let label = |quality: Option<DepthOfFieldQuality>| match quality {
+                Some(quality) => quality.label().to_owned(),
+                None => format!("Preset ({})", preset.depth_of_field().label()),
+            };
+            egui::ComboBox::from_id_salt("depth of field")
+                .selected_text(label(settings.depth_of_field))
+                .show_ui(ui, |ui| {
+                    for choice in std::iter::once(None).chain(DepthOfFieldQuality::ALL.map(Some)) {
+                        ui.selectable_value(&mut settings.depth_of_field, choice, label(choice));
+                    }
+                });
+            ui.end_row();
+
+            let switches = [
+                ("Vignette", preset.vignette(), &mut settings.vignette),
+                ("Film grain", preset.film_grain(), &mut settings.film_grain),
+                (
+                    "Chromatic aberration",
+                    preset.chromatic_aberration(),
+                    &mut settings.chromatic_aberration,
+                ),
+                ("Sharpen", preset.sharpen(), &mut settings.sharpen),
+            ];
+            for (name, preset_on, value) in switches {
+                ui.label(name);
+                let label = |on: Option<bool>| match on {
+                    Some(on) => on_off(on).to_owned(),
+                    None => format!("Preset ({})", on_off(preset_on)),
+                };
+                egui::ComboBox::from_id_salt(name)
+                    .selected_text(label(*value))
+                    .show_ui(ui, |ui| {
+                        for choice in [None, Some(true), Some(false)] {
+                            ui.selectable_value(value, choice, label(choice));
+                        }
+                    });
+                ui.end_row();
+            }
         });
     ui.add_space(16.0);
     widgets::section_label(ui, "In use");
@@ -822,6 +863,28 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
         "Volumetric fog: on (sun shafts and lamp light in an Atmosphere's fog)"
     } else {
         "Volumetric fog: off (fog without shadows in it)"
+    });
+    ui.label(match effective.depth_of_field {
+        DepthOfFieldQuality::Off => "Depth of field: off".to_owned(),
+        quality => format!(
+            "Depth of field: {}, {} samples per pixel",
+            quality.label(),
+            quality.samples()
+        ),
+    });
+    let lens: Vec<&str> = [
+        (effective.vignette, "vignette"),
+        (effective.film_grain, "film grain"),
+        (effective.chromatic_aberration, "chromatic aberration"),
+        (effective.sharpen, "sharpening"),
+    ]
+    .into_iter()
+    .filter_map(|(on, name)| on.then_some(name))
+    .collect();
+    ui.label(if lens.is_empty() {
+        "Lens effects: none".to_owned()
+    } else {
+        format!("Lens effects: {}", lens.join(", "))
     });
     for note in &effective.notes {
         ui.label(egui::RichText::new(note).color(palette.warning));
@@ -1121,6 +1184,11 @@ mod tests {
             realtime_gi: Some(true),
             volumetric_fog: Some(true),
             cloud_quality: Some(CloudQuality::Ultra),
+            depth_of_field: Some(DepthOfFieldQuality::Off),
+            vignette: Some(false),
+            film_grain: Some(true),
+            chromatic_aberration: None,
+            sharpen: Some(false),
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);

@@ -14,8 +14,9 @@
 //! takes a script's change with `take_graphics_change`.
 
 use axcenity_render::{
-    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, GraphicsSettings, Quality,
-    RENDER_SCALE_RANGE, ReflectionQuality, ShadowQuality, TextureQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
+    GraphicsSettings, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowQuality,
+    TextureQuality,
 };
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -68,6 +69,12 @@ pub(crate) fn reflection_quality_names() -> Vec<&'static str> {
 
 pub(crate) fn cloud_quality_names() -> Vec<&'static str> {
     CloudQuality::ALL.map(CloudQuality::label).to_vec()
+}
+
+pub(crate) fn depth_of_field_quality_names() -> Vec<&'static str> {
+    DepthOfFieldQuality::ALL
+        .map(DepthOfFieldQuality::label)
+        .to_vec()
 }
 
 /// `mode`'s item name in `Enum.AntiAliasing`. Its label ("MSAA 4×") isn't a
@@ -357,6 +364,53 @@ impl UserData for LuaUserGameSettings {
         fields.add_field_method_set("VolumetricFog", |lua, _, value: mlua::Value| {
             let chosen = bool_choice(lua, "VolumetricFog", value)?;
             change(lua, |settings, _| settings.volumetric_fog = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("DepthOfField", |lua, _| {
+            let name = settings(lua).depth_of_field().label();
+            Ok(item(EnumType::DepthOfField, name))
+        });
+        fields.add_field_method_set("DepthOfField", |lua, _, value: mlua::Value| {
+            let chosen = enum_choice(
+                lua,
+                "DepthOfField",
+                EnumType::DepthOfField,
+                &DepthOfFieldQuality::ALL,
+                DepthOfFieldQuality::label,
+                value,
+            )?;
+            change(lua, |settings, _| settings.depth_of_field = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("Vignette", |lua, _| Ok(settings(lua).vignette()));
+        fields.add_field_method_set("Vignette", |lua, _, value: mlua::Value| {
+            let chosen = bool_choice(lua, "Vignette", value)?;
+            change(lua, |settings, _| settings.vignette = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("FilmGrain", |lua, _| Ok(settings(lua).film_grain()));
+        fields.add_field_method_set("FilmGrain", |lua, _, value: mlua::Value| {
+            let chosen = bool_choice(lua, "FilmGrain", value)?;
+            change(lua, |settings, _| settings.film_grain = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("ChromaticAberration", |lua, _| {
+            Ok(settings(lua).chromatic_aberration())
+        });
+        fields.add_field_method_set("ChromaticAberration", |lua, _, value: mlua::Value| {
+            let chosen = bool_choice(lua, "ChromaticAberration", value)?;
+            change(lua, |settings, _| settings.chromatic_aberration = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("Sharpen", |lua, _| Ok(settings(lua).sharpen()));
+        fields.add_field_method_set("Sharpen", |lua, _, value: mlua::Value| {
+            let chosen = bool_choice(lua, "Sharpen", value)?;
+            change(lua, |settings, _| settings.sharpen = chosen);
             Ok(())
         });
 

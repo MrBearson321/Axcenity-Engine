@@ -324,6 +324,43 @@ impl CloudQuality {
     }
 }
 
+/// How a `DepthOfFieldEffect` blurs what's out of focus. Ordered from
+/// cheapest to dearest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum DepthOfFieldQuality {
+    /// No blur, and no prepass or blur target for it.
+    Off,
+    /// 16 samples per pixel.
+    Low,
+    /// 32 samples per pixel.
+    High,
+}
+
+impl DepthOfFieldQuality {
+    pub const ALL: [DepthOfFieldQuality; 3] = [
+        DepthOfFieldQuality::Off,
+        DepthOfFieldQuality::Low,
+        DepthOfFieldQuality::High,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DepthOfFieldQuality::Off => "Off",
+            DepthOfFieldQuality::Low => "Low",
+            DepthOfFieldQuality::High => "High",
+        }
+    }
+
+    /// How many points around each pixel its blur averages: 0 when it's off.
+    pub fn samples(self) -> u32 {
+        match self {
+            DepthOfFieldQuality::Off => 0,
+            DepthOfFieldQuality::Low => 16,
+            DepthOfFieldQuality::High => 32,
+        }
+    }
+}
+
 /// The smallest and largest render scale: the scene is drawn at this
 /// fraction of the output's width and height.
 pub const RENDER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
@@ -418,6 +455,19 @@ pub struct GraphicsSettings {
     pub volumetric_fog: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cloud_quality: Option<CloudQuality>,
+    /// The lens effects a world can ask for (`DepthOfFieldEffect`,
+    /// `VignetteEffect`, `FilmGrainEffect`, `ChromaticAberrationEffect`,
+    /// `SharpenEffect`), each drawn only if its setting allows it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_of_field: Option<DepthOfFieldQuality>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vignette: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub film_grain: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chromatic_aberration: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sharpen: Option<bool>,
 }
 
 impl GraphicsSettings {
@@ -572,6 +622,35 @@ impl GraphicsSettings {
         })
     }
 
+    /// How depth of field is drawn: the override, or the preset's (off at
+    /// Low, Low at Medium, High above).
+    pub fn depth_of_field(&self) -> DepthOfFieldQuality {
+        self.depth_of_field.unwrap_or(match self.quality {
+            Quality::Low => DepthOfFieldQuality::Off,
+            Quality::Medium => DepthOfFieldQuality::Low,
+            Quality::High | Quality::Ultra => DepthOfFieldQuality::High,
+        })
+    }
+
+    /// Whether a vignette is drawn: the override, or the preset's (on above
+    /// Low). The other lens effects' switches follow the same presets.
+    pub fn vignette(&self) -> bool {
+        self.vignette.unwrap_or(self.quality != Quality::Low)
+    }
+
+    pub fn film_grain(&self) -> bool {
+        self.film_grain.unwrap_or(self.quality != Quality::Low)
+    }
+
+    pub fn chromatic_aberration(&self) -> bool {
+        self.chromatic_aberration
+            .unwrap_or(self.quality != Quality::Low)
+    }
+
+    pub fn sharpen(&self) -> bool {
+        self.sharpen.unwrap_or(self.quality != Quality::Low)
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -666,6 +745,13 @@ impl GraphicsSettings {
             volumetric_fog,
             // Every GPU can draw it: it's worked out in the sky's pixels.
             cloud_quality: self.cloud_quality(),
+            // Every GPU can draw these: full-screen passes over targets the
+            // scene already has, and the prepass's depth.
+            depth_of_field: self.depth_of_field(),
+            vignette: self.vignette(),
+            film_grain: self.film_grain(),
+            chromatic_aberration: self.chromatic_aberration(),
+            sharpen: self.sharpen(),
             notes,
         }
     }
@@ -776,6 +862,12 @@ pub struct EffectiveGraphics {
     /// prepass's depth).
     pub volumetric_fog: bool,
     pub cloud_quality: CloudQuality,
+    /// Depth of field's samples (needs the prepass's depth).
+    pub depth_of_field: DepthOfFieldQuality,
+    pub vignette: bool,
+    pub film_grain: bool,
+    pub chromatic_aberration: bool,
+    pub sharpen: bool,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -1043,6 +1135,87 @@ mod tests {
     }
 
     #[test]
+    fn each_lens_effect_has_its_own_setting_by_preset_and_override() {
+        use DepthOfFieldQuality as Dof;
+        let presets = Quality::ALL.map(|quality| {
+            let settings = GraphicsSettings::preset(quality);
+            (
+                settings.depth_of_field(),
+                [
+                    settings.vignette(),
+                    settings.film_grain(),
+                    settings.chromatic_aberration(),
+                    settings.sharpen(),
+                ],
+            )
+        });
+        assert_eq!(
+            presets,
+            [
+                (Dof::Off, [false; 4]),
+                (Dof::Low, [true; 4]),
+                (Dof::High, [true; 4]),
+                (Dof::High, [true; 4]),
+            ]
+        );
+        assert_eq!(Dof::ALL.map(Dof::samples), [0, 16, 32]);
+        for quality in Quality::ALL {
+            let preset = GraphicsSettings::preset(quality);
+            let switches = |settings: &GraphicsSettings| {
+                [
+                    settings.vignette(),
+                    settings.film_grain(),
+                    settings.chromatic_aberration(),
+                    settings.sharpen(),
+                ]
+            };
+            let blur = GraphicsSettings {
+                depth_of_field: Some(Dof::Low),
+                ..preset.clone()
+            };
+            assert_eq!(blur.depth_of_field(), Dof::Low);
+            assert_eq!(switches(&blur), switches(&preset));
+            assert_eq!(blur.post_processing(), preset.post_processing());
+            // Each switch turns only itself over.
+            for which in 0..4 {
+                let mut one = preset.clone();
+                let flipped = Some(!switches(&preset)[which]);
+                match which {
+                    0 => one.vignette = flipped,
+                    1 => one.film_grain = flipped,
+                    2 => one.chromatic_aberration = flipped,
+                    _ => one.sharpen = flipped,
+                }
+                let mut expected = switches(&preset);
+                expected[which] = !expected[which];
+                assert_eq!(switches(&one), expected);
+                assert_eq!(one.depth_of_field(), preset.depth_of_field());
+                let effective = one.effective(&Capabilities::default());
+                assert_eq!(
+                    [
+                        effective.vignette,
+                        effective.film_grain,
+                        effective.chromatic_aberration,
+                        effective.sharpen,
+                    ],
+                    expected
+                );
+            }
+        }
+        // Every GPU can draw them, so none is lowered.
+        let tiny = Capabilities {
+            max_texture_size: 64,
+            max_texture_layers: 1,
+            msaa_samples: 1,
+            compute_shaders: false,
+            ..Capabilities::default()
+        };
+        let ultra = GraphicsSettings::preset(Quality::Ultra).effective(&tiny);
+        assert_eq!(ultra.depth_of_field, Dof::High);
+        assert!(ultra.vignette && ultra.film_grain && ultra.chromatic_aberration && ultra.sharpen);
+    }
+
+    #[test]
     fn settings_round_trip_through_json() {
         let settings = GraphicsSettings {
             quality: Quality::Medium,
@@ -1060,6 +1233,11 @@ mod tests {
             realtime_gi: Some(true),
             volumetric_fog: Some(false),
             cloud_quality: Some(CloudQuality::Low),
+            depth_of_field: Some(DepthOfFieldQuality::Low),
+            vignette: Some(false),
+            film_grain: Some(true),
+            chromatic_aberration: Some(false),
+            sharpen: Some(true),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -1333,6 +1511,11 @@ mod tests {
                         realtime_gi: post,
                         volumetric_fog: post,
                         cloud_quality: Some(CloudQuality::Medium),
+                        depth_of_field: Some(DepthOfFieldQuality::Low),
+                        vignette: post,
+                        film_grain: post,
+                        chromatic_aberration: post,
+                        sharpen: post,
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);
@@ -1349,6 +1532,14 @@ mod tests {
                         assert!(effective.realtime_gi <= settings.realtime_gi());
                         assert!(effective.volumetric_fog <= settings.volumetric_fog());
                         assert_eq!(effective.cloud_quality, settings.cloud_quality());
+                        assert_eq!(effective.depth_of_field, settings.depth_of_field());
+                        assert_eq!(effective.vignette, settings.vignette());
+                        assert_eq!(effective.film_grain, settings.film_grain());
+                        assert_eq!(
+                            effective.chromatic_aberration,
+                            settings.chromatic_aberration()
+                        );
+                        assert_eq!(effective.sharpen, settings.sharpen());
                         let lowered =
                             usize::from(effective.shadow_quality != settings.shadow_quality())
                                 + usize::from(effective.anti_aliasing != settings.anti_aliasing())

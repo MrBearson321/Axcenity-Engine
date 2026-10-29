@@ -1,13 +1,25 @@
 // Post-processing (rendering stage 5): bloom, then tone mapping from the
-// high dynamic range scene to the screen, then color grading. Colors are
-// linear light, except while they're graded.
+// high dynamic range scene to the screen, then lens effects and color
+// grading. Colors are linear light, except while a vignette, grain or
+// grading changes them.
 
+// Must match PostUniform in renderer/types.rs.
 struct Post {
     // x: bloom threshold, y: bloom intensity, z: exposure.
     values: vec4<f32>,
     // x: 1 if bloom is on, y: 1 if tone mapping is on, z: the curve (0
     // Classic, 1 Neutral, 2 Filmic).
     flags: vec4<f32>,
+    // Lens effects, 0 when off. x: chromatic aberration (how far red and
+    // blue part, per unit from the middle), y: sharpening, z: film grain's
+    // strength, w: a grain's size in pixels.
+    lens: vec4<f32>,
+    // x: the vignette's strength (0 off), y: where it starts (a share of the
+    // way from the middle to a corner), z: the output's aspect, w: the
+    // grain's seed for this frame.
+    vignette: vec4<f32>,
+    // rgb: the vignette's color (sRGB).
+    vignette_color: vec4<f32>,
 }
 
 @group(0) @binding(0) var source: texture_2d<f32>;
@@ -147,9 +159,64 @@ fn tone_map(color: vec3<f32>) -> vec3<f32> {
     return tone_map_classic(color);
 }
 
+fn scene_at(uv: vec2<f32>) -> vec3<f32> {
+    return textureSampleLevel(source, linear_sampler, uv, 0.0).rgb;
+}
+
+// The scene at `uv` through the lens: red and blue parted toward the
+// edges (chromatic aberration), and the edges between colors sharpened
+// (by how far the pixel differs from its four neighbors).
+fn through_lens(uv: vec2<f32>) -> vec3<f32> {
+    let plain = scene_at(uv);
+    var color = plain;
+    if post.lens.x > 0.0 {
+        let apart = (uv - 0.5) * post.lens.x;
+        color = vec3<f32>(scene_at(uv + apart).r, plain.g, scene_at(uv - apart).b);
+    }
+    // Judged on the scene as it is, so the parted colors aren't sharpened
+    // into brighter fringes.
+    if post.lens.y > 0.0 {
+        let texel = 1.0 / vec2<f32>(textureDimensions(source));
+        let around = scene_at(uv + vec2<f32>(texel.x, 0.0)) + scene_at(uv - vec2<f32>(texel.x, 0.0))
+            + scene_at(uv + vec2<f32>(0.0, texel.y)) + scene_at(uv - vec2<f32>(0.0, texel.y));
+        color = max(color + (plain - around * 0.25) * post.lens.y * 2.0, vec3<f32>(0.0));
+    }
+    return color;
+}
+
+// A number from 0 to 1 that looks random for each `cell` and `seed`.
+fn grain_noise(cell: vec2<f32>, seed: f32) -> f32 {
+    var bits = vec2<u32>(vec2<i32>(cell)) + vec2<u32>(u32(seed) * 1597u, u32(seed) * 3571u);
+    var h = bits.x * 1664525u + bits.y * 1013904223u;
+    h ^= h >> 16u;
+    h *= 2246822519u;
+    h ^= h >> 13u;
+    h *= 3266489917u;
+    h ^= h >> 16u;
+    return f32(h & 0xffffu) / 65535.0;
+}
+
+// The finished, sRGB-encoded `input` darkened (or tinted) toward the
+// corners, then with film grain over it, at output pixel `pixel`.
+fn lens_finish(input: vec3<f32>, uv: vec2<f32>, pixel: vec2<f32>) -> vec3<f32> {
+    var color = input;
+    if post.vignette.x > 0.0 {
+        // 0 in the middle, 1 in the corners, round on any screen.
+        let aspect = post.vignette.z;
+        let from_middle = length((uv - 0.5) * vec2<f32>(aspect, 1.0)) / length(vec2<f32>(aspect, 1.0) * 0.5);
+        let amount = post.vignette.x * smoothstep(post.vignette.y, 1.0, from_middle);
+        color = mix(color, post.vignette_color.rgb, amount);
+    }
+    if post.lens.z > 0.0 {
+        let noise = grain_noise(floor(pixel / post.lens.w), post.vignette.w) - 0.5;
+        color = clamp(color + noise * post.lens.z * 0.4, vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    return color;
+}
+
 @fragment
 fn fs_composite(in: VertexOut) -> @location(0) vec4<f32> {
-    var color = textureSampleLevel(source, linear_sampler, in.uv, 0.0).rgb;
+    var color = through_lens(in.uv);
     if post.flags.x > 0.5 {
         color += textureSampleLevel(bloom, linear_sampler, in.uv, 0.0).rgb * post.values.y;
     }
@@ -159,8 +226,17 @@ fn fs_composite(in: VertexOut) -> @location(0) vec4<f32> {
     }
     // Colors past 1 can't be shown. The screen's sRGB format does the rest.
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
-    if grading.tint.w > 0.5 {
-        color = to_linear(graded(to_srgb(color)));
+    let lens = post.vignette.x > 0.0 || post.lens.z > 0.0;
+    let graded_on = grading.tint.w > 0.5;
+    if lens || graded_on {
+        var shown = to_srgb(color);
+        if lens {
+            shown = lens_finish(shown, in.uv, in.clip_position.xy);
+        }
+        if graded_on {
+            shown = graded(shown);
+        }
+        color = to_linear(shown);
     }
     return vec4<f32>(color, 1.0);
 }

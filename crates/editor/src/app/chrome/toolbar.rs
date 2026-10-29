@@ -357,6 +357,34 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::LENS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    let hover = match what.class() {
+                        ClassName::DepthOfFieldEffect => {
+                            "Insert a DepthOfFieldEffect into Lighting: what's nearer or                              farther than its FocusDistance blurs, as through a camera's lens."
+                        }
+                        ClassName::VignetteEffect => {
+                            "Insert a VignetteEffect into Lighting: the picture darkens (or                              takes its Color) toward the corners."
+                        }
+                        ClassName::FilmGrainEffect => {
+                            "Insert a FilmGrainEffect into Lighting: moving noise over the                              picture, as on film."
+                        }
+                        ClassName::ChromaticAberrationEffect => {
+                            "Insert a ChromaticAberrationEffect into Lighting: red and blue                              drift apart toward the picture's edges."
+                        }
+                        _ => {
+                            "Insert a SharpenEffect into Lighting: crisper edges between                              colors, useful with a render scale below 100%."
+                        }
+                    };
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hover)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
                 for what in Insertable::VOLUMES {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     let hover = match what {

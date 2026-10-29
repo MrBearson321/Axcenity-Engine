@@ -12,6 +12,7 @@ mod color_grading;
 mod environment_maps;
 mod fog;
 mod frustum_culling;
+mod lens;
 mod level_of_detail;
 mod light_probe_volumes;
 mod outlines;
@@ -175,6 +176,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
         wind: Vec3::ZERO,
         edges: None,
         grading: None,
+        lens: crate::LensEffects::default(),
     }
 }
 
@@ -3210,6 +3212,22 @@ fn every_setting_and_value() -> Vec<GraphicsSettings> {
         s.ambient_occlusion = Some(AmbientOcclusion::Off);
         s.contact_shadows = Some(true);
     }));
+    // So does depth of field, with its own target.
+    for quality in crate::DepthOfFieldQuality::ALL {
+        all.push(with(&|s| {
+            s.ambient_occlusion = Some(AmbientOcclusion::Off);
+            s.contact_shadows = Some(false);
+            s.depth_of_field = Some(quality);
+        }));
+    }
+    for on in [false, true] {
+        all.push(with(&|s| {
+            s.vignette = Some(on);
+            s.film_grain = Some(on);
+            s.chromatic_aberration = Some(on);
+            s.sharpen = Some(on);
+        }));
+    }
     all.push(high);
     all
 }
@@ -3281,6 +3299,26 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 probes: Arc::new(vec![[[0.5; 3]; 4]; 4]),
             },
         });
+    // Every lens effect, for their settings to turn on and off.
+    list.lens = crate::LensEffects {
+        depth_of_field: Some(crate::DepthOfField {
+            focus_distance: 4.0,
+            in_focus_radius: 1.0,
+            near_intensity: 1.0,
+            far_intensity: 1.0,
+        }),
+        vignette: Some(crate::Vignette {
+            intensity: 0.5,
+            size: 0.5,
+            color: [0.0; 3],
+        }),
+        film_grain: Some(crate::FilmGrain {
+            intensity: 0.2,
+            size: 1.0,
+        }),
+        chromatic_aberration: Some(0.5),
+        sharpen: Some(0.5),
+    };
     let settings = every_setting_and_value();
     // What a renderer holds: its caches and its targets.
     let counts = |renderer: &TextureRenderer| {
@@ -3305,7 +3343,10 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             ),
             scene.environment.bytes(),
             scene.probes_traced().is_some(),
-            scene.volumetric_fogs_alive(),
+            (
+                scene.volumetric_fogs_alive(),
+                scene.depth_of_field_targets_alive(),
+            ),
         )
     };
     for round in 0..3 {
@@ -3329,7 +3370,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 (sun, (spot, point), targets, occlusion, (msaa, fxaa)),
                 environment,
                 gi,
-                fogs,
+                (fogs, depth_of_field),
             ) = counts(&renderer);
             let context = format!("round {round}, step {step}: {settings:?}");
             // A ceiling of 0 studs draws no sun shadows, so needs no map.
@@ -3346,11 +3387,14 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 "{context}"
             );
             assert_eq!(targets, 1, "{context}");
-            // The prepass is drawn for ambient occlusion, contact shadows
-            // or volumetric fog.
+            // The prepass is drawn for ambient occlusion, contact shadows,
+            // volumetric fog or depth of field.
+            let blurred = used.depth_of_field != crate::DepthOfFieldQuality::Off;
+            assert_eq!(depth_of_field, usize::from(blurred), "{context}");
             let prepass = used.ambient_occlusion != crate::AmbientOcclusion::Off
                 || used.contact_shadows
-                || used.volumetric_fog;
+                || used.volumetric_fog
+                || blurred;
             assert_eq!(occlusion, usize::from(prepass), "{context}");
             assert_eq!(
                 msaa,

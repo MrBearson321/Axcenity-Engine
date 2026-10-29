@@ -1,0 +1,564 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Ground",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.45,
+            0.62,
+            0.4
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -0.5,
+            -40
+          ],
+          "Shape": "Block",
+          "Size": [
+            60,
+            1,
+            120
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar1",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.85,
+            0.2,
+            0.15
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -3.5,
+            3,
+            -4
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar2",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.55,
+            0.15
+          ],
+          "Material": "Plastic",
+          "Position": [
+            3.5,
+            3,
+            -9
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar3",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.85,
+            0.25
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -3.5,
+            3,
+            -15
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar4",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.2,
+            0.7,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            3.5,
+            3,
+            -22
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar5",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.2,
+            0.45,
+            0.85
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -3.5,
+            3,
+            -30
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar6",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.55,
+            0.3,
+            0.8
+          ],
+          "Material": "Plastic",
+          "Position": [
+            3.5,
+            3,
+            -40
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar7",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.85,
+            0.2,
+            0.15
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -3.5,
+            3,
+            -52
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar8",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.55,
+            0.15
+          ],
+          "Material": "Plastic",
+          "Position": [
+            3.5,
+            3,
+            -66
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar9",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.85,
+            0.25
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -3.5,
+            3,
+            -82
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar10",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.2,
+            0.7,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            3.5,
+            3,
+            -100
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Stripe1",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.95,
+            0.95
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -8,
+            6,
+            -110
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Stripe2",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.1,
+            0.1,
+            0.12
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -6,
+            6,
+            -110
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Stripe3",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.95,
+            0.95
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -4,
+            6,
+            -110
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Stripe4",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.1,
+            0.1,
+            0.12
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -2,
+            6,
+            -110
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Stripe5",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.95,
+            0.95
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            6,
+            -110
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Stripe6",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.1,
+            0.1,
+            0.12
+          ],
+          "Material": "Plastic",
+          "Position": [
+            2,
+            6,
+            -110
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Stripe7",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.95,
+            0.95
+          ],
+          "Material": "Plastic",
+          "Position": [
+            4,
+            6,
+            -110
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Stripe8",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.1,
+            0.1,
+            0.12
+          ],
+          "Material": "Plastic",
+          "Position": [
+            6,
+            6,
+            -110
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Stripe9",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.95,
+            0.95
+          ],
+          "Material": "Plastic",
+          "Position": [
+            8,
+            6,
+            -110
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Glow",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            1.0,
+            0.85,
+            0.4
+          ],
+          "Material": "Neon",
+          "Position": [
+            0,
+            2,
+            -12
+          ],
+          "Shape": "Ball",
+          "Size": [
+            1.5,
+            1.5,
+            1.5
+          ]
+        }
+      }
+    ]
+  },
+  "lighting": {
+    "properties": {
+      "ToneMapping": "Neutral"
+    },
+    "children": [
+      {
+        "class": "DepthOfFieldEffect",
+        "name": "DepthOfField",
+        "properties": {
+          "FocusDistance": 14,
+          "InFocusRadius": 6,
+          "NearIntensity": 0.75,
+          "FarIntensity": 1
+        }
+      },
+      {
+        "class": "VignetteEffect",
+        "name": "Vignette",
+        "properties": {
+          "Intensity": 0.45,
+          "Size": 0.45
+        }
+      },
+      {
+        "class": "FilmGrainEffect",
+        "name": "FilmGrain",
+        "properties": {
+          "Intensity": 0.15
+        }
+      },
+      {
+        "class": "ChromaticAberrationEffect",
+        "name": "ChromaticAberration",
+        "properties": {
+          "Intensity": 0.3
+        }
+      },
+      {
+        "class": "SharpenEffect",
+        "name": "Sharpen",
+        "properties": {
+          "Intensity": 0.4
+        }
+      }
+    ]
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false,
+      "LeaderboardEnabled": true,
+      "RespawnTime": 5
+    }
+  }
+}

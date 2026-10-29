@@ -22,6 +22,7 @@ mod draw_list;
 mod fog;
 mod foliage;
 mod graphics_volumes;
+mod lens;
 mod light_probes;
 mod material;
 mod orientation;

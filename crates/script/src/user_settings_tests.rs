@@ -112,6 +112,7 @@ fn setting_the_quality_and_overrides_is_a_change_the_host_takes_once() {
         realtime_gi: Some(true),
         volumetric_fog: Some(true),
         cloud_quality: Some(CloudQuality::Low),
+        ..GraphicsSettings::default()
     };
     assert_eq!(runtime.take_graphics_change(), Some(expected.clone()));
     assert_eq!(runtime.take_graphics_change(), None);
@@ -131,6 +132,48 @@ fn setting_the_quality_and_overrides_is_a_change_the_host_takes_once() {
     assert_eq!(
         (change.shadow_quality, change.shadow_distance),
         (None, None)
+    );
+}
+
+#[test]
+fn each_lens_effect_has_its_own_setting_for_local_scripts() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    runtime.set_graphics(
+        &GraphicsSettings::preset(Quality::Low),
+        &Capabilities::default(),
+    );
+    let printed = run(
+        &mut runtime,
+        &mut world,
+        "scripts/lens.client.lua",
+        "local s = game:GetService('UserGameSettings')
+        print(s.DepthOfField, s.Vignette, s.FilmGrain, s.ChromaticAberration, s.Sharpen)
+        s.DepthOfField = Enum.DepthOfField.High
+        s.Vignette = true
+        s.FilmGrain = true
+        s.ChromaticAberration = false
+        s.Sharpen = true
+        print(s.DepthOfField, s.Vignette, s.FilmGrain, s.ChromaticAberration, s.Sharpen)
+        s.DepthOfField = Enum.DepthOfField.Low
+        print(s.DepthOfField)
+        print(pcall(function() s.DepthOfField = Enum.CloudQuality.Low end))",
+    );
+    assert_eq!(printed[0], "Enum.DepthOfField.Off	false	false	false	false");
+    assert_eq!(printed[1], "Enum.DepthOfField.High	true	true	false	true");
+    assert_eq!(printed[2], "Enum.DepthOfField.Low");
+    assert!(printed[3].starts_with("false	"), "{printed:?}");
+    let change = runtime.take_graphics_change().unwrap();
+    assert_eq!(
+        change,
+        GraphicsSettings {
+            depth_of_field: Some(axcenity_render::DepthOfFieldQuality::Low),
+            vignette: Some(true),
+            film_grain: Some(true),
+            chromatic_aberration: Some(false),
+            sharpen: Some(true),
+            ..GraphicsSettings::preset(Quality::Low)
+        }
     );
 }
 

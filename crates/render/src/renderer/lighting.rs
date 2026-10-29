@@ -498,6 +498,10 @@ pub(super) fn post_uniform(post: &PostProcessing) -> PostUniform {
             post.tone_mapping.index(),
             0.0,
         ],
+        // No lens effects until `lens::add_lens` adds them.
+        lens: [0.0, 0.0, 0.0, 1.0],
+        vignette: [0.0; 4],
+        vignette_color: [0.0; 4],
     }
 }
 

@@ -17,21 +17,21 @@ mod water;
 
 pub use atmosphere::Atmosphere;
 pub use draw_list::{
-    AmbientLight, Camera, Channel, ChannelMap, Clouds, ColorGrading, ColorLookup, Cone, DrawItem,
-    DrawList, Edges, Fog, Light, LightProbeGrid, LightProbeVolume, MAX_PALETTE_COLORS, Material,
-    MeshSource, NormalMap, Outline, PointShadows, PostProcessing, ProbeImage, ReflectionProbe,
-    SURFACE_PARAMETERS, Shading, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, Sprite, Sun,
-    Sway, TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow,
-    TextSpan, TextStroke, TextureMaps, TextureSource, Toon, UiBorderSide, UiClip, UiDrawItem,
-    UiImage, UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign, Weather, is_turned, turn_point,
-    turned_bounds,
+    AmbientLight, Camera, Channel, ChannelMap, Clouds, ColorGrading, ColorLookup, Cone,
+    DepthOfField, DrawItem, DrawList, Edges, FilmGrain, Fog, LensEffects, Light, LightProbeGrid,
+    LightProbeVolume, MAX_PALETTE_COLORS, Material, MeshSource, NormalMap, Outline, PointShadows,
+    PostProcessing, ProbeImage, ReflectionProbe, SURFACE_PARAMETERS, Shading, Shadows, Shape, Skin,
+    Sky, SkyImage, SpotShadows, Sprite, Sun, Sway, TerrainLayer, TerrainLayers, TerrainSurface,
+    TerrainView, TextAlign, TextShadow, TextSpan, TextStroke, TextureMaps, TextureSource, Toon,
+    UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle, UiShadow, UiSlice, UiText,
+    VerticalAlign, Vignette, Weather, is_turned, turn_point, turned_bounds,
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{
-    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, EffectiveGraphics,
-    EnvironmentMapSize, GraphicsSettings, POINT_SHADOW_FACES, PointShadowMapSize, Quality,
-    RENDER_SCALE_RANGE, ReflectionQuality, ShadowMapSize, ShadowQuality, SpotShadowMapSize,
-    TEXTURE_BUDGET_RANGE, TextureQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
+    EffectiveGraphics, EnvironmentMapSize, GraphicsSettings, POINT_SHADOW_FACES,
+    PointShadowMapSize, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowMapSize,
+    ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 pub use renderer::{
     CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE, RenderStats, Renderer,

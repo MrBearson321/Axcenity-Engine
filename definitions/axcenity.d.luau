@@ -483,6 +483,16 @@ declare extern type UserGameSettings with
 	MasterVolume: number
 	--- How Lighting's Clouds are drawn: Low as a flat sheet, Medium, High and Ultra looked through in 16, 32 or 64 steps (High and Ultra with fine detail and light traced toward the sun). Every quality casts the same shadows.
 	CloudQuality: EnumCloudQuality
+	--- How a DepthOfFieldEffect blurs: Off, Low (16 samples per pixel) or High (32). Off at Low, Low at Medium, High above.
+	DepthOfField: EnumDepthOfField
+	--- Whether a VignetteEffect is drawn. Off at Low, on above.
+	Vignette: boolean
+	--- Whether a FilmGrainEffect is drawn. Off at Low, on above.
+	FilmGrain: boolean
+	--- Whether a ChromaticAberrationEffect is drawn. Off at Low, on above.
+	ChromaticAberration: boolean
+	--- Whether a SharpenEffect is drawn. Off at Low, on above.
+	Sharpen: boolean
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -837,6 +847,17 @@ declare extern type EnumCloudQualityItems with
 	Ultra: EnumCloudQuality
 end
 
+--- One choice of `Enum.DepthOfField`.
+declare extern type EnumDepthOfField extends EnumItem with
+end
+
+--- The choices of `Enum.DepthOfField`.
+declare extern type EnumDepthOfFieldItems with
+	Off: EnumDepthOfField
+	Low: EnumDepthOfField
+	High: EnumDepthOfField
+end
+
 --- One choice of `Enum.UserInputType`.
 declare extern type EnumUserInputType extends EnumItem with
 end
@@ -1051,6 +1072,7 @@ declare extern type EnumLibrary with
 	AmbientOcclusion: EnumAmbientOcclusionItems
 	ReflectionQuality: EnumReflectionQualityItems
 	CloudQuality: EnumCloudQualityItems
+	DepthOfField: EnumDepthOfFieldItems
 	UserInputType: EnumUserInputTypeItems
 	UserInputState: EnumUserInputStateItems
 	MouseBehavior: EnumMouseBehaviorItems
@@ -3324,6 +3346,63 @@ declare extern type ColorCorrectionEffect extends Instance with
 	[string]: any
 end
 
+--- Inside Lighting: blurs what's nearer or farther than the distance in focus, as a camera's lens does: sharp from FocusDistance - InFocusRadius to FocusDistance + InFocusRadius studs away, blurring toward the camera by NearIntensity and away from it by FarIntensity. The first enabled one in Lighting is used. The player's graphics settings choose how finely it's drawn (UserGameSettings.DepthOfField); it's off at Low.
+declare extern type DepthOfFieldEffect extends Instance with
+	--- Whether it blurs anything. Off (or with no DepthOfFieldEffect in Lighting) it costs nothing.
+	Enabled: boolean
+	--- How far from the camera, in studs, the middle of what's sharp is (20 by default).
+	FocusDistance: number
+	--- How far either side of FocusDistance stays sharp, in studs (10 by default).
+	InFocusRadius: number
+	--- How blurred what's nearer than the sharp range gets, from 0 (not at all) to 1, growing toward the camera. 0.75 by default.
+	NearIntensity: number
+	--- How blurred what's farther than the sharp range gets, from 0 (not at all) to 1, reached at twice the sharp range's far edge, the sky included. 0.75 by default.
+	FarIntensity: number
+	[string]: any
+end
+
+--- Inside Lighting: darkens the picture toward its corners, or tints them with its Color. The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.Vignette).
+declare extern type VignetteEffect extends Instance with
+	--- Whether it's drawn. Off (or with no VignetteEffect in Lighting) it costs nothing.
+	Enabled: boolean
+	--- How much of Color the corners take, from 0 to 1 (0.5 by default).
+	Intensity: number
+	--- Where the darkening starts, from the middle (0) to the corners (1). 0.5 by default.
+	Size: number
+	--- What the corners turn toward. Black by default.
+	Color: Color3
+	[string]: any
+end
+
+--- Inside Lighting: moving noise over the picture, as on film, changing every frame. The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.FilmGrain).
+declare extern type FilmGrainEffect extends Instance with
+	--- Whether it's drawn. Off (or with no FilmGrainEffect in Lighting) it costs nothing.
+	Enabled: boolean
+	--- How strong the noise is, from 0 to 1 (0.3 by default).
+	Intensity: number
+	--- Each grain's size, in pixels of a view 1080 pixels tall (1 by default), scaled with the view's height and never under one pixel.
+	Size: number
+	[string]: any
+end
+
+--- Inside Lighting: red and blue drift apart toward the picture's edges, as through a cheap lens. The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.ChromaticAberration).
+declare extern type ChromaticAberrationEffect extends Instance with
+	--- Whether it's drawn. Off (or with no ChromaticAberrationEffect in Lighting) it costs nothing.
+	Enabled: boolean
+	--- How far red and blue drift apart toward the picture's edges: 1 parts them by 1% of its width at the left and right edges, and nothing in the middle. 0.5 by default.
+	Intensity: number
+	[string]: any
+end
+
+--- Inside Lighting: makes the edges between colors crisper (useful with a render scale below 100%). The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.Sharpen).
+declare extern type SharpenEffect extends Instance with
+	--- Whether it's drawn. Off (or with no SharpenEffect in Lighting) it costs nothing.
+	Enabled: boolean
+	--- How much crisper the edges between colors get, from 0 (no change) to 1 (strong). 0.5 by default.
+	Intensity: number
+	[string]: any
+end
+
 --- A Part that changes the look while the camera is inside it, fading in over BlendDistance studs outside it and out again on leaving. The effects inside it replace that part of the world's look: a ColorCorrectionEffect, an ExposureEffect, a FogEffect, an Atmosphere (the sky, the sun's color and height fog) or a BloomEffect; what it doesn't hold stays as it is. Where volumes overlap, the higher Priority wins. Invisible, anchored and walked through (CanCollide off) by default. Everything a Part has, and Enabled, BlendDistance and Priority.
 declare extern type GraphicsVolume extends Instance with
 	--- If true, the part stays where it is. If false, it falls and collides with other parts.
@@ -4665,7 +4744,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

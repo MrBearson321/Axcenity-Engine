@@ -24,7 +24,7 @@ Each replaces one part of the world's look while the camera is there. What the v
 | `Atmosphere` | The sky's air, the sun's color through it, and its height fog ([sky.md](sky.md), [fog.md](fog.md)). `ClockTime` still comes from Lighting. A `FogEffect` beside it wins for the fog. |
 | `ColorCorrectionEffect` | Lighting's color grading. Several in one volume add up as they do in Lighting ([post.md](post.md)). |
 
-Of each kind but color correction, the first enabled one in the volume is used. `ExposureEffect`, `FogEffect` and `BloomEffect` do nothing outside a volume; Lighting has its own properties for them.
+Of each kind but color correction, the first enabled one in the volume is used. `ExposureEffect`, `FogEffect` and `BloomEffect` do nothing outside a volume; Lighting has its own properties for them. Lens effects (depth of field, vignette and the rest, [post.md](post.md)) work in Lighting only, and do nothing in a volume.
 
 ## Blending
 
