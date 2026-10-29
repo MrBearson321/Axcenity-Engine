@@ -316,6 +316,9 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
             crate::sequence::set(lua, id, key, value)
         }
         "Team" if class == Some(ClassName::Player) => crate::players::set(lua, id, value),
+        "UserId" | "DisplayName" if class == Some(ClassName::Player) => Err(mlua::Error::runtime(
+            format!("Player.{key} is read-only: it's who joined, as they joined"),
+        )),
         key if class == Some(ClassName::Humanoid) && crate::humanoid::is_field(key) => {
             crate::humanoid::set(lua, id, key, value)
         }

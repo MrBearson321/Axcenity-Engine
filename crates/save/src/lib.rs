@@ -12,6 +12,7 @@
 //!   is moved up to this one as it's read ([`migrate`]); one from a newer
 //!   version is refused, and never saved over.
 
+mod identity;
 mod migrate;
 mod state;
 
@@ -24,6 +25,7 @@ use axcenity_core::{
 };
 use serde::{Deserialize, Serialize};
 
+pub use identity::{user_id, user_id_in};
 pub use migrate::migrate;
 pub use state::{
     Properties, SavedInstance, SavedParent, SavedValue, WorldState, restore, snapshot,
@@ -430,6 +432,12 @@ pub fn place_character(world: &mut World, parts: &[InstanceId], position: Vector
 ///
 /// `None` when none of those can be found.
 pub fn game_folder(game: &str) -> Option<PathBuf> {
+    Some(saves_folder()?.join(folder_name(game)))
+}
+
+/// The folder every game's save folder is in (see [`game_folder`]). The
+/// engine also keeps this install's player identity there (Phase 64).
+pub fn saves_folder() -> Option<PathBuf> {
     let env = |name| {
         std::env::var_os(name)
             .filter(|value| !value.is_empty())
@@ -450,7 +458,7 @@ pub fn game_folder(game: &str) -> Option<PathBuf> {
             .join("axcenity")
             .join("saves")
     };
-    Some(base.join(folder_name(game)))
+    Some(base)
 }
 
 /// `game` as a folder name: letters, digits, spaces, `-`, `_` and `.` stay,

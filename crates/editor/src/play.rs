@@ -163,6 +163,8 @@ impl Session {
         }
         session.scripts.set_assets(session.assets.clone());
         session.scripts.set_save_folder(save_folder);
+        // Who plays, the same each time on this install (Phase 64).
+        session.scripts.set_user_id(play_user_id());
         session.scripts.set_input_map(input_map.clone());
         if !levels.worlds.is_empty() {
             session
@@ -979,6 +981,19 @@ pub fn read_scripts(
         }
     }
     fresh
+}
+
+/// This install's `UserId` for the Play's Player (Phase 64), kept in the
+/// player's saves folder as in the built game.
+#[cfg(not(test))]
+fn play_user_id() -> f64 {
+    axcenity_save::user_id() as f64
+}
+
+/// In tests, a fixed one, so tests never write to the real player's data.
+#[cfg(test)]
+fn play_user_id() -> f64 {
+    1.0
 }
 
 #[cfg(test)]

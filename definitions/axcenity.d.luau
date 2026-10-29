@@ -1160,8 +1160,10 @@ declare extern type DataModel extends Instance with
 	Lighting: Lighting
 	--- The service for things Scripts and LocalScripts share, such as RemoteEvents and ModuleScripts.
 	ReplicatedStorage: ReplicatedStorage
-	--- The service that holds server scripts (`scripts/*.server.lua`).
+	--- The service that holds server scripts (`scripts/*.server.lua`). Players' devices never get what's inside.
 	ServerScriptService: ServerScriptService
+	--- The service for things only the server uses, such as Models a Script clones into the Workspace. It's saved with the world, and players' devices never get what's inside: to them it's empty.
+	ServerStorage: ServerStorage
 	--- The service with what each player starts with: StarterPlayerScripts, and the StarterCharacter each character is a copy of.
 	StarterPlayer: StarterPlayer
 	--- The service that holds the Teams players can be on.
@@ -1299,8 +1301,13 @@ declare extern type ReplicatedStorage extends Instance with
 	[string]: any
 end
 
---- The service that holds server scripts (`scripts/*.server.lua`).
+--- The service that holds server scripts (`scripts/*.server.lua`). Players' devices never get what's inside.
 declare extern type ServerScriptService extends Instance with
+	[string]: any
+end
+
+--- The service for things only the server uses, such as Models a Script clones into the Workspace. It's saved with the world, and players' devices never get what's inside: to them it's empty.
+declare extern type ServerStorage extends Instance with
 	[string]: any
 end
 
@@ -2151,11 +2158,15 @@ end
 
 --- Asks the server and waits for the answer: a LocalScript's `InvokeServer(...)` pauses until the server's `OnServerInvoke` returns, and returns what it returned. An error there is raised in the LocalScript. Keep it in ReplicatedStorage.
 declare extern type RemoteFunction extends Instance with
-	--- The function that answers `InvokeServer`: `remote.OnServerInvoke = function(player, ...) return ... end`. Setting it replaces the one before; it can be set, not read. Questions asked before it's set wait for it. Scripts only. Scripts only.
+	--- The function that answers `InvokeServer`: `remote.OnServerInvoke = function(player, ...) return ... end`. Setting it replaces the one before; it can be set, not read. Questions asked before it's set wait for it. Scripts only.
 	OnServerInvoke: (Player, ...any) -> ...any
+	--- The function that answers a Script's `InvokeClient`: `remote.OnClientInvoke = function(...) return ... end`. Setting it replaces the one before; it can be set, not read. Questions asked before it's set wait for it. LocalScripts only.
+	OnClientInvoke: (...any) -> ...any
 	[string]: any
 	--- Asks the server: pauses until its `OnServerInvoke` returns (it gets this player first, then the arguments), and returns what it returned. An error there is raised here, with the server script's line. LocalScripts only. LocalScripts only.
 	function InvokeServer(self, ...: any): ...any
+	--- Asks one player's device: pauses until its `OnClientInvoke` returns (it gets the arguments), and returns what it returned. An error there is raised here, with the LocalScript's line. A player who leaves first never answers, so the Script waits. Scripts only.
+	function InvokeClient(self, player: Player, ...: any): ...any
 end
 
 --- An event scripts on the same side fire for each other: `Fire(...)` fires `Event` with the same values. It doesn't cross between Scripts and LocalScripts.
@@ -2184,6 +2195,10 @@ declare extern type Player extends Instance with
 	Team: Instance?
 	--- If true, the player is on no team, and spawns only on Neutral SpawnLocations.
 	Neutral: boolean
+	--- Who plays: a number that stays the same each time they play on one install of Axcenity, so a server can recognize them when they join again. Read-only.
+	UserId: number
+	--- The name the player joined with. `Name` is the same, but numbered when someone in the game already has it (`Player2`). Read-only.
+	DisplayName: string
 	--- Fires with the character Model once it's in the Workspace: when the player first gets one, after each respawn and after `LoadCharacter`.
 	CharacterAdded: Signal
 	--- Fires with the old character Model just before it's destroyed to make way for a new one. It's already out of the Workspace (its Parent is nil).

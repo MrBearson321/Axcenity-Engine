@@ -1994,7 +1994,7 @@ Results are written as role-named PNGs.
 
 - [ ] Every existing `hello-*` example plays the same in single-player as before this phase.
 - [ ] A RemoteEvent fired by client 2 reaches the server with client 2's Player, and `FireAllClients` reaches all three clients in editor Play.
-- [ ] A client can't see or reach anything in ServerStorage or ServerScriptService.
+- [x] A client can't see or reach anything in ServerStorage or ServerScriptService.
 
 ---
 

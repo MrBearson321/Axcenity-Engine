@@ -1,10 +1,10 @@
 # Networking
 
-Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, hosting and joining: players who join appear in every device's `Players`, but each device still runs its own world. Shared worlds and remote calls are Phase 64, replication Phase 65.
+Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, hosting and joining. Phase 64 (so far, for hosted games): a device that joins follows the server's world as a replica and runs only its LocalScripts there, RemoteEvents and RemoteFunctions cross between devices, and Players carry `UserId` and `DisplayName`. Single-player and the editor's Play still run both sides on one World; they move to a server and client over loopback (with Play's Clients 1–8) together with client-owned characters. Replication's deltas from change records, quantizing, bandwidth budgets and smoothing are Phase 65.
 
 ## Crates
 
-- `net` (`axcenity-net`): the transport, the join handshake, LAN discovery and `Network`, which the hosts run. It depends on `core` and `script`.
+- `net` (`axcenity-net`): the transport, the join handshake, LAN discovery, the wire format (`wire.rs`), replication (`replicate.rs`) and `Network`, which the hosts run. It depends on `core` and `script`.
 - `server` (`axcenity-server`): the dedicated server binary.
 - `script`'s `NetworkService` (`network.rs`) never touches the network: it queues `NetworkRequest`s, and the host answers them.
 
@@ -19,7 +19,7 @@ Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, ho
 
 ## Handshake
 
-The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION`, the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name and the password. The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
+The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (2 since Phase 64), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password and their `user_id` (missing from older engines, read as 0). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
 
 | Check | The player's `ConnectionFailed` reason | The host's log |
 |---|---|---|
@@ -31,16 +31,36 @@ The joining player's first message, on the reliable channel as JSON, is `Hello`:
 
 A refused connection stays open for a second, so the reason arrives, then closes. A connection that says nothing for 10 seconds is closed. A player who hears nothing back for 10 seconds gives up ("The server didn't answer the join request."). Netcode's own failures become reasons too: "No game answered at …", "The connection timed out…", "The server is full." and "The server closed the connection."
 
-Accepted, the player gets `Welcome`: their id (a listen server's own player is 1) and name, made unique (a second `Player` is `Player2`; the joiner's own Player is renamed), and everyone already in. `Joined` and `Left` keep every roster the same. `Hello` and `Refused` must stay readable by later engines; raise `PROTOCOL_VERSION` when a message changes.
+Accepted, the player gets `Welcome`: their id (a listen server's own player is 1), name, made unique (a second `Player` is `Player2`), display name (the name they asked for) and user id, and everyone already in. `Joined` and `Left` keep every roster the same. `Hello` and `Refused` must stay readable by later engines; raise `PROTOCOL_VERSION` when a message changes.
 
 ## Players
 
-`Network::receive` turns the roster into Players: `ScriptRuntime::add_remote_player` makes a Player in `Players` (on a team; `PlayerAdded` fires, and it gets no character yet), and `remove_player` fires `Players.PlayerRemoving` on both sides, then destroys the Player and its character. A failure, a refusal or `Disconnect` removes every other player. The local player keeps the name the host gave it.
+On the host, `Network::receive` turns the roster into Players: `ScriptRuntime::add_remote_player` makes a Player in `Players` with its `DisplayName` and `UserId` (on a team; `PlayerAdded` fires; it gets no character yet, that's network ownership in Phase 66), and `remove_player` fires `Players.PlayerRemoving`, then destroys the Player and its character. On a player's device, Players come with the server's world: one that arrives fires `PlayerAdded` in its LocalScripts (`add_replicated_player`), and one the server removes fires `PlayerRemoving` there before it goes. A failure, a refusal or `Disconnect` removes every other player, from a replica too.
+
+- `Player.UserId` is the install's identity: a random whole number from 1 to 2⁵³−1, kept in `user-id.txt` in the saves folder (`axcenity_save::user_id`, beside every game's save folder), made the first time. There are no accounts. A dedicated server has no player, so no UserId. The editor's tests use a fixed one so they never write it.
+- `Player.DisplayName` is the name they joined with; `Name` is that, numbered if taken. Both are read-only to scripts.
+
+## Worlds and replication
+
+Each device has its own World. The server's is the game; a player's device that joined keeps a **replica**: `World::empty_replica` (the services only, at the same IDs, with the device's own string table, language, UI settings, collision groups and volume), filled with `World::create_at`. The replica's arena holds the server's Instances at their own IDs and puts the device's own (what LocalScripts make) in a range the server never uses (`InstanceId::is_local`), so an `InstanceId` is the network ID: `to_bits` and `from_bits` name the same Instance everywhere.
+
+- **What's sent** (`replicate.rs`): `game`'s properties and every service but the server-only ones, ServerScriptService and ServerStorage (`World::server_only_services`), with everything inside. A player's replica has those two services, empty.
+- **Joining**: the host sends `Snapshot` (which Player is theirs, then each service's properties and every Instance, parents first). The device stops every script (`ScriptRuntime::become_client`), swaps its world for the replica, copies its own copy's Terrain landscapes by ID, sets `LocalPlayer`, and starts the game's ModuleScripts and LocalScripts again (`Network::set_client_scripts`; the same game version loads them at the same IDs). From then on only LocalScripts run there; Scripts given to `start_script` are skipped.
+- **Each frame**, in network send, `Replicator::frame` compares the world with what it last sent and sends `Update`: made Instances, changed names, parents, properties, attributes and tags, and Instances destroyed, taken out of the game or moved into a server-only service. Everything is reliable JSON, with no budget (Phase 65). Instance properties are applied last, so they can name an Instance later in the update.
+- **A device's own changes** to its replica stay on it, until the server changes the same thing.
+- **A device following a server** (`axcenity-player --join`, or `NetworkService:Join`) doesn't step physics, characters, Humanoids, players, agents, prompts, tools, health or touches: the server does. Its own character's movement is Phase 66. After leaving, it keeps the last world without the other players.
+
+## Remote calls
+
+RemoteEvents and RemoteFunctions use the same `Message`s as on one device. The runtime keeps a message for another device (to a Player who joined from elsewhere, or from a replica to the server) in `take_remote_messages`; `Network::send` sends it as `Remote` (`wire::WireMessage`: Instances as network IDs, Lua strings as bytes). The receiver hands it to `receive_remote_messages`, and it fires in the next frame's script step.
+
+- `FireClient`, `FireAllClients` (every Player, wherever they play) and `InvokeClient` reach players on other devices; `FireServer` and `InvokeServer` reach the server.
+- The host takes a message from player *n* as theirs: its Player is the connection's, never what the message says. It must name a RemoteEvent or RemoteFunction outside the server-only services, or it's dropped. An Instance argument a player can't see (server-only, or the device's own) arrives as nil, both ways.
 
 ## Hosting and joining
 
 - `axcenity-player --host [port] <game>` runs a listen server (port 47800 if not given). `--join address:port` joins one. `--password <text>` sets a host's password, or gives it when joining. A port that's taken, or an address that can't be looked up, stops the player with the reason.
-- `axcenity-server <game> [--port <port>] [--password <text>]` loads a project folder or `.axgame` and runs its Scripts (and the ModuleScripts they require, never LocalScripts) with physics at 60 Hz, with no window, audio or GPU and no player of its own. Its frame is network receive, scripts, `Stepped`, physics, touches, breaks, health, `Heartbeat`, network send. Characters, agents and animation belong to players' devices. On Linux it needs no display; `script` still links `audio`'s library, which needs ALSA's `libasound` installed (not a sound device). `tests/headless.rs` runs the real binary with `DISPLAY` and `WAYLAND_DISPLAY` unset.
+- `axcenity-server <game> [--port <port>] [--password <text>]` loads a project folder or `.axgame` and runs its Scripts (and the ModuleScripts they require, never LocalScripts) with physics at 60 Hz, with no window, audio or GPU and no player of its own (`ScriptRuntime::set_dedicated`). Its frame is network receive, scripts, `Stepped`, physics, touches, breaks, health, `Heartbeat`, network send. Characters, agents and animation belong to players' devices. On Linux it needs no display; `script` still links `audio`'s library, which needs ALSA's `libasound` installed (not a sound device). `tests/headless.rs` runs the real binary with `DISPLAY` and `WAYLAND_DISPLAY` unset.
 - The player prints who joined and left, and every refusal and failure, to stderr (`Network::take_log`).
 - The editor's Play doesn't host or join: `Host` and `Join` fire `ConnectionFailed` with a reason, and `FindLanGames` returns an empty list.
 
@@ -60,4 +80,4 @@ Blocks (in **More**): "host game on port *n*", "join game at *address*", "leave 
 
 ## Frame order
 
-Network receive comes first in the frame: `NetworkService` requests from last frame, then what arrived. Network send comes after the frame's scripts, physics and UI layout, just before rendering. See [frame-loop.md](frame-loop.md).
+Network receive comes first in the frame: `NetworkService` requests from last frame, then what arrived (roster, the world, remote messages). Network send (`Network::send(world, scripts)`) comes after the frame's scripts, physics and UI layout, just before rendering: the world's changes, then remote messages, so a message never names an Instance its receiver doesn't have yet. See [frame-loop.md](frame-loop.md).

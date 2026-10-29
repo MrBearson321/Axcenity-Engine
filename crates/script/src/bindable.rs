@@ -3,7 +3,7 @@
 //! the same values (tables aren't copied), and `func:Invoke(...)` calls
 //! `func.OnInvoke` and returns what it returns.
 //!
-//! `OnInvoke` and a RemoteFunction's `OnServerInvoke` are callbacks: a
+//! `OnInvoke` and a RemoteFunction's `OnServerInvoke` and `OnClientInvoke` are callbacks: a
 //! script sets one function, which replaces the one before. They're kept
 //! per side in [`Callbacks`], owned by the script that set them, like
 //! connected handlers.
@@ -23,6 +23,7 @@ use crate::types::type_name;
 const CALLBACKS: &[(ClassName, &str)] = &[
     (ClassName::BindableFunction, "OnInvoke"),
     (ClassName::RemoteFunction, "OnServerInvoke"),
+    (ClassName::RemoteFunction, "OnClientInvoke"),
 ];
 
 /// The callback member `key` of `class`, if it has one by that name.

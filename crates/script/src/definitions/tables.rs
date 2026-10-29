@@ -2250,6 +2250,15 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::RemoteFunction,
+        Function {
+            name: "InvokeClient",
+            doc: "Asks one player's device: pauses until its `OnClientInvoke` returns (it gets the arguments), and returns what it returned. An error there is raised here, with the LocalScript's line. A player who leaves first never answers, so the Script waits.",
+            params: &[("player", "Player"), ("...", "any")],
+            returns: "...any",
+        },
+    ),
+    (
         ClassName::BindableEvent,
         Function {
             name: "Fire",
@@ -2630,7 +2639,15 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
         Field {
             name: "OnServerInvoke",
             ty: "(Player, ...any) -> ...any",
-            doc: "The function that answers `InvokeServer`: `remote.OnServerInvoke = function(player, ...) return ... end`. Setting it replaces the one before; it can be set, not read. Questions asked before it's set wait for it. Scripts only.",
+            doc: "The function that answers `InvokeServer`: `remote.OnServerInvoke = function(player, ...) return ... end`. Setting it replaces the one before; it can be set, not read. Questions asked before it's set wait for it.",
+        },
+    ),
+    (
+        ClassName::RemoteFunction,
+        Field {
+            name: "OnClientInvoke",
+            ty: "(...any) -> ...any",
+            doc: "The function that answers a Script's `InvokeClient`: `remote.OnClientInvoke = function(...) return ... end`. Setting it replaces the one before; it can be set, not read. Questions asked before it's set wait for it.",
         },
     ),
     (

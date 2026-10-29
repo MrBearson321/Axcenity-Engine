@@ -2577,6 +2577,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If true, the player is on no team, and spawns only on Neutral SpawnLocations.",
     ),
     (
+        ClassName::Player,
+        "UserId",
+        "Who plays: a number that stays the same each time they play on one install of Axcenity, so a server can recognize them when they join again. Read-only.",
+    ),
+    (
+        ClassName::Player,
+        "DisplayName",
+        "The name the player joined with. `Name` is the same, but numbered when someone in the game already has it (`Player2`). Read-only.",
+    ),
+    (
         ClassName::Team,
         "TeamColor",
         "The team's color: its players spawn on SpawnLocations of this TeamColor.",
@@ -4288,7 +4298,10 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "The service for things Scripts and LocalScripts share, such as RemoteEvents and ModuleScripts."
         }
         ClassName::ServerScriptService => {
-            "The service that holds server scripts (`scripts/*.server.lua`)."
+            "The service that holds server scripts (`scripts/*.server.lua`). Players' devices never get what's inside."
+        }
+        ClassName::ServerStorage => {
+            "The service for things only the server uses, such as Models a Script clones into the Workspace. It's saved with the world, and players' devices never get what's inside: to them it's empty."
         }
         ClassName::StarterPlayer => {
             "The service with what each player starts with: StarterPlayerScripts, and the StarterCharacter each character is a copy of."

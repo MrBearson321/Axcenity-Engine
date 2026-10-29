@@ -88,18 +88,27 @@ fn the_server_runs_headless_and_a_player_joins_it() {
         .join(&mut world, &mut scripts, &format!("127.0.0.1:{port}"), None)
         .unwrap();
     let start = Instant::now();
-    while !network.is_joined() {
+    // Joined, this device follows the server's world (Phase 64).
+    while !(network.is_joined() && scripts.is_client_only()) {
         assert!(
             start.elapsed() < Duration::from_secs(10),
             "never joined: {:?}",
             network.take_log()
         );
         network.receive(&mut world, &mut scripts, 1.0 / 60.0);
-        network.send();
+        network.send(&world, &mut scripts);
         std::thread::sleep(Duration::from_millis(10));
     }
     // A dedicated server has no player of its own.
-    let players = world.get(world.players()).unwrap().children().len();
-    assert_eq!(players, 1, "only this player");
+    let players = world.get(world.players()).unwrap().children().to_vec();
+    assert_eq!(
+        players,
+        [scripts.local_player().unwrap()],
+        "only this player"
+    );
+    assert!(
+        !world.get(world.workspace()).unwrap().children().is_empty(),
+        "the server's Workspace arrived"
+    );
     wait_for(&mut said, "Player joined.");
 }

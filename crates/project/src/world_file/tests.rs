@@ -258,6 +258,36 @@ fn remote_events_in_replicated_storage_save_and_load() {
 }
 
 #[test]
+fn server_storage_saves_and_loads_with_references_into_it() {
+    let mut world = World::new();
+    let model = world.create(ClassName::Model).unwrap();
+    world.set_name(model, "Prize").unwrap();
+    world
+        .set_parent(model, Some(world.server_storage()))
+        .unwrap();
+    let pointer = world.create(ClassName::ObjectValue).unwrap();
+    world.set_name(pointer, "Next").unwrap();
+    world.set_parent(pointer, Some(world.workspace())).unwrap();
+    world
+        .set_property(pointer, "Value", Value::Instance(Some(model)))
+        .unwrap();
+
+    let written = write_world(&world);
+    assert!(written.contains("\"server_storage\": {"), "{written}");
+    let loaded = parse_world(&written).unwrap();
+    let prize = loaded
+        .find_first_child(loaded.server_storage(), "Prize")
+        .unwrap();
+    let next = loaded.find_first_child(loaded.workspace(), "Next").unwrap();
+    assert_eq!(
+        loaded.get(next).unwrap().property("Value"),
+        Some(&Value::Instance(Some(prize)))
+    );
+    assert_eq!(write_world(&loaded), written);
+    assert!(!write_world(&World::new()).contains("server_storage"));
+}
+
+#[test]
 fn widgets_save_and_reload_unchanged() {
     let mut world = World::new();
     let gui = world.create(ClassName::ScreenGui).unwrap();

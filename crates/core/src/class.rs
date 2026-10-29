@@ -40,6 +40,10 @@ pub enum ClassName {
     ReplicatedStorage,
     /// The service that holds server scripts.
     ServerScriptService,
+    /// The service for things only the server uses, such as Models a
+    /// Script clones into the Workspace. Never sent to players' devices
+    /// (Phase 64).
+    ServerStorage,
     /// The service with what each player starts with. Holds
     /// StarterPlayerScripts.
     StarterPlayer,
@@ -335,13 +339,14 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 106] = [
+    pub const ALL: [ClassName; 107] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
         ClassName::Lighting,
         ClassName::ReplicatedStorage,
         ClassName::ServerScriptService,
+        ClassName::ServerStorage,
         ClassName::StarterPlayer,
         ClassName::StarterPlayerScripts,
         ClassName::Part,
@@ -452,6 +457,7 @@ impl ClassName {
             ClassName::Lighting => "Lighting",
             ClassName::ReplicatedStorage => "ReplicatedStorage",
             ClassName::ServerScriptService => "ServerScriptService",
+            ClassName::ServerStorage => "ServerStorage",
             ClassName::StarterPlayer => "StarterPlayer",
             ClassName::StarterPlayerScripts => "StarterPlayerScripts",
             ClassName::Teams => "Teams",
@@ -705,6 +711,7 @@ impl ClassName {
                 | ClassName::Lighting
                 | ClassName::ReplicatedStorage
                 | ClassName::ServerScriptService
+                | ClassName::ServerStorage
                 | ClassName::StarterPlayer
                 | ClassName::StarterPlayerScripts
                 | ClassName::Teams
@@ -808,6 +815,7 @@ impl ClassName {
             ClassName::DataModel
             | ClassName::ReplicatedStorage
             | ClassName::ServerScriptService
+            | ClassName::ServerStorage
             | ClassName::StarterPlayerScripts
             | ClassName::Teams
             | ClassName::SoundService
@@ -848,6 +856,11 @@ impl ClassName {
                 // The Team it's on; on none while `Neutral`.
                 ("Team", Value::Instance(None)),
                 ("Neutral", Value::Bool(true)),
+                // Who plays, the same each time on one install of the
+                // engine (Phase 64); 0 until they're in a game.
+                ("UserId", Value::Number(0.0)),
+                // The name they joined with; `Name` is that, made unique.
+                ("DisplayName", Value::String(String::new())),
             ],
             ClassName::Team => vec![
                 ("TeamColor", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
@@ -2175,6 +2188,7 @@ impl ClassName {
             | ClassName::Lighting
             | ClassName::ReplicatedStorage
             | ClassName::ServerScriptService
+            | ClassName::ServerStorage
             | ClassName::StarterPlayer
             | ClassName::StarterPlayerScripts
             | ClassName::Teams

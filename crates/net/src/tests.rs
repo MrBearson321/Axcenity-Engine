@@ -64,7 +64,7 @@ impl Game {
         self.network
             .receive(&mut self.world, &mut self.scripts, SECONDS);
         self.scripts.step(&mut self.world, SECONDS);
-        self.network.send();
+        self.network.send(&self.world, &mut self.scripts);
         self.collect();
     }
 

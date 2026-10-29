@@ -825,7 +825,8 @@ pub fn health_bar(world: &mut World, health: Option<InstanceId>) -> HealthBar {
     HealthBar { billboard, hud }
 }
 
-/// Where a new `what` goes: into `near` if it's ReplicatedStorage, or a
+/// Where a new `what` goes: into `near` if it's ReplicatedStorage or
+/// ServerStorage, or a
 /// Model or Folder in a place that's saved (see [`is_saved`]), or for an
 /// Animation, a part or a ScreenGui or frame it can animate. Otherwise a
 /// RemoteEvent (or RemoteFunction, BindableEvent or BindableFunction) goes
@@ -870,6 +871,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             .get(id)
             .is_some_and(|instance| instance.class().is_base_part());
         id == world.replicated_storage()
+            || id == world.server_storage()
             || (is_group && is_saved(world, id))
             // A Value object goes inside whatever is selected.
             || (matches!(what, Insertable::Value(_)) && is_saved(world, id))
@@ -961,11 +963,12 @@ pub fn needs_screen_gui(world: &World, near: Option<InstanceId>, what: Insertabl
     what.is_ui_element() && !is_ui_container(world, insert_parent(world, near, what))
 }
 
-/// True if `id` is in the Workspace, ReplicatedStorage, Teams or SoundService: the
-/// places the world file saves what's inside.
+/// True if `id` is in the Workspace, ReplicatedStorage, ServerStorage, Teams
+/// or SoundService: the places the world file saves what's inside.
 pub fn is_saved(world: &World, id: InstanceId) -> bool {
     world.is_descendant_of(id, world.workspace())
         || world.is_descendant_of(id, world.replicated_storage())
+        || world.is_descendant_of(id, world.server_storage())
         || world.is_descendant_of(id, world.teams())
         || world.is_descendant_of(id, world.sound_service())
 }

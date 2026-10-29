@@ -838,7 +838,11 @@ fn object_control(
             if ui.selectable_label(target.is_none(), "None").clicked() {
                 picked = Some(None);
             }
-            let places = [world.workspace(), world.replicated_storage()];
+            let places = [
+                world.workspace(),
+                world.replicated_storage(),
+                world.server_storage(),
+            ];
             for id in places
                 .into_iter()
                 .flat_map(|place| world.descendants(place))

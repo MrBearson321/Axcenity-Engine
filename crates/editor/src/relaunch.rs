@@ -213,7 +213,7 @@ fn saved_children(world: &World, id: InstanceId) -> Vec<InstanceId> {
 }
 
 /// Changes `target` to match `source` in everything a world file holds:
-/// the Workspace and ReplicatedStorage (their properties and trees) and
+/// the Workspace, ReplicatedStorage and ServerStorage (their properties and trees) and
 /// Lighting's properties. A child of `target` that matches one of
 /// `source`'s (same class and name, in order) stays, with its ID, and takes
 /// its properties; the rest are destroyed, and `source`'s other children
@@ -223,6 +223,7 @@ pub fn morph(target: &mut World, source: &World) {
     let services = [
         (target.workspace(), source.workspace()),
         (target.replicated_storage(), source.replicated_storage()),
+        (target.server_storage(), source.server_storage()),
     ];
     for (to, from) in services {
         copy_properties(target, to, source, from);
@@ -289,7 +290,11 @@ fn copy_properties(target: &mut World, to: InstanceId, source: &World, from: Ins
 /// into `folder` (as `<name>-<n>`).
 pub fn write_world(world: &World, folder: &Path, name: &str) -> std::io::Result<WorldHandoff> {
     let mut terrains = Vec::new();
-    for service in [world.workspace(), world.replicated_storage()] {
+    for service in [
+        world.workspace(),
+        world.replicated_storage(),
+        world.server_storage(),
+    ] {
         for id in world.descendants(service) {
             let (Some(data), Some(locator)) = (world.terrain(id), locate(world, id)) else {
                 continue;

@@ -27,6 +27,25 @@ use crate::value::{Value, ValueKind};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InstanceId(Id);
 
+impl InstanceId {
+    /// The ID as one number, for the network (Phase 64): a replica keeps
+    /// its server's Instances at their own IDs, so the number means the
+    /// same Instance on every computer in the game.
+    pub fn to_bits(self) -> u64 {
+        self.0.to_bits()
+    }
+
+    pub fn from_bits(bits: u64) -> InstanceId {
+        InstanceId(Id::from_bits(bits))
+    }
+
+    /// True for an Instance a replica made itself (a LocalScript's), which
+    /// the server never had.
+    pub fn is_local(self) -> bool {
+        self.0.is_local()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Instance {
     class: ClassName,
@@ -231,6 +250,7 @@ pub struct World {
     lighting: InstanceId,
     replicated_storage: InstanceId,
     server_script_service: InstanceId,
+    server_storage: InstanceId,
     starter_player_scripts: InstanceId,
     teams: InstanceId,
     sound_service: InstanceId,
@@ -291,6 +311,18 @@ impl World {
         let starter_player_scripts = add_service(ClassName::StarterPlayerScripts, starter_player);
         let teams = add_service(ClassName::Teams, root);
         let sound_service = add_service(ClassName::SoundService, root);
+        // Made last, so the other services keep the IDs they had before
+        // it (Phase 64), but listed after ServerScriptService.
+        let server_storage = add_service(ClassName::ServerStorage, root);
+        let game = instances.get_mut(root.0).expect("inserted first");
+        game.children.pop();
+        let at = game
+            .children
+            .iter()
+            .position(|&child| child == server_script_service)
+            .expect("a service of game")
+            + 1;
+        game.children.insert(at, server_storage);
 
         Self {
             instances,
@@ -300,6 +332,7 @@ impl World {
             lighting,
             replicated_storage,
             server_script_service,
+            server_storage,
             starter_player_scripts,
             teams,
             sound_service,
@@ -543,6 +576,24 @@ impl World {
         self.server_script_service
     }
 
+    /// Holds what only the server uses (Phase 64).
+    pub fn server_storage(&self) -> InstanceId {
+        self.server_storage
+    }
+
+    /// The services that stay on the server: players' devices never get
+    /// their contents.
+    pub fn server_only_services(&self) -> [InstanceId; 2] {
+        [self.server_script_service, self.server_storage]
+    }
+
+    /// True if `id` is in a [server-only service](Self::server_only_services).
+    pub fn is_server_only(&self, id: InstanceId) -> bool {
+        self.server_only_services()
+            .into_iter()
+            .any(|service| id == service || self.is_descendant_of(id, service))
+    }
+
     /// `StarterPlayer.StarterPlayerScripts`, which holds the LocalScripts.
     pub fn starter_player_scripts(&self) -> InstanceId {
         self.starter_player_scripts
@@ -589,6 +640,7 @@ impl World {
             ClassName::Lighting => self.lighting,
             ClassName::ReplicatedStorage => self.replicated_storage,
             ClassName::ServerScriptService => self.server_script_service,
+            ClassName::ServerStorage => self.server_storage,
             ClassName::StarterPlayer => self.get(self.starter_player_scripts)?.parent?,
             ClassName::StarterPlayerScripts => self.starter_player_scripts,
             ClassName::Teams => self.teams,
@@ -613,6 +665,39 @@ impl World {
 
     pub fn is_empty(&self) -> bool {
         self.instances.is_empty()
+    }
+
+    /// A world for following another computer's copy of this game (a
+    /// player's device following the server, Phase 64): only the
+    /// services, at the same IDs, with this world's string table,
+    /// language, UI settings, collision groups and volume. Its own
+    /// Instances get IDs the server never uses, and the server's go in at
+    /// their own with [`create_at`](Self::create_at).
+    pub fn empty_replica(&self) -> World {
+        let mut replica = World::new();
+        replica.instances.make_replica();
+        replica.strings = self.strings.clone();
+        replica.language = self.language.clone();
+        replica.ui_settings = self.ui_settings;
+        replica.collision_groups = self.collision_groups.clone();
+        replica.master_volume = self.master_volume;
+        replica
+    }
+
+    /// Creates an Instance at `id`, with default properties and no parent,
+    /// as the server has it, in a world made by
+    /// [`empty_replica`](Self::empty_replica).
+    pub fn create_at(&mut self, id: InstanceId, class: ClassName) -> Result<(), TreeError> {
+        if class.is_service() {
+            return Err(TreeError::Service(class));
+        }
+        if !self.instances.insert_at(id.0, Instance::new(class)) {
+            return Err(TreeError::Stale);
+        }
+        if class == ClassName::Terrain {
+            self.terrains.insert(id, Arc::new(TerrainData::default()));
+        }
+        Ok(())
     }
 
     /// Creates an Instance with default properties and no parent, like

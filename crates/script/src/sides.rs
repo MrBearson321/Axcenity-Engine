@@ -131,6 +131,12 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         instead: "a Script can call a function on its own side directly, or use a BindableFunction's Invoke",
     },
     SideOnlyApi {
+        name: "OnClientInvoke",
+        side: Side::Client,
+        because: "it answers what Scripts ask the player with InvokeClient",
+        instead: "set OnServerInvoke to answer what LocalScripts ask",
+    },
+    SideOnlyApi {
         name: "RenderStepped",
         side: Side::Client,
         because: "frames are drawn on the player's screen",
@@ -171,6 +177,12 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         side: Side::Server,
         because: "it sends a message from the server to every player",
         instead: "to reach Scripts, use FireServer",
+    },
+    SideOnlyApi {
+        name: "InvokeClient",
+        side: Side::Server,
+        because: "it asks a player's device from the server",
+        instead: "a LocalScript can call a function on its own side directly, or use a BindableFunction's Invoke",
     },
     SideOnlyApi {
         name: "OnServerInvoke",

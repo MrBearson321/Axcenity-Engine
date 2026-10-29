@@ -26,9 +26,9 @@ use axcenity_assets::Assets;
 use axcenity_audio::{GameAudio, SoundAction};
 use axcenity_character::{Controllers, MoveInput};
 use axcenity_core::input::{InputEvent, InputKind};
-use axcenity_core::{InstanceId, MouseBehavior, UserInputType, World};
+use axcenity_core::{ClassName, InstanceId, MouseBehavior, UserInputType, World};
 use axcenity_nav::Agents;
-use axcenity_net::{GameInfo, Network};
+use axcenity_net::{GameInfo, Network, ScriptCode};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
 use axcenity_render::glam::Vec3;
@@ -159,6 +159,8 @@ fn main() -> Result<()> {
     // Saves go in the player's data for this game, never the game's folder.
     let data_folder = axcenity_save::game_folder(&project.manifest.name);
     scripts.set_save_folder(data_folder.clone());
+    // Who plays, the same each time on this install (Phase 64).
+    scripts.set_user_id(axcenity_save::user_id() as f64);
     // LocalScripts see the saved graphics settings from the start. The
     // GPU's own capabilities replace these guesses once the window opens.
     let unknown_gpu = Capabilities::default();
@@ -185,6 +187,8 @@ fn main() -> Result<()> {
         name: project.manifest.name.clone(),
         version: project.manifest.version.clone(),
     });
+    // Joined, the LocalScripts start again on the server's world.
+    network.set_client_scripts(client_scripts(&world, &project.scripts));
     match arguments.network {
         Some(NetworkStart::Host(port)) => {
             let password = arguments.password.clone();
@@ -308,6 +312,27 @@ fn start_scripts(runtime: &mut ScriptRuntime, world: &mut World, scripts: &[Scri
 }
 
 /// Prints who joined and left, and why a connection failed.
+/// The game's ModuleScripts and LocalScripts, in the order they start, for
+/// a device that joins a server elsewhere (Phase 64).
+fn client_scripts(world: &World, scripts: &[ScriptFile]) -> Vec<ScriptCode> {
+    scripts
+        .iter()
+        .filter(|script| {
+            world.get(script.instance).is_some_and(|instance| {
+                matches!(
+                    instance.class(),
+                    ClassName::ModuleScript | ClassName::LocalScript
+                )
+            })
+        })
+        .map(|script| ScriptCode {
+            instance: script.instance,
+            path: script.path.clone(),
+            source: script.source.clone(),
+        })
+        .collect()
+}
+
 fn print_network_log(network: &mut Network) {
     for line in network.take_log() {
         eprintln!("{line}");
@@ -569,6 +594,10 @@ struct App {
     /// Hosting or joining (`--host`, `--join`, `NetworkService`), or
     /// offline (Phase 63).
     network: Network,
+    /// This device joined a server elsewhere and follows its world
+    /// (Phase 64): the server moves the parts, characters and agents, and
+    /// only LocalScripts run here.
+    following: bool,
 }
 
 impl App {
@@ -633,7 +662,24 @@ impl App {
                 name: String::new(),
                 version: String::new(),
             }),
+            following: false,
         }
+    }
+
+    /// The world became a replica of a server's (Phase 64): what was kept
+    /// about the old one starts again, and from now on the server
+    /// simulates.
+    fn follow_server(&mut self) {
+        self.following = true;
+        self.physics = Physics::with_assets(self.assets.clone());
+        self.characters = Controllers::default();
+        self.agents = Agents::default();
+        self.particles = axcenity_scene::Particles::new();
+        self.terrain = axcenity_scene::TerrainCache::new();
+        self.animators = Animators::new();
+        self.animators.update(&mut self.world, &self.assets, 0.0);
+        self.text_focus = None;
+        self.ui_pressed_button = None;
     }
 
     /// Shows the game's loading screen again for its minimum time when a
@@ -1242,29 +1288,40 @@ impl ApplicationHandler for App {
                     .receive(&mut self.world, &mut self.scripts, f64::from(seconds));
                 print_network_log(&mut self.network);
                 print_output(&mut self.scripts);
+                if self.scripts.is_client_only() && !self.following {
+                    self.follow_server();
+                }
+                // A device following a server only runs its LocalScripts:
+                // the server moves parts, characters and agents.
+                let simulates = !self.following;
 
                 // 1. Input. A character controller moves first and owns
                 //    the camera, by the input map's actions (with the
                 //    player's rebinds). Otherwise the fly camera moves, and
                 //    LocalScripts see that.
                 let motion = self.controller_input(seconds);
-                self.characters
-                    .step(&mut self.world, &self.assets, motion, seconds);
-                fire_seated(&mut self.scripts, &mut self.world, &mut self.characters);
-                fire_landed(&mut self.scripts, &mut self.world, &mut self.characters);
-                //    Then Humanoids: MoveTo, states and dying (Phase 46).
-                self.scripts
-                    .step_humanoids(&mut self.world, &self.characters, f64::from(seconds));
-                //    Then players: their first character, respawns and
-                //    spawn ForceFields (Phase 47).
-                self.scripts
-                    .step_players(&mut self.world, f64::from(seconds));
-                // Then navigation agents, toward their destinations.
-                self.agents.step(&mut self.world, &self.assets, seconds);
-                for warning in self.agents.take_warnings() {
-                    eprintln!("warning: {warning}");
+                if simulates {
+                    self.characters
+                        .step(&mut self.world, &self.assets, motion, seconds);
+                    fire_seated(&mut self.scripts, &mut self.world, &mut self.characters);
+                    fire_landed(&mut self.scripts, &mut self.world, &mut self.characters);
+                    //    Then Humanoids: MoveTo, states and dying (Phase 46).
+                    self.scripts.step_humanoids(
+                        &mut self.world,
+                        &self.characters,
+                        f64::from(seconds),
+                    );
+                    //    Then players: their first character, respawns and
+                    //    spawn ForceFields (Phase 47).
+                    self.scripts
+                        .step_players(&mut self.world, f64::from(seconds));
+                    // Then navigation agents, toward their destinations.
+                    self.agents.step(&mut self.world, &self.assets, seconds);
+                    for warning in self.agents.take_warnings() {
+                        eprintln!("warning: {warning}");
+                    }
+                    fire_sensed(&mut self.scripts, &mut self.world, &mut self.agents);
                 }
-                fire_sensed(&mut self.scripts, &mut self.world, &mut self.agents);
                 print_output(&mut self.scripts);
                 self.begin_camera(seconds, (size.width, size.height));
                 let pointer = self.apply_cursor((size.width, size.height));
@@ -1272,9 +1329,11 @@ impl ApplicationHandler for App {
                 self.scripts.input_events(&mut self.world, &events);
                 //    Then ProximityPrompts and ClickDetectors, by that input,
                 //    then Tools: pickups, the hotbar, Drop and Primary.
-                self.scripts
-                    .step_prompts(&mut self.world, f64::from(seconds));
-                self.scripts.step_tools(&mut self.world);
+                if simulates {
+                    self.scripts
+                        .step_prompts(&mut self.world, f64::from(seconds));
+                    self.scripts.step_tools(&mut self.world);
+                }
                 print_output(&mut self.scripts);
 
                 // 2. Resume scripts whose wait is over (and due `task.delay`s).
@@ -1289,28 +1348,30 @@ impl ApplicationHandler for App {
                 //    fixed 60 Hz (0 to N steps this frame). Anchoring is
                 //    after scripts, so a script cannot drop the character
                 //    for this step. Other parts keep their gravity.
-                self.characters.keep_kinematic(&mut self.world);
-                self.agents.keep_kinematic(&mut self.world);
-                self.scripts
-                    .apply_shatters(&mut self.world, &mut self.physics);
-                self.physics.step(&mut self.world, f64::from(seconds));
+                if simulates {
+                    self.characters.keep_kinematic(&mut self.world);
+                    self.agents.keep_kinematic(&mut self.world);
+                    self.scripts
+                        .apply_shatters(&mut self.world, &mut self.physics);
+                    self.physics.step(&mut self.world, f64::from(seconds));
 
-                // 4. Fire `Touched` for parts that started touching during
-                //    those steps (and `Changed` for the parts that moved),
-                //    `TouchEnded` for those that stopped, then
-                //    `RunService.Heartbeat`. Handlers that wait carry on in
-                //    step 2.
-                let touches = self.physics.take_touches();
-                self.scripts.fire_touched(&mut self.world, &touches);
-                let ends = self.physics.take_touch_ends();
-                self.scripts.fire_touch_ended(&mut self.world, &ends);
-                //    Then `Broken` and `Shattered`, for joints and parts
-                //    that broke.
-                self.scripts.fire_breaks(&mut self.world, &mut self.physics);
-                //    Then damage zones and regeneration, and health bars
-                //    follow their Health.
-                self.scripts
-                    .step_health(&mut self.world, f64::from(seconds));
+                    // 4. Fire `Touched` for parts that started touching
+                    //    during those steps (and `Changed` for the parts
+                    //    that moved), `TouchEnded` for those that stopped,
+                    //    then `RunService.Heartbeat`. Handlers that wait
+                    //    carry on in step 2.
+                    let touches = self.physics.take_touches();
+                    self.scripts.fire_touched(&mut self.world, &touches);
+                    let ends = self.physics.take_touch_ends();
+                    self.scripts.fire_touch_ended(&mut self.world, &ends);
+                    //    Then `Broken` and `Shattered`, for joints and parts
+                    //    that broke.
+                    self.scripts.fire_breaks(&mut self.world, &mut self.physics);
+                    //    Then damage zones and regeneration, and health bars
+                    //    follow their Health.
+                    self.scripts
+                        .step_health(&mut self.world, f64::from(seconds));
+                }
                 self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
                 let heard = listener_of_view(self.shown_view());
@@ -1458,7 +1519,7 @@ impl ApplicationHandler for App {
                 }
                 // Network send: after the frame's scripts, physics and UI
                 // layout, before rendering.
-                self.network.send();
+                self.network.send(&self.world, &mut self.scripts);
                 // `|| ...` is a closure: a small function the renderer calls at the right moment.
                 let window = self
                     .window

@@ -1,12 +1,16 @@
 //! Hosting and joining over a [`Server`] or [`Client`]: the handshake
-//! (`handshake`), then the roster, so every end knows who is in the game.
+//! (`handshake`), then the roster, so every end knows who is in the game,
+//! then the game's own messages (Phase 64), which `Network` reads and
+//! writes.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::PROTOCOL_VERSION;
 use crate::handshake::{Admission, GameInfo, Message, Peer, admit, unique_name};
+use crate::replicate::Update;
 use crate::transport::{Channel, Client, ConnectionId, Server, ServerEvent};
+use crate::wire::WireMessage;
 
 /// How long a connection may take to say who it is, and a joining player
 /// to hear back, before giving up.
@@ -18,7 +22,7 @@ const REFUSAL_GRACE: Duration = Duration::from_secs(1);
 const HOST_PLAYER: u32 = 1;
 
 /// Something a session tells its game.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SessionEvent {
     /// Someone else is in the game: they go in `Players`.
     Joined(Peer),
@@ -30,6 +34,13 @@ pub enum SessionEvent {
     Failed(String),
     /// The host turned a player away (logged on the host).
     Refused(String),
+    /// The server's world, for this player, whose Player is `you`.
+    Snapshot { you: u64, update: Update },
+    /// What changed in the server's world.
+    Update(Update),
+    /// A RemoteEvent or RemoteFunction message from player `from` (on the
+    /// host), or from the server (`from` 0, on a player's device).
+    Remote { from: u32, message: WireMessage },
 }
 
 /// What a host is.
@@ -62,6 +73,8 @@ impl Host {
         let own = settings.own_player.as_ref().map(|name| Peer {
             id: HOST_PLAYER,
             name: name.clone(),
+            display_name: name.clone(),
+            user_id: 0,
         });
         Host {
             server,
@@ -136,9 +149,17 @@ impl Host {
                 None => {}
             }
         }
-        // Players send nothing else yet; read it so it doesn't pile up.
-        for &id in self.players.keys() {
-            while self.server.receive(id, Channel::ReliableOrdered).is_some() {}
+        // Then the players' game messages. Nothing uses the unreliable
+        // channel yet; read it so it doesn't pile up.
+        for (&id, peer) in &self.players {
+            while let Some(bytes) = self.server.receive(id, Channel::ReliableOrdered) {
+                if let Some(Message::Remote { message }) = Message::from_bytes(&bytes) {
+                    events.push(SessionEvent::Remote {
+                        from: peer.id,
+                        message,
+                    });
+                }
+            }
             while self.server.receive(id, Channel::Unreliable).is_some() {}
         }
         let clock = self.clock;
@@ -176,14 +197,20 @@ impl Host {
             self.refused.insert(id, self.clock);
             return vec![SessionEvent::Refused(format!("{}{from}", refusal.for_host))];
         }
-        let Some(Message::Hello { name, .. }) = hello else {
+        let Some(Message::Hello { name, user_id, .. }) = hello else {
             unreachable!("admit only takes a Hello")
         };
         let everyone = self.players();
+        let display_name = match name.trim() {
+            "" => "Player".to_owned(),
+            name => name.to_owned(),
+        };
         let name = unique_name(&name, everyone.iter().map(|peer| peer.name.as_str()));
         let peer = Peer {
             id: self.next_id,
             name,
+            display_name,
+            user_id,
         };
         self.next_id += 1;
         self.send(
@@ -211,6 +238,18 @@ impl Host {
         let ids: Vec<ConnectionId> = self.players.keys().copied().collect();
         for id in ids {
             self.send(id, message);
+        }
+    }
+
+    /// Sends `message` to player `peer` (by their id), if they're in.
+    pub fn send_to(&mut self, peer: u32, message: &Message) {
+        let connection = self
+            .players
+            .iter()
+            .find(|(_, p)| p.id == peer)
+            .map(|(&connection, _)| connection);
+        if let Some(connection) = connection {
+            self.send(connection, message);
         }
     }
 
@@ -247,8 +286,15 @@ pub struct Join {
 }
 
 impl Join {
-    /// Joins through `client` as `name` (the host may number it).
-    pub fn start(client: Client, game: &GameInfo, name: &str, password: Option<String>) -> Join {
+    /// Joins through `client` as `name` (the host may number it), with this
+    /// install's `user_id`.
+    pub fn start(
+        client: Client,
+        game: &GameInfo,
+        name: &str,
+        password: Option<String>,
+        user_id: u64,
+    ) -> Join {
         Join {
             client,
             hello: Message::Hello {
@@ -257,6 +303,7 @@ impl Join {
                 version: game.version.clone(),
                 name: name.to_owned(),
                 password,
+                user_id,
             },
             asked: None,
             state: JoinState::Asking,
@@ -309,6 +356,13 @@ impl Join {
                 }
                 Some(Message::Joined { player }) => events.push(SessionEvent::Joined(player)),
                 Some(Message::Left { id }) => events.push(SessionEvent::Left(id)),
+                Some(Message::Snapshot { you, update }) => {
+                    events.push(SessionEvent::Snapshot { you, update });
+                }
+                Some(Message::Update { update }) => events.push(SessionEvent::Update(update)),
+                Some(Message::Remote { message }) => {
+                    events.push(SessionEvent::Remote { from: 0, message });
+                }
                 Some(Message::Hello { .. }) | None => {}
             }
         }
@@ -326,6 +380,14 @@ impl Join {
             ));
         }
         events
+    }
+
+    /// Sends `message` to the host, once taken in.
+    pub fn send(&mut self, message: &Message) {
+        if self.you().is_some() {
+            self.client
+                .send(Channel::ReliableOrdered, message.to_bytes());
+        }
     }
 
     /// Sends what's queued.

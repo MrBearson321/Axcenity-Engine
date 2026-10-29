@@ -87,12 +87,13 @@ fn explorer_starts_with_game_and_workspace_open() {
             "Lighting",
             "ReplicatedStorage",
             "ServerScriptService",
+            "ServerStorage",
             "StarterPlayer",
             "Teams",
             "SoundService"
         ]
     );
-    let scripts = &rows[rows.len() - 4];
+    let scripts = &rows[rows.len() - 5];
     assert!(scripts.has_children && !scripts.expanded);
 }
 
@@ -129,7 +130,7 @@ fn branches_expand_and_collapse() {
     explorer.toggle(world.server_script_service());
     let opened = outline(&explorer, &world);
     assert_eq!(opened.len(), before.len() + 1);
-    assert_eq!(opened[opened.len() - 4], "    pad");
+    assert_eq!(opened[opened.len() - 5], "    pad");
 
     explorer.toggle(world.workspace());
     let parts = world.get(world.workspace()).unwrap().children().len();
@@ -162,6 +163,7 @@ fn closing_a_branch_hides_everything_inside_it_and_reopening_restores_it() {
         "  Lighting",
         "  ReplicatedStorage",
         "  ServerScriptService",
+        "  ServerStorage",
         "  StarterPlayer",
         "  Teams",
         "  SoundService",

@@ -247,6 +247,17 @@ pub struct ScriptRuntime {
     sequences: sequence::SharedSequences,
     /// The default audio settings UI and volume sliders (Phase 52).
     volume_sliders: audio_settings::VolumeSliders,
+    /// No player plays on this device (a dedicated server, Phase 63).
+    dedicated: bool,
+    /// This device follows a server elsewhere (Phase 64): only its
+    /// LocalScripts run, against its replica of the server's world, and
+    /// its player is the server's Player for it.
+    client_only: bool,
+    /// This device's player's `UserId` (Phase 64).
+    user_id: f64,
+    /// Messages for another device: to Players who joined from elsewhere,
+    /// or (on a replica) to the server. The host's network carries them.
+    outgoing: Vec<Message>,
     /// Every script and ModuleScript started, in the order they first
     /// started, with the code they run now, so they can run again.
     started: Vec<Started>,
@@ -308,6 +319,10 @@ impl ScriptRuntime {
             level_loads: Vec::new(),
             sequences,
             volume_sliders: audio_settings::VolumeSliders::default(),
+            dedicated: false,
+            client_only: false,
+            user_id: 0.0,
+            outgoing: Vec::new(),
             started: Vec::new(),
             clones: Vec::new(),
             starting_clones: false,
@@ -409,6 +424,10 @@ impl ScriptRuntime {
             return;
         }
         let side = class.and_then(Side::of_class).unwrap_or(Side::Server);
+        if side == Side::Server && self.client_only {
+            // The server runs it.
+            return;
+        }
         self.fire_changes(world);
         if side == Side::Client {
             self.join(world);
@@ -499,13 +518,15 @@ impl ScriptRuntime {
     /// goes on the AutoAssignable Team with the fewest players, and
     /// `PlayerAdded` fires (Phase 47).
     fn join(&mut self, world: &mut World) {
-        if self.client.local_player().is_some() {
+        if self.client.local_player().is_some() || self.dedicated || self.client_only {
             return;
         }
         let player = world
             .create(ClassName::Player)
             .expect("Player is not a service");
         world.set_name(player, "Player").expect("just created");
+        let _ = world.set_property(player, "UserId", Value::Number(self.user_id));
+        let _ = world.set_property(player, "DisplayName", Value::String("Player".to_owned()));
         world
             .set_parent(player, Some(world.players()))
             .expect("both exist");
@@ -517,15 +538,28 @@ impl ScriptRuntime {
     }
 
     /// A player on another device joins a hosted game (Phase 63): a Player
-    /// named `name` goes into `Players`, on the AutoAssignable Team with the
-    /// fewest players, and `PlayerAdded` fires. It gets no character here:
-    /// the worlds aren't shared yet.
-    pub fn add_remote_player(&mut self, world: &mut World, name: &str) -> InstanceId {
+    /// named `name` goes into `Players`, with their `DisplayName` and
+    /// `UserId` (Phase 64), on the AutoAssignable Team with the fewest
+    /// players, and `PlayerAdded` fires. It gets no character here: their
+    /// own character's movement comes with network ownership (Phase 66).
+    pub fn add_remote_player(
+        &mut self,
+        world: &mut World,
+        name: &str,
+        display_name: &str,
+        user_id: f64,
+    ) -> InstanceId {
         self.fire_changes(world);
         let player = world
             .create(ClassName::Player)
             .expect("Player is not a service");
         world.set_name(player, name).expect("just created");
+        let _ = world.set_property(player, "UserId", Value::Number(user_id));
+        let _ = world.set_property(
+            player,
+            "DisplayName",
+            Value::String(display_name.to_owned()),
+        );
         world
             .set_parent(player, Some(world.players()))
             .expect("both exist");
@@ -547,6 +581,81 @@ impl ScriptRuntime {
         self.player_events
             .push(players::PlayerEvent::Removing { player });
         self.fire_changes(world);
+    }
+
+    /// A Player the server added arrived in this replica (Phase 64):
+    /// `PlayerAdded` fires in its LocalScripts.
+    pub fn add_replicated_player(&mut self, world: &mut World, player: InstanceId) {
+        if !self.client_only || world.get(player).is_none() {
+            return;
+        }
+        self.fire_changes(world);
+        self.player_events
+            .push(players::PlayerEvent::Added { player });
+        self.fire_changes(world);
+    }
+
+    /// This device's player's `UserId`: the same each time on one install
+    /// (Phase 64). Set it before scripts start.
+    pub fn set_user_id(&mut self, user_id: f64) {
+        self.user_id = user_id;
+    }
+
+    /// This device's player's `UserId`.
+    pub fn user_id(&self) -> f64 {
+        self.user_id
+    }
+
+    /// No player plays on this device: a dedicated server (Phase 63). Set
+    /// it before scripts start.
+    pub fn set_dedicated(&mut self) {
+        self.dedicated = true;
+    }
+
+    /// True once [`become_client`](Self::become_client) made this device
+    /// follow a server elsewhere.
+    pub fn is_client_only(&self) -> bool {
+        self.client_only
+    }
+
+    /// This device joined a server elsewhere (Phase 64): every script
+    /// stops, `world` becomes `replica` (the server's world as it sent it,
+    /// see `World::empty_replica`), and `player` (the server's Player for
+    /// this device) is `LocalPlayer`. From now on only LocalScripts run:
+    /// start them (and the ModuleScripts first) again with
+    /// [`start_script`](Self::start_script). The server gives out
+    /// characters, so none spawns here.
+    pub fn become_client(&mut self, world: &mut World, replica: World, player: InstanceId) {
+        for started in std::mem::take(&mut self.started) {
+            for side in [Side::Server, Side::Client] {
+                self.context(side).stop_script(started.script);
+            }
+        }
+        self.clones.clear();
+        self.player_events.clear();
+        self.players.started = true;
+        self.client_only = true;
+        *world = replica;
+        world.record_changes();
+        self.client.set_local_player(player);
+        self.fire_changes(world);
+    }
+
+    /// RemoteEvent and RemoteFunction messages for another device since
+    /// the last call, oldest first: for Players who joined from elsewhere,
+    /// or (on a replica) for the server. The host sends them in its
+    /// network send step.
+    pub fn take_remote_messages(&mut self) -> Vec<Message> {
+        std::mem::take(&mut self.outgoing)
+    }
+
+    /// Messages that came from another device, which the host checked
+    /// (the server sets each one's Player to whoever sent it). They arrive
+    /// in the next [`step`](Self::step), as this device's own do.
+    pub fn receive_remote_messages(&mut self, messages: Vec<Message>) {
+        for message in messages {
+            self.transport.send(message);
+        }
     }
 
     /// Renames the player on this device, as a server it joined named it
@@ -712,9 +821,10 @@ impl ScriptRuntime {
                 != Some(false)
         };
         let mut due = Vec::new();
-        if !self.players.started {
+        if !self.players.started
+            && let Some(player) = self.local_player()
+        {
             self.players.started = true;
-            let player = self.local_player().expect("just joined");
             match placed {
                 Some(character) => self.adopt(world, player, character),
                 None if auto_loads(world) => due.push(player),
@@ -1558,8 +1668,19 @@ impl ScriptRuntime {
                 });
             }
         }
+        let local = context.local_player().or(self.client.local_player());
         for message in context.take_outbox() {
-            self.transport.send(message);
+            // Another device's: the server, from a replica, or a Player
+            // who joined from elsewhere.
+            let elsewhere = match message.to {
+                Side::Server => self.client_only,
+                Side::Client => !self.client_only && Some(message.player) != local,
+            };
+            if elsewhere {
+                self.outgoing.push(message);
+            } else {
+                self.transport.send(message);
+            }
         }
     }
 }
@@ -1711,6 +1832,8 @@ mod assembly_tests;
 mod collection_tests;
 #[cfg(test)]
 mod data_tests;
+#[cfg(test)]
+mod devices_tests;
 #[cfg(test)]
 mod health_tests;
 #[cfg(test)]

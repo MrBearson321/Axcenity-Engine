@@ -706,6 +706,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Lighting => icons::SUN,
         ClassName::ReplicatedStorage => icons::ARROWS_LEFT_RIGHT,
         ClassName::ServerScriptService => icons::HARD_DRIVES,
+        ClassName::ServerStorage => icons::ARCHIVE,
         ClassName::StarterPlayer => icons::USER_CIRCLE,
         ClassName::StarterPlayerScripts => icons::USER_GEAR,
         ClassName::Teams => icons::USERS_THREE,

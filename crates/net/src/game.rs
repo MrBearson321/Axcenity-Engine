@@ -1,22 +1,41 @@
 //! [`Network`]: a game's hosting and joining, between the session and the
 //! game's scripts and `Players`. The player and `axcenity-server` both run
 //! it, in the frame's network receive and network send steps.
+//!
+//! Hosting, it sends players the world (a snapshot when they join, then
+//! each frame's changes, see `replicate`) and carries RemoteEvent and
+//! RemoteFunction messages between them and its scripts. Joined, the
+//! device follows the server (Phase 64): its world becomes a replica of the
+//! server's, and only its LocalScripts run, again from the start.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use axcenity_core::{InstanceId, Value, World};
-use axcenity_script::{LanGame, NetworkRequest, ScriptRuntime};
+use axcenity_core::{ClassName, InstanceId, Value, World};
+use axcenity_script::{LanGame, NetworkRequest, ScriptRuntime, Side};
 
 use crate::discovery::{HostInfo, LanAnswerer, LanSearch};
-use crate::handshake::GameInfo;
+use crate::handshake::{GameInfo, Message};
+use crate::replicate::{Replicator, Update, apply};
 use crate::session::{Host, HostSettings, Join, SessionEvent};
 use crate::transport::{Client, Server};
+use crate::wire::WireMessage;
 use crate::{DEFAULT_PORT, DISCOVERY_PORT};
 
 /// Netcode takes this many connections beyond `MaxPlayers`, so a player
 /// who finds the game full is told so by the handshake.
 const SPARE_CONNECTIONS: usize = 4;
+
+/// A script's code, which a joined device starts again on the server's
+/// world: its LocalScripts and the ModuleScripts they require.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScriptCode {
+    /// Its Instance, at the same ID in the server's world (both load the
+    /// same version of the game).
+    pub instance: InstanceId,
+    pub path: String,
+    pub source: String,
+}
 
 enum Session {
     Offline,
@@ -35,6 +54,12 @@ pub struct Network {
     search: Option<LanSearch>,
     /// What happened, for the host to print.
     log: Vec<String>,
+    /// What each player was last sent of the world, while hosting.
+    replicator: Replicator,
+    /// Players who joined and haven't been sent the world yet, by id.
+    need_snapshot: BTreeSet<u32>,
+    /// The code to start again once joined (see [`ScriptCode`]).
+    client_scripts: Vec<ScriptCode>,
 }
 
 impl Network {
@@ -48,7 +73,32 @@ impl Network {
             answerer: None,
             search: None,
             log: Vec::new(),
+            replicator: Replicator::default(),
+            need_snapshot: BTreeSet::new(),
+            client_scripts: Vec::new(),
         }
+    }
+
+    /// The game's ModuleScripts and LocalScripts (in the order they start),
+    /// to start again on the server's world once joined.
+    pub fn set_client_scripts(&mut self, scripts: Vec<ScriptCode>) {
+        self.client_scripts = scripts;
+    }
+
+    /// Another loopback player for an in-memory host (tests, and the
+    /// editor's Play with several clients).
+    pub fn connect_loopback(&mut self) -> Option<Client> {
+        match &mut self.session {
+            Session::Hosting(host) if host.port().is_none() => {
+                Some(host.server_mut().connect_loopback())
+            }
+            _ => None,
+        }
+    }
+
+    /// The Player of the player with session id `peer`, while hosting.
+    pub fn player_of(&self, peer: u32) -> Option<InstanceId> {
+        self.players.get(&peer).copied()
     }
 
     /// Uses another port for LAN discovery (tests, so they don't meet a
@@ -178,7 +228,8 @@ impl Network {
     ) {
         self.disconnect(world, scripts);
         let name = local_name(world, scripts);
-        let join = Join::start(client, &self.game, &name, password);
+        let user_id = scripts.user_id() as u64;
+        let join = Join::start(client, &self.game, &name, password, user_id);
         self.session = Session::Joined(Box::new(join));
     }
 
@@ -196,11 +247,25 @@ impl Network {
             }
         }
         self.answerer = None;
+        self.replicator = Replicator::default();
+        self.need_snapshot.clear();
         self.remove_players(world, scripts);
     }
 
     fn remove_players(&mut self, world: &mut World, scripts: &mut ScriptRuntime) {
-        for (_, player) in std::mem::take(&mut self.players) {
+        let mut players: Vec<InstanceId> =
+            std::mem::take(&mut self.players).into_values().collect();
+        // A replica has the server's Players; the device keeps its own.
+        if scripts.is_client_only() {
+            players.extend(world.get(world.players()).into_iter().flat_map(|service| {
+                service.children().iter().copied().filter(|&id| {
+                    world
+                        .get(id)
+                        .is_some_and(|i| i.class() == ClassName::Player)
+                })
+            }));
+        }
+        for player in players {
             scripts.remove_player(world, player);
         }
     }
@@ -241,11 +306,62 @@ impl Network {
     }
 
     /// Frame order's network send, after the frame's scripts and physics.
-    pub fn send(&mut self) {
+    /// Hosting: each player gets what changed in `world` (a player who
+    /// just joined, all of it), then the scripts' messages for them.
+    /// Joined: the server gets the scripts' messages.
+    pub fn send(&mut self, world: &World, scripts: &mut ScriptRuntime) {
+        let messages = scripts.take_remote_messages();
         match &mut self.session {
             Session::Offline => {}
-            Session::Hosting(host) => host.flush(),
-            Session::Joined(join) => join.flush(),
+            Session::Hosting(host) => {
+                let update = self.replicator.frame(world);
+                if !update.is_empty() {
+                    let message = Message::Update { update };
+                    for &peer in self.players.keys() {
+                        if !self.need_snapshot.contains(&peer) {
+                            host.send_to(peer, &message);
+                        }
+                    }
+                }
+                for peer in std::mem::take(&mut self.need_snapshot) {
+                    let Some(&you) = self.players.get(&peer) else {
+                        continue;
+                    };
+                    let update = self.replicator.snapshot(world);
+                    host.send_to(
+                        peer,
+                        &Message::Snapshot {
+                            you: you.to_bits(),
+                            update,
+                        },
+                    );
+                }
+                // Players never hear of the server's own Instances.
+                let visible = |id: InstanceId| world.contains(id) && !world.is_server_only(id);
+                for message in messages {
+                    let peer = self
+                        .players
+                        .iter()
+                        .find(|&(_, &player)| player == message.player)
+                        .map(|(&peer, _)| peer);
+                    if message.to == Side::Client
+                        && let Some(peer) = peer
+                    {
+                        let message = WireMessage::from_message(&message, &visible);
+                        host.send_to(peer, &Message::Remote { message });
+                    }
+                }
+                host.flush();
+            }
+            Session::Joined(join) => {
+                // The server never had this device's own Instances.
+                let shared = |id: InstanceId| !id.is_local();
+                for message in messages {
+                    let message = WireMessage::from_message(&message, &shared);
+                    join.send(&Message::Remote { message });
+                }
+                join.flush();
+            }
         }
     }
 
@@ -291,13 +407,23 @@ impl Network {
                 if you == Some(peer.id) || self.players.contains_key(&peer.id) {
                     return;
                 }
-                if self.is_hosting() {
-                    self.log.push(format!("{} joined.", peer.name));
+                // A player's device gets everyone's Player with the
+                // server's world.
+                if !self.is_hosting() {
+                    return;
                 }
-                let player = scripts.add_remote_player(world, &peer.name);
+                self.log.push(format!("{} joined.", peer.name));
+                let player = scripts.add_remote_player(
+                    world,
+                    &peer.name,
+                    &peer.display_name,
+                    peer.user_id as f64,
+                );
                 self.players.insert(peer.id, player);
+                self.need_snapshot.insert(peer.id);
             }
             SessionEvent::Left(id) => {
+                self.need_snapshot.remove(&id);
                 if let Some(player) = self.players.remove(&id) {
                     if self.is_hosting() {
                         let name = world
@@ -315,12 +441,119 @@ impl Network {
                     .push(format!("Joined \"{}\" as {}.", self.game.name, you.name));
             }
             SessionEvent::Refused(why) => self.log.push(format!("warning: {why}")),
+            SessionEvent::Snapshot { you, update } => {
+                if !self.is_hosting() {
+                    self.follow_server(world, scripts, InstanceId::from_bits(you), &update);
+                }
+            }
+            SessionEvent::Update(update) => {
+                if !self.is_hosting() && scripts.is_client_only() {
+                    let applied = apply(world, &update);
+                    for player in applied.players_leaving {
+                        scripts.remove_player(world, player);
+                    }
+                    for player in applied.players_added {
+                        scripts.add_replicated_player(world, player);
+                    }
+                }
+            }
+            SessionEvent::Remote { from, message } => self.deliver(world, scripts, from, &message),
             SessionEvent::Failed(reason) => {
                 self.session = Session::Offline;
                 self.remove_players(world, scripts);
                 self.log.push(format!("warning: {reason}"));
                 scripts.fire_connection_failed(world, &reason);
             }
+        }
+    }
+}
+
+impl Network {
+    /// This device joined: its world becomes `update`, the server's world,
+    /// with its own copy's Terrain landscapes (the same version of the
+    /// game), and its LocalScripts start again there as `you`'s.
+    fn follow_server(
+        &mut self,
+        world: &mut World,
+        scripts: &mut ScriptRuntime,
+        you: InstanceId,
+        update: &Update,
+    ) {
+        let mut replica = world.empty_replica();
+        apply(&mut replica, update);
+        let terrains: Vec<InstanceId> = replica
+            .descendants(replica.root())
+            .into_iter()
+            .filter(|&id| {
+                replica
+                    .get(id)
+                    .is_some_and(|i| i.class() == ClassName::Terrain)
+            })
+            .collect();
+        for id in terrains {
+            if let Some(data) = world.terrain(id) {
+                replica.set_terrain(id, data.clone());
+            }
+        }
+        scripts.become_client(world, replica, you);
+        let mut modules_first = Vec::new();
+        for class in [ClassName::ModuleScript, ClassName::LocalScript] {
+            for code in &self.client_scripts {
+                if world.get(code.instance).map(|i| i.class()) == Some(class) {
+                    modules_first.push(code.clone());
+                }
+            }
+        }
+        let started = modules_first.len();
+        for code in modules_first {
+            scripts.start_script(world, code.instance, &code.path, &code.source);
+        }
+        let missing = self.client_scripts.len() - started;
+        if missing > 0 {
+            self.log.push(format!(
+                "warning: {missing} of this game's scripts aren't in the server's world"
+            ));
+        }
+        self.log.push(format!(
+            "Following the server's world ({} Instances).",
+            update.ops.len()
+        ));
+    }
+
+    /// A remote message arrived. On the host it's from player `from`, so
+    /// it's theirs whatever it says, and it must name a RemoteEvent or
+    /// RemoteFunction players can see; Instances in it that they can't
+    /// arrive as nil. On a player's device it's from the server.
+    pub(crate) fn deliver(
+        &mut self,
+        world: &mut World,
+        scripts: &mut ScriptRuntime,
+        from: u32,
+        message: &WireMessage,
+    ) {
+        if self.is_hosting() {
+            let Some(&player) = self.players.get(&from) else {
+                return;
+            };
+            let remote = InstanceId::from_bits(message.remote);
+            let reachable = |id: InstanceId| world.contains(id) && !world.is_server_only(id);
+            let is_remote = world.get(remote).is_some_and(|instance| {
+                matches!(
+                    instance.class(),
+                    ClassName::RemoteEvent | ClassName::RemoteFunction
+                )
+            });
+            if !is_remote || !reachable(remote) {
+                log::info!("dropped a message from player {from} for no remote it can reach");
+                return;
+            }
+            let message = message.to_message(Side::Server, player, &reachable);
+            scripts.receive_remote_messages(vec![message]);
+        } else if scripts.is_client_only() {
+            let player = InstanceId::from_bits(message.player);
+            let exists = |id: InstanceId| world.contains(id);
+            let message = message.to_message(Side::Client, player, &exists);
+            scripts.receive_remote_messages(vec![message]);
         }
     }
 }

@@ -6,7 +6,10 @@
 //! The host answers [`Message::Welcome`] (the player's id and name, and
 //! everyone in the game) or [`Message::Refused`] with why, and says so
 //! itself. Then [`Message::Joined`] and [`Message::Left`] keep everyone's
-//! `Players` the same.
+//! roster the same. The game itself follows (Phase 64): the player's
+//! [`Message::Snapshot`], each frame's [`Message::Update`] (see
+//! `replicate`), and [`Message::Remote`] for RemoteEvents and
+//! RemoteFunctions both ways.
 //!
 //! `Hello` and `Refused` must stay readable by every later engine, so a
 //! newer one can still say why it refuses.
@@ -14,6 +17,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::PROTOCOL_VERSION;
+use crate::replicate::Update;
+use crate::wire::WireMessage;
 
 /// A player in the game, as every end knows them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,9 +27,15 @@ pub struct Peer {
     pub id: u32,
     /// Their Player's name, unique in the game.
     pub name: String,
+    /// The name they joined with (their Player's `DisplayName`).
+    #[serde(default)]
+    pub display_name: String,
+    /// Their install's identity (their Player's `UserId`).
+    #[serde(default)]
+    pub user_id: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Message {
     Hello {
@@ -33,6 +44,10 @@ pub enum Message {
         version: String,
         name: String,
         password: Option<String>,
+        /// The player's install's identity (Phase 64); 0 from an engine
+        /// before it.
+        #[serde(default)]
+        user_id: u64,
     },
     Welcome {
         you: Peer,
@@ -46,6 +61,20 @@ pub enum Message {
     },
     Left {
         id: u32,
+    },
+    /// The server's world, for a player who just joined, and which of its
+    /// Players is theirs (a network ID).
+    Snapshot {
+        you: u64,
+        update: Update,
+    },
+    /// What changed in the server's world this frame.
+    Update {
+        update: Update,
+    },
+    /// A RemoteEvent or RemoteFunction message.
+    Remote {
+        message: WireMessage,
     },
 }
 

@@ -49,6 +49,7 @@ fn new_world_has_game_and_its_services() {
             world.lighting(),
             world.replicated_storage(),
             world.server_script_service(),
+            world.server_storage(),
             starter_player,
             world.teams(),
             world.sound_service(),
@@ -642,4 +643,36 @@ fn copy_from_brings_a_tree_over_from_another_world_without_its_scripts() {
         Some(&Value::Instance(None))
     );
     assert!(level.contains(door), "the source is untouched");
+}
+
+#[test]
+fn a_replica_holds_the_servers_instances_at_their_ids_and_its_own_apart() {
+    let mut server = World::new();
+    let workspace = server.workspace();
+    let pad = part_in(&mut server, workspace, "Pad");
+    let mut replica = server.empty_replica();
+    assert_eq!(replica.workspace(), workspace, "the services match");
+    replica.create_at(pad, ClassName::Part).unwrap();
+    replica.set_parent(pad, Some(workspace)).unwrap();
+    let own = part_in(&mut replica, workspace, "Mine");
+    assert!(own.is_local() && !pad.is_local());
+    // The server's next Instance fits beside the replica's own.
+    let next = part_in(&mut server, workspace, "Next");
+    replica.create_at(next, ClassName::Part).unwrap();
+    assert_eq!(replica.get(own).unwrap().name(), "Mine");
+    assert_eq!(InstanceId::from_bits(next.to_bits()), next);
+    assert!(replica.create_at(pad, ClassName::Part).is_err(), "taken");
+}
+
+#[test]
+fn server_storage_and_server_script_service_are_server_only() {
+    let mut world = World::new();
+    let storage = world.server_storage();
+    let kept = part_in(&mut world, storage, "Kept");
+    let workspace = world.workspace();
+    let shown = part_in(&mut world, workspace, "Shown");
+    assert!(world.is_server_only(kept));
+    assert!(world.is_server_only(world.server_script_service()));
+    assert!(!world.is_server_only(shown));
+    assert_eq!(world.service(ClassName::ServerStorage), Some(storage));
 }

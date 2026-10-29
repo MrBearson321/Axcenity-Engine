@@ -4,8 +4,11 @@
 //! its own) and physics at 60 frames a second with no window, audio or
 //! GPU, and hosts the game on UDP for players to `--join`.
 //!
-//! The worlds aren't shared yet (Phase 64): players who join appear in the
-//! server's `Players`, and fire `PlayerAdded` in its Scripts.
+//! Players who join appear in the server's `Players` and fire `PlayerAdded`
+//! in its Scripts; their devices follow its world and run their
+//! LocalScripts there, and RemoteEvents and RemoteFunctions cross between
+//! them (Phase 64). Nothing in ServerStorage or ServerScriptService leaves
+//! the server.
 
 use std::ffi::OsString;
 use std::fs;
@@ -108,6 +111,7 @@ fn main() -> Result<()> {
     let mut world = project.world;
     let assets = Assets::new(&project.folder);
     let mut scripts = ScriptRuntime::new();
+    scripts.set_dedicated();
     scripts.set_assets(assets.clone());
     scripts.set_save_folder(axcenity_save::game_folder(&project.manifest.name));
     if let Err(err) = axcenity_project::load_starter_character(&project.folder, &mut world) {
@@ -187,7 +191,7 @@ fn frame(
     scripts.step_health(world, seconds);
     scripts.heartbeat(world, seconds);
     print_output(scripts);
-    network.send();
+    network.send(world, scripts);
 }
 
 fn print_log(network: &mut Network) {

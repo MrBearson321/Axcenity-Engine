@@ -31,7 +31,9 @@
 //! So are `players` (`CharacterAutoLoads`, `RespawnTime`,
 //! `LeaderboardEnabled`), `starter_player` (`StarterCharacter`) and `teams`
 //! (its Team children), in the same shape (Phase 47), and `sound_service`
-//! (its SoundGroups, with their effects, Phase 52).
+//! (its SoundGroups, with their effects, Phase 52). `server_storage`
+//! (Phase 64) is saved like `replicated_storage`, and only when it has
+//! something in it.
 //!
 //! Property values are plain JSON. Their meaning comes from the class: the
 //! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`,
@@ -128,6 +130,9 @@ struct WorldFile {
     workspace: ServiceNode,
     #[serde(default)]
     replicated_storage: ServiceNode,
+    // Phase 64: what only the server uses.
+    #[serde(default)]
+    server_storage: ServiceNode,
     #[serde(default)]
     lighting: ServiceNode,
     // Phase 47: spawning settings, the StarterCharacter, and the Teams.
@@ -269,6 +274,7 @@ fn world_roots(world: &World) -> Vec<InstanceId> {
     vec![
         world.workspace(),
         world.replicated_storage(),
+        world.server_storage(),
         world.sound_service(),
     ]
 }
@@ -287,6 +293,7 @@ pub fn parse_world(text: &str) -> Result<World, WorldError> {
     let services = [
         (world.workspace(), &file.workspace),
         (world.replicated_storage(), &file.replicated_storage),
+        (world.server_storage(), &file.server_storage),
         (world.lighting(), &file.lighting),
         (world.players(), &file.players),
         (world.starter_player(), &file.starter_player),
@@ -763,18 +770,15 @@ pub fn write_world(world: &World) -> String {
         &mut out,
     );
     // Left out when empty, so worlds without one look as they always have.
-    let replicated = world.replicated_storage();
-    if !saved_children(world, replicated).is_empty() {
-        out.push_str(",\n  \"replicated_storage\": ");
-        write_instance(
-            world,
-            replicated,
-            1,
-            &roots,
-            Region::Outside,
-            false,
-            &mut out,
-        );
+    let storages = [
+        ("replicated_storage", world.replicated_storage()),
+        ("server_storage", world.server_storage()),
+    ];
+    for (key, storage) in storages {
+        if !saved_children(world, storage).is_empty() {
+            out.push_str(&format!(",\n  \"{key}\": "));
+            write_instance(world, storage, 1, &roots, Region::Outside, false, &mut out);
+        }
     }
     // Each left out while every setting is its default and nothing is
     // inside, for the same reason.
