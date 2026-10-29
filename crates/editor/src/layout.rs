@@ -68,6 +68,9 @@ pub enum Pane {
     /// The editor's Lua plugins: on, off and their errors (`plugins.rs`,
     /// Phase 54). Starts closed.
     Plugins,
+    /// Editing a model's meshes (`model_studio.rs`, Phase 55). Starts
+    /// closed; opening a model in it opens it.
+    ModelStudio,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -78,7 +81,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 18] = [
+    pub const CLOSABLE: [Pane; 19] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -97,6 +100,7 @@ impl Pane {
         Pane::Sequencer,
         Pane::Tests,
         Pane::Plugins,
+        Pane::ModelStudio,
     ];
 
     pub fn label(self) -> &'static str {
@@ -120,6 +124,7 @@ impl Pane {
             Pane::Sequencer => "Sequencer",
             Pane::Tests => "Tests",
             Pane::Plugins => "Plugins",
+            Pane::ModelStudio => "Model Studio",
             Pane::Script(_) => "Script",
             Pane::Plugin(_) => "Plugin",
         }
@@ -146,6 +151,7 @@ impl Pane {
             Pane::Sequencer => icons::FILM_SLATE,
             Pane::Tests => icons::FLASK,
             Pane::Plugins => icons::PUZZLE_PIECE,
+            Pane::ModelStudio => icons::POLYGON,
             Pane::Script(_) => icons::CODE,
             Pane::Plugin(_) => icons::PUZZLE_PIECE,
         }
@@ -217,7 +223,8 @@ impl Layout {
             | Pane::BehaviorTree
             | Pane::DataTable
             | Pane::Material
-            | Pane::Sequencer => Some(Pane::Scene),
+            | Pane::Sequencer
+            | Pane::ModelStudio => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain | Pane::Tags | Pane::Levels | Pane::Plugins | Pane::Plugin(_) => {
                 Some(Pane::Properties)
@@ -483,6 +490,7 @@ mod tests {
                     | Pane::Mixer
                     | Pane::Tests
                     | Pane::Plugins
+                    | Pane::ModelStudio
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;

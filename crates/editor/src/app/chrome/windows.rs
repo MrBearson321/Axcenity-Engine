@@ -229,8 +229,10 @@ impl EditorApp {
         // Backspace itself, so leave those keys to it then.
         let typing = ctx.wants_keyboard_input();
         let playing = self.playing();
-        // Over a property clip, K, Delete and Backspace are the dope sheet's.
-        let animating = self.animation.wants_keys(ctx);
+        // Over a property clip, K, Delete and Backspace are the dope sheet's;
+        // over the Model Studio, its own single keys and Enter are.
+        let studio = self.model_studio.has_pointer();
+        let animating = self.animation.wants_keys(ctx) || studio;
         let studio_tool = |input: &mut egui::InputState| {
             Tool::ALL.into_iter().find(|tool| {
                 tool.shortcut()
@@ -262,7 +264,7 @@ impl EditorApp {
                 redo,
                 undo: input.consume_shortcut(&UNDO_SHORTCUT),
                 tool: studio_tool(input).or_else(|| f3x_tool(input)),
-                toggle: !playing && input.consume_key(none, egui::Key::Enter),
+                toggle: !playing && !studio && input.consume_key(none, egui::Key::Enter),
                 // Taken before the viewport sees them, so Ctrl+D doesn't
                 // also fly the camera right.
                 duplicate: input.consume_shortcut(&DUPLICATE_SHORTCUT),

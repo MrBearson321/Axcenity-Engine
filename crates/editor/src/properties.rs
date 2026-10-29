@@ -55,6 +55,8 @@ pub enum Edit {
     BuildRagdoll,
     /// Cuts the selected Fracture's part into its pieces and saves them.
     GenerateFracture,
+    /// Opens the selected MeshPart's model in the Model Studio.
+    OpenInModelStudio,
     /// During Play, pins (true) or unpins a value edited during Play, so
     /// Stop copies it into the edit world (see `play::kept`).
     Keep(Field, bool),
@@ -561,6 +563,20 @@ pub fn show(
                     .clicked()
             {
                 edit = Some(Edit::GenerateFracture);
+            }
+            let has_mesh = instance
+                .property("MeshId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.is_empty());
+            if !playing
+                && instance.class() == ClassName::MeshPart
+                && has_mesh
+                && ui
+                    .button(theme::with_icon(icons::POLYGON, "Edit in Model Studio"))
+                    .on_hover_text("Edit its model's meshes in the Model Studio tab. Saving writes a .glb.")
+                    .clicked()
+            {
+                edit = Some(Edit::OpenInModelStudio);
             }
             ui.add_space(2.0);
             // Widgets remember things such as half-typed numbers by ID. Mixing in

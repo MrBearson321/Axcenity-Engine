@@ -1744,9 +1744,9 @@ All of this milestone's math lives in `mesh_edit`. The editor draws and edits th
 
 ### Acceptance criteria
 
-- [ ] A cube made in the Studio, with one face scaled up, is saved and used by a MeshPart in the Scene View within a second.
+- [x] A cube made in the Studio, with one face scaled up, is saved and used by a MeshPart in the Scene View within a second.
 - [ ] Opening a model made in Blender and saving it unchanged gives a `.glb` that Blender opens with the same geometry, UVs and materials.
-- [ ] Loop select picks a whole edge loop on a cylinder, and every edit undoes and redoes.
+- [x] Loop select picks a whole edge loop on a cylinder, and every edit undoes and redoes.
 
 ---
 

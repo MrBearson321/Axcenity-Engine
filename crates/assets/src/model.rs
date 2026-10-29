@@ -100,6 +100,13 @@ pub struct Model {
 }
 
 impl Model {
+    /// A model of `primitives` (see [`Primitive::new`]), fitted into the
+    /// 1×1×1 cube as a loaded one is, without simpler copies: one being
+    /// edited changes too often to simplify.
+    pub fn from_primitives(primitives: Vec<Primitive>) -> Result<Model, ModelError> {
+        fit_with(primitives, false)
+    }
+
     /// Different for every model loaded, even from the same file.
     pub fn key(&self) -> u64 {
         self.key
@@ -157,6 +164,35 @@ pub struct Primitive {
 }
 
 impl Primitive {
+    /// Triangles made by hand (the Model Studio's), in the file's units,
+    /// to put together with [`Model::from_primitives`]. `normals` and
+    /// `uvs` are one per position (`uvs` may be empty); `indices` three
+    /// per triangle.
+    pub fn new(
+        positions: Vec<[f32; 3]>,
+        normals: Vec<[f32; 3]>,
+        uvs: Vec<[f32; 2]>,
+        indices: Vec<u32>,
+        mut material: ModelMaterial,
+    ) -> Primitive {
+        if uvs.is_empty() {
+            material.remove_textures();
+        }
+        Primitive {
+            key: new_key(),
+            positions,
+            normals,
+            uvs,
+            tangents: Vec::new(),
+            indices,
+            material,
+            joints: Vec::new(),
+            weights: Vec::new(),
+            lods: Vec::new(),
+            level: 0,
+        }
+    }
+
     /// Different for every primitive loaded.
     pub fn key(&self) -> u64 {
         self.key
@@ -1179,7 +1215,12 @@ fn tangents(
 /// Fits the primitives into the 1×1×1 cube centered on the origin and
 /// makes the model. The full model's primitives decide its box and hull;
 /// simpler copies (see [`lod`]) are placed the same way and attached to them.
-fn fit(mut primitives: Vec<Primitive>) -> Result<Model, ModelError> {
+fn fit(primitives: Vec<Primitive>) -> Result<Model, ModelError> {
+    fit_with(primitives, true)
+}
+
+/// [`fit`], with simpler copies only if `simplify`.
+fn fit_with(mut primitives: Vec<Primitive>, simplify: bool) -> Result<Model, ModelError> {
     // A file with only `_LOD1` objects has them as its full model.
     if primitives.iter().all(|primitive| primitive.level > 0) {
         for primitive in &mut primitives {
@@ -1248,7 +1289,11 @@ fn fit(mut primitives: Vec<Primitive>) -> Result<Model, ModelError> {
         key: new_key(),
         size: Vec3::select(thick, size, Vec3::ZERO).to_array(),
         center: center.to_array(),
-        primitives: lod::attach(primitives),
+        primitives: if simplify {
+            lod::attach(primitives)
+        } else {
+            primitives
+        },
         hull_points,
         warnings: Vec::new(),
         rig: None,

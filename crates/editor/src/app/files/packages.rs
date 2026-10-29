@@ -264,6 +264,11 @@ impl EditorApp {
                 self.assets.forget(&blob.path);
                 self.data_tables.file_changed(&folder, &blob.path);
             }
+            // A model a Model Studio save (or its undo) rewrote: MeshParts
+            // using it draw that version now.
+            if axcenity_assets::ModelFormat::of(std::path::Path::new(&blob.path)).is_some() {
+                let _ = self.assets.reload(&blob.path);
+            }
         }
         self.hand_over_tables();
         written

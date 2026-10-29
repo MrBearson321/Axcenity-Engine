@@ -159,6 +159,18 @@ impl EditorApp {
                 self.generate_fracture(id);
                 return;
             }
+            Edit::OpenInModelStudio => {
+                let mesh_id = self
+                    .world
+                    .get(id)
+                    .and_then(|instance| instance.property("MeshId"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                if let Some(mesh_id) = mesh_id {
+                    self.open_in_model_studio(&mesh_id);
+                }
+                return;
+            }
             Edit::PickClip => {
                 if let Some(path) = self.pick_property_clip() {
                     self.apply(id, Edit::Property("Clip", Value::String(path)));
@@ -1006,6 +1018,10 @@ impl EditorApp {
             self.hand_over_materials();
             return;
         }
+        // The Model Studio has its own history while the mouse is over it.
+        if self.model_studio.has_pointer() && self.model_studio.undo() {
+            return;
+        }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
             if let Some(restored) = self.history.undo(&mut self.world) {
                 self.apply_history_texts(restored.texts);
@@ -1027,6 +1043,9 @@ impl EditorApp {
         }
         if self.materials.has_pointer() && self.materials.redo() {
             self.hand_over_materials();
+            return;
+        }
+        if self.model_studio.has_pointer() && self.model_studio.redo() {
             return;
         }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
@@ -1196,6 +1215,7 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::RevertOverride(_)
         | Edit::ApplyOverride(_)
         | Edit::GenerateFracture
+        | Edit::OpenInModelStudio
         | Edit::PreviewSound(_)
         | Edit::Keep(..)
         | Edit::Attribute(..)

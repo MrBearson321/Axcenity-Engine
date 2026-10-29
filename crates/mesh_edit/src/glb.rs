@@ -6,7 +6,9 @@
 //! `#Piece3`, and loading the whole file gives the original shape.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use axcenity_assets::{AlphaMode, Image, ModelMaterial};
 use glam::{Vec2, Vec3};
 use serde_json::{Value, json};
 
@@ -84,16 +86,18 @@ pub fn write_glb(pieces: &[Mesh], materials: &[GlbMaterial], interior: &GlbMater
         nodes.push(json!({ "name": name, "mesh": meshes.len() }));
         meshes.push(json!({ "name": name, "primitives": primitives }));
     }
-    file.finish(nodes, meshes)
+    let roots = (0..nodes.len()).collect();
+    file.finish(nodes, meshes, roots)
 }
 
-/// A primitive's vertices and triangles, ready to write.
+/// A primitive's vertices and triangles, ready to write. Without `uvs`,
+/// it's written without texture coordinates.
 #[derive(Default)]
-struct Vertices {
-    positions: Vec<Vec3>,
-    normals: Vec<Vec3>,
-    uvs: Vec<Vec2>,
-    indices: Vec<u32>,
+pub(crate) struct Vertices {
+    pub positions: Vec<Vec3>,
+    pub normals: Vec<Vec3>,
+    pub uvs: Vec<Vec2>,
+    pub indices: Vec<u32>,
 }
 
 /// The triangles of `piece` on `surface`, with only the vertices they use.
@@ -167,7 +171,7 @@ pub(crate) fn plain_material() -> GlbMaterial {
 
 /// The glTF document being built, and its binary data.
 #[derive(Default)]
-struct File {
+pub(crate) struct File {
     bin: Vec<u8>,
     buffer_views: Vec<Value>,
     accessors: Vec<Value>,
@@ -176,9 +180,24 @@ struct File {
     textures: Vec<Value>,
     /// The texture already made for each image URI.
     texture_of: HashMap<String, usize>,
+    /// Some texture is placed with `KHR_texture_transform`.
+    transforms: bool,
 }
 
 impl File {
+    /// The texture showing the image file at `uri`, made the first time.
+    fn texture(&mut self, uri: &str) -> usize {
+        if let Some(&texture) = self.texture_of.get(uri) {
+            return texture;
+        }
+        self.images.push(json!({ "uri": encode_uri(uri) }));
+        self.textures
+            .push(json!({ "source": self.images.len() - 1 }));
+        let texture = self.textures.len() - 1;
+        self.texture_of.insert(uri.to_owned(), texture);
+        texture
+    }
+
     /// Adds `material` and returns its index.
     fn add_material(&mut self, material: &GlbMaterial) -> usize {
         let mut pbr = json!({
@@ -187,18 +206,7 @@ impl File {
             "roughnessFactor": finite(material.roughness).clamp(0.0, 1.0),
         });
         if let Some(uri) = &material.base_color_texture {
-            let texture = match self.texture_of.get(uri) {
-                Some(&texture) => texture,
-                None => {
-                    self.images.push(json!({ "uri": encode_uri(uri) }));
-                    self.textures
-                        .push(json!({ "source": self.images.len() - 1 }));
-                    let texture = self.textures.len() - 1;
-                    self.texture_of.insert(uri.clone(), texture);
-                    texture
-                }
-            };
-            pbr["baseColorTexture"] = json!({ "index": texture });
+            pbr["baseColorTexture"] = json!({ "index": self.texture(uri) });
         }
         self.materials.push(json!({
             "name": material.name,
@@ -209,8 +217,78 @@ impl File {
         self.materials.len() - 1
     }
 
+    /// Adds a loaded model's `material` and returns its index: its colors,
+    /// alpha and sides, and its textures linked by their files (a texture
+    /// with no file is left out). Metalness and roughness are written as
+    /// glTF's one texture of both.
+    pub(crate) fn add_model_material(&mut self, material: &ModelMaterial) -> usize {
+        let transform = (material.uv_scale != [1.0, 1.0]
+            || material.uv_offset != [0.0, 0.0]
+            || material.uv_rotation != 0.0)
+            .then(|| {
+                json!({
+                    "offset": material.uv_offset.map(finite),
+                    "rotation": finite(material.uv_rotation),
+                    "scale": material.uv_scale.map(finite),
+                })
+            });
+        self.transforms |= transform.is_some() && material.has_textures();
+        let info = |file: &mut Self, image: Option<&Arc<Image>>| {
+            let uri = image?.file.as_deref()?;
+            let mut info = json!({ "index": file.texture(uri) });
+            if let Some(transform) = &transform {
+                info["extensions"] = json!({ "KHR_texture_transform": transform });
+            }
+            Some(info)
+        };
+        let mut pbr = json!({
+            "baseColorFactor": material.base_color.map(finite),
+            "metallicFactor": finite(material.metalness).clamp(0.0, 1.0),
+            "roughnessFactor": finite(material.roughness).clamp(0.0, 1.0),
+        });
+        if let Some(texture) = info(self, material.base_color_texture.as_ref()) {
+            pbr["baseColorTexture"] = texture;
+        }
+        let metal_rough = [&material.metalness_texture, &material.roughness_texture]
+            .into_iter()
+            .flatten()
+            .map(|channel| &channel.image)
+            .next();
+        if let Some(texture) = info(self, metal_rough) {
+            pbr["metallicRoughnessTexture"] = texture;
+        }
+        let mut json = json!({
+            "name": material.name,
+            "pbrMetallicRoughness": pbr,
+            "emissiveFactor": material.emissive.map(|c| finite(c).clamp(0.0, 1.0)),
+            "doubleSided": material.double_sided,
+        });
+        match material.alpha_mode {
+            AlphaMode::Opaque => json["alphaMode"] = json!("OPAQUE"),
+            AlphaMode::Mask { cutoff } => {
+                json["alphaMode"] = json!("MASK");
+                json["alphaCutoff"] = json!(finite(cutoff));
+            }
+            AlphaMode::Blend => json["alphaMode"] = json!("BLEND"),
+        }
+        if let Some(mut texture) = info(self, material.normal_texture.as_ref()) {
+            texture["scale"] = json!(finite(material.normal_scale));
+            json["normalTexture"] = texture;
+        }
+        let occlusion = material.occlusion_texture.as_ref().map(|c| &c.image);
+        if let Some(mut texture) = info(self, occlusion) {
+            texture["strength"] = json!(finite(material.occlusion_strength));
+            json["occlusionTexture"] = texture;
+        }
+        if let Some(texture) = info(self, material.emissive_texture.as_ref()) {
+            json["emissiveTexture"] = texture;
+        }
+        self.materials.push(json);
+        self.materials.len() - 1
+    }
+
     /// Writes a primitive's data and returns its JSON.
-    fn add_primitive(&mut self, vertices: &Vertices, material: usize) -> Value {
+    pub(crate) fn add_primitive(&mut self, vertices: &Vertices, material: usize) -> Value {
         let (min, max) = vertices
             .positions
             .iter()
@@ -225,7 +303,7 @@ impl File {
         self.accessors[position]["min"] = json!(min.to_array().map(finite));
         self.accessors[position]["max"] = json!(max.to_array().map(finite));
         let normal = self.add_accessor(&normals, count, "VEC3", ARRAY_BUFFER);
-        let uv = self.add_accessor(&uvs, count, "VEC2", ARRAY_BUFFER);
+        let uv = (!uvs.is_empty()).then(|| self.add_accessor(&uvs, count, "VEC2", ARRAY_BUFFER));
         let indices = self.add_view(
             vertices.indices.iter().flat_map(|i| i.to_le_bytes()),
             ELEMENT_ARRAY_BUFFER,
@@ -236,8 +314,12 @@ impl File {
             "count": vertices.indices.len(),
             "type": "SCALAR",
         }));
+        let mut attributes = json!({ "POSITION": position, "NORMAL": normal });
+        if let Some(uv) = uv {
+            attributes["TEXCOORD_0"] = json!(uv);
+        }
         json!({
-            "attributes": { "POSITION": position, "NORMAL": normal, "TEXCOORD_0": uv },
+            "attributes": attributes,
             "indices": self.accessors.len() - 1,
             "material": material,
         })
@@ -273,12 +355,18 @@ impl File {
         self.buffer_views.len() - 1
     }
 
-    /// The finished file: header, JSON chunk and BIN chunk.
-    fn finish(self, nodes: Vec<Value>, meshes: Vec<Value>) -> Vec<u8> {
+    /// The finished file: header, JSON chunk and BIN chunk. `roots` are
+    /// the nodes at the top of the scene; the rest are their `children`.
+    pub(crate) fn finish(
+        self,
+        nodes: Vec<Value>,
+        meshes: Vec<Value>,
+        roots: Vec<usize>,
+    ) -> Vec<u8> {
         let mut root = json!({
             "asset": { "version": "2.0", "generator": "Axcenity Engine" },
             "scene": 0,
-            "scenes": [{ "nodes": (0..nodes.len()).collect::<Vec<_>>() }],
+            "scenes": [{ "nodes": roots }],
             "nodes": nodes,
             "meshes": meshes,
             "materials": self.materials,
@@ -291,6 +379,9 @@ impl File {
         if !self.images.is_empty() {
             root["images"] = json!(self.images);
             root["textures"] = json!(self.textures);
+        }
+        if self.transforms {
+            root["extensionsUsed"] = json!(["KHR_texture_transform"]);
         }
         let mut json = serde_json::to_vec(&root).expect("glTF JSON is plain data");
         // Chunks are padded to 4 bytes: JSON with spaces, BIN with zeros.

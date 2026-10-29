@@ -11,6 +11,11 @@
 //!   meshes, and [`combine_parts`] what the editor's Union and Intersect
 //!   (and scripts' `UnionAsync`, `SubtractAsync`, `IntersectAsync`) call.
 //!
+//! - [`EditMesh`] is a polygon mesh kept as half-edges, which the Model
+//!   Studio edits: [`ModelDoc`] holds a file's objects, opened from and
+//!   saved to `.glb`; [`PrimitiveSettings`] makes New shapes; [`Selection`]
+//!   picks vertices, edges and faces, loops, linked parts and rings.
+//!
 //! Everything here is deterministic: the same input gives the same output,
 //! bit for bit, so a project regenerates the same pieces anywhere.
 
@@ -22,9 +27,15 @@ mod fill;
 mod fracture;
 mod generate;
 mod glb;
+mod half_edge;
 mod merge;
+mod model_doc;
+mod primitives;
+mod select;
 mod shapes;
 mod solid;
+#[cfg(test)]
+mod studio_tests;
 #[cfg(test)]
 mod tests;
 
@@ -32,6 +43,10 @@ pub use csg::{Operation, boolean};
 pub use fracture::{Pattern, fracture, seed_points, voronoi_pieces};
 pub use generate::{Settings, generate, generate_for};
 pub use glb::{GlbMaterial, write_glb};
+pub use half_edge::{EditMesh, Face, HalfEdge, Polygon};
+pub use model_doc::{DocObject, ModelDoc, from_model};
+pub use primitives::{PrimitiveSettings, PrimitiveShape};
+pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use solid::{Combined, Solid, combine, combine_parts, save_union, solid_of};
 
 use glam::{Vec2, Vec3};

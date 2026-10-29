@@ -40,6 +40,7 @@ mod levels;
 mod material_files;
 mod material_tab;
 mod mixer;
+mod model_studio;
 mod nav_overlay;
 mod plugins;
 mod prefabs;
@@ -316,6 +317,8 @@ pub struct EditorApp {
     materials: crate::material_editor::MaterialStudio,
     /// The Sequencer tab and its preview (Phase 51).
     sequencer: crate::sequencer::Sequencer,
+    /// The Model Studio tab (Phase 55).
+    model_studio: crate::model_studio::ModelStudio,
     /// The UI Designer tab's view of a ScreenGui.
     ui_designer: UiDesigner,
     /// The Terrain panel's tools, settings, previews and work under way.
@@ -423,6 +426,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Sequencer => self.app.sequencer_pane(ui),
             Pane::Tests => self.app.tests_pane(ui),
             Pane::Plugins => self.app.plugins_pane(ui),
+            Pane::ModelStudio => self.app.model_studio_pane(ui, self.render_state),
             Pane::Script(id) => self.app.script_pane(ui, *id),
             Pane::Plugin(id) => self.app.plugin_pane(ui, *id, self.render_state),
         }
@@ -688,6 +692,7 @@ impl EditorApp {
             data_tables: DataTableStudio::default(),
             materials: Default::default(),
             sequencer: Default::default(),
+            model_studio: Default::default(),
             ui_designer: UiDesigner::default(),
             terrain: TerrainStudio::default(),
             layout: Layout::default(),
@@ -949,6 +954,9 @@ impl EditorApp {
         }
         self.terrain_frame(ctx);
         self.shortcuts(ctx);
+        // Set again if the Model Studio is drawn under the mouse this frame;
+        // a closed or hidden tab mustn't keep the keys.
+        self.model_studio.forget_pointer();
 
         // During Play, run a game frame before anything is drawn, so every
         // panel shows the world as it is now. Then ask for the next frame
@@ -1308,6 +1316,8 @@ mod prefab_tests;
 
 #[cfg(test)]
 mod level_tests;
+#[cfg(test)]
+mod model_studio_tests;
 #[cfg(test)]
 mod ragdoll_tests;
 #[cfg(test)]

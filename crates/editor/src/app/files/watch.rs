@@ -63,7 +63,7 @@ impl EditorApp {
     /// new version, without reopening the project or stopping the game. A
     /// file that can't be loaded now keeps its last good version, reported
     /// once (by `Assets` and the session's errors).
-    pub(super) fn asset_file_changed(&mut self, path: &str) {
+    pub(in crate::app) fn asset_file_changed(&mut self, path: &str) {
         let mut reloaded = self.assets.reload(path) == Reload::Reloaded;
         if let Some(session) = &mut self.play {
             reloaded |= session.asset_changed(path, &mut self.output);

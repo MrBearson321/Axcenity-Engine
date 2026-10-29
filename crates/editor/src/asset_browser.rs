@@ -355,6 +355,8 @@ pub enum BrowserAction {
     ExportPackage { name: String, paths: Vec<String> },
     /// Open the material file at this path in the Material tab.
     EditMaterial(String),
+    /// Open the model file at this path in the Model Studio.
+    EditModel(String),
     /// A line for Output. `error` is a failure.
     Notice { error: bool, text: String },
 }
@@ -801,6 +803,7 @@ impl AssetBrowser {
                 return Some(BrowserAction::ExportPackage { name, paths });
             }
             ItemMenu::EditMaterial { path } => return Some(BrowserAction::EditMaterial(path)),
+            ItemMenu::EditModel { path } => return Some(BrowserAction::EditModel(path)),
         }
         None
     }
@@ -1259,6 +1262,7 @@ impl AssetBrowser {
             let local = self.is_local(&path);
             let prefab = entry.kind == AssetKind::Prefab;
             let material = entry.kind == AssetKind::Material;
+            let model = entry.kind == AssetKind::Model;
             // The picked assets if this is one of them, or else just this.
             let export = if picked {
                 self.picked.clone()
@@ -1290,6 +1294,17 @@ impl AssetBrowser {
                         .clicked()
                 {
                     menu = Some(ItemMenu::EditMaterial { path: path.clone() });
+                    ui.close();
+                }
+                if model
+                    && ui
+                        .button(format!("{} Edit in Model Studio", icons::POLYGON))
+                        .on_hover_text(
+                            "Edit its meshes in the Model Studio tab. Saving writes a .glb.",
+                        )
+                        .clicked()
+                {
+                    menu = Some(ItemMenu::EditModel { path: path.clone() });
                     ui.close();
                 }
                 if prefab {
@@ -1408,6 +1423,9 @@ pub(super) enum ItemMenu {
         paths: Vec<String>,
     },
     EditMaterial {
+        path: String,
+    },
+    EditModel {
         path: String,
     },
 }
