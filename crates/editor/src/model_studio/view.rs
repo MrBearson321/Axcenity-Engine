@@ -8,6 +8,10 @@
 //! being edited. The handles drag that MeshPart's pose (`gizmo.rs` works on
 //! parts), and the change of pose is applied to what's picked.
 //!
+//! With the UV editor's checker on (Phase 58), the model is drawn with a
+//! checker texture on the uv channel the UV editor shows, and seams are
+//! drawn red over Edit mode's edges.
+//!
 //! Mouse: left clicks pick (Shift adds, Alt picks a loop), a left drag in
 //! Edit mode draws a box, a right or middle drag turns the camera, a
 //! Shift+middle drag slides it, and the wheel zooms. Shift+right-click puts
@@ -31,6 +35,10 @@ use crate::theme;
 
 /// The `MeshId` the open model is put under in the view's own `Assets`.
 const MESH_ID: &str = "studio/model.glb";
+/// Seams are red, as in Blender.
+const SEAM: egui::Color32 = egui::Color32::from_rgb(230, 40, 40);
+/// The checker's squares across the texture.
+const CHECKER_CELLS: u32 = 8;
 /// How close (in points) the mouse must be to pick a vertex, or an edge.
 const VERTEX_PICK: f32 = 10.0;
 const EDGE_PICK: f32 = 8.0;
@@ -44,6 +52,8 @@ pub struct Frame<'a> {
     pub axes: MoveAxes,
     pub show_normals: bool,
     pub cursor: Vec3,
+    /// The uv channel to draw a checker on, if any.
+    pub checker: Option<usize>,
 }
 
 /// What the tools draw over the view: the 3D cursor, a tool's lines and
@@ -106,8 +116,11 @@ pub struct View {
     /// The MeshPart that draws the model, whose pose the handles drag.
     part: InstanceId,
     assets: Assets,
-    /// The revision of the meshes drawn, 0 for none.
-    shown: u64,
+    /// The revision of the meshes drawn, 0 for none, and the checker's
+    /// channel it was drawn with.
+    shown: (u64, Option<usize>),
+    /// The width over the height of the view last drawn.
+    aspect: f32,
     yaw: f32,
     pitch: f32,
     distance: f32,
@@ -136,7 +149,8 @@ impl Default for View {
             world,
             part,
             assets: Assets::default(),
-            shown: 0,
+            shown: (0, None),
+            aspect: 1.0,
             yaw: 35.0,
             pitch: 25.0,
             distance: 8.0,
@@ -156,7 +170,7 @@ impl View {
 
     /// Points the camera at `doc`'s model, and draws it afresh.
     pub fn frame_doc(&mut self, doc: &StudioDoc) {
-        self.shown = 0;
+        self.shown = (0, None);
         self.drag = None;
         self.moving = None;
         self.box_start = None;
@@ -179,13 +193,33 @@ impl View {
         }
     }
 
-    /// Puts the model's current meshes in the view's world.
-    fn refresh(&mut self, doc: &StudioDoc) {
-        if self.shown == doc.revision {
+    /// The camera's view-projection matrix (model space to clip space),
+    /// for Project From View.
+    pub fn view_projection(&self) -> Mat4 {
+        use axcenity_render::glam::camera::rh;
+        let camera = self.camera();
+        let view = rh::view::look_at_mat4(camera.position, camera.look_at, Vec3::Y);
+        let projection = rh::proj::directx::perspective(
+            camera.fov_y_degrees.to_radians(),
+            self.aspect,
+            0.1,
+            10_000.0,
+        );
+        projection * view
+    }
+
+    /// Puts the model's current meshes in the view's world, with the
+    /// checker on `checker`'s uv channel if it's on.
+    fn refresh(&mut self, doc: &StudioDoc, checker: Option<usize>) {
+        if self.shown == (doc.revision, checker) {
             return;
         }
-        self.shown = doc.revision;
-        let Some(model) = doc.model.to_model() else {
+        self.shown = (doc.revision, checker);
+        let model = match checker {
+            Some(channel) => doc.model.to_model_on(channel).map(with_checker),
+            None => doc.model.to_model(),
+        };
+        let Some(model) = model else {
             let _ = self
                 .world
                 .set_property(self.part, "MeshId", Value::String(String::new()));
@@ -221,7 +255,8 @@ impl View {
     ) -> Event {
         let rect = frame.rect;
         let response = frame.response;
-        self.refresh(doc);
+        self.aspect = rect.width() / rect.height().max(1.0);
+        self.refresh(doc, frame.checker);
         self.orbit(ui, response);
         let screen = Screen::new(self.camera(), rect);
         let mut event = Event {
@@ -298,7 +333,7 @@ impl View {
             _ if extras.hint.is_some() => extras.hint.clone().unwrap_or_default(),
             (Some(modal), _) => modal.describe(),
             (None, Mode::Object) => "Click an object · Tab: Edit mode · G R S: move, turn, scale · right-drag: turn view".to_owned(),
-            (None, Mode::Edit) => "1 2 3: vertex, edge, face · Alt-click: loop · L: linked · Ctrl +/−: grow, shrink · drag: box · E I Ctrl+B Ctrl+R K M X F: model".to_owned(),
+            (None, Mode::Edit) => "1 2 3: vertex, edge, face · Alt-click: loop · L: linked · Ctrl +/−: grow, shrink · drag: box · E I Ctrl+B Ctrl+R K M X F: model · U: unwrap".to_owned(),
         };
         let palette = theme::palette(ui.ctx());
         painter.text(
@@ -805,6 +840,8 @@ fn paint_overlay(
             };
             let stroke = if picked {
                 egui::Stroke::new(2.0_f32, accent)
+            } else if mesh.is_seam(a, b) {
+                egui::Stroke::new(2.0_f32, SEAM)
             } else {
                 egui::Stroke::new(1.0_f32, wire)
             };
@@ -842,6 +879,38 @@ fn paint_overlay(
             SelectMode::Edge => {}
         }
     }
+}
+
+/// `model` with every material drawing a black-and-white checker (8 by 8
+/// squares across the texture), so stretched uvs show as stretched
+/// squares.
+fn with_checker(mut model: axcenity_assets::Model) -> axcenity_assets::Model {
+    static CHECKER: std::sync::LazyLock<std::sync::Arc<axcenity_assets::Image>> =
+        std::sync::LazyLock::new(|| {
+            let size = 256;
+            let cell = size / CHECKER_CELLS;
+            let rgba = (0..size * size)
+                .flat_map(|k| {
+                    let (x, y) = (k % size, k / size);
+                    let shade = if (x / cell + y / cell).is_multiple_of(2) {
+                        230
+                    } else {
+                        40
+                    };
+                    [shade, shade, shade, 255]
+                })
+                .collect();
+            std::sync::Arc::new(axcenity_assets::Image::new(size, size, rgba))
+        });
+    for primitive in &mut model.primitives {
+        let material = &mut primitive.material;
+        material.base_color = [1.0; 4];
+        material.base_color_texture = Some(CHECKER.clone());
+        material.uv_scale = [1.0, 1.0];
+        material.uv_rotation = 0.0;
+        material.uv_offset = [0.0, 0.0];
+    }
+    model
 }
 
 /// The longest side of the box around `mesh`.

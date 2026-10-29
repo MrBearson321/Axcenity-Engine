@@ -139,8 +139,10 @@ pub struct Primitive {
     pub positions: Vec<[f32; 3]>,
     /// One per position, one unit long.
     pub normals: Vec<[f32; 3]>,
-    /// Texture coordinates, one per position, or empty when the material
-    /// has no texture. (0, 0) is the top left of the texture.
+    /// Texture coordinates, one per position, or empty when the file has
+    /// none (a glTF file's first set is read when the material has no
+    /// texture; an FBX file's only when it has one). (0, 0) is the top
+    /// left of the texture.
     pub uvs: Vec<[f32; 2]>,
     /// One per position when the material has a normal map, else empty:
     /// the direction U grows along the surface, and in `w` 1 or -1, the
@@ -360,6 +362,17 @@ pub struct Image {
 }
 
 impl Image {
+    /// An image made in memory (the Model Studio's checker), with no file.
+    pub fn new(width: u32, height: u32, rgba: Vec<u8>) -> Image {
+        Image {
+            key: new_key(),
+            width,
+            height,
+            rgba,
+            file: None,
+        }
+    }
+
     /// Different for every texture loaded.
     pub fn key(&self) -> u64 {
         self.key
@@ -920,8 +933,10 @@ impl Reader<'_> {
                 .unwrap_or_else(|| smooth_normals(&positions, &indices));
 
             let (mut material, uv_set) = self.material(&primitive.material())?;
-            let uvs: Vec<[f32; 2]> = uv_set
-                .and_then(|set| reader.read_tex_coords(set))
+            // Without a texture, the first set is kept anyway, so the Model
+            // Studio reads back the uvs it unwrapped (Phase 58).
+            let uvs: Vec<[f32; 2]> = reader
+                .read_tex_coords(uv_set.unwrap_or(0))
                 .map(|uvs| uvs.into_f32().collect())
                 .filter(|uvs: &Vec<[f32; 2]>| uvs.len() == count)
                 .unwrap_or_default();

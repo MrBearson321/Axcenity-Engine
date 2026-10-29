@@ -1836,9 +1836,9 @@ Each can be shown, hidden, reordered and applied. The `.glb` holds the evaluated
 
 ### Acceptance criteria
 
-- [ ] A cube with seams marked as a cross unwraps to six square islands, and packs without overlap.
-- [ ] Smart UV project on the Phase 56 chair gives no overlapping islands, and the checker shows even squares (stretch below a stated threshold).
-- [ ] UVs save in the `.glb` and draw the same textures in the game as in the Studio.
+- [x] A cube with seams marked as a cross unwraps to six square islands, and packs without overlap. Tests: `a_cube_cut_at_every_edge_unwraps_to_six_equal_squares_packed_without_overlap` and `a_cube_cut_as_a_cross_unfolds_into_a_cross_of_six_squares`.
+- [x] Smart UV project on the Phase 56 chair gives no overlapping islands, and the checker shows even squares (stretch below a stated threshold). Threshold: angle and area stretch under 0.1 on every face (measured 0.05 and 0.03). Test: `smart_uv_project_lays_the_chair_out_without_overlap_and_with_even_checker_squares`; snapshot `the_tab_draws_the_chair_with_a_checker_and_its_uvs`.
+- [x] UVs save in the `.glb` and draw the same textures in the game as in the Studio. Tests: `unwrapped_uvs_save_in_the_glb_and_draw_the_same_texture_in_the_game_as_in_the_studio` and `unwrapped_uvs_save_in_the_glb_and_seams_pins_and_second_uvs_in_the_sidecar`.
 
 ---
 

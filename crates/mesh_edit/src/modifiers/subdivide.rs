@@ -141,5 +141,6 @@ fn level(soup: &Soup) -> Soup {
         positions,
         faces,
         auto_smooth: soup.auto_smooth,
+        ..Soup::default()
     }
 }

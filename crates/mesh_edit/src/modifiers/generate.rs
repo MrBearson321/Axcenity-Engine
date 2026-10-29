@@ -85,6 +85,7 @@ pub(super) fn array(
         positions: Vec::new(),
         faces: Vec::new(),
         auto_smooth: base.auto_smooth,
+        ..Soup::default()
     };
     let mut last: Vec<u32> = Vec::new();
     for copy in 0..count {
@@ -181,6 +182,7 @@ pub(super) fn solidify(mesh: &EditMesh, thickness: f32, offset: f32) -> EditMesh
         positions: Vec::with_capacity(count as usize * 2),
         faces: Vec::with_capacity(base.faces.len() * 2),
         auto_smooth: base.auto_smooth,
+        ..Soup::default()
     };
     for along in [outer, inner] {
         for (&position, &normal) in base.positions.iter().zip(&normals) {

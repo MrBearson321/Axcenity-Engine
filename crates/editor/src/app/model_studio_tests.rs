@@ -302,3 +302,98 @@ fn generated_lods_are_drawn_far_away_by_a_meshpart_without_another_step() {
     }
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Each triangle corner of `model` in its file's units: position and uv,
+/// rounded so float noise doesn't count, sorted.
+fn corner_uvs(model: &axcenity_assets::Model) -> Vec<([i64; 3], [i64; 2])> {
+    let size = Vec3::from(model.size);
+    let scale = Vec3::select(size.cmpgt(Vec3::ZERO), size, Vec3::ONE);
+    let center = Vec3::from(model.center);
+    let mut corners: Vec<_> = model
+        .primitives
+        .iter()
+        .flat_map(|primitive| {
+            primitive.indices.iter().map(move |&k| {
+                let p = Vec3::from(primitive.positions[k as usize]) * scale + center;
+                let uv = primitive.uvs[k as usize];
+                (
+                    (p * 1e4).round().as_i64vec3().to_array(),
+                    uv.map(|c| (c * 1e4).round() as i64),
+                )
+            })
+        })
+        .collect();
+    corners.sort_unstable();
+    corners
+}
+
+#[test]
+fn unwrapped_uvs_save_in_the_glb_and_draw_the_same_texture_in_the_game_as_in_the_studio() {
+    use crate::model_studio::uv_editor::UvAction;
+    let folder = copy_of_example("hello-touched", "studio-uvs");
+    let mut app = EditorApp::new(Some(&folder));
+    // A texture beside the model, which the cube's material draws.
+    let models = folder.join("assets/models");
+    std::fs::create_dir_all(&models).unwrap();
+    let pixels = image::RgbaImage::from_fn(4, 4, |x, y| {
+        image::Rgba([(x * 60) as u8, (y * 60) as u8, 200, 255])
+    });
+    pixels.save(models.join("bricks.png")).unwrap();
+    let mut texture = axcenity_assets::Image::new(4, 4, pixels.clone().into_raw());
+    texture.file = Some("bricks.png".to_owned());
+    let mut model = ModelDoc::primitive(&PrimitiveSettings::default());
+    model.objects[0].materials[0].base_color_texture = Some(std::sync::Arc::new(texture));
+    app.model_studio
+        .open(StudioDoc::new(String::new(), model, false));
+
+    // Every edge a seam, unwrapped into six squares.
+    let doc = app.model_studio.doc.as_mut().unwrap();
+    doc.toggle_mode();
+    doc.set_select_mode(SelectMode::Edge);
+    doc.select(|selection, mesh| selection.all(mesh));
+    assert!(app.model_studio.run_uv(UvAction::MarkSeam));
+    let doc = app.model_studio.doc.as_mut().unwrap();
+    doc.select(|selection, _| selection.clear());
+    assert!(app.model_studio.run_uv(UvAction::Unwrap));
+    let studio = app
+        .model_studio
+        .doc
+        .as_ref()
+        .unwrap()
+        .model
+        .to_model()
+        .unwrap();
+
+    let path = app.save_model_studio().unwrap();
+    let part = mesh_part(&mut app, &path);
+    let _ = drawn_size(&app, part);
+    // What the game loads: the saved file, read as the player reads it.
+    let bytes = std::fs::read(folder.join(&path)).unwrap();
+    let game =
+        axcenity_assets::load_model(&bytes, &models, axcenity_assets::ModelFormat::Gltf).unwrap();
+    for drawn in [&game, &app.assets.model(&path).unwrap()] {
+        assert_eq!(corner_uvs(drawn), corner_uvs(&studio), "the same uvs");
+        let texture = drawn.primitives[0]
+            .material
+            .base_color_texture
+            .as_ref()
+            .expect("the texture is drawn");
+        let shown = studio.primitives[0]
+            .material
+            .base_color_texture
+            .as_ref()
+            .unwrap();
+        assert_eq!((texture.width, texture.height), (shown.width, shown.height));
+        assert_eq!(texture.rgba, shown.rgba, "the same texture");
+    }
+    // Reopened, the seams are back from the sidecar and the uvs from the file.
+    app.open_in_model_studio(&path);
+    let reopened = app.model_studio.doc.as_ref().unwrap();
+    let mesh = reopened.mesh().unwrap();
+    assert_eq!(mesh.seams().len(), 12);
+    assert_eq!(
+        corner_uvs(&reopened.model.to_model().unwrap()),
+        corner_uvs(&studio)
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}

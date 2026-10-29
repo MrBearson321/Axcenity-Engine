@@ -137,11 +137,20 @@ impl ModelDoc {
     /// copies would draw over their full objects, so they're left out.
     /// `None` if there are no triangles.
     pub fn to_model(&self) -> Option<Model> {
+        self.to_model_on(0)
+    }
+
+    /// [`to_model`](Self::to_model), textured by uv `channel` (1 draws the
+    /// second uvs, as a lightmap would be placed).
+    pub fn to_model_on(&self, channel: usize) -> Option<Model> {
         let primitives = (0..self.objects.len())
             .filter(|&index| !self.is_lod_copy(index))
             .filter_map(|index| {
                 let object = &self.objects[index];
-                let mesh = object.evaluated(Purpose::Viewport)?;
+                let mut mesh = object.evaluated(Purpose::Viewport)?;
+                if channel == 1 {
+                    mesh.to_mut().swap_uv_channels();
+                }
                 Some(primitives(&mesh, &object.materials, true))
             })
             .flatten()
@@ -320,6 +329,7 @@ pub fn from_model(model: &Model) -> (EditMesh, Vec<ModelMaterial>) {
             polygons.push(Polygon {
                 corners: corners.to_vec(),
                 uvs: uvs.to_vec(),
+                uvs2: Vec::new(),
                 normals: if normals.len() == 3 {
                     normals
                 } else {
@@ -335,8 +345,8 @@ pub fn from_model(model: &Model) -> (EditMesh, Vec<ModelMaterial>) {
 
 /// `mesh`'s faces as triangles, one set per material slot used (a face
 /// whose slot isn't there is drawn with the first, or a plain material),
-/// in slot order. Corners sharing a vertex, uv and normal are written
-/// once. Without `uvs`, no texture coordinates.
+/// in slot order. Corners sharing a vertex, uvs and normal are written
+/// once. Without `uvs`, no texture coordinates (and no second ones).
 fn primitives<'a>(
     mesh: &EditMesh,
     materials: &'a [ModelMaterial],
@@ -355,15 +365,18 @@ fn primitives<'a>(
         .into_iter()
         .map(|slot| {
             let mut vertices = Vertices::default();
-            let mut written: HashMap<(u32, [u32; 2], [u32; 3]), u32> = HashMap::new();
+            let uvs2 = uvs && mesh.has_uv2();
+            let mut written: HashMap<(u32, [u32; 4], [u32; 3]), u32> = HashMap::new();
             for face in (0..mesh.face_count() as u32).filter(|&f| slot_of(f) == slot) {
                 for triangle in mesh.triangles(face) {
                     for corner in triangle {
                         let edge = mesh.half_edge(corner);
                         let uv = if uvs { edge.uv } else { Vec2::ZERO };
+                        let uv2 = if uvs2 { edge.uv2 } else { Vec2::ZERO };
+                        let both = [uv.x, uv.y, uv2.x, uv2.y];
                         let key = (
                             edge.vertex,
-                            uv.to_array().map(f32::to_bits),
+                            both.map(f32::to_bits),
                             edge.normal.to_array().map(f32::to_bits),
                         );
                         let index = *written.entry(key).or_insert_with(|| {
@@ -371,6 +384,9 @@ fn primitives<'a>(
                             vertices.normals.push(edge.normal);
                             if uvs {
                                 vertices.uvs.push(uv);
+                            }
+                            if uvs2 {
+                                vertices.uvs2.push(uv2);
                             }
                             (vertices.positions.len() - 1) as u32
                         });

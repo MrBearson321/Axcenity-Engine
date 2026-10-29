@@ -2,7 +2,9 @@
 //! hold, saved beside it as `<model>.meshedit.json`. Games load the
 //! `.glb`, which has each object's modifiers already on it; the sidecar
 //! keeps each object's own mesh and its modifier stack, so reopening the
-//! model in the Studio shows them still editable.
+//! model in the Studio shows them still editable. It also keeps an
+//! object's seams, pinned vertices and second uvs (Phase 58), which the
+//! Studio reads back from no `.glb`.
 //!
 //! The sidecar names the `.glb` it goes with by a hash of its bytes. If
 //! the `.glb` was changed since (exported again from another program), the
@@ -43,12 +45,20 @@ struct MeshData {
     faces: Vec<FaceData>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     auto_smooth: Option<f32>,
+    /// Seams, each by its two vertices.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    seams: Vec<[u32; 2]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pins: Vec<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct FaceData {
     corners: Vec<u32>,
     uvs: Vec<[f32; 2]>,
+    /// The second uvs, or empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    uvs2: Vec<[f32; 2]>,
     normals: Vec<[f32; 3]>,
     material: u32,
     smooth: bool,
@@ -67,8 +77,8 @@ pub fn sidecar_path(model: &str) -> String {
 
 impl ModelDoc {
     /// The sidecar for this model saved as `glb` (what [`write_glb`]
-    /// made), or `None` if no object has modifiers, so there's nothing a
-    /// `.glb` can't hold.
+    /// made), or `None` if no object has modifiers, seams, pins or second
+    /// uvs, so there's nothing a `.glb` can't hold.
     ///
     /// [`write_glb`]: ModelDoc::write_glb
     pub fn write_sidecar(&self, glb: &[u8]) -> Option<Vec<u8>> {
@@ -76,7 +86,12 @@ impl ModelDoc {
             .objects
             .iter()
             .enumerate()
-            .filter(|(_, object)| !object.modifiers.is_empty())
+            .filter(|(_, object)| {
+                let marked = object.mesh.as_ref().is_some_and(|mesh| {
+                    !mesh.seams().is_empty() || !mesh.pins().is_empty() || mesh.has_uv2()
+                });
+                !object.modifiers.is_empty() || marked
+            })
             .filter_map(|(index, object)| {
                 Some(SidecarObject {
                     index,
@@ -158,6 +173,10 @@ fn mesh_data(mesh: &EditMesh) -> MeshData {
                 FaceData {
                     corners: corners.iter().map(|e| corner(e).vertex).collect(),
                     uvs: corners.iter().map(|e| corner(e).uv.to_array()).collect(),
+                    uvs2: match mesh.has_uv2() {
+                        true => corners.iter().map(|e| corner(e).uv2.to_array()).collect(),
+                        false => Vec::new(),
+                    },
                     normals: corners
                         .iter()
                         .map(|e| corner(e).normal.to_array())
@@ -168,6 +187,8 @@ fn mesh_data(mesh: &EditMesh) -> MeshData {
             })
             .collect(),
         auto_smooth: mesh.auto_smooth(),
+        seams: mesh.seams().iter().copied().collect(),
+        pins: mesh.pins().iter().copied().collect(),
     }
 }
 
@@ -181,6 +202,7 @@ fn edit_mesh(data: MeshData, slot_now: &[u32]) -> EditMesh {
         .map(|face| Polygon {
             corners: face.corners,
             uvs: face.uvs.into_iter().map(Vec2::from).collect(),
+            uvs2: face.uvs2.into_iter().map(Vec2::from).collect(),
             normals: face.normals.into_iter().map(Vec3::from).collect(),
             material: slot_now.get(face.material as usize).copied().unwrap_or(0),
             smooth: face.smooth,
@@ -188,6 +210,8 @@ fn edit_mesh(data: MeshData, slot_now: &[u32]) -> EditMesh {
         .collect();
     let mut mesh = EditMesh::new(positions, &polygons);
     mesh.set_auto_smooth(data.auto_smooth);
+    mesh.set_seams(data.seams, true);
+    mesh.set_pins(data.pins, true);
     mesh
 }
 

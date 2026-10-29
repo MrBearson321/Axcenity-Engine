@@ -65,6 +65,7 @@ pub(super) fn decimate(mesh: &EditMesh, ratio: f32) -> EditMesh {
             SoupFace {
                 corners: triangle.map(|k| corners[k as usize].0).to_vec(),
                 uvs: triangle.map(|k| corners[k as usize].1).to_vec(),
+                uvs2: Vec::new(),
                 normals: Vec::new(),
                 material,
                 smooth: smooth_faces * 2 > all,
@@ -75,6 +76,8 @@ pub(super) fn decimate(mesh: &EditMesh, ratio: f32) -> EditMesh {
         positions: mesh.positions().to_vec(),
         faces,
         auto_smooth: mesh.auto_smooth(),
+        seams: mesh.seams().clone(),
+        pins: mesh.pins().clone(),
     }
     .build(false)
     .mesh
@@ -91,6 +94,10 @@ pub(super) fn triangulate(mesh: &EditMesh) -> EditMesh {
             faces.push(SoupFace {
                 corners: (0..3).map(|k| corner(k).vertex).collect(),
                 uvs: (0..3).map(|k| corner(k).uv).collect(),
+                uvs2: match mesh.has_uv2() {
+                    true => (0..3).map(|k| corner(k).uv2).collect(),
+                    false => Vec::new(),
+                },
                 normals: (0..3).map(|k| corner(k).normal).collect(),
                 material: like.material,
                 smooth: like.smooth,
@@ -101,6 +108,8 @@ pub(super) fn triangulate(mesh: &EditMesh) -> EditMesh {
         positions: mesh.positions().to_vec(),
         faces,
         auto_smooth: mesh.auto_smooth(),
+        seams: mesh.seams().clone(),
+        pins: mesh.pins().clone(),
     }
     .build(false)
     .mesh

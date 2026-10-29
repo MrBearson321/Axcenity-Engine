@@ -170,6 +170,7 @@ impl Builder {
         self.polygons.push(Polygon {
             corners,
             uvs: corner_uvs,
+            uvs2: Vec::new(),
             normals: Vec::new(),
             material: 0,
             smooth,

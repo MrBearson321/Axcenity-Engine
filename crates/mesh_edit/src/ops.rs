@@ -386,6 +386,9 @@ pub(crate) struct SoupFace {
     pub corners: Vec<u32>,
     /// One per corner.
     pub uvs: Vec<Vec2>,
+    /// The second uvs, one per corner, or empty: a face an operation
+    /// made or changed has none.
+    pub uvs2: Vec<Vec2>,
     /// One per corner, as the mesh had them; empty when the face changed
     /// and is shaded afresh.
     pub normals: Vec<Vec3>,
@@ -399,6 +402,7 @@ impl SoupFace {
         SoupFace {
             corners,
             uvs,
+            uvs2: Vec::new(),
             normals: Vec::new(),
             material: like.material,
             smooth: like.smooth,
@@ -422,6 +426,7 @@ impl SoupFace {
     pub fn flip(&mut self) {
         self.corners.reverse();
         self.uvs.reverse();
+        self.uvs2.reverse();
         self.normals.reverse();
         for normal in &mut self.normals {
             *normal = -*normal;
@@ -439,6 +444,7 @@ impl SoupFace {
         if keep.len() != count {
             self.corners = keep.iter().map(|&k| self.corners[k]).collect();
             self.uvs = keep.iter().map(|&k| self.uvs[k]).collect();
+            self.uvs2.clear();
             self.normals.clear();
         }
         let repeat = (1..self.corners.len()).find_map(|j| {
@@ -468,11 +474,14 @@ impl SoupFace {
 
 /// A mesh taken apart into its vertices and polygons, which an operation
 /// edits before it's built back into half-edges.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Soup {
     pub positions: Vec<Vec3>,
     pub faces: Vec<SoupFace>,
     pub auto_smooth: Option<f32>,
+    /// The mesh's seams and pins, by vertex (`EditMesh::seams`, `pins`).
+    pub seams: BTreeSet<[u32; 2]>,
+    pub pins: BTreeSet<u32>,
 }
 
 impl Soup {
@@ -484,6 +493,11 @@ impl Soup {
                 SoupFace {
                     corners: edges.iter().map(|e| corner(e).vertex).collect(),
                     uvs: edges.iter().map(|e| corner(e).uv).collect(),
+                    uvs2: if mesh.has_uv2() {
+                        edges.iter().map(|e| corner(e).uv2).collect()
+                    } else {
+                        Vec::new()
+                    },
                     normals: edges.iter().map(|e| corner(e).normal).collect(),
                     material: mesh.face(face).material,
                     smooth: mesh.face(face).smooth,
@@ -494,6 +508,8 @@ impl Soup {
             positions: mesh.positions().to_vec(),
             faces,
             auto_smooth: mesh.auto_smooth(),
+            seams: mesh.seams().clone(),
+            pins: mesh.pins().clone(),
         }
     }
 
@@ -658,6 +674,7 @@ impl Soup {
                 let face = &mut self.faces[index];
                 face.corners = corners;
                 face.uvs = uvs;
+                face.uvs2.clear();
                 face.normals.clear();
             }
         }
@@ -682,7 +699,10 @@ impl Soup {
             positions,
             faces,
             auto_smooth,
+            seams,
+            pins,
         } = self;
+        let has_uv2 = faces.iter().any(|face| !face.uvs2.is_empty());
         let mut cleaned: Vec<SoupFace> = Vec::new();
         let mut face_map = vec![None; faces.len()];
         for (index, face) in faces.into_iter().enumerate() {
@@ -714,6 +734,11 @@ impl Soup {
                     .iter()
                     .map(|&c| vertex_map[c as usize].expect("a used vertex"))
                     .collect(),
+                uvs2: match face.uvs2.len() == face.uvs.len() {
+                    true => face.uvs2,
+                    false if has_uv2 => vec![Vec2::ZERO; face.uvs.len()],
+                    false => Vec::new(),
+                },
                 uvs: face.uvs,
                 normals: face.normals,
                 material: face.material,
@@ -722,6 +747,9 @@ impl Soup {
             .collect();
         let mut mesh = EditMesh::new(kept, &polygons);
         mesh.set_auto_smooth(auto_smooth);
+        mesh.keep_uv_marks(&seams, &pins, |v| {
+            vertex_map.get(v as usize).copied().flatten()
+        });
         let mut changed: Vec<u32> = polygons
             .iter()
             .filter(|polygon| polygon.normals.is_empty())

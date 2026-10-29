@@ -17,6 +17,9 @@
 //! - Modifiers (Phase 57; `modifiers.rs`): a stack per object, drawn on
 //!   the mesh in the view and saved on it in the `.glb`; the mesh and the
 //!   stack go in the model's sidecar.
+//! - UVs (Phase 58; `uv_editor.rs`): seams, unwrapping and projections
+//!   (U, or the toolbar's UV menu), and the UV editor pane beside the
+//!   view, with a checker drawn on the uvs in the view.
 //!
 //! The Studio keeps its own undo history while the mouse is over it; each
 //! edit is one step. Save writes the file and records it as one step of the
@@ -27,10 +30,12 @@ mod modal;
 mod modifiers;
 mod proportional;
 mod tools;
+pub(crate) mod uv_editor;
 mod view;
 
 pub use modal::{Modal, ModalKind};
 pub use proportional::{Falloff, Pivot, Proportional};
+pub use uv_editor::UvEditor;
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -621,6 +626,8 @@ pub struct ModelStudio {
     pub show_normals: bool,
     /// The pivot, the 3D cursor and proportional editing.
     pub moves: MoveSettings,
+    /// The UV editor pane and the uv tools' settings.
+    pub uv: UvEditor,
     /// A keyboard move under way, and what it moves.
     modal: Option<(Modal, Moving)>,
     /// The knife or loop cut under way, a value being dragged, or a menu.
@@ -646,6 +653,7 @@ impl Default for ModelStudio {
             axes: MoveAxes::Global,
             show_normals: false,
             moves: MoveSettings::default(),
+            uv: UvEditor::default(),
             modal: None,
             tools: tools::Tools::default(),
             view: view::View::default(),
@@ -677,7 +685,7 @@ impl ModelStudio {
 
     /// True while a move is being dragged, which undo mustn't interrupt.
     pub fn is_dragging(&self) -> bool {
-        self.modal.is_some() || self.view.dragging() || self.tools.busy()
+        self.modal.is_some() || self.view.dragging() || self.tools.busy() || self.uv.busy()
     }
 
     /// Shows `doc`, unless the open one has unsaved changes: then it waits
@@ -693,6 +701,7 @@ impl ModelStudio {
     fn show_doc(&mut self, doc: StudioDoc) {
         self.modal = None;
         self.tools = tools::Tools::default();
+        self.uv.forget();
         self.view.frame_doc(&doc);
         self.doc = Some(doc);
     }
@@ -744,6 +753,8 @@ impl ModelStudio {
                         ui.add_space(8.0);
                         self.modifier_panel(ui, editable);
                     });
+            } else if self.uv.open {
+                self.view_and_uvs(ui, render_state, snap, editable);
             } else {
                 self.viewport(ui, render_state, snap, editable);
             }
@@ -929,7 +940,18 @@ impl ModelStudio {
             if editable {
                 ui.separator();
                 self.mesh_menu(ui);
+                self.uv_menu(ui);
                 self.pivot_menu(ui);
+            }
+            if widgets::icon_button(
+                ui,
+                icons::SQUARES_FOUR,
+                "UV editor: the active object's uvs beside the view",
+                self.uv.open,
+            )
+            .clicked()
+            {
+                self.uv.open = !self.uv.open;
             }
         });
     }
@@ -1101,6 +1123,7 @@ impl ModelStudio {
             axes: self.axes,
             show_normals: self.show_normals,
             cursor: self.moves.cursor,
+            checker: self.uv.checker.then_some(self.uv.channel),
         };
         if editable && response.contains_pointer() {
             self.keys(ui, &context);
@@ -1116,7 +1139,41 @@ impl ModelStudio {
         self.handle(event, ui, &context);
         if editable {
             self.overlays(ui, rect);
+            self.uv_key_menu(ui);
         }
+    }
+
+    /// The 3D view and the UV editor, side by side (or one above the
+    /// other when the tab is narrow).
+    fn view_and_uvs(
+        &mut self,
+        ui: &mut egui::Ui,
+        render_state: Option<&RenderState>,
+        snap: Snap,
+        editable: bool,
+    ) {
+        let size = ui.available_size();
+        let wide = size.x >= 520.0;
+        let half = if wide {
+            egui::vec2((size.x - 8.0) / 2.0, size.y)
+        } else {
+            egui::vec2(size.x, (size.y - 8.0) / 2.0)
+        };
+        let layout = if wide {
+            egui::Layout::left_to_right(egui::Align::Min)
+        } else {
+            egui::Layout::top_down(egui::Align::Min)
+        };
+        ui.with_layout(layout, |ui| {
+            let top_down = egui::Layout::top_down(egui::Align::Min);
+            ui.allocate_ui_with_layout(half, top_down, |ui| {
+                self.viewport(ui, render_state, snap, editable);
+            });
+            ui.separator();
+            ui.allocate_ui_with_layout(half, top_down, |ui| {
+                self.uv_pane(ui, editable);
+            });
+        });
     }
 
     /// The Studio's keys, while the mouse is over its view.
@@ -1206,7 +1263,7 @@ impl ModelStudio {
             }
             return;
         }
-        if self.op_keys(ui, pointer) {
+        if self.uv_keys(ui, pointer) || self.op_keys(ui, pointer) {
             return;
         }
         let none = egui::Modifiers::NONE;
@@ -1412,3 +1469,5 @@ pub(crate) mod modifiers_tests;
 mod tests;
 #[cfg(test)]
 pub(crate) mod tools_tests;
+#[cfg(test)]
+mod uv_tests;

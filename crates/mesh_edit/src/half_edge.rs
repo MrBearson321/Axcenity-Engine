@@ -11,11 +11,15 @@
 //! edge with only one face (an open border), or with more than two (which
 //! a half-edge mesh can't hold), has half-edges without twins.
 //!
+//! Seams (Phase 58) are edges, kept by their two vertices, where an
+//! unwrap cuts the surface open; pinned vertices keep their uvs through
+//! an unwrap. A corner can carry a second uv (`uv2`) for lightmaps.
+//!
 //! Moves only change positions, so vertex and face numbers stay put and
 //! selections hold them. The modeling operations (`ops`, Phase 56) build a
 //! new mesh, and the selection they leave is in its numbers.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use glam::{DVec2, Mat4, Vec2, Vec3};
 
@@ -33,6 +37,8 @@ pub struct HalfEdge {
     pub twin: Option<u32>,
     /// The texture coordinates of its starting corner.
     pub uv: Vec2,
+    /// Its second texture coordinates (zero when the mesh has none).
+    pub uv2: Vec2,
     /// The normal at its starting corner, one unit long.
     pub normal: Vec3,
 }
@@ -49,11 +55,12 @@ pub struct Face {
 
 /// A face to add: its corners (vertex numbers, counter-clockwise seen from
 /// outside) and each corner's uv. `normals` is one per corner, or empty to
-/// work them out.
+/// work them out; `uvs2` one per corner, or empty for none.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Polygon {
     pub corners: Vec<u32>,
     pub uvs: Vec<Vec2>,
+    pub uvs2: Vec<Vec2>,
     pub normals: Vec<Vec3>,
     pub material: u32,
     pub smooth: bool,
@@ -68,6 +75,12 @@ pub struct EditMesh {
     /// Auto smooth's angle in radians: smooth faces meeting at a sharper
     /// edge than this don't share their corners' normals.
     auto_smooth: Option<f32>,
+    /// Seams, each by its two vertices (smaller first).
+    seams: BTreeSet<[u32; 2]>,
+    /// Vertices whose uvs an unwrap keeps.
+    pins: BTreeSet<u32>,
+    /// True if the corners carry a second uv.
+    has_uv2: bool,
 }
 
 impl EditMesh {
@@ -82,6 +95,7 @@ impl EditMesh {
         for polygon in polygons {
             mesh.push_face(polygon);
         }
+        mesh.has_uv2 = polygons.iter().any(|polygon| !polygon.uvs2.is_empty());
         mesh.link_twins();
         let all: Vec<u32> = (0..mesh.faces.len() as u32).collect();
         // Faces given no normals get them now.
@@ -116,6 +130,7 @@ impl EditMesh {
                 prev: first + (k + count - 1) % count,
                 twin: None,
                 uv: polygon.uvs.get(k as usize).copied().unwrap_or(Vec2::ZERO),
+                uv2: polygon.uvs2.get(k as usize).copied().unwrap_or(Vec2::ZERO),
                 // NaN marks a corner whose normal is worked out below.
                 normal: polygon
                     .normals
@@ -193,6 +208,115 @@ impl EditMesh {
 
     pub(crate) fn set_auto_smooth(&mut self, angle: Option<f32>) {
         self.auto_smooth = angle;
+    }
+
+    /// The seams, each by its two vertices (smaller first).
+    pub fn seams(&self) -> &BTreeSet<[u32; 2]> {
+        &self.seams
+    }
+
+    /// True if the edge between `a` and `b` is a seam.
+    pub fn is_seam(&self, a: u32, b: u32) -> bool {
+        self.seams.contains(&[a.min(b), a.max(b)])
+    }
+
+    /// Makes the edges between these vertex pairs seams (or, without `on`,
+    /// not). Pairs that aren't edges are left out.
+    pub fn set_seams(&mut self, edges: impl IntoIterator<Item = [u32; 2]>, on: bool) {
+        let all = self.edge_keys();
+        for [a, b] in edges {
+            let key = [a.min(b), a.max(b)];
+            if !on {
+                self.seams.remove(&key);
+            } else if all.contains(&key) {
+                self.seams.insert(key);
+            }
+        }
+    }
+
+    /// Every edge by its two vertices, smaller first.
+    fn edge_keys(&self) -> BTreeSet<[u32; 2]> {
+        (0..self.half_edges.len() as u32)
+            .map(|e| {
+                let (a, b) = self.ends(e);
+                [a.min(b), a.max(b)]
+            })
+            .collect()
+    }
+
+    /// The vertices whose uvs an unwrap keeps.
+    pub fn pins(&self) -> &BTreeSet<u32> {
+        &self.pins
+    }
+
+    /// Pins `vertices` (or, without `on`, unpins them).
+    pub fn set_pins(&mut self, vertices: impl IntoIterator<Item = u32>, on: bool) {
+        for vertex in vertices {
+            if on && (vertex as usize) < self.positions.len() {
+                self.pins.insert(vertex);
+            } else {
+                self.pins.remove(&vertex);
+            }
+        }
+    }
+
+    /// True if the corners carry a second uv (`HalfEdge::uv2`).
+    pub fn has_uv2(&self) -> bool {
+        self.has_uv2
+    }
+
+    /// The uv of corner `half_edge` in `channel` (0 or 1).
+    pub fn uv(&self, half_edge: u32, channel: usize) -> Vec2 {
+        let edge = &self.half_edges[half_edge as usize];
+        if channel == 0 { edge.uv } else { edge.uv2 }
+    }
+
+    /// Sets the uv of corner `half_edge` in `channel`; setting the second
+    /// channel turns it on.
+    pub fn set_uv(&mut self, half_edge: u32, channel: usize, uv: Vec2) {
+        let edge = &mut self.half_edges[half_edge as usize];
+        if channel == 0 {
+            edge.uv = uv;
+        } else {
+            edge.uv2 = uv;
+            self.has_uv2 = true;
+        }
+    }
+
+    /// Swaps each corner's first and second uvs.
+    pub(crate) fn swap_uv_channels(&mut self) {
+        for edge in &mut self.half_edges {
+            std::mem::swap(&mut edge.uv, &mut edge.uv2);
+        }
+    }
+
+    /// Drops the second uv channel.
+    pub fn clear_uv2(&mut self) {
+        self.has_uv2 = false;
+        for edge in &mut self.half_edges {
+            edge.uv2 = Vec2::ZERO;
+        }
+    }
+
+    /// Seams, pins and whether there's a second channel, from `other` by
+    /// `vertex_map` (its vertex numbers to this mesh's): seams that are no
+    /// longer edges, and pins whose vertex went, are left out.
+    pub(crate) fn keep_uv_marks(
+        &mut self,
+        seams: &BTreeSet<[u32; 2]>,
+        pins: &BTreeSet<u32>,
+        vertex_map: impl Fn(u32) -> Option<u32>,
+    ) {
+        let edges = self.edge_keys();
+        self.seams = seams
+            .iter()
+            .filter_map(|&[a, b]| {
+                let (a, b) = (vertex_map(a)?, vertex_map(b)?);
+                Some([a.min(b), a.max(b)])
+            })
+            .filter(|key| edges.contains(key))
+            .collect();
+        self.pins = pins.iter().filter_map(|&v| vertex_map(v)).collect();
     }
 
     /// The vertex `half_edge` starts at and the one it runs to.

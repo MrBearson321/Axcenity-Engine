@@ -23,6 +23,9 @@
 //!   decimate, triangulate) change an object's mesh in what's drawn and
 //!   saved ([`evaluate`]); the mesh and its stack are kept in the model's
 //!   sidecar ([`sidecar_path`]).
+//! - [`uv`] unwraps: seams, [`unwrap`] by angle (LSCM), [`smart_project`],
+//!   [`project`]ions, [`pack_islands`], [`average_island_scale`],
+//!   [`stretch`], and the UV editor's edits of corners.
 //!
 //! Everything here is deterministic: the same input gives the same output,
 //! bit for bit, so a project regenerates the same pieces anywhere.
@@ -53,6 +56,9 @@ mod solid;
 mod studio_tests;
 #[cfg(test)]
 mod tests;
+pub mod uv;
+#[cfg(test)]
+mod uv_tests;
 
 pub use csg::{Operation, boolean};
 pub use fracture::{Pattern, fracture, seed_points, voronoi_pieces};
@@ -70,6 +76,10 @@ pub use primitives::{PrimitiveSettings, PrimitiveShape};
 pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use sidecar::sidecar_path;
 pub use solid::{Combined, Solid, combine, combine_parts, save_union, solid_of};
+pub use uv::{
+    AlignAxis, Projection, Stretch, average_island_scale, overlapping_islands, pack_islands,
+    project, smart_project, stretch, unwrap, uv_islands,
+};
 
 use glam::{Vec2, Vec3};
 

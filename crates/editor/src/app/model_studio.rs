@@ -92,7 +92,7 @@ impl EditorApp {
             && let Err(why) = model.read_sidecar(&sidecar_bytes, &bytes)
         {
             self.output.warning(format!(
-                "`{sidecar}` wasn't used, so modifiers are already applied: {why}."
+                "`{sidecar}` wasn't used, so modifiers are already applied (and seams, pins and second uvs are gone): {why}."
             ));
         }
         let mut doc = StudioDoc::new(glb.clone(), model, same_file);

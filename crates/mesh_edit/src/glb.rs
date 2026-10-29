@@ -91,12 +91,14 @@ pub fn write_glb(pieces: &[Mesh], materials: &[GlbMaterial], interior: &GlbMater
 }
 
 /// A primitive's vertices and triangles, ready to write. Without `uvs`,
-/// it's written without texture coordinates.
+/// it's written without texture coordinates; `uvs2` (the second set,
+/// `TEXCOORD_1`) may be empty.
 #[derive(Default)]
 pub(crate) struct Vertices {
     pub positions: Vec<Vec3>,
     pub normals: Vec<Vec3>,
     pub uvs: Vec<Vec2>,
+    pub uvs2: Vec<Vec2>,
     pub indices: Vec<u32>,
 }
 
@@ -304,6 +306,9 @@ impl File {
         self.accessors[position]["max"] = json!(max.to_array().map(finite));
         let normal = self.add_accessor(&normals, count, "VEC3", ARRAY_BUFFER);
         let uv = (!uvs.is_empty()).then(|| self.add_accessor(&uvs, count, "VEC2", ARRAY_BUFFER));
+        let uvs2: Vec<f32> = vertices.uvs2.iter().flat_map(Vec2::to_array).collect();
+        let uv2 = (uvs2.len() == count * 2)
+            .then(|| self.add_accessor(&uvs2, count, "VEC2", ARRAY_BUFFER));
         let indices = self.add_view(
             vertices.indices.iter().flat_map(|i| i.to_le_bytes()),
             ELEMENT_ARRAY_BUFFER,
@@ -317,6 +322,9 @@ impl File {
         let mut attributes = json!({ "POSITION": position, "NORMAL": normal });
         if let Some(uv) = uv {
             attributes["TEXCOORD_0"] = json!(uv);
+        }
+        if let Some(uv2) = uv2 {
+            attributes["TEXCOORD_1"] = json!(uv2);
         }
         json!({
             "attributes": attributes,
