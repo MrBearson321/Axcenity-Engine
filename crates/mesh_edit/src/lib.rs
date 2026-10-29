@@ -29,6 +29,10 @@
 //! - [`paint`] paints a material's maps in layers on an object's uvs
 //!   ([`PaintSet`], brushes through a [`TexelMap`]); saving flattens them
 //!   into PNGs named by role ([`ModelDoc::bake_paint`]).
+//! - [`sculpt`] pushes an object's surface about with brushes on a
+//!   [`Sculpt`] (a hierarchy of boxes keeps them fast; chunks say what to
+//!   draw again), masks it, and adds detail ([`voxel_remesh`],
+//!   [`subdivide`]).
 //!
 //! Everything here is deterministic: the same input gives the same output,
 //! bit for bit, so a project regenerates the same pieces anywhere.
@@ -54,6 +58,9 @@ pub mod paint;
 #[cfg(test)]
 mod paint_tests;
 mod primitives;
+pub mod sculpt;
+#[cfg(test)]
+mod sculpt_tests;
 mod select;
 mod shapes;
 mod sidecar;
@@ -80,6 +87,7 @@ pub use ops::{
 };
 pub use paint::{MapKind, PaintSet, TexelMap, paint_folder};
 pub use primitives::{PrimitiveSettings, PrimitiveShape};
+pub use sculpt::{Sculpt, subdivide, voxel_remesh};
 pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use sidecar::sidecar_path;
 pub use solid::{Combined, Solid, combine, combine_parts, save_union, solid_of};

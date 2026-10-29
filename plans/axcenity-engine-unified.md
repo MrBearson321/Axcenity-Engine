@@ -1886,9 +1886,9 @@ You can paint in the 3D view (projected to UV through a cached triangle-ID buffe
 
 ### Acceptance criteria
 
-- [ ] A face sculpted from a voxel-remeshed sphere with Draw, Clay Strips, Smooth and Crease, with X symmetry, matches on both sides.
-- [ ] Masked areas don't move under any brush.
-- [ ] The 500k-triangle frame-rate target holds in a benchmark test.
+- [x] A face sculpted from a voxel-remeshed sphere with Draw, Clay Strips, Smooth and Crease, with X symmetry, matches on both sides. Tests: `a_face_sculpted_on_a_remeshed_sphere_with_x_symmetry_matches_on_both_sides` and `a_face_sculpted_in_the_studio_from_a_voxel_remeshed_sphere_with_x_symmetry_matches_on_both_sides` (every vertex within 1e-4 of its mirror image after each stroke); snapshot `model-studio-sculpt.png`.
+- [x] Masked areas don't move under any brush. Tests: `masked_vertices_dont_move_under_any_brush` (all nine brushes, both ways, with X symmetry) and `masked_parts_dont_move_and_masking_isnt_an_undo_step`.
+- [x] The 500k-triangle frame-rate target holds in a benchmark test. Test: `sculpting_a_500k_triangle_mesh_stays_above_30_frames_a_second` (504,300 triangles; the CPU side of each frame, about 1 ms against 33 ms; the GPU rewrites only the touched chunks' corners, `a_stroke_sends_only_the_chunks_it_touched_again`).
 
 ---
 

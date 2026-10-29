@@ -157,9 +157,23 @@ impl ModelDoc {
     /// slot each primitive draws (a slot past the object's last is drawn
     /// plain), so the view can show painted materials on it again.
     pub fn to_model_slots(&self, channel: usize) -> Option<(Model, Vec<(usize, usize)>)> {
+        self.model_of(channel, None)
+    }
+
+    /// [`to_model`](Self::to_model) without object `skip` (which the
+    /// Studio draws itself while it's sculpted). `None` if nothing's left.
+    pub fn to_model_except(&self, skip: usize) -> Option<Model> {
+        self.model_of(0, Some(skip)).map(|(model, _)| model)
+    }
+
+    fn model_of(
+        &self,
+        channel: usize,
+        skip: Option<usize>,
+    ) -> Option<(Model, Vec<(usize, usize)>)> {
         let mut slots = Vec::new();
         let primitives = (0..self.objects.len())
-            .filter(|&index| !self.is_lod_copy(index))
+            .filter(|&index| !self.is_lod_copy(index) && Some(index) != skip)
             .filter_map(|index| {
                 let object = &self.objects[index];
                 let mut mesh = object.evaluated(Purpose::Viewport)?;

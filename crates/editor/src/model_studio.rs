@@ -22,6 +22,10 @@
 //!   view, with a checker drawn on the uvs in the view.
 //! - Paint mode (Phase 59; `paint.rs`): the active object's material maps
 //!   painted in layers, in the view or the UV editor, saved as PNGs.
+//! - Sculpt mode (Phase 60; `sculpt.rs`): brushes push the active
+//!   object's surface about, with a mask, symmetry, Voxel Remesh and
+//!   Subdivide; the view draws it in chunks, sending only touched ones to
+//!   the GPU again.
 //!
 //! The Studio keeps its own undo history while the mouse is over it; each
 //! edit is one step. Save writes the file and records it as one step of the
@@ -32,6 +36,7 @@ mod modal;
 mod modifiers;
 pub(crate) mod paint;
 mod proportional;
+pub(crate) mod sculpt;
 mod tools;
 pub(crate) mod uv_editor;
 mod view;
@@ -39,6 +44,7 @@ mod view;
 pub use modal::{Modal, ModalKind};
 pub use paint::PaintState;
 pub use proportional::{Falloff, Pivot, Proportional};
+pub use sculpt::SculptState;
 pub use uv_editor::UvEditor;
 
 use std::collections::{BTreeSet, HashMap};
@@ -55,7 +61,7 @@ use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets::{self, Role};
 
-/// Object mode, Edit mode or Paint mode.
+/// Object mode, Edit mode, Paint mode or Sculpt mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
@@ -63,6 +69,8 @@ pub enum Mode {
     Edit,
     /// Texture painting on the active object (Phase 59).
     Paint,
+    /// Sculpting the active object (Phase 60).
+    Sculpt,
 }
 
 /// What the tab asks the app to do.
@@ -198,7 +206,7 @@ impl StudioDoc {
     pub fn run(&mut self, op: MeshOp) -> Result<(), String> {
         let targets: Vec<(usize, Selection)> = match self.mode {
             Mode::Edit => vec![(self.active, self.selection.clone())],
-            Mode::Object | Mode::Paint => self
+            Mode::Object | Mode::Paint | Mode::Sculpt => self
                 .objects
                 .iter()
                 .filter_map(|&object| {
@@ -334,7 +342,7 @@ impl StudioDoc {
         };
     }
 
-    /// Into `mode` (Edit and Paint mode need the active object to have a
+    /// Into `mode` (Edit, Paint and Sculpt mode need the active object to have a
     /// mesh).
     pub fn set_mode(&mut self, mode: Mode) {
         if mode == Mode::Object || self.mesh().is_some() {
@@ -404,7 +412,7 @@ impl StudioDoc {
                 .into_iter()
                 .filter(|(_, vertices)| !vertices.is_empty())
                 .collect(),
-            Mode::Object | Mode::Paint => self
+            Mode::Object | Mode::Paint | Mode::Sculpt => self
                 .objects
                 .iter()
                 .filter_map(|&object| {
@@ -651,6 +659,8 @@ pub struct ModelStudio {
     pub uv: UvEditor,
     /// Paint mode's brush, map, layer and strokes.
     pub paint: PaintState,
+    /// Sculpt mode's brush, the sculpt and its strokes.
+    pub sculpt: SculptState,
     /// The project's images, for a paint brush's image.
     pub images: Vec<String>,
     /// A keyboard move under way, and what it moves.
@@ -680,6 +690,7 @@ impl Default for ModelStudio {
             moves: MoveSettings::default(),
             uv: UvEditor::default(),
             paint: PaintState::default(),
+            sculpt: SculptState::default(),
             images: Vec::new(),
             modal: None,
             tools: tools::Tools::default(),
@@ -717,6 +728,7 @@ impl ModelStudio {
             || self.tools.busy()
             || self.uv.busy()
             || self.paint.busy()
+            || self.sculpt.busy()
     }
 
     /// Shows `doc`, unless the open one has unsaved changes: then it waits
@@ -734,6 +746,7 @@ impl ModelStudio {
         self.tools = tools::Tools::default();
         self.uv.forget();
         self.paint.forget();
+        self.sculpt.forget();
         self.view.frame_doc(&doc);
         self.doc = Some(doc);
     }
@@ -783,11 +796,10 @@ impl ModelStudio {
                     .show(ui, |ui| {
                         self.object_list(ui);
                         ui.add_space(8.0);
-                        let painting = self.doc.as_ref().is_some_and(|d| d.mode == Mode::Paint);
-                        if painting {
-                            self.paint_panel(ui, editable, &mut actions);
-                        } else {
-                            self.modifier_panel(ui, editable);
+                        match self.doc.as_ref().map(|d| d.mode) {
+                            Some(Mode::Paint) => self.paint_panel(ui, editable, &mut actions),
+                            Some(Mode::Sculpt) => self.sculpt_panel(ui, editable),
+                            _ => self.modifier_panel(ui, editable),
                         }
                     });
             } else if self.uv.open {
@@ -903,6 +915,7 @@ impl ModelStudio {
                     (Mode::Object, Some(icons::CUBE), "Object"),
                     (Mode::Edit, Some(icons::POLYGON), "Edit"),
                     (Mode::Paint, Some(icons::PAINT_BRUSH), "Paint"),
+                    (Mode::Sculpt, Some(icons::HAND_GRABBING), "Sculpt"),
                 ],
             ) && mode != doc.mode
             {
@@ -1153,7 +1166,9 @@ impl ModelStudio {
     ) {
         let size = ui.available_size().max(egui::vec2(64.0, 64.0));
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
-        let painting = self.doc.as_ref().is_some_and(|doc| doc.mode == Mode::Paint);
+        let mode = self.doc.as_ref().map(|doc| doc.mode);
+        let painting = mode == Some(Mode::Paint);
+        let sculpting = mode == Some(Mode::Sculpt);
         let context = view::Frame {
             rect,
             response: &response,
@@ -1166,11 +1181,16 @@ impl ModelStudio {
                 .uv
                 .checker
                 .then_some(self.uv.channel)
-                .filter(|_| !painting),
+                .filter(|_| !painting && !sculpting),
+            sculpt: self.sculpt_items(),
         };
         if editable && response.contains_pointer() {
-            if painting {
-                self.paint_keys(ui);
+            if painting || sculpting {
+                if painting {
+                    self.paint_keys(ui);
+                } else {
+                    self.sculpt_keys(ui);
+                }
                 if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
                     && let Some(doc) = &mut self.doc
                 {
@@ -1184,6 +1204,9 @@ impl ModelStudio {
         if painting {
             extras.hint = self.paint.status.clone();
         }
+        if sculpting {
+            extras.hint = self.sculpt.status.clone();
+        }
         let Some(doc) = &mut self.doc else {
             return;
         };
@@ -1191,9 +1214,11 @@ impl ModelStudio {
         let event = self
             .view
             .show(ui, &context, render_state, doc, modal, &extras);
-        if painting {
-            if editable {
+        if painting || sculpting {
+            if editable && painting {
                 self.paint_in_view(ui, &response, &event.screen);
+            } else if editable {
+                self.sculpt_in_view(ui, &response, &event.screen);
             }
             return;
         }
@@ -1528,6 +1553,8 @@ fn save_name(doc: &StudioDoc) -> String {
 pub(crate) mod modifiers_tests;
 #[cfg(test)]
 pub(crate) mod paint_tests;
+#[cfg(test)]
+mod sculpt_tests;
 #[cfg(test)]
 pub(crate) mod tests;
 #[cfg(test)]

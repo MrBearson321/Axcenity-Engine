@@ -16,6 +16,10 @@
 //! Studio paints with the left button (`paint.rs`). While a stroke paints,
 //! only the drawn model's materials are put in again, not its meshes.
 //!
+//! In Sculpt mode (Phase 60) it doesn't either, and draws the active
+//! object as the sculpt's chunks (`sculpt.rs`), with the other objects as
+//! a model of their own and no overlay.
+//!
 //! Mouse: left clicks pick (Shift adds, Alt picks a loop), a left drag in
 //! Edit mode draws a box, a right or middle drag turns the camera, a
 //! Shift+middle drag slides it, and the wheel zooms. Shift+right-click puts
@@ -58,6 +62,8 @@ pub struct Frame<'a> {
     pub cursor: Vec3,
     /// The uv channel to draw a checker on, if any.
     pub checker: Option<usize>,
+    /// While sculpting: what to draw in place of the active object.
+    pub sculpt: Option<Vec<axcenity_render::DrawItem>>,
 }
 
 /// What the tools draw over the view: the 3D cursor, a tool's lines and
@@ -120,9 +126,9 @@ pub struct View {
     /// The MeshPart that draws the model, whose pose the handles drag.
     part: InstanceId,
     assets: Assets,
-    /// The revision of the meshes drawn, 0 for none, and the checker's
-    /// channel it was drawn with.
-    shown: (u64, Option<usize>),
+    /// The revision of the meshes drawn, 0 for none, the checker's
+    /// channel it was drawn with, and the object left out (sculpted).
+    shown: (u64, Option<usize>, Option<usize>),
     /// The paint revision drawn, and the model drawn with the object and
     /// material slot of each primitive.
     painted: u64,
@@ -157,7 +163,7 @@ impl Default for View {
             world,
             part,
             assets: Assets::default(),
-            shown: (0, None),
+            shown: (0, None, None),
             painted: 0,
             drawn: None,
             aspect: 1.0,
@@ -180,7 +186,7 @@ impl View {
 
     /// Points the camera at `doc`'s model, and draws it afresh.
     pub fn frame_doc(&mut self, doc: &StudioDoc) {
-        self.shown = (0, None);
+        self.shown = (0, None, None);
         self.drag = None;
         self.moving = None;
         self.box_start = None;
@@ -219,9 +225,10 @@ impl View {
     }
 
     /// Puts the model's current meshes in the view's world, with the
-    /// checker on `checker`'s uv channel if it's on.
-    fn refresh(&mut self, doc: &StudioDoc, checker: Option<usize>) {
-        if self.shown == (doc.revision, checker) {
+    /// checker on `checker`'s uv channel if it's on, and without object
+    /// `skip` (drawn by the Studio while it's sculpted).
+    fn refresh(&mut self, doc: &StudioDoc, checker: Option<usize>, skip: Option<usize>) {
+        if self.shown == (doc.revision, checker, skip) {
             if self.painted == doc.paint_revision || checker.is_some() {
                 return;
             }
@@ -238,19 +245,27 @@ impl View {
             }
             return;
         }
-        self.shown = (doc.revision, checker);
+        self.shown = (doc.revision, checker, skip);
         self.painted = doc.paint_revision;
-        let model = match checker {
-            Some(channel) => doc.model.to_model_on(channel).map(with_checker),
-            None => doc.model.to_model_slots(0).map(|(model, slots)| {
+        let model = match (checker, skip) {
+            (_, Some(skip)) => {
+                self.drawn = None;
+                doc.model.to_model_except(skip)
+            }
+            (Some(channel), None) => doc.model.to_model_on(channel).map(with_checker),
+            (None, None) => doc.model.to_model_slots(0).map(|(model, slots)| {
                 self.drawn = Some((model.with_materials(|_| None), slots));
                 model
             }),
         };
         let Some(model) = model else {
-            let _ = self
-                .world
-                .set_property(self.part, "MeshId", Value::String(String::new()));
+            // A MeshPart without a mesh would draw as a box: hide it.
+            for (name, value) in [
+                ("MeshId", Value::String(String::new())),
+                ("Transparency", Value::Number(1.0)),
+            ] {
+                let _ = self.world.set_property(self.part, name, value);
+            }
             return;
         };
         self.show_model(model);
@@ -262,6 +277,7 @@ impl View {
         let center = Vec3::from(model.center);
         self.assets.insert(MESH_ID, model);
         for (name, value) in [
+            ("Transparency", Value::Number(0.0)),
             ("MeshId", Value::String(MESH_ID.to_owned())),
             ("Size", Value::Vector3(Vector3::new(size.x, size.y, size.z))),
             (
@@ -289,7 +305,8 @@ impl View {
         let rect = frame.rect;
         let response = frame.response;
         self.aspect = rect.width() / rect.height().max(1.0);
-        self.refresh(doc, frame.checker);
+        let skip = frame.sculpt.as_ref().map(|_| doc.active);
+        self.refresh(doc, frame.checker, skip);
         self.orbit(ui, response);
         let screen = Screen::new(self.camera(), rect);
         let mut event = Event {
@@ -313,9 +330,11 @@ impl View {
         });
 
         // The handles, on what's picked.
-        let pose = (modal.is_none() && frame.tool.has_handles() && doc.mode != Mode::Paint)
-            .then(|| handle_pose(doc, frame.axes))
-            .flatten();
+        let pose = (modal.is_none()
+            && frame.tool.has_handles()
+            && !matches!(doc.mode, Mode::Paint | Mode::Sculpt))
+        .then(|| handle_pose(doc, frame.axes))
+        .flatten();
         let shapes = pose.map_or_else(Vec::new, |pose| gizmo::shapes(frame.tool, pose, &screen));
         let hovered = match pointer {
             Some(at)
@@ -334,20 +353,27 @@ impl View {
         }
 
         if let Some(render_state) = render_state {
-            let list = axcenity_scene::build_draw_list(&self.world, &self.assets, self.camera());
+            let mut list =
+                axcenity_scene::build_draw_list(&self.world, &self.assets, self.camera());
+            if let Some(items) = &frame.sculpt {
+                list.items.extend(items.iter().cloned());
+            }
             self.canvas.paint(ui, rect, render_state, &list);
         } else {
             ui.painter()
                 .rect_filled(rect, 0.0, theme::palette(ui.ctx()).inset);
         }
         let painter = ui.painter_at(rect);
-        paint_overlay(
-            &painter,
-            &screen,
-            doc,
-            frame.show_normals,
-            theme::palette(ui.ctx()).accent,
-        );
+        // A sculpt's many faces would bury it in lines.
+        if doc.mode != Mode::Sculpt {
+            paint_overlay(
+                &painter,
+                &screen,
+                doc,
+                frame.show_normals,
+                theme::palette(ui.ctx()).accent,
+            );
+        }
         paint_extras(&painter, &screen, extras, theme::palette(ui.ctx()).accent);
         let highlighted = self.drag.as_ref().map(|(drag, _)| drag.handle).or(hovered);
         gizmo::paint(&painter, &shapes, highlighted);
@@ -367,6 +393,7 @@ impl View {
             (Some(modal), _) => modal.describe(),
             (None, Mode::Object) => "Click an object · Tab: Edit mode · G R S: move, turn, scale · right-drag: turn view".to_owned(),
             (None, Mode::Paint) => "Drag: paint · Ctrl-click: Clone's source · [ ]: radius · X: draw or erase · right-drag: turn view · Tab: Object mode".to_owned(),
+            (None, Mode::Sculpt) => "Drag: sculpt · Ctrl: the other way · Shift: smooth · [ ]: radius · right-drag: turn view · Tab: Object mode".to_owned(),
             (None, Mode::Edit) => "1 2 3: vertex, edge, face · Alt-click: loop · L: linked · Ctrl +/−: grow, shrink · drag: box · E I Ctrl+B Ctrl+R K M X F: model · U: unwrap".to_owned(),
         };
         let palette = theme::palette(ui.ctx());
@@ -421,7 +448,7 @@ impl View {
         down: bool,
     ) -> ViewAction {
         let response = frame.response;
-        if doc.mode == Mode::Paint {
+        if matches!(doc.mode, Mode::Paint | Mode::Sculpt) {
             return ViewAction::None;
         }
         if response.secondary_clicked()
@@ -501,7 +528,7 @@ impl View {
         let ray = screen.ray(at);
         let extend = modifiers.shift;
         match doc.mode {
-            Mode::Object | Mode::Paint => ViewAction::PickObject {
+            Mode::Object | Mode::Paint | Mode::Sculpt => ViewAction::PickObject {
                 object: pick_object(doc, ray),
                 extend,
             },
