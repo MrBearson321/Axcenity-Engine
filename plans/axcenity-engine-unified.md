@@ -1969,9 +1969,9 @@ Results are written as role-named PNGs.
 
 ### Acceptance criteria
 
-- [ ] Two players on one machine connect over UDP through `--host` and `--join`, and both appear in each other's `Players` (worlds aren't shared yet).
+- [x] Two players on one machine connect over UDP through `--host` and `--join`, and both appear in each other's `Players` (worlds aren't shared yet).
 - [ ] A game on the LAN shows in `FindLanGames` on another computer.
-- [ ] A version mismatch is refused with a clear reason on both sides.
+- [x] A version mismatch is refused with a clear reason on both sides.
 - [ ] `axcenity-server` runs on Linux with no display.
 
 ---

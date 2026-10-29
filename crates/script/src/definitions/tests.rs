@@ -410,6 +410,7 @@ fn described_fields_and_methods_exist() {
         ("CollectionService", "game:GetService('CollectionService')"),
         ("SaveService", "game:GetService('SaveService')"),
         ("LevelService", "game:GetService('LevelService')"),
+        ("NetworkService", "game:GetService('NetworkService')"),
         (
             "LocalizationService",
             "game:GetService('LocalizationService')",

@@ -25,7 +25,8 @@ use axcenity_physics::Physics;
 use axcenity_project::{LoadingScreen, ScriptFile};
 use axcenity_render::{Capabilities, GraphicsSettings};
 use axcenity_script::{
-    Breakpoints, CameraState, CameraView, GameCamera, KeyEvent, OutputKind, Pause, ScriptRuntime,
+    Breakpoints, CameraState, CameraView, GameCamera, KeyEvent, NetworkRequest, OutputKind, Pause,
+    ScriptRuntime,
 };
 use axcenity_ui::LoadingGui;
 use eframe::egui;
@@ -36,6 +37,10 @@ use crate::profiler::{FrameCost, GameLoad};
 pub mod kept;
 
 pub use kept::PlayEdits;
+
+/// `NetworkService.ConnectionFailed`'s reason for `Host` and `Join` in Play.
+const PLAY_IS_OFFLINE: &str = "Play doesn't host or join games: run the game in the player \
+                               (axcenity-player --host, or --join address:port).";
 
 /// The message of a Rust panic caught during Play.
 #[derive(Debug)]
@@ -421,6 +426,20 @@ impl Session {
         let result = guard(|| {
             if self.panic_next_frame {
                 panic!("a deliberate engine panic, from Debug > Panic during Play");
+            }
+            // Play doesn't host or join (Phase 63): `NetworkService` calls
+            // fail with a reason, and LAN searches find nothing.
+            for request in self.scripts.take_network_requests() {
+                match request {
+                    NetworkRequest::FindLanGames => {
+                        self.scripts.finish_lan_search(&mut self.world, &[]);
+                    }
+                    NetworkRequest::Disconnect => {}
+                    NetworkRequest::Host { .. } | NetworkRequest::Join { .. } => {
+                        self.scripts
+                            .fire_connection_failed(&mut self.world, PLAY_IS_OFFLINE);
+                    }
+                }
             }
             // A Sequence that locks input leaves the character still.
             let motion = if self.scripts.input_locked(&self.world) {

@@ -1,0 +1,27 @@
+[package]
+name = "axcenity-server"
+description = "The Axcenity dedicated server: runs a game's Scripts headless (no window, audio or GPU) and hosts it on the network."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "axcenity-server"
+path = "src/main.rs"
+
+[dependencies]
+axcenity-assets.workspace = true
+axcenity-core.workspace = true
+axcenity-net.workspace = true
+axcenity-physics.workspace = true
+axcenity-project.workspace = true
+axcenity-save.workspace = true
+axcenity-script.workspace = true
+anyhow.workspace = true
+env_logger.workspace = true
+log.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true

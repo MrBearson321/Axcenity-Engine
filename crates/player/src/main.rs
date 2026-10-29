@@ -28,6 +28,7 @@ use axcenity_character::{Controllers, MoveInput};
 use axcenity_core::input::{InputEvent, InputKind};
 use axcenity_core::{InstanceId, MouseBehavior, UserInputType, World};
 use axcenity_nav::Agents;
+use axcenity_net::{GameInfo, Network};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
 use axcenity_render::glam::Vec3;
@@ -36,6 +37,7 @@ use axcenity_scene::{FlyCamera, MoveKeys, UiFrame};
 use axcenity_script::{CameraState, CameraView, GameCamera, OutputKind, ScriptRuntime};
 use axcenity_ui::{LoadingGui, NavKey, UiCursor, UiEvent, UiInput, UiInteraction};
 use input::{CursorLock, PlayerInput, script_key};
+use watch::NetworkStart;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{
@@ -53,9 +55,11 @@ const MAX_FRAME_SECONDS: f32 = 0.1;
 /// Touchpads scroll in pixels; this many is one mouse wheel notch.
 const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
-const USAGE: &str = "usage: axcenity-player [--watch] [project-folder | game.axgame]\n\
+const USAGE: &str = "usage: axcenity-player [--watch] [--host [port] | --join address:port] \
+                     [--password text] [project-folder | game.axgame]\n\
                      example: cargo run -p axcenity-player -- examples/hello-part\n\
-                     --watch reloads a project folder's changed assets while it plays";
+                     --watch reloads a project folder's changed assets while it plays\n\
+                     --host hosts the game (port 47800 unless given); --join joins one";
 
 fn main() -> Result<()> {
     // Show warnings and errors by default. `wgpu_hal` relays harmless graphics
@@ -175,6 +179,29 @@ fn main() -> Result<()> {
     scripts.set_input_map(project.input_map.clone());
     scripts.set_levels(&start_level, &start_level, levels);
     start_scripts(&mut scripts, &mut world, &project.scripts);
+    // Hosting or joining from the command line, once the scripts listen
+    // for players (Phase 63).
+    let mut network = Network::new(GameInfo {
+        name: project.manifest.name.clone(),
+        version: project.manifest.version.clone(),
+    });
+    match arguments.network {
+        Some(NetworkStart::Host(port)) => {
+            let password = arguments.password.clone();
+            if let Err(reason) = network.host(&mut world, &mut scripts, port, password, true) {
+                bail!("{reason}");
+            }
+        }
+        Some(NetworkStart::Join(address)) => {
+            let password = arguments.password.clone();
+            if let Err(reason) = network.join(&mut world, &mut scripts, &address, password) {
+                bail!("{reason}");
+            }
+        }
+        None => {}
+    }
+    print_network_log(&mut network);
+    print_output(&mut scripts);
     let mut audio = GameAudio::default();
     let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
     apply_audio(
@@ -200,7 +227,10 @@ fn main() -> Result<()> {
     app.audio = audio;
     app.data_folder = data_folder;
     app.watcher = watcher;
+    app.network = network;
     event_loop.run_app(&mut app)?;
+    // Tell the other players this one is gone.
+    app.network.disconnect(&mut app.world, &mut app.scripts);
 
     // Errors inside the event loop can't use `?`, so they're stored and reported here.
     match app.error {
@@ -274,6 +304,13 @@ fn start_scripts(runtime: &mut ScriptRuntime, world: &mut World, scripts: &[Scri
         log::info!("starting {}", script.path);
         runtime.start_script(world, script.instance, &script.path, &script.source);
         print_output(runtime);
+    }
+}
+
+/// Prints who joined and left, and why a connection failed.
+fn print_network_log(network: &mut Network) {
+    for line in network.take_log() {
+        eprintln!("{line}");
     }
 }
 
@@ -529,6 +566,9 @@ struct App {
     /// Watches the project's assets with `--watch`; `None` otherwise, and
     /// always for a built game.
     watcher: Option<axcenity_project::Watcher>,
+    /// Hosting or joining (`--host`, `--join`, `NetworkService`), or
+    /// offline (Phase 63).
+    network: Network,
 }
 
 impl App {
@@ -589,6 +629,10 @@ impl App {
             last_frame: None,
             shader_time: 0.0,
             watcher: None,
+            network: Network::new(GameInfo {
+                name: String::new(),
+                version: String::new(),
+            }),
         }
     }
 
@@ -1192,6 +1236,13 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                // 0. Network receive: what scripts asked of NetworkService
+                //    last frame, then who joined or left (Phase 63).
+                self.network
+                    .receive(&mut self.world, &mut self.scripts, f64::from(seconds));
+                print_network_log(&mut self.network);
+                print_output(&mut self.scripts);
+
                 // 1. Input. A character controller moves first and owns
                 //    the camera, by the input map's actions (with the
                 //    player's rebinds). Otherwise the fly camera moves, and
@@ -1405,6 +1456,9 @@ impl ApplicationHandler for App {
                 for error in self.assets.take_errors() {
                     eprintln!("error: {error}");
                 }
+                // Network send: after the frame's scripts, physics and UI
+                // layout, before rendering.
+                self.network.send();
                 // `|| ...` is a closure: a small function the renderer calls at the right moment.
                 let window = self
                     .window

@@ -238,6 +238,9 @@ impl Context {
         if let Some(mut jobs) = self.lua.app_data_mut::<crate::csg::CsgJobs>() {
             jobs.forget_script(script);
         }
+        if let Some(mut searches) = self.lua.app_data_mut::<crate::network::LanSearches>() {
+            searches.forget_script(script);
+        }
     }
 
     /// Compiles `source` without running it, for its syntax errors.
@@ -525,6 +528,31 @@ impl Context {
             let name = name.to_owned();
             events::fire(&self.lua, events::Owner::LevelService, "LevelLoaded", name);
         });
+    }
+
+    /// Fires `NetworkService.ConnectionFailed` with why (Phase 63).
+    pub fn fire_connection_failed(&self, world: &mut World, reason: &str) {
+        with_world(&self.lua, world, || {
+            let reason = reason.to_owned();
+            events::fire(
+                &self.lua,
+                events::Owner::NetworkService,
+                "ConnectionFailed",
+                reason,
+            );
+        });
+    }
+
+    /// Resumes the scripts waiting in `NetworkService:FindLanGames()`.
+    pub fn finish_lan_search(&self, world: &mut World, games: &[crate::network::LanGame]) {
+        with_world(&self.lua, world, || {
+            crate::network::finish_search(&self.lua, games);
+        });
+    }
+
+    /// The `NetworkService` calls made on this side since the last take.
+    pub fn take_network_requests(&self) -> Vec<crate::network::NetworkRequest> {
+        crate::network::take_requests(&self.lua)
     }
 
     /// Fires a no-argument event on one Instance.

@@ -1115,6 +1115,42 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         ],
     },
     ValueType {
+        class: "NetworkService",
+        doc: "Hosting and joining games, from `game:GetService(\"NetworkService\")`, so a menu can do them. Players who join appear in `Players` on every device (the worlds aren't shared yet). Both sides have it; in the editor's Play, Host and Join fail and FindLanGames finds nothing.",
+        fields: &[Field {
+            name: "ConnectionFailed",
+            ty: "Signal",
+            doc: "Fires with why when hosting or joining fails, a join is refused (such as a version mismatch, a wrong password or a full game) or the connection is lost: `function(reason) ... end`.",
+        }],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "Host",
+                doc: "Hosts the game on this device on UDP `port` (47800 if left out), for at most `Players.MaxPlayers` players; with a `password`, only players who give it can join. ConnectionFailed fires if the port is taken.",
+                params: &[("port", "number?"), ("password", "string?")],
+                returns: "()",
+            },
+            Function {
+                name: "Join",
+                doc: "Joins the game hosted at `address`, such as `NetworkService:Join(\"192.168.1.20:47800\")`, with its `password` if it has one. The player on this device may be renamed (a second `Player` is `Player2`). ConnectionFailed fires with why if it fails or is refused.",
+                params: &[("address", "string"), ("password", "string?")],
+                returns: "()",
+            },
+            Function {
+                name: "FindLanGames",
+                doc: "Asks the local network for hosts of this game, waits about a second (it pauses the script), and returns what answered: `{ Name, Version, Address, Players, MaxPlayers, HasPassword }` each, `Address` ready for Join.",
+                params: &[],
+                returns: "{ { Name: string, Version: string, Address: string, Players: number, MaxPlayers: number, HasPassword: boolean } }",
+            },
+            Function {
+                name: "Disconnect",
+                doc: "Leaves the game joined, or stops hosting; the other players leave `Players`.",
+                params: &[],
+                returns: "()",
+            },
+        ],
+    },
+    ValueType {
         class: "LocalizationService",
         doc: "The language UI text shows, from `game:GetService(\"LocalizationService\")`. A TextLabel or TextButton with a `TextKey` shows that key's value from the project's string table (`strings.json`, edited in the UI Designer's Strings tab) in `Language`, or its own Text when there's none. Both sides share it.",
         fields: &[
@@ -2199,7 +2235,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"NetworkService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -2859,6 +2895,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "LevelService",
             ty: "LevelService",
             doc: "The game's levels (same as `game:GetService(\"LevelService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "NetworkService",
+            ty: "NetworkService",
+            doc: "Hosting and joining games (same as `game:GetService(\"NetworkService\")`).",
         },
     ),
     (

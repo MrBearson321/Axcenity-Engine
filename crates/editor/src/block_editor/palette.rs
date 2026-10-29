@@ -529,6 +529,14 @@ pub(super) fn palette(
             B(BlockKind::RemoveLevel {
                 level: text("Dungeon"),
             }),
+            B(BlockKind::HostGame {
+                port: number(47800.0),
+            }),
+            B(BlockKind::JoinGame {
+                address: text("192.168.1.20:47800"),
+            }),
+            B(BlockKind::LeaveGame),
+            B(BlockKind::WhenConnectionFails { body: Vec::new() }),
             R(Expression::DataValue {
                 column: storage_name(NameKind::Column),
                 row: Box::new(Expression::DataRow {

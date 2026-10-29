@@ -41,6 +41,8 @@ pub enum Owner {
     CollectionService,
     /// `LevelService.LevelLoaded` (Phase 48).
     LevelService,
+    /// `NetworkService.ConnectionFailed` (Phase 63).
+    NetworkService,
 }
 
 /// Which event of its owner.
@@ -174,7 +176,8 @@ impl Connections {
             Owner::UserInputService
             | Owner::RunService
             | Owner::CollectionService
-            | Owner::LevelService => true,
+            | Owner::LevelService
+            | Owner::NetworkService => true,
         });
     }
 }

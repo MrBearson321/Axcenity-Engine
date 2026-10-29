@@ -34,6 +34,8 @@ my-game/
                   Autocomplete (see docs/scripting/language.md); the engine ignores them
 ```
 
+The manifest's optional `version`, such as `"version": "1.2"`, is the game's own version (`"1.0"` when it has none). A player can only join a host running the same version ([../architecture/networking.md](../architecture/networking.md)).
+
 ## `world.json`
 
 `world.json`:

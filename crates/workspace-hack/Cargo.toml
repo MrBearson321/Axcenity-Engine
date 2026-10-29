@@ -40,6 +40,7 @@ smol_str = { version = "0.2" }
 thiserror = { version = "2" }
 tracing = { version = "0.1" }
 tracing-core = { version = "0.1", default-features = false, features = ["std"] }
+zeroize = { version = "1" }
 
 [build-dependencies]
 cc = { version = "1", default-features = false, features = ["parallel"] }
@@ -50,6 +51,7 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-trai
 [target.x86_64-unknown-linux-gnu.dependencies]
 ahash = { version = "0.8", features = ["no-rng", "serde"] }
 bitflags = { version = "2", default-features = false, features = ["std"] }
+crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
 getrandom = { version = "0.3", default-features = false, features = ["std"] }
 half = { version = "2", features = ["num-traits"] }
 indexmap = { version = "2" }
@@ -76,6 +78,7 @@ bitflags = { version = "2", default-features = false, features = ["std"] }
 block2 = { version = "0.6" }
 core-foundation = { version = "0.9" }
 core-graphics-types = { version = "0.1" }
+crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga", "tiff"] }
@@ -95,6 +98,7 @@ bitflags = { version = "2", default-features = false, features = ["std"] }
 block2 = { version = "0.6" }
 core-foundation = { version = "0.9" }
 core-graphics-types = { version = "0.1" }
+crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga", "tiff"] }
@@ -110,6 +114,7 @@ winit = { version = "0.30" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit"] }
 
 [target.x86_64-pc-windows-msvc.dependencies]
+crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
 half = { version = "2", features = ["num-traits"] }
 indexmap = { version = "2" }
 smallvec = { version = "1", default-features = false, features = ["const_generics", "union"] }

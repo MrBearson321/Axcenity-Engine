@@ -27,6 +27,10 @@ use crate::{OutputKind, push_output};
 pub enum PlayerEvent {
     /// `Players.PlayerAdded(player)`.
     Added { player: InstanceId },
+    /// `Players.PlayerRemoving(player)`, as they leave a hosted game
+    /// (Phase 63). The runtime destroys the Player (and its character)
+    /// once this has fired.
+    Removing { player: InstanceId },
     /// `Player.CharacterRemoving(character)`. The character is already out
     /// of the Workspace; the runtime destroys it once this has fired.
     CharacterRemoving {

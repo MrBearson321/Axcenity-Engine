@@ -419,6 +419,20 @@ declare extern type LevelService with
 	function RemoveLevel(self, name: string): ()
 end
 
+--- Hosting and joining games, from `game:GetService("NetworkService")`, so a menu can do them. Players who join appear in `Players` on every device (the worlds aren't shared yet). Both sides have it; in the editor's Play, Host and Join fail and FindLanGames finds nothing.
+declare extern type NetworkService with
+	--- Fires with why when hosting or joining fails, a join is refused (such as a version mismatch, a wrong password or a full game) or the connection is lost: `function(reason) ... end`.
+	ConnectionFailed: Signal
+	--- Hosts the game on this device on UDP `port` (47800 if left out), for at most `Players.MaxPlayers` players; with a `password`, only players who give it can join. ConnectionFailed fires if the port is taken.
+	function Host(self, port: number?, password: string?): ()
+	--- Joins the game hosted at `address`, such as `NetworkService:Join("192.168.1.20:47800")`, with its `password` if it has one. The player on this device may be renamed (a second `Player` is `Player2`). ConnectionFailed fires with why if it fails or is refused.
+	function Join(self, address: string, password: string?): ()
+	--- Asks the local network for hosts of this game, waits about a second (it pauses the script), and returns what answered: `{ Name, Version, Address, Players, MaxPlayers, HasPassword }` each, `Address` ready for Join.
+	function FindLanGames(self): { { Name: string, Version: string, Address: string, Players: number, MaxPlayers: number, HasPassword: boolean } }
+	--- Leaves the game joined, or stops hosting; the other players leave `Players`.
+	function Disconnect(self): ()
+end
+
 --- The language UI text shows, from `game:GetService("LocalizationService")`. A TextLabel or TextButton with a `TextKey` shows that key's value from the project's string table (`strings.json`, edited in the UI Designer's Strings tab) in `Language`, or its own Text when there's none. Both sides share it.
 declare extern type LocalizationService with
 	--- The active language, such as `"English"`: one of `Languages`, the first when the game starts. Setting it changes every bound label and button; a language the table doesn't have is an error and changes nothing.
@@ -1174,6 +1188,8 @@ declare extern type DataModel extends Instance with
 	SaveService: SaveService
 	--- The game's levels (same as `game:GetService("LevelService")`).
 	LevelService: LevelService
+	--- Hosting and joining games (same as `game:GetService("NetworkService")`).
+	NetworkService: NetworkService
 	--- The language UI text shows (same as `game:GetService("LocalizationService")`).
 	LocalizationService: LocalizationService
 	--- The player's game UI settings (same as `game:GetService("GuiService")`).
@@ -1183,7 +1199,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 
@@ -1220,10 +1236,14 @@ declare extern type Players extends Instance with
 	RespawnTime: number
 	--- If false, the default leaderboard isn't drawn, for a game that makes its own. It shows each Player's `leaderstats` Folder of Value objects, top right, and Tab shows and hides it.
 	LeaderboardEnabled: boolean
+	--- How many players a hosted game takes, the host's own player among them. A player who joins a full game is refused, and their `NetworkService.ConnectionFailed` says the game is full.
+	MaxPlayers: number
 	--- The player on this device. LocalScripts only.
 	LocalPlayer: Player
 	--- Fires with the Player when someone joins, after they're put on a team and before their first character spawns.
 	PlayerAdded: Signal
+	--- Fires with the Player when someone leaves a hosted game, just before their Player (and character) are destroyed.
+	PlayerRemoving: Signal
 	[string]: any
 	--- Every Player in the game.
 	function GetPlayers(self): {Player}

@@ -145,10 +145,18 @@ pub struct Manifest {
     /// are `levels/<name>.world.json`.
     #[serde(default = "default_start_level")]
     pub start_level: String,
+    /// The game's own version, such as `"1.2"` (Phase 63). Players can
+    /// only join a host running the same one.
+    #[serde(default = "default_game_version")]
+    pub version: String,
 }
 
 fn default_show_splash() -> bool {
     true
+}
+
+fn default_game_version() -> String {
+    "1.0".to_owned()
 }
 
 fn default_start_level() -> String {
@@ -452,6 +460,7 @@ pub(crate) fn load_project(
                 description: String::new(),
                 loading_screen: LoadingScreen::default(),
                 start_level: default_start_level(),
+                version: default_game_version(),
             }
         }
     };

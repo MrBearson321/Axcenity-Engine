@@ -2552,6 +2552,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If false, the default leaderboard isn't drawn, for a game that makes its own. It shows each Player's `leaderstats` Folder of Value objects, top right, and Tab shows and hides it.",
     ),
     (
+        ClassName::Players,
+        "MaxPlayers",
+        "How many players a hosted game takes, the host's own player among them. A player who joins a full game is refused, and their `NetworkService.ConnectionFailed` says the game is full.",
+    ),
+    (
         ClassName::StarterPlayer,
         "StarterCharacter",
         "The prefab (`assets/prefabs/*.prefab.json`) each player's character is a copy of. Empty uses the character Insert > Character makes: six welded parts with a Humanoid, a ThirdPersonController, a Health, an Inventory and an Animator.",
@@ -4076,6 +4081,11 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Players,
         "PlayerAdded",
         "Fires with the Player when someone joins, after they're put on a team and before their first character spawns.",
+    ),
+    (
+        ClassName::Players,
+        "PlayerRemoving",
+        "Fires with the Player when someone leaves a hosted game, just before their Player (and character) are destroyed.",
     ),
     (
         ClassName::Player,

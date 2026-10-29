@@ -21,6 +21,7 @@ axcenity-character = { path = "crates/character" }
 axcenity-core = { path = "crates/core" }
 axcenity-mesh-edit = { path = "crates/mesh_edit" }
 axcenity-nav = { path = "crates/nav" }
+axcenity-net = { path = "crates/net" }
 axcenity-physics = { path = "crates/physics" }
 axcenity-plugins = { path = "crates/plugins" }
 axcenity-project = { path = "crates/project" }
@@ -97,6 +98,13 @@ ufbx = "0.11"
 # MIT OR Apache-2.0. Wraps the `meshoptimizer` C++ library (MIT), compiled from
 # source with `cc`, so it needs the C++ compiler `mlua` already uses.
 meshopt = "0.7"
+# The multiplayer transport (Phase 63), MIT OR Apache-2.0: reliable-ordered
+# and unreliable channels (`renet`) over UDP, with netcode's connection
+# handshake, timeouts and disconnect reasons (`renet_netcode`, over
+# `renetcode`, which brings `chacha20poly1305`, MIT OR Apache-2.0). Pure
+# Rust, on every OS. Upgrade the two together.
+renet = "2"
+renet_netcode = "2"
 # Physics. Its math types come from `glamx` (glam-based), re-exported as `rapier3d::math`.
 rapier3d = "0.36"
 serde = { version = "1", features = ["derive"] }

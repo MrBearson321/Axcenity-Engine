@@ -19,13 +19,14 @@ use crate::{
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 10] = [
+const SERVICES: [&str; 11] = [
     "UserInputService",
     "RunService",
     "Debris",
     "TweenService",
     "SaveService",
     "LevelService",
+    "NetworkService",
     "LocalizationService",
     "Lighting",
     "UserGameSettings",
@@ -168,6 +169,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             }
             kind if kind.levels() => {
                 services.insert("LevelService".to_owned());
+            }
+            kind if kind.networks() => {
+                services.insert("NetworkService".to_owned());
             }
             BlockKind::SetLanguage { .. } => {
                 services.insert("LocalizationService".to_owned());
@@ -460,6 +464,19 @@ impl<'a> Converter<'a> {
                 let function = self.handler(handler, 0)?;
                 let body = self.body(&function.body, Scope::default());
                 Some(Block::new(BlockKind::WhenSoundEnded { sound, body }))
+            }
+            "ConnectionFailed" if self.is_service(object, "NetworkService") => {
+                let function = self.handler(handler, 1)?;
+                let body = self.body(&function.body, Scope::default());
+                // The blocks can't use the reason.
+                if function
+                    .params
+                    .iter()
+                    .any(|param| code_mentions(&body, param))
+                {
+                    return None;
+                }
+                Some(Block::new(BlockKind::WhenConnectionFails { body }))
             }
             "Completed" => {
                 let sequence = self.target(object)?;
@@ -968,6 +985,9 @@ impl<'a> Converter<'a> {
         if let Some(level) = self.level_call(call, scope) {
             return Some(level);
         }
+        if let Some(network) = self.network_call(call, scope) {
+            return Some(network);
+        }
         match &call.kind {
             ExprKind::Call(function, args) => {
                 if self.is_field(function, "task", "wait")
@@ -1155,6 +1175,27 @@ impl<'a> Converter<'a> {
             ("RemoveLevel", [level]) => BlockKind::RemoveLevel {
                 level: self.expression(level, scope),
             },
+            _ => return None,
+        })
+    }
+
+    /// `NetworkService:Host(47800)`, `Join("192.168.1.20:47800")` and
+    /// `Disconnect()`. With a password they stay Lua.
+    fn network_call(&self, call: &Expr, scope: Scope) -> Option<BlockKind> {
+        let ExprKind::Method(object, method, args) = &call.kind else {
+            return None;
+        };
+        if !self.is_service(object, "NetworkService") {
+            return None;
+        }
+        Some(match (method.as_str(), args.as_slice()) {
+            ("Host", [port]) => BlockKind::HostGame {
+                port: self.expression(port, scope),
+            },
+            ("Join", [address]) => BlockKind::JoinGame {
+                address: self.expression(address, scope),
+            },
+            ("Disconnect", []) => BlockKind::LeaveGame,
             _ => return None,
         })
     }

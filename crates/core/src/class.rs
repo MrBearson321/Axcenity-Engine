@@ -832,6 +832,9 @@ impl ClassName {
                 // Off, the default leaderboard (each Player's `leaderstats`)
                 // isn't drawn, for a game's own.
                 ("LeaderboardEnabled", Value::Bool(true)),
+                // How many players a hosted game takes, the host's own
+                // player among them (Phase 63).
+                ("MaxPlayers", Value::Number(8.0)),
             ],
             ClassName::StarterPlayer => vec![
                 // The prefab each player's character is a copy of, such as
@@ -2240,8 +2243,9 @@ impl ClassName {
             // with the old and new `Enum.HumanoidStateType`, and `Died`
             // once when its Health reaches 0.
             ClassName::Humanoid => &["MoveToFinished", "StateChanged", "Died"],
-            // Each with the Player, as they join (Phase 47).
-            ClassName::Players => &["PlayerAdded"],
+            // Each with the Player, as they join (Phase 47) and as they
+            // leave a hosted game (Phase 63).
+            ClassName::Players => &["PlayerAdded", "PlayerRemoving"],
             // Each with the character Model: `CharacterAdded` once it's in
             // the Workspace, `CharacterRemoving` as it goes.
             ClassName::Player => &["CharacterAdded", "CharacterRemoving"],

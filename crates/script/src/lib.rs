@@ -18,7 +18,8 @@
 //!   (`run_service`). BindableEvents and BindableFunctions let scripts on
 //!   one side talk (`bindable`); `Debris` destroys Instances later
 //!   (`debris`), `HttpService` reads and writes JSON (`http`), and
-//!   `DataService` reads the project's data tables (`data`).
+//!   `DataService` reads the project's data tables (`data`), and
+//!   `NetworkService` asks the host to host, join and search (`network`).
 //!   `TweenService` tweens move properties smoothly,
 //!   each frame step (`tween`). `SaveService` writes and loads save slots
 //!   and checkpoints (`save`, over the `save` crate). Change events (`part.Changed`) come from the World's
@@ -70,6 +71,7 @@ mod instance;
 mod levels;
 mod localization;
 mod modules;
+mod network;
 mod physical;
 mod players;
 mod prompt;
@@ -116,6 +118,7 @@ pub use errors::error_message as error_text;
 pub use input::KeyEvent;
 pub use instance::{LuaInstance, world as lent_world, world_mut as lent_world_mut};
 pub use levels::Levels;
+pub use network::{LanGame, NetworkRequest};
 pub use prompt::ShownPrompt;
 pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
 pub use sequence::sound_actions as sequence_sound_actions;
@@ -513,6 +516,81 @@ impl ScriptRuntime {
         self.fire_changes(world);
     }
 
+    /// A player on another device joins a hosted game (Phase 63): a Player
+    /// named `name` goes into `Players`, on the AutoAssignable Team with the
+    /// fewest players, and `PlayerAdded` fires. It gets no character here:
+    /// the worlds aren't shared yet.
+    pub fn add_remote_player(&mut self, world: &mut World, name: &str) -> InstanceId {
+        self.fire_changes(world);
+        let player = world
+            .create(ClassName::Player)
+            .expect("Player is not a service");
+        world.set_name(player, name).expect("just created");
+        world
+            .set_parent(player, Some(world.players()))
+            .expect("both exist");
+        players::assign_team(world, player);
+        self.player_events
+            .push(players::PlayerEvent::Added { player });
+        self.fire_changes(world);
+        player
+    }
+
+    /// A player on another device leaves: `PlayerRemoving` fires on both
+    /// sides, then the Player (and its character) go. The player on this
+    /// device never leaves this way.
+    pub fn remove_player(&mut self, world: &mut World, player: InstanceId) {
+        if self.local_player() == Some(player) || world.get(player).is_none() {
+            return;
+        }
+        self.fire_changes(world);
+        self.player_events
+            .push(players::PlayerEvent::Removing { player });
+        self.fire_changes(world);
+    }
+
+    /// Renames the player on this device, as a server it joined named it
+    /// (a second `Player` is `Player2`).
+    pub fn rename_local_player(&mut self, world: &mut World, name: &str) {
+        if let Some(player) = self.local_player() {
+            let _ = world.set_name(player, name);
+            self.fire_changes(world);
+        }
+    }
+
+    /// The `NetworkService` calls scripts made since the last call, the
+    /// Scripts' first, each in the order made (Phase 63). The host does
+    /// them in its network step.
+    pub fn take_network_requests(&mut self) -> Vec<NetworkRequest> {
+        let mut requests = self.server.take_network_requests();
+        requests.extend(self.client.take_network_requests());
+        requests
+    }
+
+    /// The host's answer to `FindLanGames`: every script waiting in it
+    /// carries on with `games`, Scripts first.
+    pub fn finish_lan_search(&mut self, world: &mut World, games: &[LanGame]) {
+        self.fire_changes(world);
+        for side in [Side::Server, Side::Client] {
+            self.context(side).finish_lan_search(world, games);
+            self.collect(side);
+            self.fire_change_rounds(world);
+        }
+        self.fire_changes(world);
+    }
+
+    /// Fires `NetworkService.ConnectionFailed(reason)` on both sides:
+    /// hosting or joining failed, a join was refused or a connection lost.
+    pub fn fire_connection_failed(&mut self, world: &mut World, reason: &str) {
+        self.fire_changes(world);
+        for side in [Side::Server, Side::Client] {
+            self.context(side).fire_connection_failed(world, reason);
+            self.collect(side);
+            self.fire_change_rounds(world);
+        }
+        self.fire_changes(world);
+    }
+
     /// Makes `character`, placed in the Workspace before Play, `player`'s,
     /// and keeps a copy of it (with no parent, so out of the game) to
     /// respawn as. Its scripts' copies start when a copy goes in.
@@ -574,6 +652,9 @@ impl ScriptRuntime {
                     players::PlayerEvent::Added { player } => {
                         (world.players(), "PlayerAdded", player)
                     }
+                    players::PlayerEvent::Removing { player } => {
+                        (world.players(), "PlayerRemoving", player)
+                    }
                     players::PlayerEvent::CharacterRemoving { player, character } => {
                         (player, "CharacterRemoving", character)
                     }
@@ -591,6 +672,16 @@ impl ScriptRuntime {
                     && world.get(character).is_some_and(|c| c.parent().is_none())
                 {
                     let _ = world.destroy(character);
+                }
+                if let players::PlayerEvent::Removing { player } = event {
+                    if let Some(Value::Instance(Some(character))) = world
+                        .get(player)
+                        .and_then(|instance| instance.property("Character"))
+                        .cloned()
+                    {
+                        let _ = world.destroy(character);
+                    }
+                    let _ = world.destroy(player);
                 }
             }
         }

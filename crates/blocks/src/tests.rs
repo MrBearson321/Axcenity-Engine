@@ -55,6 +55,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenEventFired { .. }
         | BlockKind::WhenSoundEnded { .. }
         | BlockKind::WhenCutsceneFinished { .. }
+        | BlockKind::WhenConnectionFails { .. }
         | BlockKind::WhenStateChanged { .. }
         | BlockKind::WhenAnimationEvent { .. }
         | BlockKind::WhenAgentSenses { .. }
@@ -137,9 +138,12 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::AddLevel { .. } => 71,
         BlockKind::RemoveLevel { .. } => 72,
         BlockKind::PlayCutscene { .. } => 73,
+        BlockKind::HostGame { .. } => 74,
+        BlockKind::JoinGame { .. } => 75,
+        BlockKind::LeaveGame => 76,
     })
 }
-const STATEMENT_COUNT: usize = 74;
+const STATEMENT_COUNT: usize = 77;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -515,6 +519,19 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
             "LevelService:RemoveLevel(\"Dungeon\")",
         ),
         (
+            BlockKind::HostGame {
+                port: number(47800.0),
+            },
+            "NetworkService:Host(47800)",
+        ),
+        (
+            BlockKind::JoinGame {
+                address: text("192.168.1.20:47800"),
+            },
+            "NetworkService:Join(\"192.168.1.20:47800\")",
+        ),
+        (BlockKind::LeaveGame, "NetworkService:Disconnect()"),
+        (
             BlockKind::PlayCutscene {
                 sequence: "Intro".to_owned(),
             },
@@ -847,6 +864,7 @@ fn translation_covers_every_event_block() {
                 body: quiet(91),
             },
         ),
+        block(92, BlockKind::WhenConnectionFails { body: quiet(93) }),
     ];
     let source = translate(&script(blocks)).unwrap().source;
     for lua in [
@@ -876,11 +894,13 @@ fn translation_covers_every_event_block() {
         "RunService.Stepped:Connect(function(time, deltaTime)",
         "RunService.RenderStepped:Connect(function(deltaTime)",
         "game.ReplicatedStorage.Scored.Event:Connect(function()",
+        "local NetworkService = game:GetService(\"NetworkService\")",
+        "NetworkService.ConnectionFailed:Connect(function(reason)",
     ] {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 18, "{source}");
+    assert_eq!(source.matches("do return end").count(), 19, "{source}");
 }
 
 #[test]
@@ -1743,6 +1763,7 @@ fn every_block_script() -> BlockScript {
                 body: body(),
             },
         ),
+        block(20, BlockKind::WhenConnectionFails { body: body() }),
     ];
     // New IDs all the way down, as the statements are copies.
     script(stacks.iter().map(Block::duplicate).collect())

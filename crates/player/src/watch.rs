@@ -29,16 +29,58 @@ pub struct Arguments {
     pub game: Option<PathBuf>,
     /// `--watch` was given.
     pub watch: bool,
+    /// `--host [port]` or `--join address:port` (Phase 63).
+    pub network: Option<NetworkStart>,
+    /// `--password <text>`: the password a host asks for, or a join gives.
+    pub password: Option<String>,
+}
+
+/// Hosting or joining from the start.
+#[derive(Debug, PartialEq, Eq)]
+pub enum NetworkStart {
+    /// A listen server on this port (`None`: the default port).
+    Host(Option<u16>),
+    /// Joins the game at this address.
+    Join(String),
 }
 
 impl Arguments {
-    /// Reads the arguments after the program's name. `--watch` can come
+    /// Reads the arguments after the program's name. The options can come
     /// before or after the game.
     pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Arguments> {
         let mut parsed = Arguments::default();
-        for argument in arguments {
+        // `peekable` lets `--host` look at the next argument without taking
+        // it: a port number goes with it, a game folder doesn't.
+        let mut arguments = arguments.into_iter().peekable();
+        while let Some(argument) = arguments.next() {
             if argument == WATCH_FLAG {
                 parsed.watch = true;
+            } else if argument == "--host" || argument == "--join" {
+                if parsed.network.is_some() {
+                    bail!("a player can host or join, not both\n\n{USAGE}");
+                }
+                parsed.network = Some(if argument == "--host" {
+                    let port = arguments
+                        .peek()
+                        .and_then(|next| next.to_str())
+                        .and_then(|next| next.parse::<u16>().ok());
+                    if port.is_some() {
+                        arguments.next();
+                    }
+                    NetworkStart::Host(port)
+                } else {
+                    let Some(address) = arguments.next() else {
+                        bail!(
+                            "--join takes the address to join, such as 192.168.1.20:47800\n\n{USAGE}"
+                        );
+                    };
+                    NetworkStart::Join(address.to_string_lossy().into_owned())
+                });
+            } else if argument == "--password" {
+                let Some(password) = arguments.next() else {
+                    bail!("--password takes the game's password\n\n{USAGE}");
+                };
+                parsed.password = Some(password.to_string_lossy().into_owned());
             } else if argument.to_string_lossy().starts_with("--") {
                 bail!("unknown option `{}`\n\n{USAGE}", argument.to_string_lossy());
             } else if parsed.game.is_none() {
@@ -149,6 +191,32 @@ mod tests {
 
         assert!(parse(&["--wach", folder]).is_err());
         assert!(parse(&[folder, folder]).is_err());
+    }
+
+    #[test]
+    fn host_takes_an_optional_port_and_join_an_address() {
+        let host = parse(&["--host", "4000", "examples/hello-part"]).unwrap();
+        assert_eq!(host.network, Some(NetworkStart::Host(Some(4000))));
+        assert_eq!(host.game, Some(PathBuf::from("examples/hello-part")));
+        // A game folder after `--host` is the game, not a port.
+        let host = parse(&["--host", "examples/hello-part"]).unwrap();
+        assert_eq!(host.network, Some(NetworkStart::Host(None)));
+        assert_eq!(host.game, Some(PathBuf::from("examples/hello-part")));
+        let join = parse(&[
+            "examples/hello-part",
+            "--join",
+            "127.0.0.1:4000",
+            "--password",
+            "moat",
+        ])
+        .unwrap();
+        assert_eq!(
+            join.network,
+            Some(NetworkStart::Join("127.0.0.1:4000".to_owned()))
+        );
+        assert_eq!(join.password.as_deref(), Some("moat"));
+        assert!(parse(&["--host", "--join", "127.0.0.1:4000"]).is_err());
+        assert!(parse(&["--join"]).is_err());
     }
 
     /// A one-triangle glTF `width` studs wide at `assets/models/tri.gltf`.

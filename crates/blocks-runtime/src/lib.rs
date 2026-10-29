@@ -281,6 +281,11 @@ pub enum BlockKind {
         sequence: String,
         body: Vec<Block>,
     },
+    /// When hosting or joining fails, a join is refused or the connection
+    /// is lost (`NetworkService.ConnectionFailed`, Phase 63).
+    WhenConnectionFails {
+        body: Vec<Block>,
+    },
     /// When an Animator moves to another state (`StateChanged`).
     WhenStateChanged {
         animator: String,
@@ -535,6 +540,18 @@ pub enum BlockKind {
     RemoveLevel {
         level: Expression,
     },
+
+    // Multiplayer: `NetworkService` (Phase 63).
+    /// Hosts the game on UDP port `port`, for other players to join.
+    HostGame {
+        port: Expression,
+    },
+    /// Joins the game at `address` (`"192.168.1.20:47800"`).
+    JoinGame {
+        address: Expression,
+    },
+    /// Leaves the game joined, or stops hosting.
+    LeaveGame,
 
     // Camera: `workspace.CurrentCamera` (LocalScripts only).
     /// Sets `CameraType` to one of [`CAMERA_TYPES`]: Scriptable leaves the
@@ -815,6 +832,7 @@ impl BlockKind {
                 | BlockKind::WhenEventFired { .. }
                 | BlockKind::WhenSoundEnded { .. }
                 | BlockKind::WhenCutsceneFinished { .. }
+                | BlockKind::WhenConnectionFails { .. }
                 | BlockKind::WhenStateChanged { .. }
                 | BlockKind::WhenAnimationEvent { .. }
                 | BlockKind::WhenAgentSenses { .. }
@@ -857,6 +875,7 @@ impl BlockKind {
             | BlockKind::WhenEventFired { body, .. }
             | BlockKind::WhenSoundEnded { body, .. }
             | BlockKind::WhenCutsceneFinished { body, .. }
+            | BlockKind::WhenConnectionFails { body }
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::WhenAgentSenses { body, .. }
@@ -895,6 +914,7 @@ impl BlockKind {
             | BlockKind::WhenEventFired { body, .. }
             | BlockKind::WhenSoundEnded { body, .. }
             | BlockKind::WhenCutsceneFinished { body, .. }
+            | BlockKind::WhenConnectionFails { body }
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::WhenAgentSenses { body, .. }
@@ -948,6 +968,8 @@ impl BlockKind {
             | BlockKind::LoadSlot { slot: e }
             | BlockKind::AddLevel { level: e }
             | BlockKind::RemoveLevel { level: e }
+            | BlockKind::HostGame { port: e }
+            | BlockKind::JoinGame { address: e }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
@@ -1024,6 +1046,17 @@ impl BlockKind {
         )
     }
 
+    /// Multiplayer blocks, which need `NetworkService`.
+    pub fn networks(&self) -> bool {
+        matches!(
+            self,
+            BlockKind::HostGame { .. }
+                | BlockKind::JoinGame { .. }
+                | BlockKind::LeaveGame
+                | BlockKind::WhenConnectionFails { .. }
+        )
+    }
+
     /// Blocks nothing can go after: they never finish ("forever") or end
     /// the script ("stop this script").
     pub fn is_cap(&self) -> bool {
@@ -1060,6 +1093,8 @@ impl BlockKind {
             | BlockKind::LoadSlot { slot: e }
             | BlockKind::AddLevel { level: e }
             | BlockKind::RemoveLevel { level: e }
+            | BlockKind::HostGame { port: e }
+            | BlockKind::JoinGame { address: e }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }

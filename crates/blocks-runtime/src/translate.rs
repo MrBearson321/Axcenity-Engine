@@ -90,6 +90,9 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             kind if kind.levels() => {
                 services.insert("LevelService");
             }
+            kind if kind.networks() => {
+                services.insert("NetworkService");
+            }
             BlockKind::SetLanguage { .. } => {
                 services.insert("LocalizationService");
             }
@@ -277,6 +280,10 @@ impl Writer {
             }
             BlockKind::WhenCutsceneFinished { sequence, body } => (
                 format!("{}.Completed:Connect(function()", target(sequence)?),
+                body,
+            ),
+            BlockKind::WhenConnectionFails { body } => (
+                "NetworkService.ConnectionFailed:Connect(function(reason)".to_owned(),
                 body,
             ),
             BlockKind::WhenStateChanged { animator, body } => (
@@ -673,6 +680,15 @@ impl Writer {
                 let level = self.expression(level)?;
                 self.line(format!("LevelService:RemoveLevel({level})"));
             }
+            BlockKind::HostGame { port } => {
+                let port = self.expression(port)?;
+                self.line(format!("NetworkService:Host({port})"));
+            }
+            BlockKind::JoinGame { address } => {
+                let address = self.expression(address)?;
+                self.line(format!("NetworkService:Join({address})"));
+            }
+            BlockKind::LeaveGame => self.line("NetworkService:Disconnect()".to_owned()),
             BlockKind::SetLanguage { language } => {
                 let language = self.expression(language)?;
                 self.line(format!("LocalizationService.Language = {language}"));
@@ -899,6 +915,7 @@ impl Writer {
             | BlockKind::WhenEventFired { .. }
             | BlockKind::WhenSoundEnded { .. }
             | BlockKind::WhenCutsceneFinished { .. }
+            | BlockKind::WhenConnectionFails { .. }
             | BlockKind::WhenStateChanged { .. }
             | BlockKind::WhenAnimationEvent { .. }
             | BlockKind::WhenAgentSenses { .. }

@@ -260,6 +260,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::FireEvent { .. }
         | BlockKind::WhenSoundEnded { .. }
         | BlockKind::WhenCutsceneFinished { .. }
+        | BlockKind::WhenConnectionFails { .. }
         | BlockKind::WhenPromptTriggered { .. }
         | BlockKind::WhenPartClicked { .. }
         | BlockKind::Unattached { .. } => Category::Events,
@@ -337,7 +338,10 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::RestoreCheckpoint
         | BlockKind::LoadLevel { .. }
         | BlockKind::AddLevel { .. }
-        | BlockKind::RemoveLevel { .. } => Category::More,
+        | BlockKind::RemoveLevel { .. }
+        | BlockKind::HostGame { .. }
+        | BlockKind::JoinGame { .. }
+        | BlockKind::LeaveGame => Category::More,
         BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
     }
 }
@@ -625,6 +629,7 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Object(sequence, Filter::Sequences),
             label("finishes"),
         ])],
+        BlockKind::WhenConnectionFails { .. } => vec![Row(vec![label("when connection fails")])],
         BlockKind::WhenStateChanged { animator, .. } => vec![Row(vec![
             label("when"),
             Object(animator, Filter::Animators),
@@ -1119,6 +1124,15 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("remove level"),
             Slot(level, SlotKind::Text),
         ])],
+        BlockKind::HostGame { port } => vec![Row(vec![
+            label("host game on port"),
+            Slot(port, SlotKind::Number),
+        ])],
+        BlockKind::JoinGame { address } => vec![Row(vec![
+            label("join game at"),
+            Slot(address, SlotKind::Text),
+        ])],
+        BlockKind::LeaveGame => vec![Row(vec![label("leave game")])],
         BlockKind::SetLanguage { language } => vec![Row(vec![
             label("set language to"),
             Slot(language, SlotKind::Text),

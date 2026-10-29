@@ -308,6 +308,7 @@
     "properties": {
       "CharacterAutoLoads": false,
       "LeaderboardEnabled": true,
+      "MaxPlayers": 8,
       "RespawnTime": 5
     }
   }
