@@ -857,7 +857,7 @@ Game UI settings, separate from the editor's appearance settings, control text s
 ### Acceptance criteria
 
 - [x] A MeshPart naming a model that was moved offers Use `<new path>`. Choosing it with Apply to all fixes every part naming that path in one undo step, and undo puts them all back.
-- [ ] Locate… with a file outside the project copies it in and points the reference at the copy. Locating a model's missing texture copies it next to the model, and the finding is gone.
+- [x] Locate… with a file outside the project copies it in and points the reference at the copy. Locating a model's missing texture copies it next to the model, and the finding is gone.
 - [x] A missing clip in a state machine and a missing clip in a prefab can each be replaced or cleared. The files are rewritten, and undo restores their text.
 - [x] Clear, Delete file and Ignore each do what they say. Ignored findings stay hidden after reopening the project, and Unignore shows them again.
 - [x] Running the check alone still writes no files.

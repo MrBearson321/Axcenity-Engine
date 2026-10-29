@@ -161,3 +161,85 @@ fn the_fixes_fit_a_narrow_column() {
     );
     let _ = fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn locate_copies_an_outside_file_in_and_a_models_texture_next_to_the_model() {
+    // An ImageLabel whose image is gone, and a file picked outside the
+    // project for it.
+    let folder = copy_of_example("hello-part", "asset-fix-locate");
+    let outside = folder.with_extension("outside");
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("logo.png"), b"\x89PNG logo").unwrap();
+    let mut app = EditorApp::new(Some(&folder));
+    let label = app
+        .world
+        .create(axcenity_core::ClassName::ImageLabel)
+        .unwrap();
+    app.world
+        .set_property(
+            label,
+            "Image",
+            Value::String("assets/images/gone.png".into()),
+        )
+        .unwrap();
+    let workspace = app.world.workspace();
+    app.world.set_parent(label, Some(workspace)).unwrap();
+    app.run_asset_check();
+    let missing: Vec<Finding> = shown(&app)
+        .into_iter()
+        .filter(|finding| finding.path == "assets/images/gone.png")
+        .collect();
+    assert_eq!(missing.len(), 1, "{:?}", shown(&app));
+    app.fix_findings(&missing, FixChoice::CopyIn(outside.join("logo.png")));
+    assert_eq!(
+        fs::read(folder.join("assets/images/logo.png")).unwrap(),
+        b"\x89PNG logo",
+        "copied into the folder Import uses for images"
+    );
+    assert_eq!(
+        app.world.get(label).unwrap().property("Image"),
+        Some(&Value::String("assets/images/logo.png".into()))
+    );
+    assert!(
+        shown(&app)
+            .iter()
+            .all(|finding| finding.path != "assets/images/gone.png"),
+        "the finding is gone: {:?}",
+        shown(&app)
+    );
+    let _ = fs::remove_dir_all(&folder);
+
+    // A model whose texture is gone: the picked image goes next to it.
+    let folder = copy_of_example("hello-pbr", "asset-fix-locate-texture");
+    let color = fs::read(folder.join("assets/models/maps/color.png")).unwrap();
+    fs::write(outside.join("color.png"), &color).unwrap();
+    fs::remove_file(folder.join("assets/models/maps/color.png")).unwrap();
+    let mut app = EditorApp::new(Some(&folder));
+    app.run_asset_check();
+    let texture: Vec<Finding> = shown(&app)
+        .into_iter()
+        .filter(|finding| matches!(finding.site, project::Site::ModelTexture { .. }))
+        .collect();
+    assert!(!texture.is_empty(), "{:?}", shown(&app));
+    let model = match &texture[0].site {
+        project::Site::ModelTexture { model, .. } => model.clone(),
+        _ => unreachable!(),
+    };
+    app.fix_findings(&texture[..1], FixChoice::CopyIn(outside.join("color.png")));
+    let next_to = folder
+        .join(&model)
+        .parent()
+        .unwrap()
+        .join("textures/color.png");
+    assert_eq!(fs::read(&next_to).unwrap(), color, "{}", next_to.display());
+    assert!(
+        !shown(&app)
+            .iter()
+            .any(|finding| finding.site == texture[0].site),
+        "the finding is gone: {:?}",
+        shown(&app)
+    );
+    let _ = fs::remove_dir_all(&folder);
+    let _ = fs::remove_dir_all(&outside);
+}
