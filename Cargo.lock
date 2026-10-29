@@ -702,7 +702,10 @@ dependencies = [
 name = "axcenity-net"
 version = "0.1.0"
 dependencies = [
+ "axcenity-assets",
+ "axcenity-character",
  "axcenity-core",
+ "axcenity-physics",
  "axcenity-script",
  "axcenity-workspace-hack",
  "log",

@@ -85,7 +85,10 @@ impl Controllers {
             self.stand(world, id);
         }
         for id in controllers(world) {
-            if self.seated.contains_key(&id) || !is_driver(world, id) {
+            if self.seated.contains_key(&id)
+                || !is_driver(world, id)
+                || self.moved_elsewhere(world, id)
+            {
                 continue;
             }
             let asked = seats(world)

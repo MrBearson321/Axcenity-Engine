@@ -1748,6 +1748,11 @@ const PART_CFRAME_DOC: &str =
 const GET_PIVOT_DOC: &str = "Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.";
 const APPLY_IMPULSE_DOC: &str = "Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.";
 const CONNECTED_PARTS_DOC: &str = "The part, then the parts welded to it by an enabled WeldConstraint; with `recursive` true, every part in its assembly.";
+const SET_OWNER_DOC: &str = "Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error).";
+const GET_OWNER_DOC: &str = "Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error).";
+const SET_AUTO_DOC: &str = "Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server.";
+const GET_AUTO_DOC: &str =
+    "Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner.";
 const ROOT_PART_DOC: &str = "The root of its assembly: an anchored part if there is one, then one that isn't Massless, then the largest. A part alone is its own root.";
 const APPLY_IMPULSE_AT_DOC: &str = "Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.";
 const APPLY_ANGULAR_DOC: &str = "Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.";
@@ -2022,6 +2027,87 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
             doc: "Takes it out of its Inventory (and the hand) and puts its Handle on the ground in front of the character, in the Workspace. The character picks it up again once it has stepped off it and touches it. Returns false if it's not carried or CanBeDropped is off.",
             params: &[],
             returns: "boolean",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "SetNetworkOwner",
+            doc: SET_OWNER_DOC,
+            params: &[("player", "Instance?")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "GetNetworkOwner",
+            doc: GET_OWNER_DOC,
+            params: &[],
+            returns: "Instance?",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "SetNetworkOwnershipAuto",
+            doc: SET_AUTO_DOC,
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "GetNetworkOwnershipAuto",
+            doc: GET_AUTO_DOC,
+            params: &[],
+            returns: "boolean",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "SetNetworkOwner",
+            doc: SET_OWNER_DOC,
+            params: &[("player", "Instance?")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "GetNetworkOwner",
+            doc: GET_OWNER_DOC,
+            params: &[],
+            returns: "Instance?",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "SetNetworkOwnershipAuto",
+            doc: SET_AUTO_DOC,
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "GetNetworkOwnershipAuto",
+            doc: GET_AUTO_DOC,
+            params: &[],
+            returns: "boolean",
+        },
+    ),
+    (
+        ClassName::Player,
+        Function {
+            name: "Kick",
+            doc: "Scripts only (Phase 67): takes the player out of the game. Their device's NetworkService.ConnectionFailed fires with `reason` (\"You were kicked from the game.\" without one), and PlayerRemoving fires here. Kicking the player on this device ends the game, with the reason.",
+            params: &[("reason", "string?")],
+            returns: "()",
         },
     ),
     (

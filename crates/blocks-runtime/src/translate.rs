@@ -689,6 +689,18 @@ impl Writer {
                 self.line(format!("NetworkService:Join({address})"));
             }
             BlockKind::LeaveGame => self.line("NetworkService:Disconnect()".to_owned()),
+            BlockKind::SetNetworkOwner { target: t, owner } => {
+                let owner = self.expression(owner)?;
+                self.line(format!("{}:SetNetworkOwner({owner})", target(t)?));
+            }
+            BlockKind::SetNetworkOwnershipAuto { target: t } => {
+                self.line(format!("{}:SetNetworkOwnershipAuto()", target(t)?));
+            }
+            BlockKind::KickPlayer { player, reason } => {
+                let player = self.expression(player)?;
+                let reason = self.expression(reason)?;
+                self.line(format!("{player}:Kick({reason})"));
+            }
             BlockKind::SetLanguage { language } => {
                 let language = self.expression(language)?;
                 self.line(format!("LocalizationService.Language = {language}"));

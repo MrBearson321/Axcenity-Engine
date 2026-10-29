@@ -197,6 +197,36 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         instead: "ask the server with a RemoteEvent's FireServer, and call it there",
     },
     SideOnlyApi {
+        name: "Kick",
+        side: Side::Server,
+        because: "only the server can take a player out of the game",
+        instead: "ask the server with a RemoteEvent's FireServer, and call it there",
+    },
+    SideOnlyApi {
+        name: "SetNetworkOwner",
+        side: Side::Server,
+        because: "the server decides which device simulates each part",
+        instead: "ask the server with a RemoteEvent's FireServer, and call it there",
+    },
+    SideOnlyApi {
+        name: "GetNetworkOwner",
+        side: Side::Server,
+        because: "the server decides which device simulates each part",
+        instead: "ask the server with a RemoteFunction's InvokeServer",
+    },
+    SideOnlyApi {
+        name: "SetNetworkOwnershipAuto",
+        side: Side::Server,
+        because: "the server decides which device simulates each part",
+        instead: "ask the server with a RemoteEvent's FireServer, and call it there",
+    },
+    SideOnlyApi {
+        name: "GetNetworkOwnershipAuto",
+        side: Side::Server,
+        because: "the server decides which device simulates each part",
+        instead: "ask the server with a RemoteFunction's InvokeServer",
+    },
+    SideOnlyApi {
         name: "OnServerEvent",
         side: Side::Server,
         because: "it receives what LocalScripts send to the server",

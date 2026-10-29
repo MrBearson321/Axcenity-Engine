@@ -44,6 +44,10 @@ pub enum SessionEvent {
     /// What came on the unreliable channel from player `from` (or the
     /// server, 0): motion, newest first wins.
     Datagram { from: u32, bytes: Vec<u8> },
+    /// The parts this device now moves besides its character.
+    Ownership(Vec<u64>),
+    /// Where the server has this device's character.
+    Correction(Update),
 }
 
 /// What a host is.
@@ -395,6 +399,10 @@ impl Join {
                 Some(Message::Update { update }) => events.push(SessionEvent::Update(update)),
                 Some(Message::Remote { message }) => {
                     events.push(SessionEvent::Remote { from: 0, message });
+                }
+                Some(Message::Ownership { parts }) => events.push(SessionEvent::Ownership(parts)),
+                Some(Message::Correction { update }) => {
+                    events.push(SessionEvent::Correction(update));
                 }
                 Some(Message::Hello { .. }) | None => {}
             }

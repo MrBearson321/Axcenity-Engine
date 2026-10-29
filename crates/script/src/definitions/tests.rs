@@ -361,13 +361,15 @@ fn described_fields_and_methods_exist() {
     };
     for (class, method) in CLASS_METHODS {
         // Scripts have no LocalPlayer: they reach a Player once it joins.
-        if (*class, method.name) == (ClassName::Player, "LoadCharacter") {
+        if *class == ClassName::Player && matches!(method.name, "LoadCharacter" | "Kick") {
             check(
                 method.name,
-                "game.Players.PlayerAdded:Connect(function(player)\n\
-                 assert(type(player.LoadCharacter) == 'function', 'Player:LoadCharacter')\n\
-                 print('checked player')\nend)"
-                    .to_owned(),
+                format!(
+                    "game.Players.PlayerAdded:Connect(function(player)\n\
+                     assert(type(player.{0}) == 'function', 'Player:{0}')\n\
+                     print('checked player')\nend)",
+                    method.name
+                ),
             );
             continue;
         }

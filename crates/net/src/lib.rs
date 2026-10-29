@@ -21,6 +21,7 @@ mod discovery;
 mod game;
 mod handshake;
 mod motion;
+mod ownership;
 mod replicate;
 mod session;
 mod transport;
@@ -32,6 +33,7 @@ pub use handshake::{GameInfo, Message, Peer, Refusal};
 pub use motion::{
     DELAY, ENTRY_BYTES, MOTION_BUDGET, Motion, MotionSender, PartState, SETTLE_TIME, Smoother,
 };
+pub use ownership::{CharacterCheck, Owned, OwnedSender, TELEPORT_DISTANCE};
 pub use replicate::{
     Applied, LevelState, Op, Replicator, Update, WireChange, WireInstance, apply, replicated_parts,
 };
@@ -41,12 +43,14 @@ pub use wire::{WireArg, WireKind, WireMessage, WireValue};
 
 /// The network protocol's version: games on different ones can't play
 /// together, and the handshake says so. Raise it when a message changes.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 /// The UDP port games are hosted on unless told another.
 pub const DEFAULT_PORT: u16 = 47800;
 /// The UDP port hosts answer LAN searches on.
 pub const DISCOVERY_PORT: u16 = 47801;
 
+#[cfg(test)]
+mod character_tests;
 #[cfg(test)]
 mod replication_tests;
 #[cfg(test)]

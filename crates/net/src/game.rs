@@ -17,6 +17,9 @@ use axcenity_script::{LanGame, NetworkRequest, ScriptRuntime, Side};
 use crate::discovery::{HostInfo, LanAnswerer, LanSearch};
 use crate::handshake::{GameInfo, Message};
 use crate::motion::{MOTION_BUDGET, Motion, MotionSender, Smoother};
+use crate::ownership::{
+    CharacterCheck, OWNED_TAG, Owned, OwnedSender, character_of, character_parts,
+};
 use crate::replicate::{LevelState, Replicator, Update, apply, replicated_parts};
 use crate::session::{Host, HostSettings, Join, SessionEvent};
 use crate::transport::{Client, Conditions, LinkStats, Server};
@@ -84,6 +87,18 @@ pub struct Network {
     sent_levels: Option<LevelState>,
     /// Joined: the server's parts, smoothed.
     smoother: Smoother,
+    /// Hosting: each player's character check, by their id (Phase 66).
+    checks: BTreeMap<u32, CharacterCheck>,
+    /// Hosting: the parts each player moves besides their character, as
+    /// last worked out and sent them.
+    owned_by: BTreeMap<u32, BTreeSet<InstanceId>>,
+    /// Joined: the parts the server gives this device besides its
+    /// character.
+    owned: BTreeSet<InstanceId>,
+    /// Joined: what was sent of them.
+    owned_sender: OwnedSender,
+    /// Joined: whether this device's player holds Run.
+    running: bool,
 }
 
 impl Network {
@@ -106,7 +121,101 @@ impl Network {
             motion_budget: MOTION_BUDGET,
             sent_levels: None,
             smoother: Smoother::default(),
+            checks: BTreeMap::new(),
+            owned_by: BTreeMap::new(),
+            owned: BTreeSet::new(),
+            owned_sender: OwnedSender::default(),
+            running: false,
         }
+    }
+
+    /// Joined: whether this device's player holds Run this frame, so the
+    /// server allows their character `RunSpeed`.
+    pub fn set_running(&mut self, running: bool) {
+        self.running = running;
+    }
+
+    /// Whether this device follows a server it joined.
+    pub fn is_following(&self) -> bool {
+        matches!(self.session, Session::Joined(_))
+    }
+
+    /// The characters other devices move, which this device's controllers
+    /// leave alone: hosting, the other players'; joined, everyone's but
+    /// this device's own.
+    pub fn other_characters(&self, world: &World, scripts: &ScriptRuntime) -> BTreeSet<InstanceId> {
+        match &self.session {
+            Session::Offline => BTreeSet::new(),
+            Session::Hosting(_) => self
+                .players
+                .values()
+                .filter_map(|&player| character_of(world, player))
+                .collect(),
+            Session::Joined(_) => {
+                let me = scripts.local_player();
+                world
+                    .get(world.players())
+                    .map(|players| players.children().to_vec())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|&player| Some(player) != me)
+                    .filter_map(|player| character_of(world, player))
+                    .collect()
+            }
+        }
+    }
+
+    /// Parts physics holds still on this device because another moves
+    /// them: hosting, the other players' characters and what they own;
+    /// joined, every unanchored part but this device's own.
+    pub fn held_parts(&self, world: &World, scripts: &ScriptRuntime) -> BTreeSet<InstanceId> {
+        match &self.session {
+            Session::Offline => BTreeSet::new(),
+            Session::Hosting(_) => {
+                let mut held: BTreeSet<InstanceId> =
+                    self.owned_by.values().flatten().copied().collect();
+                for &player in self.players.values() {
+                    held.extend(character_parts(world, player));
+                }
+                held
+            }
+            Session::Joined(_) => {
+                let mine = self.moved_here(world, scripts);
+                world
+                    .descendants(world.workspace())
+                    .into_iter()
+                    .filter(|id| !mine.contains(id))
+                    .filter(|&id| {
+                        world.get(id).is_some_and(|i| {
+                            i.class().is_base_part()
+                                && i.property("Anchored").and_then(Value::as_bool) == Some(false)
+                        })
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// Joined: whether this device simulates anything (an assembly the
+    /// server gave it), so it steps physics.
+    pub fn simulates_physics(&self) -> bool {
+        match &self.session {
+            Session::Joined(_) => !self.owned.is_empty(),
+            _ => true,
+        }
+    }
+
+    /// Joined: the parts this device moves: its character's, and those the
+    /// server gave it.
+    fn moved_here(&self, world: &World, scripts: &ScriptRuntime) -> BTreeSet<InstanceId> {
+        let mut parts: BTreeSet<InstanceId> = scripts
+            .local_player()
+            .map(|me| character_parts(world, me))
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        parts.extend(self.owned.iter().copied().filter(|&id| world.contains(id)));
+        parts
     }
 
     /// Gives each player `bytes_per_second` of motion (tests).
@@ -318,6 +427,10 @@ impl Network {
         self.motion.clear();
         self.sent_levels = None;
         self.smoother = Smoother::default();
+        self.checks.clear();
+        self.owned_by.clear();
+        self.owned.clear();
+        self.owned_sender = OwnedSender::default();
         self.remove_players(world, scripts);
     }
 
@@ -385,6 +498,7 @@ impl Network {
     /// Joined: the server gets the scripts' messages.
     pub fn send(&mut self, world: &World, scripts: &mut ScriptRuntime) {
         let messages = scripts.take_remote_messages();
+        let mine = self.moved_here(world, scripts);
         match &mut self.session {
             Session::Offline => {}
             Session::Hosting(host) => {
@@ -404,6 +518,28 @@ impl Network {
                     }
                 }
                 let parts = replicated_parts(world);
+                // Who moves what (Phase 66): each player their character,
+                // and the assemblies the server gives them.
+                let owned = scripts.owned_parts(world);
+                for (&peer, &player) in &self.players {
+                    let now: BTreeSet<InstanceId> =
+                        owned.get(&player).into_iter().flatten().copied().collect();
+                    if self.owned_by.get(&peer) != Some(&now) {
+                        let parts = now.iter().map(|id| id.to_bits()).collect();
+                        host.send_to(peer, &Message::Ownership { parts });
+                        self.owned_by.insert(peer, now);
+                    }
+                }
+                self.owned_by
+                    .retain(|peer, _| self.players.contains_key(peer));
+                for (&peer, &player) in &self.players {
+                    let check = self.checks.entry(peer).or_default();
+                    if let Some(update) = check.correction(world, player, self.clock) {
+                        host.send_to(peer, &Message::Correction { update });
+                    }
+                }
+                self.checks
+                    .retain(|peer, _| self.players.contains_key(peer));
                 for peer in std::mem::take(&mut self.need_snapshot) {
                     let Some(&you) = self.players.get(&peer) else {
                         continue;
@@ -427,14 +563,12 @@ impl Network {
                         continue;
                     };
                     let focus = character_position(world, player);
-                    let (packets, settled) = sender.frame(
-                        world,
-                        &parts,
-                        focus,
-                        &BTreeSet::new(),
-                        self.seconds,
-                        self.clock,
-                    );
+                    // A player isn't sent what they move themselves.
+                    let mut theirs: BTreeSet<InstanceId> =
+                        character_parts(world, player).into_iter().collect();
+                    theirs.extend(self.owned_by.get(&peer).into_iter().flatten().copied());
+                    let (packets, settled) =
+                        sender.frame(world, &parts, focus, &theirs, self.seconds, self.clock);
                     if !settled.is_empty() {
                         let update = Update {
                             ops: settled,
@@ -465,6 +599,23 @@ impl Network {
                 host.flush();
             }
             Session::Joined(join) => {
+                // What this device moves goes to the server, and isn't
+                // smoothed from what the server sends back.
+                if scripts.is_client_only() && join.you().is_some() {
+                    self.smoother.set_owned(mine.clone());
+                    let mine: Vec<InstanceId> = mine.into_iter().collect();
+                    let seat = own_seat(world, scripts);
+                    if let Some(owned) = self.owned_sender.frame(
+                        world,
+                        &mine,
+                        self.running,
+                        seat,
+                        self.seconds,
+                        self.clock,
+                    ) {
+                        join.send_datagram(owned.to_bytes());
+                    }
+                }
                 // The server never had this device's own Instances.
                 let shared = |id: InstanceId| !id.is_local();
                 for message in messages {
@@ -575,12 +726,37 @@ impl Network {
                 }
             }
             SessionEvent::Remote { from, message } => self.deliver(world, scripts, from, &message),
-            SessionEvent::Datagram { from: _, bytes } => {
-                if !self.is_hosting()
-                    && scripts.is_client_only()
+            SessionEvent::Datagram { from, bytes } => {
+                if self.is_hosting() {
+                    if bytes.first() == Some(&OWNED_TAG)
+                        && let Some(owned) = Owned::from_bytes(&bytes)
+                        && let Some(&player) = self.players.get(&from)
+                    {
+                        let assemblies = self.owned_by.get(&from).cloned().unwrap_or_default();
+                        self.checks.entry(from).or_default().receive(
+                            world,
+                            player,
+                            &assemblies,
+                            &owned,
+                            self.clock,
+                        );
+                    }
+                } else if scripts.is_client_only()
                     && let Some(motion) = Motion::from_bytes(&bytes)
                 {
                     self.smoother.receive(world, &motion);
+                }
+            }
+            SessionEvent::Ownership(parts) => {
+                if !self.is_hosting() {
+                    self.owned = parts.into_iter().map(InstanceId::from_bits).collect();
+                }
+            }
+            SessionEvent::Correction(update) => {
+                if !self.is_hosting() && scripts.is_client_only() {
+                    apply(world, &update);
+                    self.log
+                        .push("The server moved your character back.".to_owned());
                 }
             }
             SessionEvent::Failed(reason) => {
@@ -727,6 +903,24 @@ pub(crate) fn character_position(world: &World, player: InstanceId) -> Option<Ve
                 .find(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
         })?;
     world.get(root)?.property("Position")?.as_vector3()
+}
+
+/// The seat this device's character sits in.
+fn own_seat(world: &World, scripts: &ScriptRuntime) -> Option<InstanceId> {
+    let character = character_of(world, scripts.local_player()?)?;
+    world
+        .descendants(world.workspace())
+        .into_iter()
+        .find(|&seat| {
+            world.get(seat).is_some_and(|s| {
+                matches!(s.class(), ClassName::Seat | ClassName::VehicleSeat)
+                    && s.property("Occupant")
+                        .and_then(Value::as_instance)
+                        .and_then(|controller| world.get(controller))
+                        .and_then(|controller| controller.parent())
+                        == Some(character)
+            })
+        })
 }
 
 /// `Players.MaxPlayers`, at least 1.

@@ -552,6 +552,23 @@ pub enum BlockKind {
     },
     /// Leaves the game joined, or stops hosting.
     LeaveGame,
+    /// Gives `target`'s assembly to `owner` (a Player, or nil for the
+    /// server) to simulate: `SetNetworkOwner` (Phase 66).
+    SetNetworkOwner {
+        target: String,
+        owner: Expression,
+    },
+    /// Lets the engine choose who simulates `target`'s assembly: the
+    /// nearest player: `SetNetworkOwnershipAuto` (Phase 66).
+    SetNetworkOwnershipAuto {
+        target: String,
+    },
+    /// Takes `player` out of the game, telling them `reason`:
+    /// `Player:Kick` (Phase 67).
+    KickPlayer {
+        player: Expression,
+        reason: Expression,
+    },
 
     // Camera: `workspace.CurrentCamera` (LocalScripts only).
     /// Sets `CameraType` to one of [`CAMERA_TYPES`]: Scriptable leaves the
@@ -970,6 +987,7 @@ impl BlockKind {
             | BlockKind::RemoveLevel { level: e }
             | BlockKind::HostGame { port: e }
             | BlockKind::JoinGame { address: e }
+            | BlockKind::SetNetworkOwner { owner: e, .. }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
@@ -987,6 +1005,7 @@ impl BlockKind {
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::LoadLevel { level, spawn } => vec![level, spawn],
+            BlockKind::KickPlayer { player, reason } => vec![player, reason],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
             BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],
@@ -1053,6 +1072,9 @@ impl BlockKind {
             BlockKind::HostGame { .. }
                 | BlockKind::JoinGame { .. }
                 | BlockKind::LeaveGame
+                | BlockKind::SetNetworkOwner { .. }
+                | BlockKind::SetNetworkOwnershipAuto { .. }
+                | BlockKind::KickPlayer { .. }
                 | BlockKind::WhenConnectionFails { .. }
         )
     }
@@ -1095,6 +1117,7 @@ impl BlockKind {
             | BlockKind::RemoveLevel { level: e }
             | BlockKind::HostGame { port: e }
             | BlockKind::JoinGame { address: e }
+            | BlockKind::SetNetworkOwner { owner: e, .. }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
@@ -1112,6 +1135,7 @@ impl BlockKind {
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::LoadLevel { level, spawn } => vec![level, spawn],
+            BlockKind::KickPlayer { player, reason } => vec![player, reason],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
             BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],

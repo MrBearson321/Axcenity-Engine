@@ -1300,6 +1300,19 @@ impl ApplicationHandler for App {
                 //    player's rebinds). Otherwise the fly camera moves, and
                 //    LocalScripts see that.
                 let motion = self.controller_input(seconds);
+                // In a hosted or joined game, only this device's player's
+                // character takes input, and other devices move their own
+                // (Phase 66). A device following a server moves only its
+                // own character.
+                let others = self.network.other_characters(&self.world, &self.scripts);
+                self.characters
+                    .set_players(self.scripts.local_player(), others);
+                self.network.set_running(motion.run);
+                if !simulates {
+                    self.characters
+                        .step(&mut self.world, &self.assets, motion, seconds);
+                    fire_seated(&mut self.scripts, &mut self.world, &mut self.characters);
+                }
                 if simulates {
                     self.characters
                         .step(&mut self.world, &self.assets, motion, seconds);
@@ -1348,6 +1361,16 @@ impl ApplicationHandler for App {
                 //    fixed 60 Hz (0 to N steps this frame). Anchoring is
                 //    after scripts, so a script cannot drop the character
                 //    for this step. Other parts keep their gravity.
+                // Parts another device moves are held still here.
+                let held = self.network.held_parts(&self.world, &self.scripts);
+                self.physics.set_held(held);
+                if !simulates && self.network.simulates_physics() {
+                    // An assembly the server gave this device (a car it
+                    // drives) is simulated here; the server does the rest.
+                    self.physics.step(&mut self.world, f64::from(seconds));
+                    let _ = self.physics.take_touches();
+                    let _ = self.physics.take_touch_ends();
+                }
                 if simulates {
                     self.characters.keep_kinematic(&mut self.world);
                     self.agents.keep_kinematic(&mut self.world);

@@ -17,7 +17,7 @@
 //! owns the camera: behind the character, zoomed with the mouse
 //! wheel, for a third-person one, or at its eyes for a first-person one.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axcenity_assets::Assets;
 use axcenity_core::input::{InputMap, InputState};
@@ -291,9 +291,42 @@ pub struct Controllers {
     /// The turn of each controller's first part when it was first seen,
     /// facing -Z (radians), for `AutoRotate`.
     facing: BTreeMap<InstanceId, f32>,
+    /// The Player on this device (multiplayer, Phase 66): only their
+    /// character takes input. `None`: the first Player's, as before.
+    player: Option<InstanceId>,
+    /// Characters another device moves (other players' own), left alone.
+    others: BTreeSet<InstanceId>,
 }
 
 impl Controllers {
+    /// In multiplayer (Phase 66): `player` is the one on this device, whose
+    /// character alone takes input, and `others` are the characters other
+    /// devices move, which these controllers leave alone.
+    pub fn set_players(&mut self, player: Option<InstanceId>, others: BTreeSet<InstanceId>) {
+        self.player = player;
+        self.others = others;
+    }
+
+    /// Whether another device moves the character `id` controls.
+    pub(crate) fn moved_elsewhere(&self, world: &World, id: InstanceId) -> bool {
+        !self.others.is_empty()
+            && world
+                .get(id)
+                .and_then(|controller| controller.parent())
+                .is_some_and(|character| self.others.contains(&character))
+    }
+
+    /// The controller that takes input: this device's player's character's
+    /// when there's a player set, else the first Player's.
+    fn active_of(&self, world: &World) -> Option<InstanceId> {
+        match self.player {
+            Some(player) => controller_of_player(world, player),
+            None if self.others.is_empty() => active_id(world),
+            // A dedicated server: everyone's character is moved elsewhere.
+            None => active_id(world).filter(|&id| !self.moved_elsewhere(world, id)),
+        }
+    }
+
     /// Moves the active character for `seconds` of time and updates its
     /// camera from `input`. Returns that camera, or `None` when no
     /// controller has a body. Other controllers walk their `MoveDirection`
@@ -316,12 +349,16 @@ impl Controllers {
         self.crouches.retain(|id, _| world.get(*id).is_some());
         self.built_in.retain(|id, _| world.get(*id).is_some());
         self.facing.retain(|id, _| world.get(*id).is_some());
-        let active = active_id(world);
+        let active = self.active_of(world);
         self.update_seats(world, assets, active, input.jump);
         // Controllers without input move once something asks them to,
         // and from then on keep falling and landing.
         for id in controllers(world) {
-            if Some(id) != active && is_driver(world, id) && self.wants_to_move(world, id) {
+            if Some(id) != active
+                && is_driver(world, id)
+                && !self.moved_elsewhere(world, id)
+                && self.wants_to_move(world, id)
+            {
                 self.move_character(world, assets, id, None, MoveInput::default(), dt);
             }
         }
@@ -544,7 +581,7 @@ impl Controllers {
     pub fn view(&self, world: &World) -> Option<CharacterCamera> {
         let id = match self.active {
             Some(id) if is_driver(world, id) => id,
-            _ => active_id(world)?,
+            _ => self.active_of(world)?,
         };
         let eye = Eye::of(world, id)?;
         let orbit = self.orbits.get(&id).copied().unwrap_or(Orbit::start(eye));
@@ -608,6 +645,14 @@ fn is_driver(world: &World, id: InstanceId) -> bool {
 /// movement and owns the camera. `None` when no controller has a body.
 pub fn player_character(world: &World) -> Option<InstanceId> {
     world.get(active_id(world)?)?.parent()
+}
+
+/// The controller of `player`'s `Character`, if it has a body.
+fn controller_of_player(world: &World, player: InstanceId) -> Option<InstanceId> {
+    let character = world.get(player)?.property("Character")?.as_instance()?;
+    controllers(world).into_iter().find(|&id| {
+        is_driver(world, id) && world.get(id).and_then(|c| c.parent()) == Some(character)
+    })
 }
 
 /// The controller of the first Player's `Character` (Phase 47), or else

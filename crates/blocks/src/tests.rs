@@ -141,9 +141,12 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::HostGame { .. } => 74,
         BlockKind::JoinGame { .. } => 75,
         BlockKind::LeaveGame => 76,
+        BlockKind::SetNetworkOwner { .. } => 77,
+        BlockKind::SetNetworkOwnershipAuto { .. } => 78,
+        BlockKind::KickPlayer { .. } => 79,
     })
 }
-const STATEMENT_COUNT: usize = 77;
+const STATEMENT_COUNT: usize = 80;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -262,6 +265,28 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 anchored: Expression::Boolean { value: false },
             },
             "workspace.Pad.Anchored = false",
+        ),
+        (
+            BlockKind::SetNetworkOwner {
+                target: pad(),
+                // Any value: here the `score` variable, which the block
+                // script sets.
+                owner: variable("score"),
+            },
+            "workspace.Pad:SetNetworkOwner(score)",
+        ),
+        (
+            BlockKind::SetNetworkOwnershipAuto { target: pad() },
+            "workspace.Pad:SetNetworkOwnershipAuto()",
+        ),
+        (
+            BlockKind::KickPlayer {
+                player: variable("score"),
+                reason: Expression::Text {
+                    value: "Cheating".to_owned(),
+                },
+            },
+            "score:Kick(\"Cheating\")",
         ),
         (
             BlockKind::PushWithForce {

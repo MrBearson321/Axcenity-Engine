@@ -130,7 +130,7 @@ impl PartState {
     }
 }
 
-fn distance(a: Vector3, b: Vector3) -> f64 {
+pub(crate) fn distance(a: Vector3, b: Vector3) -> f64 {
     let (x, y, z) = (a.x - b.x, a.y - b.y, a.z - b.z);
     f64::from(x * x + y * y + z * z).sqrt()
 }

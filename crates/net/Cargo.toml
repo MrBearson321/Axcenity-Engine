@@ -16,5 +16,10 @@ serde.workspace = true
 serde_json.workspace = true
 axcenity-workspace-hack.workspace = true
 
+[dev-dependencies]
+axcenity-assets.workspace = true
+axcenity-character.workspace = true
+axcenity-physics.workspace = true
+
 [lints]
 workspace = true

@@ -163,6 +163,9 @@ pub struct Physics {
     /// Fractures that shattered since the last
     /// [`take_shattered`](Self::take_shattered).
     shattered: Vec<InstanceId>,
+    /// Parts held still as if anchored, whatever their `Anchored` says:
+    /// another device moves them (Phase 66, network ownership).
+    held: BTreeSet<InstanceId>,
 }
 
 /// How a body moved before a step: its velocities and center of mass.
@@ -438,7 +441,15 @@ impl Physics {
             breakables: BTreeMap::new(),
             debris: Vec::new(),
             shattered: Vec::new(),
+            held: BTreeSet::new(),
         }
+    }
+
+    /// Holds `parts` still from the next step on, as if anchored, without
+    /// changing their `Anchored`: a multiplayer device leaves to physics
+    /// only the assemblies it simulates, and moves the rest as it's told.
+    pub fn set_held(&mut self, parts: BTreeSet<InstanceId>) {
+        self.held = parts;
     }
 
     /// Frame step 3: catches up with script changes, then runs as many fixed
@@ -697,7 +708,11 @@ impl Physics {
             .descendants(world.workspace())
             .into_iter()
             .filter(|id| !ragdolled.contains(id))
-            .filter_map(|id| Some((id, PartState::read(world, id, &self.assets)?)))
+            .filter_map(|id| {
+                let mut state = PartState::read(world, id, &self.assets)?;
+                state.anchored |= self.held.contains(&id);
+                Some((id, state))
+            })
             .collect();
         let ids: Vec<InstanceId> = current.keys().copied().collect();
         let groups: Vec<(Vec<InstanceId>, InstanceId)> =

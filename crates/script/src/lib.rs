@@ -72,6 +72,7 @@ mod levels;
 mod localization;
 mod modules;
 mod network;
+mod ownership;
 mod physical;
 mod players;
 mod prompt;
@@ -241,6 +242,11 @@ pub struct ScriptRuntime {
     saves: save::SharedSaves,
     /// `LevelService`'s levels, which both sides share (Phase 48).
     levels: levels::SharedLevels,
+    /// Network ownership's settings (Phase 66).
+    ownership: ownership::SharedOwnership,
+    /// Players who joined from other devices and get their first
+    /// character in the next `step_players`.
+    joined: Vec<InstanceId>,
     /// Levels loaded since the host last asked, for its loading screen.
     level_loads: Vec<String>,
     /// Sequences played on either side (Phase 51).
@@ -298,6 +304,9 @@ impl ScriptRuntime {
         let sequences = sequence::SharedSequences::default();
         server.lua.set_app_data(sequences.clone());
         client.lua.set_app_data(sequences.clone());
+        let ownership = ownership::SharedOwnership::default();
+        server.lua.set_app_data(ownership.clone());
+        client.lua.set_app_data(ownership.clone());
         Self {
             server,
             client,
@@ -318,6 +327,8 @@ impl ScriptRuntime {
             levels,
             level_loads: Vec::new(),
             sequences,
+            ownership,
+            joined: Vec::new(),
             volume_sliders: audio_settings::VolumeSliders::default(),
             dedicated: false,
             client_only: false,
@@ -365,6 +376,17 @@ impl ScriptRuntime {
     /// in the next step and the host shows its loading screen.
     pub fn follow_levels(&mut self, current: &str, added: Vec<(String, InstanceId)>, loaded: bool) {
         self.levels.0.borrow_mut().follow(current, added, loaded);
+    }
+
+    /// `Player:Kick` calls since the last call (Phase 67), each Player with
+    /// the reason: hosts close a remote player's connection with it, and
+    /// end the game for the player on this device.
+    pub fn take_kicks(&mut self) -> Vec<(InstanceId, String)> {
+        self.server
+            .lua
+            .app_data_mut::<players::Kicks>()
+            .map(|mut kicks| std::mem::take(&mut kicks.0))
+            .unwrap_or_default()
     }
 
     /// The levels loaded (`LoadLevel`, or a slot in another level) since
@@ -548,8 +570,9 @@ impl ScriptRuntime {
     /// A player on another device joins a hosted game (Phase 63): a Player
     /// named `name` goes into `Players`, with their `DisplayName` and
     /// `UserId` (Phase 64), on the AutoAssignable Team with the fewest
-    /// players, and `PlayerAdded` fires. It gets no character here: their
-    /// own character's movement comes with network ownership (Phase 66).
+    /// players, and `PlayerAdded` fires. Their first character comes in
+    /// the next [`step_players`](Self::step_players), as the local
+    /// player's does; their own device moves it (Phase 66).
     pub fn add_remote_player(
         &mut self,
         world: &mut World,
@@ -574,8 +597,15 @@ impl ScriptRuntime {
         players::assign_team(world, player);
         self.player_events
             .push(players::PlayerEvent::Added { player });
+        self.joined.push(player);
         self.fire_changes(world);
         player
+    }
+
+    /// Who owns each unanchored assembly now (Phase 66, see `ownership`):
+    /// each owning Player with every part they simulate.
+    pub fn owned_parts(&self, world: &World) -> BTreeMap<InstanceId, Vec<InstanceId>> {
+        ownership::owned_parts(&self.ownership, world)
     }
 
     /// A player on another device leaves: `PlayerRemoving` fires on both
@@ -840,6 +870,11 @@ impl ScriptRuntime {
             }
         }
         due.extend(self.players.step(world, seconds));
+        due.extend(
+            std::mem::take(&mut self.joined)
+                .into_iter()
+                .filter(|&player| world.contains(player)),
+        );
         for player in due {
             if auto_loads(world) {
                 self.server.load_character(world, player);

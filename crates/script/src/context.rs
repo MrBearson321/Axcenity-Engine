@@ -59,6 +59,7 @@ impl Context {
         lua.set_app_data(crate::humanoid::States::default());
         lua.set_app_data(crate::players::Spawned::default());
         lua.set_app_data(crate::players::Spawning::default());
+        lua.set_app_data(crate::players::Kicks::default());
         lua.set_app_data(crate::DebugRays::default());
         lua.set_app_data(Assets::default());
         lua.set_app_data(Outbox::default());
@@ -132,6 +133,10 @@ impl Context {
         methods.extend(
             crate::seat::methods(&lua)
                 .expect("creating Seat methods only fails when out of memory"),
+        );
+        methods.extend(
+            crate::ownership::methods(&lua)
+                .expect("creating the network ownership methods only fails when out of memory"),
         );
         methods.extend(
             crate::health::methods(&lua)

@@ -1400,6 +1400,14 @@ declare extern type Part extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error). Scripts only.
+	function SetNetworkOwner(self, player: Instance?): ()
+	--- Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error). Scripts only.
+	function GetNetworkOwner(self): Instance?
+	--- Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server. Scripts only.
+	function SetNetworkOwnershipAuto(self): ()
+	--- Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner. Scripts only.
+	function GetNetworkOwnershipAuto(self): boolean
 	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
@@ -1473,6 +1481,14 @@ declare extern type MeshPart extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error). Scripts only.
+	function SetNetworkOwner(self, player: Instance?): ()
+	--- Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error). Scripts only.
+	function GetNetworkOwner(self): Instance?
+	--- Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server. Scripts only.
+	function SetNetworkOwnershipAuto(self): ()
+	--- Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner. Scripts only.
+	function GetNetworkOwnershipAuto(self): boolean
 	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
@@ -1550,6 +1566,14 @@ declare extern type UnionOperation extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error). Scripts only.
+	function SetNetworkOwner(self, player: Instance?): ()
+	--- Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error). Scripts only.
+	function GetNetworkOwner(self): Instance?
+	--- Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server. Scripts only.
+	function SetNetworkOwnershipAuto(self): ()
+	--- Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner. Scripts only.
+	function GetNetworkOwnershipAuto(self): boolean
 	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
@@ -1637,6 +1661,14 @@ declare extern type NegateOperation extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error). Scripts only.
+	function SetNetworkOwner(self, player: Instance?): ()
+	--- Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error). Scripts only.
+	function GetNetworkOwner(self): Instance?
+	--- Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server. Scripts only.
+	function SetNetworkOwnershipAuto(self): ()
+	--- Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner. Scripts only.
+	function GetNetworkOwnershipAuto(self): boolean
 	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
@@ -1732,6 +1764,14 @@ declare extern type Seat extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error). Scripts only.
+	function SetNetworkOwner(self, player: Instance?): ()
+	--- Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error). Scripts only.
+	function GetNetworkOwner(self): Instance?
+	--- Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server. Scripts only.
+	function SetNetworkOwnershipAuto(self): ()
+	--- Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner. Scripts only.
+	function GetNetworkOwnershipAuto(self): boolean
 	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
@@ -1841,6 +1881,14 @@ declare extern type VehicleSeat extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error). Scripts only.
+	function SetNetworkOwner(self, player: Instance?): ()
+	--- Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error). Scripts only.
+	function GetNetworkOwner(self): Instance?
+	--- Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server. Scripts only.
+	function SetNetworkOwnershipAuto(self): ()
+	--- Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner. Scripts only.
+	function GetNetworkOwnershipAuto(self): boolean
 	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
@@ -1930,6 +1978,14 @@ declare extern type DamageZone extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error). Scripts only.
+	function SetNetworkOwner(self, player: Instance?): ()
+	--- Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error). Scripts only.
+	function GetNetworkOwner(self): Instance?
+	--- Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server. Scripts only.
+	function SetNetworkOwnershipAuto(self): ()
+	--- Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner. Scripts only.
+	function GetNetworkOwnershipAuto(self): boolean
 	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
@@ -2021,6 +2077,14 @@ declare extern type ReverbZone extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error). Scripts only.
+	function SetNetworkOwner(self, player: Instance?): ()
+	--- Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error). Scripts only.
+	function GetNetworkOwner(self): Instance?
+	--- Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server. Scripts only.
+	function SetNetworkOwnershipAuto(self): ()
+	--- Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner. Scripts only.
+	function GetNetworkOwnershipAuto(self): boolean
 	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
@@ -2116,6 +2180,14 @@ declare extern type SpawnLocation extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error). Scripts only.
+	function SetNetworkOwner(self, player: Instance?): ()
+	--- Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error). Scripts only.
+	function GetNetworkOwner(self): Instance?
+	--- Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server. Scripts only.
+	function SetNetworkOwnershipAuto(self): ()
+	--- Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner. Scripts only.
+	function GetNetworkOwnershipAuto(self): boolean
 	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
@@ -2206,6 +2278,8 @@ declare extern type Player extends Instance with
 	[string]: any
 	--- LocalScripts only: the mouse in the world, with the part under it (`Target`). LocalScripts only.
 	function GetMouse(self): Mouse
+	--- Scripts only (Phase 67): takes the player out of the game. Their device's NetworkService.ConnectionFailed fires with `reason` ("You were kicked from the game." without one), and PlayerRemoving fires here. Kicking the player on this device ends the game, with the reason. Scripts only.
+	function Kick(self, reason: string?): ()
 	--- Scripts only: gives the player a new character. The old one (if any) leaves the Workspace, fires CharacterRemoving and is destroyed; a copy of the StarterCharacter stands on one of the player's team's SpawnLocations (or a Neutral one), chosen at random, with a ForceField for its Duration, and CharacterAdded fires. With no SpawnLocation it stands at the origin and Output warns. Scripts only.
 	function LoadCharacter(self): ()
 end

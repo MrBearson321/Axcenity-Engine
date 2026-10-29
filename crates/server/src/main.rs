@@ -167,9 +167,11 @@ fn main() -> Result<()> {
     }
 }
 
-/// One frame, in the frame order: network receive, scripts, physics,
-/// touches and Heartbeat, network send. Characters, agents, animation and
-/// everything drawn belong to players' devices.
+/// One frame, in the frame order: network receive, players (their
+/// characters and respawns), scripts, physics, touches and Heartbeat,
+/// network send. Each player's device moves their character (Phase 66),
+/// which physics holds still here, as it does what they own; agents,
+/// animation and everything drawn belong to players' devices.
 fn frame(
     world: &mut World,
     scripts: &mut ScriptRuntime,
@@ -179,9 +181,11 @@ fn frame(
 ) {
     network.receive(world, scripts, seconds);
     print_log(network);
+    scripts.step_players(world, seconds);
     scripts.step(world, seconds);
     scripts.stepped(world, seconds);
     scripts.apply_shatters(world, physics);
+    physics.set_held(network.held_parts(world, scripts));
     physics.step(world, seconds);
     let touches = physics.take_touches();
     scripts.fire_touched(world, &touches);

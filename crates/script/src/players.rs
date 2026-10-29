@@ -386,10 +386,27 @@ fn list(lua: &Lua, ids: Vec<InstanceId>) -> mlua::Result<mlua::Table> {
     lua.create_sequence_from(ids.into_iter().map(LuaInstance))
 }
 
+/// `Player:Kick` calls not yet carried out: each Player, with the reason.
+#[derive(Default)]
+pub struct Kicks(pub Vec<(InstanceId, String)>);
+
 pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
     let load = lua.create_function(|lua, this: LuaInstance| {
         crate::sides::check(lua, "LoadCharacter")?;
         load_character(lua, this.0)?;
+        Ok(())
+    })?;
+    let kick = lua.create_function(|lua, (this, reason): (LuaInstance, Option<String>)| {
+        crate::sides::check(lua, "Kick")?;
+        if !is_class(&*world(lua)?, this.0, ClassName::Player) {
+            return Err(destroyed());
+        }
+        let reason = reason
+            .filter(|reason| !reason.trim().is_empty())
+            .unwrap_or_else(|| "You were kicked from the game.".to_owned());
+        if let Some(mut kicks) = lua.app_data_mut::<Kicks>() {
+            kicks.0.push((this.0, reason));
+        }
         Ok(())
     })?;
     let get_players = lua.create_function(|lua, _: LuaInstance| {
@@ -402,6 +419,7 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
     })?;
     Ok(vec![
         (ClassName::Player, "LoadCharacter", load),
+        (ClassName::Player, "Kick", kick),
         (ClassName::Players, "GetPlayers", get_players),
         (ClassName::Team, "GetPlayers", team_get_players),
     ])

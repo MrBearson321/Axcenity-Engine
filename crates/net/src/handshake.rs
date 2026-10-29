@@ -76,6 +76,16 @@ pub enum Message {
     Remote {
         message: WireMessage,
     },
+    /// Every part the player's device now moves besides their character
+    /// (Phase 66), as network IDs.
+    Ownership {
+        parts: Vec<u64>,
+    },
+    /// Where the server has the player's character: their device moved it
+    /// further than it may, or a server Script moved it.
+    Correction {
+        update: Update,
+    },
 }
 
 impl Message {

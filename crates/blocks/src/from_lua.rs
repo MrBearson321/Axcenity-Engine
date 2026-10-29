@@ -1033,7 +1033,8 @@ impl<'a> Converter<'a> {
             }
             // An Animator's parameters and states, named by a string.
             ExprKind::Method(object, method, args)
-                if matches!(args.first().map(|arg| &arg.kind), Some(ExprKind::Str(_))) =>
+                if method != "Kick"
+                    && matches!(args.first().map(|arg| &arg.kind), Some(ExprKind::Str(_))) =>
             {
                 let animator = self.target(object)?;
                 let ExprKind::Str(name) = &args[0].kind else {
@@ -1110,6 +1111,22 @@ impl<'a> Converter<'a> {
                     force: self.expression(&args[0], scope),
                 })
             }
+            // workspace.Car.DriverSeat:SetNetworkOwner(player)
+            ExprKind::Method(object, method, args)
+                if method == "SetNetworkOwner" && args.len() == 1 =>
+            {
+                Some(BlockKind::SetNetworkOwner {
+                    target: self.target(object)?,
+                    owner: self.expression(&args[0], scope),
+                })
+            }
+            // player:Kick("Cheating")
+            ExprKind::Method(object, method, args) if method == "Kick" && args.len() == 1 => {
+                Some(BlockKind::KickPlayer {
+                    player: self.expression(object, scope),
+                    reason: self.expression(&args[0], scope),
+                })
+            }
             ExprKind::Method(object, method, args) if args.is_empty() => {
                 let target = self.target(object)?;
                 Some(match method.as_str() {
@@ -1118,6 +1135,7 @@ impl<'a> Converter<'a> {
                     "Pause" => BlockKind::PauseSound { target },
                     "Resume" => BlockKind::ResumeSound { target },
                     "Destroy" => BlockKind::Destroy { target },
+                    "SetNetworkOwnershipAuto" => BlockKind::SetNetworkOwnershipAuto { target },
                     _ => return None,
                 })
             }

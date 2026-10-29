@@ -341,7 +341,10 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::RemoveLevel { .. }
         | BlockKind::HostGame { .. }
         | BlockKind::JoinGame { .. }
-        | BlockKind::LeaveGame => Category::More,
+        | BlockKind::LeaveGame
+        | BlockKind::SetNetworkOwner { .. }
+        | BlockKind::SetNetworkOwnershipAuto { .. }
+        | BlockKind::KickPlayer { .. } => Category::More,
         BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
     }
 }
@@ -1133,6 +1136,22 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Slot(address, SlotKind::Text),
         ])],
         BlockKind::LeaveGame => vec![Row(vec![label("leave game")])],
+        BlockKind::SetNetworkOwner { target, owner } => vec![Row(vec![
+            label("let"),
+            Slot(owner, SlotKind::Any),
+            label("simulate"),
+            Object(target, Filter::Parts),
+        ])],
+        BlockKind::SetNetworkOwnershipAuto { target } => vec![Row(vec![
+            label("let the nearest player simulate"),
+            Object(target, Filter::Parts),
+        ])],
+        BlockKind::KickPlayer { player, reason } => vec![Row(vec![
+            label("kick"),
+            Slot(player, SlotKind::Any),
+            label("because"),
+            Slot(reason, SlotKind::Text),
+        ])],
         BlockKind::SetLanguage { language } => vec![Row(vec![
             label("set language to"),
             Slot(language, SlotKind::Text),

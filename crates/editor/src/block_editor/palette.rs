@@ -536,6 +536,21 @@ pub(super) fn palette(
                 address: text("192.168.1.20:47800"),
             }),
             B(BlockKind::LeaveGame),
+            B(BlockKind::SetNetworkOwner {
+                target: part.clone(),
+                owner: Expression::Variable {
+                    name: "player".to_owned(),
+                },
+            }),
+            B(BlockKind::SetNetworkOwnershipAuto {
+                target: part.clone(),
+            }),
+            B(BlockKind::KickPlayer {
+                player: Expression::Variable {
+                    name: "player".to_owned(),
+                },
+                reason: text("Cheating"),
+            }),
             B(BlockKind::WhenConnectionFails { body: Vec::new() }),
             R(Expression::DataValue {
                 column: storage_name(NameKind::Column),

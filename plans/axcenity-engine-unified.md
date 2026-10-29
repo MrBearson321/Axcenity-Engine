@@ -2040,9 +2040,9 @@ Tools (Phase 45) fire `Activated` on the client, and replicate through the serve
 
 ### Acceptance criteria
 
-- [ ] With 150 ms of emulated latency, a player's own character moves with no delay, and others see it move smoothly.
-- [ ] A modified client that moves at twice `WalkSpeed` is pulled back by the server.
-- [ ] A car driven by one player steers instantly for them, and the others see it drive.
+- [x] With 150 ms of emulated latency, a player's own character moves with no delay, and others see it move smoothly.
+- [x] A modified client that moves at twice `WalkSpeed` is pulled back by the server.
+- [x] A car driven by one player steers instantly for them, and the others see it drive.
 
 ---
 

@@ -1,6 +1,6 @@
 # Networking
 
-Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, hosting and joining. Phase 64 (so far, for hosted games): a device that joins follows the server's world as a replica and runs only its LocalScripts there, RemoteEvents and RemoteFunctions cross between devices, and Players carry `UserId` and `DisplayName`. Phase 65: parts move by quantized motion within each player's budget and are smoothed on their device, and the level state follows the server. Single-player and the editor's Play still run both sides on one World; they move to a server and client over loopback (with Play's Clients 1–8) together with client-owned characters.
+Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, hosting and joining. Phase 64 (so far, for hosted games): a device that joins follows the server's world as a replica and runs only its LocalScripts there, RemoteEvents and RemoteFunctions cross between devices, and Players carry `UserId` and `DisplayName`. Phase 65: parts move by quantized motion within each player's budget and are smoothed on their device, and the level state follows the server. Phase 66: each player's device moves their own character, and assemblies the server gives it, with no delay; the server checks them. Single-player and the editor's Play are a listen server: the player on that device plays on the server's World, as `--host` does (chosen by the developer on 2026-10-29, so every example plays as before).
 
 ## Crates
 
@@ -20,7 +20,7 @@ Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, ho
 
 ## Handshake
 
-The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (3 since Phase 65), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password and their `user_id` (missing from older engines, read as 0). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
+The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (4 since Phase 66), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password and their `user_id` (missing from older engines, read as 0). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
 
 | Check | The player's `ConnectionFailed` reason | The host's log |
 |---|---|---|
@@ -36,7 +36,7 @@ Accepted, the player gets `Welcome`: their id (a listen server's own player is 1
 
 ## Players
 
-On the host, `Network::receive` turns the roster into Players: `ScriptRuntime::add_remote_player` makes a Player in `Players` with its `DisplayName` and `UserId` (on a team; `PlayerAdded` fires; it gets no character yet, that's network ownership in Phase 66), and `remove_player` fires `Players.PlayerRemoving`, then destroys the Player and its character. On a player's device, Players come with the server's world: one that arrives fires `PlayerAdded` in its LocalScripts (`add_replicated_player`), and one the server removes fires `PlayerRemoving` there before it goes. A failure, a refusal or `Disconnect` removes every other player, from a replica too.
+On the host, `Network::receive` turns the roster into Players: `ScriptRuntime::add_remote_player` makes a Player in `Players` with its `DisplayName` and `UserId` (on a team; `PlayerAdded` fires; their character comes in the next `step_players`, Phase 66), and `remove_player` fires `Players.PlayerRemoving`, then destroys the Player and its character. On a player's device, Players come with the server's world: one that arrives fires `PlayerAdded` in its LocalScripts (`add_replicated_player`), and one the server removes fires `PlayerRemoving` there before it goes. A failure, a refusal or `Disconnect` removes every other player, from a replica too.
 
 - `Player.UserId` is the install's identity: a random whole number from 1 to 2⁵³−1, kept in `user-id.txt` in the saves folder (`axcenity_save::user_id`, beside every game's save folder), made the first time. There are no accounts. A dedicated server has no player, so no UserId. The editor's tests use a fixed one so they never write it.
 - `Player.DisplayName` is the name they joined with; `Name` is that, numbered if taken. Both are read-only to scripts.
@@ -52,7 +52,17 @@ Each device has its own World. The server's is the game; a player's device that 
 - **Smoothing**: a player's device shows parts `DELAY` (0.1 s) behind the newest motion it has, blending the two states around that moment (angles the short way round), with its clock drifting toward the server's. A part that starts moving after standing still starts from where it stood. A reliable update that places a part (made, or settled) makes older motion stale.
 - **Levels**: an update carries `LevelService`'s level and the added ones (with their Models' IDs) when they change, and a snapshot always does, so a player who joins mid-game has the same added levels. When the server loads another level, `LevelLoaded` fires on the players' devices and their loading screen shows (`ScriptRuntime::follow_levels`).
 - **A device's own changes** to its replica stay on it, until the server changes the same thing.
-- **A device following a server** (`axcenity-player --join`, or `NetworkService:Join`) doesn't step physics, characters, Humanoids, players, agents, prompts, tools, health or touches: the server does. Its own character's movement is Phase 66. After leaving, it keeps the last world without the other players.
+- **A device following a server** (`axcenity-player --join`, or `NetworkService:Join`) doesn't step Humanoids, players, agents, prompts, tools, health or touches: the server does. It moves only its own character (below), and steps physics only for an assembly the server gave it, with every other unanchored part held still (`Physics::set_held`, `Network::held_parts`). After leaving, it keeps the last world without the other players.
+
+## Characters and network ownership
+
+Phase 66 (`ownership.rs` in `net`, `ownership.rs` in `script`).
+
+- **Players' characters.** A player who joins from another device gets their first character from `step_players`, as the local player does (the dedicated server now runs `step_players` first in its frame). Each device's controllers move only its own player's character (`Controllers::set_players` with `Network::other_characters`); the others' are moved by their devices, and the host's physics holds them still.
+- **Own character.** Each frame a joined device sends its character's parts (the ones that changed; all of them every half second), whether Run is held (`Network::set_running`) and the seat it sits in, on the unreliable channel (`Owned`, tag `O`). The motion the server sends never moves those parts on that device.
+- **The server's check** (`CharacterCheck`): the character's root part (PrimaryPart, else HumanoidRootPart, else its first part) may go across the ground as far as its controller's `WalkSpeed` (or `RunSpeed` while running or in Run) allows, 15% faster for packets that arrive bunched together, with a quarter second saved up plus 2 studs; and rise as far as `JumpHeight` launches it. More than 30 studs at once (`TELEPORT_DISTANCE`) is always refused. A Seated character or a custom `Movement` is only checked for teleports. What passes goes into the server's world (the other players see it by motion, smoothed); what fails stays where the server had it, and the device gets `Correction` with where that is ("The server moved your character back." in its log). A server Script that moves the character (a respawn, `PivotTo`) sends a correction too. A modified client moving at twice `WalkSpeed` gets about 15% more than `WalkSpeed` (`a_modified_client_that_moves_at_twice_walk_speed_is_pulled_back_by_the_server`).
+- **Seats.** The seat a device says its character sits in becomes the seat's `Occupant` on the server, so Scripts see who sits where.
+- **Assemblies.** `SetNetworkOwner`, `SetNetworkOwnershipAuto` and the driver of a VehicleSeat give an unanchored assembly to a player (`ScriptRuntime::owned_parts`). The server tells each device which parts it owns (`Ownership`, reliable). The owner simulates them (its VehicleSeat's `Throttle` and `Steer` drive the car at once) and sends them with its character; the server holds them still in its physics and puts them where the owner says, unless that's more than 60 studs from where they were. A server's own player owns nothing remotely: the host simulates it.
 
 ## Remote calls
 
@@ -66,7 +76,7 @@ RemoteEvents and RemoteFunctions use the same `Message`s as on one device. The r
 - `axcenity-player --host [port] <game>` runs a listen server (port 47800 if not given). `--join address:port` joins one. `--password <text>` sets a host's password, or gives it when joining. A port that's taken, or an address that can't be looked up, stops the player with the reason.
 - `axcenity-server <game> [--port <port>] [--password <text>]` loads a project folder or `.axgame` and runs its Scripts (and the ModuleScripts they require, never LocalScripts) with physics at 60 Hz, with no window, audio or GPU and no player of its own (`ScriptRuntime::set_dedicated`). Its frame is network receive, scripts, `Stepped`, physics, touches, breaks, health, `Heartbeat`, network send. Characters, agents and animation belong to players' devices. On Linux it needs no display; `script` still links `audio`'s library, which needs ALSA's `libasound` installed (not a sound device). `tests/headless.rs` runs the real binary with `DISPLAY` and `WAYLAND_DISPLAY` unset.
 - The player prints who joined and left, and every refusal and failure, to stderr (`Network::take_log`).
-- The editor's Play doesn't host or join: `Host` and `Join` fire `ConnectionFailed` with a reason, and `FindLanGames` returns an empty list.
+- The editor's Play doesn't host or join on the network: `Host` and `Join` fire `ConnectionFailed` with a reason, and `FindLanGames` returns an empty list.
 
 ## LAN discovery
 

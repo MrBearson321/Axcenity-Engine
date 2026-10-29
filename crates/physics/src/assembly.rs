@@ -42,10 +42,7 @@ pub fn welds(world: &World) -> Vec<(InstanceId, InstanceId)> {
 /// Splits `parts` into assemblies joined by `welds`. A weld naming a part
 /// that isn't in `parts` joins nothing. Each assembly is sorted, and they
 /// come in order of their first part.
-pub(crate) fn group(
-    parts: &[InstanceId],
-    welds: &[(InstanceId, InstanceId)],
-) -> Vec<Vec<InstanceId>> {
+pub fn group(parts: &[InstanceId], welds: &[(InstanceId, InstanceId)]) -> Vec<Vec<InstanceId>> {
     // Union-find: each part points towards a representative of its group.
     let mut leader: BTreeMap<InstanceId, InstanceId> = parts.iter().map(|&id| (id, id)).collect();
     fn find(leader: &mut BTreeMap<InstanceId, InstanceId>, id: InstanceId) -> InstanceId {
@@ -86,7 +83,7 @@ pub(crate) fn group(
 }
 
 /// The root of an assembly of `members` (sorted), which are in `world`.
-pub(crate) fn root(world: &World, members: &[InstanceId]) -> InstanceId {
+pub fn root(world: &World, members: &[InstanceId]) -> InstanceId {
     let rank = |id: InstanceId| world.get(id).map(Rank::of).unwrap_or_default();
     let mut best = members[0];
     for &id in &members[1..] {
