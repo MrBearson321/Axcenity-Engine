@@ -64,7 +64,9 @@ pub(super) struct FrameUniform {
     /// The sky's diffuse light as spherical harmonics (see
     /// `environment::harmonics`), while the environment maps are on.
     pub(super) sky_light: [[f32; 4]; 9],
-    /// How many reflection probes are drawn, then unused.
+    /// How many reflection probes are drawn, then 1 while water reflects
+    /// the screen and 1 while it sees through its copy of the scene
+    /// (`water::WaterMode::flags`), then unused.
     pub(super) reflection_probes: [u32; 4],
     /// The reflection probes drawn, smallest box first (see `probes.rs`).
     pub(super) probes: [probes::ProbeRaw; probes::MAX_PROBES],
@@ -499,6 +501,9 @@ pub(super) struct Batch {
     /// pipelines ([`surface_shaders::SurfaceShaders`]); `None` is the
     /// standard material.
     pub(super) shader: Option<u64>,
+    /// Drawn as water ([`crate::Material::water`]), first among the
+    /// see-through items (renderer/water.rs).
+    pub(super) water: bool,
     pub(super) instances: Range<u32>,
 }
 
@@ -570,6 +575,8 @@ pub(super) struct TargetsAlive {
     pub(super) occlusion: Arc<()>,
     /// Sets of the volumetric fog's grids.
     pub(super) volumetric_fog: Arc<()>,
+    /// Water's copies of the scene.
+    pub(super) water: Arc<()>,
 }
 
 /// The multisampled color the scene is drawn into while MSAA is on. Its
@@ -682,6 +689,10 @@ pub(super) struct ScenePipeline {
     /// The sun's and lamps' light in height fog, while volumetric fog is
     /// on and the world has some; `None` otherwise.
     pub(super) volumetric_fog: Option<Box<fog::VolumetricFog>>,
+    pub(super) water: water::WaterPass,
+    /// The frame bindings with water's copy of the scene in ambient
+    /// occlusion's place, while there's a copy.
+    pub(super) water_frame_bind_group: Option<wgpu::BindGroup>,
     /// How far the wind has carried the clouds.
     pub(super) cloud_drift: clouds::CloudDrift,
     /// The frame's bindings, for making them seen by compute shaders too.

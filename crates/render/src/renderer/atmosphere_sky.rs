@@ -213,15 +213,17 @@ mod tests {
         let mut sky = AtmosphereSky::default();
         let day = Sky::default();
         let look = sky.look(&day, true);
-        assert_eq!(look.colors[0], linear_color(day.top_color));
+        // Within a rounding: the compiler may fold `powf` differently here.
+        assert!(look.colors[0].abs_diff_eq(linear_color(day.top_color), 1e-6));
         assert!(look.image.is_none() && !look.scattered);
         let night = Sky {
             daylight: 0.25,
             ..Default::default()
         };
-        assert_eq!(
-            sky.look(&night, true).colors[1],
-            linear_color(day.horizon_color) * 0.25
+        let dimmed = sky.look(&night, true).colors[1];
+        assert!(
+            dimmed.abs_diff_eq(linear_color(day.horizon_color) * 0.25, 1e-6),
+            "{dimmed}"
         );
         assert_eq!(sky.skies, 0);
     }

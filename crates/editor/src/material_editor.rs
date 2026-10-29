@@ -29,7 +29,7 @@ use std::path::Path;
 
 use axcenity_assets::{
     Assets, Channel, MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MaterialChain, MaterialFile,
-    StandardMaterial, read_material_file, write_material_file,
+    StandardMaterial, StandardWater, WaterFile, read_material_file, write_material_file,
 };
 use axcenity_core::{ClassName, Color3, InstanceId, PartType, Value, Vector3, World};
 use axcenity_render::glam::Vec3;
@@ -966,6 +966,8 @@ fn values(
         );
     });
 
+    water_rows(ui, file, base.water, changes);
+
     graph::parameter_rows(ui, scene, path, file, chain, changes);
 
     ui.add_space(6.0);
@@ -1105,6 +1107,121 @@ fn pair_row(
         });
     });
     ui.end_row();
+}
+
+/// The Water section: whether the material is water, and its waves, color
+/// and foam (`docs/rendering/water.md`). `base` is what its bases give.
+fn water_rows(
+    ui: &mut egui::Ui,
+    file: &MaterialFile,
+    base: Option<StandardWater>,
+    changes: &mut Vec<Change>,
+) {
+    ui.add_space(6.0);
+    widgets::section_label(ui, "Water");
+    let own = file.water.clone();
+    responsive::form(ui, "material water", |ui| {
+        let label = value_label(ui, "Water", own.is_some());
+        label.on_hover_text(
+            "Draws a part with this material as water: its box's top, with waves, what's \
+             under seen through it, reflections and foam.",
+        );
+        ui.horizontal(|ui| {
+            let mut on = own.is_some() || base.is_some();
+            if ui.checkbox(&mut on, "").changed() {
+                changes.push((
+                    "water",
+                    Box::new(move |file| file.water = on.then(WaterFile::default)),
+                ));
+            }
+            reset_button(ui, own.is_some(), "water", changes, |file| {
+                file.water = None
+            });
+        });
+        ui.end_row();
+        if own.is_none() && base.is_none() {
+            return;
+        }
+        // Each value this file leaves out shows its base's (or the default).
+        let below = base.unwrap_or_default();
+        let own = own.unwrap_or_default();
+        color_row(
+            ui,
+            "Deep color",
+            own.deep_color,
+            below.deep_color,
+            "water deep color",
+            changes,
+            |file, value| water_of(file).deep_color = value,
+        );
+        let mut row = |name, field, (own, below), range, set: WaterSetter| {
+            number_row(
+                ui,
+                (name, field),
+                (own, below),
+                range,
+                changes,
+                move |file, value| set(water_of(file), value),
+            );
+        };
+        row(
+            "Clarity",
+            "water clarity",
+            (own.clarity, below.clarity),
+            0.1..=50.0,
+            |water, value| water.clarity = value,
+        );
+        row(
+            "Wave height",
+            "water wave height",
+            (own.wave_height, below.wave_height),
+            0.0..=5.0,
+            |water, value| water.wave_height = value,
+        );
+        row(
+            "Wave length",
+            "water wave length",
+            (own.wave_length, below.wave_length),
+            1.0..=200.0,
+            |water, value| water.wave_length = value,
+        );
+        row(
+            "Wave speed",
+            "water wave speed",
+            (own.wave_speed, below.wave_speed),
+            0.0..=4.0,
+            |water, value| water.wave_speed = value,
+        );
+        row(
+            "Wave direction",
+            "water wave direction",
+            (own.wave_direction, below.wave_direction),
+            0.0..=360.0,
+            |water, value| water.wave_direction = value,
+        );
+        row(
+            "Foam",
+            "water foam",
+            (own.foam, below.foam),
+            0.0..=4.0,
+            |water, value| water.foam = value,
+        );
+        row(
+            "Refraction",
+            "water refraction",
+            (own.refraction, below.refraction),
+            0.0..=2.0,
+            |water, value| water.refraction = value,
+        );
+    });
+}
+
+/// Sets one of a water material's values (`None` leaves it to the base).
+type WaterSetter = fn(&mut WaterFile, Option<f32>);
+
+/// `file`'s water values, made water if it wasn't.
+fn water_of(file: &mut MaterialFile) -> &mut WaterFile {
+    file.water.get_or_insert_with(WaterFile::default)
 }
 
 /// One of a material's texture maps.

@@ -199,6 +199,11 @@ impl ScenePipeline {
             [&frame_layout, &material_layout, &skinning.layout],
             samples,
         );
+        let water = water::WaterPass::new(
+            &device,
+            [&frame_layout, &material_layout, &skinning.layout],
+            samples,
+        );
         let mut terrain =
             terrain::TerrainPass::new(&device, &frame_layout, texture_bytes.clone(), samples);
         terrain.set_skipped_levels(graphics.texture_quality.skipped_levels());
@@ -270,6 +275,8 @@ impl ScenePipeline {
             light_probes,
             realtime_gi: None,
             volumetric_fog: None,
+            water,
+            water_frame_bind_group: None,
             cloud_drift: Default::default(),
             frame_entries,
             sun_disc: true,
@@ -414,6 +421,15 @@ impl ScenePipeline {
             );
             self.terrain
                 .set_samples(&self.device, &self.frame_layout, samples);
+            self.water.set_samples(
+                &self.device,
+                [
+                    &self.frame_layout,
+                    &self.material_layout,
+                    &self.skinning.layout,
+                ],
+                samples,
+            );
             self.sprites.set_samples(&self.device, samples);
             self.surface_shaders.clear_pipelines();
         }
@@ -571,6 +587,16 @@ impl ScenePipeline {
         let (probes, probe_count) = self.probes.uniform();
         frame_uniform.probes = probes;
         frame_uniform.reflection_probes[0] = probe_count;
+        // Water's copy of the solid scene exists only while it's used.
+        let water_mode = water::WaterMode::of(list, &self.graphics);
+        frame_uniform.reflection_probes[1..3].copy_from_slice(&water_mode.flags());
+        let copy_size = water_mode.copies().then_some(self.frame_targets.size);
+        if self
+            .water
+            .fit(&self.device, copy_size, &self.targets_alive.water)
+        {
+            self.bind_frame();
+        }
         let (volumes, volume_count) = self.light_probes.uniform();
         frame_uniform.volumes = volumes;
         frame_uniform.light_probes = [volume_count, u32::from(!self.sun_disc), 0, 0];
@@ -962,77 +988,83 @@ impl ScenePipeline {
 
         // The scene is drawn into the HDR texture; post-processing then brings
         // it to `view`. With MSAA it's drawn into the multisampled texture,
-        // whose samples are averaged into the HDR one as the pass ends. The
-        // pass is a block so it ends (is dropped) before `encoder.finish()`,
-        // which needs the encoder back.
-        {
-            let targets = &self.frame_targets;
-            let color_attachment = match &targets.msaa {
-                Some(msaa) => wgpu::RenderPassColorAttachment {
-                    view: &msaa.view,
-                    resolve_target: Some(&targets.hdr_view),
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        // Only the averaged result is needed.
-                        store: wgpu::StoreOp::Discard,
-                    },
-                },
-                None => wgpu::RenderPassColorAttachment {
-                    view: &targets.hdr_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                },
-            };
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("scene"),
-                color_attachments: &[Some(color_attachment)],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.frame_targets.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
-                    }),
-                    stencil_ops: None,
-                }),
-                ..Default::default()
-            });
-
-            pass.set_bind_group(0, frame_bind_group, &[]);
-            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            let mut drawn = (0, 0);
-            // Solid items come first, then the sky only where none was drawn
-            // (its depth test), so the sky and its clouds are worked out
-            // only for the pixels that show them, then see-through items
-            // over both.
-            let batch_count = batches.len();
-            let see_through = batches
-                .iter()
-                .position(|batch| batch.transparent)
-                .unwrap_or(batch_count);
-            for (index, batch) in batches.into_iter().enumerate() {
-                if index == see_through {
-                    pass.set_pipeline(&self.sky_pipeline);
-                    pass.draw(0..3, 0..1);
+        // whose samples are averaged into the HDR one as the pass ends.
+        // Solid items come first, then the sky only where none was drawn
+        // (its depth test), so the sky and its clouds are worked out only
+        // for the pixels that show them, then see-through items over both:
+        // water first, then the rest, then sprites. While water sees
+        // through itself, the pass stops before the see-through items so
+        // the solid scene can be copied for it (renderer/water.rs), and a
+        // second pass carries on where it left off.
+        let see_through = batches
+            .iter()
+            .position(|batch| batch.transparent)
+            .unwrap_or(batches.len());
+        let (solid, see_through) = batches.split_at(see_through);
+        let copied = self.water.copy.is_some() && see_through.iter().any(|batch| batch.water);
+        let water_group = self
+            .water_frame_bind_group
+            .as_ref()
+            .filter(|_| copied)
+            .unwrap_or(frame_bind_group);
+        let mut drawn = (0, 0);
+        let mut draw_batches = |pass: &mut wgpu::RenderPass<'_>, batches: &[Batch]| {
+            let mut water_bound = false;
+            for batch in batches {
+                if batch.water != water_bound {
+                    water_bound = batch.water;
+                    let group = if water_bound {
+                        water_group
+                    } else {
+                        frame_bind_group
+                    };
+                    pass.set_bind_group(0, group, &[]);
                 }
-                let Some(mesh) = self.bind_batch(&mut pass, &batch, false) else {
+                let Some(mesh) = self.bind_batch(pass, batch, false) else {
                     continue;
                 };
                 count(mesh.index_count, &batch.instances);
                 drawn.0 += batch.instances.end - batch.instances.start;
                 drawn.1 += 1;
-                pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
+                pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
             }
-            if see_through == batch_count {
-                pass.set_pipeline(&self.sky_pipeline);
-                pass.draw(0..3, 0..1);
+            if water_bound {
+                pass.set_bind_group(0, frame_bind_group, &[]);
             }
-            (counts.items_drawn, counts.batches) = drawn;
-            // Last, over everything, but hidden behind solid items.
+        };
+        // Each pass is a block so it ends (is dropped) before the next
+        // begins and before `encoder.finish()`, which need the encoder back.
+        {
+            let mut pass = begin_scene_pass(&mut encoder, &self.frame_targets, false, copied);
+            pass.set_bind_group(0, frame_bind_group, &[]);
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            draw_batches(&mut pass, solid);
+            pass.set_pipeline(&self.sky_pipeline);
+            pass.draw(0..3, 0..1);
+            if !copied {
+                draw_batches(&mut pass, see_through);
+                // Last, over everything, but hidden behind solid items.
+                self.sprites.draw(&mut pass, &sprite_draws);
+            }
+        }
+        if copied {
+            let targets = &self.frame_targets;
+            self.water.copy_scene(
+                (&self.device, &self.queue),
+                &mut encoder,
+                (&targets.hdr_view, &targets.depth_view),
+                water::CopyView {
+                    inv_view_proj: frame_uniform.inv_view_proj,
+                    camera_position: frame_uniform.camera_position,
+                },
+            );
+            let mut pass = begin_scene_pass(&mut encoder, targets, true, false);
+            pass.set_bind_group(0, frame_bind_group, &[]);
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            draw_batches(&mut pass, see_through);
             self.sprites.draw(&mut pass, &sprite_draws);
         }
+        (counts.items_drawn, counts.batches) = drawn;
         // The light the volumetric fog scattered in front of what was drawn.
         if let (Some(fog), Some(occlusion)) = (&self.volumetric_fog, &self.frame_targets.occlusion)
         {
@@ -1177,7 +1209,15 @@ impl ScenePipeline {
             pass.set_bind_group(1, group, &[]);
         } else {
             let surface = batch.shader.and_then(|key| self.surface_shaders.get(key));
+            let water = &self.water.pipelines;
+            let water = if self.water.copy.is_some() {
+                &water.refracted
+            } else {
+                &water.blended
+            };
             let pipeline = match (prepass, batch.double_sided, surface) {
+                // Water is never in the prepass.
+                _ if batch.water => water,
                 (false, _, Some(surface)) => surface.items.of(batch),
                 (false, _, None) => self.item_pipelines.of(batch),
                 (true, double_sided, Some(surface)) => surface.prepass(double_sided),
@@ -1230,7 +1270,7 @@ impl ScenePipeline {
             .map_or(&self.no_prepass_depth_view, |targets| &targets.depth_view);
         let (environment, sky_image) = self.environment.views();
         let probes = self.probes.view();
-        let bind = |layout, prepass_depth| {
+        let bind = |layout, prepass_depth, occlusion| {
             create_frame_bind_group(
                 &self.device,
                 layout,
@@ -1258,12 +1298,19 @@ impl ScenePipeline {
                 ],
             )
         };
-        self.frame_bind_group = bind(&self.frame_layout, prepass_depth);
-        self.prepass_frame_bind_group = bind(&self.frame_layout, &self.no_prepass_depth_view);
+        self.frame_bind_group = bind(&self.frame_layout, prepass_depth, occlusion);
+        self.prepass_frame_bind_group =
+            bind(&self.frame_layout, &self.no_prepass_depth_view, occlusion);
+        // Water reads its copy of the scene in ambient occlusion's place.
+        self.water_frame_bind_group = self
+            .water
+            .copy
+            .as_ref()
+            .map(|copy| bind(&self.frame_layout, prepass_depth, &copy.view));
         let fog_group = self
             .volumetric_fog
             .as_ref()
-            .map(|fog| bind(&fog.frame_layout, prepass_depth));
+            .map(|fog| bind(&fog.frame_layout, prepass_depth, occlusion));
         if let Some(fog) = &mut self.volumetric_fog {
             fog.frame_group = fog_group;
         }
@@ -1321,6 +1368,13 @@ impl ScenePipeline {
         Arc::strong_count(&self.targets_alive.volumetric_fog) - 1
     }
 
+    /// How many of water's copies of the scene are alive: 0 or 1, unless
+    /// one leaked.
+    #[cfg(test)]
+    pub(super) fn water_copies_alive(&self) -> usize {
+        Arc::strong_count(&self.targets_alive.water) - 1
+    }
+
     /// How many multisampled and FXAA targets are alive: 0 or 1 each.
     #[cfg(test)]
     pub(super) fn anti_aliasing_targets_alive(&self) -> (usize, usize) {
@@ -1373,7 +1427,8 @@ impl ScenePipeline {
                 + self.environment.bytes()
                 + self.probes.bytes()
                 + self.realtime_gi.as_ref().map_or(0, |gi| gi.bytes())
-                + self.volumetric_fog.as_ref().map_or(0, |fog| fog.bytes()),
+                + self.volumetric_fog.as_ref().map_or(0, |fog| fog.bytes())
+                + self.water.copy.as_ref().map_or(0, |copy| copy.bytes),
             buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum(),
         }
     }
@@ -1832,6 +1887,65 @@ impl ScenePipeline {
             mapped_at_creation: false,
         });
     }
+}
+
+/// Begins a scene pass into `targets`: clearing them, or (`load`) carrying
+/// on with what an earlier scene pass drew. With MSAA its samples are
+/// averaged into the HDR texture as it ends. `keep` keeps the samples and
+/// depth for a later pass (water's copy reads the depth); otherwise they're
+/// thrown away.
+fn begin_scene_pass<'a>(
+    encoder: &'a mut wgpu::CommandEncoder,
+    targets: &'a FrameTargets,
+    load: bool,
+    keep: bool,
+) -> wgpu::RenderPass<'a> {
+    let (color_load, depth_load) = if load {
+        (wgpu::LoadOp::Load, wgpu::LoadOp::Load)
+    } else {
+        (
+            wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+            wgpu::LoadOp::Clear(1.0),
+        )
+    };
+    let kept = if keep {
+        wgpu::StoreOp::Store
+    } else {
+        wgpu::StoreOp::Discard
+    };
+    let color_attachment = match &targets.msaa {
+        Some(msaa) => wgpu::RenderPassColorAttachment {
+            view: &msaa.view,
+            resolve_target: Some(&targets.hdr_view),
+            ops: wgpu::Operations {
+                load: color_load,
+                // Only the averaged result is needed, unless a later pass
+                // carries on drawing.
+                store: kept,
+            },
+        },
+        None => wgpu::RenderPassColorAttachment {
+            view: &targets.hdr_view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: color_load,
+                store: wgpu::StoreOp::Store,
+            },
+        },
+    };
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("scene"),
+        color_attachments: &[Some(color_attachment)],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: &targets.depth_view,
+            depth_ops: Some(wgpu::Operations {
+                load: depth_load,
+                store: kept,
+            }),
+            stencil_ops: None,
+        }),
+        ..Default::default()
+    })
 }
 
 /// The scene pass's sky pipeline and its pipelines for items, for drawing

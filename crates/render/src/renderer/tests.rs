@@ -19,6 +19,7 @@ mod reflection_probes;
 mod skinning;
 mod surface_shaders;
 mod texture_budget;
+mod water;
 mod weather;
 mod wind;
 
@@ -198,6 +199,7 @@ fn batch(mesh: MeshKey, transparent: bool, instances: Range<u32>) -> Batch {
         double_sided: false,
         casts_shadow: true,
         shader: None,
+        water: false,
         instances,
     }
 }

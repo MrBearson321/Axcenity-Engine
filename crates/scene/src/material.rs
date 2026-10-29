@@ -9,6 +9,7 @@ use axcenity_core::{ClassName, Instance, InstanceId, TextureChannel, Value, Worl
 use axcenity_render::glam::Mat4;
 use axcenity_render::{
     Channel, ChannelMap, Material, NormalMap, SURFACE_PARAMETERS, SurfaceShader, Sway, TextureMaps,
+    Water,
 };
 
 use crate::draw_list::{GLOW_BOOST, texture};
@@ -83,6 +84,16 @@ pub(crate) fn variant_material(standard: &StandardMaterial, assets: &Assets) -> 
             .as_ref()
             .map(|shader| SurfaceShader::new(&shader.file, &shader.code)),
         surface_parameters: surface_parameters(standard),
+        water: standard.water.map(|water| Water {
+            deep_color: water.deep_color,
+            clarity: water.clarity,
+            wave_height: water.wave_height,
+            wave_length: water.wave_length,
+            wave_speed: water.wave_speed,
+            wave_direction: water.wave_direction,
+            foam: water.foam,
+            refraction: water.refraction,
+        }),
     }
 }
 
@@ -491,6 +502,47 @@ mod tests {
         assert!((sway.height - 6.0).abs() < 1e-4, "{sway:?}");
         assert_eq!(sway.strength, 0.7);
         assert_eq!(list.items[1].sway, None, "brick doesn't sway");
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_water_material_draws_its_part_as_water_on_the_wave_grid() {
+        let folder = project("water");
+        let pool = "assets/materials/pool.material.json";
+        write(
+            &folder,
+            pool,
+            &MaterialFile {
+                water: Some(axcenity_assets::WaterFile {
+                    wave_height: Some(0.4),
+                    ..Default::default()
+                }),
+                ..MaterialFile::default()
+            },
+        );
+        write(&folder, BASE, &brick());
+        let assets = Assets::new(&folder);
+        let mut world = World::new();
+        part(&mut world, vec![variant(pool)]);
+        part(&mut world, vec![variant(BASE)]);
+        let camera = Camera {
+            position: Vec3::Z,
+            look_at: Vec3::ZERO,
+            fov_y_degrees: 50.0,
+        };
+        let list = build_draw_list(&world, &assets, camera);
+        let water = list.items[0].material.water.expect("the pool is water");
+        assert_eq!(water.wave_height, 0.4);
+        assert_eq!(
+            water.clarity,
+            axcenity_assets::StandardWater::default().clarity
+        );
+        let axcenity_render::Shape::Mesh(mesh) = &list.items[0].shape else {
+            panic!("water is drawn on the wave grid");
+        };
+        assert_eq!(mesh.key(), axcenity_render::water_surface().key());
+        assert_eq!(list.items[1].material.water, None, "brick isn't water");
+        assert!(matches!(list.items[1].shape, axcenity_render::Shape::Block));
         let _ = std::fs::remove_dir_all(folder);
     }
 

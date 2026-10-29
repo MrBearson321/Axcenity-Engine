@@ -663,8 +663,14 @@ fn part_draw_item(
     } else {
         0.0
     };
+    // Water is the top of the part's box, cut fine enough to make waves.
+    let shape = if material.water.is_some() {
+        Shape::Mesh(axcenity_render::water_surface())
+    } else {
+        built_in_shape(shape)
+    };
     Some(DrawItem {
-        shape: built_in_shape(shape),
+        shape,
         transform,
         material,
         uv_tile,

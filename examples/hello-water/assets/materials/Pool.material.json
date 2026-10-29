@@ -1,0 +1,12 @@
+{
+  "color": [0.85, 0.97, 1.0],
+  "water": {
+    "deepColor": [0.02, 0.2, 0.28],
+    "clarity": 3,
+    "waveHeight": 0.12,
+    "waveLength": 9,
+    "waveDirection": 30,
+    "foam": 0.4,
+    "refraction": 0.35
+  }
+}

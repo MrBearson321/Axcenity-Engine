@@ -657,9 +657,12 @@ pub(super) fn plan_draws(
         .iter()
         .map(|draw| (draw.mesh(), material_key(draw.item)))
         .collect();
+    // Water is drawn with the see-through items, before them (see
+    // renderer/water.rs).
+    let water = |index: usize| draws[index].item.material.water.is_some();
     let (mut transparent, mut opaque): (Vec<usize>, Vec<usize>) = (0..draws.len())
         .filter(|&index| draws[index].item.material.opacity > 0.0)
-        .partition(|&index| draws[index].item.material.opacity < 1.0);
+        .partition(|&index| draws[index].item.material.opacity < 1.0 || water(index));
 
     let sidedness = |draw: &Draw| {
         (
@@ -682,7 +685,11 @@ pub(super) fn plan_draws(
             .distance_squared(list.camera.position)
     };
     // `total_cmp` orders floats even when one is NaN, so sorting can't panic.
-    transparent.sort_by(|&a, &b| distance(b).total_cmp(&distance(a)));
+    transparent.sort_by(|&a, &b| {
+        water(b)
+            .cmp(&water(a))
+            .then_with(|| distance(b).total_cmp(&distance(a)))
+    });
 
     let mut plan = DrawPlan::default();
     // Where each skin's joints start, by the skin's address: items posed
@@ -748,6 +755,7 @@ pub(super) fn plan_draws(
         plan.instances.push(raw);
         let (double_sided, casts_shadow) = (item.material.double_sided, draw.casts_shadow);
         let shader = shader_key(item);
+        let water = item.material.water.is_some();
         match plan.batches.last_mut() {
             Some(last)
                 if last.mesh == mesh
@@ -755,7 +763,8 @@ pub(super) fn plan_draws(
                     && last.transparent == transparent
                     && last.double_sided == double_sided
                     && last.casts_shadow == casts_shadow
-                    && last.shader == shader =>
+                    && last.shader == shader
+                    && last.water == water =>
             {
                 last.instances.end = index + 1;
             }
@@ -766,6 +775,7 @@ pub(super) fn plan_draws(
                 double_sided,
                 casts_shadow,
                 shader,
+                water,
                 instances: index..index + 1,
             }),
         }
@@ -777,7 +787,7 @@ pub(super) fn plan_draws(
 /// standard material's. Terrain has its own shader.
 fn shader_key(item: &DrawItem) -> Option<u64> {
     let material = &item.material;
-    if material.terrain.is_some() {
+    if material.terrain.is_some() || material.water.is_some() {
         return None;
     }
     material.surface_shader.as_ref().map(|shader| shader.key())
@@ -814,7 +824,12 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
         };
     }
     let textures = material_textures(item).map(|source| source.map(|source| source.key()));
-    let params = item.material.surface_parameters;
+    // Water's values ride in the surface shader's place: water has none.
+    let mut params = item.material.surface_parameters;
+    if let Some(water) = &item.material.water {
+        params = [[0.0; 4]; SURFACE_PARAMETERS];
+        params[..3].copy_from_slice(&super::water::water_params(water));
+    }
     if textures.iter().all(Option::is_none) && params == [[0.0; 4]; SURFACE_PARAMETERS] {
         return MaterialKey::default();
     }

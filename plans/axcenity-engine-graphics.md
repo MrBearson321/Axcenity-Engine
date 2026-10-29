@@ -485,8 +485,8 @@ A water material (a shading option on material files) with animated Gerstner wav
 
 ### Acceptance criteria
 
-- [ ] A water plane over a pool shows the pool floor bent by the waves, reflects the sky and nearby parts, and tints deeper water.
-- [ ] Water draws correctly with fog, weather and the other Milestone 5 features on, and scales down on Low.
+- [x] A water plane over a pool shows the pool floor bent by the waves, reflects the sky and nearby parts, and tints deeper water.
+- [x] Water draws correctly with fog, weather and the other Milestone 5 features on, and scales down on Low.
 
 ---
 

@@ -73,6 +73,12 @@ pub struct MaterialFile {
     /// default) keeps it still, 1 gives like grass (`docs/rendering/wind.md`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sway: Option<f32>,
+    /// Makes it a water material: waves, what's under seen through it,
+    /// reflections and foam, in place of the standard surface and any
+    /// shader (`docs/rendering/water.md`). `{}` is water with every value
+    /// at its default; an instance changes them value by value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub water: Option<WaterFile>,
     /// WGSL code with a `surface` function that works out each pixel's
     /// surface in place of the standard one (`docs/rendering/models.md`).
     /// `""` is none, so an instance can go back to the standard surface.
@@ -116,6 +122,98 @@ impl ParamValue {
             }
         }
         out
+    }
+}
+
+/// A water material's values as written, each `None` when the file leaves
+/// it to its base (or the default, [`StandardWater::default`]).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WaterFile {
+    /// sRGB, 0 to 1: the color deep water shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deep_color: Option<[f32; 3]>,
+    /// Studs of water before only about a third of what's under shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clarity: Option<f32>,
+    /// How high the biggest wave rises, in studs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wave_height: Option<f32>,
+    /// How long the biggest wave is, crest to crest, in studs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wave_length: Option<f32>,
+    /// 1 rolls at the speed of real waves of that length, 0 stills them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wave_speed: Option<f32>,
+    /// Degrees: 0 rolls toward +X, 90 toward +Z.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wave_direction: Option<f32>,
+    /// Studs of depth the foam reaches from where the water meets
+    /// something; 0 is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foam: Option<f32>,
+    /// How far the waves bend what's under, in studs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refraction: Option<f32>,
+}
+
+impl WaterFile {
+    /// `self`'s values, and `base`'s where `self` has none.
+    pub fn over(&self, base: &WaterFile) -> WaterFile {
+        WaterFile {
+            deep_color: self.deep_color.or(base.deep_color),
+            clarity: self.clarity.or(base.clarity),
+            wave_height: self.wave_height.or(base.wave_height),
+            wave_length: self.wave_length.or(base.wave_length),
+            wave_speed: self.wave_speed.or(base.wave_speed),
+            wave_direction: self.wave_direction.or(base.wave_direction),
+            foam: self.foam.or(base.foam),
+            refraction: self.refraction.or(base.refraction),
+        }
+    }
+
+    /// Every value, with the default's where this has none.
+    pub fn resolve(&self) -> StandardWater {
+        let default = StandardWater::default();
+        StandardWater {
+            deep_color: self.deep_color.unwrap_or(default.deep_color),
+            clarity: self.clarity.unwrap_or(default.clarity),
+            wave_height: self.wave_height.unwrap_or(default.wave_height),
+            wave_length: self.wave_length.unwrap_or(default.wave_length),
+            wave_speed: self.wave_speed.unwrap_or(default.wave_speed),
+            wave_direction: self.wave_direction.unwrap_or(default.wave_direction),
+            foam: self.foam.unwrap_or(default.foam),
+            refraction: self.refraction.unwrap_or(default.refraction),
+        }
+    }
+}
+
+/// A water material's values, every one filled in. Its defaults are a
+/// clear blue pool with gentle waves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StandardWater {
+    pub deep_color: [f32; 3],
+    pub clarity: f32,
+    pub wave_height: f32,
+    pub wave_length: f32,
+    pub wave_speed: f32,
+    pub wave_direction: f32,
+    pub foam: f32,
+    pub refraction: f32,
+}
+
+impl Default for StandardWater {
+    fn default() -> Self {
+        Self {
+            deep_color: [0.02, 0.16, 0.22],
+            clarity: 4.0,
+            wave_height: 0.25,
+            wave_length: 12.0,
+            wave_speed: 1.0,
+            wave_direction: 0.0,
+            foam: 0.5,
+            refraction: 0.3,
+        }
     }
 }
 
@@ -226,6 +324,10 @@ impl MaterialFile {
             offset: self.offset.or(base.offset),
             double_sided: self.double_sided.or(base.double_sided),
             sway: self.sway.or(base.sway),
+            water: match (&self.water, &base.water) {
+                (Some(own), Some(below)) => Some(own.over(below)),
+                (own, below) => own.clone().or_else(|| below.clone()),
+            },
             shader: self.shader.clone().or_else(|| base.shader.clone()),
             parameters: base
                 .parameters
@@ -276,6 +378,7 @@ impl MaterialFile {
             offset: self.offset.unwrap_or(default.offset),
             double_sided: self.double_sided.unwrap_or(default.double_sided),
             sway: self.sway.unwrap_or(default.sway),
+            water: self.water.as_ref().map(WaterFile::resolve),
             shader: self
                 .shader
                 .as_deref()
@@ -312,6 +415,8 @@ pub struct StandardMaterial {
     pub double_sided: bool,
     /// How much it sways in the wind (0: not at all).
     pub sway: f32,
+    /// Its water, if it's a water material.
+    pub water: Option<StandardWater>,
     /// Its surface shader, if it has one.
     pub shader: Option<MaterialShader>,
     /// The values its shader reads (`parameter(i)` is the `i`th), in name
@@ -347,6 +452,7 @@ impl Default for StandardMaterial {
             offset: [0.0, 0.0],
             double_sided: false,
             sway: 0.0,
+            water: None,
             shader: None,
             parameters: Vec::new(),
         }
@@ -622,6 +728,16 @@ mod tests {
             offset: Some([0.5, 0.25]),
             double_sided: Some(true),
             sway: Some(0.6),
+            water: Some(WaterFile {
+                deep_color: Some([0.0, 0.2, 0.3]),
+                clarity: Some(6.0),
+                wave_height: Some(0.4),
+                wave_length: Some(20.0),
+                wave_speed: Some(0.5),
+                wave_direction: Some(45.0),
+                foam: Some(1.0),
+                refraction: Some(0.2),
+            }),
             shader: Some(
                 "fn surface(input: SurfaceInput) -> Surface {
     return standard_surface(input);
@@ -659,6 +775,58 @@ mod tests {
             parse_material("{ \"metalness\": \"shiny\" }"),
             Err(MaterialFileError::Format(_))
         ));
+        let _ = fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_water_instance_changes_its_bases_waves_value_by_value() {
+        let folder = project("water");
+        let lake = "assets/materials/lake.material.json";
+        write(
+            &folder,
+            lake,
+            &MaterialFile {
+                water: Some(WaterFile {
+                    deep_color: Some([0.0, 0.3, 0.2]),
+                    wave_height: Some(0.5),
+                    ..WaterFile::default()
+                }),
+                ..MaterialFile::default()
+            },
+        );
+        let calm = MaterialFile {
+            base: Some(lake.into()),
+            water: Some(WaterFile {
+                wave_height: Some(0.05),
+                ..WaterFile::default()
+            }),
+            ..MaterialFile::default()
+        };
+        write(&folder, "assets/materials/calm.material.json", &calm);
+        // `{}` is water at its defaults.
+        fs::write(
+            folder.join("assets/materials/pool.material.json"),
+            "{ \"water\": {} }",
+        )
+        .unwrap();
+        let assets = Assets::new(&folder);
+        let water = assets
+            .material("assets/materials/calm.material.json")
+            .unwrap()
+            .water
+            .unwrap();
+        assert_eq!(water.wave_height, 0.05);
+        assert_eq!(water.deep_color, [0.0, 0.3, 0.2]);
+        assert_eq!(water.clarity, StandardWater::default().clarity);
+        let pool = assets
+            .material("assets/materials/pool.material.json")
+            .unwrap();
+        assert_eq!(pool.water, Some(StandardWater::default()));
+        assert_eq!(
+            StandardMaterial::default().water,
+            None,
+            "not water by default"
+        );
         let _ = fs::remove_dir_all(folder);
     }
 

@@ -1113,6 +1113,12 @@ pub struct Material {
     /// file's `parameters`, in name order), so materials that differ only
     /// in them share the shader's pipelines. Unused ones are 0.
     pub surface_parameters: [[f32; 4]; SURFACE_PARAMETERS],
+    /// Draws the item as water (a material file's `water`): waves, what's
+    /// under it seen through it, reflections and foam, in place of the
+    /// standard surface and any surface shader. Its `base_color` tints
+    /// what's seen through it. Draw it on [`crate::water_surface`] so the
+    /// waves have corners to move.
+    pub water: Option<crate::Water>,
 }
 
 /// How many values a surface shader can read with `parameter(i)`
@@ -1137,6 +1143,7 @@ impl Default for Material {
             terrain: None,
             surface_shader: None,
             surface_parameters: [[0.0; 4]; SURFACE_PARAMETERS],
+            water: None,
         }
     }
 }

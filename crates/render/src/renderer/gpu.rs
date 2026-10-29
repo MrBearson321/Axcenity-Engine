@@ -30,6 +30,16 @@ pub(super) const SCENE_SHADER: &str = concat!(
     include_str!("../shader.wgsl"),
     include_str!("../surface.wgsl")
 );
+/// Water's shader: the scene's, then water.wgsl (see renderer/water.rs).
+pub(super) const WATER_SHADER: &str = concat!(
+    include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
+    include_str!("../lighting.wgsl"),
+    include_str!("../shader.wgsl"),
+    include_str!("../surface.wgsl"),
+    include_str!("../water.wgsl")
+);
 /// [`SCENE_SHADER`] without its `surface` function: a material's surface
 /// shader goes after it (`surface_shaders.rs`).
 pub(super) const SCENE_TEMPLATE: &str = concat!(
@@ -455,7 +465,8 @@ pub(super) fn create_depth_view(
             sample_count: samples,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            // Water's copy of the scene reads it (renderer/water.rs).
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         })
         .create_view(&wgpu::TextureViewDescriptor::default())

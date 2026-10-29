@@ -66,6 +66,7 @@ mod terrain;
 pub(crate) mod text;
 mod texture_budget;
 mod ui_pass;
+mod water;
 
 #[cfg(test)]
 use crate::draw_list::{ChannelMap, MeshSource};

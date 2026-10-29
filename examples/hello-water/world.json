@@ -1,0 +1,400 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "GroundNorth",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.36,
+            0.55,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -0.5,
+            -24.5
+          ],
+          "Shape": "Block",
+          "Size": [
+            80,
+            1,
+            31
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "GroundSouth",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.36,
+            0.55,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -0.5,
+            24.5
+          ],
+          "Shape": "Block",
+          "Size": [
+            80,
+            1,
+            31
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "GroundWest",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.36,
+            0.55,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -24.5,
+            -0.5,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            31,
+            1,
+            18
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "GroundEast",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.36,
+            0.55,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            24.5,
+            -0.5,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            31,
+            1,
+            18
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "PoolFloorDeep",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.35,
+            0.62,
+            0.72
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -6.5,
+            -3
+          ],
+          "Shape": "Block",
+          "Size": [
+            16,
+            1,
+            10
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "PoolFloorShallow",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.35,
+            0.62,
+            0.72
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -1.7,
+            5
+          ],
+          "Shape": "Block",
+          "Size": [
+            16,
+            1,
+            6
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "PoolStep",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.35,
+            0.62,
+            0.72
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -4.1,
+            1.5
+          ],
+          "Shape": "Block",
+          "Size": [
+            16,
+            4.8,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "WallNorth",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.78,
+            0.74,
+            0.66
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -3.5,
+            -8.5
+          ],
+          "Shape": "Block",
+          "Size": [
+            18,
+            7,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "WallSouth",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.78,
+            0.74,
+            0.66
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -3.5,
+            8.5
+          ],
+          "Shape": "Block",
+          "Size": [
+            18,
+            7,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "WallWest",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.78,
+            0.74,
+            0.66
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -8.5,
+            -3.5,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            1,
+            7,
+            16
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "WallEast",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.78,
+            0.74,
+            0.66
+          ],
+          "Material": "Plastic",
+          "Position": [
+            8.5,
+            -3.5,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            1,
+            7,
+            16
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Rim",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.9,
+            0.88,
+            0.82
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            0.2,
+            8.5
+          ],
+          "Shape": "Block",
+          "Size": [
+            18,
+            0.4,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Water",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            1,
+            1,
+            1
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -0.75,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            16,
+            1,
+            16
+          ],
+          "MaterialVariant": "assets/materials/Pool.material.json",
+          "CastShadow": false
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ball",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.9,
+            0.2,
+            0.15
+          ],
+          "Material": "Plastic",
+          "Position": [
+            2,
+            -4,
+            -4
+          ],
+          "Shape": "Ball",
+          "Size": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.85,
+            0.83,
+            0.78
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -4,
+            4,
+            -10
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            8,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Lamp",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            1,
+            0.55,
+            0.2
+          ],
+          "Material": "Neon",
+          "Position": [
+            5,
+            1.5,
+            -10
+          ],
+          "Shape": "Block",
+          "Size": [
+            1.5,
+            1.5,
+            1.5
+          ]
+        }
+      }
+    ]
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false,
+      "LeaderboardEnabled": true,
+      "RespawnTime": 5
+    }
+  }
+}

@@ -13,6 +13,7 @@ mod graphics;
 mod mesh;
 mod renderer;
 mod tone_mapping;
+mod water;
 
 pub use atmosphere::Atmosphere;
 pub use draw_list::{
@@ -36,6 +37,7 @@ pub use renderer::{
     ShaderError, SurfaceShader, TextureRenderer,
 };
 pub use tone_mapping::ToneMapping;
+pub use water::{WATER_GRID, Water, water_surface};
 
 /// Re-exported so callers build transforms with the same `glam` version.
 pub use glam;

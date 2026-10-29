@@ -51,7 +51,8 @@ struct Frame {
     // harmonics (rgb each), already blurred over the hemisphere and divided
     // by pi, so `sky_irradiance` gives what a white matte surface returns.
     sky_light: array<vec4<f32>, 9>,
-    // x: how many of `probes` are drawn.
+    // x: how many of `probes` are drawn, y: 1 while water reflects the
+    // screen, z: 1 while it sees through its copy of the scene (water.wgsl).
     reflection_probes: vec4<u32>,
     // The reflection probes drawn, smallest box first.
     probes: array<Probe, MAX_PROBES>,
