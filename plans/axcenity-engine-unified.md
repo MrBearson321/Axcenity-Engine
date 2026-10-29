@@ -1935,9 +1935,9 @@ Results are written as role-named PNGs.
 
 ### Acceptance criteria
 
-- [ ] A modeled humanoid with the template rig and automatic weights bends cleanly at the elbows and knees in Pose test.
-- [ ] The saved model plays a Mixamo walk clip through an Animator without retargeting.
-- [ ] Weight painting a shoulder and saving changes the deformation in the game the same way as in the Studio.
+- [x] A modeled humanoid with the template rig and automatic weights bends cleanly at the elbows and knees in Pose test.
+- [x] The saved model plays a Mixamo walk clip through an Animator without retargeting.
+- [x] Weight painting a shoulder and saving changes the deformation in the game the same way as in the Studio.
 
 ---
 

@@ -25,7 +25,7 @@
 
 mod brush;
 pub(crate) mod bvh;
-mod remesh;
+pub(crate) mod remesh;
 
 pub use brush::{SculptBrush, SculptDab, SculptTool};
 pub use remesh::{MAX_VOXELS, subdivide, voxel_remesh};

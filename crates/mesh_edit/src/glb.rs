@@ -17,6 +17,7 @@ use crate::{Mesh, Surface, position_key};
 /// glTF's numbers for its data types and buffer kinds.
 const FLOAT: u32 = 5126;
 const UNSIGNED_INT: u32 = 5125;
+const UNSIGNED_SHORT: u32 = 5123;
 const ARRAY_BUFFER: u32 = 34962;
 const ELEMENT_ARRAY_BUFFER: u32 = 34963;
 
@@ -92,7 +93,8 @@ pub fn write_glb(pieces: &[Mesh], materials: &[GlbMaterial], interior: &GlbMater
 
 /// A primitive's vertices and triangles, ready to write. Without `uvs`,
 /// it's written without texture coordinates; `uvs2` (the second set,
-/// `TEXCOORD_1`) may be empty.
+/// `TEXCOORD_1`) may be empty, and so may `joints` and `weights` (a
+/// skinned mesh's `JOINTS_0` and `WEIGHTS_0`).
 #[derive(Default)]
 pub(crate) struct Vertices {
     pub positions: Vec<Vec3>,
@@ -100,6 +102,10 @@ pub(crate) struct Vertices {
     pub uvs: Vec<Vec2>,
     pub uvs2: Vec<Vec2>,
     pub indices: Vec<u32>,
+    /// The mesh vertex each one is a corner of (not written).
+    pub vertex: Vec<u32>,
+    pub joints: Vec<[u16; 4]>,
+    pub weights: Vec<[f32; 4]>,
 }
 
 /// The triangles of `piece` on `surface`, with only the vertices they use.
@@ -309,6 +315,28 @@ impl File {
         let uvs2: Vec<f32> = vertices.uvs2.iter().flat_map(Vec2::to_array).collect();
         let uv2 = (uvs2.len() == count * 2)
             .then(|| self.add_accessor(&uvs2, count, "VEC2", ARRAY_BUFFER));
+        let skinned = vertices.joints.len() == count && vertices.weights.len() == count;
+        let joints = skinned.then(|| {
+            let view = self.add_view(
+                vertices
+                    .joints
+                    .iter()
+                    .flatten()
+                    .flat_map(|joint| joint.to_le_bytes()),
+                ARRAY_BUFFER,
+            );
+            self.accessors.push(json!({
+                "bufferView": view,
+                "componentType": UNSIGNED_SHORT,
+                "count": count,
+                "type": "VEC4",
+            }));
+            self.accessors.len() - 1
+        });
+        let weights = skinned.then(|| {
+            let flat: Vec<f32> = vertices.weights.iter().flatten().copied().collect();
+            self.add_accessor(&flat, count, "VEC4", ARRAY_BUFFER)
+        });
         let indices = self.add_view(
             vertices.indices.iter().flat_map(|i| i.to_le_bytes()),
             ELEMENT_ARRAY_BUFFER,
@@ -326,6 +354,10 @@ impl File {
         if let Some(uv2) = uv2 {
             attributes["TEXCOORD_1"] = json!(uv2);
         }
+        if let (Some(joints), Some(weights)) = (joints, weights) {
+            attributes["JOINTS_0"] = json!(joints);
+            attributes["WEIGHTS_0"] = json!(weights);
+        }
         json!({
             "attributes": attributes,
             "indices": self.accessors.len() - 1,
@@ -335,7 +367,13 @@ impl File {
 
     /// Writes `values` (`count` items of `kind`, such as "VEC3") and
     /// returns the accessor that reads them.
-    fn add_accessor(&mut self, values: &[f32], count: usize, kind: &str, target: u32) -> usize {
+    pub(crate) fn add_accessor(
+        &mut self,
+        values: &[f32],
+        count: usize,
+        kind: &str,
+        target: u32,
+    ) -> usize {
         let view = self.add_view(
             values.iter().flat_map(|value| finite(*value).to_le_bytes()),
             target,
@@ -363,6 +401,28 @@ impl File {
         self.buffer_views.len() - 1
     }
 
+    /// Writes `matrices` (column by column) as inverse bind matrices,
+    /// and returns their accessor. They aren't vertex data, so their view
+    /// has no target.
+    pub(crate) fn add_matrices(&mut self, matrices: &[glam::Mat4]) -> usize {
+        let start = self.bin.len();
+        let values = matrices.iter().flat_map(|m| m.to_cols_array());
+        self.bin
+            .extend(values.flat_map(|value| finite(value).to_le_bytes()));
+        self.buffer_views.push(json!({
+            "buffer": 0,
+            "byteOffset": start,
+            "byteLength": self.bin.len() - start,
+        }));
+        self.accessors.push(json!({
+            "bufferView": self.buffer_views.len() - 1,
+            "componentType": FLOAT,
+            "count": matrices.len(),
+            "type": "MAT4",
+        }));
+        self.accessors.len() - 1
+    }
+
     /// The finished file: header, JSON chunk and BIN chunk. `roots` are
     /// the nodes at the top of the scene; the rest are their `children`.
     pub(crate) fn finish(
@@ -370,6 +430,17 @@ impl File {
         nodes: Vec<Value>,
         meshes: Vec<Value>,
         roots: Vec<usize>,
+    ) -> Vec<u8> {
+        self.finish_with(nodes, meshes, roots, Vec::new())
+    }
+
+    /// [`finish`](Self::finish), with `skins`.
+    pub(crate) fn finish_with(
+        self,
+        nodes: Vec<Value>,
+        meshes: Vec<Value>,
+        roots: Vec<usize>,
+        skins: Vec<Value>,
     ) -> Vec<u8> {
         let mut root = json!({
             "asset": { "version": "2.0", "generator": "Axcenity Engine" },
@@ -390,6 +461,9 @@ impl File {
         }
         if self.transforms {
             root["extensionsUsed"] = json!(["KHR_texture_transform"]);
+        }
+        if !skins.is_empty() {
+            root["skins"] = json!(skins);
         }
         let mut json = serde_json::to_vec(&root).expect("glTF JSON is plain data");
         // Chunks are padded to 4 bytes: JSON with spaces, BIN with zeros.

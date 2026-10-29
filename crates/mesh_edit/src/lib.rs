@@ -66,6 +66,9 @@ pub mod paint;
 mod paint_tests;
 mod primitives;
 pub mod retopo;
+pub mod rig;
+#[cfg(test)]
+mod rig_tests;
 pub mod sculpt;
 #[cfg(test)]
 mod sculpt_tests;
@@ -97,6 +100,7 @@ pub use ops::{
 pub use paint::{MapKind, PaintSet, TexelMap, paint_folder};
 pub use primitives::{PrimitiveSettings, PrimitiveShape};
 pub use retopo::{PolyStep, Reference, decimate_to, poly_build, relax};
+pub use rig::{ArmBone, Armature, Skin};
 pub use sculpt::{Sculpt, subdivide, voxel_remesh};
 pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use sidecar::sidecar_path;

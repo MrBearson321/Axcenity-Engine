@@ -58,6 +58,38 @@ pub fn voxel_remesh(mesh: &EditMesh, size: f32) -> Result<EditMesh, String> {
     Ok(surface_nets(&grid, &field))
 }
 
+/// The surface where `distance` (negative inside) crosses 0, sampled
+/// `size` apart over the box from `min` to `max` (padded), as
+/// [`voxel_remesh`] makes it. An error past [`MAX_VOXELS`].
+pub(crate) fn field_mesh(
+    min: Vec3,
+    max: Vec3,
+    size: f32,
+    distance: impl Fn(Vec3) -> f32,
+) -> Result<EditMesh, String> {
+    let center = (min + max) / 2.0;
+    let extent = max - min;
+    let n: [usize; 3] = std::array::from_fn(|a| (extent[a] / size).ceil() as usize + 1 + 2 * PAD);
+    if n.iter().map(|&k| k as u64).product::<u64>() > MAX_VOXELS as u64 {
+        return Err("too many voxels".to_owned());
+    }
+    let grid = Grid {
+        n,
+        origin: center
+            - Vec3::new((n[0] - 1) as f32, (n[1] - 1) as f32, (n[2] - 1) as f32) * size / 2.0,
+        size,
+    };
+    let mut field = vec![0.0; n[0] * n[1] * n[2]];
+    for k in 0..n[2] {
+        for j in 0..n[1] {
+            for i in 0..n[0] {
+                field[grid.index(i, j, k)] = distance(grid.point(i, j, k));
+            }
+        }
+    }
+    Ok(surface_nets(&grid, &field))
+}
+
 /// Every face cut into four (Catmull-Clark, one level), smoothing the
 /// surface on the way.
 pub fn subdivide(mesh: &EditMesh) -> Result<EditMesh, String> {

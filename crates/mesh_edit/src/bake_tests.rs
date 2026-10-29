@@ -33,6 +33,7 @@ fn object(name: &str, mesh: EditMesh, material: &str) -> DocObject {
         uvs: true,
         modifiers: Vec::new(),
         paint: Vec::new(),
+        skin: None,
     }
 }
 
@@ -55,6 +56,7 @@ fn face_doc(triangles: usize) -> ModelDoc {
             object("Face", high, "Clay"),
             object("Face_Low", low, "Skin"),
         ],
+        armature: None,
     }
 }
 
@@ -371,6 +373,7 @@ fn baking_onto_overlapping_uvs_warns_which_islands_overlap() {
             object("Detail", cube.clone(), "Clay"),
             object("Box", cube.clone(), "Paint"),
         ],
+        armature: None,
     };
     let settings = BakeSettings {
         size: 64,

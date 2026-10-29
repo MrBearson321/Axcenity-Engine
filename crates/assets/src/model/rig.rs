@@ -2,7 +2,8 @@
 //!
 //! - A [`Rig`] is the skeleton a model's triangles hang from: its [`Bone`]s
 //!   (parents first) and the [`Joint`]s its vertices are weighted to. Only
-//!   animated models have one ([`Model::rig`]); FBX files give it.
+//!   animated models have one ([`Model::rig`]): an FBX file's skin or
+//!   animated objects, or a glTF file's skin (`gltf_rig`).
 //! - A [`Take`] is one timeline of an FBX file (an animation stack), baked
 //!   into keys per bone. Takes name their bones, so a take from one file can
 //!   move the skeleton of a model loaded from another (an animation-only

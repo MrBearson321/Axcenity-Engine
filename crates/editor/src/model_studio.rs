@@ -30,6 +30,10 @@
 //!   to snap to and build quads on (Poly Build), Make Low Poly, and Bake
 //!   (normal, occlusion, curvature and base color maps onto the active
 //!   object's uvs).
+//! - Rigging (Phase 62; `rig.rs`): Rig mode edits the armature (the
+//!   Humanoid template, bones added, extruded, parented, rolled and
+//!   mirrored) and skins objects to it; Weights mode paints the weights;
+//!   Pose mode turns bones to test them. Save writes a skinned `.glb`.
 //!
 //! The Studio keeps its own undo history while the mouse is over it; each
 //! edit is one step. Save writes the file and records it as one step of the
@@ -41,6 +45,7 @@ mod modifiers;
 pub(crate) mod paint;
 mod proportional;
 pub(crate) mod retopo;
+pub(crate) mod rig;
 pub(crate) mod sculpt;
 mod tools;
 pub(crate) mod uv_editor;
@@ -50,6 +55,7 @@ pub use modal::{Modal, ModalKind};
 pub use paint::PaintState;
 pub use proportional::{Falloff, Pivot, Proportional};
 pub use retopo::RetopoState;
+pub use rig::RigState;
 pub use sculpt::SculptState;
 pub use uv_editor::UvEditor;
 
@@ -69,7 +75,7 @@ use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets::{self, Role};
 
-/// Object mode, Edit mode, Paint mode or Sculpt mode.
+/// Object mode, Edit mode, Paint, Sculpt, Rig, Weights or Pose mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
@@ -79,6 +85,12 @@ pub enum Mode {
     Paint,
     /// Sculpting the active object (Phase 60).
     Sculpt,
+    /// Editing the model's armature and skinning objects to it (Phase 62).
+    Armature,
+    /// Painting the active object's weights to the active bone.
+    Weights,
+    /// Turning bones to test the deformation (not saved).
+    Pose,
 }
 
 /// What the tab asks the app to do.
@@ -224,7 +236,12 @@ impl StudioDoc {
     pub fn run(&mut self, op: MeshOp) -> Result<(), String> {
         let targets: Vec<(usize, Selection)> = match self.mode {
             Mode::Edit => vec![(self.active, self.selection.clone())],
-            Mode::Object | Mode::Paint | Mode::Sculpt => self
+            Mode::Object
+            | Mode::Paint
+            | Mode::Sculpt
+            | Mode::Armature
+            | Mode::Weights
+            | Mode::Pose => self
                 .objects
                 .iter()
                 .filter_map(|&object| {
@@ -364,10 +381,19 @@ impl StudioDoc {
         };
     }
 
-    /// Into `mode` (Edit, Paint and Sculpt mode need the active object to have a
-    /// mesh).
+    /// Into `mode` (Edit, Paint, Sculpt and Weights mode need the active
+    /// object to have a mesh; Pose mode needs bones).
     pub fn set_mode(&mut self, mode: Mode) {
-        if mode == Mode::Object || self.mesh().is_some() {
+        let allowed = match mode {
+            Mode::Object | Mode::Armature => true,
+            Mode::Pose => self
+                .model
+                .armature
+                .as_ref()
+                .is_some_and(|arm| !arm.bones.is_empty()),
+            _ => self.mesh().is_some(),
+        };
+        if allowed {
             self.last_op = None;
             self.mode = mode;
         }
@@ -434,7 +460,12 @@ impl StudioDoc {
                 .into_iter()
                 .filter(|(_, vertices)| !vertices.is_empty())
                 .collect(),
-            Mode::Object | Mode::Paint | Mode::Sculpt => self
+            Mode::Object
+            | Mode::Paint
+            | Mode::Sculpt
+            | Mode::Armature
+            | Mode::Weights
+            | Mode::Pose => self
                 .objects
                 .iter()
                 .filter_map(|&object| {
@@ -693,6 +724,8 @@ pub struct ModelStudio {
     pub sculpt: SculptState,
     /// The reference, Poly Build, Make Low Poly and Bake (Phase 61).
     pub retopo: RetopoState,
+    /// The active bone, the weight brush and the pose tested (Phase 62).
+    pub rig: RigState,
     /// The project's images, for a paint brush's image.
     pub images: Vec<String>,
     /// A keyboard move under way, and what it moves.
@@ -724,6 +757,7 @@ impl Default for ModelStudio {
             paint: PaintState::default(),
             sculpt: SculptState::default(),
             retopo: RetopoState::default(),
+            rig: RigState::default(),
             images: Vec::new(),
             modal: None,
             tools: tools::Tools::default(),
@@ -762,6 +796,7 @@ impl ModelStudio {
             || self.uv.busy()
             || self.paint.busy()
             || self.sculpt.busy()
+            || self.rig.busy()
     }
 
     /// Shows `doc`, unless the open one has unsaved changes: then it waits
@@ -781,6 +816,7 @@ impl ModelStudio {
         self.paint.forget();
         self.sculpt.forget();
         self.retopo.forget();
+        self.rig.forget();
         self.view.frame_doc(&doc);
         self.doc = Some(doc);
     }
@@ -833,6 +869,9 @@ impl ModelStudio {
                         match self.doc.as_ref().map(|d| d.mode) {
                             Some(Mode::Paint) => self.paint_panel(ui, editable, &mut actions),
                             Some(Mode::Sculpt) => self.sculpt_panel(ui, editable),
+                            Some(Mode::Armature | Mode::Weights | Mode::Pose) => {
+                                self.rig_panel(ui, editable)
+                            }
                             _ => {
                                 self.modifier_panel(ui, editable);
                                 self.retopo_panel(ui, editable, &mut actions);
@@ -953,6 +992,9 @@ impl ModelStudio {
                     (Mode::Edit, Some(icons::POLYGON), "Edit"),
                     (Mode::Paint, Some(icons::PAINT_BRUSH), "Paint"),
                     (Mode::Sculpt, Some(icons::HAND_GRABBING), "Sculpt"),
+                    (Mode::Armature, Some(icons::BONE), "Rig"),
+                    (Mode::Weights, Some(icons::DROP_HALF), "Weights"),
+                    (Mode::Pose, Some(icons::PERSON_SIMPLE_RUN), "Pose"),
                 ],
             ) && mode != doc.mode
             {
@@ -1206,6 +1248,7 @@ impl ModelStudio {
         let mode = self.doc.as_ref().map(|doc| doc.mode);
         let painting = mode == Some(Mode::Paint);
         let sculpting = mode == Some(Mode::Sculpt);
+        let rigging = mode.is_some_and(rig::shows_bones);
         let context = view::Frame {
             rect,
             response: &response,
@@ -1222,11 +1265,16 @@ impl ModelStudio {
             sculpt: self.sculpt_items(),
         };
         if editable && response.contains_pointer() {
-            if painting || sculpting {
+            if painting || sculpting || rigging {
                 if painting {
                     self.paint_keys(ui);
-                } else {
+                } else if sculpting {
                     self.sculpt_keys(ui);
+                } else {
+                    let at = ui
+                        .input(|input| input.pointer.latest_pos())
+                        .unwrap_or(rect.center());
+                    self.rig_keys(ui, at);
                 }
                 if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
                     && let Some(doc) = &mut self.doc
@@ -1245,6 +1293,15 @@ impl ModelStudio {
         if sculpting {
             extras.hint = self.sculpt.status.clone();
         }
+        // Weights and Pose mode draw the model skinned.
+        match self.rig_model_key() {
+            Some(key) if self.view.handed() != Some(key) => {
+                let model = self.rig_model();
+                self.view.use_model(Some(key), model);
+            }
+            Some(_) => {}
+            None => self.view.use_model(None, None),
+        }
         let Some(doc) = &mut self.doc else {
             return;
         };
@@ -1252,6 +1309,13 @@ impl ModelStudio {
         let event = self
             .view
             .show(ui, &context, render_state, doc, modal, &extras);
+        if rigging {
+            self.paint_bones(&ui.painter_at(rect), &event.screen);
+            if editable {
+                self.rig_in_view(ui, &response, &event.screen);
+            }
+            return;
+        }
         if painting || sculpting {
             if editable && painting {
                 self.paint_in_view(ui, &response, &event.screen);
@@ -1621,6 +1685,8 @@ pub(crate) mod modifiers_tests;
 pub(crate) mod paint_tests;
 #[cfg(test)]
 pub(crate) mod retopo_tests;
+#[cfg(test)]
+pub(crate) mod rig_tests;
 #[cfg(test)]
 pub(crate) mod sculpt_tests;
 #[cfg(test)]

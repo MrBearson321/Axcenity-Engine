@@ -96,7 +96,8 @@ pub struct Model {
     /// "The model `…` ".
     pub warnings: Vec<String>,
     /// The skeleton its triangles are weighted to, if it's animated (an
-    /// FBX file with a skin or animation). See [`Model::pose`].
+    /// FBX file with a skin or animation, or a glTF file with a skin). See
+    /// [`Model::pose`].
     pub rig: Option<Arc<Rig>>,
 }
 
@@ -661,19 +662,94 @@ fn read(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Model>, Model
         wanted: None,
         found: HashSet::new(),
         level: 0,
+        joints: Vec::new(),
+        skins: HashMap::new(),
     };
     let mut models = Vec::new();
     for pick in picks {
         reader.visits = 0;
         reader.wanted = pick.paths();
         reader.found.clear();
+        reader.joints.clear();
+        reader.skins.clear();
         reader.walk(&document)?;
         if let Some(path) = missing(&reader.wanted, &reader.found) {
             return Err(ModelError::NoObject(path));
         }
-        models.push(fit(std::mem::take(&mut reader.primitives))?);
+        let mut model = fit(std::mem::take(&mut reader.primitives))?;
+        if !reader.joints.is_empty() {
+            model.rig = Some(Arc::new(gltf_rig(
+                &document,
+                &reader.joints,
+                fit_matrix(&model),
+            )));
+        }
+        models.push(model);
     }
     Ok(models)
+}
+
+/// The skeleton for `joints` (each a node's index and its inverse bind
+/// matrix): their nodes and every node above them, parents first, each
+/// resting where its node is.
+fn gltf_rig(document: &gltf::Document, joints: &[(usize, Mat4)], fit: Mat4) -> Rig {
+    let mut parent_of: HashMap<usize, usize> = HashMap::new();
+    for node in document.nodes() {
+        for child in node.children() {
+            parent_of.insert(child.index(), node.index());
+        }
+    }
+    let mut wanted = HashSet::new();
+    for &(node, _) in joints {
+        let mut at = Some(node);
+        while let Some(current) = at {
+            if !wanted.insert(current) {
+                break;
+            }
+            at = parent_of.get(&current).copied();
+        }
+    }
+    let nodes: Vec<gltf::Node> = document.nodes().collect();
+    let mut bones = Vec::new();
+    let mut index_of: HashMap<usize, usize> = HashMap::new();
+    // Tops first, then down the tree, so parents come before children.
+    let mut stack: Vec<(usize, Option<usize>, usize)> = nodes
+        .iter()
+        .filter(|node| !parent_of.contains_key(&node.index()))
+        .map(|node| (node.index(), None, 0))
+        .rev()
+        .collect();
+    while let Some((node, parent, depth)) = stack.pop() {
+        if depth > MAX_NODE_DEPTH || index_of.contains_key(&node) {
+            continue;
+        }
+        let mut parent = parent;
+        if wanted.contains(&node) {
+            let (translation, rotation, scale) = nodes[node].transform().decomposed();
+            index_of.insert(node, bones.len());
+            bones.push(Bone {
+                name: node_name(&nodes[node]),
+                parent,
+                rest: BoneTransform {
+                    translation: Vec3::from(translation),
+                    rotation: glam::Quat::from_array(rotation).normalize(),
+                    scale: Vec3::from(scale),
+                },
+            });
+            parent = Some(bones.len() - 1);
+        }
+        for child in nodes[node].children().collect::<Vec<_>>().into_iter().rev() {
+            stack.push((child.index(), parent, depth + 1));
+        }
+    }
+    let joints = joints
+        .iter()
+        .map(|&(node, inverse_bind)| Joint {
+            bone: index_of.get(&node).copied().unwrap_or(0),
+            inverse_bind,
+        })
+        .collect();
+    Rig { bones, joints, fit }
 }
 
 /// The objects in a glTF file: the default scene's nodes, or every mesh
@@ -877,6 +953,10 @@ struct Reader<'a> {
     found: HashSet<String>,
     /// The level of detail of the objects being read (see [`lod::level_of`]).
     level: u8,
+    /// The skins' joints so far, each a node and its inverse bind matrix,
+    /// and where each skin's start in them.
+    joints: Vec<(usize, Mat4)>,
+    skins: HashMap<usize, u16>,
 }
 
 impl Reader<'_> {
@@ -896,7 +976,7 @@ impl Reader<'_> {
                 for mesh in document.meshes() {
                     let path = siblings.path("", &mesh_name(&mesh));
                     if want(&self.wanted, &mut self.found, &path) {
-                        self.mesh(&mesh, Mat4::IDENTITY)?;
+                        self.mesh(&mesh, Mat4::IDENTITY, None)?;
                     }
                 }
             }
@@ -922,7 +1002,12 @@ impl Reader<'_> {
         if let Some(mesh) = node.mesh()
             && want(&self.wanted, &mut self.found, path)
         {
-            self.mesh(&mesh, transform)?;
+            // A skinned mesh is where its joints put it: its node's own
+            // transform doesn't count (glTF's rule).
+            match node.skin().and_then(|skin| self.skin(&skin)) {
+                Some(first) => self.mesh(&mesh, Mat4::IDENTITY, Some(first))?,
+                None => self.mesh(&mesh, transform, None)?,
+            }
         }
         let mut siblings = Siblings::default();
         for child in node.children() {
@@ -933,7 +1018,35 @@ impl Reader<'_> {
         Ok(())
     }
 
-    fn mesh(&mut self, mesh: &gltf::Mesh, transform: Mat4) -> Result<(), ModelError> {
+    /// Where `skin`'s joints start in the model's, added the first time.
+    /// `None` if there'd be more joints than a vertex can name.
+    fn skin(&mut self, skin: &gltf::Skin) -> Option<u16> {
+        if let Some(&first) = self.skins.get(&skin.index()) {
+            return Some(first);
+        }
+        let first = u16::try_from(self.joints.len()).ok()?;
+        let count = skin.joints().count();
+        u16::try_from(self.joints.len() + count).ok()?;
+        let buffers = self.buffers;
+        let inverse: Vec<Mat4> = skin
+            .reader(|buffer| buffers.get(buffer.index()).map(|data| data.0.as_slice()))
+            .read_inverse_bind_matrices()
+            .map(|matrices| matrices.map(|m| Mat4::from_cols_array_2d(&m)).collect())
+            .unwrap_or_default();
+        for (k, joint) in skin.joints().enumerate() {
+            let matrix = inverse.get(k).copied().unwrap_or(Mat4::IDENTITY);
+            self.joints.push((joint.index(), matrix));
+        }
+        self.skins.insert(skin.index(), first);
+        Some(first)
+    }
+
+    fn mesh(
+        &mut self,
+        mesh: &gltf::Mesh,
+        transform: Mat4,
+        skin: Option<u16>,
+    ) -> Result<(), ModelError> {
         // Normals are turned by the inverse transpose, so they stay
         // perpendicular to stretched surfaces.
         let normal_matrix = Mat3::from_mat4(transform).inverse().transpose();
@@ -996,6 +1109,40 @@ impl Reader<'_> {
                 material.remove_textures();
             }
 
+            // Each corner's 4 joints (the skin's numbers after the ones
+            // before it) and weights, adding up to 1.
+            let (mut joints, mut weights) = (Vec::new(), Vec::new());
+            if let Some(first) = skin {
+                let total = self.joints.len();
+                let read_joints: Vec<[u16; 4]> = reader
+                    .read_joints(0)
+                    .map(|j| j.into_u16().collect())
+                    .unwrap_or_default();
+                let read_weights: Vec<[f32; 4]> = reader
+                    .read_weights(0)
+                    .map(|w| w.into_f32().collect())
+                    .unwrap_or_default();
+                if read_joints.len() == count && read_weights.len() == count {
+                    for (indices, values) in read_joints.into_iter().zip(read_weights) {
+                        let mut kept = [0.0; 4];
+                        let mut moved = [0u16; 4];
+                        for slot in 0..4 {
+                            let joint = usize::from(first) + usize::from(indices[slot]);
+                            if joint < total && values[slot].is_finite() && values[slot] > 0.0 {
+                                moved[slot] = joint as u16;
+                                kept[slot] = values[slot];
+                            }
+                        }
+                        let sum: f32 = kept.iter().sum();
+                        if sum > 1e-6 {
+                            kept = kept.map(|w| w / sum);
+                        }
+                        joints.push(moved);
+                        weights.push(kept);
+                    }
+                }
+            }
+
             self.primitives.push(Primitive {
                 key: new_key(),
                 positions,
@@ -1004,8 +1151,8 @@ impl Reader<'_> {
                 tangents: Vec::new(),
                 indices,
                 material,
-                joints: Vec::new(),
-                weights: Vec::new(),
+                joints,
+                weights,
                 lods: Vec::new(),
                 level: self.level,
             });

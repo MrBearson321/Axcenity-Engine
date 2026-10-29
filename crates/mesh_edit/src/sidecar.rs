@@ -20,6 +20,7 @@ use crate::half_edge::{EditMesh, Polygon};
 use crate::model_doc::ModelDoc;
 use crate::modifiers::Modifier;
 use crate::paint::{PaintData, PaintSet};
+use crate::rig::{Armature, Skin};
 
 const VERSION: u32 = 1;
 
@@ -29,6 +30,10 @@ struct Sidecar {
     /// The hash of the `.glb` it was saved with ([`hash`]).
     glb: String,
     objects: Vec<SidecarObject>,
+    /// The armature as it was edited (Phase 62): the `.glb`'s bones don't
+    /// keep their lengths or which ones deform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    armature: Option<Armature>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -43,6 +48,10 @@ struct SidecarObject {
     /// Its paint sets; their layers are files in the sidecar folder.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     paint: Vec<PaintData>,
+    /// Its weights on its own mesh (the `.glb` has them on the mesh with
+    /// its modifiers on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skin: Option<Skin>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -106,16 +115,18 @@ impl ModelDoc {
                     modifiers: object.modifiers.clone(),
                     mesh: mesh_data(object.mesh.as_ref()?),
                     paint: object.paint.iter().map(|set| set.data(index)).collect(),
+                    skin: object.skin.clone(),
                 })
             })
             .collect();
-        if objects.is_empty() {
+        if objects.is_empty() && self.armature.is_none() {
             return None;
         }
         let sidecar = Sidecar {
             version: VERSION,
             glb: hash(glb),
             objects,
+            armature: self.armature.clone(),
         };
         Some(serde_json::to_vec_pretty(&sidecar).expect("plain data serializes"))
     }
@@ -146,6 +157,22 @@ impl ModelDoc {
             return Err("the model was changed since it was saved".to_owned());
         }
         let mut restored = 0;
+        if let Some(armature) = sidecar.armature {
+            // The `.glb`'s bones were read into one by name; put each
+            // object's weights on the edited one's bones.
+            let map: Vec<Option<usize>> = self.armature.as_ref().map_or(Vec::new(), |old| {
+                old.bones
+                    .iter()
+                    .map(|bone| armature.bone(&bone.name))
+                    .collect()
+            });
+            for object in &mut self.objects {
+                if let Some(skin) = &mut object.skin {
+                    skin.remap(&map);
+                }
+            }
+            self.armature = Some(armature);
+        }
         for saved in sidecar.objects {
             let found = self
                 .objects
@@ -176,6 +203,9 @@ impl ModelDoc {
                 .collect();
             object.mesh = Some(edit_mesh(saved.mesh, &slot_now));
             object.modifiers = saved.modifiers;
+            if saved.skin.is_some() {
+                object.skin = saved.skin;
+            }
             object.paint = saved
                 .paint
                 .into_iter()
