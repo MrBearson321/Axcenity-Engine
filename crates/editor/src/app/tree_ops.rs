@@ -252,6 +252,20 @@ impl EditorApp {
             );
             return;
         }
+        // An exposure, fog or bloom effect only works in a GraphicsVolume:
+        // with none selected, one is made for it.
+        if matches!(
+            what,
+            Insertable::ExposureEffect | Insertable::FogEffect | Insertable::BloomEffect
+        ) && !near
+            .or(self.selected)
+            .is_some_and(|id| tree::is_graphics_volume(&self.world, id))
+        {
+            self.insert(Insertable::GraphicsVolume, near.or(self.selected));
+            let volume = self.selected;
+            self.insert_named(what, volume, what.class().as_str(), Vec::new());
+            return;
+        }
         // A probe works in its part's box: with no part selected, a
         // room-sized invisible one is made for it.
         if matches!(

@@ -54,6 +54,16 @@ pub(crate) fn default_sun() -> Sun {
 /// The Lighting's sun or moon and what they do to `sky`: its atmosphere
 /// (from the Lighting's Atmosphere, if it has one) and its night.
 pub(crate) fn sun_and_sky(world: &World, lighting: &Instance, sky: &mut Sky) -> Sun {
+    sun_and_sky_through(lighting, atmosphere_instance(world, lighting), sky)
+}
+
+/// Like [`sun_and_sky`], with the air of `atmosphere` (wherever it is, such
+/// as in a GraphicsVolume), or none.
+pub(crate) fn sun_and_sky_through(
+    lighting: &Instance,
+    atmosphere: Option<&Instance>,
+    sky: &mut Sky,
+) -> Sun {
     let number_of = |name, default| match lighting.property(name) {
         Some(Value::Number(value)) if value.is_finite() => *value,
         _ => default,
@@ -63,12 +73,12 @@ pub(crate) fn sun_and_sky(world: &World, lighting: &Instance, sky: &mut Sky) -> 
         number_of("GeographicLatitude", axcenity_core::DEFAULT_LATITUDE),
     );
     let moon = -sun;
-    let atmosphere = atmosphere_of(world, lighting).map(|atmosphere| Atmosphere {
+    let atmosphere = atmosphere.map(|atmosphere| Atmosphere {
         sun_direction: sun,
         moon_direction: moon,
         sun_intensity: SUN_INTENSITY,
         moon_brightness: MOON_INTENSITY / SUN_INTENSITY,
-        ..atmosphere
+        ..air_of(atmosphere)
     });
     sky.atmosphere = atmosphere;
     // The sky's colors dim from a little before sunset into the night,
@@ -119,10 +129,8 @@ pub(crate) fn atmosphere_instance<'a>(
         .find(|child| child.class() == ClassName::Atmosphere)
 }
 
-/// The air of the Lighting's first Atmosphere, with its sun and moon left
-/// at their defaults.
-fn atmosphere_of(world: &World, lighting: &Instance) -> Option<Atmosphere> {
-    let atmosphere = atmosphere_instance(world, lighting)?;
+/// The air of an Atmosphere, with its sun and moon left at their defaults.
+fn air_of(atmosphere: &Instance) -> Atmosphere {
     let number_of = |name, default: f64, most: f64| match atmosphere.property(name) {
         Some(Value::Number(value)) if value.is_finite() => value.clamp(0.0, most),
         _ => default,
@@ -135,7 +143,7 @@ fn atmosphere_of(world: &World, lighting: &Instance) -> Option<Atmosphere> {
         };
         (linear(color) / linear(default)).to_array()
     };
-    Some(Atmosphere {
+    Atmosphere {
         density: (number_of("Density", EARTH_DENSITY, 1.0) / EARTH_DENSITY) as f32,
         altitude: number_of("Offset", 0.0, 1.0) as f32,
         tint: tint_of("Color", DEFAULT_COLOR),
@@ -143,7 +151,7 @@ fn atmosphere_of(world: &World, lighting: &Instance) -> Option<Atmosphere> {
         glare: number_of("Glare", 0.0, 10.0) as f32,
         haze: number_of("Haze", 0.0, 10.0) as f32,
         ..Default::default()
-    })
+    }
 }
 
 /// An sRGB color in linear light, as the renderer turns it.

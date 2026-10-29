@@ -205,6 +205,18 @@ pub enum ClassName {
     /// contrast, saturation, a tint, a lookup table, posterizing and a
     /// palette), after tone mapping.
     ColorCorrectionEffect,
+    /// An invisible part that changes the look while the camera is inside
+    /// it, fading in over `BlendDistance` outside it: the effects inside it
+    /// (color correction, exposure, fog, atmosphere and bloom) replace the
+    /// world's. Where volumes overlap, the higher `Priority` wins.
+    GraphicsVolume,
+    /// Inside a GraphicsVolume: the exposure there, in place of Lighting's.
+    ExposureEffect,
+    /// Inside a GraphicsVolume: distance fog there, in place of the world's.
+    FogEffect,
+    /// Inside a GraphicsVolume: how bright light blooms there, in place of
+    /// Lighting's bloom.
+    BloomEffect,
     /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
     ParticleEmitter,
     /// Inside a Part, MeshPart, Model, ScreenGui or UI element: plays
@@ -353,7 +365,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 111] = [
+    pub const ALL: [ClassName; 115] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -416,6 +428,10 @@ impl ClassName {
         ClassName::Weather,
         ClassName::OutlineEffect,
         ClassName::ColorCorrectionEffect,
+        ClassName::GraphicsVolume,
+        ClassName::ExposureEffect,
+        ClassName::FogEffect,
+        ClassName::BloomEffect,
         ClassName::ParticleEmitter,
         ClassName::Animator,
         ClassName::Animation,
@@ -535,6 +551,10 @@ impl ClassName {
             ClassName::Weather => "Weather",
             ClassName::OutlineEffect => "OutlineEffect",
             ClassName::ColorCorrectionEffect => "ColorCorrectionEffect",
+            ClassName::GraphicsVolume => "GraphicsVolume",
+            ClassName::ExposureEffect => "ExposureEffect",
+            ClassName::FogEffect => "FogEffect",
+            ClassName::BloomEffect => "BloomEffect",
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
@@ -612,6 +632,7 @@ impl ClassName {
             ClassName::Seat
             | ClassName::DamageZone
             | ClassName::ReverbZone
+            | ClassName::GraphicsVolume
             | ClassName::SpawnLocation => &["Part", "BasePart", "PVInstance"],
             ClassName::VehicleSeat => &["Seat", "Part", "BasePart", "PVInstance"],
             ClassName::Model => &["PVInstance"],
@@ -647,7 +668,8 @@ impl ClassName {
     }
 
     /// A Part or one of the classes that are Parts: NegateOperation, Seat,
-    /// VehicleSeat, DamageZone, ReverbZone and SpawnLocation. They have a
+    /// VehicleSeat, DamageZone, ReverbZone, GraphicsVolume and
+    /// SpawnLocation. They have a
     /// `Shape`, a `Material` and the rest.
     pub fn is_part(self) -> bool {
         matches!(
@@ -658,6 +680,7 @@ impl ClassName {
                 | ClassName::VehicleSeat
                 | ClassName::DamageZone
                 | ClassName::ReverbZone
+                | ClassName::GraphicsVolume
                 | ClassName::SpawnLocation
         )
     }
@@ -1087,6 +1110,29 @@ impl ClassName {
                 ("Posterize", Value::Number(0.0)),
                 // An image whose colors every pixel is snapped to, or "".
                 ("Palette", Value::String(String::new())),
+            ],
+            ClassName::ExposureEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // Multiplies the scene's brightness before tone mapping,
+                // as Lighting's Exposure does.
+                ("Exposure", Value::Number(1.0)),
+            ],
+            ClassName::FogEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // None nearer than Start studs, all Color from End on.
+                (
+                    "Color",
+                    Value::Color3(Color3::new(192.0 / 255.0, 192.0 / 255.0, 192.0 / 255.0)),
+                ),
+                ("Start", Value::Number(0.0)),
+                ("End", Value::Number(200.0)),
+            ],
+            ClassName::BloomEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // As Lighting's BloomIntensity and BloomThreshold. An
+                // Intensity of 0 turns bloom off there.
+                ("Intensity", Value::Number(0.35)),
+                ("Threshold", Value::Number(1.0)),
             ],
             ClassName::ParticleEmitter => vec![
                 ("Enabled", Value::Bool(true)),
@@ -1561,6 +1607,7 @@ impl ClassName {
             | ClassName::VehicleSeat
             | ClassName::DamageZone
             | ClassName::ReverbZone
+            | ClassName::GraphicsVolume
             | ClassName::SpawnLocation => {
                 let material = Material::Plastic;
                 let preset = material.preset();
@@ -1653,6 +1700,33 @@ impl ClassName {
                         // Seconds the reverb takes to blend in on entering,
                         // and out on leaving.
                         ("FadeTime", Value::Number(1.0)),
+                    ]);
+                }
+                if self == ClassName::GraphicsVolume {
+                    // Something to walk into and not see: the look it
+                    // gives is what shows.
+                    for (name, value) in [
+                        ("Anchored", Value::Bool(true)),
+                        ("CanCollide", Value::Bool(false)),
+                        ("CanQuery", Value::Bool(false)),
+                        ("Transparency", Value::Number(1.0)),
+                        ("Color", Value::Color3(Color3::new(0.6, 0.45, 0.95))),
+                        ("CastShadow", Value::Bool(false)),
+                        ("Size", Value::Vector3(Vector3::new(20.0, 12.0, 20.0))),
+                    ] {
+                        if let Some(slot) = properties.iter_mut().find(|(n, _)| *n == name) {
+                            slot.1 = value;
+                        }
+                    }
+                    properties.extend([
+                        // Off, it changes nothing.
+                        ("Enabled", Value::Bool(true)),
+                        // Studs outside its faces over which its look fades
+                        // in as the camera comes closer. Inside, it's whole.
+                        ("BlendDistance", Value::Number(5.0)),
+                        // Where volumes overlap, the higher one wins; equal
+                        // ones follow Explorer order, the later winning.
+                        ("Priority", Value::Number(0.0)),
                     ]);
                 }
                 if self == ClassName::SpawnLocation {
@@ -2301,6 +2375,9 @@ impl ClassName {
             | ClassName::Weather
             | ClassName::OutlineEffect
             | ClassName::ColorCorrectionEffect
+            | ClassName::ExposureEffect
+            | ClassName::FogEffect
+            | ClassName::BloomEffect
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer
@@ -2403,6 +2480,7 @@ impl ClassName {
             | ClassName::VehicleSeat
             | ClassName::DamageZone
             | ClassName::ReverbZone
+            | ClassName::GraphicsVolume
             | ClassName::SpawnLocation => &["Touched", "TouchEnded"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.

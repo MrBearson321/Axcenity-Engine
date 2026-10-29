@@ -339,13 +339,46 @@ impl EditorApp {
                          everything solid, around silhouettes and along creases, with no setup \
                          per part. A material file's outline draws one around its parts alone."
                     } else if what == Insertable::ColorCorrectionEffect {
-                        "Insert a ColorCorrectionEffect into Lighting: changes the finished \
-                         picture's colors (brightness, contrast, saturation and a tint), and can \
-                         look them up in a .cube table, posterize them or snap them to a palette."
+                        "Insert a ColorCorrectionEffect into Lighting (or the selected Graphics \
+                         Volume): changes the finished picture's colors (brightness, contrast, \
+                         saturation and a tint), and can look them up in a .cube table, \
+                         posterize them or snap them to a palette."
                     } else if what == Insertable::Weather {
                         "Insert Weather into Lighting: rain or snow falling around the camera,                          wetting surfaces or covering their tops in snow. Changes ease in over                          its TransitionTime, and Workspace's GlobalWind blows the rain and snow."
                     } else {
                         "Insert an Atmosphere into Lighting: the sky is drawn as sunlight                          scattered by air, reddening toward sunset and darkening at night                          as Lighting's ClockTime goes round, and it colors the sun's light."
+                    };
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hover)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+                for what in Insertable::VOLUMES {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    let hover = match what {
+                        Insertable::GraphicsVolume => {
+                            "Insert a Graphics Volume: an invisible box that changes the look \
+                             while the camera is inside it, fading in over its BlendDistance. \
+                             Put Exposure, Fog, Bloom, Color Correction or an Atmosphere inside \
+                             it; where volumes overlap, the higher Priority wins."
+                        }
+                        Insertable::ExposureEffect => {
+                            "Insert an ExposureEffect into the selected Graphics Volume (or a \
+                             new one): the exposure inside it, in place of Lighting's."
+                        }
+                        Insertable::FogEffect => {
+                            "Insert a FogEffect into the selected Graphics Volume (or a new \
+                             one): distance fog inside it, in place of the world's."
+                        }
+                        _ => {
+                            "Insert a BloomEffect into the selected Graphics Volume (or a new \
+                             one): how bright light blooms inside it, in place of Lighting's \
+                             bloom."
+                        }
                     };
                     if ui
                         .add_enabled(!playing, button)

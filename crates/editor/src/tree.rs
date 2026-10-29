@@ -62,8 +62,16 @@ pub enum Insertable {
     Weather,
     /// Screen-space outlines, always in Lighting.
     OutlineEffect,
-    /// Color grading of the finished picture, always in Lighting.
+    /// Color grading of the finished picture, in Lighting or the selected
+    /// GraphicsVolume.
     ColorCorrectionEffect,
+    /// An invisible box that changes the look while the camera is in it.
+    GraphicsVolume,
+    /// A GraphicsVolume's exposure, fog and bloom, in the selected volume
+    /// or a new one.
+    ExposureEffect,
+    FogEffect,
+    BloomEffect,
     ParticleEmitter,
     Animator,
     Animation,
@@ -182,6 +190,27 @@ impl Insertable {
         Insertable::OutlineEffect,
         Insertable::ColorCorrectionEffect,
     ];
+    /// Whether a selected GraphicsVolume holds a new one: what changes the
+    /// look there.
+    pub fn goes_in_volume(self) -> bool {
+        matches!(
+            self,
+            Insertable::Atmosphere
+                | Insertable::ColorCorrectionEffect
+                | Insertable::ExposureEffect
+                | Insertable::FogEffect
+                | Insertable::BloomEffect
+        )
+    }
+
+    /// Ribbon ▸ Lighting ▸ Volumes: a GraphicsVolume, and the effects only
+    /// a volume holds.
+    pub const VOLUMES: [Insertable; 4] = [
+        Insertable::GraphicsVolume,
+        Insertable::ExposureEffect,
+        Insertable::FogEffect,
+        Insertable::BloomEffect,
+    ];
     /// Effects give off particles from the part they are inside.
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
     /// Animators (skeletal) and Animations (property clips).
@@ -296,6 +325,10 @@ impl Insertable {
             Insertable::Weather => "Weather",
             Insertable::OutlineEffect => "Outlines",
             Insertable::ColorCorrectionEffect => "Color Correction",
+            Insertable::GraphicsVolume => "Graphics Volume",
+            Insertable::ExposureEffect => "Exposure",
+            Insertable::FogEffect => "Fog",
+            Insertable::BloomEffect => "Bloom",
             Insertable::ParticleEmitter => "Particles",
             Insertable::Animator => "Animator",
             Insertable::Ragdoll => "Ragdoll",
@@ -363,6 +396,10 @@ impl Insertable {
             Insertable::Weather => ClassName::Weather,
             Insertable::OutlineEffect => ClassName::OutlineEffect,
             Insertable::ColorCorrectionEffect => ClassName::ColorCorrectionEffect,
+            Insertable::GraphicsVolume => ClassName::GraphicsVolume,
+            Insertable::ExposureEffect => ClassName::ExposureEffect,
+            Insertable::FogEffect => ClassName::FogEffect,
+            Insertable::BloomEffect => ClassName::BloomEffect,
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
             Insertable::Animator => ClassName::Animator,
             Insertable::Ragdoll => ClassName::Ragdoll,
@@ -511,7 +548,7 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
             ("Position", Value::Vector3(position)),
         ],
         // A room to walk into, with its bottom on the ground.
-        Insertable::ReverbZone => vec![(
+        Insertable::ReverbZone | Insertable::GraphicsVolume => vec![(
             "Position",
             Value::Vector3(Vector3::new(position.x, position.y + 6.0, position.z)),
         )],
@@ -850,10 +887,17 @@ pub fn health_bar(world: &mut World, health: Option<InstanceId>) -> HealthBar {
 /// RemoteEvent (or RemoteFunction, BindableEvent or BindableFunction) goes
 /// into ReplicatedStorage (where both sides find it, as in Roblox), and
 /// anything else into the Workspace. An Atmosphere, Clouds, Weather,
-/// OutlineEffect or ColorCorrectionEffect always goes into Lighting, and a Team into Teams. A SoundGroup goes into the
-/// selected SoundGroup, and a sound effect into the selected Sound or
-/// SoundGroup; otherwise both go into SoundService.
+/// OutlineEffect or ColorCorrectionEffect goes into Lighting, and a Team
+/// into Teams; an Atmosphere, ColorCorrectionEffect, ExposureEffect,
+/// FogEffect or BloomEffect goes into the selected GraphicsVolume. A
+/// SoundGroup goes into the selected SoundGroup, and a sound effect into
+/// the selected Sound or SoundGroup; otherwise both go into SoundService.
 pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) -> InstanceId {
+    if what.goes_in_volume()
+        && let Some(volume) = near.filter(|&id| is_graphics_volume(world, id))
+    {
+        return volume;
+    }
     if matches!(
         what,
         Insertable::Atmosphere
@@ -936,6 +980,14 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                 && is_saved(world, id))
     })
     .unwrap_or(default)
+}
+
+/// Whether `id` is a GraphicsVolume that's saved, so it can hold effects.
+pub fn is_graphics_volume(world: &World, id: InstanceId) -> bool {
+    world
+        .get(id)
+        .is_some_and(|instance| instance.class() == ClassName::GraphicsVolume)
+        && is_saved(world, id)
 }
 
 /// The middle of the top of the Part or MeshPart `id`, where a new

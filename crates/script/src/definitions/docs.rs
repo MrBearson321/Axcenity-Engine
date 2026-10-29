@@ -919,6 +919,66 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Seconds the reverb takes to blend in when the camera comes in, and out when it leaves. 1 by default.",
     ),
     (
+        ClassName::GraphicsVolume,
+        "Enabled",
+        "If false, it changes nothing.",
+    ),
+    (
+        ClassName::GraphicsVolume,
+        "BlendDistance",
+        "Studs outside its faces over which its look fades in as the camera comes closer, and out as it leaves (5 by default). Inside it, the look is whole. 0 switches it on at the faces.",
+    ),
+    (
+        ClassName::GraphicsVolume,
+        "Priority",
+        "Where volumes overlap, the one with the higher Priority wins (0 by default). Equal ones follow Explorer order, the later winning.",
+    ),
+    (
+        ClassName::ExposureEffect,
+        "Enabled",
+        "If false, it changes nothing.",
+    ),
+    (
+        ClassName::ExposureEffect,
+        "Exposure",
+        "Multiplies the scene's brightness before tone mapping, in place of Lighting's Exposure (1 by default).",
+    ),
+    (
+        ClassName::FogEffect,
+        "Enabled",
+        "If false, it changes nothing.",
+    ),
+    (
+        ClassName::FogEffect,
+        "Color",
+        "The fog's color. Light grey by default.",
+    ),
+    (
+        ClassName::FogEffect,
+        "Start",
+        "Studs from the camera where the fog begins (0 by default).",
+    ),
+    (
+        ClassName::FogEffect,
+        "End",
+        "Studs from the camera where everything is the fog's color (200 by default).",
+    ),
+    (
+        ClassName::BloomEffect,
+        "Enabled",
+        "If false, it changes nothing.",
+    ),
+    (
+        ClassName::BloomEffect,
+        "Intensity",
+        "How much of the bloom is added to the picture, in place of Lighting's BloomIntensity (0.35 by default). 0 turns bloom off there.",
+    ),
+    (
+        ClassName::BloomEffect,
+        "Threshold",
+        "Only light brighter than this blooms, in place of Lighting's BloomThreshold (1 by default).",
+    ),
+    (
         ClassName::ReverbSoundEffect,
         "Enabled",
         "If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.",
@@ -4430,6 +4490,18 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         ClassName::HighPassSoundEffect => {
             "Inside a Sound or SoundGroup: lets through only what's above Cutoff, so it sounds thin, as through a radio."
         }
+        ClassName::GraphicsVolume => {
+            "A Part that changes the look while the camera is inside it, fading in over BlendDistance studs outside it and out again on leaving. The effects inside it replace that part of the world's look: a ColorCorrectionEffect, an ExposureEffect, a FogEffect, an Atmosphere (the sky, the sun's color and height fog) or a BloomEffect; what it doesn't hold stays as it is. Where volumes overlap, the higher Priority wins. Invisible, anchored and walked through (CanCollide off) by default. Everything a Part has, and Enabled, BlendDistance and Priority."
+        }
+        ClassName::ExposureEffect => {
+            "Inside a GraphicsVolume: the exposure while the camera is in the volume, in place of Lighting's Exposure."
+        }
+        ClassName::FogEffect => {
+            "Inside a GraphicsVolume: distance fog from Start to End studs in Color while the camera is in the volume, in place of the world's fog."
+        }
+        ClassName::BloomEffect => {
+            "Inside a GraphicsVolume: how bright light blooms while the camera is in the volume, in place of Lighting's BloomIntensity and BloomThreshold."
+        }
         ClassName::ReverbZone => {
             "A Part the camera walks into: while the camera is inside it, its ReverbType blends onto every spatial Sound over FadeTime seconds, and out again on leaving. Where zones overlap, the smallest wins. Anchored, mostly see-through and walked through (CanCollide off) by default. Everything a Part has, and ReverbType and FadeTime."
         }
@@ -4577,7 +4649,7 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "Inside Lighting: rain or snow falling around the camera, and how wet and snow-covered surfaces are (parts, models and terrain). Wet surfaces are darker and glossier; snow covers the tops of things but not walls. workspace.GlobalWind blows the rain and snow. Every change eases in over TransitionTime. With Precipitation None and no Wetness or SnowCover it costs nothing."
         }
         ClassName::ColorCorrectionEffect => {
-            "Inside Lighting: changes the colors of the finished picture, after tone mapping. Brightness, Contrast, Saturation and TintColor come first, then the LookupTable, Posterize and the Palette. Several in Lighting add up (their tints multiply)."
+            "Inside Lighting: changes the colors of the finished picture, after tone mapping. Brightness, Contrast, Saturation and TintColor come first, then the LookupTable, Posterize and the Palette. Several in Lighting add up (their tints multiply). Inside a GraphicsVolume, those in the volume replace Lighting's while the camera is there."
         }
         ClassName::OutlineEffect => {
             "Inside Lighting: lines drawn along the edges of everything solid, around each silhouette and along creases where a surface turns sharply, found on screen from what's drawn, so no part needs any setup. A material file's outline draws a line around its own parts instead (see docs/rendering/stylized.md)."

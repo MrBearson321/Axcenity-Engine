@@ -1,0 +1,379 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Ground",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.45,
+            0.62,
+            0.4
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -0.5,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            128,
+            1,
+            96
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Red",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.85,
+            0.2,
+            0.15
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -6,
+            1.5,
+            -8
+          ],
+          "Shape": "Block",
+          "Size": [
+            3,
+            3,
+            3
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Yellow",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.85,
+            0.25
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            1.5,
+            -8
+          ],
+          "Shape": "Block",
+          "Size": [
+            3,
+            3,
+            3
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Blue",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.2,
+            0.4,
+            0.9
+          ],
+          "Material": "Plastic",
+          "Position": [
+            6,
+            1.5,
+            -8
+          ],
+          "Shape": "Block",
+          "Size": [
+            3,
+            3,
+            3
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "CaveRoof",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.32,
+            0.3,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            32,
+            12.5,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            26,
+            1,
+            26
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "CaveBack",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.32,
+            0.3,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            44.5,
+            6,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            1,
+            12,
+            26
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "CaveLeft",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.32,
+            0.3,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            32,
+            6,
+            -12.5
+          ],
+          "Shape": "Block",
+          "Size": [
+            26,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "CaveRight",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.32,
+            0.3,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            32,
+            6,
+            12.5
+          ],
+          "Shape": "Block",
+          "Size": [
+            26,
+            12,
+            1
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.75,
+            0.75,
+            0.78
+          ],
+          "Material": "Plastic",
+          "Position": [
+            28,
+            3,
+            -5
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Crystal",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.4,
+            0.8,
+            1.0
+          ],
+          "Material": "Neon",
+          "Position": [
+            30,
+            1.5,
+            5
+          ],
+          "Shape": "Block",
+          "Size": [
+            1.5,
+            3,
+            1.5
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ember",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            1.0,
+            0.45,
+            0.1
+          ],
+          "Material": "Neon",
+          "Position": [
+            41,
+            0.25,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            4,
+            0.5,
+            6
+          ]
+        }
+      },
+      {
+        "class": "GraphicsVolume",
+        "name": "CaveLook",
+        "properties": {
+          "Position": [
+            32,
+            6,
+            0
+          ],
+          "Size": [
+            24,
+            12,
+            24
+          ],
+          "BlendDistance": 6
+        },
+        "children": [
+          {
+            "class": "ExposureEffect",
+            "name": "Exposure",
+            "properties": {
+              "Exposure": 1.8
+            }
+          },
+          {
+            "class": "FogEffect",
+            "name": "Fog",
+            "properties": {
+              "Color": [
+                0.12,
+                0.17,
+                0.28
+              ],
+              "Start": 4,
+              "End": 70
+            }
+          },
+          {
+            "class": "ColorCorrectionEffect",
+            "name": "Cool",
+            "properties": {
+              "TintColor": [
+                0.8,
+                0.9,
+                1.0
+              ],
+              "Saturation": -0.2
+            }
+          },
+          {
+            "class": "BloomEffect",
+            "name": "Bloom",
+            "properties": {
+              "Intensity": 0.6
+            }
+          }
+        ]
+      },
+      {
+        "class": "GraphicsVolume",
+        "name": "Embers",
+        "properties": {
+          "Position": [
+            40,
+            6,
+            0
+          ],
+          "Size": [
+            8,
+            12,
+            24
+          ],
+          "BlendDistance": 4,
+          "Priority": 1
+        },
+        "children": [
+          {
+            "class": "FogEffect",
+            "name": "Fog",
+            "properties": {
+              "Color": [
+                0.45,
+                0.2,
+                0.08
+              ],
+              "Start": 0,
+              "End": 45
+            }
+          },
+          {
+            "class": "ColorCorrectionEffect",
+            "name": "Warm",
+            "properties": {
+              "TintColor": [
+                1.0,
+                0.82,
+                0.65
+              ],
+              "Contrast": 0.1
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "lighting": {
+    "properties": {
+      "ToneMapping": "Neutral"
+    }
+  }
+}

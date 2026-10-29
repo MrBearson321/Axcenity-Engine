@@ -54,7 +54,7 @@ pub(crate) fn fog_of(world: &World, lighting: &Instance) -> Fog {
 }
 
 /// An Atmosphere's height fog, in the sky's color.
-fn atmosphere_fog(atmosphere: &Instance) -> Fog {
+pub(crate) fn atmosphere_fog(atmosphere: &Instance) -> Fog {
     let number_of = |name, default: f64, most: f64| match atmosphere.property(name) {
         Some(Value::Number(value)) if value.is_finite() => value.clamp(0.0, most),
         _ => default,

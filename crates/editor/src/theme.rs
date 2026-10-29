@@ -721,6 +721,10 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::PitchShiftSoundEffect => icons::WAVE_SINE,
         ClassName::LowPassSoundEffect | ClassName::HighPassSoundEffect => icons::FUNNEL,
         ClassName::ReverbZone => icons::EAR,
+        ClassName::GraphicsVolume => icons::BOUNDING_BOX,
+        ClassName::ExposureEffect => icons::APERTURE,
+        ClassName::FogEffect => icons::CLOUD_FOG,
+        ClassName::BloomEffect => icons::STAR_FOUR,
         ClassName::Team => icons::FLAG_BANNER,
         ClassName::SpawnLocation => icons::MAP_PIN,
         ClassName::ForceField => icons::SHIELD,
@@ -867,6 +871,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::VehicleSeat
         | ClassName::DamageZone
         | ClassName::ReverbZone
+        | ClassName::GraphicsVolume
         | ClassName::Model => pick((120, 160, 240), (40, 90, 190)),
         ClassName::Folder => pick((222, 182, 92), (160, 115, 10)),
         ClassName::SurfaceAppearance => pick((214, 130, 204), (150, 50, 140)),
@@ -899,7 +904,10 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::Clouds
         | ClassName::Weather
         | ClassName::OutlineEffect
-        | ClassName::ColorCorrectionEffect => pick((232, 205, 110), (150, 115, 0)),
+        | ClassName::ColorCorrectionEffect
+        | ClassName::ExposureEffect
+        | ClassName::FogEffect
+        | ClassName::BloomEffect => pick((232, 205, 110), (150, 115, 0)),
         ClassName::ParticleEmitter => pick((232, 150, 108), (175, 80, 30)),
         ClassName::Animator => AnimKind::Animator.color(visuals),
         ClassName::Animation | ClassName::AnimationTrack => AnimKind::Animation.color(visuals),

@@ -10,8 +10,17 @@ use axcenity_render::{ColorGrading, ColorLookup, MAX_PALETTE_COLORS};
 /// their tints; the first (in Explorer order) with a lookup table, a
 /// posterize level or a palette gives that.
 pub(crate) fn grading_of(world: &World, assets: &Assets) -> Option<ColorGrading> {
-    let lighting = world.get(world.lighting())?;
-    let effects: Vec<&Instance> = lighting
+    grading_in(world, world.get(world.lighting())?, assets)
+}
+
+/// Like [`grading_of`], from the enabled `ColorCorrectionEffect`s inside
+/// `holder` (Lighting or a GraphicsVolume).
+pub(crate) fn grading_in(
+    world: &World,
+    holder: &Instance,
+    assets: &Assets,
+) -> Option<ColorGrading> {
+    let effects: Vec<&Instance> = holder
         .children()
         .iter()
         .filter_map(|&id| world.get(id))

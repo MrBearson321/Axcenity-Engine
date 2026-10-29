@@ -537,7 +537,7 @@ A `GraphicsVolume` part (its box, a blend distance and a priority) holds effect 
 
 ### Acceptance criteria
 
-- [ ] Walking into a volume blends its look in over its blend distance and out again, and overlapping volumes follow priority (unit tests on the blend, plus a visual check).
+- [x] Walking into a volume blends its look in over its blend distance and out again, and overlapping volumes follow priority (unit tests on the blend, plus a visual check).
 
 ---
 

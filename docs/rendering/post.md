@@ -26,7 +26,7 @@ Graphics Phase 32. A `ColorCorrectionEffect` inside Lighting changes the finishe
 | `Posterize` | 0 | 2 or more cuts each channel into that many even levels (`min(floor(c × n), n − 1) / (n − 1)`). |
 | `Palette` | "" | An image; each pixel becomes the nearest of its colors (straight distance in sRGB). |
 
-Several enabled effects in Lighting add up: brightness, contrast and saturation add, and tints multiply. The first in Explorer order with a lookup table, a `Posterize` level or a palette gives that one (`scene/src/color_grading.rs`, into `DrawList::grading`). An effect anywhere else does nothing. `workspace.CurrentCamera` isn't an Instance, so effects can't go inside it; a `GraphicsVolume` (Phase 33) will give a place its own look.
+Several enabled effects in Lighting add up: brightness, contrast and saturation add, and tints multiply. The first in Explorer order with a lookup table, a `Posterize` level or a palette gives that one (`scene/src/color_grading.rs`, into `DrawList::grading`). An effect anywhere else does nothing. `workspace.CurrentCamera` isn't an Instance, so effects can't go inside it; a `GraphicsVolume` gives a place its own look, and the effects inside one replace Lighting's while the camera is there ([volumes.md](volumes.md)).
 
 **Files** (`assets/src/color_grading.rs`, read by `Assets::color_lookup` and `Assets::palette`, cached, reloaded when changed, and each failure reported once while colors stay as they are). The editor's pickers copy a file from outside the project into `assets/grading`.
 

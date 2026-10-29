@@ -16,10 +16,11 @@ use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, Clouds, Cone, DrawItem, DrawList, Fog, Light,
     Material, MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage, ReflectionProbe,
-    Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, Sun, TextureMaps, TextureSource,
+    Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, TextureMaps, TextureSource,
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
+use crate::graphics_volumes::Look;
 use crate::material;
 use crate::orientation::rotation_from_orientation;
 use crate::terrain::TerrainCache;
@@ -38,25 +39,26 @@ pub(crate) const GLOW_BOOST: f32 = 2.5;
 /// them). A MeshPart in here is drawn posed; the rest are drawn still.
 pub type Poses = HashMap<InstanceId, Arc<Posed>>;
 
-/// Everything the Lighting service's properties (and its Atmosphere) set.
+/// Everything the Lighting service's properties (and its Atmosphere) set,
+/// with the graphics volumes around the camera blended into its look.
 struct LightingSettings {
-    sun: Sun,
+    look: Look,
     shadows: Shadows,
-    sky: Sky,
-    fog: Fog,
     clouds: Clouds,
-    post: PostProcessing,
     ambient: AmbientLight,
 }
 
-fn lighting_settings(world: &World, assets: &Assets) -> LightingSettings {
+fn lighting_settings(world: &World, assets: &Assets, camera: &Camera) -> LightingSettings {
     let mut settings = LightingSettings {
-        sun: crate::time_of_day::default_sun(),
+        look: Look {
+            sun: crate::time_of_day::default_sun(),
+            sky: Sky::default(),
+            fog: Fog::default(),
+            post: PostProcessing::default(),
+            grading: None,
+        },
         shadows: Shadows::default(),
-        sky: Sky::default(),
-        fog: Fog::default(),
         clouds: Clouds::default(),
-        post: PostProcessing::default(),
         ambient: AMBIENT,
     };
     let Some(lighting) = world.get(world.lighting()) else {
@@ -74,7 +76,8 @@ fn lighting_settings(world: &World, assets: &Assets) -> LightingSettings {
         Some(color) => [color.r, color.g, color.b],
         None => default,
     };
-    let (shadows, sky, post) = (&mut settings.shadows, &mut settings.sky, &mut settings.post);
+    let look = &mut settings.look;
+    let (shadows, sky, post) = (&mut settings.shadows, &mut look.sky, &mut look.post);
     shadows.enabled = bool_of("ShadowsEnabled", shadows.enabled);
     shadows.distance = number_of("ShadowDistance", shadows.distance);
     shadows.softness = number_of("ShadowSoftness", shadows.softness);
@@ -103,9 +106,12 @@ fn lighting_settings(world: &World, assets: &Assets) -> LightingSettings {
     post.bloom_enabled = bool_of("BloomEnabled", post.bloom_enabled);
     post.bloom_intensity = number_of("BloomIntensity", post.bloom_intensity);
     post.bloom_threshold = number_of("BloomThreshold", post.bloom_threshold);
-    settings.sun = crate::time_of_day::sun_and_sky(world, lighting, &mut settings.sky);
-    settings.fog = crate::fog::fog_of(world, lighting);
+    look.sun = crate::time_of_day::sun_and_sky(world, lighting, &mut look.sky);
+    look.fog = crate::fog::fog_of(world, lighting);
+    look.grading = crate::color_grading::grading_of(world, assets);
     settings.clouds = crate::clouds::clouds_of(world, lighting);
+    settings.look =
+        crate::graphics_volumes::blend(world, assets, lighting, camera.position, settings.look);
     settings
 }
 
@@ -296,8 +302,9 @@ pub fn build_draw_list_posed(
     poses: &Poses,
     terrain: &mut TerrainCache,
 ) -> DrawList {
-    let settings = lighting_settings(world, assets);
-    let glow = if settings.post.enabled && settings.post.bloom_enabled {
+    let settings = lighting_settings(world, assets, &camera);
+    let look = settings.look;
+    let glow = if look.post.enabled && look.post.bloom_enabled {
         GLOW_BOOST
     } else {
         1.0
@@ -361,19 +368,19 @@ pub fn build_draw_list_posed(
     terrain.draw_all(world, assets, &camera, &mut items);
 
     DrawList {
-        sky: settings.sky,
-        fog: settings.fog,
+        sky: look.sky,
+        fog: look.fog,
         clouds: settings.clouds,
         weather: crate::weather::settled(world),
         wind: crate::particles::global_wind(world),
         camera,
-        sun: settings.sun,
+        sun: look.sun,
         ambient: settings.ambient,
         shadows: settings.shadows,
         lights,
-        post: settings.post,
+        post: look.post,
         edges: crate::outlines::edges_of(world),
-        grading: crate::color_grading::grading_of(world, assets),
+        grading: look.grading,
         items,
         sprites: Vec::new(),
         ui: Vec::new(),

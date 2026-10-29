@@ -1684,6 +1684,8 @@ mod time_of_day_tests;
 mod clouds_tests;
 
 #[cfg(test)]
+mod volume_tests;
+#[cfg(test)]
 mod weather_tests;
 
 #[cfg(test)]

@@ -3303,7 +3303,7 @@ declare extern type OutlineEffect extends Instance with
 	[string]: any
 end
 
---- Inside Lighting: changes the colors of the finished picture, after tone mapping. Brightness, Contrast, Saturation and TintColor come first, then the LookupTable, Posterize and the Palette. Several in Lighting add up (their tints multiply).
+--- Inside Lighting: changes the colors of the finished picture, after tone mapping. Brightness, Contrast, Saturation and TintColor come first, then the LookupTable, Posterize and the Palette. Several in Lighting add up (their tints multiply). Inside a GraphicsVolume, those in the volume replace Lighting's while the camera is there.
 declare extern type ColorCorrectionEffect extends Instance with
 	--- Whether it changes the picture. Off (or with no ColorCorrectionEffect in Lighting) it costs nothing.
 	Enabled: boolean
@@ -3321,6 +3321,140 @@ declare extern type ColorCorrectionEffect extends Instance with
 	Posterize: number
 	--- An image in the project whose colors (up to 64) every pixel is snapped to the nearest of, for a retro look. "" for none.
 	Palette: string
+	[string]: any
+end
+
+--- A Part that changes the look while the camera is inside it, fading in over BlendDistance studs outside it and out again on leaving. The effects inside it replace that part of the world's look: a ColorCorrectionEffect, an ExposureEffect, a FogEffect, an Atmosphere (the sky, the sun's color and height fog) or a BloomEffect; what it doesn't hold stays as it is. Where volumes overlap, the higher Priority wins. Invisible, anchored and walked through (CanCollide off) by default. Everything a Part has, and Enabled, BlendDistance and Priority.
+declare extern type GraphicsVolume extends Instance with
+	--- If true, the part stays where it is. If false, it falls and collides with other parts.
+	Anchored: boolean
+	--- Block, Ball, Cylinder (along X) or Wedge.
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
+	Position: Vector3
+	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
+	Orientation: Vector3
+	--- The part's size in studs along X, Y and Z.
+	Size: Vector3
+	--- The part's color.
+	Color: Color3
+	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
+	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
+	MaterialVariant: string
+	--- From 0 (not metal) to 1 (metal).
+	Metalness: number
+	--- From 0 (mirror-smooth) to 1 (matte).
+	Roughness: number
+	--- If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
+	CastShadow: boolean
+	--- From 0 (as solid as its material) to 1 (invisible).
+	Transparency: number
+	--- If false, other parts pass through it. It still fires Touched. An unanchored part that can't collide falls through the floor.
+	CanCollide: boolean
+	--- If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
+	WindAffected: boolean
+	--- The color the part glows in when Emission is above 0.
+	EmissiveColor: Color3
+	--- How brightly the part glows in EmissiveColor: 0 is no glow, 1 as bright as a white surface in full light, higher values bloom.
+	Emission: number
+	--- Studs one copy of a SurfaceAppearance's textures covers. 0 leaves the shape's own coordinates unscaled.
+	TileSize: number
+	--- The collision group it's in, `"Default"` at first. Parts in two groups set not to collide (the Collision Groups window, or `PhysicsService:CollisionGroupSetCollidable`) pass through each other and don't touch. A name that isn't registered counts as Default.
+	CollisionGroup: string
+	--- If false, scripts' raycasts, shape casts and overlap queries (`workspace:Raycast`, `GetPartsInPart`, ...) pass it by. It still collides.
+	CanQuery: boolean
+	--- If false, it fires no Touched or TouchEnded, and touching it fires neither on other parts. It still collides.
+	CanTouch: boolean
+	--- If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.
+	Massless: boolean
+	--- Its own density, friction, elasticity and their weights (`PhysicalProperties.new(...)`), or nil for its Material's. Read `CurrentPhysicalProperties` for the ones in use.
+	CustomPhysicalProperties: PhysicalProperties?
+	--- How fast the part moves, in studs a second. Physics updates it as the part moves; setting it throws the part. Anchored parts don't move.
+	AssemblyLinearVelocity: Vector3
+	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
+	AssemblyAngularVelocity: Vector3
+	--- If false, it changes nothing.
+	Enabled: boolean
+	--- Studs outside its faces over which its look fades in as the camera comes closer, and out as it leaves (5 by default). Inside it, the look is whole. 0 switches it on at the faces.
+	BlendDistance: number
+	--- Where volumes overlap, the one with the higher Priority wins (0 by default). Equal ones follow Explorer order, the later winning.
+	Priority: number
+	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
+	CFrame: CFrame
+	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
+	AssemblyMass: number
+	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
+	AssemblyCenterOfMass: Vector3
+	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
+	CurrentPhysicalProperties: PhysicalProperties
+	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
+	Touched: Signal
+	--- Fires when another part stops touching this one: once they've been apart for a few physics steps, or at once when one of them can't touch the other any more (`CanTouch` off, or set not to collide). The handler gets the other part.
+	TouchEnded: Signal
+	[string]: any
+	--- Joins the part and `parts` into one solid and returns it as a new UnionOperation (its Parent is nil), with this part's look and physics. NegateOperations among `parts` are cut out. The work runs in the background and the script waits for it. Errors, saying why, if a part isn't a closed solid (a Capsule, or a model with holes). `options.CollisionFidelity` sets the union's.
+	function UnionAsync(self, parts: {Instance}, options: {[string]: any}?): UnionOperation
+	--- Cuts every one of `parts` out of the part and returns what's left as a new UnionOperation (its Parent is nil), with this part's look and physics: a crater where a ball was. The work runs in the background and the script waits for it. Errors, saying why, if a part isn't a closed solid or nothing is left. `options.CollisionFidelity` sets the union's.
+	function SubtractAsync(self, parts: {Instance}, options: {[string]: any}?): UnionOperation
+	--- Keeps only where the part and all of `parts` overlap, as a new UnionOperation (its Parent is nil), with this part's look and physics. The work runs in the background and the script waits for it. Errors, saying why, if a part isn't a closed solid or they don't overlap. `options.CollisionFidelity` sets the union's.
+	function IntersectAsync(self, parts: {Instance}, options: {[string]: any}?): UnionOperation
+	--- The part, then the parts welded to it by an enabled WeldConstraint; with `recursive` true, every part in its assembly.
+	function GetConnectedParts(self, recursive: boolean?): {Instance}
+	--- The root of its assembly: an anchored part if there is one, then one that isn't Massless, then the largest. A part alone is its own root.
+	function GetRootPart(self): Instance
+	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
+	function GetPivot(self): CFrame
+	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
+	function PivotTo(self, target: CFrame): ()
+	--- Scripts only (Phase 66): `player`'s device simulates this part's whole assembly from now on, so it responds at once for them, and the server sees what it does; nil gives it back to the server. An anchored part has no owner (an error). Scripts only.
+	function SetNetworkOwner(self, player: Instance?): ()
+	--- Scripts only: the Player whose device simulates this part's assembly now, or nil for the server. An anchored part has no owner (an error). Scripts only.
+	function GetNetworkOwner(self): Instance?
+	--- Scripts only: the engine chooses who simulates this part's assembly: the player driving a VehicleSeat in it, else the nearest player within 40 studs, else the server. Scripts only.
+	function SetNetworkOwnershipAuto(self): ()
+	--- Scripts only: true after SetNetworkOwnershipAuto, until SetNetworkOwner. Scripts only.
+	function GetNetworkOwnershipAuto(self): boolean
+	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
+	function ApplyImpulse(self, impulse: Vector3): ()
+	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
+	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
+	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
+	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
+	function GetMass(self): number
+end
+
+--- Inside a GraphicsVolume: the exposure while the camera is in the volume, in place of Lighting's Exposure.
+declare extern type ExposureEffect extends Instance with
+	--- If false, it changes nothing.
+	Enabled: boolean
+	--- Multiplies the scene's brightness before tone mapping, in place of Lighting's Exposure (1 by default).
+	Exposure: number
+	[string]: any
+end
+
+--- Inside a GraphicsVolume: distance fog from Start to End studs in Color while the camera is in the volume, in place of the world's fog.
+declare extern type FogEffect extends Instance with
+	--- If false, it changes nothing.
+	Enabled: boolean
+	--- The fog's color. Light grey by default.
+	Color: Color3
+	--- Studs from the camera where the fog begins (0 by default).
+	Start: number
+	--- Studs from the camera where everything is the fog's color (200 by default).
+	End: number
+	[string]: any
+end
+
+--- Inside a GraphicsVolume: how bright light blooms while the camera is in the volume, in place of Lighting's BloomIntensity and BloomThreshold.
+declare extern type BloomEffect extends Instance with
+	--- If false, it changes nothing.
+	Enabled: boolean
+	--- How much of the bloom is added to the picture, in place of Lighting's BloomIntensity (0.35 by default). 0 turns bloom off there.
+	Intensity: number
+	--- Only light brighter than this blooms, in place of Lighting's BloomThreshold (1 by default).
+	Threshold: number
 	[string]: any
 end
 
@@ -4531,7 +4665,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

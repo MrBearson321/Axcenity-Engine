@@ -83,7 +83,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 27] = [
+const GROUPS: [(&str, &[&str]); 29] = [
     (
         "Appearance",
         &[
@@ -307,6 +307,18 @@ const GROUPS: [(&str, &[&str]); 27] = [
             "Palette",
         ],
     ),
+    ("Graphics Volume", &["Enabled", "BlendDistance", "Priority"]),
+    (
+        "Effect",
+        &[
+            "Enabled",
+            "Exposure",
+            "Start",
+            "End",
+            "Intensity",
+            "Threshold",
+        ],
+    ),
     (
         "Post-processing",
         &[
@@ -425,6 +437,11 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
             "Weather" => instance.class() == ClassName::Weather,
             "Outlines" => instance.class() == ClassName::OutlineEffect,
             "Color Correction" => instance.class() == ClassName::ColorCorrectionEffect,
+            "Graphics Volume" => instance.class() == ClassName::GraphicsVolume,
+            "Effect" => matches!(
+                instance.class(),
+                ClassName::ExposureEffect | ClassName::FogEffect | ClassName::BloomEffect
+            ),
             "Light" => matches!(
                 instance.class(),
                 ClassName::PointLight | ClassName::SpotLight
@@ -913,6 +930,8 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Weather" => icons::CLOUD_RAIN,
         "Outlines" => icons::PEN_NIB,
         "Color Correction" => icons::SWATCHES,
+        "Graphics Volume" => icons::BOUNDING_BOX,
+        "Effect" => icons::APERTURE,
         "Post-processing" => icons::SPARKLE,
         "Light" => icons::LIGHTBULB,
         "Attributes" => icons::LIST_BULLETS,

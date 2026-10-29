@@ -338,6 +338,44 @@ fn sound_groups_effects_and_reverb_zones_go_where_they_work() {
     std::fs::remove_dir_all(folder).unwrap();
 }
 
+/// Graphics Phase 33: an exposure, fog or bloom effect goes into the
+/// selected Graphics Volume, or into a new one in the Workspace; a color
+/// correction or Atmosphere goes into a selected volume, or else Lighting.
+#[test]
+fn graphics_volumes_hold_the_effects_inserted_into_them() {
+    let folder = copy_of_example("hello-part", "volume-insert");
+    let mut app = EditorApp::new(Some(&folder));
+    app.insert(Insertable::FogEffect, None);
+    let fog = app.selected.unwrap();
+    assert_eq!(app.world.get(fog).unwrap().class(), ClassName::FogEffect);
+    let volume = app.world.get(fog).unwrap().parent().unwrap();
+    let instance = app.world.get(volume).unwrap();
+    assert_eq!(instance.class(), ClassName::GraphicsVolume);
+    assert_eq!(instance.parent(), Some(app.world.workspace()));
+    assert_eq!(instance.property("CanCollide"), Some(&Value::Bool(false)));
+    assert_eq!(instance.property("Transparency"), Some(&Value::Number(1.0)));
+
+    for what in [
+        Insertable::ExposureEffect,
+        Insertable::BloomEffect,
+        Insertable::ColorCorrectionEffect,
+        Insertable::Atmosphere,
+    ] {
+        app.insert(what, Some(volume));
+        let effect = app.selected.unwrap();
+        assert_eq!(app.world.get(effect).unwrap().parent(), Some(volume));
+        assert!(tree::check_editable(&app.world, effect).is_ok());
+    }
+    app.insert(Insertable::ColorCorrectionEffect, None);
+    let grading = app.selected.unwrap();
+    assert_eq!(
+        app.world.get(grading).unwrap().parent(),
+        Some(app.world.lighting())
+    );
+    drop(app);
+    std::fs::remove_dir_all(folder).unwrap();
+}
+
 #[test]
 fn the_whole_editor_draws_in_each_theme_and_density() {
     let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
