@@ -152,3 +152,55 @@ fn studio_undo_is_its_own_while_the_mouse_is_over_it() {
     );
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_chair_modeled_from_one_cube_is_saved_and_drawn_by_a_meshpart_in_the_world() {
+    let folder = copy_of_example("hello-touched", "studio-chair");
+    let mut app = EditorApp::new(Some(&folder));
+    let doc = StudioDoc::new(
+        String::new(),
+        ModelDoc::primitive(&PrimitiveSettings::default()),
+        false,
+    );
+    app.model_studio.open(doc);
+    crate::model_studio::tools_tests::model_chair(app.model_studio.doc.as_mut().unwrap());
+
+    let path = app.save_model_studio().unwrap();
+    assert_eq!(path, "assets/models/Cube.glb");
+    let part = mesh_part(&mut app, &path);
+    // Legs to backrest: 1.75 below the seat's middle to 1.95 above.
+    let [x, y, z] = drawn_size(&app, part);
+    assert!((x - 2.0).abs() < 1e-4 && (y - 3.7).abs() < 1e-4 && (z - 2.0).abs() < 1e-4);
+
+    // Saved as triangles: every polygon cut into (corners − 2).
+    let mesh = app.model_studio.doc.as_ref().unwrap().mesh().unwrap();
+    let triangles: usize = (0..mesh.face_count() as u32)
+        .map(|f| mesh.face_vertices(f).len() - 2)
+        .sum();
+    let model = app.assets.model(&path).unwrap();
+    let saved: usize = model.primitives.iter().map(|p| p.indices.len() / 3).sum();
+    assert_eq!(saved, triangles);
+
+    // The Scene view draws it, and the file opens again as the same chair.
+    let camera = axcenity_render::Camera {
+        position: Vec3::new(8.0, 6.0, 8.0),
+        look_at: Vec3::ZERO,
+        fov_y_degrees: 50.0,
+    };
+    let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
+    let drawn = model.primitives[0].key();
+    assert!(list.items.iter().any(
+        |item| matches!(&item.shape, axcenity_render::Shape::Mesh(mesh) if mesh.key() == drawn)
+    ));
+    let bytes = std::fs::read(folder.join(&path)).unwrap();
+    let reopened = ModelDoc::open(
+        &bytes,
+        &folder.join("assets/models"),
+        axcenity_assets::ModelFormat::Gltf,
+    )
+    .unwrap();
+    let again = reopened.objects[0].mesh.as_ref().unwrap();
+    axcenity_mesh_edit::check_manifold(again, true).unwrap();
+    assert_eq!(again.vertex_count(), mesh.vertex_count());
+    let _ = std::fs::remove_dir_all(&folder);
+}

@@ -106,7 +106,7 @@ impl Selection {
     }
 
     /// Picks, in the current mode, whatever `vertices` wholly cover.
-    fn set_covered(&mut self, mesh: &EditMesh, vertices: &BTreeSet<u32>) {
+    pub(crate) fn set_covered(&mut self, mesh: &EditMesh, vertices: &BTreeSet<u32>) {
         match self.mode {
             SelectMode::Vertex => self.vertices = vertices.clone(),
             SelectMode::Edge => {

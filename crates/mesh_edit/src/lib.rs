@@ -15,6 +15,10 @@
 //!   Studio edits: [`ModelDoc`] holds a file's objects, opened from and
 //!   saved to `.glb`; [`PrimitiveSettings`] makes New shapes; [`Selection`]
 //!   picks vertices, edges and faces, loops, linked parts and rings.
+//! - [`apply`] runs a modeling [`MeshOp`] (extrude, inset, bevel, loop
+//!   cut, knife, merge, fill and the rest) on an `EditMesh` and what's
+//!   picked of it; [`check_manifold`] says whether a mesh is still a
+//!   manifold surface.
 //!
 //! Everything here is deterministic: the same input gives the same output,
 //! bit for bit, so a project regenerates the same pieces anywhere.
@@ -30,6 +34,9 @@ mod glb;
 mod half_edge;
 mod merge;
 mod model_doc;
+mod ops;
+#[cfg(test)]
+mod ops_tests;
 mod primitives;
 mod select;
 mod shapes;
@@ -45,6 +52,9 @@ pub use generate::{Settings, generate, generate_for};
 pub use glb::{GlbMaterial, write_glb};
 pub use half_edge::{EditMesh, Face, HalfEdge, Polygon};
 pub use model_doc::{DocObject, ModelDoc, from_model};
+pub use ops::{
+    DeleteKind, DissolveKind, ExtrudeMode, KnifePoint, MergeAt, MeshOp, apply, check_manifold,
+};
 pub use primitives::{PrimitiveSettings, PrimitiveShape};
 pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use solid::{Combined, Solid, combine, combine_parts, save_union, solid_of};

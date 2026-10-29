@@ -11,7 +11,7 @@ use super::*;
 use crate::gizmo::{Drag, Handle, Modes, Pointer, Pose};
 use crate::screen::Screen;
 
-fn cube_doc() -> StudioDoc {
+pub(super) fn cube_doc() -> StudioDoc {
     StudioDoc::new(
         String::new(),
         ModelDoc::primitive(&PrimitiveSettings::default()),
@@ -19,7 +19,7 @@ fn cube_doc() -> StudioDoc {
     )
 }
 
-fn studio_with(doc: StudioDoc) -> ModelStudio {
+pub(super) fn studio_with(doc: StudioDoc) -> ModelStudio {
     let mut studio = ModelStudio::default();
     studio.open(doc);
     studio
@@ -34,7 +34,7 @@ fn positions(doc: &StudioDoc) -> Vec<Vec3> {
         .collect()
 }
 
-fn screen() -> Screen {
+pub(super) fn screen() -> Screen {
     let camera = Camera {
         position: Vec3::new(6.0, 5.0, 8.0),
         look_at: Vec3::ZERO,
@@ -176,8 +176,8 @@ fn a_move_handle_drag_moves_the_picked_face_as_one_undo_step() {
             .abs_diff_eq(Vec3::new(0.0, 2.5, 0.0), 1e-4)
     );
 
-    let moving = Moving::begin(&doc).unwrap();
-    moving.update(&mut doc, matrix);
+    let moving = Moving::begin(&doc, pose.position, &MoveSettings::default()).unwrap();
+    moving.update(&mut doc, matrix, &Proportional::default());
     moving.finish(&mut doc, "Move");
     let max = positions(&doc)
         .iter()

@@ -1777,9 +1777,9 @@ Each operation shows its settings in a panel after it runs, and changing them re
 
 ### Acceptance criteria
 
-- [ ] A simple chair (a seat, four legs, a backrest) can be modeled from one cube with extrude, inset, loop cut and bevel, and used in the game.
-- [ ] Changing the bevel's segments in the adjust panel re-runs the bevel without another undo step.
-- [ ] Every operation keeps the mesh manifold when its input is, and a test checks each one on a cube and a cylinder.
+- [x] A simple chair (a seat, four legs, a backrest) can be modeled from one cube with extrude, inset, loop cut and bevel, and used in the game.
+- [x] Changing the bevel's segments in the adjust panel re-runs the bevel without another undo step.
+- [x] Every operation keeps the mesh manifold when its input is, and a test checks each one on a cube and a cylinder.
 
 ---
 

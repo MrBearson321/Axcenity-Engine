@@ -10,11 +10,13 @@
 //!
 //! Mouse: left clicks pick (Shift adds, Alt picks a loop), a left drag in
 //! Edit mode draws a box, a right or middle drag turns the camera, a
-//! Shift+middle drag slides it, and the wheel zooms.
+//! Shift+middle drag slides it, and the wheel zooms. Shift+right-click puts
+//! the 3D cursor on the surface clicked (Phase 56), or level with where it
+//! was.
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
-use axcenity_mesh_edit::{EditMesh, SelectMode};
+use axcenity_mesh_edit::{EditMesh, KnifePoint, SelectMode};
 use axcenity_render::Camera;
 use axcenity_render::glam::{Mat4, Quat, Vec3};
 use axcenity_scene::{Ray, rotation_from_orientation};
@@ -41,6 +43,20 @@ pub struct Frame<'a> {
     pub tool: Tool,
     pub axes: MoveAxes,
     pub show_normals: bool,
+    pub cursor: Vec3,
+}
+
+/// What the tools draw over the view: the 3D cursor, a tool's lines and
+/// points (the knife's path, a loop cut's loops), proportional editing's
+/// circle, and a hint in place of the usual one.
+#[derive(Default)]
+pub struct Extras {
+    pub cursor: Vec3,
+    pub lines: Vec<[Vec3; 2]>,
+    pub points: Vec<Vec3>,
+    /// A center and radius, in the model's units.
+    pub circle: Option<(Vec3, f32)>,
+    pub hint: Option<String>,
 }
 
 /// What the mouse did in the view.
@@ -70,12 +86,17 @@ pub enum ViewAction {
     BeginHandle,
     Handle(Mat4),
     EndHandle(&'static str),
+    /// Shift+right-click: the 3D cursor goes here.
+    Cursor(Vec3),
 }
 
 pub struct Event {
     pub screen: Screen,
     pub clicked: bool,
     pub secondary_clicked: bool,
+    /// Where a left click was, and where the mouse is.
+    pub click_at: Option<egui::Pos2>,
+    pub pointer: Option<egui::Pos2>,
     pub action: ViewAction,
 }
 
@@ -196,6 +217,7 @@ impl View {
         render_state: Option<&RenderState>,
         doc: &mut StudioDoc,
         modal: Option<&Modal>,
+        extras: &Extras,
     ) -> Event {
         let rect = frame.rect;
         let response = frame.response;
@@ -206,6 +228,11 @@ impl View {
             screen,
             clicked: response.clicked(),
             secondary_clicked: response.secondary_clicked(),
+            click_at: response
+                .clicked()
+                .then(|| response.interact_pointer_pos())
+                .flatten(),
+            pointer: ui.input(|input| input.pointer.latest_pos()),
             action: ViewAction::None,
         };
         let (pointer, modifiers, pressed, down) = ui.input(|input| {
@@ -253,6 +280,7 @@ impl View {
             frame.show_normals,
             theme::palette(ui.ctx()).accent,
         );
+        paint_extras(&painter, &screen, extras, theme::palette(ui.ctx()).accent);
         let highlighted = self.drag.as_ref().map(|(drag, _)| drag.handle).or(hovered);
         gizmo::paint(&painter, &shapes, highlighted);
         if let (Some(start), Some(at)) = (self.box_start, pointer) {
@@ -267,9 +295,10 @@ impl View {
             );
         }
         let hint = match (modal, doc.mode) {
+            _ if extras.hint.is_some() => extras.hint.clone().unwrap_or_default(),
             (Some(modal), _) => modal.describe(),
             (None, Mode::Object) => "Click an object · Tab: Edit mode · G R S: move, turn, scale · right-drag: turn view".to_owned(),
-            (None, Mode::Edit) => "1 2 3: vertex, edge, face · Alt-click: loop · L: linked · Ctrl +/−: grow, shrink · drag: box".to_owned(),
+            (None, Mode::Edit) => "1 2 3: vertex, edge, face · Alt-click: loop · L: linked · Ctrl +/−: grow, shrink · drag: box · E I Ctrl+B Ctrl+R K M X F: model".to_owned(),
         };
         let palette = theme::palette(ui.ctx());
         painter.text(
@@ -323,6 +352,12 @@ impl View {
         down: bool,
     ) -> ViewAction {
         let response = frame.response;
+        if response.secondary_clicked()
+            && modifiers.shift
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            return ViewAction::Cursor(self.cursor_at(doc, screen, at, frame.cursor));
+        }
         if pressed && let (Some(handle), Some(at), Some(pose)) = (hovered, pointer, pose) {
             let modes = Modes {
                 axes: frame.axes,
@@ -417,6 +452,101 @@ impl View {
                 };
                 ViewAction::Pick { element, extend }
             }
+        }
+    }
+}
+
+impl View {
+    /// Where Shift+right-click at `at` puts the 3D cursor: on the nearest
+    /// surface there, or else level with the cursor (`cursor`) as seen.
+    fn cursor_at(&self, doc: &StudioDoc, screen: &Screen, at: egui::Pos2, cursor: Vec3) -> Vec3 {
+        let ray = screen.ray(at);
+        let hit = doc
+            .model
+            .objects
+            .iter()
+            .filter_map(|object| Some(pick_face(object.mesh.as_ref()?, ray)?.1))
+            .min_by(f32::total_cmp);
+        if let Some(along) = hit {
+            return ray.origin + ray.direction * along;
+        }
+        let camera = self.camera();
+        let facing = (camera.look_at - camera.position).normalize_or(Vec3::NEG_Z);
+        let along = (cursor - ray.origin).dot(facing) / ray.direction.dot(facing);
+        if along.is_finite() && along > 0.0 {
+            ray.origin + ray.direction * along
+        } else {
+            cursor
+        }
+    }
+}
+
+/// Where a knife click at `at` cuts: the vertex there, or the point on the
+/// nearest edge under the mouse.
+pub(super) fn knife_point(
+    mesh: &EditMesh,
+    screen: &Screen,
+    at: egui::Pos2,
+) -> Option<(KnifePoint, Vec3)> {
+    if let Some(vertex) = nearest_vertex(mesh, screen, at) {
+        let point = KnifePoint {
+            a: vertex,
+            b: vertex,
+            t: 0.0,
+        };
+        return Some((point, mesh.position(vertex)));
+    }
+    let edge = nearest_edge(mesh, screen, at, EDGE_PICK * 1.5)?;
+    let (a, b) = mesh.ends(edge);
+    let (pa, pb) = (mesh.position(a), mesh.position(b));
+    // The point on the edge nearest the mouse's ray.
+    let ray = screen.ray(at);
+    let along = pb - pa;
+    let from = pa - ray.origin;
+    let (aa, ad, dd) = (
+        along.dot(along),
+        along.dot(ray.direction),
+        ray.direction.dot(ray.direction),
+    );
+    let (af, df) = (along.dot(from), ray.direction.dot(from));
+    let denominator = aa * dd - ad * ad;
+    let t = if denominator.abs() < 1e-12 {
+        0.5
+    } else {
+        ((ad * df - dd * af) / denominator).clamp(0.0, 1.0)
+    };
+    Some((KnifePoint { a, b, t }, pa.lerp(pb, t)))
+}
+
+/// The tools' lines, points and circle, and the 3D cursor.
+fn paint_extras(painter: &egui::Painter, screen: &Screen, extras: &Extras, accent: egui::Color32) {
+    let tool = egui::Color32::from_rgb(255, 210, 60);
+    for &[a, b] in &extras.lines {
+        if let Some(segment) = screen.line(a, b) {
+            painter.line_segment(segment, egui::Stroke::new(2.0_f32, tool));
+        }
+    }
+    for &point in &extras.points {
+        if let Some(at) = screen.point(point) {
+            painter.circle_filled(at, 4.0, tool);
+        }
+    }
+    if let Some((center, radius)) = extras.circle
+        && let Some(at) = screen.point(center)
+    {
+        let points = radius / screen.studs_per_point(center).max(1e-6);
+        painter.circle_stroke(at, points, egui::Stroke::new(1.0_f32, accent));
+    }
+    // The 3D cursor: a red and white ring with a cross.
+    if let Some(at) = screen.point(extras.cursor) {
+        let red = egui::Color32::from_rgb(230, 60, 60);
+        painter.circle_stroke(at, 7.0, egui::Stroke::new(2.0_f32, egui::Color32::WHITE));
+        painter.circle_stroke(at, 7.0, egui::Stroke::new(1.0_f32, red));
+        for (dx, dy) in [(1.0, 0.0), (0.0, 1.0)] {
+            let step = egui::vec2(dx, dy);
+            let stroke = egui::Stroke::new(1.0_f32, egui::Color32::BLACK);
+            painter.line_segment([at + step * 4.0, at + step * 11.0], stroke);
+            painter.line_segment([at - step * 4.0, at - step * 11.0], stroke);
         }
     }
 }

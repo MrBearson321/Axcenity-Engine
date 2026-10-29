@@ -11,8 +11,9 @@
 //! edge with only one face (an open border), or with more than two (which
 //! a half-edge mesh can't hold), has half-edges without twins.
 //!
-//! Vertices and faces are only added in this phase, never removed, so
-//! their numbers stay put and selections can hold them.
+//! Moves only change positions, so vertex and face numbers stay put and
+//! selections hold them. The modeling operations (`ops`, Phase 56) build a
+//! new mesh, and the selection they leave is in its numbers.
 
 use std::collections::HashMap;
 
@@ -64,6 +65,9 @@ pub struct EditMesh {
     positions: Vec<Vec3>,
     half_edges: Vec<HalfEdge>,
     faces: Vec<Face>,
+    /// Auto smooth's angle in radians: smooth faces meeting at a sharper
+    /// edge than this don't share their corners' normals.
+    auto_smooth: Option<f32>,
 }
 
 impl EditMesh {
@@ -182,6 +186,15 @@ impl EditMesh {
         &self.faces[face as usize]
     }
 
+    /// Auto smooth's angle in radians, if it's on.
+    pub fn auto_smooth(&self) -> Option<f32> {
+        self.auto_smooth
+    }
+
+    pub(crate) fn set_auto_smooth(&mut self, angle: Option<f32>) {
+        self.auto_smooth = angle;
+    }
+
     /// The vertex `half_edge` starts at and the one it runs to.
     pub fn ends(&self, half_edge: u32) -> (u32, u32) {
         let edge = &self.half_edges[half_edge as usize];
@@ -288,7 +301,7 @@ impl EditMesh {
 
     /// Works out the normals of every face touching `vertices`, and of the
     /// smooth faces next to those (whose shared corners average theirs).
-    fn reshade_around(&mut self, vertices: &[u32]) {
+    pub(crate) fn reshade_around(&mut self, vertices: &[u32]) {
         let vertex_faces = self.vertex_faces();
         let mut touched = vec![false; self.positions.len()];
         for &vertex in vertices {
@@ -315,7 +328,8 @@ impl EditMesh {
     /// Works out the corner normals of `faces`: a flat face's corners take
     /// its normal, and a smooth face's the average of the smooth faces
     /// around each corner's vertex, weighted by the corner's angle so a
-    /// face cut in two doesn't count twice.
+    /// face cut in two doesn't count twice. With auto smooth, only the
+    /// faces reached without crossing a sharp edge count.
     fn shade(&mut self, faces: &[u32]) {
         if faces.is_empty() {
             return;
@@ -341,14 +355,66 @@ impl EditMesh {
             let is_smooth = self.faces[face as usize].smooth;
             for edge in self.face_half_edges(face) {
                 let vertex = self.half_edges[edge as usize].vertex as usize;
-                let normal = if is_smooth {
-                    smooth[vertex].normalize_or(flat)
-                } else {
-                    flat
+                let normal = match (is_smooth, self.auto_smooth) {
+                    (false, _) => flat,
+                    (true, Some(angle)) => {
+                        self.fan_normal(edge, &normals, angle).normalize_or(flat)
+                    }
+                    (true, None) => smooth[vertex].normalize_or(flat),
                 };
                 self.half_edges[edge as usize].normal = normal.normalize_or(Vec3::Y);
             }
         }
+    }
+
+    /// The angle-weighted normal of the smooth faces around `half_edge`'s
+    /// vertex that its face reaches without crossing an edge sharper than
+    /// `angle`: walked round one way, then (if that didn't come back
+    /// round) the other.
+    fn fan_normal(&self, half_edge: u32, normals: &[Vec3], angle: f32) -> Vec3 {
+        let cos = angle.cos();
+        let edge = |index: u32| &self.half_edges[index as usize];
+        let weighted = |index: u32| {
+            let here = self.positions[edge(index).vertex as usize];
+            let next = self.positions[edge(edge(index).next).vertex as usize];
+            let prev = self.positions[edge(edge(index).prev).vertex as usize];
+            let corner = (next - here).angle_between(prev - here);
+            normals[edge(index).face as usize] * if corner.is_finite() { corner } else { 0.0 }
+        };
+        let joins = |from: u32, to: u32| {
+            let (a, b) = (edge(from).face as usize, edge(to).face as usize);
+            self.faces[b].smooth && normals[a].dot(normals[b]) >= cos
+        };
+        let mut sum = weighted(half_edge);
+        // Across the edge coming into the corner.
+        let mut at = half_edge;
+        for _ in 0..self.half_edges.len() {
+            let Some(twin) = edge(edge(at).prev).twin else {
+                break;
+            };
+            if twin == half_edge {
+                return sum;
+            }
+            if !joins(at, twin) {
+                break;
+            }
+            sum += weighted(twin);
+            at = twin;
+        }
+        // Across the edge going out of it.
+        let mut at = half_edge;
+        for _ in 0..self.half_edges.len() {
+            let Some(twin) = edge(at).twin else {
+                break;
+            };
+            let next = edge(twin).next;
+            if next == half_edge || !joins(at, next) {
+                break;
+            }
+            sum += weighted(next);
+            at = next;
+        }
+        sum
     }
 
     /// The faces cut into triangles: each `[half-edge; 3]`, so a triangle's

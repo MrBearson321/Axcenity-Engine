@@ -8,7 +8,12 @@
 //!   (L), all (A), grow and shrink (Ctrl + and Ctrl −).
 //! - G, R and S (`modal.rs`) or the editor's handles (Move, Rotate and
 //!   Scale in the Studio's toolbar) move what's picked, with the toolbar's
-//!   snapping and Global or Local axes.
+//!   snapping and Global or Local axes, round the pivot, and with
+//!   proportional editing (O) moving what's near too (`proportional.rs`).
+//! - Modeling operations (Phase 56: E, I, Ctrl+B, Ctrl+R, K, M, F and the
+//!   Mesh menu; `tools.rs`) run on what's picked as one undo step each;
+//!   the adjust panel runs the last one again with new settings in place
+//!   of it.
 //!
 //! The Studio keeps its own undo history while the mouse is over it; each
 //! edit is one step. Save writes the file and records it as one step of the
@@ -16,13 +21,18 @@
 //! overlay are `view.rs`.
 
 mod modal;
+mod proportional;
+mod tools;
 mod view;
 
 pub use modal::{Modal, ModalKind};
+pub use proportional::{Falloff, Pivot, Proportional};
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
-use axcenity_mesh_edit::{ModelDoc, PrimitiveSettings, PrimitiveShape, SelectMode, Selection};
+use axcenity_mesh_edit::{
+    MeshOp, ModelDoc, PrimitiveSettings, PrimitiveShape, SelectMode, Selection, apply,
+};
 use axcenity_render::glam::{Mat4, Vec3};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
@@ -59,6 +69,16 @@ struct Snapshot {
     selection: Selection,
 }
 
+/// The last modeling operation run, which the adjust panel can run again
+/// with other settings, from the state before it.
+#[derive(Clone, Debug)]
+pub struct LastOp {
+    pub op: MeshOp,
+    before: Snapshot,
+    /// Each object it ran on, and what was picked of it.
+    targets: Vec<(usize, Selection)>,
+}
+
 /// A model open in the Studio.
 pub struct StudioDoc {
     /// The project path Save writes (a `.glb`).
@@ -79,6 +99,8 @@ pub struct StudioDoc {
     pub revision: u64,
     /// The revision last saved.
     saved: u64,
+    /// The last operation, until anything else is done.
+    pub last_op: Option<LastOp>,
 }
 
 impl StudioDoc {
@@ -101,6 +123,7 @@ impl StudioDoc {
             redo: Vec::new(),
             revision: 1,
             saved: if saved { 1 } else { 0 },
+            last_op: None,
         }
     }
 
@@ -142,6 +165,101 @@ impl StudioDoc {
         self.undo.push((label.to_owned(), before));
         self.redo.clear();
         self.revision += 1;
+        self.last_op = None;
+    }
+
+    /// Runs `op` on what's picked, as one undo step: in Edit mode on the
+    /// active object's picked parts; in Object mode (shading only) on every
+    /// face of each picked object.
+    pub fn run(&mut self, op: MeshOp) -> Result<(), String> {
+        let targets: Vec<(usize, Selection)> = match self.mode {
+            Mode::Edit => vec![(self.active, self.selection.clone())],
+            Mode::Object => self
+                .objects
+                .iter()
+                .filter_map(|&object| {
+                    let mesh = self.model.objects.get(object)?.mesh.as_ref()?;
+                    let mut all = Selection {
+                        mode: SelectMode::Face,
+                        ..Selection::default()
+                    };
+                    all.faces = (0..mesh.face_count() as u32).collect();
+                    Some((object, all))
+                })
+                .collect(),
+        };
+        if targets.is_empty() {
+            return Err("Pick something to run it on".to_owned());
+        }
+        let shading = matches!(
+            op,
+            MeshOp::ShadeSmooth | MeshOp::ShadeFlat | MeshOp::AutoSmooth { .. }
+        );
+        if self.mode == Mode::Object && !shading {
+            return Err(format!("{} works in Edit mode (Tab)", op.label()));
+        }
+        let before = self.snapshot();
+        self.perform(&op, &before, &targets)?;
+        self.record(op.label(), before.clone());
+        self.last_op = Some(LastOp {
+            op,
+            before,
+            targets,
+        });
+        Ok(())
+    }
+
+    /// Runs the last operation again with `op`'s settings, in place of how
+    /// it ran: no new undo step. On an error the last result stays.
+    pub fn adjust(&mut self, op: MeshOp) -> Result<(), String> {
+        let Some(last) = self.last_op.take() else {
+            return Err("No operation to adjust".to_owned());
+        };
+        let result = self.perform(&op, &last.before, &last.targets);
+        self.last_op = Some(LastOp {
+            op: if result.is_ok() { op } else { last.op },
+            ..last
+        });
+        result
+    }
+
+    /// Takes the last operation back without a step to redo (a drag that
+    /// was cancelled).
+    pub fn cancel_last(&mut self) {
+        if self.last_op.take().is_some()
+            && let Some((_, before)) = self.undo.pop()
+        {
+            self.restore(before);
+        }
+    }
+
+    /// `op` on each target's mesh as it was in `before`, put in place.
+    fn perform(
+        &mut self,
+        op: &MeshOp,
+        before: &Snapshot,
+        targets: &[(usize, Selection)],
+    ) -> Result<(), String> {
+        let mut results = Vec::new();
+        for (object, selection) in targets {
+            let Some(mesh) = before
+                .model
+                .objects
+                .get(*object)
+                .and_then(|o| o.mesh.as_ref())
+            else {
+                continue;
+            };
+            results.push((*object, apply(mesh, selection, op)?));
+        }
+        for (object, (mesh, selection)) in results {
+            self.model.objects[object].mesh = Some(mesh);
+            if before.mode == Mode::Edit {
+                self.selection = selection;
+            }
+        }
+        self.revision += 1;
+        Ok(())
     }
 
     /// Puts the last edit back. False if there's none.
@@ -152,6 +270,7 @@ impl StudioDoc {
         let now = self.snapshot();
         self.restore(before);
         self.redo.push((label, now));
+        self.last_op = None;
         true
     }
 
@@ -163,6 +282,7 @@ impl StudioDoc {
         let now = self.snapshot();
         self.restore(after);
         self.undo.push((label, now));
+        self.last_op = None;
         true
     }
 
@@ -181,6 +301,7 @@ impl StudioDoc {
 
     /// Tab: into Edit mode on the active object, or back to Object mode.
     pub fn toggle_mode(&mut self) {
+        self.last_op = None;
         self.mode = match self.mode {
             Mode::Object if self.mesh().is_some() => Mode::Edit,
             _ => Mode::Object,
@@ -235,6 +356,7 @@ impl StudioDoc {
             return;
         };
         change(&mut self.selection, mesh);
+        self.last_op = None;
     }
 
     /// What a move moves: each object and its vertices.
@@ -292,12 +414,11 @@ impl StudioDoc {
             .collect()
     }
 
-    /// Puts `targets` where `matrix` takes them from `start`.
-    fn place(&mut self, targets: &[(usize, Vec<u32>)], start: &[Vec<Vec3>], matrix: Mat4) {
-        for ((object, vertices), start) in targets.iter().zip(start) {
+    /// Puts `targets` at `positions` (one each).
+    fn set_points(&mut self, targets: &[(usize, Vec<u32>)], positions: &[Vec<Vec3>]) {
+        for ((object, vertices), positions) in targets.iter().zip(positions) {
             if let Some(mesh) = self.model.objects[*object].mesh.as_mut() {
-                let moved: Vec<Vec3> = start.iter().map(|&p| matrix.transform_point3(p)).collect();
-                mesh.set_positions(vertices, &moved);
+                mesh.set_positions(vertices, positions);
             }
         }
         self.revision += 1;
@@ -312,8 +433,12 @@ impl StudioDoc {
             return false;
         }
         let before = self.snapshot();
-        let start = self.positions_of(&targets);
-        self.place(&targets, &start, matrix);
+        let moved: Vec<Vec<Vec3>> = self
+            .positions_of(&targets)
+            .into_iter()
+            .map(|start| start.iter().map(|&p| matrix.transform_point3(p)).collect())
+            .collect();
+        self.set_points(&targets, &moved);
         self.record(label, before);
         true
     }
@@ -324,25 +449,98 @@ impl StudioDoc {
 struct Moving {
     targets: Vec<(usize, Vec<u32>)>,
     start: Vec<Vec<Vec3>>,
+    /// Each vertex's distance from the nearest picked one (0 for picked
+    /// ones; others are there for proportional editing).
+    distances: Vec<Vec<f32>>,
+    /// Each vertex's own pivot, with Individual Origins.
+    origins: Vec<Vec<Option<Vec3>>>,
+    /// The move's pivot.
+    center: Vec3,
     before: Snapshot,
 }
 
 impl Moving {
-    fn begin(doc: &StudioDoc) -> Option<Moving> {
-        let targets = doc.targets();
-        if targets.is_empty() {
+    /// What a move of `doc`'s picked parts round `center` moves: with
+    /// proportional editing on (in Edit mode), every vertex, by its
+    /// distance.
+    fn begin(doc: &StudioDoc, center: Vec3, how: &MoveSettings) -> Option<Moving> {
+        let picked = doc.targets();
+        if picked.is_empty() {
             return None;
+        }
+        let mut targets = Vec::new();
+        let mut distances = Vec::new();
+        let mut origins = Vec::new();
+        for (object, vertices) in picked {
+            let Some(mesh) = doc.model.objects[object].mesh.as_ref() else {
+                continue;
+            };
+            let near: Vec<(u32, f32)> = if doc.mode == Mode::Edit && how.proportional.on {
+                let mut near: Vec<(u32, f32)> =
+                    proportional::distances(mesh, &vertices, f32::INFINITY)
+                        .into_iter()
+                        .collect();
+                near.sort_by_key(|&(v, _)| v);
+                near
+            } else {
+                vertices.iter().map(|&v| (v, 0.0)).collect()
+            };
+            let own: HashMap<u32, Vec3> = match (how.pivot, doc.mode) {
+                (Pivot::Individual, Mode::Edit) => proportional::origins(mesh, &doc.selection),
+                (Pivot::Individual, Mode::Object) => {
+                    let middle = vertices.iter().map(|&v| mesh.position(v)).sum::<Vec3>()
+                        / vertices.len().max(1) as f32;
+                    vertices.iter().map(|&v| (v, middle)).collect()
+                }
+                _ => HashMap::new(),
+            };
+            origins.push(near.iter().map(|(v, _)| own.get(v).copied()).collect());
+            distances.push(near.iter().map(|&(_, d)| d).collect());
+            targets.push((object, near.into_iter().map(|(v, _)| v).collect()));
         }
         Some(Moving {
             start: doc.positions_of(&targets),
             targets,
+            distances,
+            origins,
+            center,
             before: doc.snapshot(),
         })
     }
 
-    /// Shows the move as `matrix` takes it.
-    fn update(&self, doc: &mut StudioDoc, matrix: Mat4) {
-        doc.place(&self.targets, &self.start, matrix);
+    /// Shows the move as `matrix` takes it, each vertex as much of the way
+    /// as proportional editing says.
+    fn update(&self, doc: &mut StudioDoc, matrix: Mat4, proportional: &Proportional) {
+        let moved: Vec<Vec<Vec3>> = self
+            .start
+            .iter()
+            .zip(&self.distances)
+            .zip(&self.origins)
+            .map(|((start, distances), origins)| {
+                start
+                    .iter()
+                    .zip(distances)
+                    .zip(origins)
+                    .map(|((&p, &distance), origin)| {
+                        let weight = if proportional.on {
+                            proportional.falloff.weight(distance, proportional.radius)
+                        } else if distance == 0.0 {
+                            1.0
+                        } else {
+                            0.0
+                        };
+                        let (matrix, center) = match origin {
+                            Some(origin) => {
+                                (proportional::around(matrix, self.center, *origin), *origin)
+                            }
+                            None => (matrix, self.center),
+                        };
+                        proportional::partial(matrix, weight, center).transform_point3(p)
+                    })
+                    .collect()
+            })
+            .collect();
+        doc.set_points(&self.targets, &moved);
     }
 
     /// Keeps the move as one undo step named `label`.
@@ -352,7 +550,41 @@ impl Moving {
 
     /// Puts everything back where it started.
     fn cancel(self, doc: &mut StudioDoc) {
-        doc.place(&self.targets, &self.start, Mat4::IDENTITY);
+        doc.set_points(&self.targets, &self.start);
+    }
+}
+
+/// How moves move: the pivot, the 3D cursor and proportional editing.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MoveSettings {
+    pub pivot: Pivot,
+    pub cursor: Vec3,
+    pub proportional: Proportional,
+}
+
+impl MoveSettings {
+    /// The point a move of `doc`'s picked parts goes round.
+    fn center(&self, doc: &StudioDoc) -> Option<Vec3> {
+        let (median, _) = doc.pivot()?;
+        Some(match self.pivot {
+            Pivot::Median | Pivot::Individual => median,
+            Pivot::Cursor => self.cursor,
+            Pivot::BoundingBox => {
+                let (min, max) = doc
+                    .targets()
+                    .iter()
+                    .flat_map(|(object, vertices)| {
+                        let mesh = doc.model.objects[*object].mesh.as_ref();
+                        vertices
+                            .iter()
+                            .filter_map(move |&v| Some(mesh?.position(v)))
+                    })
+                    .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(min, max), p| {
+                        (min.min(p), max.max(p))
+                    });
+                (min + max) / 2.0
+            }
+        })
     }
 }
 
@@ -367,8 +599,12 @@ pub struct ModelStudio {
     pub axes: MoveAxes,
     /// Draw each face's normal.
     pub show_normals: bool,
+    /// The pivot, the 3D cursor and proportional editing.
+    pub moves: MoveSettings,
     /// A keyboard move under way, and what it moves.
     modal: Option<(Modal, Moving)>,
+    /// The knife or loop cut under way, a value being dragged, or a menu.
+    tools: tools::Tools,
     view: view::View,
     /// The mouse was over the tab last frame, so undo and keys are its.
     hovered: bool,
@@ -386,7 +622,9 @@ impl Default for ModelStudio {
             tool: Tool::Select,
             axes: MoveAxes::Global,
             show_normals: false,
+            moves: MoveSettings::default(),
             modal: None,
+            tools: tools::Tools::default(),
             view: view::View::default(),
             hovered: false,
             pending: None,
@@ -415,7 +653,7 @@ impl ModelStudio {
 
     /// True while a move is being dragged, which undo mustn't interrupt.
     pub fn is_dragging(&self) -> bool {
-        self.modal.is_some() || self.view.dragging()
+        self.modal.is_some() || self.view.dragging() || self.tools.busy()
     }
 
     /// Shows `doc`, unless the open one has unsaved changes: then it waits
@@ -430,6 +668,7 @@ impl ModelStudio {
 
     fn show_doc(&mut self, doc: StudioDoc) {
         self.modal = None;
+        self.tools = tools::Tools::default();
         self.view.frame_doc(&doc);
         self.doc = Some(doc);
     }
@@ -662,6 +901,11 @@ impl ModelStudio {
             {
                 doc.redo();
             }
+            if editable {
+                ui.separator();
+                self.mesh_menu(ui);
+                self.pivot_menu(ui);
+            }
         });
     }
 
@@ -807,16 +1051,23 @@ impl ModelStudio {
             tool: if editable { self.tool } else { Tool::Select },
             axes: self.axes,
             show_normals: self.show_normals,
+            cursor: self.moves.cursor,
         };
         if editable && response.contains_pointer() {
             self.keys(ui, &context);
         }
+        let extras = self.extras();
         let Some(doc) = &mut self.doc else {
             return;
         };
         let modal = self.modal.as_mut().map(|(modal, _)| &*modal);
-        let event = self.view.show(ui, &context, render_state, doc, modal);
+        let event = self
+            .view
+            .show(ui, &context, render_state, doc, modal, &extras);
         self.handle(event, ui, &context);
+        if editable {
+            self.overlays(ui, rect);
+        }
     }
 
     /// The Studio's keys, while the mouse is over its view.
@@ -824,7 +1075,45 @@ impl ModelStudio {
         let pointer = ui
             .input(|input| input.pointer.latest_pos())
             .unwrap_or(frame.rect.center());
+        if self.tool_keys(ui) {
+            return;
+        }
         if let Some((modal, _)) = &mut self.modal {
+            let proportional = self.moves.proportional.on;
+            let (grab_again, wider) = ui.input_mut(|input| {
+                let grab_again = modal.kind == ModalKind::Grab
+                    && input.consume_key(egui::Modifiers::NONE, egui::Key::G);
+                // Proportional editing's radius: Page Up and Down, or the
+                // wheel (which then doesn't zoom).
+                let mut wider = 0.0;
+                if proportional {
+                    if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+                        wider += 1.0;
+                    }
+                    if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+                        wider -= 1.0;
+                    }
+                    if input.raw_scroll_delta.y != 0.0 {
+                        wider += input.raw_scroll_delta.y.signum();
+                    }
+                    input.raw_scroll_delta = egui::Vec2::ZERO;
+                    input.smooth_scroll_delta = egui::Vec2::ZERO;
+                }
+                (grab_again, wider)
+            });
+            if grab_again {
+                // G G: edge slide in place of the grab.
+                self.cancel_modal();
+                self.begin_edge_slide(pointer);
+                return;
+            }
+            if wider != 0.0 {
+                let radius = &mut self.moves.proportional.radius;
+                *radius = (*radius * 1.1_f32.powf(wider)).clamp(0.001, 10_000.0);
+            }
+            let Some((modal, _)) = &mut self.modal else {
+                return;
+            };
             let (axes, typed, back, enter, escape) = ui.input_mut(|input| {
                 let mut axes = Vec::new();
                 for (axis, key) in [egui::Key::X, egui::Key::Y, egui::Key::Z]
@@ -866,6 +1155,9 @@ impl ModelStudio {
             } else if escape {
                 self.cancel_modal();
             }
+            return;
+        }
+        if self.op_keys(ui, pointer) {
             return;
         }
         let none = egui::Modifiers::NONE;
@@ -933,7 +1225,13 @@ impl ModelStudio {
         let Some(doc) = &self.doc else {
             return false;
         };
-        let (Some((center, normal)), Some(moving)) = (doc.pivot(), Moving::begin(doc)) else {
+        let Some((_, normal)) = doc.pivot() else {
+            return false;
+        };
+        let Some(center) = self.moves.center(doc) else {
+            return false;
+        };
+        let Some(moving) = Moving::begin(doc, center, &self.moves) else {
             return false;
         };
         self.modal = Some((
@@ -948,7 +1246,11 @@ impl ModelStudio {
         let (Some((modal, moving)), Some(doc)) = (&self.modal, &mut self.doc) else {
             return;
         };
-        moving.update(doc, modal.matrix(screen, mouse, snap));
+        moving.update(
+            doc,
+            modal.matrix(screen, mouse, snap),
+            &self.moves.proportional,
+        );
     }
 
     /// Keeps the keyboard move as one undo step.
@@ -967,6 +1269,9 @@ impl ModelStudio {
 
     /// Acts on what happened in the view.
     fn handle(&mut self, event: view::Event, ui: &egui::Ui, frame: &view::Frame) {
+        if self.handle_tools(&event) {
+            return;
+        }
         let screen = event.screen;
         if self.modal.is_some() {
             if let Some(mouse) = ui.input(|input| input.pointer.latest_pos()) {
@@ -1005,13 +1310,17 @@ impl ModelStudio {
                 set.extend(elements);
             }),
             view::ViewAction::BeginHandle => {
-                self.view.moving = Moving::begin(doc);
+                // The handles go round the middle of their box.
+                let center = view::handle_pose(doc, self.axes).map(|pose| pose.position);
+                self.view.moving =
+                    center.and_then(|center| Moving::begin(doc, center, &self.moves));
             }
             view::ViewAction::Handle(matrix) => {
                 if let Some(moving) = &self.view.moving {
-                    moving.update(doc, matrix);
+                    moving.update(doc, matrix, &self.moves.proportional);
                 }
             }
+            view::ViewAction::Cursor(at) => self.moves.cursor = at,
             view::ViewAction::EndHandle(label) => {
                 if let Some(moving) = self.view.moving.take() {
                     moving.finish(doc, label);
@@ -1050,3 +1359,5 @@ fn save_name(doc: &StudioDoc) -> String {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) mod tools_tests;
