@@ -9,10 +9,11 @@
 //! server-only service), and their changed properties, attributes and tags.
 //!
 //! [`Replicator`] finds those changes by comparing the world with what it
-//! last sent, so nothing the server does is missed, however it changed.
-//! Everything goes on the reliable channel, uncompressed and unbudgeted;
-//! Phase 65 builds deltas from the change records, quantizes positions,
-//! budgets bandwidth and smooths movement.
+//! last sent, so nothing the server does is missed, however it changed
+//! (a change record would be missed by a host that took them for its
+//! scripts first). These go on the reliable channel. A part's movement
+//! doesn't: once a part is on a device it moves by `motion`, quantized and
+//! within each player's budget (Phase 65).
 //!
 //! A replica keeps the server's Instances at their own IDs (see
 //! `World::empty_replica`), so an ID means the same Instance on every
@@ -24,6 +25,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use serde::{Deserialize, Serialize};
 
+use crate::motion::MOTION_PROPERTIES;
 use crate::wire::WireValue;
 
 /// An Instance as the server has it.
@@ -82,11 +84,26 @@ pub enum Op {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Update {
     pub ops: Vec<Op>,
+    /// The server's clock when it was made, in seconds: a part's motion
+    /// sent before it is stale.
+    #[serde(default)]
+    pub time: f64,
+    /// `LevelService`'s levels, when they changed (and in a snapshot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels: Option<LevelState>,
+}
+
+/// The level in the Workspace and those added beside it, each with its
+/// Model's network ID.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LevelState {
+    pub current: String,
+    pub added: Vec<(String, u64)>,
 }
 
 impl Update {
     pub fn is_empty(&self) -> bool {
-        self.ops.is_empty()
+        self.ops.is_empty() && self.levels.is_none()
     }
 }
 
@@ -100,13 +117,16 @@ struct Sent {
 }
 
 impl Sent {
+    /// What updates carry of `id`: a part's motion goes on its own.
     fn of(world: &World, id: InstanceId) -> Option<Sent> {
         let instance = world.get(id)?;
+        let part = instance.class().is_base_part();
         Some(Sent {
             name: instance.name().to_owned(),
             parent: instance.parent(),
             properties: instance
                 .properties()
+                .filter(|(name, _)| !(part && MOTION_PROPERTIES.contains(name)))
                 .map(|(name, value)| (name, value.clone()))
                 .collect(),
             attributes: instance.attributes().clone(),
@@ -156,6 +176,15 @@ fn replicated(world: &World) -> (Vec<InstanceId>, Vec<InstanceId>) {
     (services, inside)
 }
 
+/// The BaseParts players get, which move by `motion`.
+pub fn replicated_parts(world: &World) -> Vec<InstanceId> {
+    let (_, inside) = replicated(world);
+    inside
+        .into_iter()
+        .filter(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
+        .collect()
+}
+
 fn properties(instance: &axcenity_core::Instance) -> Vec<(String, WireValue)> {
     instance
         .properties()
@@ -203,7 +232,10 @@ impl Replicator {
             }
         }
         ops.extend(inside.into_iter().filter_map(|id| create(world, id)));
-        Update { ops }
+        Update {
+            ops,
+            ..Update::default()
+        }
     }
 
     /// What changed since the last call, for the players who have the
@@ -244,7 +276,10 @@ impl Replicator {
             self.sent.remove(&id);
             ops.push(Op::Destroy { id: id.to_bits() });
         }
-        Update { ops }
+        Update {
+            ops,
+            ..Update::default()
+        }
     }
 }
 
@@ -306,6 +341,9 @@ pub struct Applied {
     /// Players the server removed, still in the replica, so
     /// `PlayerRemoving` can fire before they go.
     pub players_leaving: Vec<InstanceId>,
+    /// Parts given their exact place (made, or settled), so motion sent
+    /// before it is stale.
+    pub placed: Vec<InstanceId>,
 }
 
 /// Applies `update` to a replica. Instance properties are set last, so
@@ -347,6 +385,9 @@ pub fn apply(world: &mut World, update: &Update) -> Applied {
                 }
                 let parent = InstanceId::from_bits(instance.parent);
                 let _ = world.set_parent(id, Some(parent));
+                if class.is_base_part() {
+                    applied.placed.push(id);
+                }
                 if class == ClassName::Player && parent == world.players() {
                     applied.players_added.push(id);
                 }
@@ -361,6 +402,9 @@ pub fn apply(world: &mut World, update: &Update) -> Applied {
                 }
                 for (name, value) in &change.properties {
                     set(world, id, name, value);
+                }
+                if change.properties.iter().any(|(name, _)| name == "Position") {
+                    applied.placed.push(id);
                 }
                 for (name, value) in &change.attributes {
                     let value = value.as_ref().and_then(WireValue::to_value);

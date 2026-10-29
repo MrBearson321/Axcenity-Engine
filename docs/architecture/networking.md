@@ -1,6 +1,6 @@
 # Networking
 
-Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, hosting and joining. Phase 64 (so far, for hosted games): a device that joins follows the server's world as a replica and runs only its LocalScripts there, RemoteEvents and RemoteFunctions cross between devices, and Players carry `UserId` and `DisplayName`. Single-player and the editor's Play still run both sides on one World; they move to a server and client over loopback (with Play's Clients 1–8) together with client-owned characters. Replication's deltas from change records, quantizing, bandwidth budgets and smoothing are Phase 65.
+Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, hosting and joining. Phase 64 (so far, for hosted games): a device that joins follows the server's world as a replica and runs only its LocalScripts there, RemoteEvents and RemoteFunctions cross between devices, and Players carry `UserId` and `DisplayName`. Phase 65: parts move by quantized motion within each player's budget and are smoothed on their device, and the level state follows the server. Single-player and the editor's Play still run both sides on one World; they move to a server and client over loopback (with Play's Clients 1–8) together with client-owned characters.
 
 ## Crates
 
@@ -12,14 +12,15 @@ Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, ho
 
 `net::transport` uses `renet` 2 (reliable-ordered and unreliable channels) over UDP through `renet_netcode` (netcode's connection handshake, 15-second timeout and disconnect reasons). The in-memory loopback has the same `Server` and `Client` interface; `Network::host_in_memory` and `join_through` use it.
 
-- Channel 0 is reliable-ordered, channel 1 unreliable (`Channel`).
+- Channel 0 is reliable-ordered, channel 1 unreliable (`Channel`). The unreliable channel carries motion (below).
+- The loopback can emulate a worse network (`Conditions`: `latency` added to each packet each way, give or take `jitter`, and the share `loss` dropped; `Server::emulate`, `Network::emulate`). `Network::stats` gives each connection's round trip, loss and bytes a second (renet's numbers), and the bytes sent over a loopback.
 - Netcode runs unsecured: there's no account service to hand out connect tokens, so packets aren't encrypted. This is enough for direct-address and LAN play, which is all there is (no relay or matchmaking).
 - Netcode's protocol id is the same for every game and version. Games and versions are told apart by the handshake, which can say why it refuses; netcode would drop the packets silently.
 - A server listens on IPv4 (`0.0.0.0`), and joining prefers an address's IPv4 form.
 
 ## Handshake
 
-The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (2 since Phase 64), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password and their `user_id` (missing from older engines, read as 0). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
+The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (3 since Phase 65), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password and their `user_id` (missing from older engines, read as 0). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
 
 | Check | The player's `ConnectionFailed` reason | The host's log |
 |---|---|---|
@@ -46,7 +47,10 @@ Each device has its own World. The server's is the game; a player's device that 
 
 - **What's sent** (`replicate.rs`): `game`'s properties and every service but the server-only ones, ServerScriptService and ServerStorage (`World::server_only_services`), with everything inside. A player's replica has those two services, empty.
 - **Joining**: the host sends `Snapshot` (which Player is theirs, then each service's properties and every Instance, parents first). The device stops every script (`ScriptRuntime::become_client`), swaps its world for the replica, copies its own copy's Terrain landscapes by ID, sets `LocalPlayer`, and starts the game's ModuleScripts and LocalScripts again (`Network::set_client_scripts`; the same game version loads them at the same IDs). From then on only LocalScripts run there; Scripts given to `start_script` are skipped.
-- **Each frame**, in network send, `Replicator::frame` compares the world with what it last sent and sends `Update`: made Instances, changed names, parents, properties, attributes and tags, and Instances destroyed, taken out of the game or moved into a server-only service. Everything is reliable JSON, with no budget (Phase 65). Instance properties are applied last, so they can name an Instance later in the update.
+- **Each frame**, in network send, `Replicator::frame` compares the world with what it last sent and sends `Update`: made Instances, changed names, parents, properties, attributes and tags, and Instances destroyed, taken out of the game or moved into a server-only service. It's reliable JSON, with the server's clock (`time`). Instance properties are applied last, so they can name an Instance later in the update. Comparing, rather than reading `core`'s change records, means nothing is missed though the scripts take those records first.
+- **Motion** (`motion.rs`): a BasePart's `Position`, `Orientation`, `AssemblyLinearVelocity` and `AssemblyAngularVelocity` aren't in updates once the part is on a device. Each frame each player's `MotionSender` adds to every moved part's priority (how far it is from what they have, times nearness to their character: 1 / (1 + distance / 64)) and sends the highest first while their budget lasts (`MOTION_BUDGET`, 24 000 bytes a second, saved up for at most a quarter second). A part is 32 bytes: its network ID, its position to 1/128 stud, each angle to 360/65536°, and its velocity to 1/32 stud a second, in packets under 1000 bytes on the unreliable channel. A part still for `SETTLE_TIME` (0.2 s) is sent once more, exactly, in a reliable update, so a lost packet never leaves it elsewhere. 200 moving crates stay under 32 000 bytes a second per player (`two_hundred_moving_crates_stay_under_the_bandwidth_budget_per_client`).
+- **Smoothing**: a player's device shows parts `DELAY` (0.1 s) behind the newest motion it has, blending the two states around that moment (angles the short way round), with its clock drifting toward the server's. A part that starts moving after standing still starts from where it stood. A reliable update that places a part (made, or settled) makes older motion stale.
+- **Levels**: an update carries `LevelService`'s level and the added ones (with their Models' IDs) when they change, and a snapshot always does, so a player who joins mid-game has the same added levels. When the server loads another level, `LevelLoaded` fires on the players' devices and their loading screen shows (`ScriptRuntime::follow_levels`).
 - **A device's own changes** to its replica stay on it, until the server changes the same thing.
 - **A device following a server** (`axcenity-player --join`, or `NetworkService:Join`) doesn't step physics, characters, Humanoids, players, agents, prompts, tools, health or touches: the server does. Its own character's movement is Phase 66. After leaving, it keeps the last world without the other players.
 

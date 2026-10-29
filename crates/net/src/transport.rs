@@ -4,6 +4,9 @@
 //!
 //! Each frame a host calls `update` (receive), reads and sends messages,
 //! then `flush` (send). Times are real seconds since the last update.
+//!
+//! The loopback can pretend to be a worse network ([`Conditions`]: delay,
+//! jitter and loss), for the editor's Play settings and for tests.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -76,12 +79,117 @@ fn now() -> Duration {
         .unwrap_or_default()
 }
 
-/// The two queues of packets between a loopback client and its server.
+/// A network as bad as this, emulated on the loopback (Phase 67's Play
+/// settings): each packet arrives `latency` late, give or take up to
+/// `jitter`, and `loss` of them (0 to 1) never arrive. Both directions.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Conditions {
+    pub latency: Duration,
+    pub jitter: Duration,
+    pub loss: f64,
+}
+
+/// How a connection is doing, as renet measures it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LinkStats {
+    /// The round trip, in seconds.
+    pub rtt: f64,
+    /// The share of packets lost, 0 to 1.
+    pub packet_loss: f64,
+    pub bytes_sent_per_second: f64,
+    pub bytes_received_per_second: f64,
+}
+
+impl From<renet::NetworkInfo> for LinkStats {
+    fn from(info: renet::NetworkInfo) -> LinkStats {
+        LinkStats {
+            rtt: info.rtt,
+            packet_loss: info.packet_loss,
+            bytes_sent_per_second: info.bytes_sent_per_second,
+            bytes_received_per_second: info.bytes_received_per_second,
+        }
+    }
+}
+
+/// A packet on its way, due when the receiving end's clock reaches `due`.
+struct InFlight {
+    due: Duration,
+    bytes: Vec<u8>,
+}
+
+/// One direction of a loopback: the packets on their way, and the
+/// receiving end's clock.
+#[derive(Default)]
+struct Lane {
+    packets: RefCell<VecDeque<InFlight>>,
+    clock: Cell<Duration>,
+    /// Every byte put on it (lost ones too), for measuring bandwidth.
+    bytes: Cell<u64>,
+}
+
+impl Lane {
+    /// Puts `packets` on their way, late or lost as `pipe` says.
+    fn send(&self, pipe: &Pipe, packets: Vec<Vec<u8>>) {
+        let conditions = pipe.conditions.get();
+        let mut queue = self.packets.borrow_mut();
+        for bytes in packets {
+            self.bytes.set(self.bytes.get() + bytes.len() as u64);
+            if conditions.loss > 0.0 && pipe.random() < conditions.loss {
+                continue;
+            }
+            let jitter = conditions.jitter.as_secs_f64() * (pipe.random() * 2.0 - 1.0);
+            let delay = (conditions.latency.as_secs_f64() + jitter).max(0.0);
+            queue.push_back(InFlight {
+                due: self.clock.get() + Duration::from_secs_f64(delay),
+                bytes,
+            });
+        }
+    }
+
+    /// Advances the receiving end's clock by `elapsed` and takes the
+    /// packets due by then, in the order they arrive.
+    fn arrive(&self, elapsed: Duration) -> Vec<Vec<u8>> {
+        let now = self.clock.get() + elapsed;
+        self.clock.set(now);
+        let mut queue = self.packets.borrow_mut();
+        let (due, later): (VecDeque<InFlight>, VecDeque<InFlight>) =
+            queue.drain(..).partition(|packet| packet.due <= now);
+        *queue = later;
+        let mut due: Vec<InFlight> = due.into();
+        due.sort_by_key(|packet| packet.due);
+        due.into_iter().map(|packet| packet.bytes).collect()
+    }
+}
+
+/// The two lanes between a loopback client and its server.
 #[derive(Default)]
 struct Pipe {
-    to_server: RefCell<VecDeque<Vec<u8>>>,
-    to_client: RefCell<VecDeque<Vec<u8>>>,
+    to_server: Lane,
+    to_client: Lane,
     closed: Cell<Option<Closed>>,
+    conditions: Cell<Conditions>,
+    /// xorshift's state, for loss and jitter.
+    seed: Cell<u64>,
+}
+
+impl Pipe {
+    fn new(conditions: Conditions, seed: u64) -> Pipe {
+        Pipe {
+            conditions: Cell::new(conditions),
+            seed: Cell::new(seed | 1),
+            ..Pipe::default()
+        }
+    }
+
+    /// A number from 0 up to 1.
+    fn random(&self) -> f64 {
+        let mut x = self.seed.get();
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.seed.set(x);
+        (x >> 11) as f64 / (1u64 << 53) as f64
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -111,6 +219,8 @@ pub struct Server {
     udp: Option<NetcodeServerTransport>,
     loopbacks: Vec<(ClientId, Rc<Pipe>)>,
     next_loopback: ClientId,
+    /// What the loopback emulates.
+    conditions: Conditions,
 }
 
 impl Server {
@@ -143,7 +253,30 @@ impl Server {
             udp: None,
             loopbacks: Vec::new(),
             next_loopback: FIRST_LOOPBACK,
+            conditions: Conditions::default(),
         }
+    }
+
+    /// Makes every loopback connection, and those to come, as bad as
+    /// `conditions`. UDP connections are as the network is.
+    pub fn emulate(&mut self, conditions: Conditions) {
+        self.conditions = conditions;
+        for (_, pipe) in &self.loopbacks {
+            pipe.conditions.set(conditions);
+        }
+    }
+
+    /// How the connection `id` is doing.
+    pub fn stats(&self, id: ConnectionId) -> Option<LinkStats> {
+        self.renet.network_info(id).ok().map(LinkStats::from)
+    }
+
+    /// Every byte sent to the loopback connection `id` so far.
+    pub fn loopback_bytes_sent(&self, id: ConnectionId) -> Option<u64> {
+        self.loopbacks
+            .iter()
+            .find(|(loopback, _)| *loopback == id)
+            .map(|(_, pipe)| pipe.to_client.bytes.get())
     }
 
     /// The UDP port it listens on; `None` in memory.
@@ -158,7 +291,7 @@ impl Server {
         let id = self.next_loopback;
         self.next_loopback -= 1;
         let renet = self.renet.new_local_client(id);
-        let pipe = Rc::new(Pipe::default());
+        let pipe = Rc::new(Pipe::new(self.conditions, id));
         self.loopbacks.push((id, pipe.clone()));
         Client {
             renet,
@@ -182,7 +315,7 @@ impl Server {
                 renet.remove_connection(*id);
                 return false;
             }
-            for packet in pipe.to_server.borrow_mut().drain(..) {
+            for packet in pipe.to_server.arrive(elapsed) {
                 let _ = renet.process_packet_from(&packet, *id);
             }
             true
@@ -213,8 +346,7 @@ impl Server {
         let closing = renet.disconnections_id();
         self.loopbacks.retain(|(id, pipe)| {
             if let Ok(packets) = renet.get_packets_to_send(*id) {
-                let mut to_client = pipe.to_client.borrow_mut();
-                to_client.extend(packets);
+                pipe.to_client.send(pipe, packets);
             }
             if closing.contains(id) {
                 pipe.closed.set(Some(Closed::ByServer));
@@ -319,7 +451,7 @@ impl Client {
                     self.renet.disconnect_due_to_transport();
                     self.ended = Some("The server closed the connection.".to_owned());
                 }
-                for packet in pipe.to_client.borrow_mut().drain(..) {
+                for packet in pipe.to_client.arrive(elapsed) {
                     self.renet.process_packet(&packet);
                 }
             }
@@ -338,13 +470,18 @@ impl Client {
             }
             Link::Loopback(pipe) => {
                 let packets = self.renet.get_packets_to_send();
-                pipe.to_server.borrow_mut().extend(packets);
+                pipe.to_server.send(pipe, packets);
             }
         }
     }
 
     pub fn is_connected(&self) -> bool {
         self.ended.is_none() && self.renet.is_connected()
+    }
+
+    /// How the connection is doing.
+    pub fn stats(&self) -> LinkStats {
+        self.renet.network_info().into()
     }
 
     /// Why the connection ended; `None` while connecting or connected.

@@ -20,22 +20,28 @@
 mod discovery;
 mod game;
 mod handshake;
+mod motion;
 mod replicate;
 mod session;
 mod transport;
 mod wire;
 
 pub use discovery::{HostInfo, LanAnswerer, LanSearch, SEARCH_TIME};
-pub use game::{Network, ScriptCode};
+pub use game::{Network, PeerStats, ScriptCode};
 pub use handshake::{GameInfo, Message, Peer, Refusal};
-pub use replicate::{Applied, Op, Replicator, Update, WireChange, WireInstance, apply};
+pub use motion::{
+    DELAY, ENTRY_BYTES, MOTION_BUDGET, Motion, MotionSender, PartState, SETTLE_TIME, Smoother,
+};
+pub use replicate::{
+    Applied, LevelState, Op, Replicator, Update, WireChange, WireInstance, apply, replicated_parts,
+};
 pub use session::{HANDSHAKE_TIMEOUT, Host, HostSettings, Join, SessionEvent};
-pub use transport::{Channel, Client, ConnectionId, Server, ServerEvent};
+pub use transport::{Channel, Client, Conditions, ConnectionId, LinkStats, Server, ServerEvent};
 pub use wire::{WireArg, WireKind, WireMessage, WireValue};
 
 /// The network protocol's version: games on different ones can't play
 /// together, and the handshake says so. Raise it when a message changes.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 /// The UDP port games are hosted on unless told another.
 pub const DEFAULT_PORT: u16 = 47800;
 /// The UDP port hosts answer LAN searches on.
@@ -43,5 +49,7 @@ pub const DISCOVERY_PORT: u16 = 47801;
 
 #[cfg(test)]
 mod replication_tests;
+#[cfg(test)]
+mod smoothing_tests;
 #[cfg(test)]
 mod tests;

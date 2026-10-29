@@ -11,7 +11,7 @@ use axcenity_script::{OutputKind, ScriptRuntime};
 use super::*;
 use crate::wire::{WireArg, WireKind};
 
-const SECONDS: f64 = 1.0 / 60.0;
+pub(crate) const SECONDS: f64 = 1.0 / 60.0;
 
 const SERVER: &str = r#"
 local remote = game.ReplicatedStorage.Shout
@@ -62,13 +62,13 @@ end
 
 /// The same game on every device: loading it makes the same Instances
 /// at the same IDs everywhere.
-struct Castle {
-    world: World,
-    server_script: InstanceId,
-    client_script: InstanceId,
+pub(crate) struct Castle {
+    pub(crate) world: World,
+    pub(crate) server_script: InstanceId,
+    pub(crate) client_script: InstanceId,
 }
 
-fn castle() -> Castle {
+pub(crate) fn castle() -> Castle {
     let mut world = World::new();
     let add = |world: &mut World, class, name: &str, parent| {
         let id = world.create(class).unwrap();
@@ -102,7 +102,7 @@ fn castle() -> Castle {
     }
 }
 
-fn info() -> GameInfo {
+pub(crate) fn info() -> GameInfo {
     GameInfo {
         name: "Castle".to_owned(),
         version: "1.0".to_owned(),
@@ -110,15 +110,15 @@ fn info() -> GameInfo {
 }
 
 /// One device: its world, scripts and network.
-struct Device {
-    world: World,
-    scripts: ScriptRuntime,
-    network: Network,
-    output: Vec<String>,
+pub(crate) struct Device {
+    pub(crate) world: World,
+    pub(crate) scripts: ScriptRuntime,
+    pub(crate) network: Network,
+    pub(crate) output: Vec<String>,
 }
 
 impl Device {
-    fn frame(&mut self) {
+    pub(crate) fn frame(&mut self) {
         self.network
             .receive(&mut self.world, &mut self.scripts, SECONDS);
         self.scripts.step(&mut self.world, SECONDS);
@@ -132,13 +132,23 @@ impl Device {
         self.output.extend(self.network.take_log());
     }
 
-    fn said(&self, text: &str) -> bool {
+    /// A frame of `axcenity-server`'s, with `Heartbeat`.
+    pub(crate) fn frame_with_heartbeat(&mut self) {
+        self.network
+            .receive(&mut self.world, &mut self.scripts, SECONDS);
+        self.scripts.step(&mut self.world, SECONDS);
+        self.scripts.heartbeat(&mut self.world, SECONDS);
+        self.network.send(&self.world, &mut self.scripts);
+        self.output.extend(self.network.take_log());
+    }
+
+    pub(crate) fn said(&self, text: &str) -> bool {
         self.output.iter().any(|line| line == text)
     }
 }
 
 /// `axcenity-server` with the castle, hosting in memory.
-fn server() -> (Device, Client) {
+pub(crate) fn server() -> (Device, Client) {
     let Castle {
         mut world,
         server_script,
@@ -159,7 +169,7 @@ fn server() -> (Device, Client) {
 }
 
 /// A player's device with the castle, joining through `client`.
-fn player(client: Client, user_id: f64) -> Device {
+pub(crate) fn player(client: Client, user_id: f64) -> Device {
     let Castle {
         mut world,
         client_script,
@@ -182,7 +192,7 @@ fn player(client: Client, user_id: f64) -> Device {
     }
 }
 
-fn frames(server: &mut Device, players: &mut [Device], count: usize) {
+pub(crate) fn frames(server: &mut Device, players: &mut [Device], count: usize) {
     for _ in 0..count {
         server.frame();
         for player in players.iter_mut() {
@@ -192,7 +202,7 @@ fn frames(server: &mut Device, players: &mut [Device], count: usize) {
 }
 
 /// A server and three players, joined one after another.
-fn three_players() -> (Device, Vec<Device>) {
+pub(crate) fn three_players() -> (Device, Vec<Device>) {
     let (mut server, first) = server();
     let mut players = vec![player(first, 101.0)];
     frames(&mut server, &mut players, 5);
@@ -437,7 +447,9 @@ _G.crate = crate
             "_G.crate.Position = Vector3.new(4, 5, 6)",
         )
         .unwrap();
-    frames(&mut server, &mut players, 1);
+    // A move arrives as motion, shown a moment behind; once the crate has
+    // stood still it's sent exactly.
+    frames(&mut server, &mut players, 30);
     for player in &players {
         assert_eq!(
             position(&player.world),

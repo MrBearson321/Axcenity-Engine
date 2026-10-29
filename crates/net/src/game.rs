@@ -11,14 +11,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use axcenity_core::{ClassName, InstanceId, Value, World};
+use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_script::{LanGame, NetworkRequest, ScriptRuntime, Side};
 
 use crate::discovery::{HostInfo, LanAnswerer, LanSearch};
 use crate::handshake::{GameInfo, Message};
-use crate::replicate::{Replicator, Update, apply};
+use crate::motion::{MOTION_BUDGET, Motion, MotionSender, Smoother};
+use crate::replicate::{LevelState, Replicator, Update, apply, replicated_parts};
 use crate::session::{Host, HostSettings, Join, SessionEvent};
-use crate::transport::{Client, Server};
+use crate::transport::{Client, Conditions, LinkStats, Server};
 use crate::wire::WireMessage;
 use crate::{DEFAULT_PORT, DISCOVERY_PORT};
 
@@ -35,6 +36,16 @@ pub struct ScriptCode {
     pub instance: InstanceId,
     pub path: String,
     pub source: String,
+}
+
+/// One connection's numbers, for the Profiler's Network section.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PeerStats {
+    /// The other player's Player, while hosting; `None` for the server.
+    pub player: Option<InstanceId>,
+    pub link: LinkStats,
+    /// Every byte sent to them so far, over the loopback.
+    pub loopback_bytes_sent: Option<u64>,
 }
 
 enum Session {
@@ -60,6 +71,19 @@ pub struct Network {
     need_snapshot: BTreeSet<u32>,
     /// The code to start again once joined (see [`ScriptCode`]).
     client_scripts: Vec<ScriptCode>,
+    /// Seconds since the session started: the server's clock, which
+    /// motion and updates carry.
+    clock: f64,
+    /// The last frame's length, in seconds.
+    seconds: f64,
+    /// Each player's motion, while hosting, by their id.
+    motion: BTreeMap<u32, MotionSender>,
+    /// Bytes a second of motion each player may get.
+    motion_budget: f64,
+    /// The levels players were last told of.
+    sent_levels: Option<LevelState>,
+    /// Joined: the server's parts, smoothed.
+    smoother: Smoother,
 }
 
 impl Network {
@@ -76,7 +100,19 @@ impl Network {
             replicator: Replicator::default(),
             need_snapshot: BTreeSet::new(),
             client_scripts: Vec::new(),
+            clock: 0.0,
+            seconds: 0.0,
+            motion: BTreeMap::new(),
+            motion_budget: MOTION_BUDGET,
+            sent_levels: None,
+            smoother: Smoother::default(),
         }
+    }
+
+    /// Gives each player `bytes_per_second` of motion (tests).
+    pub fn with_motion_budget(mut self, bytes_per_second: f64) -> Network {
+        self.motion_budget = bytes_per_second;
+        self
     }
 
     /// The game's ModuleScripts and LocalScripts (in the order they start),
@@ -93,6 +129,36 @@ impl Network {
                 Some(host.server_mut().connect_loopback())
             }
             _ => None,
+        }
+    }
+
+    /// Makes the in-memory host's connections as bad as `conditions`
+    /// (the editor's Play settings, and tests). Nothing for UDP.
+    pub fn emulate(&mut self, conditions: Conditions) {
+        if let Session::Hosting(host) = &mut self.session {
+            host.server_mut().emulate(conditions);
+        }
+    }
+
+    /// How each other player's connection is doing, while hosting; this
+    /// device's connection to the server, joined.
+    pub fn stats(&self) -> Vec<PeerStats> {
+        match &self.session {
+            Session::Offline => Vec::new(),
+            Session::Hosting(host) => self
+                .players
+                .iter()
+                .map(|(&peer, &player)| PeerStats {
+                    player: Some(player),
+                    link: host.stats_of(peer).unwrap_or_default(),
+                    loopback_bytes_sent: host.loopback_bytes_sent_to(peer),
+                })
+                .collect(),
+            Session::Joined(join) => vec![PeerStats {
+                player: None,
+                link: join.stats(),
+                loopback_bytes_sent: None,
+            }],
         }
     }
 
@@ -249,6 +315,9 @@ impl Network {
         self.answerer = None;
         self.replicator = Replicator::default();
         self.need_snapshot.clear();
+        self.motion.clear();
+        self.sent_levels = None;
+        self.smoother = Smoother::default();
         self.remove_players(world, scripts);
     }
 
@@ -278,6 +347,8 @@ impl Network {
             self.follow(world, scripts, request);
         }
         let elapsed = Duration::from_secs_f64(seconds.max(0.0));
+        self.seconds = seconds.max(0.0);
+        self.clock += self.seconds;
         let events = match &mut self.session {
             Session::Offline => Vec::new(),
             Session::Hosting(host) => host.update(elapsed),
@@ -285,6 +356,9 @@ impl Network {
         };
         for event in events {
             self.apply(world, scripts, event);
+        }
+        if scripts.is_client_only() && matches!(self.session, Session::Joined(_)) {
+            self.smoother.step(world, self.seconds);
         }
         if let (Some(answerer), Session::Hosting(host)) = (&self.answerer, &self.session) {
             let settings = host.settings();
@@ -314,7 +388,13 @@ impl Network {
         match &mut self.session {
             Session::Offline => {}
             Session::Hosting(host) => {
-                let update = self.replicator.frame(world);
+                let levels = level_state(scripts);
+                let mut update = self.replicator.frame(world);
+                update.time = self.clock;
+                if levels != self.sent_levels {
+                    update.levels.clone_from(&levels);
+                    self.sent_levels.clone_from(&levels);
+                }
                 if !update.is_empty() {
                     let message = Message::Update { update };
                     for &peer in self.players.keys() {
@@ -323,11 +403,14 @@ impl Network {
                         }
                     }
                 }
+                let parts = replicated_parts(world);
                 for peer in std::mem::take(&mut self.need_snapshot) {
                     let Some(&you) = self.players.get(&peer) else {
                         continue;
                     };
-                    let update = self.replicator.snapshot(world);
+                    let mut update = self.replicator.snapshot(world);
+                    update.time = self.clock;
+                    update.levels.clone_from(&levels);
                     host.send_to(
                         peer,
                         &Message::Snapshot {
@@ -335,6 +418,34 @@ impl Network {
                             update,
                         },
                     );
+                    self.motion
+                        .insert(peer, MotionSender::new(world, &parts, self.motion_budget));
+                }
+                // Then each player's share of the parts that moved.
+                for (&peer, sender) in &mut self.motion {
+                    let Some(&player) = self.players.get(&peer) else {
+                        continue;
+                    };
+                    let focus = character_position(world, player);
+                    let (packets, settled) = sender.frame(
+                        world,
+                        &parts,
+                        focus,
+                        &BTreeSet::new(),
+                        self.seconds,
+                        self.clock,
+                    );
+                    if !settled.is_empty() {
+                        let update = Update {
+                            ops: settled,
+                            time: self.clock,
+                            levels: None,
+                        };
+                        host.send_to(peer, &Message::Update { update });
+                    }
+                    for packet in packets {
+                        host.send_datagram(peer, packet);
+                    }
                 }
                 // Players never hear of the server's own Instances.
                 let visible = |id: InstanceId| world.contains(id) && !world.is_server_only(id);
@@ -449,6 +560,12 @@ impl Network {
             SessionEvent::Update(update) => {
                 if !self.is_hosting() && scripts.is_client_only() {
                     let applied = apply(world, &update);
+                    for id in applied.placed {
+                        self.smoother.settle(id, update.time);
+                    }
+                    if let Some(levels) = &update.levels {
+                        follow_levels(scripts, levels, true);
+                    }
                     for player in applied.players_leaving {
                         scripts.remove_player(world, player);
                     }
@@ -458,6 +575,14 @@ impl Network {
                 }
             }
             SessionEvent::Remote { from, message } => self.deliver(world, scripts, from, &message),
+            SessionEvent::Datagram { from: _, bytes } => {
+                if !self.is_hosting()
+                    && scripts.is_client_only()
+                    && let Some(motion) = Motion::from_bytes(&bytes)
+                {
+                    self.smoother.receive(world, &motion);
+                }
+            }
             SessionEvent::Failed(reason) => {
                 self.session = Session::Offline;
                 self.remove_players(world, scripts);
@@ -481,6 +606,10 @@ impl Network {
     ) {
         let mut replica = world.empty_replica();
         apply(&mut replica, update);
+        self.smoother = Smoother::default();
+        if let Some(levels) = &update.levels {
+            follow_levels(scripts, levels, false);
+        }
         let terrains: Vec<InstanceId> = replica
             .descendants(replica.root())
             .into_iter()
@@ -556,6 +685,48 @@ impl Network {
             scripts.receive_remote_messages(vec![message]);
         }
     }
+}
+
+/// `LevelService`'s levels as players are told them; `None` for a game
+/// without levels.
+fn level_state(scripts: &ScriptRuntime) -> Option<LevelState> {
+    let levels = scripts.levels();
+    levels.saved()?;
+    Some(LevelState {
+        current: levels.current().to_owned(),
+        added: levels
+            .added_models()
+            .iter()
+            .map(|(name, model)| (name.clone(), model.to_bits()))
+            .collect(),
+    })
+}
+
+fn follow_levels(scripts: &mut ScriptRuntime, levels: &LevelState, loaded: bool) {
+    let added = levels
+        .added
+        .iter()
+        .map(|(name, model)| (name.clone(), InstanceId::from_bits(*model)))
+        .collect();
+    scripts.follow_levels(&levels.current, added, loaded);
+}
+
+/// Where `player`'s character is: its PrimaryPart, else its
+/// HumanoidRootPart, else its first part.
+pub(crate) fn character_position(world: &World, player: InstanceId) -> Option<Vector3> {
+    let character = world.get(player)?.property("Character")?.as_instance()?;
+    let model = world.get(character)?;
+    let root = model
+        .property("PrimaryPart")
+        .and_then(Value::as_instance)
+        .or_else(|| world.find_first_child(character, "HumanoidRootPart"))
+        .or_else(|| {
+            world
+                .descendants(character)
+                .into_iter()
+                .find(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
+        })?;
+    world.get(root)?.property("Position")?.as_vector3()
 }
 
 /// `Players.MaxPlayers`, at least 1.

@@ -359,6 +359,14 @@ impl ScriptRuntime {
         self.levels.0.borrow()
     }
 
+    /// On a device following a server (Phase 65): the server's level is
+    /// `current`, with `added` beside it, whose Workspace replication
+    /// brings. When `loaded` and it's another level, `LevelLoaded` fires
+    /// in the next step and the host shows its loading screen.
+    pub fn follow_levels(&mut self, current: &str, added: Vec<(String, InstanceId)>, loaded: bool) {
+        self.levels.0.borrow_mut().follow(current, added, loaded);
+    }
+
     /// The levels loaded (`LoadLevel`, or a slot in another level) since
     /// the last call, oldest first. Hosts show their loading screen again.
     pub fn take_level_loads(&mut self) -> Vec<String> {

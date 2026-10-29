@@ -2016,10 +2016,10 @@ A client's changes to replicated Instances stay local and are never sent. Only R
 
 ### Acceptance criteria
 
-- [ ] A part created, moved and destroyed by a server Script appears, moves smoothly and disappears on every client.
-- [ ] A client that sets a part's colour locally sees it, and the server and other clients don't.
-- [ ] A player who joins mid-game sees the same world as the others, including levels added with `AddLevel`.
-- [ ] Bandwidth for 200 moving crates stays under a set budget per client, measured by a test.
+- [x] A part created, moved and destroyed by a server Script appears, moves smoothly and disappears on every client.
+- [x] A client that sets a part's colour locally sees it, and the server and other clients don't.
+- [x] A player who joins mid-game sees the same world as the others, including levels added with `AddLevel`.
+- [x] Bandwidth for 200 moving crates stays under a set budget per client, measured by a test.
 
 ---
 

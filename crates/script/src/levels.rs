@@ -80,6 +80,22 @@ impl Levels {
         self.added.iter().map(|(name, _)| name.as_str())
     }
 
+    /// The levels added, each with the Model it's in.
+    pub fn added_models(&self) -> &[(String, InstanceId)] {
+        &self.added
+    }
+
+    /// A player's device following a server: the server's Workspace
+    /// arrives by replication, so this only says which levels are in it.
+    /// `loaded` fires `LevelLoaded` for a level the server loaded.
+    pub(crate) fn follow(&mut self, current: &str, added: Vec<(String, InstanceId)>, loaded: bool) {
+        if loaded && self.current != current {
+            self.loaded.push(current.to_owned());
+        }
+        self.current = current.to_owned();
+        self.added = added;
+    }
+
     /// What a save slot keeps: `None` for a game without levels.
     pub fn saved(&self) -> Option<SavedLevels> {
         (!self.worlds.is_empty()).then(|| SavedLevels {

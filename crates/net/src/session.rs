@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::PROTOCOL_VERSION;
 use crate::handshake::{Admission, GameInfo, Message, Peer, admit, unique_name};
 use crate::replicate::Update;
-use crate::transport::{Channel, Client, ConnectionId, Server, ServerEvent};
+use crate::transport::{Channel, Client, ConnectionId, LinkStats, Server, ServerEvent};
 use crate::wire::WireMessage;
 
 /// How long a connection may take to say who it is, and a joining player
@@ -41,6 +41,9 @@ pub enum SessionEvent {
     /// A RemoteEvent or RemoteFunction message from player `from` (on the
     /// host), or from the server (`from` 0, on a player's device).
     Remote { from: u32, message: WireMessage },
+    /// What came on the unreliable channel from player `from` (or the
+    /// server, 0): motion, newest first wins.
+    Datagram { from: u32, bytes: Vec<u8> },
 }
 
 /// What a host is.
@@ -149,8 +152,7 @@ impl Host {
                 None => {}
             }
         }
-        // Then the players' game messages. Nothing uses the unreliable
-        // channel yet; read it so it doesn't pile up.
+        // Then the players' game messages.
         for (&id, peer) in &self.players {
             while let Some(bytes) = self.server.receive(id, Channel::ReliableOrdered) {
                 if let Some(Message::Remote { message }) = Message::from_bytes(&bytes) {
@@ -160,7 +162,12 @@ impl Host {
                     });
                 }
             }
-            while self.server.receive(id, Channel::Unreliable).is_some() {}
+            while let Some(bytes) = self.server.receive(id, Channel::Unreliable) {
+                events.push(SessionEvent::Datagram {
+                    from: peer.id,
+                    bytes,
+                });
+            }
         }
         let clock = self.clock;
         let server = &mut self.server;
@@ -243,13 +250,39 @@ impl Host {
 
     /// Sends `message` to player `peer` (by their id), if they're in.
     pub fn send_to(&mut self, peer: u32, message: &Message) {
-        let connection = self
-            .players
+        if let Some(connection) = self.connection_of(peer) {
+            self.send(connection, message);
+        }
+    }
+
+    /// Sends `bytes` to player `peer` on the unreliable channel.
+    pub fn send_datagram(&mut self, peer: u32, bytes: Vec<u8>) {
+        if let Some(connection) = self.connection_of(peer) {
+            self.server.send(connection, Channel::Unreliable, bytes);
+        }
+    }
+
+    fn connection_of(&self, peer: u32) -> Option<ConnectionId> {
+        self.players
             .iter()
             .find(|(_, p)| p.id == peer)
-            .map(|(&connection, _)| connection);
-        if let Some(connection) = connection {
-            self.send(connection, message);
+            .map(|(&connection, _)| connection)
+    }
+
+    /// How player `peer`'s connection is doing.
+    pub fn stats_of(&self, peer: u32) -> Option<LinkStats> {
+        self.server.stats(self.connection_of(peer)?)
+    }
+
+    /// Every byte sent to player `peer` so far, on the loopback.
+    pub fn loopback_bytes_sent_to(&self, peer: u32) -> Option<u64> {
+        self.server.loopback_bytes_sent(self.connection_of(peer)?)
+    }
+
+    /// Closes player `peer`'s connection, as `Player:Kick` does.
+    pub fn kick(&mut self, peer: u32) {
+        if let Some(connection) = self.connection_of(peer) {
+            self.server.disconnect(connection);
         }
     }
 
@@ -366,7 +399,13 @@ impl Join {
                 Some(Message::Hello { .. }) | None => {}
             }
         }
-        while self.client.receive(Channel::Unreliable).is_some() {}
+        if matches!(self.state, JoinState::In { .. }) {
+            while let Some(bytes) = self.client.receive(Channel::Unreliable) {
+                events.push(SessionEvent::Datagram { from: 0, bytes });
+            }
+        } else {
+            while self.client.receive(Channel::Unreliable).is_some() {}
+        }
         let answered = matches!(self.state, JoinState::In { .. });
         if !answered
             && self
@@ -388,6 +427,18 @@ impl Join {
             self.client
                 .send(Channel::ReliableOrdered, message.to_bytes());
         }
+    }
+
+    /// Sends `bytes` to the host on the unreliable channel, once taken in.
+    pub fn send_datagram(&mut self, bytes: Vec<u8>) {
+        if self.you().is_some() {
+            self.client.send(Channel::Unreliable, bytes);
+        }
+    }
+
+    /// How the connection is doing.
+    pub fn stats(&self) -> LinkStats {
+        self.client.stats()
     }
 
     /// Sends what's queued.
