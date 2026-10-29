@@ -116,6 +116,7 @@ pub(super) fn create_pipeline(
             10 => Float32x4,
             11 => Float32x4,
             14 => Uint32x2,
+            15 => Float32x4,
         ],
     };
 
@@ -343,7 +344,7 @@ pub(super) fn create_shadow_pipeline(
         bind_group_layouts: &[shadow_layout, &skinning.empty_layout, &skinning.layout],
         push_constant_ranges: &[],
     });
-    // Only the position, the model matrix and the skin matter here.
+    // Only the position, the model matrix, the skin and the sway matter here.
     let vertex_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<Vertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
@@ -373,11 +374,16 @@ pub(super) fn create_shadow_pipeline(
                 offset: 48,
                 shader_location: 5,
             },
-            // The skin is last, past the attributes left out.
+            // The skin and the sway are last, past the attributes left out.
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Uint32x2,
                 offset: std::mem::offset_of!(InstanceRaw, skin) as u64,
                 shader_location: 14,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: std::mem::offset_of!(InstanceRaw, sway) as u64,
+                shader_location: 15,
             },
         ],
     };

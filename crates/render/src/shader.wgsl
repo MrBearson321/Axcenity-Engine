@@ -121,6 +121,39 @@ fn unit_or_zero(v: vec3<f32>) -> vec3<f32> {
     return select(vec3<f32>(0.0), v * inverseSqrt(length_squared), length_squared > 0.0);
 }
 
+// Plants sway in the wind (`DrawItem::sway`). The most a plant of strength
+// 1 leans, as a share of its height, and the wind speed in studs a second
+// at which it leans about two thirds of that.
+const SWAY_LEAN: f32 = 0.25;
+const SWAY_WIND: f32 = 20.0;
+
+// Where the world-space corner `world` of a plant (its instance's `sway`:
+// the height of its ground, 1 over its height, its strength) is bent by
+// the frame's wind. It leans downwind, more the stronger the wind and the
+// higher up the plant, and stays still in no wind. Gusts roll over the
+// ground with the wind, and a flutter shakes it. Both vary smoothly over
+// the world, so a plant drawn as several items bends as one. The farthest
+// a corner goes is `Sway::reach` in draw_list.rs: keep them matching.
+fn swayed(world: vec3<f32>, sway: vec4<f32>) -> vec3<f32> {
+    let wind = frame.clock.yw;
+    let speed = length(wind);
+    if sway.z <= 0.0 || speed < 1e-3 {
+        return world;
+    }
+    let up = clamp((world.y - sway.x) * sway.y, 0.0, 1.0);
+    // Stiff at the foot, giving more toward the top.
+    let bend = up * up;
+    let time = frame.clock.x;
+    let lean = SWAY_LEAN * sway.z / sway.y * (1.0 - exp(-speed / SWAY_WIND));
+    let gust = cloud_noise2((world.xz - wind * time) * 0.03);
+    let flutter = sin(time * (1.7 + speed * 0.05) + dot(world.xz, vec2<f32>(0.21, 0.17)));
+    let along = lean * bend * (0.7 + 0.5 * gust + 0.15 * flutter);
+    let offset = wind / speed * along;
+    // Bending lowers the top a little, so the plant keeps its length.
+    let drop = 0.5 * along * along * sway.y;
+    return world + vec3<f32>(offset.x, -drop, offset.y);
+}
+
 // Per draw item. Must match `InstanceRaw` in renderer.rs.
 struct InstanceIn {
     @location(2) model_0: vec4<f32>,
@@ -138,6 +171,8 @@ struct InstanceIn {
     @location(11) surface: vec4<f32>,
     // Where the item's skin's joints start, and how many (0: not animated).
     @location(14) skin: vec2<u32>,
+    // How it sways in the wind (see `swayed`).
+    @location(15) sway: vec4<f32>,
 }
 
 struct VertexOut {
@@ -158,7 +193,8 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     let normal_matrix = mat3x3<f32>(instance.normal_0, instance.normal_1, instance.normal_2);
     let posed = pose_corner(vertex.index, instance.skin, vertex.position, vertex.normal,
         vertex.tangent.xyz);
-    let world_position = model * vec4<f32>(posed.position, 1.0);
+    let world_position = vec4<f32>(swayed((model * vec4<f32>(posed.position, 1.0)).xyz,
+        instance.sway), 1.0);
 
     var out: VertexOut;
     out.clip_position = frame.view_proj * world_position;
@@ -200,10 +236,13 @@ fn vs_shadow(
     @location(4) model_2: vec4<f32>,
     @location(5) model_3: vec4<f32>,
     @location(14) skin: vec2<u32>,
+    @location(15) sway: vec4<f32>,
 ) -> @builtin(position) vec4<f32> {
     let model = mat4x4<f32>(model_0, model_1, model_2, model_3);
     let posed = pose_corner(index, skin, position, vec3<f32>(0.0), vec3<f32>(0.0));
-    return shadow_cascade * model * vec4<f32>(posed.position, 1.0);
+    // Swaying plants' shadows sway with them.
+    let world = swayed((model * vec4<f32>(posed.position, 1.0)).xyz, sway);
+    return shadow_cascade * vec4<f32>(world, 1.0);
 }
 
 // One map's value: the channel picked by `mask`, inverted if `invert` is 1.

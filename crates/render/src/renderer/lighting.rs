@@ -99,6 +99,12 @@ pub(super) fn frame_uniform(
     let sun_direction = list.sun.direction.normalize_or(Vec3::Y);
     let sun_radiance = linear_color(list.sun.color) * list.sun.intensity;
     let ambient = linear_color(list.ambient.color) * list.ambient.intensity;
+    // A NaN or infinite wind would throw swaying plants out of sight.
+    let wind = if list.wind.is_finite() {
+        list.wind
+    } else {
+        Vec3::ZERO
+    };
     let shadows = shadow_setup(
         list,
         shadows_drawn(list.shadows, graphics),
@@ -145,7 +151,7 @@ pub(super) fn frame_uniform(
         ],
         light_probes: [0; 4],
         volumes: Default::default(),
-        clock: [list.time, 0.0, 0.0, 0.0],
+        clock: [list.time, wind.x, wind.y, wind.z],
         // The sky's look fills this in.
         night: [0.0; 4],
         // So does the fog, which takes the sky's colors.
@@ -702,7 +708,9 @@ pub(super) fn plan_draws(
                 bounds
             }
         };
-        let sphere = shape_bounds.sphere(item.transform);
+        let (center, radius) = shape_bounds.sphere(item.transform);
+        // A swaying plant reaches past where it rests.
+        let sphere = (center, radius + item.sway.map_or(0.0, |sway| sway.reach()));
         let visible = view.touches(sphere);
         if let Some(seen) = seen.as_deref_mut() {
             seen.push(CullingBounds {
@@ -912,6 +920,10 @@ pub(super) fn instance_raw(item: &DrawItem) -> Option<InstanceRaw> {
             item.uv_tile,
         ],
         skin: [0, 0],
+        sway: match item.sway {
+            Some(sway) if !sway.is_still() => [sway.base, 1.0 / sway.height, sway.strength, 0.0],
+            _ => [0.0; 4],
+        },
     })
 }
 

@@ -20,6 +20,7 @@ mod skinning;
 mod surface_shaders;
 mod texture_budget;
 mod weather;
+mod wind;
 
 #[test]
 fn zero_sized_window_has_nothing_to_draw() {
@@ -167,6 +168,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
         reflection_probes: Vec::new(),
         light_probe_volumes: Vec::new(),
         time: 0.0,
+        wind: Vec3::ZERO,
     }
 }
 
@@ -184,6 +186,7 @@ fn item(shape: Shape, position: Vec3, opacity: f32) -> DrawItem {
         id: 0,
         cull_distance: 0.0,
         skin: None,
+        sway: None,
     }
 }
 
@@ -497,6 +500,7 @@ fn big_block() -> DrawItem {
         id: 0,
         cull_distance: 0.0,
         skin: None,
+        sway: None,
     }
 }
 
@@ -959,6 +963,7 @@ fn texture_renderer_draws_the_sky_and_a_part_into_a_texture() {
         id: 0,
         cull_distance: 0.0,
         skin: None,
+        sway: None,
     });
     renderer.resize(64, 64);
     assert_eq!(renderer.size(), (64, 64));
@@ -1060,6 +1065,7 @@ fn texture_renderer_draws_a_mesh_with_texture_maps() {
         id: 0,
         cull_distance: 0.0,
         skin: None,
+        sway: None,
     });
     let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
     renderer.render(&list).unwrap();
@@ -1158,6 +1164,7 @@ fn terrain_chunks_show_the_layer_their_weights_pick() {
             id: 0,
             cull_distance: 0.0,
             skin: None,
+            sway: None,
         }]);
         // Looking straight down at it, in sunlight.
         list.camera.look_at = Vec3::new(0.0, -1.0, -0.001);
@@ -2406,6 +2413,7 @@ fn one_of_everything() -> (DrawList, Vec<Probe>) {
         id: 0,
         cull_distance: 0.0,
         skin: None,
+        sway: None,
     };
     let mut list = list_of(vec![solid, see_through, cut_out, ground]);
     list.sky = Sky::default();
@@ -2819,6 +2827,7 @@ fn a_double_sided_square_shows_its_back_lit_like_its_front() {
             id: 0,
             cull_distance: 0.0,
             skin: None,
+            sway: None,
         };
         let mut list = list_of(vec![square]);
         // Lit from behind the camera.

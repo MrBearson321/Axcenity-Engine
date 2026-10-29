@@ -82,7 +82,7 @@ pub(super) struct FrameUniform {
     /// The light probe volumes drawn, smallest box first (see
     /// `light_probes.rs`).
     pub(super) volumes: [light_probes::VolumeRaw; light_probes::MAX_VOLUMES],
-    /// Seconds (`DrawList::time`), then unused.
+    /// Seconds (`DrawList::time`), then the wind (`DrawList::wind`).
     pub(super) clock: [f32; 4],
     /// How bright the stars are, and 1 when the sky image is an
     /// atmosphere's (lighting.wgsl's `night`).
@@ -265,6 +265,10 @@ pub(super) struct InstanceRaw {
     /// Where the item's skin's joints start in the frame's joints, and how
     /// many it has: 0 for an item that isn't skinned (see `skinning.rs`).
     pub(super) skin: [u32; 2],
+    /// How the item sways in the wind (see `swayed` in shader.wgsl): the
+    /// height of its ground, 1 over its height, its strength (0: still),
+    /// then unused.
+    pub(super) sway: [f32; 4],
 }
 
 #[repr(C)]

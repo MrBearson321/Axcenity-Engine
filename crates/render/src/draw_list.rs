@@ -25,6 +25,9 @@ pub struct DrawList {
     /// How wet and snow-covered surfaces are, which every lit item and
     /// the terrain show.
     pub weather: Weather,
+    /// The wind (the Workspace's `GlobalWind`), in studs a second. Items
+    /// with a [`DrawItem::sway`] bend along its level part.
+    pub wind: Vec3,
     pub camera: Camera,
     pub sun: Sun,
     pub ambient: AmbientLight,
@@ -880,7 +883,47 @@ pub struct DrawItem {
     /// `None` draws the mesh as it is. Items posed alike share one `Arc`, so
     /// its joints are uploaded once.
     pub skin: Option<Arc<Skin>>,
+    /// How the item sways in [`DrawList::wind`] (plants), or `None` to keep
+    /// it still. Its shadow sways with it.
+    pub sway: Option<Sway>,
 }
+
+/// How a plant bends in the wind. Its corners move by their height above
+/// `base`: not at all at the ground, most at `base + height`. A plant drawn
+/// as several items gives each the same values, so its pieces bend as one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sway {
+    /// The world height of the ground the plant stands on, in studs.
+    pub base: f32,
+    /// How tall the plant is, in studs.
+    pub height: f32,
+    /// How far it gives: 1 is grass, which leans about a quarter of its
+    /// height in a strong wind. 0 keeps it still.
+    pub strength: f32,
+}
+
+impl Sway {
+    /// The farthest a corner can move from where it rests, in studs, in a
+    /// wind of any speed (see `swayed` in shader.wgsl).
+    pub fn reach(&self) -> f32 {
+        if self.is_still() {
+            0.0
+        } else {
+            self.height * self.strength * SWAY_REACH
+        }
+    }
+
+    /// Whether the item doesn't move at all.
+    pub fn is_still(&self) -> bool {
+        !(self.strength > 0.0 && self.height > 0.0 && self.base.is_finite())
+    }
+}
+
+/// The most a plant of strength 1 leans, as a share of its height, with
+/// its gusts and flutter at their strongest. Matches `swayed` in
+/// shader.wgsl: its lean (at most `SWAY_LEAN`) times its gusts and flutter
+/// (at most 1.2 + 0.15).
+const SWAY_REACH: f32 = 0.25 * 1.35;
 
 /// One pose of an animated mesh, for skinning on the GPU: where each joint
 /// moves the corners weighted to it.

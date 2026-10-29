@@ -69,6 +69,10 @@ pub struct MaterialFile {
     pub offset: Option<[f32; 2]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub double_sided: Option<bool>,
+    /// How much what's drawn with it sways in the wind, by height: 0 (the
+    /// default) keeps it still, 1 gives like grass (`docs/rendering/wind.md`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sway: Option<f32>,
     /// WGSL code with a `surface` function that works out each pixel's
     /// surface in place of the standard one (`docs/rendering/models.md`).
     /// `""` is none, so an instance can go back to the standard surface.
@@ -221,6 +225,7 @@ impl MaterialFile {
             tiling: self.tiling.or(base.tiling),
             offset: self.offset.or(base.offset),
             double_sided: self.double_sided.or(base.double_sided),
+            sway: self.sway.or(base.sway),
             shader: self.shader.clone().or_else(|| base.shader.clone()),
             parameters: base
                 .parameters
@@ -270,6 +275,7 @@ impl MaterialFile {
             tiling: self.tiling.unwrap_or(default.tiling),
             offset: self.offset.unwrap_or(default.offset),
             double_sided: self.double_sided.unwrap_or(default.double_sided),
+            sway: self.sway.unwrap_or(default.sway),
             shader: self
                 .shader
                 .as_deref()
@@ -304,6 +310,8 @@ pub struct StandardMaterial {
     pub tiling: [f32; 2],
     pub offset: [f32; 2],
     pub double_sided: bool,
+    /// How much it sways in the wind (0: not at all).
+    pub sway: f32,
     /// Its surface shader, if it has one.
     pub shader: Option<MaterialShader>,
     /// The values its shader reads (`parameter(i)` is the `i`th), in name
@@ -338,6 +346,7 @@ impl Default for StandardMaterial {
             tiling: [1.0, 1.0],
             offset: [0.0, 0.0],
             double_sided: false,
+            sway: 0.0,
             shader: None,
             parameters: Vec::new(),
         }
@@ -612,6 +621,7 @@ mod tests {
             tiling: Some([2.0, 3.0]),
             offset: Some([0.5, 0.25]),
             double_sided: Some(true),
+            sway: Some(0.6),
             shader: Some(
                 "fn surface(input: SurfaceInput) -> Surface {
     return standard_surface(input);
@@ -669,6 +679,7 @@ mod tests {
                 ..MaterialMaps::default()
             },
             tiling: Some([2.0, 2.0]),
+            sway: Some(0.5),
             ..MaterialFile::default()
         };
         write(&folder, "assets/materials/brick.material.json", &base);
@@ -697,6 +708,7 @@ mod tests {
         assert_eq!(worn.metalness, 1.0);
         assert_eq!(worn.roughness, 0.9);
         assert_eq!(worn.tiling, [2.0, 2.0]);
+        assert_eq!(worn.sway, 0.5);
         assert_eq!(worn.maps.color, None);
         let normal = worn.maps.normal.as_ref().unwrap();
         assert_eq!(normal.path, "assets/textures/brick_n.png");

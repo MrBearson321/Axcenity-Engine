@@ -68,7 +68,8 @@ struct Frame {
     light_probes: vec4<u32>,
     // The light probe volumes drawn, smallest box first.
     volumes: array<Volume, MAX_VOLUMES>,
-    // x: seconds (`DrawList::time`), for surface shaders that move.
+    // x: seconds (`DrawList::time`), for surface shaders that move. yzw:
+    // the wind in studs a second (`DrawList::wind`), for swaying plants.
     clock: vec4<f32>,
     // x: how bright the stars are (0 by day), y: 1 when the sky image is an
     // atmosphere's, so the sun or moon and the stars are drawn over it.

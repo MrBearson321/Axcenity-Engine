@@ -942,6 +942,14 @@ fn values(
             );
         });
         ui.end_row();
+        number_row(
+            ui,
+            ("Sway", "sway"),
+            (file.sway, base.sway),
+            0.0..=2.0,
+            changes,
+            |file, value| file.sway = value,
+        );
         pair_row(
             ui,
             ("Tiling", "tiling"),

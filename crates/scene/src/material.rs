@@ -6,8 +6,9 @@ use axcenity_assets::{
     StandardMaterial,
 };
 use axcenity_core::{ClassName, Instance, InstanceId, TextureChannel, Value, World};
+use axcenity_render::glam::Mat4;
 use axcenity_render::{
-    Channel, ChannelMap, Material, NormalMap, SURFACE_PARAMETERS, SurfaceShader, TextureMaps,
+    Channel, ChannelMap, Material, NormalMap, SURFACE_PARAMETERS, SurfaceShader, Sway, TextureMaps,
 };
 
 use crate::draw_list::{GLOW_BOOST, texture};
@@ -83,6 +84,22 @@ pub(crate) fn variant_material(standard: &StandardMaterial, assets: &Assets) -> 
             .map(|shader| SurfaceShader::new(&shader.file, &shader.code)),
         surface_parameters: surface_parameters(standard),
     }
+}
+
+/// How a part drawn with `standard` at `transform` (its 1×1×1 box) sways
+/// in the wind: by height over the bottom of its box, as much as the
+/// material's `sway` says. `None` when it says 0.
+pub(crate) fn variant_sway(standard: &StandardMaterial, transform: Mat4) -> Option<Sway> {
+    // `filter` leaves out a NaN too.
+    let strength = Some(standard.sway).filter(|&sway| sway > 0.0)?;
+    // Half the box's height: how far up each of its axes reaches.
+    let half_height =
+        0.5 * (transform.x_axis.y.abs() + transform.y_axis.y.abs() + transform.z_axis.y.abs());
+    Some(Sway {
+        base: transform.w_axis.y - half_height,
+        height: 2.0 * half_height,
+        strength,
+    })
 }
 
 /// `standard`'s parameters as its shader reads them, in their order; past
@@ -426,6 +443,54 @@ mod tests {
         assert_eq!((worn.metalness, worn.roughness), (0.0, 0.9));
         assert_eq!((red.metalness, red.roughness), (0.0, 0.1));
         assert_eq!(red.base_color, [0.5, 0.0, 0.0]);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_material_with_sway_sways_its_parts_by_their_height_and_wind_reaches_the_draw_list() {
+        let folder = project("sway");
+        let reeds = "assets/materials/reeds.material.json";
+        write(
+            &folder,
+            reeds,
+            &MaterialFile {
+                sway: Some(0.7),
+                ..MaterialFile::default()
+            },
+        );
+        write(&folder, BASE, &brick());
+        let assets = Assets::new(&folder);
+        let mut world = World::new();
+        let size = Value::Vector3(axcenity_core::Vector3::new(1.0, 6.0, 1.0));
+        let position = Value::Vector3(axcenity_core::Vector3::new(4.0, 5.0, 0.0));
+        part(
+            &mut world,
+            vec![
+                variant(reeds),
+                ("Size", size.clone()),
+                ("Position", position),
+            ],
+        );
+        part(&mut world, vec![variant(BASE), ("Size", size)]);
+        let wind = axcenity_core::Vector3::new(12.0, 0.0, -3.0);
+        let workspace = world.workspace();
+        world
+            .set_property(workspace, "GlobalWind", Value::Vector3(wind))
+            .unwrap();
+
+        let camera = Camera {
+            position: Vec3::Z,
+            look_at: Vec3::ZERO,
+            fov_y_degrees: 50.0,
+        };
+        let list = build_draw_list(&world, &assets, camera);
+        assert_eq!(list.wind, Vec3::new(12.0, 0.0, -3.0));
+        // Rooted at the bottom of its box, 6 studs tall.
+        let sway = list.items[0].sway.expect("the reeds sway");
+        assert!((sway.base - 2.0).abs() < 1e-4, "{sway:?}");
+        assert!((sway.height - 6.0).abs() < 1e-4, "{sway:?}");
+        assert_eq!(sway.strength, 0.7);
+        assert_eq!(list.items[1].sway, None, "brick doesn't sway");
         let _ = std::fs::remove_dir_all(folder);
     }
 

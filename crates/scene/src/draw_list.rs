@@ -365,6 +365,7 @@ pub fn build_draw_list_posed(
         fog: settings.fog,
         clouds: settings.clouds,
         weather: crate::weather::settled(world),
+        wind: crate::particles::global_wind(world),
         camera,
         sun: settings.sun,
         ambient: settings.ambient,
@@ -633,6 +634,9 @@ fn part_draw_item(
     } else {
         [color.r, color.g, color.b]
     };
+    let sway = variant
+        .as_ref()
+        .and_then(|standard| material::variant_sway(standard, transform));
     let material = match (appearance, variant) {
         (None, Some(standard)) => {
             let mut material = material::variant_material(&standard, assets);
@@ -668,6 +672,7 @@ fn part_draw_item(
         id: 0,
         cull_distance: 0.0,
         skin: None,
+        sway,
     })
 }
 
@@ -859,6 +864,7 @@ fn mesh_part_draw_items(
             id: 0,
             cull_distance: 0.0,
             skin: None,
+            sway: None,
         });
         return;
     };
@@ -869,6 +875,9 @@ fn mesh_part_draw_items(
         .filter(|child| child.class() == ClassName::SurfaceAppearance)
         .collect();
     let variant = material::variant_of(instance, assets);
+    let sway = variant
+        .as_ref()
+        .and_then(|standard| material::variant_sway(standard, transform));
     // A UnionOperation with UsePartColor is drawn all in its Color.
     let whole_color = (instance.property("UsePartColor").and_then(Value::as_bool) == Some(true))
         .then(|| instance.property("Color").and_then(Value::as_color3))
@@ -902,6 +911,7 @@ fn mesh_part_draw_items(
             id: draw_id(id),
             cull_distance: 0.0,
             skin: skin.clone(),
+            sway,
         });
     }
     for item in &mut items[first..] {
@@ -1005,6 +1015,7 @@ pub(crate) fn push_model(model: &Arc<Model>, transform: Mat4, id: u64, items: &m
             id,
             cull_distance: 0.0,
             skin: None,
+            sway: None,
         });
     }
 }

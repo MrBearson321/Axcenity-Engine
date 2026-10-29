@@ -266,6 +266,7 @@ impl ModelStudio {
                     id: 0,
                     cull_distance: 0.0,
                     skin: None,
+                    sway: None,
                 })
             })
             .collect();

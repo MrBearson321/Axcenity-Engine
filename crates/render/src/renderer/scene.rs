@@ -89,10 +89,21 @@ impl ScenePipeline {
         });
         // Binding 5 matches `shadow_cascade` in shader.wgsl. Each pass picks
         // its cascade with an offset into the buffer (a "dynamic offset").
-        // Binding 9 is the frame's joints, as in the frame's group.
+        // Bindings 0 and 9 are the frame's uniform (its wind and clock, for
+        // swaying plants) and joints, as in the frame's group.
         let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow pass"),
             entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -106,8 +117,13 @@ impl ScenePipeline {
                 skinning::joints_entry(),
             ],
         });
-        let shadow_bind_group =
-            create_shadow_bind_group(&device, &shadow_layout, &cascade_buffer, &skinning.joints);
+        let shadow_bind_group = create_shadow_bind_group(
+            &device,
+            &shadow_layout,
+            &frame_buffer,
+            &cascade_buffer,
+            &skinning.joints,
+        );
         let shadow_pipeline = create_shadow_pipeline(&device, &shadow_layout, &skinning);
 
         // Bindings 0 and 3–9 are the textures (see `material_bindings`).
@@ -1254,6 +1270,7 @@ impl ScenePipeline {
         self.shadow_bind_group = create_shadow_bind_group(
             &self.device,
             &self.shadow_layout,
+            &self.frame_buffer,
             &self.cascade_buffer,
             &self.skinning.joints,
         );
@@ -2050,11 +2067,12 @@ pub(super) fn text_bounds(text: &UiText, [dx, dy]: [f32; 2]) -> TextBounds {
     }
 }
 
-/// The shadow passes' bindings: each view's matrix in `cascades` (picked
-/// by a dynamic offset), and the frame's `joints`.
+/// The shadow passes' bindings: the `frame` uniform, each view's matrix in
+/// `cascades` (picked by a dynamic offset), and the frame's `joints`.
 fn create_shadow_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
+    frame: &wgpu::Buffer,
     cascades: &wgpu::Buffer,
     joints: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
@@ -2062,6 +2080,10 @@ fn create_shadow_bind_group(
         label: Some("shadow pass"),
         layout,
         entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: frame.as_entire_binding(),
+            },
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {

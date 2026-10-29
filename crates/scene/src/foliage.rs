@@ -7,7 +7,7 @@ use axcenity_core::{
     Vector3,
 };
 use axcenity_render::glam::{Mat4, Quat, Vec2, Vec3};
-use axcenity_render::{DrawItem, Material, Shape};
+use axcenity_render::{DrawItem, Material, Shape, Sway};
 use axcenity_terrain::Placement;
 
 use crate::draw_list::{draw_id, push_model};
@@ -318,6 +318,52 @@ fn cull_distance(source: &FoliageSource) -> f32 {
     }
 }
 
+/// How much a built-in plant gives in the wind ([`Sway::strength`]):
+/// grass and flowers bend most, a tree least. Props stay still, apart from
+/// the prop tree, which is the plant's shape.
+fn sway_strength(source: &FoliageSource) -> f32 {
+    match source {
+        FoliageSource::Plant(FoliagePlant::Grass) => 1.0,
+        FoliageSource::Plant(FoliagePlant::Flower) => 0.8,
+        FoliageSource::Plant(FoliagePlant::Bush) => 0.35,
+        FoliageSource::Plant(FoliagePlant::Tree) | FoliageSource::Prop(FoliageProp::Tree) => 0.2,
+        FoliageSource::Prop(_) | FoliageSource::Model(_) => 0.0,
+    }
+}
+
+/// How the plant made of `pieces`, standing at `instance` (its ground at
+/// the origin, scaled), sways: by its height over the ground, every piece
+/// alike so they bend as one. `None` for a plant that doesn't.
+fn plant_sway(pieces: &[Piece], strength: f32, instance: Mat4) -> Option<Sway> {
+    if strength <= 0.0 {
+        return None;
+    }
+    let base = instance.w_axis.y;
+    let top = pieces
+        .iter()
+        .flat_map(|piece| {
+            let transform = instance * piece_transform(piece);
+            corners().map(move |corner| transform.transform_point3(corner).y)
+        })
+        .fold(base, f32::max);
+    Some(Sway {
+        base,
+        height: top - base,
+        strength,
+    })
+}
+
+/// The corners of the unit cube every built-in shape fits.
+fn corners() -> impl Iterator<Item = Vec3> {
+    (0..8).map(|i| {
+        Vec3::new(
+            if i & 1 == 0 { -0.5 } else { 0.5 },
+            if i & 2 == 0 { -0.5 } else { 0.5 },
+            if i & 4 == 0 { -0.5 } else { 0.5 },
+        )
+    })
+}
+
 /// Adds the painted foliage of `terrain` (its data `data`) to `items`,
 /// sitting on the surface.
 pub(crate) fn draw_terrain(
@@ -349,9 +395,11 @@ pub(crate) fn draw_terrain(
             }
             source => {
                 let cull_distance = cull_distance(source) * instance.scale.max(0.01);
+                let sway = plant_sway(pieces(source), sway_strength(source), transform);
                 for piece in pieces(source) {
                     items.push(DrawItem {
                         cull_distance,
+                        sway,
                         ..piece_item(piece, transform)
                     });
                 }
@@ -384,15 +432,19 @@ fn instance_transform(
     ))
 }
 
-fn piece_item(piece: &Piece, instance: Mat4) -> DrawItem {
-    let local = Mat4::from_scale_rotation_translation(
+/// Where `piece`'s shape sits in its plant or prop.
+fn piece_transform(piece: &Piece) -> Mat4 {
+    Mat4::from_scale_rotation_translation(
         mesh_scale(piece.shape, piece.size),
         rotation_from_orientation(piece.orientation),
         piece.position,
-    );
+    )
+}
+
+fn piece_item(piece: &Piece, instance: Mat4) -> DrawItem {
     DrawItem {
         shape: shape_of(piece.shape),
-        transform: instance * local,
+        transform: instance * piece_transform(piece),
         material: Material {
             base_color: if piece.glow { [0.0; 3] } else { piece.color },
             emissive: if piece.glow { piece.color } else { [0.0; 3] },
@@ -406,6 +458,7 @@ fn piece_item(piece: &Piece, instance: Mat4) -> DrawItem {
         id: 0,
         cull_distance: 0.0,
         skin: None,
+        sway: None,
     }
 }
 
@@ -469,5 +522,48 @@ mod tests {
             .collect();
         assert!(!grass.is_empty());
         assert!(grass.iter().all(|&distance| distance == 120.0), "{grass:?}");
+    }
+
+    #[test]
+    fn plants_sway_as_one_by_their_height_and_props_stay_still() {
+        let mut world = axcenity_core::World::new();
+        let terrain = world.create(ClassName::Terrain).unwrap();
+        world.set_parent(terrain, Some(world.workspace())).unwrap();
+        let mut data = TerrainData::flat(9, 9, 0.25).unwrap();
+        let plant = |source, x, scale| FoliageInstance {
+            source,
+            x,
+            z: 4.0,
+            yaw: 0.0,
+            scale,
+            collide: false,
+        };
+        data.foliage_mut().extend([
+            plant(FoliageSource::Plant(FoliagePlant::Tree), 2.0, 2.0),
+            plant(FoliageSource::Plant(FoliagePlant::Grass), 4.0, 1.0),
+            plant(FoliageSource::Prop(FoliageProp::Crate), 6.0, 1.0),
+        ]);
+        world.set_terrain(terrain, std::sync::Arc::new(data));
+        let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
+        let data = world.terrain(terrain).unwrap();
+        let mut items = Vec::new();
+        draw_terrain(terrain, &placement, data, &Assets::default(), &mut items);
+        let ground = |x| {
+            let xz = placement.to_world_xz(data, Vec2::new(x, 4.0));
+            placement.ground_y(data, xz.x, xz.y).unwrap()
+        };
+
+        // The tree's trunk and crown share one sway, from its ground to the
+        // top of its crown (7.5 + 3 studs, twice over).
+        let (trunk, crown) = (&items[0], &items[1]);
+        let tree = trunk.sway.expect("trees sway");
+        assert_eq!(crown.sway, Some(tree));
+        assert!((tree.base - ground(2.0)).abs() < 1e-4, "{tree:?}");
+        assert!((tree.height - 21.0).abs() < 1e-3, "{tree:?}");
+        // Grass is 1.1 studs tall and gives more than a tree.
+        let grass = items[2].sway.expect("grass sways");
+        assert!((grass.height - 1.1).abs() < 1e-3, "{grass:?}");
+        assert!(grass.strength > tree.strength);
+        assert_eq!(items[4].sway, None, "crates stay still");
     }
 }

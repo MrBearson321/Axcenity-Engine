@@ -472,8 +472,8 @@ Foliage and marked models sway in the vertex shader by `GlobalWind`, with per-ve
 
 ### Acceptance criteria
 
-- [ ] Plants sway in the direction and strength of the wind, and still with zero wind.
-- [ ] Their shadows match their movement.
+- [x] Plants sway in the direction and strength of the wind, and still with zero wind.
+- [x] Their shadows match their movement.
 
 ---
 

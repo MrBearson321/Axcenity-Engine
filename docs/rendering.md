@@ -10,6 +10,7 @@ Map only. `render` draws a draw list. It does not know about Instances. Open the
 - Fog (Lighting's distance fog, an Atmosphere's height fog, volumetric fog and sun shafts): [rendering/fog.md](rendering/fog.md)
 - Clouds (a `Clouds` layer, its shadows, the wind, cloud quality): [rendering/clouds.md](rendering/clouds.md)
 - Weather (a `Weather`: rain and snow, wet and snow-covered surfaces, easing): [rendering/weather.md](rendering/weather.md)
+- Plants swaying in the wind (`DrawItem::sway`, a material's `sway`, `GlobalWind`): [rendering/wind.md](rendering/wind.md)
 - Bloom and tone mapping: [rendering/post.md](rendering/post.md)
 - Sprites and particles: [rendering/particles.md](rendering/particles.md)
 - The machine's graphics settings (presets, overrides, capabilities, `UserGameSettings`, `graphics.json`, the per-preset references): [rendering/settings.md](rendering/settings.md)

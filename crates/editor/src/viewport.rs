@@ -1269,15 +1269,16 @@ pub fn ground_point(world: &World, terrain: InstanceId, ray: axcenity_scene::Ray
     Some(ray.at(distance))
 }
 
-/// Seconds since the editor started, for surface shaders that move and
-/// clouds the wind carries. While `list` has either, frames keep being
-/// drawn.
+/// Seconds since the editor started, for surface shaders that move,
+/// clouds the wind carries and plants it sways. While `list` has any of
+/// them, frames keep being drawn.
 pub fn shader_time(ui: &egui::Ui, list: &axcenity_render::DrawList) -> f32 {
+    let windy = list.wind.x != 0.0 || list.wind.z != 0.0;
     let moving = list.clouds.is_moving()
         || list
             .items
             .iter()
-            .any(|item| item.material.surface_shader.is_some());
+            .any(|item| item.material.surface_shader.is_some() || (windy && item.sway.is_some()));
     if moving {
         ui.ctx().request_repaint();
     }
