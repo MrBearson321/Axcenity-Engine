@@ -108,6 +108,57 @@ impl Model {
         fit_with(primitives, false)
     }
 
+    /// A new model of the same triangles with each primitive drawn by
+    /// `material(index)` (or its own material, for `None`): the Model
+    /// Studio's paint shown as it's painted. The primitives keep their
+    /// keys, so meshes already drawn are used again; one given a normal map
+    /// gets tangents.
+    pub fn with_materials(&self, material: impl Fn(usize) -> Option<ModelMaterial>) -> Model {
+        let primitives = self
+            .primitives
+            .iter()
+            .enumerate()
+            .map(|(index, primitive)| {
+                let material = material(index).unwrap_or_else(|| primitive.material.clone());
+                let tangents = if primitive.tangents.is_empty()
+                    && material.normal_texture.is_some()
+                    && !primitive.uvs.is_empty()
+                {
+                    tangents(
+                        &primitive.positions,
+                        &primitive.normals,
+                        &primitive.uvs,
+                        &primitive.indices,
+                    )
+                } else {
+                    primitive.tangents.clone()
+                };
+                Primitive {
+                    key: primitive.key,
+                    positions: primitive.positions.clone(),
+                    normals: primitive.normals.clone(),
+                    uvs: primitive.uvs.clone(),
+                    tangents,
+                    indices: primitive.indices.clone(),
+                    material,
+                    joints: primitive.joints.clone(),
+                    weights: primitive.weights.clone(),
+                    lods: Vec::new(),
+                    level: primitive.level,
+                }
+            })
+            .collect();
+        Model {
+            key: new_key(),
+            size: self.size,
+            center: self.center,
+            primitives,
+            hull_points: self.hull_points.clone(),
+            warnings: Vec::new(),
+            rig: self.rig.clone(),
+        }
+    }
+
     /// Different for every model loaded, even from the same file.
     pub fn key(&self) -> u64 {
         self.key

@@ -215,11 +215,18 @@ fn include_runtime_file(root: &Path, path: &Path) -> bool {
     let Some(Component::Normal(first)) = components.first() else {
         return false;
     };
-    // The Model Studio's sidecars are editing state; games load the `.glb`.
+    // The Model Studio's sidecars (and sidecar folders of paint layers)
+    // are editing state; games load the `.glb`.
     if relative
         .to_string_lossy()
         .to_ascii_lowercase()
         .ends_with(axcenity_assets::MESH_EDIT_SUFFIX)
+        || components.iter().any(|component| {
+            component
+                .as_os_str()
+                .to_string_lossy()
+                .ends_with(axcenity_assets::MESH_EDIT_FOLDER_SUFFIX)
+        })
     {
         return false;
     }
@@ -309,6 +316,15 @@ mod tests {
         assert!(!include_runtime_file(
             root,
             &root.join("assets/models/Head.meshedit.json")
+        ));
+        // Its paint layers aren't either; the saved maps are.
+        assert!(!include_runtime_file(
+            root,
+            &root.join("assets/models/Head.meshedit/0-0-BaseColor-1.png")
+        ));
+        assert!(include_runtime_file(
+            root,
+            &root.join("assets/models/textures/Head_Head_Skin_BaseColor.png")
         ));
     }
 

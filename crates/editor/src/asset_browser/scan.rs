@@ -128,6 +128,11 @@ fn walk(directory: &Path, prefix: &str, found: &mut Vec<AssetEntry>) {
             continue;
         };
         if file_type.is_dir() {
+            // A model's Model Studio sidecar folder (its paint layers) is
+            // editing state, not assets.
+            if name.ends_with(axcenity_assets::MESH_EDIT_FOLDER_SUFFIX) {
+                continue;
+            }
             walk(&entry.path(), &path, found);
         } else if let Some(kind) = kind_of(&path) {
             found.push(AssetEntry {

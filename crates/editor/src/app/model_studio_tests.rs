@@ -397,3 +397,177 @@ fn unwrapped_uvs_save_in_the_glb_and_draw_the_same_texture_in_the_game_as_in_the
     );
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// The chair made in the Studio, smart-projected, in Paint mode painting
+/// at 256 texels.
+fn painting_chair(app: &mut EditorApp) {
+    use crate::model_studio::uv_editor::UvAction;
+    let doc = StudioDoc::new(
+        String::new(),
+        ModelDoc::primitive(&PrimitiveSettings::default()),
+        false,
+    );
+    app.model_studio.open(doc);
+    let doc = app.model_studio.doc.as_mut().unwrap();
+    crate::model_studio::tools_tests::model_chair(doc);
+    doc.select(|selection, _| selection.clear());
+    assert!(app.model_studio.run_uv(UvAction::SmartProject));
+    let doc = app.model_studio.doc.as_mut().unwrap();
+    doc.set_mode(Mode::Paint);
+    app.model_studio.paint.size = 256;
+    app.model_studio.paint.brush.strength = 1.0;
+}
+
+/// Paints `kind` across the seat with `brush` (a color, or a value).
+fn paint_seat(app: &mut EditorApp, kind: axcenity_mesh_edit::MapKind, color: [u8; 3], value: f32) {
+    let screen = crate::model_studio::tests::screen();
+    let points = crate::model_studio::paint_tests::stroke(
+        &screen,
+        Vec3::new(-0.6, 0.11, 0.3),
+        Vec3::new(0.6, 0.11, 0.3),
+    );
+    let paint = &mut app.model_studio.paint;
+    paint.map = kind;
+    paint.brush.color = color;
+    paint.brush.value = value;
+    assert!(app.model_studio.paint_stroke(&screen, &points));
+}
+
+#[test]
+fn rust_painted_on_the_chair_saves_maps_the_scene_view_draws_with_the_material_set_up() {
+    use axcenity_mesh_edit::MapKind;
+    let folder = copy_of_example("hello-touched", "studio-paint");
+    let mut app = EditorApp::new(Some(&folder));
+    painting_chair(&mut app);
+    paint_seat(&mut app, MapKind::BaseColor, [150, 70, 30], 0.0);
+    paint_seat(&mut app, MapKind::Roughness, [0; 3], 1.0);
+    let set = app
+        .model_studio
+        .doc
+        .as_ref()
+        .unwrap()
+        .paint_set(0)
+        .unwrap()
+        .clone();
+    let color = set.map(MapKind::BaseColor).unwrap().flat().to_vec();
+    let rough: Vec<u8> = set
+        .map(MapKind::Roughness)
+        .unwrap()
+        .flat()
+        .chunks(4)
+        .map(|p| p[0])
+        .collect();
+
+    let path = app.save_model_studio().unwrap();
+    // Named by role beside the model, as `assets` reads maps.
+    let models = folder.join("assets/models");
+    for name in [
+        "Cube_Cube_Material_BaseColor.png",
+        "Cube_Cube_Material_MetallicRoughness.png",
+    ] {
+        assert!(models.join("textures").join(name).exists(), "{name}");
+    }
+    let part = mesh_part(&mut app, &path);
+    let _ = drawn_size(&app, part);
+    // The game's own load, and the Scene view's model, use the maps with
+    // nothing set up by hand.
+    let bytes = std::fs::read(folder.join(&path)).unwrap();
+    let game =
+        axcenity_assets::load_model(&bytes, &models, axcenity_assets::ModelFormat::Gltf).unwrap();
+    for model in [&game, &app.assets.model(&path).unwrap()] {
+        let material = &model.primitives[0].material;
+        assert_eq!(material.base_color, [1.0; 4]);
+        assert_eq!(material.base_color_texture.as_ref().unwrap().rgba, color);
+        let roughness = material.roughness_texture.as_ref().unwrap();
+        assert_eq!(roughness.channel, axcenity_assets::Channel::Green);
+        let saved: Vec<u8> = roughness.image.rgba.chunks(4).map(|p| p[1]).collect();
+        assert_eq!(saved, rough);
+    }
+    // The Scene view's draw list has the part with its painted maps.
+    let camera = axcenity_render::Camera {
+        position: Vec3::new(8.0, 6.0, 8.0),
+        look_at: Vec3::ZERO,
+        fov_y_degrees: 50.0,
+    };
+    let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
+    let drawn = app.assets.model(&path).unwrap().primitives[0].key();
+    let item = list
+        .items
+        .iter()
+        .find(
+            |item| matches!(&item.shape, axcenity_render::Shape::Mesh(mesh) if mesh.key() == drawn),
+        )
+        .expect("the part is drawn");
+    let texture = item
+        .material
+        .base_color_texture
+        .as_ref()
+        .expect("painted color");
+    assert_eq!(
+        axcenity_render::TextureSource::rgba(&**texture),
+        color.as_slice()
+    );
+    assert!(item.material.maps.roughness.is_some(), "painted roughness");
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_hidden_layer_stays_out_of_the_saved_maps_and_is_still_there_after_reopening() {
+    use axcenity_mesh_edit::MapKind;
+    let folder = copy_of_example("hello-touched", "studio-paint-layers");
+    let mut app = EditorApp::new(Some(&folder));
+    painting_chair(&mut app);
+    paint_seat(&mut app, MapKind::BaseColor, [150, 70, 30], 0.0);
+    let rust_only = {
+        let doc = app.model_studio.doc.as_ref().unwrap();
+        doc.paint_set(0)
+            .unwrap()
+            .map(MapKind::BaseColor)
+            .unwrap()
+            .flat()
+            .to_vec()
+    };
+    let doc = app.model_studio.doc.as_mut().unwrap();
+    doc.change_paint(0, "Add Layer", None, |set| {
+        set.map_mut(MapKind::BaseColor).unwrap().add_layer();
+    });
+    paint_seat(&mut app, MapKind::BaseColor, [20, 40, 220], 0.0);
+    let doc = app.model_studio.doc.as_mut().unwrap();
+    doc.change_paint(0, "Hide Layer", None, |set| {
+        let map = set.map_mut(MapKind::BaseColor).unwrap();
+        map.layers[1].visible = false;
+        map.refresh_all();
+    });
+    let blue_layer = doc
+        .paint_set(0)
+        .unwrap()
+        .map(MapKind::BaseColor)
+        .unwrap()
+        .layers[1]
+        .clone();
+    assert!(!blue_layer.is_empty());
+
+    let path = app.save_model_studio().unwrap();
+    let saved = image::open(folder.join("assets/models/textures/Cube_Cube_Material_BaseColor.png"))
+        .unwrap()
+        .into_rgba8()
+        .into_raw();
+    assert_eq!(saved, rust_only, "the hidden layer's paint isn't saved");
+    assert!(
+        folder
+            .join("assets/models/Cube.meshedit/0-0-BaseColor-1.png")
+            .exists()
+    );
+
+    app.open_in_model_studio(&path);
+    let doc = app.model_studio.doc.as_ref().unwrap();
+    let map = doc
+        .paint_set(0)
+        .expect("painted again from the sidecar")
+        .map(MapKind::BaseColor)
+        .unwrap();
+    assert_eq!(map.layers.len(), 2);
+    assert_eq!(map.layers[1], blue_layer, "still there, still hidden");
+    assert_eq!(map.flat(), rust_only.as_slice());
+    let _ = std::fs::remove_dir_all(&folder);
+}

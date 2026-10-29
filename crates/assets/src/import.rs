@@ -12,6 +12,9 @@ pub const MODELS_FOLDER: &str = "assets/models";
 /// The end of a model's Model Studio sidecar (`Head.meshedit.json` beside
 /// `Head.glb`): editing state the `.glb` can't hold, which games don't use.
 pub const MESH_EDIT_SUFFIX: &str = ".meshedit.json";
+/// The end of a model's Model Studio sidecar folder (`Head.meshedit`
+/// beside `Head.glb`), which keeps its paint layers as PNGs.
+pub const MESH_EDIT_FOLDER_SUFFIX: &str = ".meshedit";
 /// Where an imported model's embedded textures are copied out to, inside
 /// its folder.
 pub const TEXTURES_FOLDER: &str = "textures";

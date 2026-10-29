@@ -1,6 +1,6 @@
 [package]
 name = "axcenity-mesh-edit"
-description = "Axcenity mesh editing: cutting triangle meshes along planes and breaking them into fracture pieces."
+description = "Axcenity mesh editing: cutting and breaking triangle meshes, and the Model Studio's editable meshes, uvs and texture painting."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,6 +13,7 @@ name = "axcenity_mesh_edit"
 axcenity-assets.workspace = true
 axcenity-core.workspace = true
 glam.workspace = true
+image.workspace = true
 meshopt.workspace = true
 serde.workspace = true
 serde_json.workspace = true

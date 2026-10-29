@@ -4,7 +4,9 @@
 //! keeps each object's own mesh and its modifier stack, so reopening the
 //! model in the Studio shows them still editable. It also keeps an
 //! object's seams, pinned vertices and second uvs (Phase 58), which the
-//! Studio reads back from no `.glb`.
+//! Studio reads back from no `.glb`. Painted objects (Phase 59) keep their
+//! layers' settings here and their pixels as PNGs in the sidecar folder
+//! (`paint.rs`).
 //!
 //! The sidecar names the `.glb` it goes with by a hash of its bytes. If
 //! the `.glb` was changed since (exported again from another program), the
@@ -17,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::half_edge::{EditMesh, Polygon};
 use crate::model_doc::ModelDoc;
 use crate::modifiers::Modifier;
+use crate::paint::{PaintData, PaintSet};
 
 const VERSION: u32 = 1;
 
@@ -37,6 +40,9 @@ struct SidecarObject {
     materials: Vec<String>,
     modifiers: Vec<Modifier>,
     mesh: MeshData,
+    /// Its paint sets; their layers are files in the sidecar folder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    paint: Vec<PaintData>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,8 +83,8 @@ pub fn sidecar_path(model: &str) -> String {
 
 impl ModelDoc {
     /// The sidecar for this model saved as `glb` (what [`write_glb`]
-    /// made), or `None` if no object has modifiers, seams, pins or second
-    /// uvs, so there's nothing a `.glb` can't hold.
+    /// made), or `None` if no object has modifiers, seams, pins, second
+    /// uvs or paint, so there's nothing a `.glb` can't hold.
     ///
     /// [`write_glb`]: ModelDoc::write_glb
     pub fn write_sidecar(&self, glb: &[u8]) -> Option<Vec<u8>> {
@@ -90,7 +96,7 @@ impl ModelDoc {
                 let marked = object.mesh.as_ref().is_some_and(|mesh| {
                     !mesh.seams().is_empty() || !mesh.pins().is_empty() || mesh.has_uv2()
                 });
-                !object.modifiers.is_empty() || marked
+                !object.modifiers.is_empty() || !object.paint.is_empty() || marked
             })
             .filter_map(|(index, object)| {
                 Some(SidecarObject {
@@ -99,6 +105,7 @@ impl ModelDoc {
                     materials: object.materials.iter().map(|m| m.name.clone()).collect(),
                     modifiers: object.modifiers.clone(),
                     mesh: mesh_data(object.mesh.as_ref()?),
+                    paint: object.paint.iter().map(|set| set.data(index)).collect(),
                 })
             })
             .collect();
@@ -118,6 +125,18 @@ impl ModelDoc {
     /// is found by its place and name, or else its name. Returns how many
     /// objects it put back, or why it couldn't be used.
     pub fn read_sidecar(&mut self, sidecar: &[u8], glb: &[u8]) -> Result<usize, String> {
+        self.read_sidecar_with(sidecar, glb, &mut |_| None)
+    }
+
+    /// [`read_sidecar`](Self::read_sidecar), with paint layers read by
+    /// `read` (a file name in the sidecar folder to its bytes) and put on
+    /// their objects' materials.
+    pub fn read_sidecar_with(
+        &mut self,
+        sidecar: &[u8],
+        glb: &[u8],
+        read: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+    ) -> Result<usize, String> {
         let sidecar: Sidecar =
             serde_json::from_slice(sidecar).map_err(|err| format!("it can't be read: {err}"))?;
         if sidecar.version > VERSION {
@@ -157,6 +176,19 @@ impl ModelDoc {
                 .collect();
             object.mesh = Some(edit_mesh(saved.mesh, &slot_now));
             object.modifiers = saved.modifiers;
+            object.paint = saved
+                .paint
+                .into_iter()
+                .map(|data| {
+                    let mut set = PaintSet::load(data, read);
+                    set.slot = slot_now.get(set.slot as usize).copied().unwrap_or(0);
+                    set
+                })
+                .filter(|set| (set.slot as usize) < object.materials.len())
+                .collect();
+            for set in &object.paint {
+                set.apply_to(&mut object.materials[set.slot as usize]);
+            }
             restored += 1;
         }
         Ok(restored)

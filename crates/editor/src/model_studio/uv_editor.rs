@@ -204,7 +204,8 @@ pub(super) struct UvScreen {
 }
 
 impl UvScreen {
-    fn scale(&self) -> f32 {
+    /// Points per texture width.
+    pub fn scale(&self) -> f32 {
         self.rect.width().min(self.rect.height()) * self.zoom
     }
 
@@ -554,7 +555,8 @@ impl ModelStudio {
             zoom: self.uv.zoom,
             pan: self.uv.pan,
         };
-        if editable && response.contains_pointer() {
+        let painting = self.doc.as_ref().is_some_and(|doc| doc.mode == Mode::Paint);
+        if editable && response.contains_pointer() && !painting {
             self.uv_pane_keys(ui, &screen);
         }
         self.uv_pane_mouse(ui, &response, &screen, editable);
@@ -766,6 +768,10 @@ impl ModelStudio {
         if !editable {
             return;
         }
+        if self.doc.as_ref().is_some_and(|doc| doc.mode == Mode::Paint) {
+            self.paint_in_uvs(ui, response, screen);
+            return;
+        }
         let extend = ui.input(|i| i.modifiers.shift);
         if response.drag_started_by(egui::PointerButton::Primary) {
             self.uv.box_start = response.interact_pointer_pos();
@@ -929,6 +935,15 @@ impl ModelStudio {
                 );
             }
         }
+        // In Paint mode, the map being painted.
+        if let Some(texture) = self.paint_texture(ui.ctx()) {
+            painter.image(
+                texture,
+                egui::Rect::from_two_pos(screen.point(Vec2::ZERO), screen.point(Vec2::ONE)),
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
         painter.rect_stroke(
             egui::Rect::from_two_pos(screen.point(Vec2::ZERO), screen.point(Vec2::ONE)),
             0.0,
@@ -1024,6 +1039,10 @@ impl ModelStudio {
                 modal.kind.label()
             ),
             (None, Some(status)) => status.clone(),
+            _ if doc.mode == Mode::Paint => match &self.paint.status {
+                Some(status) => status.clone(),
+                None => "Drag: paint the map in uv space · Ctrl-click: Clone's source · Fill: an island".to_owned(),
+            },
             (None, None) if self.uv.overlaps.2 > 0 => {
                 format!("{} pairs of islands overlap · Pack Islands lays them out", self.uv.overlaps.2)
             }

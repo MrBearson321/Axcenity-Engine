@@ -20,6 +20,8 @@
 //! - UVs (Phase 58; `uv_editor.rs`): seams, unwrapping and projections
 //!   (U, or the toolbar's UV menu), and the UV editor pane beside the
 //!   view, with a checker drawn on the uvs in the view.
+//! - Paint mode (Phase 59; `paint.rs`): the active object's material maps
+//!   painted in layers, in the view or the UV editor, saved as PNGs.
 //!
 //! The Studio keeps its own undo history while the mouse is over it; each
 //! edit is one step. Save writes the file and records it as one step of the
@@ -28,12 +30,14 @@
 
 mod modal;
 mod modifiers;
+pub(crate) mod paint;
 mod proportional;
 mod tools;
 pub(crate) mod uv_editor;
 mod view;
 
 pub use modal::{Modal, ModalKind};
+pub use paint::PaintState;
 pub use proportional::{Falloff, Pivot, Proportional};
 pub use uv_editor::UvEditor;
 
@@ -51,12 +55,14 @@ use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets::{self, Role};
 
-/// Object mode or Edit mode.
+/// Object mode, Edit mode or Paint mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
     Object,
     Edit,
+    /// Texture painting on the active object (Phase 59).
+    Paint,
 }
 
 /// What the tab asks the app to do.
@@ -66,6 +72,8 @@ pub enum StudioAction {
     Open(String),
     /// Save the open model.
     Save,
+    /// Read this project image as the paint brush's image.
+    BrushImage(String),
 }
 
 /// Everything an undo step puts back.
@@ -106,6 +114,9 @@ pub struct StudioDoc {
     /// Goes up with every change to the meshes, so the view knows to draw
     /// them again.
     pub revision: u64,
+    /// Goes up as a stroke paints, so the view shows the materials again
+    /// (the meshes are the same).
+    pub paint_revision: u64,
     /// The revision last saved.
     saved: u64,
     /// The last operation, until anything else is done.
@@ -133,6 +144,7 @@ impl StudioDoc {
             undo: Vec::new(),
             redo: Vec::new(),
             revision: 1,
+            paint_revision: 0,
             saved: if saved { 1 } else { 0 },
             last_op: None,
             modifier_edit: None,
@@ -186,7 +198,7 @@ impl StudioDoc {
     pub fn run(&mut self, op: MeshOp) -> Result<(), String> {
         let targets: Vec<(usize, Selection)> = match self.mode {
             Mode::Edit => vec![(self.active, self.selection.clone())],
-            Mode::Object => self
+            Mode::Object | Mode::Paint => self
                 .objects
                 .iter()
                 .filter_map(|&object| {
@@ -207,7 +219,7 @@ impl StudioDoc {
             op,
             MeshOp::ShadeSmooth | MeshOp::ShadeFlat | MeshOp::AutoSmooth { .. }
         );
-        if self.mode == Mode::Object && !shading {
+        if self.mode != Mode::Edit && !shading {
             return Err(format!("{} works in Edit mode (Tab)", op.label()));
         }
         let before = self.snapshot();
@@ -322,6 +334,15 @@ impl StudioDoc {
         };
     }
 
+    /// Into `mode` (Edit and Paint mode need the active object to have a
+    /// mesh).
+    pub fn set_mode(&mut self, mode: Mode) {
+        if mode == Mode::Object || self.mesh().is_some() {
+            self.last_op = None;
+            self.mode = mode;
+        }
+    }
+
     /// 1, 2 or 3: what Edit mode picks, keeping what's covered.
     pub fn set_select_mode(&mut self, mode: SelectMode) {
         let Some(mesh) = self
@@ -383,7 +404,7 @@ impl StudioDoc {
                 .into_iter()
                 .filter(|(_, vertices)| !vertices.is_empty())
                 .collect(),
-            Mode::Object => self
+            Mode::Object | Mode::Paint => self
                 .objects
                 .iter()
                 .filter_map(|&object| {
@@ -628,6 +649,10 @@ pub struct ModelStudio {
     pub moves: MoveSettings,
     /// The UV editor pane and the uv tools' settings.
     pub uv: UvEditor,
+    /// Paint mode's brush, map, layer and strokes.
+    pub paint: PaintState,
+    /// The project's images, for a paint brush's image.
+    pub images: Vec<String>,
     /// A keyboard move under way, and what it moves.
     modal: Option<(Modal, Moving)>,
     /// The knife or loop cut under way, a value being dragged, or a menu.
@@ -654,6 +679,8 @@ impl Default for ModelStudio {
             show_normals: false,
             moves: MoveSettings::default(),
             uv: UvEditor::default(),
+            paint: PaintState::default(),
+            images: Vec::new(),
             modal: None,
             tools: tools::Tools::default(),
             view: view::View::default(),
@@ -685,7 +712,11 @@ impl ModelStudio {
 
     /// True while a move is being dragged, which undo mustn't interrupt.
     pub fn is_dragging(&self) -> bool {
-        self.modal.is_some() || self.view.dragging() || self.tools.busy() || self.uv.busy()
+        self.modal.is_some()
+            || self.view.dragging()
+            || self.tools.busy()
+            || self.uv.busy()
+            || self.paint.busy()
     }
 
     /// Shows `doc`, unless the open one has unsaved changes: then it waits
@@ -702,6 +733,7 @@ impl ModelStudio {
         self.modal = None;
         self.tools = tools::Tools::default();
         self.uv.forget();
+        self.paint.forget();
         self.view.frame_doc(&doc);
         self.doc = Some(doc);
     }
@@ -751,7 +783,12 @@ impl ModelStudio {
                     .show(ui, |ui| {
                         self.object_list(ui);
                         ui.add_space(8.0);
-                        self.modifier_panel(ui, editable);
+                        let painting = self.doc.as_ref().is_some_and(|d| d.mode == Mode::Paint);
+                        if painting {
+                            self.paint_panel(ui, editable, &mut actions);
+                        } else {
+                            self.modifier_panel(ui, editable);
+                        }
                     });
             } else if self.uv.open {
                 self.view_and_uvs(ui, render_state, snap, editable);
@@ -865,10 +902,11 @@ impl ModelStudio {
                 &[
                     (Mode::Object, Some(icons::CUBE), "Object"),
                     (Mode::Edit, Some(icons::POLYGON), "Edit"),
+                    (Mode::Paint, Some(icons::PAINT_BRUSH), "Paint"),
                 ],
             ) && mode != doc.mode
             {
-                doc.toggle_mode();
+                doc.set_mode(mode);
             }
             if doc.mode == Mode::Edit {
                 let mut select = doc.selection.mode;
@@ -1115,6 +1153,7 @@ impl ModelStudio {
     ) {
         let size = ui.available_size().max(egui::vec2(64.0, 64.0));
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        let painting = self.doc.as_ref().is_some_and(|doc| doc.mode == Mode::Paint);
         let context = view::Frame {
             rect,
             response: &response,
@@ -1123,12 +1162,28 @@ impl ModelStudio {
             axes: self.axes,
             show_normals: self.show_normals,
             cursor: self.moves.cursor,
-            checker: self.uv.checker.then_some(self.uv.channel),
+            checker: self
+                .uv
+                .checker
+                .then_some(self.uv.channel)
+                .filter(|_| !painting),
         };
         if editable && response.contains_pointer() {
-            self.keys(ui, &context);
+            if painting {
+                self.paint_keys(ui);
+                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+                    && let Some(doc) = &mut self.doc
+                {
+                    doc.toggle_mode();
+                }
+            } else {
+                self.keys(ui, &context);
+            }
         }
-        let extras = self.extras();
+        let mut extras = self.extras();
+        if painting {
+            extras.hint = self.paint.status.clone();
+        }
         let Some(doc) = &mut self.doc else {
             return;
         };
@@ -1136,6 +1191,12 @@ impl ModelStudio {
         let event = self
             .view
             .show(ui, &context, render_state, doc, modal, &extras);
+        if painting {
+            if editable {
+                self.paint_in_view(ui, &response, &event.screen);
+            }
+            return;
+        }
         self.handle(event, ui, &context);
         if editable {
             self.overlays(ui, rect);
@@ -1466,7 +1527,9 @@ fn save_name(doc: &StudioDoc) -> String {
 #[cfg(test)]
 pub(crate) mod modifiers_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod paint_tests;
+#[cfg(test)]
+pub(crate) mod tests;
 #[cfg(test)]
 pub(crate) mod tools_tests;
 #[cfg(test)]

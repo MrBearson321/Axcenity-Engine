@@ -1865,9 +1865,9 @@ You can paint in the 3D view (projected to UV through a cached triangle-ID buffe
 
 ### Acceptance criteria
 
-- [ ] Painting rust onto the roughness and colour maps of the chair shows in the Studio and in the Scene View after save, with the material set up automatically.
-- [ ] Hiding a layer and saving removes its paint from the saved maps. The layer is still there after reopening.
-- [ ] Painting across a UV seam leaves no visible line.
+- [x] Painting rust onto the roughness and colour maps of the chair shows in the Studio and in the Scene View after save, with the material set up automatically. Tests: `rust_painted_on_the_chair_saves_maps_the_scene_view_draws_with_the_material_set_up` and `rust_painted_from_the_view_shows_on_the_chair_and_each_stroke_is_one_undo_step`; snapshot `model-studio-paint.png`.
+- [x] Hiding a layer and saving removes its paint from the saved maps. The layer is still there after reopening. Tests: `a_hidden_layer_stays_out_of_the_saved_maps_and_is_still_there_after_reopening` and `layers_go_through_the_sidecar_folder_hidden_and_all`.
+- [x] Painting across a UV seam leaves no visible line. Tests: `painting_across_a_uv_seam_leaves_no_line` and `a_stroke_across_the_seam_of_a_cylinder_leaves_no_line` (both sides of the seam read within 4/255 through the GPU's filter).
 
 ---
 

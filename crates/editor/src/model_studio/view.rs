@@ -12,6 +12,10 @@
 //! checker texture on the uv channel the UV editor shows, and seams are
 //! drawn red over Edit mode's edges.
 //!
+//! In Paint mode (Phase 59) the view doesn't pick or show handles: the
+//! Studio paints with the left button (`paint.rs`). While a stroke paints,
+//! only the drawn model's materials are put in again, not its meshes.
+//!
 //! Mouse: left clicks pick (Shift adds, Alt picks a loop), a left drag in
 //! Edit mode draws a box, a right or middle drag turns the camera, a
 //! Shift+middle drag slides it, and the wheel zooms. Shift+right-click puts
@@ -119,6 +123,10 @@ pub struct View {
     /// The revision of the meshes drawn, 0 for none, and the checker's
     /// channel it was drawn with.
     shown: (u64, Option<usize>),
+    /// The paint revision drawn, and the model drawn with the object and
+    /// material slot of each primitive.
+    painted: u64,
+    drawn: Option<(axcenity_assets::Model, Vec<(usize, usize)>)>,
     /// The width over the height of the view last drawn.
     aspect: f32,
     yaw: f32,
@@ -150,6 +158,8 @@ impl Default for View {
             part,
             assets: Assets::default(),
             shown: (0, None),
+            painted: 0,
+            drawn: None,
             aspect: 1.0,
             yaw: 35.0,
             pitch: 25.0,
@@ -212,12 +222,30 @@ impl View {
     /// checker on `checker`'s uv channel if it's on.
     fn refresh(&mut self, doc: &StudioDoc, checker: Option<usize>) {
         if self.shown == (doc.revision, checker) {
+            if self.painted == doc.paint_revision || checker.is_some() {
+                return;
+            }
+            // The same meshes with the materials as painted now.
+            self.painted = doc.paint_revision;
+            if let Some((model, slots)) = &self.drawn {
+                let model = model.with_materials(|index| {
+                    let &(object, slot) = slots.get(index)?;
+                    // Without uvs, it's drawn without textures.
+                    (!model.primitives[index].uvs.is_empty()).then_some(())?;
+                    doc.model.objects.get(object)?.materials.get(slot).cloned()
+                });
+                self.show_model(model);
+            }
             return;
         }
         self.shown = (doc.revision, checker);
+        self.painted = doc.paint_revision;
         let model = match checker {
             Some(channel) => doc.model.to_model_on(channel).map(with_checker),
-            None => doc.model.to_model(),
+            None => doc.model.to_model_slots(0).map(|(model, slots)| {
+                self.drawn = Some((model.with_materials(|_| None), slots));
+                model
+            }),
         };
         let Some(model) = model else {
             let _ = self
@@ -225,6 +253,11 @@ impl View {
                 .set_property(self.part, "MeshId", Value::String(String::new()));
             return;
         };
+        self.show_model(model);
+    }
+
+    /// Draws `model` in place of the last.
+    fn show_model(&mut self, model: axcenity_assets::Model) {
         let size = Vec3::from(model.size).max(Vec3::splat(0.001));
         let center = Vec3::from(model.center);
         self.assets.insert(MESH_ID, model);
@@ -280,7 +313,7 @@ impl View {
         });
 
         // The handles, on what's picked.
-        let pose = (modal.is_none() && frame.tool.has_handles())
+        let pose = (modal.is_none() && frame.tool.has_handles() && doc.mode != Mode::Paint)
             .then(|| handle_pose(doc, frame.axes))
             .flatten();
         let shapes = pose.map_or_else(Vec::new, |pose| gizmo::shapes(frame.tool, pose, &screen));
@@ -333,6 +366,7 @@ impl View {
             _ if extras.hint.is_some() => extras.hint.clone().unwrap_or_default(),
             (Some(modal), _) => modal.describe(),
             (None, Mode::Object) => "Click an object · Tab: Edit mode · G R S: move, turn, scale · right-drag: turn view".to_owned(),
+            (None, Mode::Paint) => "Drag: paint · Ctrl-click: Clone's source · [ ]: radius · X: draw or erase · right-drag: turn view · Tab: Object mode".to_owned(),
             (None, Mode::Edit) => "1 2 3: vertex, edge, face · Alt-click: loop · L: linked · Ctrl +/−: grow, shrink · drag: box · E I Ctrl+B Ctrl+R K M X F: model · U: unwrap".to_owned(),
         };
         let palette = theme::palette(ui.ctx());
@@ -387,6 +421,9 @@ impl View {
         down: bool,
     ) -> ViewAction {
         let response = frame.response;
+        if doc.mode == Mode::Paint {
+            return ViewAction::None;
+        }
         if response.secondary_clicked()
             && modifiers.shift
             && let Some(at) = response.interact_pointer_pos()
@@ -464,7 +501,7 @@ impl View {
         let ray = screen.ray(at);
         let extend = modifiers.shift;
         match doc.mode {
-            Mode::Object => ViewAction::PickObject {
+            Mode::Object | Mode::Paint => ViewAction::PickObject {
                 object: pick_object(doc, ray),
                 extend,
             },

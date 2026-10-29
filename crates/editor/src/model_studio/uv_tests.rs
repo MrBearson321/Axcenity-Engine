@@ -22,7 +22,7 @@ fn worst_stretch(doc: &StudioDoc) -> (f32, f32) {
 }
 
 /// The chair, smart-projected with nothing picked (so every face).
-fn projected_chair() -> ModelStudio {
+pub(super) fn projected_chair() -> ModelStudio {
     let mut doc = cube_doc();
     model_chair(&mut doc);
     doc.select(|selection, _| selection.clear());

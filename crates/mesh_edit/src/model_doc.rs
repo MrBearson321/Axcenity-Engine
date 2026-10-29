@@ -10,7 +10,9 @@
 //! pick the same objects.
 //!
 //! An object's modifiers (Phase 57) are on it in what's drawn and saved;
-//! its own mesh and the stack are kept in the sidecar (`sidecar.rs`).
+//! its own mesh and the stack are kept in the sidecar (`sidecar.rs`). Its
+//! paint (Phase 59, `paint.rs`) is on its materials as images; saving
+//! flattens them to PNGs and keeps the layers in the sidecar folder.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -26,6 +28,7 @@ use serde_json::{Value, json};
 use crate::glb::{File, Vertices};
 use crate::half_edge::{EditMesh, Polygon, newell};
 use crate::modifiers::{Modifier, ModifierKind, Purpose, evaluate};
+use crate::paint::PaintSet;
 use crate::primitives::PrimitiveSettings;
 
 /// The share of triangles Generate LODs keeps in `_LOD1` and `_LOD2`, as
@@ -52,6 +55,8 @@ pub struct DocObject {
     pub uvs: bool,
     /// Its modifier stack, first to last.
     pub modifiers: Vec<Modifier>,
+    /// Its material slots being painted (Phase 59), one set each.
+    pub paint: Vec<PaintSet>,
 }
 
 impl DocObject {
@@ -90,6 +95,7 @@ impl ModelDoc {
                 materials: vec![material],
                 uvs: true,
                 modifiers: Vec::new(),
+                paint: Vec::new(),
             }],
         }
     }
@@ -124,6 +130,7 @@ impl ModelDoc {
                 materials,
                 uvs,
                 modifiers: Vec::new(),
+                paint: Vec::new(),
             });
         }
         if objects.iter().all(|object| object.mesh.is_none()) {
@@ -143,6 +150,14 @@ impl ModelDoc {
     /// [`to_model`](Self::to_model), textured by uv `channel` (1 draws the
     /// second uvs, as a lightmap would be placed).
     pub fn to_model_on(&self, channel: usize) -> Option<Model> {
+        self.to_model_slots(channel).map(|(model, _)| model)
+    }
+
+    /// [`to_model_on`](Self::to_model_on), and the object and material
+    /// slot each primitive draws (a slot past the object's last is drawn
+    /// plain), so the view can show painted materials on it again.
+    pub fn to_model_slots(&self, channel: usize) -> Option<(Model, Vec<(usize, usize)>)> {
+        let mut slots = Vec::new();
         let primitives = (0..self.objects.len())
             .filter(|&index| !self.is_lod_copy(index))
             .filter_map(|index| {
@@ -151,10 +166,16 @@ impl ModelDoc {
                 if channel == 1 {
                     mesh.to_mut().swap_uv_channels();
                 }
-                Some(primitives(&mesh, &object.materials, true))
+                let drawn = primitives(&mesh, &object.materials, true);
+                Some(
+                    drawn
+                        .into_iter()
+                        .map(move |(vertices, material, slot)| (vertices, material, (index, slot))),
+                )
             })
             .flatten()
-            .map(|(vertices, material)| {
+            .map(|(vertices, material, slot)| {
+                slots.push(slot);
                 Primitive::new(
                     vertices.positions.iter().map(|p| p.to_array()).collect(),
                     vertices.normals.iter().map(|n| n.to_array()).collect(),
@@ -164,7 +185,7 @@ impl ModelDoc {
                 )
             })
             .collect();
-        Model::from_primitives(primitives).ok()
+        Some((Model::from_primitives(primitives).ok()?, slots))
     }
 
     /// The model as a `.glb` file: a node per object, under its groups'
@@ -198,7 +219,7 @@ impl ModelDoc {
             if let Some(mesh) = object.evaluated(Purpose::Export) {
                 let parts: Vec<Value> = primitives(&mesh, &object.materials, object.uvs)
                     .into_iter()
-                    .map(|(vertices, material)| {
+                    .map(|(vertices, material, _)| {
                         let key = format!("{material:?}");
                         let index = match material_of.get(&key) {
                             Some(&index) => index,
@@ -272,9 +293,12 @@ impl ModelDoc {
             modifiers.push(Modifier::new(ModifierKind::Decimate { ratio }));
             self.objects.insert(
                 after + k,
+                // Saving points the copies at the painted maps; they aren't
+                // painted themselves.
                 DocObject {
                     name,
                     modifiers,
+                    paint: Vec::new(),
                     ..object.clone()
                 },
             );
@@ -345,13 +369,14 @@ pub fn from_model(model: &Model) -> (EditMesh, Vec<ModelMaterial>) {
 
 /// `mesh`'s faces as triangles, one set per material slot used (a face
 /// whose slot isn't there is drawn with the first, or a plain material),
-/// in slot order. Corners sharing a vertex, uvs and normal are written
-/// once. Without `uvs`, no texture coordinates (and no second ones).
+/// in slot order, with the slot (`usize::MAX` for the plain one). Corners
+/// sharing a vertex, uvs and normal are written once. Without `uvs`, no
+/// texture coordinates (and no second ones).
 fn primitives<'a>(
     mesh: &EditMesh,
     materials: &'a [ModelMaterial],
     uvs: bool,
-) -> Vec<(Vertices, &'a ModelMaterial)> {
+) -> Vec<(Vertices, &'a ModelMaterial, usize)> {
     static PLAIN: std::sync::LazyLock<ModelMaterial> =
         std::sync::LazyLock::new(ModelMaterial::default);
     let slot_of = |face: u32| {
@@ -394,7 +419,10 @@ fn primitives<'a>(
                     }
                 }
             }
-            (vertices, materials.get(slot).unwrap_or(&PLAIN))
+            match materials.get(slot) {
+                Some(material) => (vertices, material, slot),
+                None => (vertices, &*PLAIN, usize::MAX),
+            }
         })
         .collect()
 }

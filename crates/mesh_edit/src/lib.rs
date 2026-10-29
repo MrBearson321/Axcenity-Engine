@@ -26,6 +26,9 @@
 //! - [`uv`] unwraps: seams, [`unwrap`] by angle (LSCM), [`smart_project`],
 //!   [`project`]ions, [`pack_islands`], [`average_island_scale`],
 //!   [`stretch`], and the UV editor's edits of corners.
+//! - [`paint`] paints a material's maps in layers on an object's uvs
+//!   ([`PaintSet`], brushes through a [`TexelMap`]); saving flattens them
+//!   into PNGs named by role ([`ModelDoc::bake_paint`]).
 //!
 //! Everything here is deterministic: the same input gives the same output,
 //! bit for bit, so a project regenerates the same pieces anywhere.
@@ -47,6 +50,9 @@ mod modifiers_tests;
 mod ops;
 #[cfg(test)]
 mod ops_tests;
+pub mod paint;
+#[cfg(test)]
+mod paint_tests;
 mod primitives;
 mod select;
 mod shapes;
@@ -72,6 +78,7 @@ pub use modifiers::{
 pub use ops::{
     DeleteKind, DissolveKind, ExtrudeMode, KnifePoint, MergeAt, MeshOp, apply, check_manifold,
 };
+pub use paint::{MapKind, PaintSet, TexelMap, paint_folder};
 pub use primitives::{PrimitiveSettings, PrimitiveShape};
 pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use sidecar::sidecar_path;

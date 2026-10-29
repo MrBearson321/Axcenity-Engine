@@ -1,12 +1,14 @@
 //! The Model Studio tab's actions (Phase 55; the tab is `model_studio.rs`):
 //! opening a model file, and saving it as a `.glb` as one step of the
 //! editor's history, which MeshParts using it reload at once. A model with
-//! modifiers (Phase 57) saves its sidecar too, and opens from it.
+//! modifiers (Phase 57) saves its sidecar too, and opens from it. Painted
+//! maps (Phase 59) save as PNGs in `textures/` beside it, and their layers
+//! in its sidecar folder.
 
 use std::sync::Arc;
 
 use axcenity_assets::ModelFormat;
-use axcenity_mesh_edit::{ModelDoc, sidecar_path};
+use axcenity_mesh_edit::{ModelDoc, paint_folder, sidecar_path};
 use eframe::egui_wgpu::RenderState;
 
 use super::*;
@@ -20,14 +22,18 @@ impl EditorApp {
         ui: &mut egui::Ui,
         render_state: Option<&RenderState>,
     ) {
-        let mut models: Vec<String> = self
-            .asset_browser
-            .entries()
-            .into_iter()
-            .filter(|entry| entry.kind == AssetKind::Model)
-            .map(|entry| entry.path)
-            .collect();
-        models.sort();
+        let entries = self.asset_browser.entries();
+        let of_kind = |kinds: &[AssetKind]| -> Vec<String> {
+            let mut paths: Vec<String> = entries
+                .iter()
+                .filter(|entry| kinds.contains(&entry.kind))
+                .map(|entry| entry.path.clone())
+                .collect();
+            paths.sort();
+            paths
+        };
+        let models = of_kind(&[AssetKind::Model]);
+        self.model_studio.images = of_kind(&[AssetKind::Image, AssetKind::Texture]);
         let editable = self.project.is_some() && !self.playing();
         let actions = self
             .model_studio
@@ -41,6 +47,7 @@ impl EditorApp {
                 StudioAction::Save => {
                     self.save_model_studio();
                 }
+                StudioAction::BrushImage(path) => self.load_brush_image(&path),
             }
         }
     }
@@ -86,10 +93,17 @@ impl EditorApp {
         let same_file = glb == file;
         // Each object's own mesh and modifiers, from the sidecar.
         let sidecar = sidecar_path(file);
+        // Paint layers are files in the sidecar folder.
+        let layers =
+            folder.join(axcenity_assets::safe_path(&paint_folder(file)).unwrap_or_default());
+        let mut read_layer = |name: &str| {
+            let name = axcenity_assets::safe_file_name(name)?;
+            std::fs::read(layers.join(name)).ok()
+        };
         if same_file
             && let Some(sidecar_bytes) = axcenity_assets::safe_path(&sidecar)
                 .and_then(|path| std::fs::read(folder.join(path)).ok())
-            && let Err(why) = model.read_sidecar(&sidecar_bytes, &bytes)
+            && let Err(why) = model.read_sidecar_with(&sidecar_bytes, &bytes, &mut read_layer)
         {
             self.output.warning(format!(
                 "`{sidecar}` wasn't used, so modifiers are already applied (and seams, pins and second uvs are gone): {why}."
@@ -139,18 +153,45 @@ impl EditorApp {
             doc.path = format!("{}/{file}", axcenity_assets::MODELS_FOLDER);
         }
         let path = doc.path.clone();
+        // Painted maps flattened to PNGs, which the materials then use.
+        let textures = doc.model.bake_paint(&path);
         let bytes = doc.model.write_glb();
         // The sidecar goes with it, or an old one goes once nothing needs it.
         let sidecar = sidecar_path(&path);
         let sidecar_bytes = doc.model.write_sidecar(&bytes);
+        let mut files: Vec<(String, Option<Vec<u8>>)> = vec![
+            (path.clone(), Some(bytes)),
+            (sidecar.clone(), sidecar_bytes),
+        ];
+        files.extend(textures.into_iter().map(|(file, png)| (file, Some(png))));
+        // The paint layers, in place of the ones there (a deleted layer's
+        // file goes).
+        let layers = paint_folder(&path);
+        let mut layer_files: Vec<(String, Option<Vec<u8>>)> = doc
+            .model
+            .paint_files()
+            .into_iter()
+            .map(|(name, png)| (format!("{layers}/{name}"), Some(png)))
+            .collect();
+        if let Some(disk) = axcenity_assets::safe_path(&layers).map(|p| folder.join(p))
+            && let Ok(entries) = std::fs::read_dir(disk)
+        {
+            for entry in entries.flatten() {
+                let old = format!("{layers}/{}", entry.file_name().to_string_lossy());
+                if !layer_files.iter().any(|(file, _)| *file == old) {
+                    layer_files.push((old, None));
+                }
+            }
+        }
+        files.extend(layer_files);
         let mut changes = Vec::new();
-        for (file, after) in [(&path, Some(bytes)), (&sidecar, sidecar_bytes)] {
+        for (file, after) in &files {
             let disk = folder.join(axcenity_assets::safe_path(file)?);
             let before = std::fs::read(&disk).ok();
             if before.is_none() && after.is_none() {
                 continue;
             }
-            let written = match &after {
+            let written = match after {
                 Some(after) => disk
                     .parent()
                     .map_or(Ok(()), std::fs::create_dir_all)
@@ -164,8 +205,12 @@ impl EditorApp {
             changes.push(BlobChange {
                 path: file.clone(),
                 before: before.map(Arc::new),
-                after: after.map(Arc::new),
+                after: after.clone().map(Arc::new),
             });
+        }
+        // An emptied sidecar folder goes too.
+        if let Some(disk) = axcenity_assets::safe_path(&layers).map(|p| folder.join(p)) {
+            let _ = std::fs::remove_dir(disk);
         }
         doc.mark_saved();
         let name = doc.name().to_owned();
@@ -177,5 +222,22 @@ impl EditorApp {
         self.asset_browser.refresh();
         self.output.info(format!("Saved `{path}`."));
         Some(path)
+    }
+
+    /// Reads the project image at `path` as the Model Studio's brush image.
+    fn load_brush_image(&mut self, path: &str) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        let read = axcenity_assets::safe_path(path)
+            .ok_or_else(|| "it isn't inside the project".to_owned())
+            .and_then(|relative| std::fs::read(folder.join(relative)).map_err(|e| e.to_string()))
+            .and_then(|bytes| crate::model_studio::paint::brush_image(path, &bytes));
+        match read {
+            Ok(image) => self.model_studio.paint.brush.image = Some(image),
+            Err(why) => self
+                .output
+                .error(format!("Could not use `{path}` as a brush image: {why}")),
+        }
     }
 }

@@ -34,7 +34,7 @@ fn positions(doc: &StudioDoc) -> Vec<Vec3> {
         .collect()
 }
 
-pub(super) fn screen() -> Screen {
+pub(crate) fn screen() -> Screen {
     let camera = Camera {
         position: Vec3::new(6.0, 5.0, 8.0),
         look_at: Vec3::ZERO,
