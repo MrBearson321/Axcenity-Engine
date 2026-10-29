@@ -12,7 +12,7 @@ Map only. `render` draws a draw list. It does not know about Instances. Open the
 - Weather (a `Weather`: rain and snow, wet and snow-covered surfaces, easing): [rendering/weather.md](rendering/weather.md)
 - Plants swaying in the wind (`DrawItem::sway`, a material's `sway`, `GlobalWind`): [rendering/wind.md](rendering/wind.md)
 - Water (a material file's `water`: waves, seeing through it, reflections, depth tint, foam, the scene copy): [rendering/water.md](rendering/water.md)
-- Shading models (a material file's `shading`: Standard, Unlit, Toon bands, ramp, rim and highlight): [rendering/stylized.md](rendering/stylized.md)
+- Shading models and outlines (a material file's `shading`: Standard, Unlit, Toon bands, ramp, rim and highlight; its `outline`; Lighting's `OutlineEffect`): [rendering/stylized.md](rendering/stylized.md)
 - Bloom and tone mapping: [rendering/post.md](rendering/post.md)
 - Sprites and particles: [rendering/particles.md](rendering/particles.md)
 - The machine's graphics settings (presets, overrides, capabilities, `UserGameSettings`, `graphics.json`, the per-preset references): [rendering/settings.md](rendering/settings.md)

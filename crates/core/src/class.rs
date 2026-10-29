@@ -198,6 +198,9 @@ pub enum ClassName {
     /// and snow-covered every surface is. Changes ease in over
     /// `TransitionTime`.
     Weather,
+    /// Inside Lighting: lines drawn along the edges of everything solid
+    /// (silhouettes and creases), found on screen, with no setup per part.
+    OutlineEffect,
     /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
     ParticleEmitter,
     /// Inside a Part, MeshPart, Model, ScreenGui or UI element: plays
@@ -346,7 +349,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 109] = [
+    pub const ALL: [ClassName; 110] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -407,6 +410,7 @@ impl ClassName {
         ClassName::Atmosphere,
         ClassName::Clouds,
         ClassName::Weather,
+        ClassName::OutlineEffect,
         ClassName::ParticleEmitter,
         ClassName::Animator,
         ClassName::Animation,
@@ -524,6 +528,7 @@ impl ClassName {
             ClassName::Atmosphere => "Atmosphere",
             ClassName::Clouds => "Clouds",
             ClassName::Weather => "Weather",
+            ClassName::OutlineEffect => "OutlineEffect",
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
@@ -1049,6 +1054,14 @@ impl ClassName {
                 // Seconds a change takes to ease in: rain wetting surfaces,
                 // drying, snow settling or melting.
                 ("TransitionTime", Value::Number(10.0)),
+            ],
+            ClassName::OutlineEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // The lines' color.
+                ("Color", Value::Color3(Color3::new(0.0, 0.0, 0.0))),
+                // How thick they are, in pixels of a view 1080 pixels tall
+                // (scaled with the view's height, never under one pixel).
+                ("Thickness", Value::Number(1.0)),
             ],
             ClassName::ParticleEmitter => vec![
                 ("Enabled", Value::Bool(true)),
@@ -2261,6 +2274,7 @@ impl ClassName {
             | ClassName::Atmosphere
             | ClassName::Clouds
             | ClassName::Weather
+            | ClassName::OutlineEffect
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer

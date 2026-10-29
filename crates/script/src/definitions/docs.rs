@@ -1356,6 +1356,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Which way the clouds drift on their own, in degrees turned from +X (east, 0) toward +Z (south, 90).",
     ),
     (
+        ClassName::OutlineEffect,
+        "Enabled",
+        "Whether the lines are drawn. Off (or with no OutlineEffect in Lighting) they cost nothing.",
+    ),
+    (
+        ClassName::OutlineEffect,
+        "Color",
+        "The lines' color. Black by default.",
+    ),
+    (
+        ClassName::OutlineEffect,
+        "Thickness",
+        "How thick the lines are, in pixels of a view 1080 pixels tall (1 by default), scaled with the view's height and never under one pixel.",
+    ),
+    (
         ClassName::Weather,
         "Precipitation",
         "What falls around the camera (`Enum.Precipitation`): None, Rain (the default) or Snow. Rain wets surfaces as it falls, up to its Intensity; snow covers the ones facing up.",
@@ -4520,6 +4535,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Weather => {
             "Inside Lighting: rain or snow falling around the camera, and how wet and snow-covered surfaces are (parts, models and terrain). Wet surfaces are darker and glossier; snow covers the tops of things but not walls. workspace.GlobalWind blows the rain and snow. Every change eases in over TransitionTime. With Precipitation None and no Wetness or SnowCover it costs nothing."
+        }
+        ClassName::OutlineEffect => {
+            "Inside Lighting: lines drawn along the edges of everything solid, around each silhouette and along creases where a surface turns sharply, found on screen from what's drawn, so no part needs any setup. A material file's outline draws a line around its own parts instead (see docs/rendering/stylized.md)."
         }
         ClassName::ParticleEmitter => {
             "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."

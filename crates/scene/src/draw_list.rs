@@ -372,6 +372,7 @@ pub fn build_draw_list_posed(
         shadows: settings.shadows,
         lights,
         post: settings.post,
+        edges: crate::outlines::edges_of(world),
         items,
         sprites: Vec::new(),
         ui: Vec::new(),

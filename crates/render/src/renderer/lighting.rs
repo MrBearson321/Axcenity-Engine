@@ -757,6 +757,7 @@ pub(super) fn plan_draws(
         let (double_sided, casts_shadow) = (item.material.double_sided, draw.casts_shadow);
         let shader = shader_key(item);
         let water = item.material.water.is_some();
+        let outline = !transparent && outline_uniform(&item.material)[3] > 0.0;
         match plan.batches.last_mut() {
             Some(last)
                 if last.mesh == mesh
@@ -765,7 +766,8 @@ pub(super) fn plan_draws(
                     && last.double_sided == double_sided
                     && last.casts_shadow == casts_shadow
                     && last.shader == shader
-                    && last.water == water =>
+                    && last.water == water
+                    && last.outline == outline =>
             {
                 last.instances.end = index + 1;
             }
@@ -777,6 +779,7 @@ pub(super) fn plan_draws(
                 casts_shadow,
                 shader,
                 water,
+                outline,
                 instances: index..index + 1,
             }),
         }
@@ -848,6 +851,18 @@ fn shading_uniform(material: &Material) -> ([f32; 4], [f32; 4]) {
     }
 }
 
+/// [`MapsUniform::outline`] for `material`: none for water and terrain.
+fn outline_uniform(material: &Material) -> [f32; 4] {
+    match material.outline {
+        Some(outline)
+            if outline.width > 0.0 && material.water.is_none() && material.terrain.is_none() =>
+        {
+            linear_color(outline.color).extend(outline.width).to_array()
+        }
+        _ => [0.0; 4],
+    }
+}
+
 /// The material binding an item is drawn with (see [`MaterialKey`]).
 pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
     if let Some(surface) = &item.material.terrain {
@@ -864,9 +879,11 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
         params[..3].copy_from_slice(&super::water::water_params(water));
     }
     let (shading, toon) = shading_uniform(&item.material);
+    let outline = outline_uniform(&item.material);
     if textures.iter().all(Option::is_none)
         && params == [[0.0; 4]; SURFACE_PARAMETERS]
         && shading[0] == SHADING_STANDARD
+        && outline[3] == 0.0
     {
         return MaterialKey::default();
     }
@@ -918,6 +935,7 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
         ],
         shading,
         toon,
+        outline,
         params,
     };
     MaterialKey {
@@ -944,6 +962,7 @@ pub(super) fn maps_uniform_of(key: &MaterialKey) -> MapsUniform {
             uv_offset: [0.0; 4],
             shading: [SHADING_STANDARD, 0.0, 0.0, 0.0],
             toon: [0.0; 4],
+            outline: [0.0; 4],
             params: [[0.0; 4]; SURFACE_PARAMETERS],
         };
     }

@@ -23,6 +23,7 @@ mod foliage;
 mod light_probes;
 mod material;
 mod orientation;
+mod outlines;
 mod particles;
 mod pick;
 mod preload;

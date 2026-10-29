@@ -194,7 +194,7 @@ impl ScenePipeline {
         let settings = GraphicsSettings::default();
         let graphics = settings.effective(&capabilities);
         let samples = graphics.anti_aliasing.samples();
-        let (sky_pipeline, item_pipelines) = scene_pipelines(
+        let (sky_pipeline, item_pipelines, outline_pipeline) = scene_pipelines(
             &device,
             [&frame_layout, &material_layout, &skinning.layout],
             samples,
@@ -211,13 +211,14 @@ impl ScenePipeline {
         let post = PostPasses::new(&device, color_format);
         let occlusion =
             OcclusionPasses::new(&device, [&frame_layout, &material_layout, &skinning.layout]);
+        let edge_pipeline = create_edge_pipeline(&device, &occlusion.layout, samples);
         let targets_alive = TargetsAlive::default();
         let frame_targets = FrameTargets::new(
             &device,
             (&post, &occlusion),
             scene_size((width, height), &graphics, &capabilities),
             (width, height),
-            targets_used(&graphics),
+            targets_used(&graphics, false),
             &targets_alive,
         );
         let ui_pipeline = create_ui_pipeline(&device, color_format);
@@ -264,6 +265,9 @@ impl ScenePipeline {
             queue,
             sky_pipeline,
             item_pipelines,
+            outline_pipeline,
+            edge_pipeline,
+            edges: false,
             surface_shaders: Default::default(),
             sprites,
             post,
@@ -410,7 +414,11 @@ impl ScenePipeline {
         self.bind_frame();
         let samples = self.graphics.anti_aliasing.samples();
         if samples != old_samples {
-            (self.sky_pipeline, self.item_pipelines) = scene_pipelines(
+            (
+                self.sky_pipeline,
+                self.item_pipelines,
+                self.outline_pipeline,
+            ) = scene_pipelines(
                 &self.device,
                 [
                     &self.frame_layout,
@@ -419,6 +427,8 @@ impl ScenePipeline {
                 ],
                 samples,
             );
+            self.edge_pipeline =
+                create_edge_pipeline(&self.device, &self.occlusion.layout, samples);
             self.terrain
                 .set_samples(&self.device, &self.frame_layout, samples);
             self.water.set_samples(
@@ -450,11 +460,12 @@ impl ScenePipeline {
     }
 
     /// Remakes the scene's targets if they weren't made for this output
-    /// size, render scale, anti-aliasing, ambient occlusion and contact
-    /// shadows. The old ones are freed.
+    /// size, render scale, anti-aliasing, ambient occlusion, contact
+    /// shadows, volumetric fog and screen-space outlines. The old ones are
+    /// freed.
     fn fit_targets(&mut self) {
         let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
-        let used = targets_used(&self.graphics);
+        let used = targets_used(&self.graphics, self.edges);
         let targets = &self.frame_targets;
         let made_for = (
             targets.size,
@@ -488,6 +499,12 @@ impl ScenePipeline {
         aspect: f32,
         viewport_size: (u32, u32),
     ) -> Result<()> {
+        // Screen-space outlines keep the prepass's targets alive while the
+        // world has them.
+        if self.edges != list.edges.is_some() {
+            self.edges = list.edges.is_some();
+            self.fit_targets();
+        }
         // Lights are planned in the scene's pixels, which the render scale
         // makes fewer or more than the output's. UI uses the output's.
         let quality = self.graphics.shadow_quality;
@@ -656,6 +673,14 @@ impl ScenePipeline {
             let uniform = occlusion_uniform(list, aspect, self.graphics.ambient_occlusion);
             self.queue
                 .write_buffer(&self.occlusion.uniform, 0, bytemuck::bytes_of(&uniform));
+        }
+        if let Some(edges) = &list.edges {
+            let uniform = edge_uniform(list, edges, aspect, self.frame_targets.size);
+            self.queue.write_buffer(
+                &self.occlusion.edge_uniform,
+                0,
+                bytemuck::bytes_of(&uniform),
+            );
         }
         let post = post_drawn(&list.post, &self.graphics);
         self.queue.write_buffer(
@@ -991,7 +1016,9 @@ impl ScenePipeline {
         // whose samples are averaged into the HDR one as the pass ends.
         // Solid items come first, then the sky only where none was drawn
         // (its depth test), so the sky and its clouds are worked out only
-        // for the pixels that show them, then see-through items over both:
+        // for the pixels that show them. Solid items' outlines come just
+        // after them, and screen-space outlines after the sky. Then
+        // see-through items over all that:
         // water first, then the rest, then sprites. While water sees
         // through itself, the pass stops before the see-through items so
         // the solid scene can be copied for it (renderer/water.rs), and a
@@ -1031,7 +1058,21 @@ impl ScenePipeline {
             if water_bound {
                 pass.set_bind_group(0, frame_bind_group, &[]);
             }
+            // Outlines (solid items only) go behind what was just drawn.
+            for batch in batches.iter().filter(|batch| batch.outline) {
+                let Some(mesh) = self.bind_batch(pass, batch, false) else {
+                    continue;
+                };
+                pass.set_pipeline(&self.outline_pipeline);
+                count(mesh.index_count, &batch.instances);
+                pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
+            }
         };
+        let edges = self
+            .frame_targets
+            .occlusion
+            .as_ref()
+            .filter(|_| list.edges.is_some());
         // Each pass is a block so it ends (is dropped) before the next
         // begins and before `encoder.finish()`, which need the encoder back.
         {
@@ -1041,6 +1082,13 @@ impl ScenePipeline {
             draw_batches(&mut pass, solid);
             pass.set_pipeline(&self.sky_pipeline);
             pass.draw(0..3, 0..1);
+            // Screen-space outlines over the solid scene and the sky.
+            if let Some(prepass) = edges {
+                pass.set_pipeline(&self.edge_pipeline);
+                pass.set_bind_group(0, &prepass.edge_group, &[]);
+                pass.draw(0..3, 0..1);
+                pass.set_bind_group(0, frame_bind_group, &[]);
+            }
             if !copied {
                 draw_batches(&mut pass, see_through);
                 // Last, over everything, but hidden behind solid items.
@@ -1948,15 +1996,14 @@ fn begin_scene_pass<'a>(
     })
 }
 
-/// The scene pass's sky pipeline and its pipelines for items, for drawing
-/// with `samples` per pixel.
-/// The sky's and items' pipelines, with `layouts` the frame's, the
-/// material's and the skin's bindings.
+/// The scene pass's sky pipeline, its pipelines for items and for their
+/// outlines, for drawing with `samples` per pixel, with `layouts` the
+/// frame's, the material's and the skin's bindings.
 fn scene_pipelines(
     device: &wgpu::Device,
     layouts: [&wgpu::BindGroupLayout; 3],
     samples: u32,
-) -> (wgpu::RenderPipeline, ItemPipelines) {
+) -> (wgpu::RenderPipeline, ItemPipelines, wgpu::RenderPipeline) {
     let frame_layout = layouts[0];
     let shader = shader_module(device, "scene", gpu::SCENE_SHADER);
     let pipeline = |transparent, double_sided| {
@@ -1977,6 +2024,14 @@ fn scene_pipelines(
             double_sided: pipeline(false, true),
             double_sided_transparent: pipeline(true, true),
         },
+        create_pipeline(
+            device,
+            &shader,
+            ("vs_outline", "fs_outline"),
+            &layouts,
+            (HDR_FORMAT, samples),
+            (false, true),
+        ),
     )
 }
 
@@ -2111,15 +2166,17 @@ fn frame_layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
 
 /// The scene's samples per pixel, whether FXAA needs its target, and
 /// whether ambient occlusion needs the prepass's and its own (contact
-/// shadows and volumetric fog need only the prepass's depth).
-fn targets_used(graphics: &EffectiveGraphics) -> (u32, bool, bool) {
+/// shadows and volumetric fog need only the prepass's depth, and
+/// screen-space outlines, the draw list's `edges`, its depth and normals).
+fn targets_used(graphics: &EffectiveGraphics, edges: bool) -> (u32, bool, bool) {
     let anti_aliasing = graphics.anti_aliasing;
     (
         anti_aliasing.samples(),
         anti_aliasing == crate::AntiAliasing::Fxaa,
         graphics.ambient_occlusion != crate::AmbientOcclusion::Off
             || graphics.contact_shadows
-            || graphics.volumetric_fog,
+            || graphics.volumetric_fog
+            || edges,
     )
 }
 

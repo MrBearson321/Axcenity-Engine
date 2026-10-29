@@ -571,6 +571,40 @@ mod tests {
         let _ = std::fs::remove_dir_all(&folder);
     }
 
+    #[test]
+    fn an_outline_set_in_the_tab_draws_in_the_viewport_and_play_and_saves() {
+        let folder = copy_of_example("hello-touched", "material-outline");
+        let mut app = EditorApp::new(Some(&folder));
+        app.new_material("Inked");
+        let path = "assets/materials/Inked.material.json";
+        app.materials.edit("outline width", |file| {
+            file.outline.get_or_insert_default().width = Some(4.0)
+        });
+        app.materials.finish_edit();
+        app.materials.edit("outline color", |file| {
+            file.outline.get_or_insert_default().color = Some([0.0, 0.0, 1.0])
+        });
+        app.hand_over_materials();
+        // The tab draws its Outline rows.
+        draw_tab(&mut app, crate::material_editor::MaterialView::Values);
+        assert!(app.save());
+        let pad = part(&app, "Pad");
+        app.use_material(path, "Inked", vec![pad]);
+        let expected = Some(axcenity_render::Outline {
+            width: 4.0,
+            color: [0.0, 0.0, 1.0],
+        });
+        let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera());
+        assert_eq!(material_in(&app.world, pad, &list).outline, expected);
+        app.play();
+        let game = app.play.as_ref().unwrap().world();
+        let list = axcenity_scene::build_draw_list(game, &app.assets, camera());
+        assert_eq!(material_in(game, pad, &list).outline, expected);
+        let written = axcenity_assets::read_material_file(&folder.join(path)).unwrap();
+        assert_eq!(written.outline.and_then(|outline| outline.width), Some(4.0));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     type Gpu = (axcenity_render::wgpu::Device, axcenity_render::wgpu::Queue);
 
     fn gpu() -> Option<Gpu> {

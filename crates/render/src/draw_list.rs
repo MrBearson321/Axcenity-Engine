@@ -36,6 +36,9 @@ pub struct DrawList {
     /// handle, the ones closest to the camera are used.
     pub lights: Vec<Light>,
     pub post: PostProcessing,
+    /// Lines drawn along the edges of everything solid, found on screen
+    /// (Lighting's `OutlineEffect`). `None` draws none, and costs nothing.
+    pub edges: Option<Edges>,
     pub items: Vec<DrawItem>,
     /// Pictures that always face the camera, such as particles, drawn
     /// after every item. They aren't lit or shadowed.
@@ -653,6 +656,28 @@ impl Default for Clouds {
     }
 }
 
+/// Screen-space outlines: lines where the depth or the facing of what's
+/// drawn changes sharply (around every silhouette and along creases), found
+/// in the depth and normal prepass, so they need no setup per material
+/// (`docs/rendering/stylized.md`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Edges {
+    /// sRGB.
+    pub color: [f32; 3],
+    /// How thick the lines are, in pixels of a view 1080 pixels tall
+    /// (scaled with the view's height, and never under one pixel).
+    pub thickness: f32,
+}
+
+impl Default for Edges {
+    fn default() -> Self {
+        Self {
+            color: [0.0; 3],
+            thickness: 1.0,
+        }
+    }
+}
+
 /// How wet and snow-covered surfaces are (Lighting's `Weather`): parts,
 /// models and terrain all read it. The default is dry, with no snow.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -1121,6 +1146,31 @@ pub struct Material {
     pub water: Option<crate::Water>,
     /// How it's lit. Water and terrain ignore it.
     pub shading: Shading,
+    /// A line around its silhouette (an inverted hull), for solid items.
+    /// Water and terrain ignore it.
+    pub outline: Option<Outline>,
+}
+
+/// A material's outline: its item is drawn again behind itself, back faces
+/// only, pushed out along its normals by the same number of pixels however
+/// far away it is (`docs/rendering/stylized.md`). Smooth meshes (spheres,
+/// characters) get an unbroken line; a hard-edged one opens at its corners.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Outline {
+    /// In pixels of a view 1080 pixels tall, scaled with the view's height
+    /// (and never under one pixel). 0 draws none.
+    pub width: f32,
+    /// sRGB, drawn as it is (unlit, but fogged).
+    pub color: [f32; 3],
+}
+
+impl Default for Outline {
+    fn default() -> Self {
+        Self {
+            width: 2.0,
+            color: [0.0; 3],
+        }
+    }
 }
 
 /// How a [`Material`] is lit. Every model takes the same lights, shadows,
@@ -1193,6 +1243,7 @@ impl Default for Material {
             surface_parameters: [[0.0; 4]; SURFACE_PARAMETERS],
             water: None,
             shading: Shading::Standard,
+            outline: None,
         }
     }
 }

@@ -8,8 +8,8 @@ use axcenity_assets::{
 use axcenity_core::{ClassName, Instance, InstanceId, TextureChannel, Value, World};
 use axcenity_render::glam::Mat4;
 use axcenity_render::{
-    Channel, ChannelMap, Material, NormalMap, SURFACE_PARAMETERS, Shading, SurfaceShader, Sway,
-    TextureMaps, Toon, Water,
+    Channel, ChannelMap, Material, NormalMap, Outline, SURFACE_PARAMETERS, Shading, SurfaceShader,
+    Sway, TextureMaps, Toon, Water,
 };
 
 use crate::draw_list::{GLOW_BOOST, texture};
@@ -111,6 +111,10 @@ pub(crate) fn variant_material(standard: &StandardMaterial, assets: &Assets) -> 
                 highlight: standard.toon.highlight,
             }),
         },
+        outline: standard.outline.map(|outline| Outline {
+            width: outline.width,
+            color: outline.color,
+        }),
     }
 }
 
@@ -609,6 +613,40 @@ mod tests {
             "a material file without shading is standard"
         );
         assert!(matches!(items[3].material.shading, Shading::Standard));
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_materials_outline_reaches_the_draw_list_and_files_without_one_have_none() {
+        let folder = project("outline");
+        let inked = "assets/materials/inked.material.json";
+        write(
+            &folder,
+            inked,
+            &MaterialFile {
+                outline: Some(axcenity_assets::OutlineFile {
+                    width: Some(6.0),
+                    color: Some([0.0, 0.0, 1.0]),
+                }),
+                ..MaterialFile::default()
+            },
+        );
+        write(&folder, BASE, &brick());
+        let assets = Assets::new(&folder);
+        let mut world = World::new();
+        part(&mut world, vec![variant(inked)]);
+        part(&mut world, vec![variant(BASE)]);
+        part(&mut world, vec![]);
+        let items = items(&world, &assets);
+        assert_eq!(
+            items[0].material.outline,
+            Some(Outline {
+                width: 6.0,
+                color: [0.0, 0.0, 1.0],
+            })
+        );
+        assert_eq!(items[1].material.outline, None);
+        assert_eq!(items[2].material.outline, None);
         let _ = std::fs::remove_dir_all(folder);
     }
 

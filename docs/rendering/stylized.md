@@ -31,6 +31,36 @@ Every model is drawn by the same pipelines, in the same pass, with the same ligh
 
 The item shader already reads all 16 sampled textures it may, so a toon ramp is bound in the specular map's place (`material_textures`), through its sRGB view (`create_material`), and a toon material has no specular map. Water and terrain ignore the shading.
 
+## Outlines
+
+Graphics Phase 31: two kinds, each optional and each free while unused. `examples/hello-outlines` has both: a toon character with a material outline, near and far, and plain blocks outlined by an `OutlineEffect`.
+
+### A material's outline (inverted hull)
+
+```json
+{ "outline": { "width": 3, "color": [0.05, 0.05, 0.1] } }
+```
+
+- `width`: in pixels of a view 1080 pixels tall, scaled with the view's height and never under one pixel. Left out, it's 2; `0` draws none (and takes away the base's).
+- `color`: sRGB, black by default. Drawn unlit, but fogged.
+
+Merged from the base value by value, like `toon` (`OutlineFile`, `StandardOutline` in `assets/src/material.rs`; `scene` hands it over as `render::Material::outline`). The Material tab has an Outline section (`outline_rows`). Any shading model can have one; water, terrain and see-through items don't.
+
+Drawing: each solid batch with an outline (`Batch::outline`) is drawn a second time right after the solid items, with `outline_pipeline` (`vs_outline`, `fs_outline` in shader.wgsl): every corner is posed and swayed as in `vs_main`, then pushed out on screen along its normal by the width in pixels (times the clip `w`, so the same width near or far). The pipeline culls nothing and `fs_outline` keeps only back faces, so the line shows just past the silhouette and the item hides the rest. The outline values ride in the material's uniform (`MapsUniform::outline`), and every surface shader's items use the standard outline pipeline. Smooth meshes (spheres, characters) get an unbroken line; a hard-edged mesh's split normals open the line at its corners, so outline those with the effect below.
+
+### Screen-space outlines (`OutlineEffect`)
+
+An `OutlineEffect` inside Lighting (`Enabled`, `Color` black, `Thickness` 1 in pixels of a view 1080 pixels tall, never under one pixel) draws lines along the edges of everything solid, with no per-part setup. `scene` reads the first one (`outlines.rs`) into `DrawList::edges`; disabled or absent, it's `None`. The editor inserts one from the Lighting ribbon's **Outlines** (`Insertable::OutlineEffect`).
+
+While `edges` is set, the depth and normal prepass is drawn even with ambient occlusion off (`targets_used`), and `edges.wgsl` runs in the scene pass after the sky, before see-through items (so glass and water aren't outlined, and edges behind them show through them). Each pixel looks `Thickness` pixels left, right, up and down:
+
+- **Depth**: nearness (1 over the view distance) changes evenly across any flat surface on screen, so `2 × center − before − after` over the center is 0 on a plane, large on the near side of a step or against the sky, and negative on the far side. Lines are drawn on the near side only (above 0.05, blended in by 0.1).
+- **Facing**: the view-space normal of the next pixel along, if it's at about the same depth, turning by more than about 45° (1 − cos above 0.3) is a crease, such as a block's corner or where it meets the floor. One side only, so the line is as thick as asked.
+
+The line is blended over by its strength. Edges aren't fogged. Removing the effect frees the prepass targets again if nothing else uses them.
+
 ## Tests
 
-`render` `renderer/tests/shading.rs`: Standard, Unlit and Toon spheres side by side in one frame (Standard shades smoothly, Unlit is its color on both sides and ignores a brighter sun, Toon has exactly its bands), the highlight and rim showing only when asked for, a ramp coloring the light, a toon floor taking a block's shadow with a hard edge and a lamp's light, and the shading picking the material binding (a Standard material keeps the plain one). `assets` `a_toon_instance_changes_its_bases_bands_value_by_value`; `scene` `a_materials_shading_reaches_the_draw_list_and_files_without_one_stay_standard`; `editor` `toon_shading_set_in_the_tab_draws_in_the_viewport_and_play_and_saves`. `player` `every_example_renders` draws `hello-toon`.
+`render` `renderer/tests/shading.rs`: Standard, Unlit and Toon spheres side by side in one frame (Standard shades smoothly, Unlit is its color on both sides and ignores a brighter sun, Toon has exactly its bands), the highlight and rim showing only when asked for, a ramp coloring the light, a toon floor taking a block's shadow with a hard edge and a lamp's light, and the shading picking the material binding (a Standard material keeps the plain one). `assets` `a_toon_instance_changes_its_bases_bands_value_by_value`; `scene` `a_materials_shading_reaches_the_draw_list_and_files_without_one_stay_standard`; `editor` `toon_shading_set_in_the_tab_draws_in_the_viewport_and_play_and_saves`. `player` `every_example_renders` draws `hello-toon` and `hello-outlines`.
+
+Outlines: `render` `renderer/tests/outlines.rs`: an outlined toon sphere's outline is about 4 pixels on every side near and far (with MSAA too) and none without one, twice the width is twice as wide, and the item's own pixels don't change; an outline is one more draw call and a see-through item gets none; screen-space edges draw exactly the block's silhouette and its two creases over a grey-on-grey scene (Off, FXAA and MSAA), leave open floor and flat faces untouched, take the world's color, and keep the prepass alive only while set. `assets` `an_outline_instance_changes_its_bases_outline_value_by_value`; `scene` `a_materials_outline_reaches_the_draw_list_and_files_without_one_have_none`, `lightings_outline_effect_draws_edges_unless_disabled`; `editor` `an_outline_set_in_the_tab_draws_in_the_viewport_and_play_and_saves`.

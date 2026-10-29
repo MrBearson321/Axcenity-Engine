@@ -87,6 +87,11 @@ pub struct MaterialFile {
     /// read when the shading is `Toon`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub toon: Option<ToonFile>,
+    /// A line around its silhouette, merged value by value
+    /// (`docs/rendering/stylized.md`). `{}` is the default outline; a width
+    /// of 0 takes away the base's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outline: Option<OutlineFile>,
     /// WGSL code with a `surface` function that works out each pixel's
     /// surface in place of the standard one (`docs/rendering/models.md`).
     /// `""` is none, so an instance can go back to the standard surface.
@@ -192,6 +197,57 @@ impl ToonFile {
             softness: self.softness.unwrap_or(default.softness),
             rim: self.rim.unwrap_or(default.rim),
             highlight: self.highlight.unwrap_or(default.highlight),
+        }
+    }
+}
+
+/// An outline's values as written, each `None` when the file leaves it to
+/// its base (or the default, [`StandardOutline::default`]).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct OutlineFile {
+    /// In pixels of a view 1080 pixels tall: 0 is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<f32>,
+    /// sRGB, 0 to 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<[f32; 3]>,
+}
+
+impl OutlineFile {
+    /// `self`'s values, and `base`'s where `self` has none.
+    pub fn over(&self, base: &OutlineFile) -> OutlineFile {
+        OutlineFile {
+            width: self.width.or(base.width),
+            color: self.color.or(base.color),
+        }
+    }
+
+    /// Every value, with the default's where this has none, or `None` for
+    /// a width of 0 (or less).
+    pub fn resolve(&self) -> Option<StandardOutline> {
+        let default = StandardOutline::default();
+        let outline = StandardOutline {
+            width: self.width.unwrap_or(default.width),
+            color: self.color.unwrap_or(default.color),
+        };
+        (outline.width > 0.0).then_some(outline)
+    }
+}
+
+/// An outline's values, every one filled in: by default a black line 2
+/// pixels wide at 1080 pixels tall.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StandardOutline {
+    pub width: f32,
+    pub color: [f32; 3],
+}
+
+impl Default for StandardOutline {
+    fn default() -> Self {
+        Self {
+            width: 2.0,
+            color: [0.0; 3],
         }
     }
 }
@@ -429,6 +485,10 @@ impl MaterialFile {
                 (Some(own), Some(below)) => Some(own.over(below)),
                 (own, below) => own.clone().or_else(|| below.clone()),
             },
+            outline: match (&self.outline, &base.outline) {
+                (Some(own), Some(below)) => Some(own.over(below)),
+                (own, below) => own.clone().or_else(|| below.clone()),
+            },
             shader: self.shader.clone().or_else(|| base.shader.clone()),
             parameters: base
                 .parameters
@@ -482,6 +542,7 @@ impl MaterialFile {
             water: self.water.as_ref().map(WaterFile::resolve),
             shading: self.shading.unwrap_or_default(),
             toon: self.toon.clone().unwrap_or_default().resolve(),
+            outline: self.outline.as_ref().and_then(OutlineFile::resolve),
             shader: self
                 .shader
                 .as_deref()
@@ -523,6 +584,8 @@ pub struct StandardMaterial {
     pub shading: Shading,
     /// Toon shading's values, used when `shading` is [`Shading::Toon`].
     pub toon: StandardToon,
+    /// Its outline, if it has one.
+    pub outline: Option<StandardOutline>,
     /// Its surface shader, if it has one.
     pub shader: Option<MaterialShader>,
     /// The values its shader reads (`parameter(i)` is the `i`th), in name
@@ -561,6 +624,7 @@ impl Default for StandardMaterial {
             water: None,
             shading: Shading::Standard,
             toon: StandardToon::default(),
+            outline: None,
             shader: None,
             parameters: Vec::new(),
         }
@@ -864,6 +928,10 @@ mod tests {
                 rim: Some(0.5),
                 highlight: Some(0.4),
             }),
+            outline: Some(OutlineFile {
+                width: Some(3.0),
+                color: Some([0.1, 0.2, 0.3]),
+            }),
             shader: Some(
                 "fn surface(input: SurfaceInput) -> Surface {
     return standard_surface(input);
@@ -1008,6 +1076,60 @@ mod tests {
             parse_material("{ \"shading\": \"Glossy\" }"),
             Err(MaterialFileError::Format(_))
         ));
+        let _ = fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn an_outline_instance_changes_its_bases_outline_value_by_value() {
+        let folder = project("outline");
+        let inked = "assets/materials/inked.material.json";
+        fs::write(
+            folder.join(inked),
+            "{ \"outline\": { \"width\": 4, \"color\": [0.2, 0, 0] } }",
+        )
+        .unwrap();
+        let blue = MaterialFile {
+            base: Some(inked.into()),
+            outline: Some(OutlineFile {
+                color: Some([0.0, 0.0, 1.0]),
+                ..OutlineFile::default()
+            }),
+            ..MaterialFile::default()
+        };
+        write(&folder, "assets/materials/blue.material.json", &blue);
+        let bare = MaterialFile {
+            base: Some(inked.into()),
+            outline: Some(OutlineFile {
+                width: Some(0.0),
+                ..OutlineFile::default()
+            }),
+            ..MaterialFile::default()
+        };
+        write(&folder, "assets/materials/bare.material.json", &bare);
+        let assets = Assets::new(&folder);
+
+        let outline = |path: &str| assets.material(path).unwrap().outline;
+        assert_eq!(
+            outline("assets/materials/blue.material.json"),
+            Some(StandardOutline {
+                width: 4.0,
+                color: [0.0, 0.0, 1.0],
+            }),
+            "the width comes from the base"
+        );
+        assert_eq!(
+            outline("assets/materials/bare.material.json"),
+            None,
+            "a width of 0 takes it away"
+        );
+        assert_eq!(
+            parse_material("{ \"outline\": {} }")
+                .unwrap()
+                .resolve()
+                .outline,
+            Some(StandardOutline::default())
+        );
+        assert_eq!(StandardMaterial::default().outline, None);
         let _ = fs::remove_dir_all(folder);
     }
 

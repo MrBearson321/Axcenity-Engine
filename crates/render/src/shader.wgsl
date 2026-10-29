@@ -32,6 +32,9 @@ struct Maps {
     shading: vec4<f32>,
     // x: toon's rim light.
     toon: vec4<f32>,
+    // The outline's linear color, then its width (0: none) in pixels of a
+    // view 1080 pixels tall.
+    outline: vec4<f32>,
     // The surface shader's values (`Material::surface_parameters`).
     params: array<vec4<f32>, 8>,
 }
@@ -195,6 +198,12 @@ struct VertexOut {
 
 @vertex
 fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
+    return item_vertex(vertex, instance);
+}
+
+// A corner of an item, posed, swayed and placed (`vs_main`'s work, shared
+// with `vs_outline`).
+fn item_vertex(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     let model = mat4x4<f32>(instance.model_0, instance.model_1, instance.model_2, instance.model_3);
     let normal_matrix = mat3x3<f32>(instance.normal_0, instance.normal_1, instance.normal_2);
     let posed = pose_corner(vertex.index, instance.skin, vertex.position, vertex.normal,
@@ -226,6 +235,39 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     // A direction along the surface, so it stretches with the shape.
     out.tangent = vec4<f32>((model * vec4<f32>(posed.tangent, 0.0)).xyz, vertex.tangent.w);
     return out;
+}
+
+// An outline's corner: the item's, pushed out on screen along its normal
+// by the outline's width, the same number of pixels however far away it
+// is. Only back faces are kept (`fs_outline`), so the line shows just past
+// the item's silhouette, hidden by the item itself everywhere else.
+@vertex
+fn vs_outline(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
+    var out = item_vertex(vertex, instance);
+    // `frame.ambient_occlusion.zw` is 1 over the scene's size in pixels.
+    let size = 1.0 / frame.ambient_occlusion.zw;
+    // Never under one pixel, so a small view still shows it.
+    let pixels = max(maps.outline.w * size.y / 1080.0, 1.0);
+    // The normal's direction on screen, in pixels (so the view's shape
+    // doesn't squash it).
+    let across = (frame.view_proj * vec4<f32>(out.normal, 0.0)).xy * size;
+    if dot(across, across) > 1e-12 {
+        let push = normalize(across) * pixels * 2.0 / size;
+        out.clip_position = vec4<f32>(out.clip_position.xy + push * out.clip_position.w,
+            out.clip_position.zw);
+    }
+    return out;
+}
+
+// The outline's color, unlit but fogged, on back faces only. Cut-out holes
+// aren't followed: the outline is of the whole mesh.
+@fragment
+fn fs_outline(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    if front || dithered_out(in.fade, in.clip_position.xy) {
+        discard;
+    }
+    let seen = fogged(frame.fog, frame.camera_position.xyz, in.world_position, maps.outline.rgb);
+    return vec4<f32>(seen, 1.0);
 }
 
 // The shadow pass's cascade: turns world space to that cascade's view from

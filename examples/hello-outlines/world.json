@@ -1,0 +1,362 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Ground",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.55,
+            0.62,
+            0.5
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -0.5,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            96,
+            1,
+            96
+          ]
+        }
+      },
+      {
+        "class": "Model",
+        "name": "NearCharacter",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.95,
+                0.55,
+                0.25
+              ],
+              "Material": "Plastic",
+              "Position": [
+                0,
+                1.3,
+                0
+              ],
+              "Shape": "Ball",
+              "Size": [
+                2.6,
+                2.6,
+                2.6
+              ],
+              "MaterialVariant": "assets/materials/Inked.material.json"
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Head",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                1,
+                0.85,
+                0.7
+              ],
+              "Material": "Plastic",
+              "Position": [
+                0,
+                3.4,
+                0
+              ],
+              "Shape": "Ball",
+              "Size": [
+                2,
+                2,
+                2
+              ],
+              "MaterialVariant": "assets/materials/Inked.material.json"
+            }
+          },
+          {
+            "class": "Part",
+            "name": "LeftArm",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.95,
+                0.55,
+                0.25
+              ],
+              "Material": "Plastic",
+              "Position": [
+                -1.7,
+                1.6,
+                0
+              ],
+              "Shape": "Ball",
+              "Size": [
+                1,
+                1,
+                1
+              ],
+              "MaterialVariant": "assets/materials/Inked.material.json"
+            }
+          },
+          {
+            "class": "Part",
+            "name": "RightArm",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.95,
+                0.55,
+                0.25
+              ],
+              "Material": "Plastic",
+              "Position": [
+                1.7,
+                1.6,
+                0
+              ],
+              "Shape": "Ball",
+              "Size": [
+                1,
+                1,
+                1
+              ],
+              "MaterialVariant": "assets/materials/Inked.material.json"
+            }
+          }
+        ]
+      },
+      {
+        "class": "Model",
+        "name": "FarCharacter",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.95,
+                0.55,
+                0.25
+              ],
+              "Material": "Plastic",
+              "Position": [
+                -14,
+                1.3,
+                -30
+              ],
+              "Shape": "Ball",
+              "Size": [
+                2.6,
+                2.6,
+                2.6
+              ],
+              "MaterialVariant": "assets/materials/Inked.material.json"
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Head",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                1,
+                0.85,
+                0.7
+              ],
+              "Material": "Plastic",
+              "Position": [
+                -14,
+                3.4,
+                -30
+              ],
+              "Shape": "Ball",
+              "Size": [
+                2,
+                2,
+                2
+              ],
+              "MaterialVariant": "assets/materials/Inked.material.json"
+            }
+          },
+          {
+            "class": "Part",
+            "name": "LeftArm",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.95,
+                0.55,
+                0.25
+              ],
+              "Material": "Plastic",
+              "Position": [
+                -15.7,
+                1.6,
+                -30
+              ],
+              "Shape": "Ball",
+              "Size": [
+                1,
+                1,
+                1
+              ],
+              "MaterialVariant": "assets/materials/Inked.material.json"
+            }
+          },
+          {
+            "class": "Part",
+            "name": "RightArm",
+            "properties": {
+              "Anchored": true,
+              "Color": [
+                0.95,
+                0.55,
+                0.25
+              ],
+              "Material": "Plastic",
+              "Position": [
+                -12.3,
+                1.6,
+                -30
+              ],
+              "Shape": "Ball",
+              "Size": [
+                1,
+                1,
+                1
+              ],
+              "MaterialVariant": "assets/materials/Inked.material.json"
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Crate",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.7,
+            0.5,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -5,
+            1,
+            2
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "TallCrate",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.6,
+            0.45,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -6,
+            1.5,
+            -3
+          ],
+          "Shape": "Block",
+          "Size": [
+            3,
+            3,
+            3
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ramp",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.5,
+            0.55,
+            0.75
+          ],
+          "Material": "Plastic",
+          "Position": [
+            5,
+            1,
+            -2
+          ],
+          "Shape": "Wedge",
+          "Size": [
+            3,
+            2,
+            4
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pillar",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.9,
+            0.85,
+            0.4
+          ],
+          "Material": "Plastic",
+          "Position": [
+            7,
+            3,
+            -8
+          ],
+          "Shape": "Block",
+          "Size": [
+            1.5,
+            6,
+            1.5
+          ]
+        }
+      }
+    ]
+  },
+  "lighting": {
+    "children": [
+      {
+        "class": "OutlineEffect",
+        "name": "OutlineEffect",
+        "properties": {
+          "Color": [
+            0.05,
+            0.05,
+            0.1
+          ],
+          "Thickness": 1.5
+        }
+      }
+    ]
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false,
+      "LeaderboardEnabled": true,
+      "RespawnTime": 5
+    }
+  }
+}

@@ -4,19 +4,20 @@
 //! While ambient occlusion is on, solid items' depth and view-space normals
 //! are drawn first (the prepass, at the scene's size). The occlusion pass
 //! reads them at half that size and the blur smooths its result, which the
-//! scene pass multiplies into ambient and sky light.
+//! scene pass multiplies into ambient and sky light. Screen-space outlines
+//! (`edges.wgsl`) read the same prepass.
 
 use std::sync::Arc;
 
-use crate::draw_list::DrawList;
+use crate::draw_list::{DrawList, Edges};
 use crate::graphics::AmbientOcclusion;
 
 use super::gpu::{create_pipeline, shader_module, target_bytes};
-use super::lighting::camera_matrices;
+use super::lighting::{camera_matrices, linear_color};
 use super::post::fullscreen_pass;
 use super::{
-    DEPTH_FORMAT, NORMAL_FORMAT, OCCLUSION_FORMAT, OCCLUSION_RADIUS, OcclusionPasses,
-    OcclusionTargets, OcclusionUniform,
+    DEPTH_FORMAT, EdgeUniform, HDR_FORMAT, NORMAL_FORMAT, OCCLUSION_FORMAT, OCCLUSION_RADIUS,
+    OcclusionPasses, OcclusionTargets, OcclusionUniform,
 };
 
 impl OcclusionPasses {
@@ -69,6 +70,12 @@ impl OcclusionPasses {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let edge_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("screen-space outlines"),
+            size: size_of::<EdgeUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let shader = device.create_shader_module(wgpu::include_wgsl!("../ssao.wgsl"));
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("ambient occlusion"),
@@ -105,6 +112,7 @@ impl OcclusionPasses {
             blur: fullscreen("ambient occlusion blur", "fs_blur"),
             layout,
             uniform,
+            edge_uniform,
         }
     }
 
@@ -166,7 +174,7 @@ impl OcclusionTargets {
         let normal_view = view("prepass normals", (width, height), NORMAL_FORMAT);
         let raw_view = view("ambient occlusion", half, OCCLUSION_FORMAT);
         let blurred_view = view("ambient occlusion (blurred)", half, OCCLUSION_FORMAT);
-        let group = |source: &wgpu::TextureView| {
+        let group = |source: &wgpu::TextureView, uniform: &wgpu::Buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("ambient occlusion"),
                 layout: &passes.layout,
@@ -181,14 +189,15 @@ impl OcclusionTargets {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: passes.uniform.as_entire_binding(),
+                        resource: uniform.as_entire_binding(),
                     },
                 ],
             })
         };
         Self {
-            occlusion_group: group(&normal_view),
-            blur_group: group(&raw_view),
+            occlusion_group: group(&normal_view, &passes.uniform),
+            blur_group: group(&raw_view, &passes.uniform),
+            edge_group: group(&normal_view, &passes.edge_uniform),
             depth_view,
             normal_view,
             raw_view,
@@ -212,4 +221,86 @@ pub(super) fn occlusion_uniform(
         inv_projection: projection.inverse().to_cols_array_2d(),
         settings: [quality.samples() as f32, OCCLUSION_RADIUS, 0.0, 0.0],
     }
+}
+
+/// What the screen-space outline pass reads for drawing `edges` over a
+/// scene of `size` pixels seen as `list`'s camera at `aspect` sees it.
+pub(super) fn edge_uniform(
+    list: &DrawList,
+    edges: &Edges,
+    aspect: f32,
+    (_, height): (u32, u32),
+) -> EdgeUniform {
+    let (_, projection) = camera_matrices(&list.camera, aspect);
+    let thickness = if edges.thickness.is_finite() {
+        edges.thickness.max(0.0)
+    } else {
+        1.0
+    };
+    EdgeUniform {
+        inv_projection: projection.inverse().to_cols_array_2d(),
+        color: linear_color(edges.color).extend(0.0).to_array(),
+        settings: [thickness * height as f32 / 1080.0, 0.0, 0.0, 0.0],
+    }
+}
+
+/// The pipeline that draws screen-space outlines into the scene pass, with
+/// `samples` per pixel, reading the prepass through `layout`.
+pub(super) fn create_edge_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    samples: u32,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::include_wgsl!("../edges.wgsl"));
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("screen-space outlines"),
+        bind_group_layouts: &[layout],
+        push_constant_ranges: &[],
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("screen-space outlines"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        // Over everything drawn so far, leaving the depth alone.
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: false,
+            depth_compare: wgpu::CompareFunction::Always,
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_edges"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: HDR_FORMAT,
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::SrcAlpha,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::Zero,
+                        dst_factor: wgpu::BlendFactor::One,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview: None,
+        cache: None,
+    })
 }

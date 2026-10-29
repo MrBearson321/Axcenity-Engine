@@ -89,7 +89,7 @@ use lighting::{
 #[cfg(test)]
 use lighting::{cascade_ends, light_raw, uv_matrix};
 use lod::{Draw, LodStates, Resolved};
-use occlusion::occlusion_uniform;
+use occlusion::{create_edge_pipeline, edge_uniform, occlusion_uniform};
 use skinning::Skinning;
 use std::sync::Arc;
 

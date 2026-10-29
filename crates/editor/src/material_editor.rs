@@ -29,8 +29,8 @@ use std::path::Path;
 
 use axcenity_assets::{
     Assets, Channel, MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MaterialChain, MaterialFile,
-    Shading, StandardMaterial, StandardWater, ToonFile, WaterFile, read_material_file,
-    write_material_file,
+    OutlineFile, Shading, StandardMaterial, StandardOutline, StandardWater, ToonFile, WaterFile,
+    read_material_file, write_material_file,
 };
 use axcenity_core::{ClassName, Color3, InstanceId, PartType, Value, Vector3, World};
 use axcenity_render::glam::Vec3;
@@ -969,6 +969,8 @@ fn values(
 
     shading_rows(ui, scene, file, &base, changes);
 
+    outline_rows(ui, file, &base, changes);
+
     water_rows(ui, file, base.water, changes);
 
     graph::parameter_rows(ui, scene, path, file, chain, changes);
@@ -1261,6 +1263,59 @@ type ToonSetter = fn(&mut ToonFile, Option<f32>);
 /// `file`'s toon values, made if it had none.
 fn toon_of(file: &mut MaterialFile) -> &mut ToonFile {
     file.toon.get_or_insert_with(ToonFile::default)
+}
+
+/// The Outline section: the line drawn around its parts' silhouettes, its
+/// width (0 for none) and color (`docs/rendering/stylized.md`). `base` is
+/// what its bases give.
+fn outline_rows(
+    ui: &mut egui::Ui,
+    file: &MaterialFile,
+    base: &StandardMaterial,
+    changes: &mut Vec<Change>,
+) {
+    ui.add_space(6.0);
+    widgets::section_label(ui, "Outline");
+    let below = base.outline.unwrap_or(StandardOutline {
+        width: 0.0,
+        ..StandardOutline::default()
+    });
+    let own = file.outline.clone().unwrap_or_default();
+    // An outline block that sets no width anywhere draws the default one.
+    let width = own
+        .width
+        .unwrap_or(if base.outline.is_none() && file.outline.is_some() {
+            StandardOutline::default().width
+        } else {
+            below.width
+        });
+    // Its width is in pixels at 1080 pixels tall, the same near or far.
+    responsive::form(ui, "material outline", |ui| {
+        number_row(
+            ui,
+            ("Width", "outline width"),
+            (own.width, width),
+            0.0..=10.0,
+            changes,
+            |file, value| outline_of(file).width = value,
+        );
+        if width > 0.0 {
+            color_row(
+                ui,
+                "Color",
+                own.color,
+                below.color,
+                "outline color",
+                changes,
+                |file, value| outline_of(file).color = value,
+            );
+        }
+    });
+}
+
+/// `file`'s outline values, made if it had none.
+fn outline_of(file: &mut MaterialFile) -> &mut OutlineFile {
+    file.outline.get_or_insert_with(OutlineFile::default)
 }
 
 /// The Water section: whether the material is water, and its waves, color

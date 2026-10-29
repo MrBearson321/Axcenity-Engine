@@ -13,6 +13,7 @@ mod fog;
 mod frustum_culling;
 mod level_of_detail;
 mod light_probe_volumes;
+mod outlines;
 mod point_and_contact_shadows;
 mod realtime_gi;
 mod reflection_probes;
@@ -171,6 +172,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
         light_probe_volumes: Vec::new(),
         time: 0.0,
         wind: Vec3::ZERO,
+        edges: None,
     }
 }
 
@@ -201,6 +203,7 @@ fn batch(mesh: MeshKey, transparent: bool, instances: Range<u32>) -> Batch {
         casts_shadow: true,
         shader: None,
         water: false,
+        outline: false,
         instances,
     }
 }

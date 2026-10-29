@@ -80,7 +80,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 25] = [
+const GROUPS: [(&str, &[&str]); 26] = [
     (
         "Appearance",
         &[
@@ -290,6 +290,7 @@ const GROUPS: [(&str, &[&str]); 25] = [
             "TransitionTime",
         ],
     ),
+    ("Outlines", &["Enabled", "Thickness"]),
     (
         "Post-processing",
         &[
@@ -406,6 +407,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
             "Atmosphere" => instance.class() == ClassName::Atmosphere,
             "Clouds" => instance.class() == ClassName::Clouds,
             "Weather" => instance.class() == ClassName::Weather,
+            "Outlines" => instance.class() == ClassName::OutlineEffect,
             "Light" => matches!(
                 instance.class(),
                 ClassName::PointLight | ClassName::SpotLight
@@ -892,6 +894,7 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Atmosphere" => icons::WIND,
         "Clouds" => icons::CLOUD,
         "Weather" => icons::CLOUD_RAIN,
+        "Outlines" => icons::PEN_NIB,
         "Post-processing" => icons::SPARKLE,
         "Light" => icons::LIGHTBULB,
         "Attributes" => icons::LIST_BULLETS,

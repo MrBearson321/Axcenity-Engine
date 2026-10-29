@@ -513,7 +513,7 @@ Per-material geometry outlines (inverted hull, with width and color) and a scree
 
 ### Acceptance criteria
 
-- [ ] An outlined Toon character shows an even outline at any distance, and edge detection outlines a scene without per-material setup.
+- [x] An outlined Toon character shows an even outline at any distance, and edge detection outlines a scene without per-material setup.
 
 ---
 

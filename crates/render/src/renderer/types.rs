@@ -248,6 +248,20 @@ pub(super) struct OcclusionUniform {
     pub(super) settings: [f32; 4],
 }
 
+/// What the screen-space outline pass reads. Must match `Edges` in
+/// edges.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct EdgeUniform {
+    /// Turns clip space back to view space.
+    pub(super) inv_projection: [[f32; 4]; 4],
+    /// The lines' linear color, then unused.
+    pub(super) color: [f32; 4],
+    /// How far each pixel looks for an edge, in the scene's pixels, then
+    /// unused.
+    pub(super) settings: [f32; 4],
+}
+
 /// One draw item as the GPU reads it. Must match `InstanceIn` in shader.wgsl.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -397,6 +411,9 @@ pub(super) struct MapsUniform {
     pub(super) shading: [f32; 4],
     /// Toon's rim light, then unused.
     pub(super) toon: [f32; 4],
+    /// The outline's linear color, then its width (0: none) in pixels of a
+    /// view 1080 pixels tall.
+    pub(super) outline: [f32; 4],
     /// The surface shader's values ([`crate::Material::surface_parameters`]).
     pub(super) params: [[f32; 4]; SURFACE_PARAMETERS],
 }
@@ -441,7 +458,7 @@ pub(super) const MATERIAL_TEXTURES: usize = 8;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct MaterialKey {
     pub(super) textures: [Option<u64>; MATERIAL_TEXTURES],
-    pub(super) maps: [[u32; 4]; 11 + SURFACE_PARAMETERS],
+    pub(super) maps: [[u32; 4]; 12 + SURFACE_PARAMETERS],
     /// A terrain chunk's binding (see `terrain::TerrainKey`), all 0 for
     /// everything else.
     pub(super) terrain: terrain::TerrainKey,
@@ -515,6 +532,9 @@ pub(super) struct Batch {
     /// Drawn as water ([`crate::Material::water`]), first among the
     /// see-through items (renderer/water.rs).
     pub(super) water: bool,
+    /// Drawn again as its outline ([`crate::Material::outline`]) after the
+    /// solid items. Only solid items have one.
+    pub(super) outline: bool,
     pub(super) instances: Range<u32>,
 }
 
@@ -551,6 +571,9 @@ pub(super) struct OcclusionPasses {
     pub(super) occlusion: wgpu::RenderPipeline,
     /// Blurs that, without blurring across a change in depth.
     pub(super) blur: wgpu::RenderPipeline,
+    /// The screen-space outlines' [`EdgeUniform`], read through `layout`
+    /// with the prepass's depth and normals.
+    pub(super) edge_uniform: wgpu::Buffer,
 }
 
 /// What the prepass draws into and ambient occlusion reads and writes,
@@ -568,6 +591,8 @@ pub(super) struct OcclusionTargets {
     pub(super) occlusion_group: wgpu::BindGroup,
     /// Depth and the raw occlusion, for the blur.
     pub(super) blur_group: wgpu::BindGroup,
+    /// Depth and normals, for the screen-space outlines.
+    pub(super) edge_group: wgpu::BindGroup,
     /// Bytes of its four textures.
     pub(super) bytes: u64,
     /// A clone of [`TargetsAlive::occlusion`].
@@ -634,8 +659,9 @@ pub(super) struct FrameTargets {
     pub(super) depth_view: wgpu::TextureView,
     /// Only while FXAA is on.
     pub(super) fxaa: Option<FxaaTarget>,
-    /// Only while ambient occlusion or contact shadows are on (contact
-    /// shadows read only the prepass's depth).
+    /// Only while ambient occlusion, contact shadows, volumetric fog or
+    /// screen-space outlines are on (all but the first read only what the
+    /// prepass drew).
     pub(super) occlusion: Option<OcclusionTargets>,
     /// Bloom levels from half the scene's size down, each half the one before.
     pub(super) levels: Vec<wgpu::TextureView>,
@@ -676,6 +702,16 @@ pub(super) struct ScenePipeline {
     pub(super) queue: wgpu::Queue,
     pub(super) sky_pipeline: wgpu::RenderPipeline,
     pub(super) item_pipelines: ItemPipelines,
+    /// Solid items' outlines, whatever their surface shader: their back
+    /// faces, pushed out along their normals (`vs_outline`). Every face is
+    /// drawn and the front ones left out by the shader.
+    pub(super) outline_pipeline: wgpu::RenderPipeline,
+    /// Screen-space outlines (`edges.wgsl`), drawn over the solid scene
+    /// and the sky, before see-through items.
+    pub(super) edge_pipeline: wgpu::RenderPipeline,
+    /// Whether the last draw list asked for screen-space outlines, which
+    /// keep the prepass's targets alive.
+    pub(super) edges: bool,
     /// Pipelines for materials' own surface shaders.
     pub(super) surface_shaders: surface_shaders::SurfaceShaders,
     /// Camera-facing pictures, such as particles.
