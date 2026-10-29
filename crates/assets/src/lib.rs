@@ -46,10 +46,11 @@ pub use data_table::{
 };
 pub use fonts::{FontFile, is_font_file};
 pub use import::{
-    AUDIO_EXTENSIONS, ImportError, MODELS_FOLDER, PROJECT_AUDIO_FOLDER, PROJECT_SKY_FOLDER,
-    PROJECT_TEXTURES_FOLDER, TEXTURE_EXTENSIONS, TEXTURES_FOLDER, import_animation_file,
-    import_audio, import_model, import_picks, import_sky_image, import_texture, list_model_objects,
-    load_model_file, load_takes_file, safe_file_name, unique_file_name,
+    AUDIO_EXTENSIONS, ImportError, MESH_EDIT_SUFFIX, MODELS_FOLDER, PROJECT_AUDIO_FOLDER,
+    PROJECT_SKY_FOLDER, PROJECT_TEXTURES_FOLDER, TEXTURE_EXTENSIONS, TEXTURES_FOLDER,
+    import_animation_file, import_audio, import_model, import_picks, import_sky_image,
+    import_texture, list_model_objects, load_model_file, load_takes_file, safe_file_name,
+    unique_file_name,
 };
 pub use light_probes::{
     LIGHT_PROBES_SUFFIX, LightProbes, MAX_LIGHT_PROBES_PER_SIDE, ProbeLight, decode_light_probes,
@@ -65,7 +66,7 @@ pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, MapSlot,
     Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
     Primitive, Rig, Take, TextureRole, Track, list_objects, load_model, load_models, load_takes,
-    texture_roles,
+    lod_level, texture_roles,
 };
 pub use probe::{
     PROBE_SUFFIX, PROBES_FOLDER, ProbeImage, decode_probe, encode_probe, is_probe_file, probe_path,

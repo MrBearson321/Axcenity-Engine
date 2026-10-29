@@ -15,6 +15,7 @@ mod rig;
 #[cfg(test)]
 mod test_rig;
 
+pub use lod::level_of as lod_level;
 pub use maps::{MapSlot, TextureRole, texture_roles};
 pub use objects::{ModelObject, Pick};
 pub use rig::{
@@ -725,7 +726,8 @@ fn mesh_name(mesh: &gltf::Mesh) -> String {
 }
 
 /// True if the object at `path` is in `wanted` (or everything is wanted),
-/// adding it to `found` if so.
+/// or is a wanted object's `_LOD1` or `_LOD2` copy, which comes with it.
+/// A wanted path met is added to `found`.
 fn want(wanted: &Option<HashSet<String>>, found: &mut HashSet<String>, path: &str) -> bool {
     match wanted {
         None => true,
@@ -733,7 +735,7 @@ fn want(wanted: &Option<HashSet<String>>, found: &mut HashSet<String>, path: &st
             found.insert(path.to_owned());
             true
         }
-        Some(_) => false,
+        Some(wanted) => lod::full_path(path).is_some_and(|full| wanted.contains(full)),
     }
 }
 

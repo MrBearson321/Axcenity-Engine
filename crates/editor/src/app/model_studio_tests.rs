@@ -204,3 +204,101 @@ fn a_chair_modeled_from_one_cube_is_saved_and_drawn_by_a_meshpart_in_the_world()
     assert_eq!(again.vertex_count(), mesh.vertex_count());
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_half_head_with_mirror_and_subdivision_saves_whole_and_reopens_as_the_half_with_its_stack() {
+    use crate::model_studio::modifiers_tests::{half_head_doc, mirror, subdivision};
+    let folder = copy_of_example("hello-touched", "studio-head");
+    let mut app = EditorApp::new(Some(&folder));
+    let mut doc = half_head_doc();
+    let half = doc.mesh().unwrap().clone();
+    let stack = vec![mirror(true), subdivision()];
+    doc.set_modifiers("Add Mirror", stack.clone());
+    app.model_studio.open(doc);
+
+    let path = app.save_model_studio().unwrap();
+    assert_eq!(path, "assets/models/UVSphere.glb");
+    let sidecar = "assets/models/UVSphere.meshedit.json";
+    assert!(folder.join(sidecar).is_file());
+    // What the game draws is the whole head: as wide as it is deep (the
+    // half was half as wide).
+    let part = mesh_part(&mut app, &path);
+    let [x, y, z] = drawn_size(&app, part);
+    assert!((x - z).abs() < 1e-3 && x > 1.8, "{x} {y} {z}");
+    let drawn = app.assets.model(&path).unwrap();
+    let triangles: usize = drawn.primitives.iter().map(|p| p.indices.len() / 3).sum();
+    assert!(
+        triangles > half.face_count() * 2 * 16,
+        "{triangles}: smoothed twice"
+    );
+
+    // Opened again: the half mesh and its stack, still editable.
+    app.open_in_model_studio(&path);
+    let doc = app.model_studio.doc.as_mut().unwrap();
+    assert!(!doc.unsaved());
+    assert_eq!(doc.mesh(), Some(&half));
+    assert_eq!(doc.model.objects[0].modifiers, stack);
+    doc.toggle_mode();
+    doc.set_select_mode(SelectMode::Face);
+    doc.select(|selection, mesh| {
+        selection.faces = (0..mesh.face_count() as u32)
+            .filter(|&f| mesh.face_normal(f).y > 0.9)
+            .collect();
+    });
+    let top = Mat4::from_translation(Vec3::Y * 0.5);
+    assert!(doc.transform("Move", top));
+    app.save_model_studio().unwrap();
+    let [_, taller, _] = drawn_size(&app, part);
+    assert!(taller > y + 0.2, "{taller} against {y}");
+
+    // Without modifiers the sidecar goes, and undoing the save brings it back.
+    let doc = app.model_studio.doc.as_mut().unwrap();
+    doc.set_modifiers("Remove Mirror", Vec::new());
+    app.save_model_studio().unwrap();
+    assert!(!folder.join(sidecar).exists());
+    app.undo();
+    assert!(folder.join(sidecar).is_file());
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn generated_lods_are_drawn_far_away_by_a_meshpart_without_another_step() {
+    let folder = copy_of_example("hello-touched", "studio-lods");
+    let mut app = EditorApp::new(Some(&folder));
+    let mut settings = PrimitiveSettings::of(axcenity_mesh_edit::PrimitiveShape::UvSphere);
+    settings.segments = 32;
+    settings.rings = 16;
+    let mut doc = StudioDoc::new(String::new(), ModelDoc::primitive(&settings), false);
+    doc.generate_lods().unwrap();
+    let wanted: Vec<usize> = doc.model.objects[1..]
+        .iter()
+        .map(|object| {
+            let mesh = object
+                .evaluated(axcenity_mesh_edit::Purpose::Export)
+                .unwrap();
+            (0..mesh.face_count() as u32)
+                .map(|f| mesh.triangles(f).len())
+                .sum()
+        })
+        .collect();
+    app.model_studio.open(doc);
+    let path = app.save_model_studio().unwrap();
+
+    for mesh_id in [path.clone(), format!("{path}#UVSphere")] {
+        let part = mesh_part(&mut app, &mesh_id);
+        let model = app.assets.model(&mesh_id).unwrap();
+        assert_eq!(
+            model.primitives.len(),
+            1,
+            "{mesh_id}: the copies aren't parts"
+        );
+        let levels: Vec<usize> = model.primitives[0]
+            .lods
+            .iter()
+            .map(|lod| lod.indices.len() / 3)
+            .collect();
+        assert_eq!(levels, wanted, "{mesh_id}: the file's own copies");
+        app.world.destroy(part).unwrap();
+    }
+    let _ = std::fs::remove_dir_all(&folder);
+}

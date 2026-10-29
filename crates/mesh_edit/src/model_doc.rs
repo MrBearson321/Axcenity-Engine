@@ -8,19 +8,29 @@
 //! Saving writes each object as a node with no transform, under nodes for
 //! the groups it was in, so object paths (`file.glb#Group/Chair`) still
 //! pick the same objects.
+//!
+//! An object's modifiers (Phase 57) are on it in what's drawn and saved;
+//! its own mesh and the stack are kept in the sidecar (`sidecar.rs`).
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
 
 use axcenity_assets::{
     Model, ModelError, ModelFormat, ModelMaterial, Pick, Primitive, list_objects, load_models,
+    lod_level,
 };
 use glam::{Vec2, Vec3};
 use serde_json::{Value, json};
 
 use crate::glb::{File, Vertices};
 use crate::half_edge::{EditMesh, Polygon, newell};
+use crate::modifiers::{Modifier, ModifierKind, Purpose, evaluate};
 use crate::primitives::PrimitiveSettings;
+
+/// The share of triangles Generate LODs keeps in `_LOD1` and `_LOD2`, as
+/// the renderer's own simplified copies do.
+pub const LOD_RATIOS: [f32; 2] = [0.5, 0.25];
 
 /// Corner normals this close to the face's own (as a cosine) count as
 /// flat shading.
@@ -40,6 +50,20 @@ pub struct DocObject {
     pub materials: Vec<ModelMaterial>,
     /// False if the file gave it no texture coordinates, so none are saved.
     pub uvs: bool,
+    /// Its modifier stack, first to last.
+    pub modifiers: Vec<Modifier>,
+}
+
+impl DocObject {
+    /// Its mesh with its shown modifiers on it, for `purpose`; `None` for
+    /// a group.
+    pub fn evaluated(&self, purpose: Purpose) -> Option<Cow<'_, EditMesh>> {
+        let mesh = self.mesh.as_ref()?;
+        if self.modifiers.iter().all(|modifier| !modifier.show) {
+            return Some(Cow::Borrowed(mesh));
+        }
+        Some(Cow::Owned(evaluate(mesh, &self.modifiers, purpose).mesh))
+    }
 }
 
 /// The objects of one model file.
@@ -65,6 +89,7 @@ impl ModelDoc {
                 mesh: Some(settings.build()),
                 materials: vec![material],
                 uvs: true,
+                modifiers: Vec::new(),
             }],
         }
     }
@@ -98,6 +123,7 @@ impl ModelDoc {
                 mesh,
                 materials,
                 uvs,
+                modifiers: Vec::new(),
             });
         }
         if objects.iter().all(|object| object.mesh.is_none()) {
@@ -106,13 +132,18 @@ impl ModelDoc {
         Ok(ModelDoc { objects })
     }
 
-    /// The objects with meshes, as one model to draw, fitted into the
-    /// 1×1×1 cube as a loaded one is. `None` if there are no triangles.
+    /// The objects with meshes and their modifiers, as one model to draw,
+    /// fitted into the 1×1×1 cube as a loaded one is; `_LOD1` and `_LOD2`
+    /// copies would draw over their full objects, so they're left out.
+    /// `None` if there are no triangles.
     pub fn to_model(&self) -> Option<Model> {
-        let primitives = self
-            .objects
-            .iter()
-            .filter_map(|object| Some(primitives(object.mesh.as_ref()?, &object.materials, true)))
+        let primitives = (0..self.objects.len())
+            .filter(|&index| !self.is_lod_copy(index))
+            .filter_map(|index| {
+                let object = &self.objects[index];
+                let mesh = object.evaluated(Purpose::Viewport)?;
+                Some(primitives(&mesh, &object.materials, true))
+            })
             .flatten()
             .map(|(vertices, material)| {
                 Primitive::new(
@@ -155,8 +186,8 @@ impl ModelDoc {
             }
             parents.push(node);
             let mut json = json!({ "name": object.name });
-            if let Some(mesh) = &object.mesh {
-                let parts: Vec<Value> = primitives(mesh, &object.materials, object.uvs)
+            if let Some(mesh) = object.evaluated(Purpose::Export) {
+                let parts: Vec<Value> = primitives(&mesh, &object.materials, object.uvs)
                     .into_iter()
                     .map(|(vertices, material)| {
                         let key = format!("{material:?}");
@@ -179,6 +210,67 @@ impl ModelDoc {
             nodes.push(json);
         }
         file.finish(nodes, meshes, roots)
+    }
+
+    /// True if object `index` is a `_LOD1` or `_LOD2` copy of another
+    /// object with a mesh.
+    pub fn is_lod_copy(&self, index: usize) -> bool {
+        let name = self.objects[index].name.trim_end();
+        lod_level(name) > 0 && {
+            let full = &name[..name.len() - "_lod1".len()];
+            self.objects
+                .iter()
+                .any(|object| object.mesh.is_some() && object.name == full)
+        }
+    }
+
+    /// Generate LODs: `<name>_LOD1` and `<name>_LOD2` copies of object
+    /// `index`, each its mesh and modifiers with a Decimate to
+    /// [`LOD_RATIOS`] of the triangles added at the end, named as the
+    /// renderer finds them. They go right after the object (and what's
+    /// inside it), at its depth, in place of copies already there. Returns
+    /// the object's index after; `None` for a group or a copy.
+    pub fn generate_lods(&mut self, index: usize) -> Option<usize> {
+        let object = self.objects.get(index)?;
+        if object.mesh.is_none() || lod_level(&object.name) > 0 {
+            return None;
+        }
+        let object = object.clone();
+        let names: Vec<String> = (1..=LOD_RATIOS.len())
+            .map(|level| format!("{}_LOD{level}", object.name))
+            .collect();
+        let mut index = index;
+        let mut at = 0;
+        self.objects.retain(|other| {
+            let old =
+                other.depth == object.depth && other.mesh.is_some() && names.contains(&other.name);
+            if old && at < index {
+                index -= 1;
+            }
+            at += 1;
+            !old
+        });
+        let mut after = index + 1;
+        while self
+            .objects
+            .get(after)
+            .is_some_and(|inside| inside.depth > object.depth)
+        {
+            after += 1;
+        }
+        for (k, (name, ratio)) in names.into_iter().zip(LOD_RATIOS).enumerate() {
+            let mut modifiers = object.modifiers.clone();
+            modifiers.push(Modifier::new(ModifierKind::Decimate { ratio }));
+            self.objects.insert(
+                after + k,
+                DocObject {
+                    name,
+                    modifiers,
+                    ..object.clone()
+                },
+            );
+        }
+        Some(index)
     }
 }
 

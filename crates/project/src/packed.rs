@@ -215,6 +215,14 @@ fn include_runtime_file(root: &Path, path: &Path) -> bool {
     let Some(Component::Normal(first)) = components.first() else {
         return false;
     };
+    // The Model Studio's sidecars are editing state; games load the `.glb`.
+    if relative
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .ends_with(axcenity_assets::MESH_EDIT_SUFFIX)
+    {
+        return false;
+    }
     // UI Event Graphs stay graphs: loading compiles each to the
     // LocalScript under its ScreenGui, as it does for a project folder.
     if matches!(
@@ -290,6 +298,19 @@ fn take<'a>(bytes: &'a [u8], cursor: &mut usize, length: usize) -> Result<&'a [u
 mod tests {
     use super::*;
     use axcenity_blocks_runtime::{Block, BlockKind, BlockScript};
+
+    #[test]
+    fn a_built_game_has_models_but_not_their_model_studio_sidecars() {
+        let root = Path::new("game");
+        assert!(include_runtime_file(
+            root,
+            &root.join("assets/models/Head.glb")
+        ));
+        assert!(!include_runtime_file(
+            root,
+            &root.join("assets/models/Head.meshedit.json")
+        ));
+    }
 
     fn temp_folder(name: &str) -> PathBuf {
         let path =

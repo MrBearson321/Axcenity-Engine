@@ -669,6 +669,8 @@ dependencies = [
  "axcenity-core",
  "axcenity-workspace-hack",
  "glam 0.34.1",
+ "meshopt",
+ "serde",
  "serde_json",
 ]
 

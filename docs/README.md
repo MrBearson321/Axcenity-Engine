@@ -25,7 +25,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | The Explorer tree | [editor/tree.md](editor/tree.md) |
 | Script tabs, file watching, or rebuilding or hot-patching the engine | [editor/scripts.md](editor/scripts.md) |
 | Model import or the Animation panel | [editor/import.md](editor/import.md) |
-| The Model Studio tab, editable meshes (`EditMesh`, `ModelDoc`), modeling operations (`MeshOp`), saving `.glb` | [editor/model-studio.md](editor/model-studio.md) |
+| The Model Studio tab, editable meshes (`EditMesh`, `ModelDoc`), modeling operations (`MeshOp`), modifiers and the `.meshedit.json` sidecar, Generate LODs, saving `.glb` | [editor/model-studio.md](editor/model-studio.md) |
 | Paint, materials, lights, or the angular tool | [editor/building.md](editor/building.md) |
 | The Assets panel | [editor/assets.md](editor/assets.md) |
 | Scripts, LocalScripts, or RemoteEvents in the editor | [editor/sides.md](editor/sides.md) |

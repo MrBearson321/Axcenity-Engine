@@ -14,6 +14,9 @@
 //!   Mesh menu; `tools.rs`) run on what's picked as one undo step each;
 //!   the adjust panel runs the last one again with new settings in place
 //!   of it.
+//! - Modifiers (Phase 57; `modifiers.rs`): a stack per object, drawn on
+//!   the mesh in the view and saved on it in the `.glb`; the mesh and the
+//!   stack go in the model's sidecar.
 //!
 //! The Studio keeps its own undo history while the mouse is over it; each
 //! edit is one step. Save writes the file and records it as one step of the
@@ -21,6 +24,7 @@
 //! overlay are `view.rs`.
 
 mod modal;
+mod modifiers;
 mod proportional;
 mod tools;
 mod view;
@@ -31,7 +35,7 @@ pub use proportional::{Falloff, Pivot, Proportional};
 use std::collections::{BTreeSet, HashMap};
 
 use axcenity_mesh_edit::{
-    MeshOp, ModelDoc, PrimitiveSettings, PrimitiveShape, SelectMode, Selection, apply,
+    MeshOp, ModelDoc, PrimitiveSettings, PrimitiveShape, Purpose, SelectMode, Selection, apply,
 };
 use axcenity_render::glam::{Mat4, Vec3};
 use eframe::egui;
@@ -101,6 +105,8 @@ pub struct StudioDoc {
     saved: u64,
     /// The last operation, until anything else is done.
     pub last_op: Option<LastOp>,
+    /// The object and undo step a modifier change under way goes into.
+    modifier_edit: Option<(usize, usize)>,
 }
 
 impl StudioDoc {
@@ -124,6 +130,7 @@ impl StudioDoc {
             revision: 1,
             saved: if saved { 1 } else { 0 },
             last_op: None,
+            modifier_edit: None,
         }
     }
 
@@ -271,6 +278,7 @@ impl StudioDoc {
         self.restore(before);
         self.redo.push((label, now));
         self.last_op = None;
+        self.modifier_edit = None;
         true
     }
 
@@ -283,6 +291,7 @@ impl StudioDoc {
         self.restore(after);
         self.undo.push((label, now));
         self.last_op = None;
+        self.modifier_edit = None;
         true
     }
 
@@ -509,9 +518,10 @@ impl Moving {
     }
 
     /// Shows the move as `matrix` takes it, each vertex as much of the way
-    /// as proportional editing says.
+    /// as proportional editing says. In Edit mode a clipping Mirror keeps
+    /// vertices from crossing its plane.
     fn update(&self, doc: &mut StudioDoc, matrix: Mat4, proportional: &Proportional) {
-        let moved: Vec<Vec<Vec3>> = self
+        let mut moved: Vec<Vec<Vec3>> = self
             .start
             .iter()
             .zip(&self.distances)
@@ -540,6 +550,16 @@ impl Moving {
                     .collect()
             })
             .collect();
+        if doc.mode == Mode::Edit {
+            for ((object, _), (moved, start)) in
+                self.targets.iter().zip(moved.iter_mut().zip(&self.start))
+            {
+                let stack = &doc.model.objects[*object].modifiers;
+                for (point, &from) in moved.iter_mut().zip(start) {
+                    *point = axcenity_mesh_edit::clip(stack, from, *point);
+                }
+            }
+        }
         doc.set_points(&self.targets, &moved);
     }
 
@@ -612,6 +632,9 @@ pub struct ModelStudio {
     pending: Option<StudioDoc>,
     /// Lines for the Console.
     pub notices: Vec<String>,
+    /// The active object's modifiers that couldn't run, worked out for
+    /// this revision and object.
+    stack_errors: (u64, usize, Vec<(usize, String)>),
 }
 
 impl Default for ModelStudio {
@@ -629,6 +652,7 @@ impl Default for ModelStudio {
             hovered: false,
             pending: None,
             notices: Vec::new(),
+            stack_errors: (0, 0, Vec::new()),
         }
     }
 }
@@ -703,7 +727,7 @@ impl ModelStudio {
         self.pending_bar(ui);
         self.toolbar(ui, models, editable, &mut actions);
         ui.separator();
-        let Some(doc) = &self.doc else {
+        if self.doc.is_none() {
             ui.add_space(12.0);
             ui.vertical_centered(|ui| {
                 ui.weak("Open a model, or make a New shape, to edit it here.");
@@ -711,18 +735,19 @@ impl ModelStudio {
             });
             return actions;
         };
-        let has_groups = doc.model.objects.len() > 1;
-        if has_groups {
-            responsive::split(ui, 420.0, 0.24, |ui, pane| {
-                if pane == 0 {
-                    self.object_list(ui);
-                } else {
-                    self.viewport(ui, render_state, snap, editable);
-                }
-            });
-        } else {
-            self.viewport(ui, render_state, snap, editable);
-        }
+        responsive::split(ui, 420.0, 0.28, |ui, pane| {
+            if pane == 0 {
+                egui::ScrollArea::vertical()
+                    .id_salt("studio side")
+                    .show(ui, |ui| {
+                        self.object_list(ui);
+                        ui.add_space(8.0);
+                        self.modifier_panel(ui, editable);
+                    });
+            } else {
+                self.viewport(ui, render_state, snap, editable);
+            }
+        });
         actions
     }
 
@@ -1007,31 +1032,55 @@ impl ModelStudio {
         };
         widgets::section_label(ui, "Objects");
         let mut clicked = None;
-        egui::ScrollArea::vertical()
-            .id_salt("studio objects")
-            .show(ui, |ui| {
-                for (index, object) in doc.model.objects.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.add_space(object.depth as f32 * 12.0);
-                        let icon = if object.mesh.is_some() {
-                            icons::CUBE
-                        } else {
-                            icons::FOLDER_OPEN
-                        };
-                        let mut text = theme::with_icon(icon, &object.name);
-                        if index == doc.active && object.mesh.is_some() {
-                            text.push_str("  ·  active");
-                        }
-                        let response = ui.selectable_label(doc.objects.contains(&index), text);
-                        if response.clicked() && object.mesh.is_some() {
-                            clicked = Some((index, ui.input(|i| i.modifiers.shift)));
-                        }
-                    });
+        for (index, object) in doc.model.objects.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.add_space(object.depth as f32 * 12.0);
+                let icon = if object.mesh.is_some() {
+                    icons::CUBE
+                } else {
+                    icons::FOLDER_OPEN
+                };
+                let mut text = theme::with_icon(icon, &object.name);
+                if index == doc.active && object.mesh.is_some() {
+                    text.push_str("  ·  active");
+                }
+                let mut response = ui.selectable_label(doc.objects.contains(&index), text);
+                if doc.model.is_lod_copy(index) {
+                    response =
+                        response.on_hover_text("A far-away copy: games draw it, this view doesn't");
+                }
+                if response.clicked() && object.mesh.is_some() {
+                    clicked = Some((index, ui.input(|i| i.modifiers.shift)));
                 }
             });
+        }
         if let Some((index, extend)) = clicked {
             doc.click_object(Some(index), extend);
         }
+    }
+
+    /// The active object's modifier stack, and what couldn't run in it.
+    fn modifier_panel(&mut self, ui: &mut egui::Ui, editable: bool) {
+        let dragging = self.is_dragging();
+        let Some(doc) = &mut self.doc else {
+            return;
+        };
+        let (revision, active, _) = &self.stack_errors;
+        if !dragging && (*revision != doc.revision || *active != doc.active) {
+            let errors = doc
+                .model
+                .objects
+                .get(doc.active)
+                .filter(|object| !object.modifiers.is_empty())
+                .and_then(|object| {
+                    let mesh = object.mesh.as_ref()?;
+                    let stack = &object.modifiers;
+                    Some(axcenity_mesh_edit::evaluate(mesh, stack, Purpose::Viewport).errors)
+                })
+                .unwrap_or_default();
+            self.stack_errors = (doc.revision, doc.active, errors);
+        }
+        modifiers::panel(ui, doc, &self.stack_errors.2, editable, &mut self.notices);
     }
 
     /// The 3D view and what the mouse and keys do in it.
@@ -1357,6 +1406,8 @@ fn save_name(doc: &StudioDoc) -> String {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod modifiers_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

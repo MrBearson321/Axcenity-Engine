@@ -36,11 +36,18 @@ const UV_WEIGHT: f32 = 1.0;
 
 /// The level of detail an object of this name holds: 1 or 2 for a name
 /// ending in `_LOD1` or `_LOD2` (in any case), else 0, the full model.
-pub(super) fn level_of(name: &str) -> u8 {
+pub fn level_of(name: &str) -> u8 {
     let name = name.trim().to_ascii_lowercase();
     (1..=LEVELS)
         .find(|level| name.ends_with(&format!("_lod{level}")))
         .unwrap_or(0)
+}
+
+/// The path of the full object a `_LOD1` or `_LOD2` copy at `path` is a
+/// copy of (`Rock` for `Rock_LOD1`), or `None` if it isn't one.
+pub(super) fn full_path(path: &str) -> Option<&str> {
+    let path = path.trim_end();
+    (level_of(path) > 0).then(|| &path[..path.len() - "_lod1".len()])
 }
 
 /// Splits `primitives` into the full model's and their simpler copies, and

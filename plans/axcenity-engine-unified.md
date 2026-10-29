@@ -1804,9 +1804,9 @@ Each can be shown, hidden, reordered and applied. The `.glb` holds the evaluated
 
 ### Acceptance criteria
 
-- [ ] Half a character head with a Mirror and a Subdivision modifier saves as a whole, smooth head. Reopening it shows the half mesh and the stack, still editable.
-- [ ] Applying a modifier bakes it into the mesh as one undo step.
-- [ ] Generated LODs are picked up by the renderer's level-of-detail system without any other step.
+- [x] Half a character head with a Mirror and a Subdivision modifier saves as a whole, smooth head. Reopening it shows the half mesh and the stack, still editable.
+- [x] Applying a modifier bakes it into the mesh as one undo step.
+- [x] Generated LODs are picked up by the renderer's level-of-detail system without any other step.
 
 ---
 

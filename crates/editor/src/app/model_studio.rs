@@ -1,11 +1,12 @@
 //! The Model Studio tab's actions (Phase 55; the tab is `model_studio.rs`):
 //! opening a model file, and saving it as a `.glb` as one step of the
-//! editor's history, which MeshParts using it reload at once.
+//! editor's history, which MeshParts using it reload at once. A model with
+//! modifiers (Phase 57) saves its sidecar too, and opens from it.
 
 use std::sync::Arc;
 
 use axcenity_assets::ModelFormat;
-use axcenity_mesh_edit::ModelDoc;
+use axcenity_mesh_edit::{ModelDoc, sidecar_path};
 use eframe::egui_wgpu::RenderState;
 
 use super::*;
@@ -64,10 +65,12 @@ impl EditorApp {
             .map_err(|err| err.to_string())
             .and_then(|bytes| {
                 let parent = disk.parent().unwrap_or(&folder);
-                ModelDoc::open(&bytes, parent, format).map_err(|err| err.to_string())
+                let model =
+                    ModelDoc::open(&bytes, parent, format).map_err(|err| err.to_string())?;
+                Ok((model, bytes))
             });
-        let model = match opened {
-            Ok(model) => model,
+        let (mut model, bytes) = match opened {
+            Ok(opened) => opened,
             Err(why) => {
                 self.output.error(format!(
                     "Could not open `{file}` in the Model Studio: {why}"
@@ -81,6 +84,17 @@ impl EditorApp {
             file.rsplit_once('.').map_or(file, |(stem, _)| stem)
         );
         let same_file = glb == file;
+        // Each object's own mesh and modifiers, from the sidecar.
+        let sidecar = sidecar_path(file);
+        if same_file
+            && let Some(sidecar_bytes) = axcenity_assets::safe_path(&sidecar)
+                .and_then(|path| std::fs::read(folder.join(path)).ok())
+            && let Err(why) = model.read_sidecar(&sidecar_bytes, &bytes)
+        {
+            self.output.warning(format!(
+                "`{sidecar}` wasn't used, so modifiers are already applied: {why}."
+            ));
+        }
         let mut doc = StudioDoc::new(glb.clone(), model, same_file);
         // The picked object, by the last name in its path.
         if let Some(first) = pick.split(',').next().filter(|first| !first.is_empty()) {
@@ -126,27 +140,37 @@ impl EditorApp {
         }
         let path = doc.path.clone();
         let bytes = doc.model.write_glb();
-        let disk = folder.join(axcenity_assets::safe_path(&path)?);
-        let before = std::fs::read(&disk).ok();
-        let written = disk
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&disk, &bytes));
-        if let Err(err) = written {
-            self.output.error(format!("Could not save `{path}`: {err}"));
-            return None;
+        // The sidecar goes with it, or an old one goes once nothing needs it.
+        let sidecar = sidecar_path(&path);
+        let sidecar_bytes = doc.model.write_sidecar(&bytes);
+        let mut changes = Vec::new();
+        for (file, after) in [(&path, Some(bytes)), (&sidecar, sidecar_bytes)] {
+            let disk = folder.join(axcenity_assets::safe_path(file)?);
+            let before = std::fs::read(&disk).ok();
+            if before.is_none() && after.is_none() {
+                continue;
+            }
+            let written = match &after {
+                Some(after) => disk
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|()| std::fs::write(&disk, after)),
+                None => std::fs::remove_file(&disk),
+            };
+            if let Err(err) = written {
+                self.output.error(format!("Could not save `{file}`: {err}"));
+                return None;
+            }
+            changes.push(BlobChange {
+                path: file.clone(),
+                before: before.map(Arc::new),
+                after: after.map(Arc::new),
+            });
         }
         doc.mark_saved();
         let name = doc.name().to_owned();
-        self.history.record_blobs(
-            &mut self.world,
-            format!("Save {name}"),
-            vec![BlobChange {
-                path: path.clone(),
-                before: before.map(Arc::new),
-                after: Some(Arc::new(bytes)),
-            }],
-        );
+        self.history
+            .record_blobs(&mut self.world, format!("Save {name}"), changes);
         // Taken in now, not when the watcher notices: MeshParts using it
         // draw the new version this frame.
         self.asset_file_changed(&path);

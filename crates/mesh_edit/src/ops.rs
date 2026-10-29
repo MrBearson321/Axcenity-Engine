@@ -677,7 +677,7 @@ impl Soup {
     /// Builds the mesh: faces cleaned of repeated corners, unused vertices
     /// dropped (unless `keep_loose`), and changed faces and the smooth
     /// faces next to them shaded again.
-    fn build(self, keep_loose: bool) -> Built {
+    pub(crate) fn build(self, keep_loose: bool) -> Built {
         let Soup {
             positions,
             faces,
@@ -745,8 +745,8 @@ pub(crate) fn along_edge(a: Vec3, b: Vec3, p: Vec3) -> f32 {
 }
 
 /// A built mesh, and where the [`Soup`]'s vertices and faces went in it.
-struct Built {
-    mesh: EditMesh,
+pub(crate) struct Built {
+    pub mesh: EditMesh,
     vertex_map: Vec<Option<u32>>,
     face_map: Vec<Option<u32>>,
 }

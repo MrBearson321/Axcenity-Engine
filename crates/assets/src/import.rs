@@ -9,6 +9,9 @@ use crate::model::{self, Model, ModelError, ModelFormat, ModelObject, Pick, Take
 
 /// Where imported models go, inside the project folder.
 pub const MODELS_FOLDER: &str = "assets/models";
+/// The end of a model's Model Studio sidecar (`Head.meshedit.json` beside
+/// `Head.glb`): editing state the `.glb` can't hold, which games don't use.
+pub const MESH_EDIT_SUFFIX: &str = ".meshedit.json";
 /// Where an imported model's embedded textures are copied out to, inside
 /// its folder.
 pub const TEXTURES_FOLDER: &str = "textures";

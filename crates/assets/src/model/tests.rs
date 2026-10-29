@@ -343,4 +343,17 @@ fn a_files_own_lod1_object_is_the_simpler_copy_and_doesnt_size_the_model() {
             .iter()
             .all(|p| (p[2] - 5.0).abs() < 1e-5)
     );
+
+    // Picking the full object by name brings its copy with it.
+    let picked = load_models(
+        gltf.as_bytes(),
+        &folder,
+        ModelFormat::Gltf,
+        &[Pick::Objects(vec!["Rock".to_owned()])],
+    )
+    .unwrap();
+    assert_eq!(picked[0].primitives.len(), 1);
+    assert_eq!(picked[0].primitives[0].lods.len(), 1);
+    assert_eq!(picked[0].primitives[0].lods[0].indices.len(), 3);
+    let _ = std::fs::remove_dir_all(&folder);
 }
