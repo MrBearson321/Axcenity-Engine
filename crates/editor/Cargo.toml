@@ -16,6 +16,7 @@ axcenity-core.workspace = true
 axcenity-mesh-edit.workspace = true
 axcenity-nav.workspace = true
 axcenity-physics.workspace = true
+axcenity-plugins.workspace = true
 axcenity-project.workspace = true
 axcenity-render.workspace = true
 axcenity-save.workspace = true

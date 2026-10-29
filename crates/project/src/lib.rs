@@ -109,6 +109,10 @@ pub const WORLD_FILE: &str = "world.json";
 /// this name is taken too.
 pub const KEPT_WORLD_FILE: &str = "world.backup.json";
 pub const SCRIPTS_FOLDER: &str = "scripts";
+/// The editor's Lua plugins for this project (Phase 54; the `plugins`
+/// crate). Editor-only: built games never have it, and its stylesheets
+/// don't style the game.
+pub const PLUGINS_FOLDER: &str = "plugins";
 /// Files ending in this are server scripts. The part before it is the Script's name.
 pub const SERVER_SCRIPT_SUFFIX: &str = ".server.lua";
 /// Files ending in this are client scripts, which become LocalScripts.

@@ -3,10 +3,12 @@
 //! editor that runs luau-lsp) autocompletes the script API and type-checks
 //! scripts as Luau (`+=`, `continue` and type annotations are fine).
 //!
-//! Three files, all relative to the project folder:
+//! Four files, all relative to the project folder:
 //! - [`DEFINITIONS_FILE`]: `axcenity_script::lua_definitions()`. Opening the
 //!   project rewrites it when it's out of date ([`refresh`]), so it follows
 //!   engine updates.
+//! - [`PLUGIN_DEFINITIONS_FILE`]: the editor plugins' API, for editing a
+//!   plugin's Lua (added to luau-lsp's settings by hand).
 //! - [`SETTINGS_FILE`]: luau-lsp settings (the standard platform rather than
 //!   Roblox, the definitions, `.lua` files as Luau, and no globals that
 //!   scripts don't have).
@@ -28,6 +30,9 @@ use serde_json::Value;
 /// The definitions, in a folder the project loader skips, so they're never
 /// taken for one of the project's scripts.
 pub const DEFINITIONS_FILE: &str = ".axcenity/axcenity.d.luau";
+/// The editor plugins' API (Phase 54), for a workspace that edits plugins:
+/// not in [`SETTINGS`], as game scripts don't have its globals.
+pub const PLUGIN_DEFINITIONS_FILE: &str = ".axcenity/axcenity-plugin.d.luau";
 pub const SETTINGS_FILE: &str = ".vscode/settings.json";
 pub const EXTENSIONS_FILE: &str = ".vscode/extensions.json";
 
@@ -115,6 +120,12 @@ pub fn set_up(folder: &Path) -> io::Result<SetUp> {
         &axcenity_script::lua_definitions(),
     )?;
     result.written.push(DEFINITIONS_FILE);
+    write(
+        folder,
+        PLUGIN_DEFINITIONS_FILE,
+        axcenity_plugins::PLUGIN_DEFINITIONS,
+    )?;
+    result.written.push(PLUGIN_DEFINITIONS_FILE);
     for (file, text) in [(SETTINGS_FILE, SETTINGS), (EXTENSIONS_FILE, EXTENSIONS)] {
         let path = folder.join(file);
         let Ok(saved) = fs::read_to_string(&path) else {
@@ -263,7 +274,12 @@ mod tests {
         let result = set_up(&folder).unwrap();
         assert_eq!(
             result.written,
-            [DEFINITIONS_FILE, SETTINGS_FILE, EXTENSIONS_FILE]
+            [
+                DEFINITIONS_FILE,
+                PLUGIN_DEFINITIONS_FILE,
+                SETTINGS_FILE,
+                EXTENSIONS_FILE
+            ]
         );
         assert_eq!(
             read(&folder, DEFINITIONS_FILE),
@@ -279,7 +295,7 @@ mod tests {
 
         // A second time, nothing is missing, so both are left as they are.
         let result = set_up(&folder).unwrap();
-        assert_eq!(result.written, [DEFINITIONS_FILE]);
+        assert_eq!(result.written, [DEFINITIONS_FILE, PLUGIN_DEFINITIONS_FILE]);
         assert_eq!(result.kept, [SETTINGS_FILE, EXTENSIONS_FILE]);
         let _ = fs::remove_dir_all(&folder);
     }
@@ -326,7 +342,12 @@ mod tests {
         let result = set_up(&folder).unwrap();
         assert_eq!(
             result.written,
-            [DEFINITIONS_FILE, SETTINGS_FILE, EXTENSIONS_FILE]
+            [
+                DEFINITIONS_FILE,
+                PLUGIN_DEFINITIONS_FILE,
+                SETTINGS_FILE,
+                EXTENSIONS_FILE
+            ]
         );
         assert_eq!(result.removed, [OLD_DEFINITIONS_FILE, OLD_SETTINGS_FILE]);
         assert!(!folder.join(OLD_SETTINGS_FILE).exists());

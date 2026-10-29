@@ -22,7 +22,7 @@ use crate::style::{
 };
 use crate::transition::Transitions;
 use crate::widget::{self, DropdownList};
-use crate::{UiElement, UiLayout, layout_ui_with_pseudo, scroll_bars};
+use crate::{ScreenGuis, UiElement, UiLayout, layout_ui_with_pseudo, scroll_bars};
 
 /// How long the pointer rests on an element before its tooltip shows, in seconds.
 pub const TOOLTIP_DELAY: f64 = 0.5;
@@ -132,6 +132,8 @@ pub struct UiInteraction {
     /// The option of the open list the keyboard or controller is on, when
     /// it was opened that way.
     list_cursor: Option<usize>,
+    /// Lay out only this ScreenGui (see [`UiInteraction::only`]).
+    only: Option<InstanceId>,
 }
 
 /// A press on a widget that does something when it's let go over the same place.
@@ -206,6 +208,16 @@ enum ScrollDrag {
 }
 
 impl UiInteraction {
+    /// UI state for just the ScreenGui `gui`, wherever it is, laid out on
+    /// the whole screen: an editor plugin's dock tab, whose ScreenGui is
+    /// outside the tree.
+    pub fn only(gui: InstanceId) -> Self {
+        Self {
+            only: Some(gui),
+            ..Self::default()
+        }
+    }
+
     /// Lays the UI out for this frame, `seconds` after the last one: as
     /// [`crate::layout_ui_interactive`] does, but with styles eased by their
     /// transitions, the hovered element's tooltip drawn, and the cursor to
@@ -234,7 +246,10 @@ impl UiInteraction {
                 ..PseudoClasses::default()
             },
             camera,
-            input.on_top,
+            ScreenGuis {
+                on_top: input.on_top,
+                only: self.only,
+            },
         );
         // An open Dropdown's list covers everything under it. Where it is
         // comes from this layout, so it's right on the frame it opens.
@@ -275,7 +290,10 @@ impl UiInteraction {
             stylesheets,
             pseudo,
             camera,
-            input.on_top,
+            ScreenGuis {
+                on_top: input.on_top,
+                only: self.only,
+            },
         );
         layout.hovered = hovered;
         layout.active = active;

@@ -1415,7 +1415,7 @@ fn paint_guide(painter: &egui::Painter, view: &View, guide: Guide) {
 
 /// A rough drawing of UI draw items with egui's painter, for when there's
 /// no GPU renderer (drawing tests). `origin` is where pixel 0, 0 is.
-fn sketch<'a>(
+pub(crate) fn sketch<'a>(
     painter: &egui::Painter,
     origin: egui::Pos2,
     pixels_per_point: f32,

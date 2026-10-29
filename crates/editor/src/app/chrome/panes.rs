@@ -728,6 +728,12 @@ impl EditorApp {
         let tool = (!self.playing() && sequence.is_none()).then_some(self.tool);
         let preview = self.angular_preview();
         let terrain_brush = self.terrain_brush_view(&ctx);
+        let plugin_mouse = self
+            .plugins
+            .entries
+            .iter()
+            .any(|entry| entry.running.is_some())
+            .then(|| self.plugin_has_mouse());
         let emits = std::mem::take(&mut self.pending_emits);
         let debug_rays = self
             .play
@@ -776,6 +782,7 @@ impl EditorApp {
                                 .constraint_tool
                                 .as_ref()
                                 .map(|tool| tool.first.map(|first| first.point)),
+                            plugin_mouse,
                             play_camera: match sequence.and_then(|p| p.camera) {
                                 Some(shot) => Some(crate::viewport::PlayCamera {
                                     shown: axcenity_script::CameraView {

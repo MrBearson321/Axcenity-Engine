@@ -436,3 +436,64 @@ fn a_sliders_parts_restyle_through_their_pseudo_elements() {
     let hovered = lay_out_at(&mut ui, &world, &sheets, Some([120.0, 12.0]));
     assert_eq!(in_colour(&hovered, 0x0000ff).len(), 1);
 }
+
+/// An editor plugin's dock tab (Phase 54): a ScreenGui outside the tree,
+/// laid out alone with `UiInteraction::only`. Its Slider drags, its
+/// TextButton is hit, and its stylesheet restyles it.
+#[test]
+fn a_screen_gui_outside_the_tree_works_alone() {
+    let mut world = World::new();
+    // The game's own UI isn't drawn in the plugin's tab.
+    let game = screen_gui(&mut world);
+    element(
+        &mut world,
+        game,
+        ClassName::Frame,
+        "game",
+        [0.0, 0.0, 50.0, 50.0],
+    );
+    let tab = world.create(ClassName::ScreenGui).unwrap();
+    let slider = element(
+        &mut world,
+        tab,
+        ClassName::Slider,
+        "amount",
+        [0.0, 0.0, 240.0, 24.0],
+    );
+    let apply = element(
+        &mut world,
+        tab,
+        ClassName::TextButton,
+        "apply",
+        [0.0, 40.0, 100.0, 30.0],
+    );
+    let blue = css("#apply { background-color: #0000ff; }");
+    let red = css("#apply { background-color: #ff0000; }");
+    let mut ui = UiInteraction::only(tab);
+    let frame = |ui: &mut UiInteraction, world: &World, sheets: &[Stylesheet]| {
+        ui.layout(world, (300, 200), sheets, UiInput::default(), None, 0.0)
+    };
+    let layout = frame(&mut ui, &world, &blue);
+    let ids: Vec<_> = layout.elements.iter().map(|element| element.id).collect();
+    assert_eq!(ids, [slider, apply]);
+    assert_eq!(layout.hit_button(50.0, 55.0), Some(apply));
+    let button_colour = |layout: &UiLayout| {
+        layout
+            .draw_items
+            .iter()
+            .find_map(|item| match item {
+                UiDrawItem::Rectangle(rect) if rect.position == [0.0, 40.0] => Some(rect.color),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(button_colour(&layout), [0.0, 0.0, 1.0, 1.0]);
+    assert_eq!(
+        button_colour(&frame(&mut ui, &world, &red)),
+        [1.0, 0.0, 0.0, 1.0]
+    );
+
+    ui.press(&world, [230.0, 12.0]).apply(&mut world);
+    let _ = ui.release(&world, Some([230.0, 12.0])).apply(&mut world);
+    assert_eq!(number(&world, slider), 100.0);
+}

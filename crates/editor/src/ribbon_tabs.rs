@@ -44,10 +44,12 @@ pub enum RibbonGroup {
     Check,
     /// Collider, raycast, bounds and emitter overlays.
     Overlays,
+    /// The toolbars the editor's Lua plugins made (Phase 54).
+    Plugins,
 }
 
 impl RibbonGroup {
-    pub const ALL: [RibbonGroup; 15] = [
+    pub const ALL: [RibbonGroup; 16] = [
         RibbonGroup::Game,
         RibbonGroup::Tools,
         RibbonGroup::Build,
@@ -63,6 +65,7 @@ impl RibbonGroup {
         RibbonGroup::Panels,
         RibbonGroup::Check,
         RibbonGroup::Overlays,
+        RibbonGroup::Plugins,
     ];
 
     /// The caption under the group.
@@ -83,6 +86,7 @@ impl RibbonGroup {
             RibbonGroup::Panels => "Panels",
             RibbonGroup::Check => "Check",
             RibbonGroup::Overlays => "Overlays",
+            RibbonGroup::Plugins => "Plugins",
         }
     }
 
@@ -107,6 +111,7 @@ impl RibbonGroup {
             RibbonGroup::Panels => "Show or hide the Explorer, Properties, Console and Assets",
             RibbonGroup::Check => "Scan the project for missing and broken assets",
             RibbonGroup::Overlays => "Collider, raycast, bounds and audio-emitter overlays",
+            RibbonGroup::Plugins => "Buttons the project's and your plugins add",
         }
     }
 }
@@ -121,10 +126,11 @@ pub enum BuiltInTab {
     Script,
     Test,
     View,
+    Plugins,
 }
 
 impl BuiltInTab {
-    pub const ALL: [BuiltInTab; 7] = [
+    pub const ALL: [BuiltInTab; 8] = [
         BuiltInTab::Home,
         BuiltInTab::Model,
         BuiltInTab::Terrain,
@@ -132,6 +138,7 @@ impl BuiltInTab {
         BuiltInTab::Script,
         BuiltInTab::Test,
         BuiltInTab::View,
+        BuiltInTab::Plugins,
     ];
 
     pub fn label(self) -> &'static str {
@@ -143,6 +150,7 @@ impl BuiltInTab {
             BuiltInTab::Script => "Script",
             BuiltInTab::Test => "Test",
             BuiltInTab::View => "View",
+            BuiltInTab::Plugins => "Plugins",
         }
     }
 
@@ -156,6 +164,7 @@ impl BuiltInTab {
             BuiltInTab::Script => icons::CODE,
             BuiltInTab::Test => icons::FLASK,
             BuiltInTab::View => icons::EYE,
+            BuiltInTab::Plugins => icons::PUZZLE_PIECE,
         }
     }
 
@@ -169,6 +178,7 @@ impl BuiltInTab {
             BuiltInTab::Script => &[Game, Scripts],
             BuiltInTab::Test => &[Game, Check],
             BuiltInTab::View => &[Panels, Overlays],
+            BuiltInTab::Plugins => &[Plugins],
         }
     }
 }

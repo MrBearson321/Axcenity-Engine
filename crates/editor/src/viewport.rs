@@ -184,6 +184,9 @@ pub struct ViewportOutput {
     pub terrain: Option<TerrainPointer>,
     /// With the Constraint tool on: the part surface clicked, if any.
     pub surface: Option<SurfacePick>,
+    /// The mouse over the Scene View for the editor's plugins
+    /// (`plugin:GetMouse()`), while any run and the game doesn't.
+    pub plugin_mouse: Option<axcenity_plugins::MouseInput>,
     /// What drawing the scene took, for the Profiler.
     pub render: Option<RenderCost>,
     /// Materials whose surface shaders didn't compile, each once, for the
@@ -304,6 +307,9 @@ pub struct ViewportScene<'a> {
     /// surfaces instead of selecting or dragging. Holds the first surface
     /// once it's picked, to mark it.
     pub constraint_pick: Option<Option<Vec3>>,
+    /// While plugins run (outside Play): whether one has the left button
+    /// (`plugin:Activate(true)`), which then neither selects nor drags.
+    pub plugin_mouse: Option<bool>,
     /// The camera during Play (`Session::shown_camera`, with whether the
     /// game holds the view). A controller's or a script's camera doesn't
     /// move the fly camera, so Stop shows it where it was.
@@ -455,6 +461,8 @@ pub struct Viewport {
     /// True from the left button going down with a terrain brush until
     /// it's let go.
     terrain_stroke: bool,
+    /// The left button went down over the viewport for a plugin and is held.
+    plugin_press: bool,
     /// Terrains' chunk meshes and weights, kept between frames, and the
     /// Terrain Studio's previews and views.
     pub terrain: TerrainCache,
@@ -517,6 +525,7 @@ impl Viewport {
             drag: None,
             particles: Particles::new(),
             terrain_stroke: false,
+            plugin_press: false,
             terrain: TerrainCache::new(),
             character_look: (0.0, 0.0),
             character_zoom: 0.0,
@@ -709,6 +718,7 @@ impl Viewport {
             poses,
             terrain_brush,
             constraint_pick,
+            plugin_mouse,
             play_camera,
             graphics,
         } = scene;
@@ -716,7 +726,8 @@ impl Viewport {
         let brush = terrain_brush.filter(|_| tool.is_some());
         // So does the Constraint tool, which picks surfaces.
         let picking = constraint_pick.filter(|_| tool.is_some());
-        let drag_tool = if brush.is_some() || picking.is_some() {
+        let plugin_button = plugin_mouse == Some(true) && play_camera.is_none();
+        let drag_tool = if brush.is_some() || picking.is_some() || plugin_button {
             None
         } else {
             tool
@@ -919,7 +930,7 @@ impl Viewport {
                 modifiers,
                 keep_group: selection.contains(&part),
             }),
-            None if drag.in_use || brush.is_some() || picking.is_some() => None,
+            None if drag.in_use || brush.is_some() || picking.is_some() || plugin_button => None,
             None => self.clicked_part(ui, &response, &screen, world, &ui_scene, &lights),
         };
         let playing = tool.is_none() && response.clicked_by(egui::PointerButton::Primary);
@@ -1156,6 +1167,9 @@ impl Viewport {
         }
         let surface = picking
             .and_then(|first| self.surface_input(ui, &response, rect, &screen, world, first));
+        let plugin_mouse = plugin_mouse
+            .filter(|_| play_camera.is_none())
+            .and_then(|_| self.plugin_input(ui, &response, &screen, world));
         ViewportOutput {
             clicked,
             activated,
@@ -1172,6 +1186,7 @@ impl Viewport {
             drop,
             terrain,
             surface,
+            plugin_mouse,
             render: Some(render),
             shader_errors,
         }

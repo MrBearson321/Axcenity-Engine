@@ -33,6 +33,7 @@ mod anchor_handles;
 mod anchors;
 pub(crate) mod arrange;
 mod artboard;
+pub(crate) use artboard::sketch;
 pub(crate) mod bevel;
 mod event_graph;
 mod group;

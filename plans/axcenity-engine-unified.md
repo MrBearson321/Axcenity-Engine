@@ -1710,10 +1710,10 @@ Live preview scrubs in the editor without entering Play. Blocks: "play cutscene"
 
 ### Acceptance criteria
 
-- [ ] An example "Align to grid" plugin adds a ribbon button that snaps the selected parts to 1 stud, as one undo step.
-- [ ] A plugin dock tab with a Slider and a TextButton works and restyles through CSS.
-- [ ] A plugin that errors shows the error with `file:line` in Output and in the Plugins panel, and the editor keeps running.
-- [ ] Built games and the player contain no plugin code. A plugin can't read a file outside the project.
+- [x] An example "Align to grid" plugin adds a ribbon button that snaps the selected parts to 1 stud, as one undo step.
+- [x] A plugin dock tab with a Slider and a TextButton works and restyles through CSS.
+- [x] A plugin that errors shows the error with `file:line` in Output and in the Plugins panel, and the editor keeps running.
+- [x] Built games and the player contain no plugin code. A plugin can't read a file outside the project.
 
 ---
 

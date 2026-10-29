@@ -300,6 +300,12 @@ impl EditorApp {
         if let Some(project) = &mut self.project {
             project.saved_terrains = terrain::terrain_revisions(&self.world);
         }
+        // Plugins hold the old world's Instances: they start again on this one.
+        for entry in &mut self.plugins.entries {
+            entry.running = None;
+            entry.widgets.clear();
+        }
+        self.load_plugins();
     }
     /// File > Set Up VS Code Autocomplete: writes the files luau-lsp needs
     /// into the project, and says what to do next.

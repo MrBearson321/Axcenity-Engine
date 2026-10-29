@@ -104,7 +104,9 @@ pub(super) fn find_stylesheet_files(
             }
         };
         if file_type.is_dir() {
-            if !name.starts_with('.') && name != "target" && name != "node_modules" {
+            // The editor's plugins style their own dock tabs, never the game.
+            let plugins = prefix.is_empty() && name == crate::PLUGINS_FOLDER;
+            if !name.starts_with('.') && name != "target" && name != "node_modules" && !plugins {
                 folders.push((path, shown));
             }
         } else if file_type.is_file()

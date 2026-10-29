@@ -354,7 +354,7 @@ pub fn layout_ui_viewed(
             ..PseudoClasses::default()
         },
         camera,
-        None,
+        ScreenGuis::default(),
     )
 }
 
@@ -380,7 +380,7 @@ pub fn layout_ui_interactive(
             ..PseudoClasses::default()
         },
         camera,
-        input.on_top,
+        ScreenGuis::workspace(input.on_top),
     );
     let hovered = input.pointer.and_then(|[x, y]| base.hover_target(x, y));
     let active = input.pressed.filter(|button| hovered == Some(*button));
@@ -396,7 +396,7 @@ pub fn layout_ui_interactive(
             ..PseudoClasses::default()
         },
         camera,
-        input.on_top,
+        ScreenGuis::workspace(input.on_top),
     );
     layout.hovered = hovered;
     layout.active = active;
@@ -405,6 +405,21 @@ pub fn layout_ui_interactive(
 
 /// Lays out the enabled ScreenGuis by `DisplayOrder` (ties in tree
 /// order), then the BillboardGuis, then `on_top` (see [`UiInput::on_top`]).
+/// Which ScreenGuis [`layout_ui_with_pseudo`] lays out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ScreenGuis {
+    /// The Workspace's, with this one last (see [`UiInput::on_top`]).
+    pub(crate) on_top: Option<InstanceId>,
+    /// Only this one, wherever it is, instead (see [`UiInteraction::only`]).
+    pub(crate) only: Option<InstanceId>,
+}
+
+impl ScreenGuis {
+    fn workspace(on_top: Option<InstanceId>) -> Self {
+        Self { on_top, only: None }
+    }
+}
+
 pub(crate) fn layout_ui_with_pseudo(
     world: &World,
     width: u32,
@@ -412,12 +427,21 @@ pub(crate) fn layout_ui_with_pseudo(
     stylesheets: &[Stylesheet],
     pseudo: PseudoClasses<'_>,
     camera: Option<&Camera>,
-    on_top: Option<InstanceId>,
+    guis: ScreenGuis,
 ) -> UiLayout {
     let mut layout = UiLayout::default();
     if width == 0 || height == 0 {
         return layout;
     }
+    // A plugin's dock tab: just its ScreenGui, wherever that is.
+    if let Some(only) = guis.only {
+        if enabled_screen_gui(world, only) {
+            let screen = (width, height, [0.0; 4]);
+            layout_screen_gui(world, only, screen, stylesheets, pseudo, &mut layout);
+        }
+        return layout;
+    }
+    let on_top = guis.on_top;
 
     let workspace = world.workspace();
     let mut guis: Vec<(f64, InstanceId)> = world

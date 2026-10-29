@@ -50,6 +50,10 @@
 //! it with the world. Copies keep every `InstanceId`, so older steps still work.
 //! Applying a prefab copy's overrides is such a step that also keeps the
 //! prefab file's text before and after ([`History::record_world_and_files`]).
+//!
+//! A plugin's edits (Phase 54) are worked out afterwards from the world
+//! before and after, Instance by Instance, and merge until its next
+//! waypoint ([`History::record_edits`], in `edits`).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -298,6 +302,8 @@ enum StepKind {
         other: WorldCopy,
         texts: Vec<TextChange>,
     },
+    /// What a plugin's Lua did between waypoints (see `edits`).
+    Edits(edits::Edits),
 }
 
 /// A whole world kept by a step. Its own type, to print as just its size in
@@ -1013,6 +1019,7 @@ impl History {
                     put_annotations(world, *id, before);
                 }
             }
+            StepKind::Edits(edits) => edits.undo(world),
             StepKind::World { other, texts } => {
                 std::mem::swap(world, &mut *other.0);
                 undone = texts
@@ -1098,6 +1105,7 @@ impl History {
                     put_annotations(world, *id, after);
                 }
             }
+            StepKind::Edits(edits) => edits.redo(world),
             StepKind::World { other, texts } => {
                 std::mem::swap(world, &mut *other.0);
                 redone = texts.clone();
@@ -1193,6 +1201,9 @@ fn restore<'a>(
         }
     }
 }
+
+mod edits;
+pub use edits::changed_ids;
 
 #[cfg(test)]
 mod tests;

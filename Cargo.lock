@@ -632,6 +632,7 @@ dependencies = [
  "axcenity-mesh-edit",
  "axcenity-nav",
  "axcenity-physics",
+ "axcenity-plugins",
  "axcenity-project",
  "axcenity-render",
  "axcenity-save",
@@ -721,6 +722,18 @@ dependencies = [
  "pollster",
  "serde_json",
  "winit",
+]
+
+[[package]]
+name = "axcenity-plugins"
+version = "0.1.0"
+dependencies = [
+ "axcenity-core",
+ "axcenity-script",
+ "axcenity-workspace-hack",
+ "mlua",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

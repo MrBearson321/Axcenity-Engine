@@ -49,6 +49,52 @@ impl Viewport {
         }
     }
 
+    /// The mouse over the viewport for the editor's plugins: what it points
+    /// at, and whether it moved or its left button went down or up.
+    /// `None` while it's elsewhere and nothing happened.
+    pub(super) fn plugin_input(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        screen: &Screen,
+        world: &World,
+    ) -> Option<axcenity_plugins::MouseInput> {
+        let (pointer, pressed, released, delta, alt) = ui.input(|input| {
+            (
+                input.pointer.latest_pos(),
+                input.pointer.primary_pressed(),
+                input.pointer.primary_released(),
+                input.pointer.delta(),
+                input.modifiers.alt,
+            )
+        });
+        let over = pointer.filter(|_| response.contains_pointer())?;
+        // Alt+left-drag orbits the camera instead.
+        let pressed = pressed && !alt;
+        if pressed {
+            self.plugin_press = true;
+        }
+        let released = released && std::mem::take(&mut self.plugin_press);
+        let moved = delta != egui::Vec2::ZERO;
+        if !(pressed || released || moved) {
+            return None;
+        }
+        let ray = screen.ray(over);
+        let hit = axcenity_scene::pick_hit(world, ray, None);
+        // Nothing under the mouse: a point far along the ray.
+        let distance = hit.map_or(1000.0, |hit| hit.distance);
+        let point = ray.origin + ray.direction * distance;
+        Some(axcenity_plugins::MouseInput {
+            state: axcenity_plugins::MouseState {
+                hit: axcenity_core::Vector3::new(point.x, point.y, point.z),
+                target: hit.map(|hit| hit.part),
+            },
+            moved,
+            pressed,
+            released,
+        })
+    }
+
     /// The Constraint tool: marks the part surface under the mouse (and
     /// `first`, the surface already picked), and gives the one clicked.
     /// Alt+left-drag still orbits the camera.

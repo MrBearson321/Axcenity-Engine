@@ -175,7 +175,7 @@ fn collect_runtime_files(
             if directory == root
                 && matches!(
                     name.to_str(),
-                    Some(".git" | ".vscode" | ".axcenity" | "target")
+                    Some(".git" | ".vscode" | ".axcenity" | "target" | crate::PLUGINS_FOLDER)
                 )
             {
                 continue;

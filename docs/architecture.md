@@ -23,3 +23,4 @@ Map only. Open the one file that matches the change.
 - Build tools: [editor/building.md](editor/building.md)
 - Assets panel: [editor/assets.md](editor/assets.md)
 - Server, client, and modules in the editor: [editor/sides.md](editor/sides.md)
+- Lua editor plugins: [editor/plugins.md](editor/plugins.md)

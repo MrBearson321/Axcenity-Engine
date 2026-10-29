@@ -328,6 +328,20 @@ pub fn destroy(lua: &Lua, id: InstanceId) -> mlua::Result<()> {
         going.extend(world.descendants(id));
         going
     };
+    // The editor's plugins: an Instance in the tree only leaves it, so the
+    // editor can undo that (see `edit`).
+    if lua.app_data_ref::<crate::edit::DetachOnDestroy>().is_some() {
+        let in_tree = {
+            let world = world(lua)?;
+            world.is_descendant_of(id, world.root())
+        };
+        if in_tree {
+            world_mut(lua)?
+                .set_parent(id, None)
+                .map_err(|err| mlua::Error::runtime(err.to_string()))?;
+            return Ok(());
+        }
+    }
     if lua.app_data_ref::<Destroying>().is_none() {
         lua.set_app_data(Destroying::default());
     }

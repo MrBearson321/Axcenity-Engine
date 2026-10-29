@@ -818,3 +818,26 @@ fn sound_groups_and_their_effects_save_with_the_world() {
         "{text}"
     );
 }
+
+/// The editor's plugins (`plugins/`, Phase 54) never reach the game: a
+/// built game has none of their files, and their stylesheets don't style
+/// the game.
+#[test]
+fn built_games_and_the_game_ui_have_no_plugin_files() {
+    let example = examples_folder().join("hello-plugins");
+    assert!(example.join("plugins/part-tools/widget.css").is_file());
+    let project = load(&example).unwrap();
+    assert!(project.problems.is_empty(), "{:?}", project.problems);
+    let mut problems = Vec::new();
+    let stylesheets = find_stylesheets(&example, &mut problems);
+    assert!(
+        stylesheets.iter().all(|path| !path.starts_with("plugins/")),
+        "{stylesheets:?}"
+    );
+
+    let built = temp_folder("hello-plugins-built");
+    unpack_game(&pack_game(&example).unwrap(), &built).unwrap();
+    assert!(built.join(WORLD_FILE).is_file());
+    assert!(!built.join(PLUGINS_FOLDER).exists());
+    fs::remove_dir_all(built).unwrap();
+}

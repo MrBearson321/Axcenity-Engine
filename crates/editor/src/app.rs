@@ -41,6 +41,7 @@ mod material_files;
 mod material_tab;
 mod mixer;
 mod nav_overlay;
+mod plugins;
 mod prefabs;
 mod probes;
 mod sequencer;
@@ -240,6 +241,8 @@ pub struct EditorApp {
     mixer: crate::mixer::Mixer,
     /// The Tests panel's tree and the run going now (Phase 53).
     game_tests: crate::game_tests::GameTests,
+    /// The editor's Lua plugins, their dock tabs and saved settings (Phase 54).
+    plugins: crate::plugins::Plugins,
     /// The last asset check, for the Asset Check panel.
     asset_check: AssetCheck,
     /// The Tags panel's rename box.
@@ -384,6 +387,13 @@ impl egui_dock::TabViewer for DockViewer<'_> {
     fn title(&mut self, pane: &mut Pane) -> egui::WidgetText {
         match pane {
             Pane::Script(id) => self.app.tabs.title(*id, &self.visuals),
+            Pane::Plugin(id) => egui::RichText::new(theme::with_icon(
+                icons::PUZZLE_PIECE,
+                &self.app.plugin_pane_title(*id),
+            ))
+            .family(theme::medium_family())
+            .size(theme::type_scale::BODY - 0.5)
+            .into(),
             _ => pane.title(),
         }
     }
@@ -412,7 +422,9 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Levels => self.app.levels_pane(ui),
             Pane::Sequencer => self.app.sequencer_pane(ui),
             Pane::Tests => self.app.tests_pane(ui),
+            Pane::Plugins => self.app.plugins_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
+            Pane::Plugin(id) => self.app.plugin_pane(ui, *id, self.render_state),
         }
     }
 
@@ -429,6 +441,9 @@ impl egui_dock::TabViewer for DockViewer<'_> {
                     .request_and_go_ahead(&self.ctx, Discard::CloseTab(path));
             }
             return egui_dock::tab_viewer::OnCloseResponse::Ignore;
+        }
+        if let Pane::Plugin(id) = pane {
+            self.app.close_plugin_pane(*id);
         }
         egui_dock::tab_viewer::OnCloseResponse::Close
     }
@@ -637,6 +652,7 @@ impl EditorApp {
             profiler: Profiler::default(),
             mixer: crate::mixer::Mixer::default(),
             game_tests: crate::game_tests::GameTests::default(),
+            plugins: crate::plugins::Plugins::default(),
             asset_check: AssetCheck::default(),
             tags: crate::tags::TagsPanel::default(),
             tabs: ScriptTabs::default(),
@@ -912,6 +928,10 @@ impl EditorApp {
             project.watcher.wake(ctx);
         }
         self.check_disk();
+        let seconds = ctx
+            .input(|input| f64::from(input.stable_dt))
+            .min(MAX_FRAME_SECONDS);
+        self.plugins_frame(seconds);
         if self.bake_probes_asked
             && let Some(render_state) = render_state
         {
@@ -1106,6 +1126,9 @@ impl EditorApp {
             self.constraint_surface(pick);
             ctx.request_repaint();
         }
+        if let Some(mouse) = output.plugin_mouse {
+            self.plugin_mouse(mouse);
+        }
         if self.constraint_tool.is_some()
             && (self.playing() || ctx.input(|input| input.key_pressed(egui::Key::Escape)))
         {
@@ -1276,6 +1299,8 @@ mod mover_tests;
 mod navigation_tests;
 #[cfg(test)]
 mod play_tests;
+#[cfg(test)]
+mod plugin_tests;
 #[cfg(test)]
 mod posing_tests;
 #[cfg(test)]

@@ -480,7 +480,8 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::Tags => app.tags_pane(ui),
                         Pane::Levels => app.levels_pane(ui),
                         Pane::Sequencer => app.sequencer_pane(ui),
-                        Pane::Scene | Pane::Script(_) => {}
+                        Pane::Plugins => app.plugins_pane(ui),
+                        Pane::Scene | Pane::Script(_) | Pane::Plugin(_) => {}
                     }
                     fit = Some((ui.min_rect(), room));
                 });
@@ -1388,7 +1389,8 @@ fn set_up_autocomplete_writes_the_files_and_opening_refreshes_old_definitions() 
     app.set_up_autocomplete();
     assert_eq!(
         last_line(&app).text,
-        "Set up autocomplete: wrote `.axcenity/axcenity.d.luau`, `.vscode/settings.json` \
+        "Set up autocomplete: wrote `.axcenity/axcenity.d.luau`, \
+         `.axcenity/axcenity-plugin.d.luau`, `.vscode/settings.json` \
          and `.vscode/extensions.json`. Open the project folder in VS Code and install \
          the Luau extension (JohnnyMorganz.luau-lsp) when it asks; scripts then \
          autocomplete the engine's API."

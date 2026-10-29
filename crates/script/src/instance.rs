@@ -967,6 +967,9 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 /// `"DataService"` or `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
+        if let Some(service) = crate::edit::extra_service(lua, &name) {
+            return Ok(service);
+        }
         match name.as_str() {
             "UserInputService" => {
                 sides::check(lua, &name)?;

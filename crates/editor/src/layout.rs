@@ -65,14 +65,20 @@ pub enum Pane {
     /// The project's game tests and how they went (`game_tests.rs`,
     /// Phase 53). Starts closed.
     Tests,
+    /// The editor's Lua plugins: on, off and their errors (`plugins.rs`,
+    /// Phase 54). Starts closed.
+    Plugins,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
+    /// A plugin's dock tab, by its number (`WidgetView::pane`). Not saved:
+    /// plugins open their tabs again when they start.
+    Plugin(u64),
 }
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 17] = [
+    pub const CLOSABLE: [Pane; 18] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -90,6 +96,7 @@ impl Pane {
         Pane::Levels,
         Pane::Sequencer,
         Pane::Tests,
+        Pane::Plugins,
     ];
 
     pub fn label(self) -> &'static str {
@@ -112,7 +119,9 @@ impl Pane {
             Pane::Levels => "Levels",
             Pane::Sequencer => "Sequencer",
             Pane::Tests => "Tests",
+            Pane::Plugins => "Plugins",
             Pane::Script(_) => "Script",
+            Pane::Plugin(_) => "Plugin",
         }
     }
 
@@ -136,7 +145,9 @@ impl Pane {
             Pane::Levels => icons::STACK,
             Pane::Sequencer => icons::FILM_SLATE,
             Pane::Tests => icons::FLASK,
+            Pane::Plugins => icons::PUZZLE_PIECE,
             Pane::Script(_) => icons::CODE,
+            Pane::Plugin(_) => icons::PUZZLE_PIECE,
         }
     }
 
@@ -208,7 +219,9 @@ impl Layout {
             | Pane::Material
             | Pane::Sequencer => Some(Pane::Scene),
             // A tab beside Properties, down the right.
-            Pane::Terrain | Pane::Tags | Pane::Levels => Some(Pane::Properties),
+            Pane::Terrain | Pane::Tags | Pane::Levels | Pane::Plugins | Pane::Plugin(_) => {
+                Some(Pane::Properties)
+            }
             Pane::Script(_) => Some(Pane::Scene),
         };
         let beside = neighbor
@@ -222,7 +235,13 @@ impl Layout {
             }
             // Its neighbor is closed too: split it off the Scene's side.
             (
-                Pane::Explorer | Pane::Properties | Pane::Terrain | Pane::Tags | Pane::Levels,
+                Pane::Explorer
+                | Pane::Properties
+                | Pane::Terrain
+                | Pane::Tags
+                | Pane::Levels
+                | Pane::Plugins
+                | Pane::Plugin(_),
                 None,
             ) => {
                 tree.split_right(NodeIndex::root(), 0.78, vec![pane]);
@@ -270,6 +289,18 @@ impl Layout {
         }
     }
 
+    /// Makes the plugin dock tabs match `open`, the plugin widgets that
+    /// show: new ones open beside Properties, and the rest close.
+    pub fn sync_plugins(&mut self, open: &[u64]) {
+        for &id in open {
+            if !self.is_open(Pane::Plugin(id)) {
+                self.open(Pane::Plugin(id));
+            }
+        }
+        self.dock
+            .retain_tabs(|pane| !matches!(pane, Pane::Plugin(id) if !open.contains(id)));
+    }
+
     /// Puts every panel back where it starts. Open scripts come back beside
     /// the Scene.
     pub fn reset(&mut self) {
@@ -282,7 +313,7 @@ impl Layout {
     pub fn to_text(&self) -> String {
         let dock = self
             .dock
-            .filter_tabs(|pane| !matches!(pane, Pane::Script(_)));
+            .filter_tabs(|pane| !matches!(pane, Pane::Script(_) | Pane::Plugin(_)));
         serde_json::to_string(&dock).unwrap_or_default()
     }
 
@@ -451,6 +482,7 @@ mod tests {
                     | Pane::Sequencer
                     | Pane::Mixer
                     | Pane::Tests
+                    | Pane::Plugins
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;

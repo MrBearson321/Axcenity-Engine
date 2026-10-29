@@ -58,6 +58,11 @@ enum ResumeWith {
 }
 
 impl Scheduler {
+    /// True while a coroutine is waiting (`task.wait`, `task.delay`).
+    pub fn has_waiting(&self) -> bool {
+        !self.waiting.is_empty()
+    }
+
     /// Pauses `thread` (already yielding) for `seconds`. A wait of 0 lasts
     /// until the next step, so a loop around `task.wait()` runs once a frame.
     pub fn wait(&mut self, thread: Thread, seconds: f64) {

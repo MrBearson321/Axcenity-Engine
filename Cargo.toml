@@ -22,6 +22,7 @@ axcenity-core = { path = "crates/core" }
 axcenity-mesh-edit = { path = "crates/mesh_edit" }
 axcenity-nav = { path = "crates/nav" }
 axcenity-physics = { path = "crates/physics" }
+axcenity-plugins = { path = "crates/plugins" }
 axcenity-project = { path = "crates/project" }
 axcenity-render = { path = "crates/render" }
 axcenity-save = { path = "crates/save" }

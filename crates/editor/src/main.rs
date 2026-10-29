@@ -41,6 +41,7 @@ mod node_graph;
 mod output;
 mod placing;
 mod play;
+mod plugins;
 mod prefab_menu;
 mod profiler;
 mod properties;
@@ -166,6 +167,7 @@ fn main() -> eframe::Result {
             let mut app = EditorApp::new(None);
             app.load_settings(ctx, creation_context.storage);
             app.set_global_assets(global_assets::default_folder());
+            app.set_plugin_data(plugins::default_folder());
             // Read in the background, so the window and splash show at once.
             if let Some(handoff) = &handoff {
                 app.resume(ctx, handoff);

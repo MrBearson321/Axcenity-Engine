@@ -172,6 +172,7 @@ impl EditorApp {
                     .on_disabled_hover_text("Open a project first.")
                     .clicked();
             }),
+            RibbonGroup::Plugins => self.plugin_ribbon_groups(ui),
             RibbonGroup::Tools => ribbon::group(ui, "Tools", |ui| {
                 self.tool_buttons(ui, &Tool::TRANSFORM);
             }),

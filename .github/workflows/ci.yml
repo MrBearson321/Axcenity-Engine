@@ -59,7 +59,7 @@ jobs:
       - name: Check the player has no editor code
         shell: bash
         run: |
-          if cargo tree -p axcenity-player -e normal --prefix none --locked | grep -E '^(axcenity-editor|axcenity-blocks|eframe|egui|subsecond) '; then
+          if cargo tree -p axcenity-player -e normal --prefix none --locked | grep -E '^(axcenity-editor|axcenity-blocks|axcenity-plugins|eframe|egui|subsecond) '; then
             echo "axcenity-player depends on editor code"
             exit 1
           fi

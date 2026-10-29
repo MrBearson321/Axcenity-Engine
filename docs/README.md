@@ -33,6 +33,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Project files, export, licenses, or GitHub releases | [project-and-export.md](project-and-export.md), then one file |
 | Data tables, the Data Table tab, or `DataService` | [project/data-tables.md](project/data-tables.md) |
 | Game tests (`tests/*.spec.lua`), the Tests panel, `axcenity-test` | [project/game-tests.md](project/game-tests.md) |
+| Editor plugins (`plugins/`, the plugin API, the Plugins panel) | [editor/plugins.md](editor/plugins.md) |
 | In-game UI, the string table and languages | [ui.md](ui.md) |
 | Terrain algorithms | [terrain.md](terrain.md) |
 
