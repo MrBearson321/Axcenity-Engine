@@ -364,6 +364,7 @@ pub fn build_draw_list_posed(
         sky: settings.sky,
         fog: settings.fog,
         clouds: settings.clouds,
+        weather: crate::weather::settled(world),
         camera,
         sun: settings.sun,
         ambient: settings.ambient,

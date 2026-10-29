@@ -19,6 +19,7 @@ mod reflection_probes;
 mod skinning;
 mod surface_shaders;
 mod texture_budget;
+mod weather;
 
 #[test]
 fn zero_sized_window_has_nothing_to_draw() {
@@ -137,6 +138,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
         },
         fog: crate::Fog::default(),
         clouds: crate::Clouds::default(),
+        weather: crate::Weather::default(),
         camera: Camera {
             position: Vec3::ZERO,
             look_at: Vec3::NEG_Z,

@@ -459,8 +459,8 @@ One `Weather` state (under Lighting) holds precipitation (none, rain, snow), int
 
 ### Acceptance criteria
 
-- [ ] Turning rain on wets surfaces over time and drying reverses it. Snow cover whitens tops but not walls.
-- [ ] Weather saves with the world, can be scripted, and costs nothing when off.
+- [x] Turning rain on wets surfaces over time and drying reverses it. Snow cover whitens tops but not walls.
+- [x] Weather saves with the world, can be scripted, and costs nothing when off.
 
 ---
 

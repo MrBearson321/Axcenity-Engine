@@ -194,6 +194,10 @@ pub enum ClassName {
     /// whose shadows fall on the world. The Workspace's `GlobalWind`
     /// carries it along.
     Clouds,
+    /// Inside Lighting: rain or snow falling around the camera, and how wet
+    /// and snow-covered every surface is. Changes ease in over
+    /// `TransitionTime`.
+    Weather,
     /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
     ParticleEmitter,
     /// Inside a Part, MeshPart, Model, ScreenGui or UI element: plays
@@ -342,7 +346,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 108] = [
+    pub const ALL: [ClassName; 109] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -402,6 +406,7 @@ impl ClassName {
         ClassName::LightProbeVolume,
         ClassName::Atmosphere,
         ClassName::Clouds,
+        ClassName::Weather,
         ClassName::ParticleEmitter,
         ClassName::Animator,
         ClassName::Animation,
@@ -518,6 +523,7 @@ impl ClassName {
             ClassName::LightProbeVolume => "LightProbeVolume",
             ClassName::Atmosphere => "Atmosphere",
             ClassName::Clouds => "Clouds",
+            ClassName::Weather => "Weather",
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
@@ -1021,6 +1027,28 @@ impl ClassName {
                 // (south). The Workspace's GlobalWind adds to it.
                 ("Speed", Value::Number(20.0)),
                 ("Direction", Value::Number(0.0)),
+            ],
+            ClassName::Weather => vec![
+                // What falls around the camera (`Enum.Precipitation`): None,
+                // Rain or Snow. Rain wets surfaces as it falls, and snow
+                // covers them.
+                (
+                    "Precipitation",
+                    Value::EnumItem(EnumItem {
+                        enum_name: "Precipitation".to_owned(),
+                        item: "Rain".to_owned(),
+                    }),
+                ),
+                // How hard it falls, from 0 to 1.
+                ("Intensity", Value::Number(0.5)),
+                // How wet surfaces are, and how much snow covers the ones
+                // facing up, from 0 to 1, whatever is falling (puddles
+                // after the rain, old snow).
+                ("Wetness", Value::Number(0.0)),
+                ("SnowCover", Value::Number(0.0)),
+                // Seconds a change takes to ease in: rain wetting surfaces,
+                // drying, snow settling or melting.
+                ("TransitionTime", Value::Number(10.0)),
             ],
             ClassName::ParticleEmitter => vec![
                 ("Enabled", Value::Bool(true)),
@@ -2232,6 +2260,7 @@ impl ClassName {
             | ClassName::LightProbeVolume
             | ClassName::Atmosphere
             | ClassName::Clouds
+            | ClassName::Weather
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer

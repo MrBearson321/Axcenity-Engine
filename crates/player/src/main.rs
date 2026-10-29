@@ -1591,6 +1591,7 @@ impl ApplicationHandler for App {
                     size,
                 ));
                 draw_list.sprites = self.particles.sprites(&self.world, &self.assets);
+                self.particles.add_weather(&mut draw_list);
                 self.shader_time += seconds;
                 draw_list.time = self.shader_time;
                 if self.show_splash {
@@ -1681,6 +1682,9 @@ mod time_of_day_tests;
 
 #[cfg(test)]
 mod clouds_tests;
+
+#[cfg(test)]
+mod weather_tests;
 
 #[cfg(test)]
 mod bench_tests;

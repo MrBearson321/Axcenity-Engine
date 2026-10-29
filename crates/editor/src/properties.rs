@@ -80,7 +80,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 24] = [
+const GROUPS: [(&str, &[&str]); 25] = [
     (
         "Appearance",
         &[
@@ -281,6 +281,16 @@ const GROUPS: [(&str, &[&str]); 24] = [
     ),
     ("Clouds", &["Cover", "Density", "Speed", "Direction"]),
     (
+        "Weather",
+        &[
+            "Precipitation",
+            "Intensity",
+            "Wetness",
+            "SnowCover",
+            "TransitionTime",
+        ],
+    ),
+    (
         "Post-processing",
         &[
             "PostProcessingEnabled",
@@ -395,6 +405,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
             }
             "Atmosphere" => instance.class() == ClassName::Atmosphere,
             "Clouds" => instance.class() == ClassName::Clouds,
+            "Weather" => instance.class() == ClassName::Weather,
             "Light" => matches!(
                 instance.class(),
                 ClassName::PointLight | ClassName::SpotLight
@@ -880,6 +891,7 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Fog" => icons::CLOUD_FOG,
         "Atmosphere" => icons::WIND,
         "Clouds" => icons::CLOUD,
+        "Weather" => icons::CLOUD_RAIN,
         "Post-processing" => icons::SPARKLE,
         "Light" => icons::LIGHTBULB,
         "Attributes" => icons::LIST_BULLETS,
@@ -1323,11 +1335,18 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             )
             .changed()
             .then_some(Value::Number(number)),
-        // An Atmosphere's air and Clouds' cover and thickness.
-        Value::Number(mut number) if matches!(name, "Density" | "Offset" | "Cover") => ui
-            .add(egui::Slider::new(&mut number, 0.0..=1.0).clamping(egui::SliderClamping::Always))
-            .changed()
-            .then_some(Value::Number(number)),
+        // An Atmosphere's air, Clouds' cover and thickness, and the
+        // Weather's shares.
+        Value::Number(mut number)
+            if matches!(
+                name,
+                "Density" | "Offset" | "Cover" | "Intensity" | "Wetness" | "SnowCover"
+            ) =>
+        {
+            ui.add(egui::Slider::new(&mut number, 0.0..=1.0).clamping(egui::SliderClamping::Always))
+                .changed()
+                .then_some(Value::Number(number))
+        }
         Value::Number(mut number) if matches!(name, "Glare" | "Haze") => ui
             .add(egui::Slider::new(&mut number, 0.0..=10.0).clamping(egui::SliderClamping::Always))
             .changed()
@@ -1667,6 +1686,8 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         "ProximityPromptExclusivity" => vec!["OnePerButton", "OneGlobally", "AlwaysShow"],
         // The room a ReverbZone sounds like (Phase 52).
         "ReverbType" => axcenity_audio::REVERB_TYPES.to_vec(),
+        // What a Weather lets fall (graphics Phase 27).
+        "Precipitation" => vec!["None", "Rain", "Snow"],
         _ => {
             ui.label(format!("{}.{}", item.enum_name, item.item));
             return None;

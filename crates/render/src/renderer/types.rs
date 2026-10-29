@@ -91,6 +91,9 @@ pub(super) struct FrameUniform {
     pub(super) fog: fog::FogRaw,
     /// The layer of cloud in the sky (clouds.wgsl's `Clouds`).
     pub(super) clouds: clouds::CloudsRaw,
+    /// x: how wet surfaces are, y: how much snow covers them, each from 0
+    /// to 1 (lighting.wgsl's `weathered`).
+    pub(super) weather: [f32; 4],
 }
 
 /// The most point and spot lights drawn at once.

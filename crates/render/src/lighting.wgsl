@@ -77,6 +77,9 @@ struct Frame {
     fog: Fog,
     // The layer of cloud in the sky (clouds.wgsl).
     clouds: Clouds,
+    // x: how wet surfaces are, y: how much snow covers them, each from 0
+    // to 1 (`weathered`).
+    weather: vec4<f32>,
 }
 
 // The most light probe volumes drawn at once. Must match `MAX_VOLUMES` in
@@ -708,7 +711,76 @@ fn shade(
 // screen-space ambient occlusion together), `dielectric` how much a
 // non-metal reflects head-on (usually 4%), and `solid` whether it's in the
 // prepass (see-through surfaces aren't), so contact shadows can fall on it.
+// The weather changes the surface first (`weathered`).
 fn light_surface(
+    world_position: vec3<f32>,
+    geometric: vec3<f32>,
+    n: vec3<f32>,
+    pixel: vec2<f32>,
+    base_color: vec3<f32>,
+    metalness: f32,
+    roughness: f32,
+    occlusion: f32,
+    dielectric: vec3<f32>,
+    solid: bool,
+) -> vec3<f32> {
+    let weather = weathered(geometric, n, base_color, metalness, roughness);
+    return shade_surface(world_position, geometric, weather.normal, pixel, weather.base_color,
+        weather.metalness, weather.roughness, occlusion, dielectric, solid);
+}
+
+// How much darker a soaked non-metal is: water fills its pores, so less
+// light scatters back out of it.
+const WET_DARKENING: f32 = 0.5;
+// How rough a soaked surface is at most: a film of water is smooth.
+const WET_ROUGHNESS: f32 = 0.08;
+// Snow's color (linear) and roughness.
+const SNOW_COLOR: vec3<f32> = vec3<f32>(0.85, 0.87, 0.9);
+const SNOW_ROUGHNESS: f32 = 0.8;
+
+// A surface as the weather leaves it.
+struct Weathered {
+    base_color: vec3<f32>,
+    metalness: f32,
+    roughness: f32,
+    normal: vec3<f32>,
+}
+
+// The weather on a surface (`frame.weather`): wet surfaces are darker and
+// glossier, undersides less so; snow covers surfaces facing up, the
+// deeper it is the further down their slopes, and never walls. Snow is
+// judged by the surface's own normal (`geometric`), so a normal map's
+// bumps don't shed it, and it smooths the shading normal over. Dry and
+// bare, the surface is left as it is.
+fn weathered(
+    geometric: vec3<f32>,
+    n: vec3<f32>,
+    base_color: vec3<f32>,
+    metalness: f32,
+    roughness: f32,
+) -> Weathered {
+    var out = Weathered(base_color, metalness, roughness, n);
+    let wetness = frame.weather.x;
+    let cover = frame.weather.y;
+    if wetness <= 0.0 && cover <= 0.0 {
+        return out;
+    }
+    let up = geometric.y;
+    let wet = wetness * smoothstep(-1.0, -0.2, up);
+    out.base_color *= mix(1.0, WET_DARKENING, wet * (1.0 - metalness));
+    out.roughness = mix(roughness, min(roughness, WET_ROUGHNESS), wet);
+    // Full on a flat top from two thirds cover, and at full cover down to
+    // about 37 degrees of slope; nothing steeper than about 66 degrees.
+    let snow = clamp(1.5 * cover - 2.5 * (1.0 - up), 0.0, 1.0);
+    out.base_color = mix(out.base_color, SNOW_COLOR, snow);
+    out.metalness = mix(metalness, 0.0, snow);
+    out.roughness = mix(out.roughness, SNOW_ROUGHNESS, snow);
+    out.normal = normalize(mix(n, geometric, snow));
+    return out;
+}
+
+// `light_surface` for a surface the weather has already changed.
+fn shade_surface(
     world_position: vec3<f32>,
     geometric: vec3<f32>,
     n: vec3<f32>,

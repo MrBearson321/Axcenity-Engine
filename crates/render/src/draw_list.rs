@@ -22,6 +22,9 @@ pub struct DrawList {
     /// A layer of cloud high above, drawn in the sky, whose shadows fall
     /// on the world.
     pub clouds: Clouds,
+    /// How wet and snow-covered surfaces are, which every lit item and
+    /// the terrain show.
+    pub weather: Weather,
     pub camera: Camera,
     pub sun: Sun,
     pub ambient: AmbientLight,
@@ -644,6 +647,26 @@ impl Default for Clouds {
             color: [1.0; 3],
             wind: Vec3::ZERO,
         }
+    }
+}
+
+/// How wet and snow-covered surfaces are (Lighting's `Weather`): parts,
+/// models and terrain all read it. The default is dry, with no snow.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Weather {
+    /// From 0 (dry) to 1 (soaked): wet surfaces are darker and glossier.
+    /// Undersides stay drier.
+    pub wetness: f32,
+    /// From 0 (none) to 1: how much snow lies on surfaces facing up. More
+    /// cover whitens flat tops fully and reaches further down slopes; walls
+    /// stay bare.
+    pub snow: f32,
+}
+
+impl Weather {
+    /// Whether surfaces are dry and bare, so the shaders skip the weather.
+    pub fn is_clear(&self) -> bool {
+        !(self.wetness > 0.0 || self.snow > 0.0)
     }
 }
 

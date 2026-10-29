@@ -152,7 +152,15 @@ pub(super) fn frame_uniform(
         fog: Default::default(),
         // And the clouds, which drift with the wind.
         clouds: Default::default(),
+        weather: weather_uniform(&list.weather),
     }
+}
+
+/// The weather as `Frame::weather` holds it: wetness and snow cover, each
+/// held to 0 to 1 (a NaN is none).
+fn weather_uniform(weather: &crate::Weather) -> [f32; 4] {
+    let share = |value: f32| if value > 0.0 { value.min(1.0) } else { 0.0 };
+    [share(weather.wetness), share(weather.snow), 0.0, 0.0]
 }
 
 /// The lights to draw, and which of them reach each tile of the screen.

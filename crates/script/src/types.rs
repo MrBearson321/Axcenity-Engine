@@ -533,10 +533,11 @@ pub enum EnumType {
     ProximityPromptExclusivity,
     HumanoidStateType,
     ReverbType,
+    Precipitation,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 31] = [
+    pub const ALL: [EnumType; 32] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -568,6 +569,7 @@ impl EnumType {
         EnumType::ProximityPromptExclusivity,
         EnumType::HumanoidStateType,
         EnumType::ReverbType,
+        EnumType::Precipitation,
     ];
 
     pub fn name(self) -> &'static str {
@@ -603,6 +605,7 @@ impl EnumType {
             EnumType::ProximityPromptExclusivity => "ProximityPromptExclusivity",
             EnumType::HumanoidStateType => "HumanoidStateType",
             EnumType::ReverbType => "ReverbType",
+            EnumType::Precipitation => "Precipitation",
         }
     }
 
@@ -645,6 +648,8 @@ impl EnumType {
             EnumType::CollisionFidelity => vec!["Box", "Hull", "PreciseConvexDecomposition"],
             // The room a ReverbZone sounds like (Phase 52).
             EnumType::ReverbType => axcenity_audio::REVERB_TYPES.to_vec(),
+            // What a Weather lets fall (graphics Phase 27).
+            EnumType::Precipitation => vec!["None", "Rain", "Snow"],
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -777,7 +782,8 @@ impl LuaEnumItem {
             | EnumType::CollisionFidelity
             | EnumType::ProximityPromptExclusivity
             | EnumType::HumanoidStateType
-            | EnumType::ReverbType => None,
+            | EnumType::ReverbType
+            | EnumType::Precipitation => None,
         }
     }
 }

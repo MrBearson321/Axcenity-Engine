@@ -11,6 +11,10 @@
 //!
 //! The built-in particle pictures ([`ParticleType`]) are drawn here, white
 //! with their shape in the alpha, so a particle's color tints them.
+//!
+//! The weather's rain and snow are particles too: the host's `Particles`
+//! keeps the world's weather (`WeatherState`, `weather.rs`), and
+//! [`Particles::add_weather`] puts it into a draw list.
 
 use std::collections::HashMap;
 use std::f32::consts::TAU;
@@ -19,9 +23,10 @@ use std::sync::{Arc, OnceLock};
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, ParticleType, Value, World};
 use axcenity_render::glam::Vec3;
-use axcenity_render::{Sprite, TextureSource};
+use axcenity_render::{DrawList, Sprite, TextureSource};
 
 use crate::draw_list::{image_texture, part_placement};
+use crate::weather::WeatherState;
 
 /// The most particles one emitter keeps; past this, no more are born
 /// until some die.
@@ -97,9 +102,9 @@ impl Settings {
 #[derive(Debug)]
 pub struct Particles {
     emitters: HashMap<InstanceId, Emitter>,
-    /// A small random number generator's state (xorshift), so particles
-    /// spread differently every time without a dependency.
-    random: u64,
+    random: Random,
+    /// The world's weather as it eases in, and its rain or snow.
+    weather: WeatherState,
 }
 
 impl Default for Particles {
@@ -112,13 +117,16 @@ impl Particles {
     pub fn new() -> Self {
         Self {
             emitters: HashMap::new(),
-            random: 0x9E37_79B9_7F4A_7C15,
+            random: Random::default(),
+            weather: WeatherState::default(),
         }
     }
 
-    /// Takes every particle away, such as when Play starts or stops.
+    /// Takes every particle away, such as when Play starts or stops. The
+    /// weather starts again from the world's as it is.
     pub fn clear(&mut self) {
         self.emitters.clear();
+        self.weather.reset();
     }
 
     /// How many particles are out.
@@ -126,10 +134,25 @@ impl Particles {
         self.emitters.values().map(|e| e.particles.len()).sum()
     }
 
-    /// True while something moves: particles are out, or an emitter in
-    /// the Workspace is giving them off. Hosts keep drawing frames then.
+    /// True while something moves: particles are out, an emitter in the
+    /// Workspace is giving them off, or rain or snow falls or the weather
+    /// is easing. Hosts keep drawing frames then.
     pub fn is_active(&self, world: &World) -> bool {
-        self.count() > 0 || emitters(world).any(|(_, instance)| Settings::read(instance).enabled)
+        self.count() > 0
+            || emitters(world).any(|(_, instance)| Settings::read(instance).enabled)
+            || self.weather.is_active(world)
+    }
+
+    /// Puts the weather into `list` (built from the same world): how wet
+    /// and snowy surfaces are as it eases in, and its rain or snow around
+    /// `list`'s camera. Before the first [`update`](Self::update) the
+    /// list keeps the world's settled weather.
+    pub fn add_weather(&self, list: &mut DrawList) {
+        if let Some(look) = self.weather.look() {
+            list.weather = look;
+        }
+        list.sprites
+            .extend(self.weather.sprites(list.camera.position));
     }
 
     /// Gives off `count` particles from `emitter` now, whether or not it's
@@ -154,13 +177,15 @@ impl Particles {
     }
 
     /// Moves every particle on by `seconds`, lets old ones die, and gives
-    /// off new ones from each Enabled emitter by its Rate.
+    /// off new ones from each Enabled emitter by its Rate. The weather
+    /// eases on and its rain or snow falls.
     pub fn update(&mut self, world: &World, seconds: f32) {
         let seconds = if seconds.is_finite() {
             seconds.clamp(0.0, 0.25)
         } else {
             0.0
         };
+        self.weather.update(world, seconds, &mut self.random);
         let live: Vec<(InstanceId, Settings, Option<axcenity_render::glam::Mat4>)> =
             emitters(world)
                 .map(|(id, instance)| {
@@ -251,12 +276,16 @@ impl Particles {
         if state.particles.len() >= MAX_PER_EMITTER {
             return;
         }
-        let inside = Vec3::new(self.next() - 0.5, self.next() - 0.5, self.next() - 0.5);
+        let inside = Vec3::new(
+            self.random.next() - 0.5,
+            self.random.next() - 0.5,
+            self.random.next() - 0.5,
+        );
         let position = transform.transform_point3(inside);
         let (_, rotation, _) = transform.to_scale_rotation_translation();
         let forward = (rotation * settings.direction).normalize_or(Vec3::Y);
         let heading = self.within_cone(forward, settings.spread.to_radians() / 2.0);
-        let life = settings.lifetime * (0.8 + 0.4 * self.next());
+        let life = settings.lifetime * (0.8 + 0.4 * self.random.next());
         state.particles.push(Particle {
             position,
             velocity: heading * settings.speed,
@@ -268,20 +297,33 @@ impl Particles {
     /// A random direction at most `half_angle` radians from `forward`.
     fn within_cone(&mut self, forward: Vec3, half_angle: f32) -> Vec3 {
         let cos_most = half_angle.min(std::f32::consts::PI).cos();
-        let z = 1.0 - self.next() * (1.0 - cos_most);
-        let around = self.next() * TAU;
+        let z = 1.0 - self.random.next() * (1.0 - cos_most);
+        let around = self.random.next() * TAU;
         let across = (1.0 - z * z).max(0.0).sqrt();
         let (u, v) = forward.any_orthonormal_pair();
         forward * z + (u * around.cos() + v * around.sin()) * across
     }
+}
 
+/// A small random number generator (xorshift), so particles spread
+/// differently every time without a dependency.
+#[derive(Debug)]
+pub(crate) struct Random(u64);
+
+impl Default for Random {
+    fn default() -> Self {
+        Self(0x9E37_79B9_7F4A_7C15)
+    }
+}
+
+impl Random {
     /// A random number from 0 up to 1.
-    fn next(&mut self) -> f32 {
-        let mut x = self.random;
+    pub(crate) fn next(&mut self) -> f32 {
+        let mut x = self.0;
         x ^= x << 13;
         x ^= x >> 7;
         x ^= x << 17;
-        self.random = x;
+        self.0 = x;
         (x >> 40) as f32 / (1u64 << 24) as f32
     }
 }
@@ -413,6 +455,33 @@ pub fn built_in(kind: ParticleType) -> Arc<dyn TextureSource> {
         .position(|&k| k == kind)
         .expect("every kind is in ALL");
     pictures[index].clone()
+}
+
+/// The picture raindrops show: a thin streak down the middle, fading at
+/// its ends, so a drop looks like it's falling fast.
+pub(crate) fn rain_streak() -> Arc<dyn TextureSource> {
+    static PICTURE_OF_RAIN: OnceLock<Arc<BuiltIn>> = OnceLock::new();
+    PICTURE_OF_RAIN
+        .get_or_init(|| {
+            let mut rgba = Vec::with_capacity((PICTURE * PICTURE * 4) as usize);
+            for row in 0..PICTURE {
+                for column in 0..PICTURE {
+                    let x = (column as f32 + 0.5) / PICTURE as f32 - 0.5;
+                    let y = (row as f32 + 0.5) / PICTURE as f32 - 0.5;
+                    let across = (1.0 - x.abs() / 0.03).clamp(0.0, 1.0);
+                    let along = (1.0 - (y / 0.5).powi(2)).clamp(0.0, 1.0);
+                    let alpha = across * along;
+                    rgba.extend_from_slice(&[255, 255, 255, (alpha * 255.0).round() as u8]);
+                }
+            }
+            // Below the particle types' keys, far from the ones `assets`
+            // hands out.
+            Arc::new(BuiltIn {
+                key: u64::MAX - 64,
+                rgba,
+            })
+        })
+        .clone()
 }
 
 /// Draws `kind`'s picture: white, with its shape in the alpha channel.

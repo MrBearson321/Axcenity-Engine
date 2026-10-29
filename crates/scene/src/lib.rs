@@ -30,6 +30,7 @@ mod preload;
 mod reload_tests;
 mod terrain;
 mod time_of_day;
+mod weather;
 
 pub use camera::{FlyCamera, MoveKeys};
 pub use draw_list::{

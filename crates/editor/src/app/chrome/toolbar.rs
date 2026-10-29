@@ -334,6 +334,8 @@ impl EditorApp {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     let hover = if what == Insertable::Clouds {
                         "Insert Clouds into Lighting: a layer of cloud high in the sky, lit by                          the sun, whose shadows fall on the world. Workspace's GlobalWind                          carries them along."
+                    } else if what == Insertable::Weather {
+                        "Insert Weather into Lighting: rain or snow falling around the camera,                          wetting surfaces or covering their tops in snow. Changes ease in over                          its TransitionTime, and Workspace's GlobalWind blows the rain and snow."
                     } else {
                         "Insert an Atmosphere into Lighting: the sky is drawn as sunlight                          scattered by air, reddening toward sunset and darkening at night                          as Lighting's ClockTime goes round, and it colors the sun's light."
                     };

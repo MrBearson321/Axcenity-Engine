@@ -58,6 +58,8 @@ pub enum Insertable {
     Atmosphere,
     /// A layer of cloud in the sky, always in Lighting.
     Clouds,
+    /// Rain or snow and wet or snowy surfaces, always in Lighting.
+    Weather,
     ParticleEmitter,
     Animator,
     Animation,
@@ -169,7 +171,11 @@ impl Insertable {
     /// Ribbon ▸ Lighting ▸ Reflections.
     pub const PROBES: [Insertable; 2] = [Insertable::ReflectionProbe, Insertable::LightProbeVolume];
     /// Ribbon ▸ Lighting ▸ Sky.
-    pub const SKY: [Insertable; 2] = [Insertable::Atmosphere, Insertable::Clouds];
+    pub const SKY: [Insertable; 3] = [
+        Insertable::Atmosphere,
+        Insertable::Clouds,
+        Insertable::Weather,
+    ];
     /// Effects give off particles from the part they are inside.
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
     /// Animators (skeletal) and Animations (property clips).
@@ -281,6 +287,7 @@ impl Insertable {
             Insertable::LightProbeVolume => "Light Probes",
             Insertable::Atmosphere => "Atmosphere",
             Insertable::Clouds => "Clouds",
+            Insertable::Weather => "Weather",
             Insertable::ParticleEmitter => "Particles",
             Insertable::Animator => "Animator",
             Insertable::Ragdoll => "Ragdoll",
@@ -345,6 +352,7 @@ impl Insertable {
             Insertable::LightProbeVolume => ClassName::LightProbeVolume,
             Insertable::Atmosphere => ClassName::Atmosphere,
             Insertable::Clouds => ClassName::Clouds,
+            Insertable::Weather => ClassName::Weather,
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
             Insertable::Animator => ClassName::Animator,
             Insertable::Ragdoll => ClassName::Ragdoll,
@@ -831,12 +839,15 @@ pub fn health_bar(world: &mut World, health: Option<InstanceId>) -> HealthBar {
 /// Animation, a part or a ScreenGui or frame it can animate. Otherwise a
 /// RemoteEvent (or RemoteFunction, BindableEvent or BindableFunction) goes
 /// into ReplicatedStorage (where both sides find it, as in Roblox), and
-/// anything else into the Workspace. An Atmosphere or Clouds always goes
-/// into Lighting, and a Team into Teams. A SoundGroup goes into the
+/// anything else into the Workspace. An Atmosphere, Clouds or Weather
+/// always goes into Lighting, and a Team into Teams. A SoundGroup goes into the
 /// selected SoundGroup, and a sound effect into the selected Sound or
 /// SoundGroup; otherwise both go into SoundService.
 pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) -> InstanceId {
-    if matches!(what, Insertable::Atmosphere | Insertable::Clouds) {
+    if matches!(
+        what,
+        Insertable::Atmosphere | Insertable::Clouds | Insertable::Weather
+    ) {
         return world.lighting();
     }
     if what == Insertable::Team {

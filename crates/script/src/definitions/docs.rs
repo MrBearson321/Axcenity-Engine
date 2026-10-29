@@ -1121,7 +1121,7 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::Workspace,
         "GlobalWind",
-        "The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag, pushes unanchored parts with WindAffected, and carries Lighting's Clouds along (its level part).",
+        "The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag, pushes unanchored parts with WindAffected, carries Lighting's Clouds along (its level part), and blows the Weather's rain and snow.",
     ),
     (
         ClassName::Lighting,
@@ -1354,6 +1354,31 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Clouds,
         "Direction",
         "Which way the clouds drift on their own, in degrees turned from +X (east, 0) toward +Z (south, 90).",
+    ),
+    (
+        ClassName::Weather,
+        "Precipitation",
+        "What falls around the camera (`Enum.Precipitation`): None, Rain (the default) or Snow. Rain wets surfaces as it falls, up to its Intensity; snow covers the ones facing up.",
+    ),
+    (
+        ClassName::Weather,
+        "Intensity",
+        "How hard the rain or snow falls, from 0 to 1 (0.5 by default): more drops, and wetter or deeper on the ground.",
+    ),
+    (
+        ClassName::Weather,
+        "Wetness",
+        "How wet surfaces are whatever is falling, from 0 (dry, the default) to 1 (soaked): darker and glossier. Rain wets them at least as much as its Intensity.",
+    ),
+    (
+        ClassName::Weather,
+        "SnowCover",
+        "How much snow lies on surfaces facing up whatever is falling, from 0 (none, the default) to 1: more cover whitens flat tops fully and reaches further down slopes. Walls stay bare. Falling snow covers them at least as much as its Intensity.",
+    ),
+    (
+        ClassName::Weather,
+        "TransitionTime",
+        "Seconds a change takes to ease in (10 by default): rain starting and stopping, surfaces wetting and drying, snow settling and melting. 0 changes at once.",
     ),
     (
         ClassName::ParticleEmitter,
@@ -4492,6 +4517,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Clouds => {
             "Inside Lighting: a layer of cloud high in the sky (800 to 1200 studs up), lit by the sun and sky, whose shadows fall on the world beneath. They drift at their own Speed toward their Direction, and workspace.GlobalWind carries them too; their shadows move with them. The player's graphics settings choose how finely it's drawn (UserGameSettings.CloudQuality); at Low it's a flat sheet."
+        }
+        ClassName::Weather => {
+            "Inside Lighting: rain or snow falling around the camera, and how wet and snow-covered surfaces are (parts, models and terrain). Wet surfaces are darker and glossier; snow covers the tops of things but not walls. workspace.GlobalWind blows the rain and snow. Every change eases in over TransitionTime. With Precipitation None and no Wetness or SnowCover it costs nothing."
         }
         ClassName::ParticleEmitter => {
             "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."

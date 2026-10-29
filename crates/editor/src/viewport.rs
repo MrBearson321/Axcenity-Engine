@@ -1008,6 +1008,7 @@ impl Viewport {
         let mut draw_list =
             axcenity_scene::build_draw_list_posed(world, assets, camera, poses, &mut self.terrain);
         draw_list.sprites = self.particles.sprites(world, assets);
+        self.particles.add_weather(&mut draw_list);
         draw_list.ui = ui_layout.draw_items.clone();
         if let Some(inventory) = hotbar {
             draw_list.ui.extend(axcenity_ui::hotbar_items(
