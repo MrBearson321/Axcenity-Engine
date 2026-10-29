@@ -3,13 +3,13 @@
 
 use axcenity_assets::{
     Assets, Channel as FileChannel, MapFile, MapSettings, MaterialFile, MaterialMaps,
-    StandardMaterial,
+    Shading as FileShading, StandardMaterial,
 };
 use axcenity_core::{ClassName, Instance, InstanceId, TextureChannel, Value, World};
 use axcenity_render::glam::Mat4;
 use axcenity_render::{
-    Channel, ChannelMap, Material, NormalMap, SURFACE_PARAMETERS, SurfaceShader, Sway, TextureMaps,
-    Water,
+    Channel, ChannelMap, Material, NormalMap, SURFACE_PARAMETERS, Shading, SurfaceShader, Sway,
+    TextureMaps, Toon, Water,
 };
 
 use crate::draw_list::{GLOW_BOOST, texture};
@@ -94,6 +94,23 @@ pub(crate) fn variant_material(standard: &StandardMaterial, assets: &Assets) -> 
             foam: water.foam,
             refraction: water.refraction,
         }),
+        shading: match standard.shading {
+            FileShading::Standard => Shading::Standard,
+            FileShading::Unlit => Shading::Unlit,
+            FileShading::Toon => Shading::Toon(Toon {
+                steps: standard.toon.steps,
+                // A ramp not loaded (yet) leaves the bands.
+                ramp: standard
+                    .toon
+                    .ramp
+                    .as_ref()
+                    .and_then(|ramp| assets.texture(ramp))
+                    .map(|image| texture(&image)),
+                softness: standard.toon.softness,
+                rim: standard.toon.rim,
+                highlight: standard.toon.highlight,
+            }),
+        },
     }
 }
 
@@ -543,6 +560,55 @@ mod tests {
         assert_eq!(mesh.key(), axcenity_render::water_surface().key());
         assert_eq!(list.items[1].material.water, None, "brick isn't water");
         assert!(matches!(list.items[1].shape, axcenity_render::Shape::Block));
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_materials_shading_reaches_the_draw_list_and_files_without_one_stay_standard() {
+        let folder = project("shading");
+        let cel = "assets/materials/cel.material.json";
+        let flat = "assets/materials/flat.material.json";
+        write(
+            &folder,
+            cel,
+            &MaterialFile {
+                shading: Some(FileShading::Toon),
+                toon: Some(axcenity_assets::ToonFile {
+                    steps: Some(4),
+                    ramp: Some("assets/textures/swatch.png".into()),
+                    rim: Some(0.6),
+                    ..Default::default()
+                }),
+                ..MaterialFile::default()
+            },
+        );
+        write(
+            &folder,
+            flat,
+            &MaterialFile {
+                shading: Some(FileShading::Unlit),
+                ..MaterialFile::default()
+            },
+        );
+        write(&folder, BASE, &brick());
+        let assets = Assets::new(&folder);
+        let mut world = World::new();
+        part(&mut world, vec![variant(cel)]);
+        part(&mut world, vec![variant(flat)]);
+        part(&mut world, vec![variant(BASE)]);
+        part(&mut world, vec![]);
+        let items = items(&world, &assets);
+        let Shading::Toon(toon) = &items[0].material.shading else {
+            panic!("cel is toon: {:?}", items[0].material.shading);
+        };
+        assert_eq!((toon.steps, toon.rim), (4, 0.6));
+        assert!(toon.ramp.is_some(), "with its ramp");
+        assert!(matches!(items[1].material.shading, Shading::Unlit));
+        assert!(
+            matches!(items[2].material.shading, Shading::Standard),
+            "a material file without shading is standard"
+        );
+        assert!(matches!(items[3].material.shading, Shading::Standard));
         let _ = std::fs::remove_dir_all(folder);
     }
 

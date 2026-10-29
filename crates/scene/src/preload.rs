@@ -51,7 +51,7 @@ impl AssetFile {
             }
             Self::Material(path) => {
                 if let Some(material) = assets.material(path) {
-                    for map in material.maps.paths() {
+                    for map in material.image_paths() {
                         assets.texture(map);
                     }
                 }

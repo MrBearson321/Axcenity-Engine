@@ -1,0 +1,162 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Ground",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.55,
+            0.6,
+            0.5
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -0.5,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            48,
+            1,
+            48
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "StandardBall",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.9,
+            0.35,
+            0.2
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -4.8,
+            2,
+            3.6
+          ],
+          "Shape": "Ball",
+          "Size": [
+            4,
+            4,
+            4
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "UnlitBall",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.9,
+            0.35,
+            0.2
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            2,
+            0
+          ],
+          "Shape": "Ball",
+          "Size": [
+            4,
+            4,
+            4
+          ],
+          "MaterialVariant": "assets/materials/Flat.material.json"
+        }
+      },
+      {
+        "class": "Part",
+        "name": "ToonBall",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.9,
+            0.35,
+            0.2
+          ],
+          "Material": "Plastic",
+          "Position": [
+            4.8,
+            2,
+            -3.6
+          ],
+          "Shape": "Ball",
+          "Size": [
+            4,
+            4,
+            4
+          ],
+          "MaterialVariant": "assets/materials/Cel.material.json"
+        }
+      },
+      {
+        "class": "Part",
+        "name": "ToonBlock",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.3,
+            0.5,
+            0.9
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -2,
+            1,
+            -7
+          ],
+          "Shape": "Block",
+          "Size": [
+            3,
+            2,
+            3
+          ],
+          "MaterialVariant": "assets/materials/Cel.material.json"
+        }
+      },
+      {
+        "class": "Part",
+        "name": "ToonPillar",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.85,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            8,
+            3,
+            -9
+          ],
+          "Shape": "Block",
+          "Size": [
+            1.5,
+            6,
+            1.5
+          ],
+          "MaterialVariant": "assets/materials/Cel.material.json"
+        }
+      }
+    ]
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false,
+      "LeaderboardEnabled": true,
+      "RespawnTime": 5
+    }
+  }
+}

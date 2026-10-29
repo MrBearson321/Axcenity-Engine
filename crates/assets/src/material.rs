@@ -79,6 +79,14 @@ pub struct MaterialFile {
     /// at its default; an instance changes them value by value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub water: Option<WaterFile>,
+    /// How it's lit: `Standard` (the default), `Unlit` or `Toon`
+    /// (`docs/rendering/stylized.md`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shading: Option<Shading>,
+    /// Toon shading's bands, rim and highlight, merged value by value. Only
+    /// read when the shading is `Toon`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toon: Option<ToonFile>,
     /// WGSL code with a `surface` function that works out each pixel's
     /// surface in place of the standard one (`docs/rendering/models.md`).
     /// `""` is none, so an instance can go back to the standard surface.
@@ -122,6 +130,94 @@ impl ParamValue {
             }
         }
         out
+    }
+}
+
+/// How a material is lit. Every model takes the same lights, shadows and
+/// post-processing, in the same pass.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Shading {
+    /// Physically based: the sun, lamps and sky, reflections and all.
+    #[default]
+    Standard,
+    /// Its color as it is, whatever the light (it still glows and fogs).
+    Unlit,
+    /// Cel shading: light in flat bands, a rim light and a sharp highlight.
+    Toon,
+}
+
+/// Toon shading's values as written, each `None` when the file leaves it
+/// to its base (or the default, [`StandardToon::default`]).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ToonFile {
+    /// How many bands of light from dark to fully lit (1 is two-tone:
+    /// lit or not).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steps: Option<u32>,
+    /// An image whose colors, left to right, are the light from none to
+    /// full, in place of `steps`. `""` takes away the base's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ramp: Option<String>,
+    /// 0 is a hard edge between bands (and the shadow's edge), 1 a smooth
+    /// blend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub softness: Option<f32>,
+    /// How bright the rim light on its outline is: 0 is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rim: Option<f32>,
+    /// How big the highlight is: 0 is none, 1 a wide one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub highlight: Option<f32>,
+}
+
+impl ToonFile {
+    /// `self`'s values, and `base`'s where `self` has none.
+    pub fn over(&self, base: &ToonFile) -> ToonFile {
+        ToonFile {
+            steps: self.steps.or(base.steps),
+            ramp: self.ramp.clone().or_else(|| base.ramp.clone()),
+            softness: self.softness.or(base.softness),
+            rim: self.rim.or(base.rim),
+            highlight: self.highlight.or(base.highlight),
+        }
+    }
+
+    /// Every value, with the default's where this has none.
+    pub fn resolve(&self) -> StandardToon {
+        let default = StandardToon::default();
+        StandardToon {
+            steps: self.steps.unwrap_or(default.steps).max(1),
+            ramp: self.ramp.clone().filter(|ramp| !ramp.is_empty()),
+            softness: self.softness.unwrap_or(default.softness),
+            rim: self.rim.unwrap_or(default.rim),
+            highlight: self.highlight.unwrap_or(default.highlight),
+        }
+    }
+}
+
+/// Toon shading's values, every one filled in. Its defaults are three
+/// hard-edged bands with a faint rim and a small highlight.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StandardToon {
+    /// At least 1.
+    pub steps: u32,
+    /// The ramp image, relative to the project folder.
+    pub ramp: Option<String>,
+    pub softness: f32,
+    pub rim: f32,
+    pub highlight: f32,
+}
+
+impl Default for StandardToon {
+    fn default() -> Self {
+        Self {
+            steps: 3,
+            ramp: None,
+            softness: 0.05,
+            rim: 0.3,
+            highlight: 0.2,
+        }
     }
 }
 
@@ -328,6 +424,11 @@ impl MaterialFile {
                 (Some(own), Some(below)) => Some(own.over(below)),
                 (own, below) => own.clone().or_else(|| below.clone()),
             },
+            shading: self.shading.or(base.shading),
+            toon: match (&self.toon, &base.toon) {
+                (Some(own), Some(below)) => Some(own.over(below)),
+                (own, below) => own.clone().or_else(|| below.clone()),
+            },
             shader: self.shader.clone().or_else(|| base.shader.clone()),
             parameters: base
                 .parameters
@@ -379,6 +480,8 @@ impl MaterialFile {
             double_sided: self.double_sided.unwrap_or(default.double_sided),
             sway: self.sway.unwrap_or(default.sway),
             water: self.water.as_ref().map(WaterFile::resolve),
+            shading: self.shading.unwrap_or_default(),
+            toon: self.toon.clone().unwrap_or_default().resolve(),
             shader: self
                 .shader
                 .as_deref()
@@ -417,6 +520,9 @@ pub struct StandardMaterial {
     pub sway: f32,
     /// Its water, if it's a water material.
     pub water: Option<StandardWater>,
+    pub shading: Shading,
+    /// Toon shading's values, used when `shading` is [`Shading::Toon`].
+    pub toon: StandardToon,
     /// Its surface shader, if it has one.
     pub shader: Option<MaterialShader>,
     /// The values its shader reads (`parameter(i)` is the `i`th), in name
@@ -453,9 +559,21 @@ impl Default for StandardMaterial {
             double_sided: false,
             sway: 0.0,
             water: None,
+            shading: Shading::Standard,
+            toon: StandardToon::default(),
             shader: None,
             parameters: Vec::new(),
         }
+    }
+}
+
+impl StandardMaterial {
+    /// Every image it's drawn with: its maps', then a toon ramp's.
+    pub fn image_paths(&self) -> impl Iterator<Item = &str> {
+        let ramp = (self.shading == Shading::Toon)
+            .then_some(self.toon.ramp.as_deref())
+            .flatten();
+        self.maps.paths().chain(ramp)
     }
 }
 
@@ -738,6 +856,14 @@ mod tests {
                 foam: Some(1.0),
                 refraction: Some(0.2),
             }),
+            shading: Some(Shading::Toon),
+            toon: Some(ToonFile {
+                steps: Some(2),
+                ramp: Some("assets/textures/ramp.png".into()),
+                softness: Some(0.1),
+                rim: Some(0.5),
+                highlight: Some(0.4),
+            }),
             shader: Some(
                 "fn surface(input: SurfaceInput) -> Surface {
     return standard_surface(input);
@@ -827,6 +953,61 @@ mod tests {
             None,
             "not water by default"
         );
+        let _ = fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_toon_instance_changes_its_bases_bands_value_by_value() {
+        let folder = project("toon");
+        let cel = "assets/materials/cel.material.json";
+        fs::write(
+            folder.join(cel),
+            "{ \"shading\": \"Toon\", \"toon\": { \"steps\": 2, \"rim\": 0.8, \"ramp\": \
+             \"assets/textures/ramp.png\" } }",
+        )
+        .unwrap();
+        let soft = MaterialFile {
+            base: Some(cel.into()),
+            toon: Some(ToonFile {
+                softness: Some(0.5),
+                ramp: Some(String::new()),
+                ..ToonFile::default()
+            }),
+            ..MaterialFile::default()
+        };
+        write(&folder, "assets/materials/soft.material.json", &soft);
+        let assets = Assets::new(&folder);
+
+        let base = assets.material(cel).unwrap();
+        assert_eq!(base.shading, Shading::Toon);
+        assert_eq!(
+            base.image_paths().collect::<Vec<_>>(),
+            ["assets/textures/ramp.png"],
+            "a toon ramp is read with the maps"
+        );
+        let toon = assets
+            .material("assets/materials/soft.material.json")
+            .unwrap();
+        assert_eq!(
+            toon.shading,
+            Shading::Toon,
+            "the shading comes from the base"
+        );
+        assert_eq!(
+            toon.toon,
+            StandardToon {
+                steps: 2,
+                ramp: None,
+                softness: 0.5,
+                rim: 0.8,
+                highlight: StandardToon::default().highlight,
+            }
+        );
+        assert_eq!(StandardMaterial::default().shading, Shading::Standard);
+        assert!(matches!(
+            parse_material("{ \"shading\": \"Glossy\" }"),
+            Err(MaterialFileError::Format(_))
+        ));
         let _ = fs::remove_dir_all(folder);
     }
 

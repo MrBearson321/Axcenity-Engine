@@ -781,6 +781,86 @@ fn weathered(
     return out;
 }
 
+// Light arriving at a surface point from one light: its direction `l`
+// (toward the light), its color and strength there, and how much of it
+// isn't shadowed.
+struct Arrival {
+    l: vec3<f32>,
+    radiance: vec3<f32>,
+    visible: f32,
+}
+
+// The sun at `world_position`: its shadow, the clouds' and, for `solid`
+// surfaces (in the prepass), contact shadows.
+fn sun_arrival(world_position: vec3<f32>, geometric: vec3<f32>, pixel: vec2<f32>, solid: bool)
+    -> Arrival {
+    var visible = sun_visibility(world_position, geometric, pixel)
+        * cloud_shadow(frame.clouds, world_position, frame.sun_direction.xyz);
+    if solid {
+        visible *= contact_visibility(world_position, geometric, frame.sun_direction.xyz,
+            frame.contact.y, pixel);
+    }
+    return Arrival(frame.sun_direction.xyz, frame.sun_radiance.rgb, visible);
+}
+
+// The point and spot lights listed for `pixel`'s screen tile: where they
+// start in `tile_lights`, how many there are, and a turn for their shadow
+// filters, by the pixel's noise.
+struct TileLamps {
+    first: u32,
+    count: u32,
+    rotation: mat2x2<f32>,
+}
+
+fn tile_lamps(pixel: vec2<f32>) -> TileLamps {
+    let angle = pixel_noise(pixel) * 6.2831853;
+    let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
+    let tile_size = max(frame.lights.y, 1u);
+    let tile = vec2<u32>(pixel) / tile_size;
+    let first = (tile.y * frame.lights.z + tile.x) * (LIGHTS_PER_TILE + 1u);
+    var count = 0u;
+    if frame.lights.x > 0u {
+        count = min(tile_lights[first], LIGHTS_PER_TILE);
+    }
+    return TileLamps(first, count, rotation);
+}
+
+// The `i`th of `lamps` at `world_position`. Beyond its range or outside
+// its cone, nothing arrives (`visible` 0).
+fn lamp_arrival(lamps: TileLamps, i: u32, world_position: vec3<f32>, geometric: vec3<f32>,
+    pixel: vec2<f32>, solid: bool) -> Arrival {
+    var arrival = Arrival(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0), 0.0);
+    let light = lights[tile_lights[lamps.first + 1u + i]];
+    let to_light = light.position_range.xyz - world_position;
+    let distance_squared = dot(to_light, to_light);
+    let range = light.position_range.w;
+    if distance_squared >= range * range {
+        return arrival;
+    }
+    let dist = sqrt(distance_squared);
+    let l = to_light / max(dist, 0.0001);
+    // Inverse-square falloff that reaches exactly 0 at the range.
+    let edge = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
+    var strength = edge * edge / (distance_squared + 1.0);
+    if light.radiance_cone.w > -1.5 {
+        strength *= smoothstep(light.radiance_cone.w, light.direction_inner.w,
+            dot(-l, light.direction_inner.xyz));
+    }
+    if strength <= 0.0 {
+        return arrival;
+    }
+    var visible = lamp_visibility(light, world_position, geometric, to_light, lamps.rotation);
+    // Contact shadows for lamps that cast shadows, up to the lamp.
+    if solid && light.shadow.x >= 0.0 {
+        visible *= contact_visibility(world_position, geometric, l, min(frame.contact.y, dist),
+            pixel);
+    }
+    arrival.l = l;
+    arrival.radiance = light.radiance_cone.rgb * strength;
+    arrival.visible = visible;
+    return arrival;
+}
+
 // `light_surface` for a surface the weather has already changed.
 fn shade_surface(
     world_position: vec3<f32>,
@@ -799,52 +879,18 @@ fn shade_surface(
     // Metals reflect in their own color.
     let f0 = mix(dielectric, base_color, metalness);
 
-    var sun = shade(n, v, frame.sun_direction.xyz, base_color, metalness, roughness, f0)
-        * frame.sun_radiance.rgb
-        * sun_visibility(world_position, geometric, pixel)
-        * cloud_shadow(frame.clouds, world_position, frame.sun_direction.xyz);
-    if solid {
-        sun *= contact_visibility(world_position, geometric, frame.sun_direction.xyz,
-            frame.contact.y, pixel);
-    }
+    let sun_light = sun_arrival(world_position, geometric, pixel, solid);
+    let sun = shade(n, v, sun_light.l, base_color, metalness, roughness, f0)
+        * sun_light.radiance * sun_light.visible;
 
     // Point and spot lights: only the ones listed for this pixel's tile.
     var lit = vec3<f32>(0.0);
-    let angle = pixel_noise(pixel) * 6.2831853;
-    let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
-    let tile_size = max(frame.lights.y, 1u);
-    let tile = vec2<u32>(pixel) / tile_size;
-    let first = (tile.y * frame.lights.z + tile.x) * (LIGHTS_PER_TILE + 1u);
-    var count = 0u;
-    if frame.lights.x > 0u {
-        count = min(tile_lights[first], LIGHTS_PER_TILE);
-    }
-    for (var i = 0u; i < count; i++) {
-        let light = lights[tile_lights[first + 1u + i]];
-        let to_light = light.position_range.xyz - world_position;
-        let distance_squared = dot(to_light, to_light);
-        let range = light.position_range.w;
-        if distance_squared >= range * range {
-            continue;
-        }
-        let dist = sqrt(distance_squared);
-        let l = to_light / max(dist, 0.0001);
-        // Inverse-square falloff that reaches exactly 0 at the range.
-        let edge = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
-        var strength = edge * edge / (distance_squared + 1.0);
-        if light.radiance_cone.w > -1.5 {
-            strength *= smoothstep(light.radiance_cone.w, light.direction_inner.w,
-                dot(-l, light.direction_inner.xyz));
-        }
-        if strength > 0.0 {
-            var visible = lamp_visibility(light, world_position, geometric, to_light, rotation);
-            // Contact shadows for lamps that cast shadows, up to the lamp.
-            if solid && light.shadow.x >= 0.0 {
-                visible *= contact_visibility(world_position, geometric, l,
-                    min(frame.contact.y, dist), pixel);
-            }
-            lit += shade(n, v, l, base_color, metalness, roughness, f0)
-                * light.radiance_cone.rgb * strength * visible;
+    let lamps = tile_lamps(pixel);
+    for (var i = 0u; i < lamps.count; i++) {
+        let lamp = lamp_arrival(lamps, i, world_position, geometric, pixel, solid);
+        if lamp.visible > 0.0 {
+            lit += shade(n, v, lamp.l, base_color, metalness, roughness, f0) * lamp.radiance
+                * lamp.visible;
         }
     }
 

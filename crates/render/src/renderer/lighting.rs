@@ -11,8 +11,8 @@ use glam::camera::rh;
 use glam::{Mat3, Mat4, Vec2, Vec3};
 
 use crate::draw_list::{
-    Camera, ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, Skin,
-    TextureSource,
+    Camera, ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shading, Shadows,
+    Skin, TextureSource,
 };
 use crate::graphics::{AmbientOcclusion, EffectiveGraphics, ShadowMapSize, ShadowQuality};
 
@@ -24,7 +24,8 @@ use super::{
     FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE, LightRaw, MATERIAL_TEXTURES,
     MAX_LIGHTS, MAX_POINT_SHADOWS, MAX_SPOT_SHADOW_DEGREES, MAX_SPOT_SHADOWS, MAX_SUN_SIZE,
     MAX_TILES, MIN_TILE_SIZE, MapsUniform, MaterialKey, MeshKey, NEAR_PLANE, POINT_SHADOW_SPREAD,
-    PointShadow, PostUniform, SHADOW_CASCADES, SHADOW_CASTER_RANGE, SpotShadow,
+    PointShadow, PostUniform, SHADING_STANDARD, SHADING_TOON, SHADING_UNLIT, SHADOW_CASCADES,
+    SHADOW_CASTER_RANGE, SpotShadow,
 };
 use crate::SURFACE_PARAMETERS;
 
@@ -811,8 +812,40 @@ pub(super) fn material_textures(
         maps.occlusion.as_ref().map(|map| &map.texture),
         maps.emissive.as_ref(),
         maps.opacity.as_ref().map(|map| &map.texture),
-        maps.specular.as_ref(),
+        // A toon ramp takes the specular map's place.
+        match &material.shading {
+            Shading::Toon(toon) if material.water.is_none() => toon.ramp.as_ref(),
+            _ => maps.specular.as_ref(),
+        },
     ]
+}
+
+/// [`MapsUniform::shading`] and [`MapsUniform::toon`] for `material`.
+/// Water draws its own way, as standard.
+fn shading_uniform(material: &Material) -> ([f32; 4], [f32; 4]) {
+    if material.water.is_some() {
+        return ([SHADING_STANDARD, 0.0, 0.0, 0.0], [0.0; 4]);
+    }
+    match &material.shading {
+        Shading::Standard => ([SHADING_STANDARD, 0.0, 0.0, 0.0], [0.0; 4]),
+        Shading::Unlit => ([SHADING_UNLIT, 0.0, 0.0, 0.0], [0.0; 4]),
+        Shading::Toon(toon) => {
+            let steps = if toon.ramp.is_some() {
+                0.0
+            } else {
+                toon.steps.max(1) as f32
+            };
+            (
+                [
+                    SHADING_TOON,
+                    steps,
+                    toon.softness.clamp(0.0, 1.0),
+                    toon.highlight.clamp(0.0, 1.0),
+                ],
+                [toon.rim.max(0.0), 0.0, 0.0, 0.0],
+            )
+        }
+    }
 }
 
 /// The material binding an item is drawn with (see [`MaterialKey`]).
@@ -830,7 +863,11 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
         params = [[0.0; 4]; SURFACE_PARAMETERS];
         params[..3].copy_from_slice(&super::water::water_params(water));
     }
-    if textures.iter().all(Option::is_none) && params == [[0.0; 4]; SURFACE_PARAMETERS] {
+    let (shading, toon) = shading_uniform(&item.material);
+    if textures.iter().all(Option::is_none)
+        && params == [[0.0; 4]; SURFACE_PARAMETERS]
+        && shading[0] == SHADING_STANDARD
+    {
         return MaterialKey::default();
     }
     let maps = &item.material.maps;
@@ -866,7 +903,12 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
             },
             used(maps.opacity.is_some()),
         ],
-        specular: [used(maps.specular.is_some()), 0.0, 0.0, 0.0],
+        specular: [
+            used(maps.specular.is_some() && shading[0] == SHADING_STANDARD),
+            0.0,
+            0.0,
+            0.0,
+        ],
         uv_matrix: uv_matrix(&item.material),
         uv_offset: [
             item.material.uv_offset[0],
@@ -874,6 +916,8 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
             0.0,
             0.0,
         ],
+        shading,
+        toon,
         params,
     };
     MaterialKey {
@@ -898,6 +942,8 @@ pub(super) fn maps_uniform_of(key: &MaterialKey) -> MapsUniform {
             specular: [0.0; 4],
             uv_matrix: [1.0, 0.0, 0.0, 1.0],
             uv_offset: [0.0; 4],
+            shading: [SHADING_STANDARD, 0.0, 0.0, 0.0],
+            toon: [0.0; 4],
             params: [[0.0; 4]; SURFACE_PARAMETERS],
         };
     }

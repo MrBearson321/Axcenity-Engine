@@ -16,6 +16,7 @@ mod light_probe_volumes;
 mod point_and_contact_shadows;
 mod realtime_gi;
 mod reflection_probes;
+mod shading;
 mod skinning;
 mod surface_shaders;
 mod texture_budget;

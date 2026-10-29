@@ -29,7 +29,8 @@ use std::path::Path;
 
 use axcenity_assets::{
     Assets, Channel, MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MaterialChain, MaterialFile,
-    StandardMaterial, StandardWater, WaterFile, read_material_file, write_material_file,
+    Shading, StandardMaterial, StandardWater, ToonFile, WaterFile, read_material_file,
+    write_material_file,
 };
 use axcenity_core::{ClassName, Color3, InstanceId, PartType, Value, Vector3, World};
 use axcenity_render::glam::Vec3;
@@ -966,6 +967,8 @@ fn values(
         );
     });
 
+    shading_rows(ui, scene, file, &base, changes);
+
     water_rows(ui, file, base.water, changes);
 
     graph::parameter_rows(ui, scene, path, file, chain, changes);
@@ -1107,6 +1110,157 @@ fn pair_row(
         });
     });
     ui.end_row();
+}
+
+/// The Shading section: how the material is lit, and for Toon its bands,
+/// ramp, softness, rim and highlight (`docs/rendering/stylized.md`).
+/// `base` is what its bases give.
+fn shading_rows(
+    ui: &mut egui::Ui,
+    scene: &MaterialScene,
+    file: &MaterialFile,
+    base: &StandardMaterial,
+    changes: &mut Vec<Change>,
+) {
+    ui.add_space(6.0);
+    widgets::section_label(ui, "Shading");
+    let shading = file.shading.unwrap_or(base.shading);
+    responsive::form(ui, "material shading", |ui| {
+        value_label(ui, "Shading", file.shading.is_some()).on_hover_text(
+            "Standard is physically based. Unlit shows its color whatever the light. Toon \
+             lights it in flat bands, with a rim light and a sharp highlight.",
+        );
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("material shading")
+                .selected_text(shading_name(shading))
+                .show_ui(ui, |ui| {
+                    for choice in [Shading::Standard, Shading::Unlit, Shading::Toon] {
+                        if ui
+                            .selectable_label(shading == choice, shading_name(choice))
+                            .clicked()
+                        {
+                            changes.push((
+                                "shading",
+                                Box::new(move |file| file.shading = Some(choice)),
+                            ));
+                        }
+                    }
+                });
+            reset_button(ui, file.shading.is_some(), "shading", changes, |file| {
+                file.shading = None
+            });
+        });
+        ui.end_row();
+        if shading != Shading::Toon {
+            return;
+        }
+        // Each value this file leaves out shows its base's (or the default).
+        let below = &base.toon;
+        let own = file.toon.clone().unwrap_or_default();
+        value_label(ui, "Bands", own.steps.is_some())
+            .on_hover_text("How many bands of light from dark to fully lit.");
+        ui.horizontal(|ui| {
+            let mut steps = own.steps.unwrap_or(below.steps);
+            if ui.add(egui::Slider::new(&mut steps, 1..=8)).changed() {
+                changes.push((
+                    "toon steps",
+                    Box::new(move |file| toon_of(file).steps = Some(steps)),
+                ));
+            }
+            reset_button(ui, own.steps.is_some(), "toon steps", changes, |file| {
+                toon_of(file).steps = None
+            });
+        });
+        ui.end_row();
+        value_label(ui, "Ramp", own.ramp.is_some()).on_hover_text(
+            "An image whose colors, left to right, are the light from none to full, in place \
+             of the bands.",
+        );
+        ui.horizontal(|ui| {
+            let image = own
+                .ramp
+                .clone()
+                .or_else(|| below.ramp.clone())
+                .unwrap_or_default();
+            let text = if image.is_empty() {
+                "None".to_owned()
+            } else {
+                image.rsplit('/').next().unwrap_or(&image).to_owned()
+            };
+            egui::ComboBox::from_id_salt("toon ramp")
+                .selected_text(text)
+                .width((ui.available_width() - 40.0).clamp(60.0, 180.0))
+                .show_ui(ui, |ui| {
+                    for candidate in
+                        std::iter::once("").chain(scene.images.iter().map(String::as_str))
+                    {
+                        let name = if candidate.is_empty() {
+                            "None"
+                        } else {
+                            candidate
+                        };
+                        if ui.selectable_label(candidate == image, name).clicked() {
+                            let candidate = candidate.to_owned();
+                            changes.push((
+                                "toon ramp",
+                                Box::new(move |file| toon_of(file).ramp = Some(candidate)),
+                            ));
+                        }
+                    }
+                });
+            reset_button(ui, own.ramp.is_some(), "toon ramp", changes, |file| {
+                toon_of(file).ramp = None
+            });
+        });
+        ui.end_row();
+        let mut row = |name, field, (own, below), range, set: ToonSetter| {
+            number_row(
+                ui,
+                (name, field),
+                (own, below),
+                range,
+                changes,
+                move |file, value| set(toon_of(file), value),
+            );
+        };
+        row(
+            "Softness",
+            "toon softness",
+            (own.softness, below.softness),
+            0.0..=1.0,
+            |toon, value| toon.softness = value,
+        );
+        row(
+            "Rim light",
+            "toon rim",
+            (own.rim, below.rim),
+            0.0..=2.0,
+            |toon, value| toon.rim = value,
+        );
+        row(
+            "Highlight",
+            "toon highlight",
+            (own.highlight, below.highlight),
+            0.0..=1.0,
+            |toon, value| toon.highlight = value,
+        );
+    });
+}
+
+fn shading_name(shading: Shading) -> &'static str {
+    match shading {
+        Shading::Standard => "Standard",
+        Shading::Unlit => "Unlit",
+        Shading::Toon => "Toon",
+    }
+}
+
+/// Sets one of toon shading's numbers (`None` leaves it to the base).
+type ToonSetter = fn(&mut ToonFile, Option<f32>);
+
+/// `file`'s toon values, made if it had none.
+fn toon_of(file: &mut MaterialFile) -> &mut ToonFile {
+    file.toon.get_or_insert_with(ToonFile::default)
 }
 
 /// The Water section: whether the material is water, and its waves, color

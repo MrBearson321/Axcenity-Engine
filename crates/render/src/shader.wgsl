@@ -26,6 +26,12 @@ struct Maps {
     uv_matrix: vec4<f32>,
     // xy: added to the texture coordinates after `uv_matrix`.
     uv_offset: vec4<f32>,
+    // How it's lit. x: the model (SHADING_STANDARD, _UNLIT or _TOON); for
+    // toon, y: its bands (0: read its ramp, bound in the specular map's
+    // place), z: softness, w: highlight size.
+    shading: vec4<f32>,
+    // x: toon's rim light.
+    toon: vec4<f32>,
     // The surface shader's values (`Material::surface_parameters`).
     params: array<vec4<f32>, 8>,
 }
@@ -381,15 +387,105 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     // Non-metals reflect about 4% of light, or as their specular map says.
     let dielectric = mix(vec3<f32>(0.04), 0.08 * specular_texel.rgb, maps.specular.x);
 
-    let color = light_surface(in.world_position, normalize(in.normal) * facing, shaded.normal,
-        in.clip_position.xy, shaded.base_color, metalness, roughness, occlusion, dielectric,
-        solid);
+    let geometric = normalize(in.normal) * facing;
+    var color: vec3<f32>;
+    if maps.shading.x == SHADING_UNLIT {
+        color = shaded.base_color;
+    } else if maps.shading.x == SHADING_TOON {
+        color = toon_surface(in.world_position, geometric, shaded.normal, in.clip_position.xy,
+            shaded.base_color, occlusion, solid);
+    } else {
+        color = light_surface(in.world_position, geometric, shaded.normal, in.clip_position.xy,
+            shaded.base_color, metalness, roughness, occlusion, dielectric, solid);
+    }
 
     // Solid items stay solid whatever the texture's alpha, so the window's
     // own alpha stays 1.
     let alpha = select(clamp(shaded.opacity, 0.0, 1.0), 1.0, solid);
     let seen = fogged(frame.fog, frame.camera_position.xyz, in.world_position, color + shaded.emissive);
     return vec4<f32>(seen, alpha);
+}
+
+// `Maps::shading`'s models. Must match `SHADING_*` in renderer/types.rs.
+const SHADING_STANDARD: f32 = 0.0;
+const SHADING_UNLIT: f32 = 1.0;
+const SHADING_TOON: f32 = 2.0;
+
+// How far round from the camera a toon surface's rim light starts (in
+// 1 - cos of the angle), and how large a highlight of size 1 is (its
+// half-angle in radians).
+const TOON_RIM_WIDTH: f32 = 0.35;
+const TOON_HIGHLIGHT_ANGLE: f32 = 0.5;
+
+// Cuts `x` (0 to 1) into the material's bands, or reads its ramp at `x`
+// (its middle row, left to right, one pixel unblended).
+fn toon_band(x: f32) -> vec3<f32> {
+    let light = clamp(x, 0.0, 1.0);
+    let steps = maps.shading.y;
+    if steps < 1.0 {
+        let size = textureDimensions(specular_texture);
+        let at = vec2<u32>(u32(round(light * f32(size.x - 1u))), size.y / 2u);
+        return textureLoad(specular_texture, at, 0).rgb;
+    }
+    // Any light at all lifts a point to the first band, and each band's
+    // lower edge blends over `softness` of a band.
+    let scaled = light * steps;
+    let below = floor(scaled);
+    let blend = clamp((scaled - below) / max(maps.shading.z, 1e-4), 0.0, 1.0);
+    return vec3<f32>(min((below + blend) / steps, 1.0));
+}
+
+// 0 below `edge`, 1 above it, blended over `softness` of `width`.
+fn toon_step(value: f32, edge: f32, width: f32) -> f32 {
+    return clamp((value - edge) / max(maps.shading.z * width, 1e-4), 0.0, 1.0);
+}
+
+// One light on a toon surface: its banded share (how squarely it falls,
+// times its shadow) of the base color, plus the highlight, in its color.
+fn toon_light(n: vec3<f32>, v: vec3<f32>, arrival: Arrival, base_color: vec3<f32>) -> vec3<f32> {
+    let n_dot_l = max(dot(n, arrival.l), 0.0);
+    let diffuse = base_color / PI * toon_band(n_dot_l * arrival.visible);
+    let h = normalize(v + arrival.l);
+    let cut = cos(maps.shading.w * TOON_HIGHLIGHT_ANGLE);
+    let highlight = toon_step(dot(n, h), cut, 1.0 - cut) * arrival.visible
+        * select(0.0, 1.0, n_dot_l > 0.0 && maps.shading.w > 0.0);
+    return (diffuse + vec3<f32>(highlight / PI)) * arrival.radiance;
+}
+
+// The light a toon surface gives back toward the camera, from the same
+// lights and shadows as `light_surface` (the weather too), but cut into
+// bands, with a rim light around its outline and flat ambient light.
+fn toon_surface(
+    world_position: vec3<f32>,
+    geometric: vec3<f32>,
+    normal: vec3<f32>,
+    pixel: vec2<f32>,
+    base_color: vec3<f32>,
+    occlusion: f32,
+    solid: bool,
+) -> vec3<f32> {
+    let weather = weathered(geometric, normal, base_color, 0.0, 1.0);
+    let n = weather.normal;
+    let color = weather.base_color;
+    let v = normalize(frame.camera_position.xyz - world_position);
+
+    let sun = sun_arrival(world_position, geometric, pixel, solid);
+    var lit = toon_light(n, v, sun, color);
+    let lamps = tile_lamps(pixel);
+    for (var i = 0u; i < lamps.count; i++) {
+        let lamp = lamp_arrival(lamps, i, world_position, geometric, pixel, solid);
+        if lamp.visible > 0.0 {
+            lit += toon_light(n, v, lamp, color);
+        }
+    }
+
+    let surrounding = frame.ambient.rgb
+        + surrounding_diffuse(world_position, n, frame.sky_top.w);
+    let ambient = occlusion * surrounding * color;
+    // The rim catches the sun (where it isn't shadowed) and the sky.
+    let rim = maps.toon.x * toon_step(1.0 - max(dot(n, v), 0.0), 1.0 - TOON_RIM_WIDTH,
+        TOON_RIM_WIDTH) * (sun.radiance * sun.visible / PI + surrounding);
+    return lit + ambient + rim;
 }
 
 // Whether a fading item leaves out the pixel at `pixel`, in a fine pattern,

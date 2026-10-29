@@ -536,6 +536,41 @@ mod tests {
         });
     }
 
+    #[test]
+    fn toon_shading_set_in_the_tab_draws_in_the_viewport_and_play_and_saves() {
+        use axcenity_render::Shading;
+        let folder = copy_of_example("hello-touched", "material-toon");
+        let mut app = EditorApp::new(Some(&folder));
+        app.new_material("Cel");
+        let path = "assets/materials/Cel.material.json";
+        app.materials.edit("shading", |file| {
+            file.shading = Some(axcenity_assets::Shading::Toon)
+        });
+        app.materials.finish_edit();
+        app.materials.edit("toon steps", |file| {
+            file.toon.get_or_insert_default().steps = Some(2)
+        });
+        app.hand_over_materials();
+        // The tab draws its Toon rows.
+        draw_tab(&mut app, crate::material_editor::MaterialView::Values);
+        assert!(app.save());
+        let pad = part(&app, "Pad");
+        app.use_material(path, "Cel", vec![pad]);
+        let toon_steps = |material: axcenity_render::Material| match material.shading {
+            Shading::Toon(toon) => Some(toon.steps),
+            _ => None,
+        };
+        let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera());
+        assert_eq!(toon_steps(material_in(&app.world, pad, &list)), Some(2));
+        app.play();
+        let game = app.play.as_ref().unwrap().world();
+        let list = axcenity_scene::build_draw_list(game, &app.assets, camera());
+        assert_eq!(toon_steps(material_in(game, pad, &list)), Some(2));
+        let written = axcenity_assets::read_material_file(&folder.join(path)).unwrap();
+        assert_eq!(written.shading, Some(axcenity_assets::Shading::Toon));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     type Gpu = (axcenity_render::wgpu::Device, axcenity_render::wgpu::Queue);
 
     fn gpu() -> Option<Gpu> {

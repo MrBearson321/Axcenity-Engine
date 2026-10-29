@@ -1,0 +1,9 @@
+{
+  "shading": "Toon",
+  "toon": {
+    "steps": 2,
+    "softness": 0.05,
+    "rim": 0.4,
+    "highlight": 0.25
+  }
+}

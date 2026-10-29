@@ -1119,6 +1119,54 @@ pub struct Material {
     /// what's seen through it. Draw it on [`crate::water_surface`] so the
     /// waves have corners to move.
     pub water: Option<crate::Water>,
+    /// How it's lit. Water and terrain ignore it.
+    pub shading: Shading,
+}
+
+/// How a [`Material`] is lit. Every model takes the same lights, shadows,
+/// fog and post-processing, in the same pass
+/// (`docs/rendering/stylized.md`).
+#[derive(Clone, Debug, Default)]
+pub enum Shading {
+    /// Physically based (the default).
+    #[default]
+    Standard,
+    /// The surface's color (and glow) as it is, whatever the light.
+    Unlit,
+    /// Cel shading: see [`Toon`].
+    Toon(Toon),
+}
+
+/// Toon shading: each light's share (how squarely it falls, times its
+/// shadow) is cut into flat bands, with a rim light around the outline and
+/// a sharp highlight. Metalness and roughness are left out.
+#[derive(Clone, Debug)]
+pub struct Toon {
+    /// How many bands from dark to fully lit, at least 1 (two-tone).
+    pub steps: u32,
+    /// An image whose colors, left to right along its middle row, are the
+    /// light from none to full, in place of `steps`. sRGB, read without
+    /// blending its pixels. It takes the specular map's place, so a toon
+    /// material has no specular map.
+    pub ramp: Option<Arc<dyn TextureSource>>,
+    /// 0 is a hard edge between bands (the shadow's too), 1 a smooth blend.
+    pub softness: f32,
+    /// How bright the rim light is, 0 for none.
+    pub rim: f32,
+    /// How big the highlight is, 0 for none, 1 a wide one.
+    pub highlight: f32,
+}
+
+impl Default for Toon {
+    fn default() -> Self {
+        Self {
+            steps: 3,
+            ramp: None,
+            softness: 0.05,
+            rim: 0.3,
+            highlight: 0.2,
+        }
+    }
 }
 
 /// How many values a surface shader can read with `parameter(i)`
@@ -1144,6 +1192,7 @@ impl Default for Material {
             surface_shader: None,
             surface_parameters: [[0.0; 4]; SURFACE_PARAMETERS],
             water: None,
+            shading: Shading::Standard,
         }
     }
 }

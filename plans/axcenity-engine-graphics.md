@@ -500,8 +500,8 @@ Material files gain `shading`: `Standard` (the default), `Unlit`, and `Toon` (a 
 
 ### Acceptance criteria
 
-- [ ] Standard, Unlit and Toon parts draw side by side in one scene, each lit as its model says.
-- [ ] Existing materials stay Standard and look unchanged.
+- [x] Standard, Unlit and Toon parts draw side by side in one scene, each lit as its model says.
+- [x] Existing materials stay Standard and look unchanged.
 
 ---
 

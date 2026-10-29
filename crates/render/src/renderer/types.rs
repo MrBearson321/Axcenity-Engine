@@ -391,9 +391,20 @@ pub(super) struct MapsUniform {
     pub(super) uv_matrix: [f32; 4],
     /// Added to the turned texture coordinates, then unused.
     pub(super) uv_offset: [f32; 4],
+    /// How it's lit: the model ([`SHADING_STANDARD`], [`SHADING_UNLIT`] or
+    /// [`SHADING_TOON`]), then toon's bands (0 when its ramp is bound in the
+    /// specular map's place), softness and highlight size.
+    pub(super) shading: [f32; 4],
+    /// Toon's rim light, then unused.
+    pub(super) toon: [f32; 4],
     /// The surface shader's values ([`crate::Material::surface_parameters`]).
     pub(super) params: [[f32; 4]; SURFACE_PARAMETERS],
 }
+
+/// [`MapsUniform::shading`]'s models, as shader.wgsl names them.
+pub(super) const SHADING_STANDARD: f32 = 0.0;
+pub(super) const SHADING_UNLIT: f32 = 1.0;
+pub(super) const SHADING_TOON: f32 = 2.0;
 
 /// A texture uploaded to the GPU, with a view for each way it's read.
 pub(super) struct GpuTexture {
@@ -430,7 +441,7 @@ pub(super) const MATERIAL_TEXTURES: usize = 8;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct MaterialKey {
     pub(super) textures: [Option<u64>; MATERIAL_TEXTURES],
-    pub(super) maps: [[u32; 4]; 9 + SURFACE_PARAMETERS],
+    pub(super) maps: [[u32; 4]; 11 + SURFACE_PARAMETERS],
     /// A terrain chunk's binding (see `terrain::TerrainKey`), all 0 for
     /// everything else.
     pub(super) terrain: terrain::TerrainKey,

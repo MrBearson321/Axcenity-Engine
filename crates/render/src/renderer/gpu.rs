@@ -15,8 +15,8 @@ use crate::mesh::{self, MeshData, Vertex};
 use super::skinning::{JOINTS_BINDING, Skinning};
 use super::{
     Bounds, DEPTH_FORMAT, GpuBytes, GpuMaterial, GpuMesh, GpuTexture, InstanceRaw,
-    MATERIAL_TEXTURES, MapsUniform, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT, TEXTURE_FORMAT,
-    TEXTURE_SRGB_FORMAT,
+    MATERIAL_TEXTURES, MapsUniform, SHADING_TOON, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT,
+    TEXTURE_FORMAT, TEXTURE_SRGB_FORMAT,
 };
 
 /// The shader for parts and models, and the shadow and sky passes: the
@@ -687,7 +687,7 @@ pub(super) fn upload_texture(
 
 /// Binds a material's `textures` (in [`MATERIAL_TEXTURES`] order) and
 /// `maps` for the shader. Colors are read through sRGB views, the rest as
-/// plain values.
+/// plain values. A toon ramp, in the specular map's place, is colors.
 pub(super) fn create_material(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -695,6 +695,7 @@ pub(super) fn create_material(
     textures: [&GpuTexture; MATERIAL_TEXTURES],
     maps: MapsUniform,
 ) -> GpuMaterial {
+    let ramp = maps.shading[0] == SHADING_TOON && maps.shading[1] == 0.0;
     let maps = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("material maps"),
         contents: bytemuck::bytes_of(&maps),
@@ -733,7 +734,14 @@ pub(super) fn create_material(
             view(6, &occlusion.linear),
             view(7, &emissive.srgb),
             view(8, &opacity.linear),
-            view(9, &specular.linear),
+            view(
+                9,
+                if ramp {
+                    &specular.srgb
+                } else {
+                    &specular.linear
+                },
+            ),
         ],
     });
     GpuMaterial {
