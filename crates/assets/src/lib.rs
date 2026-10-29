@@ -13,6 +13,9 @@
 //!   `Bake` names ([`ProbeImage`]).
 //! - [`Assets::light_probes`] reads the bake a `LightProbeVolume`'s `Bake`
 //!   names ([`LightProbes`]).
+//! - [`Assets::color_lookup`] and [`Assets::palette`] read the lookup table
+//!   and palette a `ColorCorrectionEffect` names ([`ColorLookup`],
+//!   [`Palette`]).
 //! - [`load_model`] reads a `.gltf`, `.glb` or `.fbx` file into a [`Model`]: plain
 //!   triangles, materials and textures, fitted into the 1×1×1 cube that every
 //!   part's mesh fills.
@@ -24,6 +27,7 @@
 //! Every file is read from inside the project folder ([`safe_path`]), so a
 //! world file or script can't make the engine read anything else.
 
+mod color_grading;
 mod data_table;
 mod fonts;
 mod import;
@@ -40,6 +44,10 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
+pub use color_grading::{
+    ColorLookup, LOOKUP_EXTENSIONS, MAX_LOOKUP_SIZE, MAX_PALETTE_COLORS, PROJECT_GRADING_FOLDER,
+    Palette, lookup_from_strip, palette_from_image, parse_cube, read_color_lookup, read_palette,
+};
 pub use data_table::{
     AssetType, Cell, Column, ColumnType, DATA_FOLDER, DATA_TABLE_SUFFIX, DataTable, DataTableError,
     Row, data_table_name, data_table_path, is_data_table, read_data_table, write_data_table,
@@ -48,9 +56,9 @@ pub use fonts::{FontFile, is_font_file};
 pub use import::{
     AUDIO_EXTENSIONS, ImportError, MESH_EDIT_FOLDER_SUFFIX, MESH_EDIT_SUFFIX, MODELS_FOLDER,
     PROJECT_AUDIO_FOLDER, PROJECT_SKY_FOLDER, PROJECT_TEXTURES_FOLDER, TEXTURE_EXTENSIONS,
-    TEXTURES_FOLDER, import_animation_file, import_audio, import_model, import_picks,
-    import_sky_image, import_texture, list_model_objects, load_model_file, load_takes_file,
-    safe_file_name, unique_file_name,
+    TEXTURES_FOLDER, import_animation_file, import_audio, import_grading_file, import_model,
+    import_picks, import_sky_image, import_texture, list_model_objects, load_model_file,
+    load_takes_file, safe_file_name, unique_file_name,
 };
 pub use light_probes::{
     LIGHT_PROBES_SUFFIX, LightProbes, MAX_LIGHT_PROBES_PER_SIDE, ProbeLight, decode_light_probes,
@@ -138,6 +146,10 @@ struct Shared {
     probes: HashMap<String, Option<Arc<ProbeImage>>>,
     /// Every light probe bake asked for so far, by its path, the same way.
     light_probes: HashMap<String, Option<Arc<LightProbes>>>,
+    /// Every color lookup table asked for so far, by its path, the same way.
+    lookups: HashMap<String, Option<Arc<ColorLookup>>>,
+    /// Every palette asked for so far, by its path, the same way.
+    palettes: HashMap<String, Option<Arc<Palette>>>,
     /// Every material file asked for so far, by its path, put together
     /// with its bases. `None` means it couldn't be read.
     materials: HashMap<String, Option<material::Resolved>>,
@@ -363,6 +375,69 @@ impl Assets {
         shared
             .light_probes
             .insert(path.to_owned(), Some(Arc::new(probes)));
+    }
+
+    /// The color lookup table at `path` (a ColorCorrectionEffect's
+    /// `LookupTable`: a `.cube` file or a strip image, such as
+    /// `assets/grading/warm.cube`), read the first time. `None` if `path`
+    /// is empty or it can't be read; the reason goes to
+    /// [`take_errors`](Self::take_errors), once. Tables are small, so
+    /// they're read at once even while textures load in the background.
+    pub fn color_lookup(&self, path: &str) -> Option<Arc<ColorLookup>> {
+        if path.is_empty() {
+            return None;
+        }
+        let mut shared = self.lock();
+        if let Some(lookup) = shared.lookups.get(path) {
+            return lookup.clone();
+        }
+        let folder = shared.folder.clone()?;
+        let lookup = match read_color_lookup(&folder, path) {
+            Ok(lookup) => Some(Arc::new(lookup)),
+            Err(message) => {
+                shared.errors.push(format!(
+                    "Could not load the lookup table `{path}`: {message}. Colors are left as                      they are."
+                ));
+                None
+            }
+        };
+        reload::remember_stamp(&mut shared, &folder, path);
+        shared.lookups.insert(path.to_owned(), lookup.clone());
+        lookup
+    }
+
+    /// The palette image at `path` (a ColorCorrectionEffect's `Palette`,
+    /// such as `assets/grading/retro.png`), read the first time, as
+    /// [`color_lookup`](Self::color_lookup) reads a table. A palette with
+    /// too many colors is reported once too.
+    pub fn palette(&self, path: &str) -> Option<Arc<Palette>> {
+        if path.is_empty() {
+            return None;
+        }
+        let mut shared = self.lock();
+        if let Some(palette) = shared.palettes.get(path) {
+            return palette.clone();
+        }
+        let folder = shared.folder.clone()?;
+        let palette = match read_palette(&folder, path) {
+            Ok((palette, warning)) => {
+                if let Some(warning) = warning {
+                    shared
+                        .errors
+                        .push(format!("The palette `{path}` {warning}."));
+                }
+                Some(Arc::new(palette))
+            }
+            Err(message) => {
+                shared.errors.push(format!(
+                    "Could not load the palette `{path}`: {message}. Colors are left as they are."
+                ));
+                None
+            }
+        };
+        reload::remember_stamp(&mut shared, &folder, path);
+        shared.palettes.insert(path.to_owned(), palette.clone());
+        palette
     }
 
     /// The material file at `path` (a part's `MaterialVariant`, such as
@@ -610,6 +685,8 @@ impl Assets {
         shared.textures.remove(file);
         shared.probes.remove(file);
         shared.light_probes.remove(file);
+        shared.lookups.remove(file);
+        shared.palettes.remove(file);
         shared.takes.remove(file);
         shared.tables.remove(file);
         forget_materials_using(&mut shared, file);
@@ -624,6 +701,8 @@ impl Assets {
         shared.textures.retain(|_, texture| texture.is_some());
         shared.probes.retain(|_, probe| probe.is_some());
         shared.light_probes.retain(|_, probes| probes.is_some());
+        shared.lookups.retain(|_, lookup| lookup.is_some());
+        shared.palettes.retain(|_, palette| palette.is_some());
         shared.takes.retain(|_, takes| takes.is_some());
         shared.tables.retain(|_, table| table.is_ok());
         shared

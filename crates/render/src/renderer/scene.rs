@@ -688,6 +688,9 @@ impl ScenePipeline {
             0,
             bytemuck::bytes_of(&post_uniform(&post)),
         );
+        self.post
+            .grading
+            .prepare(&self.device, &self.queue, list.grading.as_ref());
 
         self.frame += 1;
         // Each item's level of detail, which decides the meshes uploaded.

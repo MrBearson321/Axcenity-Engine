@@ -125,7 +125,7 @@ impl OcclusionPasses {
             &targets.raw_view,
             clear,
             &self.occlusion,
-            &targets.occlusion_group,
+            &[&targets.occlusion_group],
         );
         fullscreen_pass(
             encoder,
@@ -133,7 +133,7 @@ impl OcclusionPasses {
             &targets.blurred_view,
             clear,
             &self.blur,
-            &targets.blur_group,
+            &[&targets.blur_group],
         );
     }
 }

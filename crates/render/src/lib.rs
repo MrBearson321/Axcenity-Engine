@@ -17,13 +17,14 @@ mod water;
 
 pub use atmosphere::Atmosphere;
 pub use draw_list::{
-    AmbientLight, Camera, Channel, ChannelMap, Clouds, Cone, DrawItem, DrawList, Edges, Fog, Light,
-    LightProbeGrid, LightProbeVolume, Material, MeshSource, NormalMap, Outline, PointShadows,
-    PostProcessing, ProbeImage, ReflectionProbe, SURFACE_PARAMETERS, Shading, Shadows, Shape, Skin,
-    Sky, SkyImage, SpotShadows, Sprite, Sun, Sway, TerrainLayer, TerrainLayers, TerrainSurface,
-    TerrainView, TextAlign, TextShadow, TextSpan, TextStroke, TextureMaps, TextureSource, Toon,
-    UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle, UiShadow, UiSlice, UiText,
-    VerticalAlign, Weather, is_turned, turn_point, turned_bounds,
+    AmbientLight, Camera, Channel, ChannelMap, Clouds, ColorGrading, ColorLookup, Cone, DrawItem,
+    DrawList, Edges, Fog, Light, LightProbeGrid, LightProbeVolume, MAX_PALETTE_COLORS, Material,
+    MeshSource, NormalMap, Outline, PointShadows, PostProcessing, ProbeImage, ReflectionProbe,
+    SURFACE_PARAMETERS, Shading, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, Sprite, Sun,
+    Sway, TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow,
+    TextSpan, TextStroke, TextureMaps, TextureSource, Toon, UiBorderSide, UiClip, UiDrawItem,
+    UiImage, UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign, Weather, is_turned, turn_point,
+    turned_bounds,
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{

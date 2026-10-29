@@ -24,6 +24,9 @@ pub enum Edit {
     /// SurfaceAppearance's `ColorMap`) with the file picker. The app does
     /// that, and sets the property.
     PickTexture(&'static str),
+    /// Asks for a lookup table or palette file for this ColorCorrectionEffect
+    /// property (`LookupTable` or `Palette`), like [`Edit::PickTexture`].
+    PickGradingFile(&'static str),
     /// Asks for an audio file for the Sound's `SoundId`, like [`Edit::PickTexture`].
     PickAudio,
     /// Asks for a state machine file for the Animator's `StateMachine`.
@@ -80,7 +83,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 26] = [
+const GROUPS: [(&str, &[&str]); 27] = [
     (
         "Appearance",
         &[
@@ -292,6 +295,19 @@ const GROUPS: [(&str, &[&str]); 26] = [
     ),
     ("Outlines", &["Enabled", "Thickness"]),
     (
+        "Color Correction",
+        &[
+            "Enabled",
+            "Brightness",
+            "Contrast",
+            "Saturation",
+            "TintColor",
+            "LookupTable",
+            "Posterize",
+            "Palette",
+        ],
+    ),
+    (
         "Post-processing",
         &[
             "PostProcessingEnabled",
@@ -408,6 +424,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
             "Clouds" => instance.class() == ClassName::Clouds,
             "Weather" => instance.class() == ClassName::Weather,
             "Outlines" => instance.class() == ClassName::OutlineEffect,
+            "Color Correction" => instance.class() == ClassName::ColorCorrectionEffect,
             "Light" => matches!(
                 instance.class(),
                 ClassName::PointLight | ClassName::SpotLight
@@ -895,6 +912,7 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Clouds" => icons::CLOUD,
         "Weather" => icons::CLOUD_RAIN,
         "Outlines" => icons::PEN_NIB,
+        "Color Correction" => icons::SWATCHES,
         "Post-processing" => icons::SPARKLE,
         "Light" => icons::LIGHTBULB,
         "Attributes" => icons::LIST_BULLETS,
@@ -1028,6 +1046,9 @@ fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<
         Value::String(path) if name == "Clip" => clip_control(ui, &path),
         Value::String(path) if name == "BehaviorTree" => behavior_tree_control(ui, &path),
         Value::String(path) if name == "SkyImage" => sky_control(ui, &path),
+        Value::String(path) if matches!(name, "LookupTable" | "Palette") => {
+            grading_control(ui, name, &path)
+        }
         // Picked by the editor; the Terrain Studio says where it is.
         Value::String(path) if name == "DataFolder" => {
             ui.label(if path.is_empty() {
@@ -1061,6 +1082,42 @@ fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit
         if ui
             .small_button(icons::X)
             .on_hover_text("Use no map")
+            .clicked()
+        {
+            edit = Some(Edit::Property(name, Value::String(String::new())));
+        }
+        let file = path.rsplit('/').next().unwrap_or(path);
+        ui.add(egui::Label::new(file).truncate())
+            .on_hover_text(path);
+    });
+    edit
+}
+
+/// A ColorCorrectionEffect's lookup table or palette file, with buttons to
+/// pick one and to use none.
+fn grading_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit> {
+    let mut edit = None;
+    ui.horizontal(|ui| {
+        let hover = if name == "LookupTable" {
+            "Choose a lookup table: a .cube file, or a strip image of N squares of N × N \
+             pixels side by side (such as 256 × 16)"
+        } else {
+            "Choose a palette: an image whose colors (up to 64) every pixel is snapped to"
+        };
+        if ui
+            .small_button(icons::FOLDER_OPEN)
+            .on_hover_text(hover)
+            .clicked()
+        {
+            edit = Some(Edit::PickGradingFile(name));
+        }
+        if path.is_empty() {
+            ui.weak("None");
+            return;
+        }
+        if ui
+            .small_button(icons::X)
+            .on_hover_text("Use none")
             .clicked()
         {
             edit = Some(Edit::Property(name, Value::String(String::new())));

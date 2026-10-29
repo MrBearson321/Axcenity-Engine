@@ -201,6 +201,10 @@ pub enum ClassName {
     /// Inside Lighting: lines drawn along the edges of everything solid
     /// (silhouettes and creases), found on screen, with no setup per part.
     OutlineEffect,
+    /// Inside Lighting: changes the finished picture's colors (brightness,
+    /// contrast, saturation, a tint, a lookup table, posterizing and a
+    /// palette), after tone mapping.
+    ColorCorrectionEffect,
     /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
     ParticleEmitter,
     /// Inside a Part, MeshPart, Model, ScreenGui or UI element: plays
@@ -349,7 +353,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 110] = [
+    pub const ALL: [ClassName; 111] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -411,6 +415,7 @@ impl ClassName {
         ClassName::Clouds,
         ClassName::Weather,
         ClassName::OutlineEffect,
+        ClassName::ColorCorrectionEffect,
         ClassName::ParticleEmitter,
         ClassName::Animator,
         ClassName::Animation,
@@ -529,6 +534,7 @@ impl ClassName {
             ClassName::Clouds => "Clouds",
             ClassName::Weather => "Weather",
             ClassName::OutlineEffect => "OutlineEffect",
+            ClassName::ColorCorrectionEffect => "ColorCorrectionEffect",
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
@@ -1062,6 +1068,25 @@ impl ClassName {
                 // How thick they are, in pixels of a view 1080 pixels tall
                 // (scaled with the view's height, never under one pixel).
                 ("Thickness", Value::Number(1.0)),
+            ],
+            ClassName::ColorCorrectionEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // Added to every channel, from -1 (black) to 1 (white).
+                ("Brightness", Value::Number(0.0)),
+                // Above 0 spreads colors from mid-grey; -1 is flat grey.
+                ("Contrast", Value::Number(0.0)),
+                // Above 0 is more colorful; -1 is grey.
+                ("Saturation", Value::Number(0.0)),
+                // Multiplies every color. White changes nothing.
+                ("TintColor", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                // A `.cube` file or a strip image every color is looked up
+                // in, or "" for none.
+                ("LookupTable", Value::String(String::new())),
+                // How many levels each channel is cut down to (2 or more),
+                // or 0 to leave them smooth.
+                ("Posterize", Value::Number(0.0)),
+                // An image whose colors every pixel is snapped to, or "".
+                ("Palette", Value::String(String::new())),
             ],
             ClassName::ParticleEmitter => vec![
                 ("Enabled", Value::Bool(true)),
@@ -2275,6 +2300,7 @@ impl ClassName {
             | ClassName::Clouds
             | ClassName::Weather
             | ClassName::OutlineEffect
+            | ClassName::ColorCorrectionEffect
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer

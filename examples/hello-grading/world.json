@@ -1,0 +1,269 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Ground",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.45,
+            0.62,
+            0.4
+          ],
+          "Material": "Plastic",
+          "Position": [
+            0,
+            -0.5,
+            0
+          ],
+          "Shape": "Block",
+          "Size": [
+            96,
+            1,
+            96
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Red",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.85,
+            0.2,
+            0.15
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -8.75,
+            1.5,
+            -6
+          ],
+          "Shape": "Block",
+          "Size": [
+            2.5,
+            3,
+            2.5
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Orange",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.55,
+            0.15
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -5.25,
+            1.5,
+            -6
+          ],
+          "Shape": "Ball",
+          "Size": [
+            2.5,
+            3,
+            2.5
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Yellow",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.85,
+            0.25
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -1.75,
+            1.5,
+            -6
+          ],
+          "Shape": "Block",
+          "Size": [
+            2.5,
+            3,
+            2.5
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Green",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.2,
+            0.7,
+            0.3
+          ],
+          "Material": "Plastic",
+          "Position": [
+            1.75,
+            1.5,
+            -6
+          ],
+          "Shape": "Ball",
+          "Size": [
+            2.5,
+            3,
+            2.5
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Blue",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.2,
+            0.4,
+            0.9
+          ],
+          "Material": "Plastic",
+          "Position": [
+            5.25,
+            1.5,
+            -6
+          ],
+          "Shape": "Block",
+          "Size": [
+            2.5,
+            3,
+            2.5
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Purple",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.55,
+            0.25,
+            0.75
+          ],
+          "Material": "Plastic",
+          "Position": [
+            8.75,
+            1.5,
+            -6
+          ],
+          "Shape": "Ball",
+          "Size": [
+            2.5,
+            3,
+            2.5
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "WhitePillar",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.95,
+            0.95,
+            0.95
+          ],
+          "Material": "Plastic",
+          "Position": [
+            -12,
+            3,
+            -12
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "GreyPillar",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "Material": "Plastic",
+          "Position": [
+            12,
+            3,
+            -12
+          ],
+          "Shape": "Block",
+          "Size": [
+            2,
+            6,
+            2
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Glow",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.4,
+            0.9,
+            1.0
+          ],
+          "Material": "Neon",
+          "Position": [
+            0,
+            4.5,
+            -10
+          ],
+          "Shape": "Ball",
+          "Size": [
+            1.5,
+            1.5,
+            1.5
+          ]
+        }
+      }
+    ]
+  },
+  "lighting": {
+    "properties": {
+      "ToneMapping": "Neutral"
+    },
+    "children": [
+      {
+        "class": "ColorCorrectionEffect",
+        "name": "ColorCorrection",
+        "properties": {
+          "LookupTable": "assets/grading/Warm.cube",
+          "Contrast": 0.1
+        }
+      }
+    ]
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false,
+      "LeaderboardEnabled": true,
+      "RespawnTime": 5
+    }
+  }
+}

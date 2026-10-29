@@ -8,6 +8,7 @@ use crate::graphics::ShadowQuality;
 use glam::Mat4;
 
 mod clouds;
+mod color_grading;
 mod environment_maps;
 mod fog;
 mod frustum_culling;
@@ -173,6 +174,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
         time: 0.0,
         wind: Vec3::ZERO,
         edges: None,
+        grading: None,
     }
 }
 

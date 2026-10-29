@@ -29,6 +29,8 @@ pub enum ImportError {
     NotAudio,
     #[error("only Radiance .hdr, PNG and JPEG sky images can be used")]
     NotASkyImage,
+    #[error("only .cube lookup tables and PNG, JPEG, TGA and BMP images can be used")]
+    NotAGradingFile,
     #[error("could not read it")]
     Read(#[source] io::Error),
     #[error(transparent)]
@@ -157,6 +159,22 @@ pub fn import_sky_image(project: &Path, file: &Path) -> Result<String, ImportErr
         "sky",
     )
     .ok_or(ImportError::NotASkyImage)?
+}
+
+/// The path in `project` of the lookup table or palette `file`, for a
+/// ColorCorrectionEffect's `LookupTable` or `Palette`: its own if it's
+/// inside the project, otherwise a copy's in
+/// [`PROJECT_GRADING_FOLDER`](crate::PROJECT_GRADING_FOLDER), as
+/// [`import_texture`] does for textures.
+pub fn import_grading_file(project: &Path, file: &Path) -> Result<String, ImportError> {
+    import_file(
+        project,
+        file,
+        crate::PROJECT_GRADING_FOLDER,
+        &crate::LOOKUP_EXTENSIONS,
+        "grading",
+    )
+    .ok_or(ImportError::NotAGradingFile)?
 }
 
 /// `file`'s path in `project`, copying it into `into` first if it's

@@ -338,6 +338,10 @@ impl EditorApp {
                         "Insert an OutlineEffect into Lighting: lines along the edges of \
                          everything solid, around silhouettes and along creases, with no setup \
                          per part. A material file's outline draws one around its parts alone."
+                    } else if what == Insertable::ColorCorrectionEffect {
+                        "Insert a ColorCorrectionEffect into Lighting: changes the finished \
+                         picture's colors (brightness, contrast, saturation and a tint), and can \
+                         look them up in a .cube table, posterize them or snap them to a palette."
                     } else if what == Insertable::Weather {
                         "Insert Weather into Lighting: rain or snow falling around the camera,                          wetting surfaces or covering their tops in snow. Changes ease in over                          its TransitionTime, and Workspace's GlobalWind blows the rain and snow."
                     } else {

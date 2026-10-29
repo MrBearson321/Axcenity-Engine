@@ -373,6 +373,7 @@ pub fn build_draw_list_posed(
         lights,
         post: settings.post,
         edges: crate::outlines::edges_of(world),
+        grading: crate::color_grading::grading_of(world, assets),
         items,
         sprites: Vec::new(),
         ui: Vec::new(),

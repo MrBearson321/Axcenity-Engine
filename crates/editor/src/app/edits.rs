@@ -89,6 +89,13 @@ impl EditorApp {
                 }
                 return;
             }
+            &Edit::PickGradingFile(name) => {
+                if let Some(path) = self.pick_grading_file(name) {
+                    self.apply(id, Edit::Property(name, Value::String(path)));
+                    self.history.seal();
+                }
+                return;
+            }
             Edit::PickAudio => {
                 if let Some(path) = self.pick_audio() {
                     self.apply(id, Edit::Property("SoundId", Value::String(path)));
@@ -1201,6 +1208,7 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         }
         // Turned into a property edit, or done, by `apply`.
         Edit::PickTexture(_)
+        | Edit::PickGradingFile(_)
         | Edit::PickAudio
         | Edit::PickController
         | Edit::OpenController

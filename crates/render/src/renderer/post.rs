@@ -1,10 +1,12 @@
-//! Bloom, tone mapping and FXAA (`post.wgsl`), and the frame's targets.
+//! Bloom, tone mapping, color grading and FXAA (`post.wgsl`), and the
+//! frame's targets.
 //!
 //! The scene is drawn into an HDR target. Bloom blurs the bright parts, then
 //! the composite pass writes the window or the editor's viewport texture, or
 //! with FXAA on an LDR target that FXAA then smooths into the output.
 
 use super::gpu::{create_depth_view, target_bytes};
+use super::grading::GradingPass;
 use super::{
     BLOOM_LEVELS, DEPTH_FORMAT, FXAA_FORMAT, FrameTargets, FxaaTarget, HDR_FORMAT, MsaaTarget,
     OcclusionPasses, OcclusionTargets, PostPasses, PostUniform, TargetsAlive,
@@ -65,11 +67,12 @@ impl PostPasses {
             mapped_at_creation: false,
         });
 
+        let grading = GradingPass::new(device);
         let shader = device.create_shader_module(wgpu::include_wgsl!("../post.wgsl"));
-        let pipeline = |label, layout: &wgpu::BindGroupLayout, entry, format, blend| {
+        let pipeline = |label, layouts: &[&wgpu::BindGroupLayout], entry, format, blend| {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(label),
-                bind_group_layouts: &[layout],
+                bind_group_layouts: layouts,
                 push_constant_ranges: &[],
             });
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -104,17 +107,23 @@ impl PostPasses {
             operation: wgpu::BlendOperation::Add,
         };
         Self {
-            prefilter: pipeline("bloom prefilter", &layout, "fs_prefilter", HDR_FORMAT, None),
+            prefilter: pipeline(
+                "bloom prefilter",
+                &[&layout],
+                "fs_prefilter",
+                HDR_FORMAT,
+                None,
+            ),
             downsample: pipeline(
                 "bloom downsample",
-                &layout,
+                &[&layout],
                 "fs_downsample",
                 HDR_FORMAT,
                 None,
             ),
             upsample: pipeline(
                 "bloom upsample",
-                &layout,
+                &[&layout],
                 "fs_upsample",
                 HDR_FORMAT,
                 Some(wgpu::BlendState {
@@ -124,19 +133,20 @@ impl PostPasses {
             ),
             composite: pipeline(
                 "composite",
-                &composite_layout,
+                &[&composite_layout, &grading.layout],
                 "fs_composite",
                 color_format,
                 None,
             ),
             composite_for_fxaa: pipeline(
                 "composite for FXAA",
-                &composite_layout,
+                &[&composite_layout, &grading.layout],
                 "fs_composite",
                 FXAA_FORMAT,
                 None,
             ),
-            fxaa: pipeline("FXAA", &layout, "fs_fxaa", color_format, None),
+            fxaa: pipeline("FXAA", &[&layout], "fs_fxaa", color_format, None),
+            grading,
             sampler,
             layout,
             composite_layout,
@@ -161,7 +171,7 @@ impl PostPasses {
                 &levels[0],
                 wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                 &self.prefilter,
-                &targets.prefilter_group,
+                &[&targets.prefilter_group],
             );
             for (level, target) in levels.iter().enumerate().skip(1) {
                 fullscreen_pass(
@@ -170,7 +180,7 @@ impl PostPasses {
                     target,
                     wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                     &self.downsample,
-                    &targets.downsample_groups[level],
+                    &[&targets.downsample_groups[level]],
                 );
             }
             for level in (1..levels.len()).rev() {
@@ -180,11 +190,12 @@ impl PostPasses {
                     &levels[level - 1],
                     wgpu::LoadOp::Load,
                     &self.upsample,
-                    &targets.upsample_groups[level],
+                    &[&targets.upsample_groups[level]],
                 );
             }
         }
         let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+        let groups = [&targets.composite_group, self.grading.group()];
         let Some(fxaa) = &targets.fxaa else {
             fullscreen_pass(
                 encoder,
@@ -192,7 +203,7 @@ impl PostPasses {
                 target,
                 clear,
                 &self.composite,
-                &targets.composite_group,
+                &groups,
             );
             return;
         };
@@ -202,20 +213,21 @@ impl PostPasses {
             &fxaa.view,
             clear,
             &self.composite_for_fxaa,
-            &targets.composite_group,
+            &groups,
         );
-        fullscreen_pass(encoder, "FXAA", target, clear, &self.fxaa, &fxaa.group);
+        fullscreen_pass(encoder, "FXAA", target, clear, &self.fxaa, &[&fxaa.group]);
     }
 }
 
-/// Draws one full-screen triangle with `pipeline` into `target`.
+/// Draws one full-screen triangle with `pipeline` into `target`, with
+/// `bind_groups` from group 0 on.
 pub(super) fn fullscreen_pass(
     encoder: &mut wgpu::CommandEncoder,
     label: &str,
     target: &wgpu::TextureView,
     load: wgpu::LoadOp<wgpu::Color>,
     pipeline: &wgpu::RenderPipeline,
-    bind_group: &wgpu::BindGroup,
+    bind_groups: &[&wgpu::BindGroup],
 ) {
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some(label),
@@ -231,7 +243,9 @@ pub(super) fn fullscreen_pass(
         ..Default::default()
     });
     pass.set_pipeline(pipeline);
-    pass.set_bind_group(0, bind_group, &[]);
+    for (index, group) in bind_groups.iter().enumerate() {
+        pass.set_bind_group(index as u32, *group, &[]);
+    }
     pass.draw(0..3, 0..1);
 }
 

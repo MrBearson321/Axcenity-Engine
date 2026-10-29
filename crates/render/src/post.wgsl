@@ -1,5 +1,6 @@
 // Post-processing (rendering stage 5): bloom, then tone mapping from the
-// high dynamic range scene to the screen. Colors are linear light.
+// high dynamic range scene to the screen, then color grading. Colors are
+// linear light, except while they're graded.
 
 struct Post {
     // x: bloom threshold, y: bloom intensity, z: exposure.
@@ -14,6 +15,22 @@ struct Post {
 @group(0) @binding(2) var<uniform> post: Post;
 // The blurred bright parts, for the composite pass only.
 @group(0) @binding(3) var bloom: texture_2d<f32>;
+
+// Color grading, for the composite pass only. Must match GradingUniform in
+// renderer/grading.rs.
+struct Grading {
+    // x: brightness, y: contrast, z: saturation, w: posterize levels (0 none).
+    values: vec4<f32>,
+    // rgb: the tint (sRGB), w: 1 if grading is on.
+    tint: vec4<f32>,
+    // x: the lookup table's size (0 none), y: how many palette colors.
+    counts: vec4<f32>,
+    // sRGB.
+    palette: array<vec4<f32>, 64>,
+}
+
+@group(1) @binding(0) var lookup: texture_3d<f32>;
+@group(1) @binding(1) var<uniform> grading: Grading;
 
 struct VertexOut {
     @builtin(position) clip_position: vec4<f32>,
@@ -141,7 +158,73 @@ fn fs_composite(in: VertexOut) -> @location(0) vec4<f32> {
         color = tone_map(color);
     }
     // Colors past 1 can't be shown. The screen's sRGB format does the rest.
-    return vec4<f32>(clamp(color, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
+    if grading.tint.w > 0.5 {
+        color = to_linear(graded(to_srgb(color)));
+    }
+    return vec4<f32>(color, 1.0);
+}
+
+fn to_srgb(color: vec3<f32>) -> vec3<f32> {
+    let high = 1.055 * pow(color, vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(high, color * 12.92, color <= vec3<f32>(0.0031308));
+}
+
+fn to_linear(color: vec3<f32>) -> vec3<f32> {
+    let high = pow((color + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(high, color / 12.92, color <= vec3<f32>(0.04045));
+}
+
+// One entry of the lookup table.
+fn lookup_entry(at: vec3<i32>) -> vec3<f32> {
+    return textureLoad(lookup, at, 0).rgb;
+}
+
+// `color` looked up in the table, blended between its eight nearest
+// entries (trilinear), so a neutral table gives back exactly what it got.
+fn looked_up(color: vec3<f32>) -> vec3<f32> {
+    let last = i32(grading.counts.x) - 1;
+    let at = color * f32(last);
+    let low = min(vec3<i32>(floor(at)), vec3<i32>(last - 1));
+    let f = at - vec3<f32>(low);
+    let r0 = mix(lookup_entry(low), lookup_entry(low + vec3<i32>(1, 0, 0)), f.x);
+    let r1 = mix(lookup_entry(low + vec3<i32>(0, 1, 0)), lookup_entry(low + vec3<i32>(1, 1, 0)), f.x);
+    let r2 = mix(lookup_entry(low + vec3<i32>(0, 0, 1)), lookup_entry(low + vec3<i32>(1, 0, 1)), f.x);
+    let r3 = mix(lookup_entry(low + vec3<i32>(0, 1, 1)), lookup_entry(low + vec3<i32>(1, 1, 1)), f.x);
+    return mix(mix(r0, r1, f.y), mix(r2, r3, f.y), f.z);
+}
+
+// The finished, sRGB-encoded `input` graded: brightness, contrast,
+// saturation, tint, the lookup table, posterizing, then the palette.
+fn graded(input: vec3<f32>) -> vec3<f32> {
+    let values = grading.values;
+    var color = input + values.x;
+    color = (color - 0.5) * (1.0 + values.y) + 0.5;
+    let grey = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+    color = mix(vec3<f32>(grey), color, 1.0 + values.z);
+    color = clamp(color * grading.tint.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    if grading.counts.x > 1.5 {
+        color = clamp(looked_up(color), vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    // Even steps from black to white, as many as asked for.
+    if values.w > 1.5 {
+        color = min(floor(color * values.w), vec3<f32>(values.w - 1.0)) / (values.w - 1.0);
+    }
+    let colors = u32(grading.counts.y);
+    if colors > 0u {
+        var nearest = grading.palette[0].rgb;
+        var best = 4.0;
+        for (var i = 0u; i < colors; i += 1u) {
+            let offset = grading.palette[i].rgb - color;
+            let distance = dot(offset, offset);
+            if distance < best {
+                best = distance;
+                nearest = grading.palette[i].rgb;
+            }
+        }
+        color = nearest;
+    }
+    return color;
 }
 
 // FXAA: smooths stair-stepped edges in the finished picture (`source`, the

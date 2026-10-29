@@ -154,6 +154,23 @@ impl Assets {
             }
         }
 
+        let mut lookup = None;
+        if shared.lookups.contains_key(file) {
+            used = true;
+            match crate::read_color_lookup(&folder, file) {
+                Ok(read) => lookup = Some(read),
+                Err(message) => problems.push(message),
+            }
+        }
+        let mut palette = None;
+        if shared.palettes.contains_key(file) {
+            used = true;
+            match crate::read_palette(&folder, file) {
+                Ok((read, _)) => palette = Some(read),
+                Err(message) => problems.push(message),
+            }
+        }
+
         let mut probe = None;
         if shared.probes.contains_key(file) {
             used = true;
@@ -239,6 +256,14 @@ impl Assets {
             shared
                 .sky_images
                 .insert(file.to_owned(), Some(Arc::new(image)));
+        }
+        if let Some(read) = lookup {
+            shared.lookups.insert(file.to_owned(), Some(Arc::new(read)));
+        }
+        if let Some(read) = palette {
+            shared
+                .palettes
+                .insert(file.to_owned(), Some(Arc::new(read)));
         }
         if let Some(image) = probe {
             shared.probes.insert(file.to_owned(), Some(Arc::new(image)));

@@ -1371,6 +1371,46 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "How thick the lines are, in pixels of a view 1080 pixels tall (1 by default), scaled with the view's height and never under one pixel.",
     ),
     (
+        ClassName::ColorCorrectionEffect,
+        "Enabled",
+        "Whether it changes the picture. Off (or with no ColorCorrectionEffect in Lighting) it costs nothing.",
+    ),
+    (
+        ClassName::ColorCorrectionEffect,
+        "Brightness",
+        "Added to every color channel, from -1 (black) to 1 (white). 0 by default.",
+    ),
+    (
+        ClassName::ColorCorrectionEffect,
+        "Contrast",
+        "Above 0 spreads colors away from mid-grey; below it squeezes them toward it, down to -1 (flat grey). 0 by default.",
+    ),
+    (
+        ClassName::ColorCorrectionEffect,
+        "Saturation",
+        "Above 0 makes colors more vivid; below it greys them, down to -1 (black and white). 0 by default.",
+    ),
+    (
+        ClassName::ColorCorrectionEffect,
+        "TintColor",
+        "Multiplies every color. White (the default) changes nothing.",
+    ),
+    (
+        ClassName::ColorCorrectionEffect,
+        "LookupTable",
+        "A lookup table in the project every color is looked up in: a .cube file, or a strip image of N squares of N × N pixels side by side (such as 256 × 16). \"\" for none.",
+    ),
+    (
+        ClassName::ColorCorrectionEffect,
+        "Posterize",
+        "How many levels each color channel is cut down to, 2 or more, for a flat, poster look. 0 (the default) leaves them smooth.",
+    ),
+    (
+        ClassName::ColorCorrectionEffect,
+        "Palette",
+        "An image in the project whose colors (up to 64) every pixel is snapped to the nearest of, for a retro look. \"\" for none.",
+    ),
+    (
         ClassName::Weather,
         "Precipitation",
         "What falls around the camera (`Enum.Precipitation`): None, Rain (the default) or Snow. Rain wets surfaces as it falls, up to its Intensity; snow covers the ones facing up.",
@@ -4535,6 +4575,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Weather => {
             "Inside Lighting: rain or snow falling around the camera, and how wet and snow-covered surfaces are (parts, models and terrain). Wet surfaces are darker and glossier; snow covers the tops of things but not walls. workspace.GlobalWind blows the rain and snow. Every change eases in over TransitionTime. With Precipitation None and no Wetness or SnowCover it costs nothing."
+        }
+        ClassName::ColorCorrectionEffect => {
+            "Inside Lighting: changes the colors of the finished picture, after tone mapping. Brightness, Contrast, Saturation and TintColor come first, then the LookupTable, Posterize and the Palette. Several in Lighting add up (their tints multiply)."
         }
         ClassName::OutlineEffect => {
             "Inside Lighting: lines drawn along the edges of everything solid, around each silhouette and along creases where a surface turns sharply, found on screen from what's drawn, so no part needs any setup. A material file's outline draws a line around its own parts instead (see docs/rendering/stylized.md)."

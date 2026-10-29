@@ -555,6 +555,8 @@ pub(super) struct PostPasses {
     pub(super) composite: wgpu::RenderPipeline,
     pub(super) composite_for_fxaa: wgpu::RenderPipeline,
     pub(super) fxaa: wgpu::RenderPipeline,
+    /// Color grading's values and lookup table, for the composite pass.
+    pub(super) grading: super::grading::GradingPass,
 }
 
 /// The depth and normal prepass's and the ambient occlusion passes'

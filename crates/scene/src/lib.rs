@@ -16,6 +16,7 @@
 
 mod camera;
 mod clouds;
+mod color_grading;
 mod constraints;
 mod draw_list;
 mod fog;

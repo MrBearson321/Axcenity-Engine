@@ -62,6 +62,8 @@ pub enum Insertable {
     Weather,
     /// Screen-space outlines, always in Lighting.
     OutlineEffect,
+    /// Color grading of the finished picture, always in Lighting.
+    ColorCorrectionEffect,
     ParticleEmitter,
     Animator,
     Animation,
@@ -173,11 +175,12 @@ impl Insertable {
     /// Ribbon ▸ Lighting ▸ Reflections.
     pub const PROBES: [Insertable; 2] = [Insertable::ReflectionProbe, Insertable::LightProbeVolume];
     /// Ribbon ▸ Lighting ▸ Sky.
-    pub const SKY: [Insertable; 4] = [
+    pub const SKY: [Insertable; 5] = [
         Insertable::Atmosphere,
         Insertable::Clouds,
         Insertable::Weather,
         Insertable::OutlineEffect,
+        Insertable::ColorCorrectionEffect,
     ];
     /// Effects give off particles from the part they are inside.
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
@@ -292,6 +295,7 @@ impl Insertable {
             Insertable::Clouds => "Clouds",
             Insertable::Weather => "Weather",
             Insertable::OutlineEffect => "Outlines",
+            Insertable::ColorCorrectionEffect => "Color Correction",
             Insertable::ParticleEmitter => "Particles",
             Insertable::Animator => "Animator",
             Insertable::Ragdoll => "Ragdoll",
@@ -358,6 +362,7 @@ impl Insertable {
             Insertable::Clouds => ClassName::Clouds,
             Insertable::Weather => ClassName::Weather,
             Insertable::OutlineEffect => ClassName::OutlineEffect,
+            Insertable::ColorCorrectionEffect => ClassName::ColorCorrectionEffect,
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
             Insertable::Animator => ClassName::Animator,
             Insertable::Ragdoll => ClassName::Ragdoll,
@@ -844,8 +849,8 @@ pub fn health_bar(world: &mut World, health: Option<InstanceId>) -> HealthBar {
 /// Animation, a part or a ScreenGui or frame it can animate. Otherwise a
 /// RemoteEvent (or RemoteFunction, BindableEvent or BindableFunction) goes
 /// into ReplicatedStorage (where both sides find it, as in Roblox), and
-/// anything else into the Workspace. An Atmosphere, Clouds, Weather or
-/// OutlineEffect always goes into Lighting, and a Team into Teams. A SoundGroup goes into the
+/// anything else into the Workspace. An Atmosphere, Clouds, Weather,
+/// OutlineEffect or ColorCorrectionEffect always goes into Lighting, and a Team into Teams. A SoundGroup goes into the
 /// selected SoundGroup, and a sound effect into the selected Sound or
 /// SoundGroup; otherwise both go into SoundService.
 pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) -> InstanceId {
@@ -855,6 +860,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             | Insertable::Clouds
             | Insertable::Weather
             | Insertable::OutlineEffect
+            | Insertable::ColorCorrectionEffect
     ) {
         return world.lighting();
     }

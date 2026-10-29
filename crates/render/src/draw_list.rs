@@ -39,6 +39,10 @@ pub struct DrawList {
     /// Lines drawn along the edges of everything solid, found on screen
     /// (Lighting's `OutlineEffect`). `None` draws none, and costs nothing.
     pub edges: Option<Edges>,
+    /// The finished picture's colors changed after tone mapping
+    /// (Lighting's `ColorCorrectionEffect`). `None` leaves them as they are,
+    /// and costs nothing.
+    pub grading: Option<ColorGrading>,
     pub items: Vec<DrawItem>,
     /// Pictures that always face the camera, such as particles, drawn
     /// after every item. They aren't lit or shadowed.
@@ -675,6 +679,74 @@ impl Default for Edges {
             color: [0.0; 3],
             thickness: 1.0,
         }
+    }
+}
+
+/// The most colors a [`ColorGrading::palette`] holds; more are left out.
+pub const MAX_PALETTE_COLORS: usize = 64;
+
+/// Changes to the finished picture's colors, made after tone mapping on
+/// sRGB-encoded values (as the screen shows them), in this order:
+/// brightness, contrast, saturation, tint, the lookup table, posterizing
+/// and the palette (`docs/rendering/post.md`). The default changes nothing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColorGrading {
+    /// Added to every channel: -1 is black, 1 is white.
+    pub brightness: f32,
+    /// Spreads (above 0) or squeezes (down to -1, flat grey) colors away
+    /// from or toward mid-grey.
+    pub contrast: f32,
+    /// More (above 0) or less (down to -1, grey) colorful.
+    pub saturation: f32,
+    /// sRGB, multiplying every color. White changes nothing.
+    pub tint: [f32; 3],
+    /// A table every color is looked up in.
+    pub lookup: Option<ColorLookup>,
+    /// How many levels each channel is cut down to, 2 or more. 0 (or 1)
+    /// leaves them smooth.
+    pub posterize: u32,
+    /// sRGB colors each pixel is snapped to the nearest of, up to
+    /// [`MAX_PALETTE_COLORS`]. Empty leaves colors as they are.
+    pub palette: Vec<[f32; 3]>,
+}
+
+impl Default for ColorGrading {
+    fn default() -> Self {
+        Self {
+            brightness: 0.0,
+            contrast: 0.0,
+            saturation: 0.0,
+            tint: [1.0; 3],
+            lookup: None,
+            posterize: 0,
+            palette: Vec::new(),
+        }
+    }
+}
+
+/// A color lookup table: a cube of `size` entries a side mapping each
+/// sRGB-encoded color to another, read between entries (trilinear).
+#[derive(Clone)]
+pub struct ColorLookup {
+    /// Different for every table, so the renderer uploads each one once.
+    pub key: u64,
+    /// Entries a side, 2 or more.
+    pub size: u32,
+    /// Red, green and blue for each entry, sRGB-encoded, red changing
+    /// fastest, then green, then blue: `size³ × 3` values.
+    pub rgb: Arc<Vec<f32>>,
+}
+
+impl fmt::Debug for ColorLookup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let size = self.size;
+        write!(f, "ColorLookup #{} ({size}×{size}×{size})", self.key)
+    }
+}
+
+impl PartialEq for ColorLookup {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
     }
 }
 

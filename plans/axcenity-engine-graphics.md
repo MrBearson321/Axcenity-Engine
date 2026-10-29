@@ -525,7 +525,7 @@ A `ColorCorrectionEffect` (`Brightness`, `Contrast`, `Saturation`, `TintColor`) 
 
 ### Acceptance criteria
 
-- [ ] Each control changes the frame as expected, and a neutral LUT changes nothing (GPU test).
+- [x] Each control changes the frame as expected, and a neutral LUT changes nothing (GPU test).
 
 ---
 

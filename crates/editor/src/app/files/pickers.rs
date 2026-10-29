@@ -23,6 +23,33 @@ impl EditorApp {
         }
     }
 
+    /// Asks for a ColorCorrectionEffect's lookup table (`LookupTable`) or
+    /// palette image (`Palette`), and returns its path in the project,
+    /// copied into `assets/grading` first if it was outside.
+    pub(in crate::app) fn pick_grading_file(&mut self, name: &str) -> Option<String> {
+        let project = self.project.as_ref()?;
+        let dialog = rfd::FileDialog::new().set_directory(&project.folder);
+        let dialog = if name == "LookupTable" {
+            dialog
+                .set_title("Choose a lookup table")
+                .add_filter("Lookup table", &axcenity_assets::LOOKUP_EXTENSIONS)
+        } else {
+            dialog
+                .set_title("Choose a palette")
+                .add_filter("Palette image", &axcenity_assets::TEXTURE_EXTENSIONS)
+        };
+        let file = dialog.pick_file()?;
+        match axcenity_assets::import_grading_file(&project.folder, &file) {
+            Ok(path) => Some(path),
+            Err(err) => {
+                let err = chain(&err);
+                self.output
+                    .error(format!("Could not use `{}`: {err}", file.display()));
+                None
+            }
+        }
+    }
+
     /// Asks for a sound file, and returns its `SoundId`: its path in the
     /// project, copied into `assets/audio` first if it was outside.
     pub(in crate::app) fn pick_audio(&mut self) -> Option<String> {
