@@ -24,7 +24,7 @@
 //! stroke's undo step keeps.
 
 mod brush;
-mod bvh;
+pub(crate) mod bvh;
 mod remesh;
 
 pub use brush::{SculptBrush, SculptDab, SculptTool};
@@ -33,7 +33,7 @@ pub use remesh::{MAX_VOXELS, subdivide, voxel_remesh};
 use glam::Vec3;
 
 use crate::half_edge::EditMesh;
-use bvh::Bvh;
+pub(crate) use bvh::Bvh;
 #[cfg(test)]
 pub(crate) use bvh::hit;
 

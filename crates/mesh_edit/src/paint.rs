@@ -21,7 +21,7 @@
 //! Color maps hold sRGB values, as their PNGs do; the others plain values.
 
 mod brush;
-mod texels;
+pub(crate) mod texels;
 
 pub use brush::{
     Brush, BrushFalloff, BrushImage, Dab, ImageMode, PaintTool, StampView, Target, Touch, stamp,
@@ -714,7 +714,7 @@ pub(crate) fn to_byte(value: f32) -> u8 {
 }
 
 /// A linear value (0 to 1) as an sRGB byte.
-fn to_srgb(linear: f32) -> u8 {
+pub(crate) fn to_srgb(linear: f32) -> u8 {
     let linear = linear.clamp(0.0, 1.0);
     let encoded = if linear <= 0.003_130_8 {
         linear * 12.92
@@ -725,7 +725,7 @@ fn to_srgb(linear: f32) -> u8 {
 }
 
 /// An sRGB byte as a linear value.
-fn from_srgb(byte: u8) -> f32 {
+pub(crate) fn from_srgb(byte: u8) -> f32 {
     let encoded = f32::from(byte) / 255.0;
     if encoded <= 0.040_45 {
         encoded / 12.92
@@ -736,14 +736,14 @@ fn from_srgb(byte: u8) -> f32 {
 
 /// How a PNG keeps its texels.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Png {
+pub(crate) enum Png {
     Rgba,
     /// The red channel, as grey.
     Grey,
 }
 
 /// `pixels` (RGBA, `size` by `size`) as a PNG file.
-fn encode_png(size: u32, pixels: &[u8], kind: Png) -> Vec<u8> {
+pub(crate) fn encode_png(size: u32, pixels: &[u8], kind: Png) -> Vec<u8> {
     let mut bytes = Vec::new();
     let written = match kind {
         Png::Rgba => image::RgbaImage::from_raw(size, size, pixels.to_vec())
@@ -967,6 +967,26 @@ pub fn paint_folder(model: &str) -> String {
     }
 }
 
+/// The start of the names of maps made for `material` (slot `slot`) of
+/// object `index`, named `object`, of the model whose file's stem is
+/// `stem`: `Chair_Seat_Wood`, to which `_BaseColor.png` and the rest are
+/// added.
+pub(crate) fn map_stem(
+    stem: &str,
+    object: &str,
+    index: usize,
+    material: &ModelMaterial,
+    slot: u32,
+) -> String {
+    let material_name = match material.name.as_str() {
+        "" => format!("Slot{}", slot + 1),
+        name => name.to_owned(),
+    };
+    axcenity_assets::safe_file_name(&format!("{stem}_{object}_{material_name}"))
+        .unwrap_or_else(|| format!("{stem}_{index}"))
+        .replace(['.', ' '], "_")
+}
+
 impl ModelDoc {
     /// Save's part for painting: each painted map flattened into a PNG
     /// named by its role, in `textures/` beside the model at `model` (a
@@ -987,16 +1007,7 @@ impl ModelDoc {
                     continue;
                 };
                 painted.insert((index, set.slot));
-                let material_name = match material.name.as_str() {
-                    "" => format!("Slot{}", set.slot + 1),
-                    name => name.to_owned(),
-                };
-                let wanted = axcenity_assets::safe_file_name(&format!(
-                    "{stem}_{}_{material_name}",
-                    object.name
-                ))
-                .unwrap_or_else(|| format!("{stem}_{index}"))
-                .replace(['.', ' '], "_");
+                let wanted = map_stem(stem, &object.name, index, material, set.slot);
                 let mut name = wanted.clone();
                 if !names.insert(name.clone()) {
                     name = format!("{wanted}_{index}_{}", set.slot);

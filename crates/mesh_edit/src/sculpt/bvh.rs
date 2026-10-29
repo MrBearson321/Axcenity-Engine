@@ -200,6 +200,86 @@ impl Bvh {
         best
     }
 
+    /// True if the ray hits any triangle closer than `limit` (a ray
+    /// toward the sky, for ambient occlusion).
+    pub(crate) fn occluded(
+        &self,
+        positions: &[Vec3],
+        triangles: &[[u32; 3]],
+        origin: Vec3,
+        direction: Vec3,
+        limit: f32,
+    ) -> bool {
+        if self.order.is_empty() {
+            return false;
+        }
+        let inverse = direction.recip();
+        let mut stack = vec![0usize];
+        while let Some(index) = stack.pop() {
+            let node = &self.nodes[index];
+            match slab(node.min, node.max, origin, inverse) {
+                Some(near) if near < limit => {}
+                _ => continue,
+            }
+            if node.left != 0 {
+                stack.push(node.left as usize + 1);
+                stack.push(node.left as usize);
+                continue;
+            }
+            for &triangle in &self.order[node.start as usize..(node.start + node.count) as usize] {
+                let corners = triangles[triangle as usize].map(|v| positions[v as usize]);
+                if hit(origin, direction, corners).is_some_and(|t| t < limit) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// The triangle nearest `point`, the nearest point on it and that
+    /// point's barycentric weights.
+    pub(crate) fn nearest(
+        &self,
+        positions: &[Vec3],
+        triangles: &[[u32; 3]],
+        point: Vec3,
+    ) -> Option<(u32, Vec3, [f32; 3])> {
+        if self.order.is_empty() {
+            return None;
+        }
+        let mut best: Option<(u32, Vec3, [f32; 3], f32)> = None;
+        let mut stack = vec![0usize];
+        let box_distance = |node: &Node| point.clamp(node.min, node.max).distance_squared(point);
+        while let Some(index) = stack.pop() {
+            let node = &self.nodes[index];
+            if best.is_some_and(|(.., d)| box_distance(node) >= d) {
+                continue;
+            }
+            if node.left != 0 {
+                // The nearer child first (pushed last), so the other is
+                // more often passed over.
+                let (a, b) = (node.left as usize, node.left as usize + 1);
+                if box_distance(&self.nodes[a]) <= box_distance(&self.nodes[b]) {
+                    stack.push(b);
+                    stack.push(a);
+                } else {
+                    stack.push(a);
+                    stack.push(b);
+                }
+                continue;
+            }
+            for &triangle in &self.order[node.start as usize..(node.start + node.count) as usize] {
+                let corners = triangles[triangle as usize].map(|v| positions[v as usize]);
+                let (on, weights) = closest_on_triangle(point, corners);
+                let distance = on.distance_squared(point);
+                if best.is_none_or(|(.., d)| distance < d) {
+                    best = Some((triangle, on, weights, distance));
+                }
+            }
+        }
+        best.map(|(triangle, on, weights, _)| (triangle, on, weights))
+    }
+
     /// Adds to `out` every triangle in a leaf whose box comes within
     /// `radius` of `center`.
     pub(crate) fn sphere(&self, center: Vec3, radius: f32, out: &mut Vec<u32>) {
@@ -254,6 +334,49 @@ fn slab(min: Vec3, max: Vec3, origin: Vec3, inverse: Vec3) -> Option<f32> {
     let near = a.min(b).max_element();
     let far = a.max(b).min_element();
     (far >= near.max(0.0)).then_some(near.max(0.0))
+}
+
+/// The point of the triangle `a b c` nearest `p`, and its barycentric
+/// weights (Ericson, *Real-Time Collision Detection*, 5.1.5: which of the
+/// corners, edges or inside it's nearest, by where `p` is against them).
+pub(crate) fn closest_on_triangle(p: Vec3, [a, b, c]: [Vec3; 3]) -> (Vec3, [f32; 3]) {
+    let (ab, ac, ap) = (b - a, c - a, p - a);
+    let (d1, d2) = (ab.dot(ap), ac.dot(ap));
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return (a, [1.0, 0.0, 0.0]);
+    }
+    let bp = p - b;
+    let (d3, d4) = (ab.dot(bp), ac.dot(bp));
+    if d3 >= 0.0 && d4 <= d3 {
+        return (b, [0.0, 1.0, 0.0]);
+    }
+    let vc = d1 * d4 - d3 * d2;
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        let v = d1 / (d1 - d3);
+        return (a + ab * v, [1.0 - v, v, 0.0]);
+    }
+    let cp = p - c;
+    let (d5, d6) = (ab.dot(cp), ac.dot(cp));
+    if d6 >= 0.0 && d5 <= d6 {
+        return (c, [0.0, 0.0, 1.0]);
+    }
+    let vb = d5 * d2 - d1 * d6;
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        let w = d2 / (d2 - d6);
+        return (a + ac * w, [1.0 - w, 0.0, w]);
+    }
+    let va = d3 * d6 - d5 * d4;
+    if va <= 0.0 && d4 - d3 >= 0.0 && d5 - d6 >= 0.0 {
+        let w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return (b + (c - b) * w, [0.0, 1.0 - w, w]);
+    }
+    let total = va + vb + vc;
+    if total.abs() < 1e-30 {
+        // No area: its first corner will do.
+        return (a, [1.0, 0.0, 0.0]);
+    }
+    let (v, w) = (vb / total, vc / total);
+    (a + ab * v + ac * w, [1.0 - v - w, v, w])
 }
 
 /// How far along the ray it hits `a b c`, from either side. Worked out in

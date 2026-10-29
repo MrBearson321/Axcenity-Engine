@@ -33,10 +33,17 @@
 //!   [`Sculpt`] (a hierarchy of boxes keeps them fast; chunks say what to
 //!   draw again), masks it, and adds detail ([`voxel_remesh`],
 //!   [`subdivide`]).
+//! - [`retopo`] builds a lighter mesh over a high-poly [`Reference`]
+//!   (snapping to it, [`poly_build`], [`decimate_to`], [`relax`]), and [`bake`] puts
+//!   the high-poly detail into maps on the lighter one's uvs
+//!   ([`ModelDoc::bake`]: normal, ambient occlusion, curvature, base color).
 //!
 //! Everything here is deterministic: the same input gives the same output,
 //! bit for bit, so a project regenerates the same pieces anywhere.
 
+pub mod bake;
+#[cfg(test)]
+mod bake_tests;
 mod csg;
 #[cfg(test)]
 mod csg_tests;
@@ -58,6 +65,7 @@ pub mod paint;
 #[cfg(test)]
 mod paint_tests;
 mod primitives;
+pub mod retopo;
 pub mod sculpt;
 #[cfg(test)]
 mod sculpt_tests;
@@ -73,6 +81,7 @@ pub mod uv;
 #[cfg(test)]
 mod uv_tests;
 
+pub use bake::{BakeReport, BakeSettings, Overlap};
 pub use csg::{Operation, boolean};
 pub use fracture::{Pattern, fracture, seed_points, voronoi_pieces};
 pub use generate::{Settings, generate, generate_for};
@@ -87,6 +96,7 @@ pub use ops::{
 };
 pub use paint::{MapKind, PaintSet, TexelMap, paint_folder};
 pub use primitives::{PrimitiveSettings, PrimitiveShape};
+pub use retopo::{PolyStep, Reference, decimate_to, poly_build, relax};
 pub use sculpt::{Sculpt, subdivide, voxel_remesh};
 pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use sidecar::sidecar_path;

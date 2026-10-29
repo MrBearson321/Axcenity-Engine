@@ -161,6 +161,57 @@ fn stroke(sculpt: &mut Sculpt, settings: Stroke, from: Vec3, to: Vec3) -> bool {
     changed
 }
 
+/// The strokes that sculpt a face looking along +Z on a sphere of radius
+/// 1, with X symmetry.
+fn face_strokes() -> [(Stroke, Vec3, Vec3); 5] {
+    let with = |tool| Stroke {
+        symmetry: [true, false, false],
+        ..Stroke::of(tool)
+    };
+    // The face looks along +Z. A brow and a nose (Draw: the nose runs down
+    // the middle, where both sides' dabs overlap), cheeks (Clay Strips),
+    // the brow softened (Smooth), and the mouth (Crease).
+    [
+        (
+            with(SculptTool::Draw),
+            Vec3::new(0.05, 0.35, 0.94),
+            Vec3::new(0.5, 0.35, 0.8),
+        ),
+        (
+            with(SculptTool::Draw),
+            Vec3::new(0.0, 0.2, 1.0),
+            Vec3::new(0.0, -0.15, 1.0),
+        ),
+        (
+            with(SculptTool::ClayStrips),
+            Vec3::new(0.3, -0.05, 0.95),
+            Vec3::new(0.55, -0.2, 0.8),
+        ),
+        (
+            with(SculptTool::Smooth),
+            Vec3::new(0.0, 0.35, 0.94),
+            Vec3::new(0.5, 0.35, 0.8),
+        ),
+        (
+            with(SculptTool::Crease),
+            Vec3::new(0.0, -0.45, 0.89),
+            Vec3::new(0.35, -0.42, 0.83),
+        ),
+    ]
+}
+
+/// The face of `a_face_sculpted_on_a_remeshed_sphere_with_x_symmetry_…`
+/// as a mesh (Phase 61 retopologises and bakes it).
+pub(crate) fn sculpted_face() -> EditMesh {
+    let mut mesh = remeshed_sphere();
+    let mut sculpt = Sculpt::new(&mesh);
+    for (settings, from, to) in face_strokes() {
+        stroke(&mut sculpt, settings, from, to);
+    }
+    sculpt.write_back(&mut mesh);
+    mesh
+}
+
 #[test]
 fn a_voxel_remeshed_sphere_is_closed_outward_even_and_mirrored() {
     let mesh = remeshed_sphere();
@@ -210,40 +261,7 @@ fn a_face_sculpted_on_a_remeshed_sphere_with_x_symmetry_matches_on_both_sides() 
     let mut sculpt = Sculpt::new(&mesh);
     let pairs = mirror_pairs(sculpt.positions());
     let start = sculpt.positions().to_vec();
-    let with = |tool| Stroke {
-        symmetry: [true, false, false],
-        ..Stroke::of(tool)
-    };
-    // The face looks along +Z. A brow and a nose (Draw: the nose runs down
-    // the middle, where both sides' dabs overlap), cheeks (Clay Strips),
-    // the brow softened (Smooth), and the mouth (Crease).
-    let strokes = [
-        (
-            with(SculptTool::Draw),
-            Vec3::new(0.05, 0.35, 0.94),
-            Vec3::new(0.5, 0.35, 0.8),
-        ),
-        (
-            with(SculptTool::Draw),
-            Vec3::new(0.0, 0.2, 1.0),
-            Vec3::new(0.0, -0.15, 1.0),
-        ),
-        (
-            with(SculptTool::ClayStrips),
-            Vec3::new(0.3, -0.05, 0.95),
-            Vec3::new(0.55, -0.2, 0.8),
-        ),
-        (
-            with(SculptTool::Smooth),
-            Vec3::new(0.0, 0.35, 0.94),
-            Vec3::new(0.5, 0.35, 0.8),
-        ),
-        (
-            with(SculptTool::Crease),
-            Vec3::new(0.0, -0.45, 0.89),
-            Vec3::new(0.35, -0.42, 0.83),
-        ),
-    ];
+    let strokes = face_strokes();
     for (settings, from, to) in strokes {
         assert!(
             stroke(&mut sculpt, settings, from, to),

@@ -195,6 +195,15 @@ impl View {
         self.distance = ((max - min).length() * 1.6).max(2.0);
     }
 
+    /// Turns the camera to look from `yaw` and `pitch` (degrees), and
+    /// brings it `closer` (a factor), for snapshots.
+    #[cfg(test)]
+    pub fn look_from(&mut self, yaw: f32, pitch: f32, closer: f32) {
+        self.yaw = yaw;
+        self.pitch = pitch;
+        self.distance /= closer;
+    }
+
     fn camera(&self) -> Camera {
         let (yaw, pitch) = (self.yaw.to_radians(), self.pitch.to_radians());
         let direction = Vec3::new(

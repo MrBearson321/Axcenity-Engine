@@ -66,7 +66,7 @@ pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, MapSlot,
     Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
     Primitive, Rig, Take, TextureRole, Track, list_objects, load_model, load_models, load_takes,
-    lod_level, texture_roles,
+    lod_level, tangents, texture_roles,
 };
 pub use probe::{
     PROBE_SUFFIX, PROBES_FOLDER, ProbeImage, decode_probe, encode_probe, is_probe_file, probe_path,

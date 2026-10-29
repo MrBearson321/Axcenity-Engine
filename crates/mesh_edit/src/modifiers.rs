@@ -9,7 +9,7 @@
 //! Applying one ([`ModifierKind::run`] on the mesh itself) bakes it in.
 
 mod generate;
-mod reduce;
+pub(crate) mod reduce;
 mod subdivide;
 
 use std::collections::BTreeSet;

@@ -3,7 +3,8 @@
 //! editor's history, which MeshParts using it reload at once. A model with
 //! modifiers (Phase 57) saves its sidecar too, and opens from it. Painted
 //! maps (Phase 59) save as PNGs in `textures/` beside it, and their layers
-//! in its sidecar folder.
+//! in its sidecar folder. Bake (Phase 61) writes its maps there too, as a
+//! step of its own.
 
 use std::sync::Arc;
 
@@ -48,6 +49,9 @@ impl EditorApp {
                     self.save_model_studio();
                 }
                 StudioAction::BrushImage(path) => self.load_brush_image(&path),
+                StudioAction::Bake => {
+                    self.bake_model_studio();
+                }
             }
         }
     }
@@ -134,25 +138,8 @@ impl EditorApp {
     /// `assets/models`), as one undo step of the editor, and reloads it in
     /// every MeshPart using it. Returns the path written.
     pub(in crate::app) fn save_model_studio(&mut self) -> Option<String> {
-        let folder = self
-            .project
-            .as_ref()
-            .map(|project| project.folder.clone())?;
+        let (folder, path) = self.model_studio_path()?;
         let doc = self.model_studio.doc.as_mut()?;
-        if doc.path.is_empty() {
-            let name = doc
-                .model
-                .objects
-                .first()
-                .map_or("Model".to_owned(), |o| o.name.clone());
-            let name = axcenity_assets::safe_file_name(&name).unwrap_or_else(|| "Model".to_owned());
-            let models = folder.join(axcenity_assets::MODELS_FOLDER);
-            let file = axcenity_assets::unique_file_name(&format!("{name}.glb"), |taken| {
-                models.join(taken).exists()
-            });
-            doc.path = format!("{}/{file}", axcenity_assets::MODELS_FOLDER);
-        }
-        let path = doc.path.clone();
         // Painted maps flattened to PNGs, which the materials then use.
         let textures = doc.model.bake_paint(&path);
         let bytes = doc.model.write_glb();
@@ -184,8 +171,60 @@ impl EditorApp {
             }
         }
         files.extend(layer_files);
+        let changes = self.write_studio_files(&folder, &files)?;
+        // An emptied sidecar folder goes too.
+        if let Some(disk) = axcenity_assets::safe_path(&layers).map(|p| folder.join(p)) {
+            let _ = std::fs::remove_dir(disk);
+        }
+        let doc = self.model_studio.doc.as_mut()?;
+        doc.mark_saved();
+        let name = doc.name().to_owned();
+        self.history
+            .record_blobs(&mut self.world, format!("Save {name}"), changes);
+        // Taken in now, not when the watcher notices: MeshParts using it
+        // draw the new version this frame.
+        self.asset_file_changed(&path);
+        self.asset_browser.refresh();
+        self.output.info(format!("Saved `{path}`."));
+        Some(path)
+    }
+
+    /// The project folder and the path the Studio's model saves at, which a
+    /// new model is given now (in `assets/models`, named after its first
+    /// object).
+    fn model_studio_path(&mut self) -> Option<(std::path::PathBuf, String)> {
+        let folder = self
+            .project
+            .as_ref()
+            .map(|project| project.folder.clone())?;
+        let doc = self.model_studio.doc.as_mut()?;
+        if doc.path.is_empty() {
+            let name = doc
+                .model
+                .objects
+                .first()
+                .map_or("Model".to_owned(), |o| o.name.clone());
+            let name = axcenity_assets::safe_file_name(&name).unwrap_or_else(|| "Model".to_owned());
+            let models = folder.join(axcenity_assets::MODELS_FOLDER);
+            let file = axcenity_assets::unique_file_name(&format!("{name}.glb"), |taken| {
+                models.join(taken).exists()
+            });
+            doc.path = format!("{}/{file}", axcenity_assets::MODELS_FOLDER);
+        }
+        let path = doc.path.clone();
+        Some((folder, path))
+    }
+
+    /// Writes (or, for `None`, deletes) each project file, and returns the
+    /// changes for one history step. `None`, with the error in the Output,
+    /// if one couldn't be written.
+    fn write_studio_files(
+        &mut self,
+        folder: &std::path::Path,
+        files: &[(String, Option<Vec<u8>>)],
+    ) -> Option<Vec<BlobChange>> {
         let mut changes = Vec::new();
-        for (file, after) in &files {
+        for (file, after) in files {
             let disk = folder.join(axcenity_assets::safe_path(file)?);
             let before = std::fs::read(&disk).ok();
             if before.is_none() && after.is_none() {
@@ -208,20 +247,46 @@ impl EditorApp {
                 after: after.clone().map(Arc::new),
             });
         }
-        // An emptied sidecar folder goes too.
-        if let Some(disk) = axcenity_assets::safe_path(&layers).map(|p| folder.join(p)) {
-            let _ = std::fs::remove_dir(disk);
-        }
-        doc.mark_saved();
-        let name = doc.name().to_owned();
+        Some(changes)
+    }
+
+    /// Bakes the Studio's reference onto its active object (a step of the
+    /// Studio's undo) and writes the maps as PNGs beside the model (a step
+    /// of the editor's history). Returns the files written.
+    pub(in crate::app) fn bake_model_studio(&mut self) -> Option<Vec<String>> {
+        let (folder, path) = self.model_studio_path()?;
+        let settings = self.model_studio.retopo.bake.clone();
+        let doc = self.model_studio.doc.as_mut()?;
+        let report = match doc.bake(&path, &settings) {
+            Ok(report) => report,
+            Err(why) => {
+                self.output.error(format!("Could not bake: {why}"));
+                self.model_studio.retopo.status = Some(why);
+                return None;
+            }
+        };
+        let name = doc.model.objects[doc.active].name.clone();
+        let files: Vec<(String, Option<Vec<u8>>)> = report
+            .files
+            .iter()
+            .map(|(file, png)| (file.clone(), Some(png.clone())))
+            .collect();
+        let changes = self.write_studio_files(&folder, &files)?;
         self.history
-            .record_blobs(&mut self.world, format!("Save {name}"), changes);
-        // Taken in now, not when the watcher notices: MeshParts using it
-        // draw the new version this frame.
-        self.asset_file_changed(&path);
+            .record_blobs(&mut self.world, format!("Bake {name}"), changes);
+        for (file, _) in &files {
+            self.asset_file_changed(file);
+        }
         self.asset_browser.refresh();
-        self.output.info(format!("Saved `{path}`."));
-        Some(path)
+        for warning in report.warnings() {
+            self.output.warning(format!("Bake {name}: {warning}"));
+        }
+        self.output.info(format!(
+            "Baked {} maps onto {name}. Save the model to keep them on it.",
+            files.len()
+        ));
+        self.model_studio.bake_done(&report);
+        Some(files.into_iter().map(|(file, _)| file).collect())
     }
 
     /// Reads the project image at `path` as the Model Studio's brush image.

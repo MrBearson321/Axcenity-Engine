@@ -1078,9 +1078,17 @@ impl Reader<'_> {
                 gltf::material::AlphaMode::Blend => AlphaMode::Blend,
             },
             base_color_texture,
+            // glTF's normal maps are OpenGL's, but a file named as
+            // DirectX's (`_NormalDX.png`, as the Model Studio bakes them)
+            // is read as one, as an FBX's is.
+            normal_flip_green: normal_texture
+                .as_ref()
+                .and_then(|image| image.file.as_deref())
+                .is_some_and(|file| {
+                    maps::role_from_name(file) == Some(maps::Role::Normal { flip_green: true })
+                }),
             normal_texture,
             normal_scale,
-            normal_flip_green: false,
             metalness_texture: metallic_roughness
                 .clone()
                 .map(|image| ChannelTexture::new(image, Channel::Blue)),
@@ -1231,8 +1239,9 @@ fn smooth_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
 
 /// Tangents for a normal map (see [`Primitive::tangents`]): each corner
 /// gets the average U and V directions of the triangles around it,
-/// weighted by their area, made perpendicular to its normal.
-fn tangents(
+/// weighted by their area, made perpendicular to its normal. Public so the
+/// Model Studio's baker puts its normal maps in the same frames.
+pub fn tangents(
     positions: &[[f32; 3]],
     normals: &[[f32; 3]],
     uvs: &[[f32; 2]],

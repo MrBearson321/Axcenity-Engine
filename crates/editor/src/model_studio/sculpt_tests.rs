@@ -13,7 +13,7 @@ use super::*;
 use crate::screen::Screen;
 
 /// Looking at the sphere's front (+Z) from 5 studs away.
-fn front() -> Screen {
+pub(super) fn front() -> Screen {
     let camera = Camera {
         position: Vec3::new(0.0, 0.0, 5.0),
         look_at: Vec3::ZERO,
@@ -27,14 +27,14 @@ fn front() -> Screen {
 
 /// The points of a stroke on `screen` along the sphere's surface, from
 /// `from` to `to` (directions from its middle).
-fn stroke(screen: &Screen, from: Vec3, to: Vec3) -> Vec<egui::Pos2> {
+pub(super) fn stroke(screen: &Screen, from: Vec3, to: Vec3) -> Vec<egui::Pos2> {
     (0..=16)
         .filter_map(|k| screen.point(from.lerp(to, k as f32 / 16.0).normalize()))
         .collect()
 }
 
 /// A New UV sphere in Sculpt mode, voxel remeshed.
-fn remeshed_sphere() -> ModelStudio {
+pub(super) fn remeshed_sphere() -> ModelStudio {
     let doc = StudioDoc::new(
         String::new(),
         ModelDoc::primitive(&PrimitiveSettings::of(PrimitiveShape::UvSphere)),

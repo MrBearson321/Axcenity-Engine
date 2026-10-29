@@ -775,8 +775,8 @@ pub(crate) fn along_edge(a: Vec3, b: Vec3, p: Vec3) -> f32 {
 /// A built mesh, and where the [`Soup`]'s vertices and faces went in it.
 pub(crate) struct Built {
     pub mesh: EditMesh,
-    vertex_map: Vec<Option<u32>>,
-    face_map: Vec<Option<u32>>,
+    pub vertex_map: Vec<Option<u32>>,
+    pub face_map: Vec<Option<u32>>,
 }
 
 impl Built {

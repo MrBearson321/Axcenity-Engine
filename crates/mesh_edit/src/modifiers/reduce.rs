@@ -15,7 +15,7 @@ const MIN_RATIO: f32 = 0.01;
 /// uv or material are kept apart, so meshoptimizer keeps seams and the
 /// borders between materials where they are. Each triangle is smooth if
 /// most faces of its material were.
-pub(super) fn decimate(mesh: &EditMesh, ratio: f32) -> EditMesh {
+pub(crate) fn decimate(mesh: &EditMesh, ratio: f32) -> EditMesh {
     if ratio.is_nan() || ratio >= 1.0 {
         return mesh.clone();
     }

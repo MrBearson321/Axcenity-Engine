@@ -26,6 +26,10 @@
 //!   object's surface about, with a mask, symmetry, Voxel Remesh and
 //!   Subdivide; the view draws it in chunks, sending only touched ones to
 //!   the GPU again.
+//! - Retopology and baking (Phase 61; `retopo.rs`): a reference object
+//!   to snap to and build quads on (Poly Build), Make Low Poly, and Bake
+//!   (normal, occlusion, curvature and base color maps onto the active
+//!   object's uvs).
 //!
 //! The Studio keeps its own undo history while the mouse is over it; each
 //! edit is one step. Save writes the file and records it as one step of the
@@ -36,6 +40,7 @@ mod modal;
 mod modifiers;
 pub(crate) mod paint;
 mod proportional;
+pub(crate) mod retopo;
 pub(crate) mod sculpt;
 mod tools;
 pub(crate) mod uv_editor;
@@ -44,13 +49,16 @@ mod view;
 pub use modal::{Modal, ModalKind};
 pub use paint::PaintState;
 pub use proportional::{Falloff, Pivot, Proportional};
+pub use retopo::RetopoState;
 pub use sculpt::SculptState;
 pub use uv_editor::UvEditor;
 
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 use axcenity_mesh_edit::{
-    MeshOp, ModelDoc, PrimitiveSettings, PrimitiveShape, Purpose, SelectMode, Selection, apply,
+    MeshOp, ModelDoc, PrimitiveSettings, PrimitiveShape, Purpose, Reference, SelectMode, Selection,
+    apply,
 };
 use axcenity_render::glam::{Mat4, Vec3};
 use eframe::egui;
@@ -82,6 +90,8 @@ pub enum StudioAction {
     Save,
     /// Read this project image as the paint brush's image.
     BrushImage(String),
+    /// Bake the reference onto the active object and write the maps.
+    Bake,
 }
 
 /// Everything an undo step puts back.
@@ -131,6 +141,12 @@ pub struct StudioDoc {
     pub last_op: Option<LastOp>,
     /// The object and undo step a modifier change under way goes into.
     modifier_edit: Option<(usize, usize)>,
+    /// The high-poly object retopology builds on and bakes from (Phase
+    /// 61). Not an undo step.
+    pub reference: Option<usize>,
+    /// What Edit mode's moves and operations snap to, if anything: set by
+    /// the Studio before each (`ModelStudio::refresh_snap`).
+    pub(crate) snap: Option<Arc<Reference>>,
 }
 
 impl StudioDoc {
@@ -156,6 +172,8 @@ impl StudioDoc {
             saved: if saved { 1 } else { 0 },
             last_op: None,
             modifier_edit: None,
+            reference: None,
+            snap: None,
         }
     }
 
@@ -282,7 +300,11 @@ impl StudioDoc {
             else {
                 continue;
             };
-            results.push((*object, apply(mesh, selection, op)?));
+            let (mut result, picked) = apply(mesh, selection, op)?;
+            if let Some(surface) = &self.snap {
+                snap_new_vertices(mesh, &mut result, surface);
+            }
+            results.push((*object, (result, picked)));
         }
         for (object, (mesh, selection)) in results {
             self.model.objects[object].mesh = Some(mesh);
@@ -500,6 +522,8 @@ struct Moving {
     /// The move's pivot.
     center: Vec3,
     before: Snapshot,
+    /// The surface what moves sticks to (Snap to surface, Phase 61).
+    snap: Option<Arc<Reference>>,
 }
 
 impl Moving {
@@ -548,6 +572,7 @@ impl Moving {
             origins,
             center,
             before: doc.snapshot(),
+            snap: doc.snap.clone(),
         })
     }
 
@@ -590,6 +615,11 @@ impl Moving {
             {
                 let stack = &doc.model.objects[*object].modifiers;
                 for (point, &from) in moved.iter_mut().zip(start) {
+                    if let Some(surface) = &self.snap
+                        && *point != from
+                    {
+                        *point = surface.snap(*point);
+                    }
                     *point = axcenity_mesh_edit::clip(stack, from, *point);
                 }
             }
@@ -661,6 +691,8 @@ pub struct ModelStudio {
     pub paint: PaintState,
     /// Sculpt mode's brush, the sculpt and its strokes.
     pub sculpt: SculptState,
+    /// The reference, Poly Build, Make Low Poly and Bake (Phase 61).
+    pub retopo: RetopoState,
     /// The project's images, for a paint brush's image.
     pub images: Vec<String>,
     /// A keyboard move under way, and what it moves.
@@ -691,6 +723,7 @@ impl Default for ModelStudio {
             uv: UvEditor::default(),
             paint: PaintState::default(),
             sculpt: SculptState::default(),
+            retopo: RetopoState::default(),
             images: Vec::new(),
             modal: None,
             tools: tools::Tools::default(),
@@ -747,6 +780,7 @@ impl ModelStudio {
         self.uv.forget();
         self.paint.forget();
         self.sculpt.forget();
+        self.retopo.forget();
         self.view.frame_doc(&doc);
         self.doc = Some(doc);
     }
@@ -799,7 +833,10 @@ impl ModelStudio {
                         match self.doc.as_ref().map(|d| d.mode) {
                             Some(Mode::Paint) => self.paint_panel(ui, editable, &mut actions),
                             Some(Mode::Sculpt) => self.sculpt_panel(ui, editable),
-                            _ => self.modifier_panel(ui, editable),
+                            _ => {
+                                self.modifier_panel(ui, editable);
+                                self.retopo_panel(ui, editable, &mut actions);
+                            }
                         }
                     });
             } else if self.uv.open {
@@ -1201,6 +1238,7 @@ impl ModelStudio {
             }
         }
         let mut extras = self.extras();
+        self.retopo_extras(&mut extras);
         if painting {
             extras.hint = self.paint.status.clone();
         }
@@ -1267,7 +1305,7 @@ impl ModelStudio {
         let pointer = ui
             .input(|input| input.pointer.latest_pos())
             .unwrap_or(frame.rect.center());
-        if self.tool_keys(ui) {
+        if self.tool_keys(ui) || self.poly_build_keys(ui) {
             return;
         }
         if let Some((modal, _)) = &mut self.modal {
@@ -1414,6 +1452,7 @@ impl ModelStudio {
 
     /// Starts a keyboard move of what's picked, from the mouse at `at`.
     pub fn begin_modal(&mut self, kind: ModalKind, at: egui::Pos2) -> bool {
+        self.refresh_snap();
         let Some(doc) = &self.doc else {
             return false;
         };
@@ -1461,7 +1500,7 @@ impl ModelStudio {
 
     /// Acts on what happened in the view.
     fn handle(&mut self, event: view::Event, ui: &egui::Ui, frame: &view::Frame) {
-        if self.handle_tools(&event) {
+        if self.handle_tools(&event) || self.handle_poly_build(&event) {
             return;
         }
         let screen = event.screen;
@@ -1502,6 +1541,10 @@ impl ModelStudio {
                 set.extend(elements);
             }),
             view::ViewAction::BeginHandle => {
+                self.refresh_snap();
+                let Some(doc) = &mut self.doc else {
+                    return;
+                };
                 // The handles go round the middle of their box.
                 let center = view::handle_pose(doc, self.axes).map(|pose| pose.position);
                 self.view.moving =
@@ -1535,6 +1578,29 @@ struct StudioKeys {
     shrink: bool,
 }
 
+/// Puts the vertices of `after` (an operation's result on `before`) that
+/// aren't where one of `before`'s was, the new and moved ones, on
+/// `surface`.
+fn snap_new_vertices(
+    before: &axcenity_mesh_edit::EditMesh,
+    after: &mut axcenity_mesh_edit::EditMesh,
+    surface: &Reference,
+) {
+    let key = |p: Vec3| p.to_array().map(f32::to_bits);
+    let old: std::collections::HashSet<[u32; 3]> =
+        before.positions().iter().map(|&p| key(p)).collect();
+    let (vertices, places): (Vec<u32>, Vec<Vec3>) = after
+        .positions()
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| !old.contains(&key(**p)))
+        .map(|(v, &p)| (v as u32, surface.snap(p)))
+        .unzip();
+    if !vertices.is_empty() {
+        after.set_positions(&vertices, &places);
+    }
+}
+
 /// Where Save writes `doc`, as the tooltip names it.
 fn save_name(doc: &StudioDoc) -> String {
     if doc.path.is_empty() {
@@ -1554,7 +1620,9 @@ pub(crate) mod modifiers_tests;
 #[cfg(test)]
 pub(crate) mod paint_tests;
 #[cfg(test)]
-mod sculpt_tests;
+pub(crate) mod retopo_tests;
+#[cfg(test)]
+pub(crate) mod sculpt_tests;
 #[cfg(test)]
 pub(crate) mod tests;
 #[cfg(test)]

@@ -23,6 +23,8 @@ const NONE: u32 = u32::MAX;
 #[derive(Clone, Copy, Debug)]
 struct Triangle {
     face: u32,
+    /// Its corners' half-edges in the mesh.
+    corners: [u32; 3],
     positions: [Vec3; 3],
     normals: [Vec3; 3],
     uvs: [Vec2; 3],
@@ -63,6 +65,7 @@ impl TexelMap {
                 let corners = triangle.map(|e| *mesh.half_edge(e));
                 triangles.push(Triangle {
                     face,
+                    corners: triangle,
                     positions: corners.map(|corner| mesh.position(corner.vertex)),
                     normals: corners.map(|corner| corner.normal),
                     uvs: corners.map(|corner| corner.uv),
@@ -259,6 +262,24 @@ impl TexelMap {
             .map(|(_, uv)| uv)
     }
 
+    /// How many triangles of the slot it has.
+    pub(crate) fn triangle_count(&self) -> usize {
+        self.triangles.len()
+    }
+
+    /// Triangle `t`'s corners (half-edges of the mesh) and their places.
+    pub(crate) fn triangle(&self, t: u32) -> ([u32; 3], [Vec3; 3]) {
+        let triangle = &self.triangles[t as usize];
+        (triangle.corners, triangle.positions)
+    }
+
+    /// Triangle `t`'s texels (its gutter's too): each one's number, place
+    /// and normal on the surface.
+    pub(crate) fn texels_of(&self, t: u32) -> impl Iterator<Item = (u32, Vec3, Vec3)> + '_ {
+        let range = self.starts[t as usize] as usize..self.starts[t as usize + 1] as usize;
+        range.map(|k| (self.texels[k], self.positions[k], self.normals[k]))
+    }
+
     /// How far a move of `motion` on the surface goes in uvs, on triangle
     /// `triangle` (a Smear's drag).
     pub(crate) fn uv_motion(&self, triangle: u32, motion: Vec3) -> Vec2 {
@@ -319,7 +340,7 @@ fn barycentric([a, b, c]: [Vec2; 3], at: Vec2) -> Option<[f32; 3]> {
 
 /// `point`'s barycentric weights in the triangle `corners` in space,
 /// after dropping it onto the triangle's plane.
-fn surface_weights([a, b, c]: [Vec3; 3], point: Vec3) -> Option<[f32; 3]> {
+pub(crate) fn surface_weights([a, b, c]: [Vec3; 3], point: Vec3) -> Option<[f32; 3]> {
     let (ab, ac, ap) = (b - a, c - a, point - a);
     let (d00, d01, d11) = (ab.dot(ab), ab.dot(ac), ac.dot(ac));
     let (d20, d21) = (ap.dot(ab), ap.dot(ac));

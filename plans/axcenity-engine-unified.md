@@ -1910,8 +1910,8 @@ Results are written as role-named PNGs.
 
 ### Acceptance criteria
 
-- [ ] The sculpted face from Phase 60, retopologised to under 5k triangles and baked, looks close to the sculpt in the game. A test compares normals from the bake with the high-poly surface at sample points.
-- [ ] Baking without overlapping UVs gives no seams. With overlap, it warns which islands overlap.
+- [x] The sculpted face from Phase 60, retopologised to under 5k triangles and baked, looks close to the sculpt in the game. A test compares normals from the bake with the high-poly surface at sample points.
+- [x] Baking without overlapping UVs gives no seams. With overlap, it warns which islands overlap.
 
 ---
 

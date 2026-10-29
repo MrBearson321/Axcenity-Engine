@@ -571,3 +571,55 @@ fn a_hidden_layer_stays_out_of_the_saved_maps_and_is_still_there_after_reopening
     assert_eq!(map.flat(), rust_only.as_slice());
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_sculpted_face_retopologised_and_baked_writes_maps_a_meshpart_draws_once_saved() {
+    let folder = copy_of_example("hello-touched", "studio-bake");
+    let mut app = EditorApp::new(Some(&folder));
+    app.model_studio = crate::model_studio::retopo_tests::sculpted_face_studio();
+    app.model_studio.retopo.target = 4000;
+    app.model_studio.make_low_poly();
+    app.model_studio.retopo.bake.size = 512;
+    let files = app.bake_model_studio().expect("it bakes");
+    let roles = ["BaseColor", "Normal", "Occlusion", "Curvature"];
+    assert_eq!(
+        files,
+        roles.map(|role| format!(
+            "assets/models/textures/UVSphere_UVSphere_Low_Material_{role}.png"
+        ))
+    );
+    for file in &files {
+        assert!(folder.join(file).is_file(), "{file}");
+    }
+    // A step of the editor's history (the files), and of the Studio's (the
+    // material).
+    assert_eq!(app.history.undo_label(), Some("Bake UVSphere_Low"));
+    let doc = app.model_studio.doc.as_ref().unwrap();
+    assert_eq!(doc.undo_label(), Some("Bake UVSphere_Low"));
+    let (warnings, _) = app.model_studio.retopo.report.clone().unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+
+    // Saved, a MeshPart picking the low-poly face draws it with the maps.
+    let path = app.save_model_studio().unwrap();
+    assert_eq!(path, "assets/models/UVSphere.glb");
+    let mesh_id = format!("{path}#UVSphere_Low");
+    let part = mesh_part(&mut app, &mesh_id);
+    let _ = drawn_size(&app, part);
+    let model = app.assets.model(&mesh_id).unwrap();
+    let triangles: usize = model.primitives.iter().map(|p| p.indices.len() / 3).sum();
+    assert!(triangles <= 4000, "{triangles}");
+    let primitive = &model.primitives[0];
+    let material = &primitive.material;
+    let normal = material
+        .normal_texture
+        .as_ref()
+        .expect("the baked normal map");
+    assert_eq!(
+        normal.file.as_deref(),
+        Some("textures/UVSphere_UVSphere_Low_Material_Normal.png")
+    );
+    assert!(material.occlusion_texture.is_some());
+    assert!(material.base_color_texture.is_some());
+    assert_eq!(primitive.tangents.len(), primitive.positions.len());
+    let _ = std::fs::remove_dir_all(&folder);
+}
