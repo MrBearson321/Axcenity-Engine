@@ -197,6 +197,18 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         instead: "ask the server with a RemoteEvent's FireServer, and call it there",
     },
     SideOnlyApi {
+        name: "SendMessage",
+        side: Side::Client,
+        because: "a message is sent by the player on a device",
+        instead: "use DisplaySystemMessage to show one from the server",
+    },
+    SideOnlyApi {
+        name: "OnIncomingMessage",
+        side: Side::Server,
+        because: "the server decides what every player sees",
+        instead: "set it in a Script",
+    },
+    SideOnlyApi {
         name: "Kick",
         side: Side::Server,
         because: "only the server can take a player out of the game",

@@ -2552,6 +2552,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If false, the default leaderboard isn't drawn, for a game that makes its own. It shows each Player's `leaderstats` Folder of Value objects, top right, and Tab shows and hides it.",
     ),
     (
+        ClassName::TextChatService,
+        "ChatEnabled",
+        "If false, the default chat window isn't drawn and `/` doesn't open it, for a game with its own chat or none. Scripts can still send and hear messages.",
+    ),
+    (
         ClassName::Players,
         "MaxPlayers",
         "How many players a hosted game takes, the host's own player among them. A player who joins a full game is refused, and their `NetworkService.ConnectionFailed` says the game is full.",
@@ -4088,6 +4093,11 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires once when the character's Health reaches 0, after the Health's own Died and StateChanged to Dead. By then the controller has stopped and RagdollOnDeath and BreakJointsOnDeath are done.",
     ),
     (
+        ClassName::TextChatService,
+        "MessageReceived",
+        "Fires on each device as a chat message arrives there, with the message: `message.Text`, and `message.Player` (nil for a system message). On both sides, after the server's OnIncomingMessage.",
+    ),
+    (
         ClassName::Players,
         "PlayerAdded",
         "Fires with the Player when someone joins, after they're put on a team and before their first character spawns.",
@@ -4309,6 +4319,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         ClassName::Teams => "The service that holds the Teams players can be on.",
         ClassName::SoundService => {
             "The service that holds the SoundGroups, the game's audio buses. Its groups' volumes are saved with the world in save slots. When a group is UserAdjustable, the game has an AudioSettings ScreenGui in the Workspace (made when it starts, hidden until a script sets its Enabled) with a slider for UserGameSettings.MasterVolume and one for each of those groups."
+        }
+        ClassName::TextChatService => {
+            "The default chat (Phase 67): a chat window at the bottom left that `/` opens, styled with `TextChatService` rules (`TextChatService::key` styles the names). SendMessage sends from a LocalScript; on the server, OnIncomingMessage sees every message and returns its text, changed or not, or nil to drop it; DisplaySystemMessage shows a message from the game. MessageReceived fires on each device as a message arrives. ChatEnabled off hides the window."
         }
         ClassName::SoundGroup => {
             "An audio bus: the Sounds whose SoundGroup is it, and the SoundGroups inside it, are mixed together at its Volume, through the sound effects inside it. Put them in SoundService, such as Master with Music and SFX inside."

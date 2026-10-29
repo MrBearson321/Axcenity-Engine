@@ -49,6 +49,7 @@ mod bindable;
 mod camera;
 mod cframe;
 mod changes;
+mod chat;
 mod click;
 mod client;
 mod collection;
@@ -112,6 +113,7 @@ use mlua::Lua;
 use crate::context::Context;
 
 pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, GameCamera};
+pub use chat::ChatLine;
 pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
 pub use definitions::{ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions};
 pub use edit::EditRuntime;
@@ -244,6 +246,10 @@ pub struct ScriptRuntime {
     levels: levels::SharedLevels,
     /// Network ownership's settings (Phase 66).
     ownership: ownership::SharedOwnership,
+    /// The default chat's messages (Phase 67).
+    chat: chat::SharedChat,
+    /// Seconds since players' data was last written.
+    save_clock: f64,
     /// Players who joined from other devices and get their first
     /// character in the next `step_players`.
     joined: Vec<InstanceId>,
@@ -307,6 +313,9 @@ impl ScriptRuntime {
         let ownership = ownership::SharedOwnership::default();
         server.lua.set_app_data(ownership.clone());
         client.lua.set_app_data(ownership.clone());
+        let chat = chat::SharedChat::default();
+        server.lua.set_app_data(chat.clone());
+        client.lua.set_app_data(chat.clone());
         Self {
             server,
             client,
@@ -328,7 +337,9 @@ impl ScriptRuntime {
             level_loads: Vec::new(),
             sequences,
             ownership,
+            chat,
             joined: Vec::new(),
+            save_clock: 0.0,
             volume_sliders: audio_settings::VolumeSliders::default(),
             dedicated: false,
             client_only: false,
@@ -376,6 +387,77 @@ impl ScriptRuntime {
     /// in the next step and the host shows its loading screen.
     pub fn follow_levels(&mut self, current: &str, added: Vec<(String, InstanceId)>, loaded: bool) {
         self.levels.0.borrow_mut().follow(current, added, loaded);
+    }
+
+    /// The chat window's Enter (Phase 67): `text` is sent as this device's
+    /// player, as `TextChatService:SendMessage` does.
+    pub fn send_chat(&mut self, text: &str) {
+        if let Some(text) = chat::clean(text) {
+            self.chat.0.borrow_mut().outgoing.push(text);
+        }
+    }
+
+    /// Messages sent from this device since the last call, for the server.
+    pub fn take_chat_sends(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.chat.0.borrow_mut().outgoing)
+    }
+
+    /// System messages Scripts showed since the last call, for every device.
+    pub fn take_system_messages(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.chat.0.borrow_mut().system)
+    }
+
+    /// The server's `OnIncomingMessage` decides what `player` sent: the text
+    /// to send on (changed or not), or `None` to drop it.
+    pub fn filter_chat(
+        &mut self,
+        world: &mut World,
+        player: Option<InstanceId>,
+        text: &str,
+    ) -> Option<String> {
+        self.fire_changes(world);
+        let filtered = self.server.filter_chat(world, player, text);
+        self.collect(Side::Server);
+        self.fire_changes(world);
+        filtered
+    }
+
+    /// A message arrived on this device (from `player`, or a system message
+    /// for `None`): `MessageReceived` fires in the next step, and the chat
+    /// window shows it.
+    pub fn receive_chat(&mut self, player: Option<InstanceId>, text: String) {
+        self.chat.0.borrow_mut().incoming.push((player, text));
+    }
+
+    /// The chat window's lines, oldest first.
+    pub fn chat_lines(&self) -> Vec<ChatLine> {
+        self.chat.0.borrow().lines.iter().cloned().collect()
+    }
+
+    /// Fires `MessageReceived` on both sides for each message that arrived,
+    /// and adds it to the chat window's lines.
+    fn fire_chat(&mut self, world: &mut World) {
+        let incoming = std::mem::take(&mut self.chat.0.borrow_mut().incoming);
+        for (player, text) in incoming {
+            let from = player
+                .and_then(|player| world.get(player))
+                .map(|p| p.name().to_owned());
+            {
+                let mut chat = self.chat.0.borrow_mut();
+                chat.lines.push_back(ChatLine {
+                    from,
+                    text: text.clone(),
+                });
+                while chat.lines.len() > chat::MAX_LINES {
+                    chat.lines.pop_front();
+                }
+            }
+            for side in [Side::Server, Side::Client] {
+                self.context(side).fire_chat_message(world, player, &text);
+                self.collect(side);
+                self.fire_changes(world);
+            }
+        }
     }
 
     /// `Player:Kick` calls since the last call (Phase 67), each Player with
@@ -615,10 +697,25 @@ impl ScriptRuntime {
         if self.local_player() == Some(player) || world.get(player).is_none() {
             return;
         }
+        let user = world
+            .get(player)
+            .and_then(|p| p.property("UserId"))
+            .and_then(Value::as_number)
+            .map(|id| id.max(0.0) as u64);
         self.fire_changes(world);
         self.player_events
             .push(players::PlayerEvent::Removing { player });
         self.fire_changes(world);
+        // What `PlayerRemoving` handlers kept for them is written now.
+        if let Some(user) = user
+            && let Err(err) = self.saves.0.borrow_mut().forget_player(user)
+        {
+            self.output.push(OutputLine {
+                kind: OutputKind::Warning,
+                text: format!("SaveService: {err}"),
+                trace: Vec::new(),
+            });
+        }
     }
 
     /// A Player the server added arrived in this replica (Phase 64):
@@ -986,6 +1083,19 @@ impl ScriptRuntime {
     /// during this step) arrives in this step; anything later, next frame.
     pub fn step(&mut self, world: &mut World, seconds: f64) {
         self.fire_changes(world);
+        self.fire_chat(world);
+        // Players' data on a server is written once a second at most.
+        self.save_clock += seconds.max(0.0);
+        if self.save_clock >= 1.0 {
+            self.save_clock = 0.0;
+            if let Err(err) = self.saves.0.borrow_mut().flush_players() {
+                self.output.push(OutputLine {
+                    kind: OutputKind::Warning,
+                    text: format!("SaveService: {err}"),
+                    trace: Vec::new(),
+                });
+            }
+        }
         // A game with no LocalScripts still has its player.
         self.join(world);
         for side in [Side::Server, Side::Client] {

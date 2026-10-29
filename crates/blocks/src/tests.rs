@@ -144,9 +144,11 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetNetworkOwner { .. } => 77,
         BlockKind::SetNetworkOwnershipAuto { .. } => 78,
         BlockKind::KickPlayer { .. } => 79,
+        BlockKind::SendChatMessage { .. } => 80,
+        BlockKind::ShowSystemMessage { .. } => 81,
     })
 }
-const STATEMENT_COUNT: usize = 80;
+const STATEMENT_COUNT: usize = 82;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -287,6 +289,22 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 },
             },
             "score:Kick(\"Cheating\")",
+        ),
+        (
+            BlockKind::SendChatMessage {
+                text: Expression::Text {
+                    value: "Hello".to_owned(),
+                },
+            },
+            "TextChatService:SendMessage(\"Hello\")",
+        ),
+        (
+            BlockKind::ShowSystemMessage {
+                text: Expression::Text {
+                    value: "Round over".to_owned(),
+                },
+            },
+            "TextChatService:DisplaySystemMessage(\"Round over\")",
         ),
         (
             BlockKind::PushWithForce {

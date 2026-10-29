@@ -8,6 +8,7 @@
 mod style;
 
 mod accessibility;
+mod chat;
 mod css;
 mod gamepad;
 mod hotbar;
@@ -22,6 +23,7 @@ mod transition;
 mod turn;
 mod widget;
 
+pub use chat::{CHAT_SHOWN, chat_enabled, chat_items};
 pub use css::*;
 pub use gamepad::{GamepadButton, Gamepads, NavRepeat, PadNavigation, nav_key, pad_key};
 pub use hotbar::hotbar_items;

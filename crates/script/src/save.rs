@@ -61,6 +61,58 @@ fn key(lua: &Lua, value: &mlua::Value, method: &str) -> mlua::Result<String> {
     }
 }
 
+/// The UserId of `value` when it's a Player, else `None`.
+fn player_arg(lua: &Lua, value: &mlua::Value) -> mlua::Result<Option<u64>> {
+    let mlua::Value::UserData(data) = value else {
+        return Ok(None);
+    };
+    let Ok(instance) = data.borrow::<LuaInstance>() else {
+        return Ok(None);
+    };
+    let world = world(lua)?;
+    let Some(player) = world.get(instance.0) else {
+        return Ok(None);
+    };
+    if player.class() != axcenity_core::ClassName::Player {
+        return Ok(None);
+    }
+    let user = player
+        .property("UserId")
+        .and_then(axcenity_core::Value::as_number)
+        .unwrap_or(0.0);
+    Ok(Some(user.max(0.0) as u64))
+}
+
+/// A slot method's optional Player: theirs, or the game's for nil.
+fn user_of(lua: &Lua, value: &mlua::Value, method: &str) -> mlua::Result<Option<u64>> {
+    if value.is_nil() {
+        return Ok(None);
+    }
+    player_arg(lua, value)?.map(Some).ok_or_else(|| {
+        mlua::Error::runtime(format!(
+            "{method}(slot, player): the second argument must be a Player, not a {}",
+            type_name(lua, value)
+        ))
+    })
+}
+
+/// A value SaveService can keep, or `None` for nil.
+fn stored(
+    lua: &Lua,
+    method: &str,
+    value: &mlua::Value,
+) -> mlua::Result<Option<axcenity_core::Value>> {
+    match value {
+        mlua::Value::Nil => Ok(None),
+        other => any_value_from_lua(lua, other).map(Some).ok_or_else(|| {
+            mlua::Error::runtime(format!(
+                "{method} keeps a boolean, number, string, Vector3, Vector2, Color3, UDim2 or EnumItem (or nil to remove it), not a {}",
+                type_name(lua, other)
+            ))
+        }),
+    }
+}
+
 /// Sets (or, for nil, removes) a value in player data or settings.
 fn set_value(
     lua: &Lua,
@@ -121,41 +173,98 @@ fn set_ui_setting(lua: &Lua, name: &str, value: mlua::Value) -> mlua::Result<()>
 
 impl UserData for LuaSaveService {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("SaveSlot", |lua, _, number: mlua::Value| {
-            let slot = slot(lua, &number, "SaveSlot")?;
-            let saves = saves(lua)?;
-            let world = world(lua)?;
-            saves.borrow().save(&world, slot).map_err(failed)?;
-            Ok(())
-        });
+        // With a Player (on a server, Phase 67), the slot is theirs:
+        // `players/<UserId>/slot-<n>.json`, with their data.
+        methods.add_method(
+            "SaveSlot",
+            |lua, _, (number, player): (mlua::Value, mlua::Value)| {
+                let slot = slot(lua, &number, "SaveSlot")?;
+                let user = user_of(lua, &player, "SaveSlot")?;
+                let saves = saves(lua)?;
+                let world = world(lua)?;
+                match user {
+                    Some(user) => saves.borrow_mut().for_player(user).save(&world, slot),
+                    None => saves.borrow().save(&world, slot),
+                }
+                .map_err(failed)?;
+                Ok(())
+            },
+        );
         // The slot's level goes in first (Phase 48), then the rest is
         // restored over it.
-        methods.add_method("LoadSlot", |lua, _, number: mlua::Value| {
-            let slot = slot(lua, &number, "LoadSlot")?;
-            let saves = saves(lua)?;
-            let file = saves.borrow().read(slot).map_err(failed)?;
-            let mut world = world_mut(lua)?;
-            if let Some(saved) = &file.levels {
-                crate::levels::go_to_saved(lua, &mut world, saved);
-            }
-            saves.borrow_mut().apply(&mut world, file);
-            Ok(())
-        });
-        methods.add_method("HasSlot", |lua, _, number: mlua::Value| {
-            let slot = slot(lua, &number, "HasSlot")?;
-            Ok(saves(lua)?.borrow().has_slot(slot))
-        });
         methods.add_method(
-            "SetPlayerData",
-            |lua, _, (name, value): (mlua::Value, mlua::Value)| {
-                set_value(lua, "SetPlayerData", name, value, |saves| {
-                    &mut saves.player_data
+            "LoadSlot",
+            |lua, _, (number, player): (mlua::Value, mlua::Value)| {
+                let slot = slot(lua, &number, "LoadSlot")?;
+                let user = user_of(lua, &player, "LoadSlot")?;
+                let saves = saves(lua)?;
+                let file = match user {
+                    Some(user) => saves.borrow_mut().for_player(user).read(slot),
+                    None => saves.borrow().read(slot),
+                }
+                .map_err(failed)?;
+                let mut world = world_mut(lua)?;
+                if let Some(saved) = &file.levels {
+                    crate::levels::go_to_saved(lua, &mut world, saved);
+                }
+                match user {
+                    Some(user) => {
+                        let mut theirs = saves.borrow_mut().for_player(user);
+                        theirs.apply(&mut world, file);
+                        let data = std::mem::take(&mut theirs.player_data);
+                        saves.borrow_mut().set_player_data(user, data);
+                    }
+                    None => saves.borrow_mut().apply(&mut world, file),
+                }
+                Ok(())
+            },
+        );
+        methods.add_method(
+            "HasSlot",
+            |lua, _, (number, player): (mlua::Value, mlua::Value)| {
+                let slot = slot(lua, &number, "HasSlot")?;
+                let user = user_of(lua, &player, "HasSlot")?;
+                let saves = saves(lua)?;
+                Ok(match user {
+                    Some(user) => saves.borrow_mut().for_player(user).has_slot(slot),
+                    None => saves.borrow().has_slot(slot),
                 })
             },
         );
-        methods.add_method("GetPlayerData", |lua, _, name: mlua::Value| {
-            let name = key(lua, &name, "GetPlayerData")?;
-            let value = saves(lua)?.borrow().player_data.get(&name).cloned();
+        // With a Player first, that player's own data, kept by their UserId
+        // (on a server, Phase 67).
+        methods.add_method("SetPlayerData", |lua, _, args: mlua::MultiValue| {
+            let mut args = args.into_iter();
+            let first = args.next().unwrap_or(mlua::Value::Nil);
+            let Some(user) = player_arg(lua, &first)? else {
+                let value = args.next().unwrap_or(mlua::Value::Nil);
+                return set_value(lua, "SetPlayerData", first, value, |saves| {
+                    &mut saves.player_data
+                });
+            };
+            let name = args.next().unwrap_or(mlua::Value::Nil);
+            let name = key(lua, &name, "SetPlayerData")?;
+            let value = args.next().unwrap_or(mlua::Value::Nil);
+            let value = stored(lua, "SetPlayerData", &value)?;
+            saves(lua)?
+                .borrow_mut()
+                .set_player_value(user, &name, value);
+            Ok(())
+        });
+        methods.add_method("GetPlayerData", |lua, _, args: mlua::MultiValue| {
+            let mut args = args.into_iter();
+            let first = args.next().unwrap_or(mlua::Value::Nil);
+            let value = match player_arg(lua, &first)? {
+                Some(user) => {
+                    let name = args.next().unwrap_or(mlua::Value::Nil);
+                    let name = key(lua, &name, "GetPlayerData")?;
+                    saves(lua)?.borrow_mut().player_value(user, &name)
+                }
+                None => {
+                    let name = key(lua, &first, "GetPlayerData")?;
+                    saves(lua)?.borrow().player_data.get(&name).cloned()
+                }
+            };
             match value {
                 Some(value) => value_to_lua(lua, &value),
                 None => Ok(mlua::Value::Nil),

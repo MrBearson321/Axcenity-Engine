@@ -569,6 +569,16 @@ pub enum BlockKind {
         player: Expression,
         reason: Expression,
     },
+    /// Sends `text` to the chat as this device's player:
+    /// `TextChatService:SendMessage` (LocalScripts, Phase 67).
+    SendChatMessage {
+        text: Expression,
+    },
+    /// Shows `text` in the chat as the game's:
+    /// `TextChatService:DisplaySystemMessage` (Phase 67).
+    ShowSystemMessage {
+        text: Expression,
+    },
 
     // Camera: `workspace.CurrentCamera` (LocalScripts only).
     /// Sets `CameraType` to one of [`CAMERA_TYPES`]: Scriptable leaves the
@@ -988,6 +998,8 @@ impl BlockKind {
             | BlockKind::HostGame { port: e }
             | BlockKind::JoinGame { address: e }
             | BlockKind::SetNetworkOwner { owner: e, .. }
+            | BlockKind::SendChatMessage { text: e }
+            | BlockKind::ShowSystemMessage { text: e }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
@@ -1072,9 +1084,6 @@ impl BlockKind {
             BlockKind::HostGame { .. }
                 | BlockKind::JoinGame { .. }
                 | BlockKind::LeaveGame
-                | BlockKind::SetNetworkOwner { .. }
-                | BlockKind::SetNetworkOwnershipAuto { .. }
-                | BlockKind::KickPlayer { .. }
                 | BlockKind::WhenConnectionFails { .. }
         )
     }
@@ -1118,6 +1127,8 @@ impl BlockKind {
             | BlockKind::HostGame { port: e }
             | BlockKind::JoinGame { address: e }
             | BlockKind::SetNetworkOwner { owner: e, .. }
+            | BlockKind::SendChatMessage { text: e }
+            | BlockKind::ShowSystemMessage { text: e }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }

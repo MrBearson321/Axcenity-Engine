@@ -55,6 +55,9 @@ pub enum ClassName {
     /// The service that holds the SoundGroups (Phase 52): the game's
     /// audio buses.
     SoundService,
+    /// The default chat (Phase 67): `ChatEnabled`, `MessageReceived`,
+    /// `SendMessage`, `DisplaySystemMessage` and `OnIncomingMessage`.
+    TextChatService,
     /// A side players are on, in Teams: they spawn on the SpawnLocations
     /// of its `TeamColor`.
     Team,
@@ -339,7 +342,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 107] = [
+    pub const ALL: [ClassName; 108] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -425,6 +428,7 @@ impl ClassName {
         ClassName::Teams,
         ClassName::Team,
         ClassName::SoundService,
+        ClassName::TextChatService,
         ClassName::WeldConstraint,
         ClassName::HingeConstraint,
         ClassName::BallSocketConstraint,
@@ -462,6 +466,7 @@ impl ClassName {
             ClassName::StarterPlayerScripts => "StarterPlayerScripts",
             ClassName::Teams => "Teams",
             ClassName::SoundService => "SoundService",
+            ClassName::TextChatService => "TextChatService",
             ClassName::Team => "Team",
             ClassName::Part => "Part",
             ClassName::Seat => "Seat",
@@ -716,6 +721,7 @@ impl ClassName {
                 | ClassName::StarterPlayerScripts
                 | ClassName::Teams
                 | ClassName::SoundService
+                | ClassName::TextChatService
         )
     }
 
@@ -832,6 +838,11 @@ impl ClassName {
             | ClassName::AnimationTrack => Vec::new(),
             // An IntValue's number is always whole (`World::set_property`
             // rounds it).
+            ClassName::TextChatService => vec![
+                // Off, the default chat window isn't drawn and `/` doesn't
+                // open it; scripts can still send and hear messages.
+                ("ChatEnabled", Value::Bool(true)),
+            ],
             ClassName::Players => vec![
                 // On, each player gets a character when they join and
                 // again `RespawnTime` seconds after it dies.
@@ -2260,6 +2271,9 @@ impl ClassName {
             // Each with the Player, as they join (Phase 47) and as they
             // leave a hosted game (Phase 63).
             ClassName::Players => &["PlayerAdded", "PlayerRemoving"],
+            // With the message: `Text`, and `Player` (nil for a system
+            // message), on each device once it arrives (Phase 67).
+            ClassName::TextChatService => &["MessageReceived"],
             // Each with the character Model: `CharacterAdded` once it's in
             // the Workspace, `CharacterRemoving` as it goes.
             ClassName::Player => &["CharacterAdded", "CharacterRemoving"],

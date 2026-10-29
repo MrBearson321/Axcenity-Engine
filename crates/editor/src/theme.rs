@@ -711,6 +711,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::StarterPlayerScripts => icons::USER_GEAR,
         ClassName::Teams => icons::USERS_THREE,
         ClassName::SoundService => icons::SPEAKER_HIFI,
+        ClassName::TextChatService => icons::CHAT_CIRCLE_TEXT,
         ClassName::SoundGroup => icons::FADERS,
         ClassName::ReverbSoundEffect => icons::WAVEFORM,
         ClassName::EqualizerSoundEffect => icons::EQUALIZER,

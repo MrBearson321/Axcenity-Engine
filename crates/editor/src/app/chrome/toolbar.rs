@@ -160,6 +160,8 @@ impl EditorApp {
                         ui.ctx().format_shortcut(&STOP_SHORTCUT)
                     ))
                     .clicked();
+
+                self.play_settings_controls(ui, playing);
             }),
             RibbonGroup::Check => ribbon::group(ui, "Check", |ui| {
                 let button = RibbonButton::new(icons::MAGNIFYING_GLASS, "Assets");
@@ -839,5 +841,96 @@ impl EditorApp {
                 );
             }),
         }
+    }
+}
+
+impl EditorApp {
+    /// Beside Play and Stop (Phases 64 and 67): how many clients Play
+    /// runs, the network emulated between them, and, while several play,
+    /// which one the viewport shows.
+    fn play_settings_controls(&mut self, ui: &mut egui::Ui, playing: bool) {
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("Clients");
+                let mut clients = self.play_settings.clients;
+                ui.add_enabled(
+                    !playing,
+                    egui::DragValue::new(&mut clients).range(1..=crate::play::multi::MAX_CLIENTS),
+                )
+                .on_hover_text(
+                    "How many players Play runs, each a client with its own world. The first \
+                     plays on the server; the others join it, as players on other computers do.",
+                )
+                .on_disabled_hover_text("Stop the game to change how many clients play.");
+                self.play_settings.clients = clients;
+            });
+            ui.menu_button(theme::with_icon(icons::WIFI_HIGH, "Network"), |ui| {
+                let mut conditions = self.play_settings.conditions;
+                let mut latency = conditions.latency.as_secs_f64() * 1000.0;
+                let mut jitter = conditions.jitter.as_secs_f64() * 1000.0;
+                let mut loss = conditions.loss * 100.0;
+                crate::responsive::form(ui, "play network", |ui| {
+                    ui.label("Latency");
+                    ui.add(
+                        egui::DragValue::new(&mut latency)
+                            .range(0.0..=1000.0)
+                            .suffix(" ms"),
+                    )
+                    .on_hover_text("Added to every packet each way between the clients.");
+                    ui.end_row();
+                    ui.label("Jitter");
+                    ui.add(
+                        egui::DragValue::new(&mut jitter)
+                            .range(0.0..=500.0)
+                            .suffix(" ms"),
+                    )
+                    .on_hover_text("Each packet is up to this much earlier or later.");
+                    ui.end_row();
+                    ui.label("Packet loss");
+                    ui.add(
+                        egui::DragValue::new(&mut loss)
+                            .range(0.0..=50.0)
+                            .suffix(" %"),
+                    )
+                    .on_hover_text("This share of packets never arrives.");
+                    ui.end_row();
+                });
+                ui.weak("Between Play's clients, with 2 or more.");
+                conditions.latency = std::time::Duration::from_secs_f64(latency / 1000.0);
+                conditions.jitter = std::time::Duration::from_secs_f64(jitter / 1000.0);
+                conditions.loss = loss / 100.0;
+                if conditions != self.play_settings.conditions {
+                    self.play_settings.conditions = conditions;
+                    if let Some(play) = &mut self.play {
+                        play.emulate(conditions);
+                    }
+                }
+            });
+            if let Some(play) = &mut self.play
+                && play.clients() > 1
+            {
+                let views = play.views();
+                let shown = play.view();
+                let name = views
+                    .iter()
+                    .find(|(view, _)| *view == shown)
+                    .map(|(_, name)| name.clone())
+                    .unwrap_or_default();
+                egui::ComboBox::from_id_salt("play view")
+                    .selected_text(name)
+                    .show_ui(ui, |ui| {
+                        for (view, name) in views {
+                            if ui.selectable_label(view == shown, name).clicked() {
+                                play.set_view(view);
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "Which device the viewport, Explorer and Properties show: the server, \
+                         from the fly camera, or a client's game, which gets the keys and mouse.",
+                    );
+            }
+        });
     }
 }

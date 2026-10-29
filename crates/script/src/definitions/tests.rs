@@ -325,6 +325,10 @@ fn described_fields_and_methods_exist() {
         (ClassName::DamageZone, "Instance.new('DamageZone')"),
         (ClassName::SpawnLocation, "Instance.new('SpawnLocation')"),
         (ClassName::Players, "game:GetService('Players')"),
+        (
+            ClassName::TextChatService,
+            "game:GetService('TextChatService')",
+        ),
         (ClassName::Team, "Instance.new('Team')"),
         (ClassName::Animation, "Instance.new('Animation')"),
         (ClassName::Sequence, "Instance.new('Sequence')"),

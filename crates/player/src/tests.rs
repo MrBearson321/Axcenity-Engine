@@ -2928,3 +2928,48 @@ fn reading_and_writing_cframes_leaves_a_saved_world_byte_for_byte_the_same() {
         assert_eq!(before, axcenity_project::write_world(&world), "{name}");
     }
 }
+
+/// Not a check: writes what every example does in three seconds (its
+/// output, and where each part is) to the file `AXCENITY_DUMP` names, to
+/// compare two versions of the engine.
+#[test]
+#[ignore]
+fn dump_every_example() {
+    let Some(out) = std::env::var_os("AXCENITY_DUMP") else {
+        return;
+    };
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let mut names: Vec<String> = fs::read_dir(&examples)
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().join("axcenity.json").exists())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    let mut text = String::new();
+    for name in names {
+        let (mut world, mut scripts) = start_example(&name);
+        let (mut physics, mut clock) = (Physics::new(), 0);
+        run_until(&mut world, &mut scripts, &mut physics, &mut clock, 3.0);
+        text.push_str(&format!("== {name}\n"));
+        for line in scripts.take_output() {
+            text.push_str(&format!("{:?} {}\n", line.kind, line.text));
+        }
+        for id in world.descendants(world.workspace()) {
+            let instance = world.get(id).unwrap();
+            if let Some(p) = instance
+                .property("Position")
+                .and_then(axcenity_core::Value::as_vector3)
+            {
+                text.push_str(&format!(
+                    "{} {:.2} {:.2} {:.2}\n",
+                    instance.name(),
+                    p.x,
+                    p.y,
+                    p.z
+                ));
+            }
+        }
+    }
+    fs::write(out, text).unwrap();
+}

@@ -641,6 +641,7 @@ dependencies = [
  "axcenity-core",
  "axcenity-mesh-edit",
  "axcenity-nav",
+ "axcenity-net",
  "axcenity-physics",
  "axcenity-plugins",
  "axcenity-project",

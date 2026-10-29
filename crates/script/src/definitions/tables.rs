@@ -1769,6 +1769,24 @@ const INTERSECT_ASYNC_DOC: &str = "Keeps only where the part and all of `parts` 
 
 pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
     (
+        ClassName::TextChatService,
+        Function {
+            name: "SendMessage",
+            doc: "LocalScripts only (Phase 67): sends `text` as this device's player, as the chat window's Enter does. The server's OnIncomingMessage may change or drop it; then every device's MessageReceived fires.",
+            params: &[("text", "string")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::TextChatService,
+        Function {
+            name: "DisplaySystemMessage",
+            doc: "Shows `text` in the chat as the game's, with no player's name: from a Script on every device, from a LocalScript on this one.",
+            params: &[("text", "string")],
+            returns: "()",
+        },
+    ),
+    (
         ClassName::Part,
         Function {
             name: "UnionAsync",
@@ -2720,6 +2738,14 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
 
 /// Fields only some classes have, besides their properties and events.
 pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
+    (
+        ClassName::TextChatService,
+        Field {
+            name: "OnIncomingMessage",
+            ty: "(message: { Text: string, Player: Player? }) -> string?",
+            doc: "Scripts only (Phase 67): sees each message a player sends before anyone else does, and returns the text to send (changed or not), or nil to drop it: `TextChatService.OnIncomingMessage = function(message) return message.Text end`. It must return at once; an error keeps the message as it was.",
+        },
+    ),
     (
         ClassName::RemoteFunction,
         Field {

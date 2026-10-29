@@ -53,6 +53,7 @@ fn new_world_has_game_and_its_services() {
             starter_player,
             world.teams(),
             world.sound_service(),
+            world.text_chat_service(),
         ]
     );
     assert_eq!(

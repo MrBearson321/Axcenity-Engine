@@ -11,6 +11,9 @@
 //!   slot fails without changing anything. A slot from an older save version
 //!   is moved up to this one as it's read ([`migrate`]); one from a newer
 //!   version is refused, and never saved over.
+//! - In multiplayer (Phase 67) the server keeps each player's data by their
+//!   `UserId`, in `players/<UserId>.json`, and their slots in
+//!   `players/<UserId>/`, in the server's own data for the game.
 
 mod identity;
 mod migrate;
@@ -130,15 +133,32 @@ pub struct Saves {
     /// The levels the game is in, which slots record. Hosts with levels
     /// keep it up to date; `None` for a game without them.
     pub levels: Option<SavedLevels>,
+    /// Each player's data on a server, by their `UserId` (Phase 67), read
+    /// from their file the first time it's asked for.
+    players: BTreeMap<u64, PlayerData>,
+}
+
+/// One player's data on a server, and whether it changed since written.
+#[derive(Debug, Default)]
+struct PlayerData {
+    values: BTreeMap<String, Value>,
+    dirty: bool,
+}
+
+/// A player's data file.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct PlayerFile {
+    version: u32,
+    #[serde(default)]
+    player_data: Properties,
 }
 
 impl Saves {
     /// Saves that write slots in `folder`. `None` can't save or load.
     pub fn new(folder: Option<PathBuf>) -> Self {
-        Self {
-            folder,
-            ..Self::default()
-        }
+        let mut saves = Self::default();
+        saves.folder = folder;
+        saves
     }
 
     /// Where slots are written, if anywhere.
@@ -155,6 +175,119 @@ impl Saves {
         check_slot(slot)?;
         let folder = self.folder.as_ref().ok_or(SaveError::NoFolder)?;
         Ok(folder.join(format!("slot-{slot}.json")))
+    }
+
+    /// Where the player `user_id`'s data and slots are kept on a server.
+    fn player_folder(&self, user_id: u64) -> Result<PathBuf, SaveError> {
+        let folder = self.folder.as_ref().ok_or(SaveError::NoFolder)?;
+        Ok(folder.join("players")).map(|players| players.join(user_id.to_string()))
+    }
+
+    /// The player `user_id`'s data, read from their file the first time.
+    fn player(&mut self, user_id: u64) -> &mut PlayerData {
+        let path = self
+            .player_folder(user_id)
+            .ok()
+            .map(|folder| folder.with_extension("json"));
+        self.players.entry(user_id).or_insert_with(|| {
+            let values = path
+                .and_then(|path| fs::read_to_string(path).ok())
+                .and_then(|text| serde_json::from_str::<PlayerFile>(&text).ok())
+                .map(|file| from_properties(&file.player_data))
+                .unwrap_or_default();
+            PlayerData {
+                values,
+                dirty: false,
+            }
+        })
+    }
+
+    /// The value `name` of the player `user_id`'s data (multiplayer).
+    pub fn player_value(&mut self, user_id: u64, name: &str) -> Option<Value> {
+        self.player(user_id).values.get(name).cloned()
+    }
+
+    /// Sets (or, for `None`, removes) the value `name` of the player
+    /// `user_id`'s data. It's written by [`flush_players`](Self::flush_players).
+    pub fn set_player_value(&mut self, user_id: u64, name: &str, value: Option<Value>) {
+        let player = self.player(user_id);
+        let changed = match value {
+            Some(value) => player.values.insert(name.to_owned(), value.clone()) != Some(value),
+            None => player.values.remove(name).is_some(),
+        };
+        player.dirty |= changed;
+    }
+
+    /// Writes every player's data that changed since it was last written,
+    /// each to `players/<UserId>.json`. Returns the first error.
+    pub fn flush_players(&mut self) -> Result<(), SaveError> {
+        let mut result = Ok(());
+        let dirty: Vec<u64> = self
+            .players
+            .iter()
+            .filter(|(_, player)| player.dirty)
+            .map(|(&id, _)| id)
+            .collect();
+        for user_id in dirty {
+            let written = self.write_player(user_id);
+            if written.is_ok()
+                && let Some(player) = self.players.get_mut(&user_id)
+            {
+                player.dirty = false;
+            }
+            if result.is_ok() {
+                result = written;
+            }
+        }
+        result
+    }
+
+    /// Writes the player `user_id`'s data, then forgets it (they left).
+    pub fn forget_player(&mut self, user_id: u64) -> Result<(), SaveError> {
+        let written = match self.players.get(&user_id) {
+            Some(player) if player.dirty => self.write_player(user_id),
+            _ => Ok(()),
+        };
+        self.players.remove(&user_id);
+        written
+    }
+
+    fn write_player(&self, user_id: u64) -> Result<(), SaveError> {
+        let path = self.player_folder(user_id)?.with_extension("json");
+        let Some(player) = self.players.get(&user_id) else {
+            return Ok(());
+        };
+        let file = PlayerFile {
+            version: SAVE_VERSION,
+            player_data: to_properties(&player.values),
+        };
+        let text = serde_json::to_string_pretty(&file).expect("player data always serializes");
+        write_atomically(&path, &text).map_err(|err| SaveError::Write {
+            slot: 0,
+            message: format!("{}: {err}", path.display()),
+        })
+    }
+
+    /// The saves of the player `user_id` on a server, for their slots:
+    /// slots in `players/<UserId>/`, with their data as the player data
+    /// and the game's settings and levels.
+    pub fn for_player(&mut self, user_id: u64) -> Saves {
+        let values = self.player(user_id).values.clone();
+        Saves {
+            folder: self.player_folder(user_id).ok(),
+            player_data: values,
+            settings: self.settings.clone(),
+            checkpoint: None,
+            levels: self.levels.clone(),
+            players: BTreeMap::new(),
+        }
+    }
+
+    /// The player `user_id`'s data is now `values` (their slot loaded).
+    pub fn set_player_data(&mut self, user_id: u64, values: BTreeMap<String, Value>) {
+        let player = self.player(user_id);
+        player.dirty |= player.values != values;
+        player.values = values;
     }
 
     /// True if slot `slot` has been saved.
@@ -252,13 +385,7 @@ impl Saves {
             slot,
             message: err.to_string(),
         };
-        let folder = path.parent().expect("a slot file is in a folder");
-        fs::create_dir_all(folder).map_err(write_error)?;
-        // Written beside it and renamed over it, so a crash halfway through
-        // leaves the previous save as it was.
-        let temporary = path.with_extension("json.tmp");
-        fs::write(&temporary, text).map_err(write_error)?;
-        fs::rename(&temporary, &path).map_err(write_error)?;
+        write_atomically(&path, &text).map_err(write_error)?;
         Ok(path)
     }
 
@@ -335,6 +462,24 @@ impl Saves {
         migrate(&mut json, version as u32).map_err(damaged)?;
         serde_json::from_value(json).map_err(|err| damaged(err.to_string()))
     }
+}
+
+/// Players' data that changed is written as the game ends, too.
+impl Drop for Saves {
+    fn drop(&mut self) {
+        let _ = self.flush_players();
+    }
+}
+
+/// Writes `text` beside `path` and renames it over it, so a crash halfway
+/// through leaves the previous file as it was, making its folder first.
+fn write_atomically(path: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(folder) = path.parent() {
+        fs::create_dir_all(folder)?;
+    }
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, text)?;
+    fs::rename(&temporary, path)
 }
 
 /// The save version of a slot file's text, if it has one.

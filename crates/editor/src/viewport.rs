@@ -258,6 +258,11 @@ pub struct PlayCamera {
     pub holds: bool,
 }
 
+/// The chat window during Play (Phase 67): its lines (who said each,
+/// `None` for a system message, and what), and the line being typed while
+/// it's open.
+pub type ChatView = (Vec<(Option<String>, String)>, Option<String>);
+
 pub struct ViewportScene<'a> {
     pub world: &'a World,
     pub assets: &'a Assets,
@@ -284,6 +289,9 @@ pub struct ViewportScene<'a> {
     pub hotbar: Option<InstanceId>,
     /// Whether the default leaderboard is drawn during Play (Tab hides it).
     pub leaderboard: bool,
+    /// The chat window during Play (Phase 67): its lines, and the line
+    /// being typed while it's open.
+    pub chat: Option<ChatView>,
     /// The ProximityPrompts that show during Play, drawn over the game UI.
     pub prompts: Vec<axcenity_ui::PromptView>,
     /// The cursor over a ClickDetector during Play (a CSS cursor name).
@@ -708,6 +716,7 @@ impl Viewport {
             loading_screen,
             hotbar,
             leaderboard,
+            chat,
             prompts,
             click_cursor,
             light_cones,
@@ -1012,6 +1021,16 @@ impl Viewport {
         if leaderboard {
             draw_list.ui.extend(axcenity_ui::leaderboard_items(
                 world,
+                stylesheets,
+                width,
+                height,
+            ));
+        }
+        if let Some((lines, typing)) = &chat {
+            draw_list.ui.extend(axcenity_ui::chat_items(
+                world,
+                lines,
+                typing.as_deref(),
                 stylesheets,
                 width,
                 height,

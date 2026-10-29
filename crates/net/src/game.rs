@@ -99,6 +99,9 @@ pub struct Network {
     owned_sender: OwnedSender,
     /// Joined: whether this device's player holds Run.
     running: bool,
+    /// Why the player on this device was kicked (`Player:Kick`), for the
+    /// host to end the game with.
+    kicked: Option<String>,
 }
 
 impl Network {
@@ -126,7 +129,14 @@ impl Network {
             owned: BTreeSet::new(),
             owned_sender: OwnedSender::default(),
             running: false,
+            kicked: None,
         }
+    }
+
+    /// Why the player on this device was kicked, once: the host ends the
+    /// game (the player quits; the editor stops Play) with the reason.
+    pub fn take_kicked(&mut self) -> Option<String> {
+        self.kicked.take()
     }
 
     /// Joined: whether this device's player holds Run this frame, so the
@@ -470,6 +480,7 @@ impl Network {
         for event in events {
             self.apply(world, scripts, event);
         }
+        self.chat_and_kicks(world, scripts);
         if scripts.is_client_only() && matches!(self.session, Session::Joined(_)) {
             self.smoother.step(world, self.seconds);
         }
@@ -747,6 +758,25 @@ impl Network {
                     self.smoother.receive(world, &motion);
                 }
             }
+            SessionEvent::Chat { from, text } => {
+                let Some(&player) = self.players.get(&from) else {
+                    return;
+                };
+                let Some(text) = crate::chat_text(&text) else {
+                    return;
+                };
+                if let Some(text) = scripts.filter_chat(world, Some(player), &text) {
+                    self.deliver_chat(scripts, Some(player), text);
+                }
+            }
+            SessionEvent::ChatLine { player, text } => {
+                if !self.is_hosting() && scripts.is_client_only() {
+                    let player = (player != 0)
+                        .then(|| InstanceId::from_bits(player))
+                        .filter(|&id| world.contains(id));
+                    scripts.receive_chat(player, text);
+                }
+            }
             SessionEvent::Ownership(parts) => {
                 if !self.is_hosting() {
                     self.owned = parts.into_iter().map(InstanceId::from_bits).collect();
@@ -903,6 +933,70 @@ pub(crate) fn character_position(world: &World, player: InstanceId) -> Option<Ve
                 .find(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
         })?;
     world.get(root)?.property("Position")?.as_vector3()
+}
+
+impl Network {
+    /// Chat sent on this device and Scripts' system messages, and
+    /// `Player:Kick`s (Phase 67). Joined, messages go to the server;
+    /// otherwise the server's `OnIncomingMessage` decides on them here.
+    fn chat_and_kicks(&mut self, world: &mut World, scripts: &mut ScriptRuntime) {
+        let sends = scripts.take_chat_sends();
+        let system = scripts.take_system_messages();
+        if let Session::Joined(join) = &mut self.session {
+            for text in sends {
+                join.send(&Message::Chat { text });
+            }
+        } else {
+            let me = scripts.local_player();
+            for text in sends {
+                if let Some(text) = scripts.filter_chat(world, me, &text) {
+                    self.deliver_chat(scripts, me, text);
+                }
+            }
+            for text in system {
+                self.deliver_chat(scripts, None, text);
+            }
+        }
+        for (player, reason) in scripts.take_kicks() {
+            if Some(player) == scripts.local_player() {
+                self.log.push(format!("warning: kicked: {reason}"));
+                self.kicked = Some(reason);
+                continue;
+            }
+            let peer = self
+                .players
+                .iter()
+                .find(|&(_, &p)| p == player)
+                .map(|(&peer, _)| peer);
+            if let (Some(peer), Session::Hosting(host)) = (peer, &mut self.session) {
+                let name = world
+                    .get(player)
+                    .map(|p| p.name().to_owned())
+                    .unwrap_or_default();
+                self.log.push(format!("Kicked {name}: {reason}"));
+                host.kick(peer, &reason);
+            }
+        }
+    }
+
+    /// A message for every device, from `player` (or a system message).
+    fn deliver_chat(
+        &mut self,
+        scripts: &mut ScriptRuntime,
+        player: Option<InstanceId>,
+        text: String,
+    ) {
+        if let Session::Hosting(host) = &mut self.session {
+            let message = Message::ChatLine {
+                player: player.map_or(0, InstanceId::to_bits),
+                text: text.clone(),
+            };
+            for &peer in self.players.keys() {
+                host.send_to(peer, &message);
+            }
+        }
+        scripts.receive_chat(player, text);
+    }
 }
 
 /// The seat this device's character sits in.

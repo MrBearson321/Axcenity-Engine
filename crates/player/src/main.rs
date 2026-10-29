@@ -565,6 +565,8 @@ struct App {
     pointer: Option<[f32; 2]>,
     /// A TextBox the player is typing in. Keys go to it instead of the game.
     text_focus: Option<InstanceId>,
+    /// The chat line being typed, while the chat is open (`/`, Phase 67).
+    chat_typing: Option<String>,
     /// UI layout warnings already printed, so a PageLayout problem is not
     /// repeated every frame.
     ui_warnings: Vec<String>,
@@ -646,6 +648,7 @@ impl App {
             zoom: 0.0,
             pointer: None,
             text_focus: None,
+            chat_typing: None,
             ui_warnings: Vec::new(),
             ui_mouse_events: Vec::new(),
             ui_mouse_down: false,
@@ -696,7 +699,10 @@ impl App {
         self.look_dx = 0.0;
         self.look_dy = 0.0;
         self.zoom = 0.0;
-        if self.text_focus.is_some() || self.scripts.input_locked(&self.world) {
+        if self.text_focus.is_some()
+            || self.chat_typing.is_some()
+            || self.scripts.input_locked(&self.world)
+        {
             return MoveInput::default();
         }
         self.input.motion_input(look, zoom, seconds)
@@ -991,6 +997,31 @@ impl App {
         }
     }
 
+    /// Typing in the open chat: Enter sends the line, Esc closes it.
+    fn type_chat(&mut self, event: &winit::event::KeyEvent) {
+        if event.state != ElementState::Pressed {
+            return;
+        }
+        let Some(line) = &mut self.chat_typing else {
+            return;
+        };
+        match event.physical_key {
+            PhysicalKey::Code(KeyCode::Escape) => self.chat_typing = None,
+            PhysicalKey::Code(KeyCode::Enter | KeyCode::NumpadEnter) => {
+                let line = self.chat_typing.take().unwrap_or_default();
+                self.scripts.send_chat(&line);
+            }
+            PhysicalKey::Code(KeyCode::Backspace) => {
+                line.pop();
+            }
+            _ => {
+                if let Some(text) = &event.text {
+                    line.extend(text.chars().filter(|c| !c.is_control()));
+                }
+            }
+        }
+    }
+
     fn note_ui_warnings(&mut self, warnings: &[String]) {
         for warning in warnings {
             if !self.ui_warnings.iter().any(|seen| seen == warning) {
@@ -1164,7 +1195,18 @@ impl ApplicationHandler for App {
                     PhysicalKey::Code(code) => Some(code),
                     PhysicalKey::Unidentified(_) => None,
                 };
-                if self.text_focus.is_some() {
+                if self.chat_typing.is_some() {
+                    self.type_chat(&event);
+                    if let Some(key) = key.and_then(script_key) {
+                        self.push_key(key, pressed, true);
+                    }
+                } else if pressed
+                    && key == Some(KeyCode::Slash)
+                    && axcenity_ui::chat_enabled(&self.world)
+                {
+                    // `/` opens the chat (Phase 67).
+                    self.chat_typing = Some(String::new());
+                } else if self.text_focus.is_some() {
                     self.type_text(&event);
                     // Scripts hear typed keys, as the UI's.
                     if let Some(key) = key.and_then(script_key) {
@@ -1288,6 +1330,15 @@ impl ApplicationHandler for App {
                     .receive(&mut self.world, &mut self.scripts, f64::from(seconds));
                 print_network_log(&mut self.network);
                 print_output(&mut self.scripts);
+                // `Player:Kick` on this device's player ends the game.
+                if let Some(reason) = self.network.take_kicked() {
+                    eprintln!("You were kicked from the game: {reason}");
+                    event_loop.exit();
+                    return;
+                }
+                if !axcenity_ui::chat_enabled(&self.world) {
+                    self.chat_typing = None;
+                }
                 if self.scripts.is_client_only() && !self.following {
                     self.follow_server();
                 }
@@ -1517,6 +1568,21 @@ impl ApplicationHandler for App {
                         size.height,
                     ));
                 }
+                // The chat window (Phase 67), at the bottom left.
+                let lines: Vec<(Option<String>, String)> = self
+                    .scripts
+                    .chat_lines()
+                    .into_iter()
+                    .map(|line| (line.from, line.text))
+                    .collect();
+                draw_list.ui.extend(axcenity_ui::chat_items(
+                    &self.world,
+                    &lines,
+                    self.chat_typing.as_deref(),
+                    &self.stylesheets,
+                    size.width,
+                    size.height,
+                ));
                 draw_list.ui.extend(prompt_items(
                     &self.world,
                     self.scripts.shown_prompts(),

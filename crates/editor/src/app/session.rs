@@ -436,7 +436,7 @@ impl EditorApp {
             &mut self.output,
         );
         let (position, orientation) = self.viewport.camera_view();
-        match Session::start(
+        match Play::start(
             game,
             &scripts,
             self.tabs.breakpoints(),
@@ -452,6 +452,7 @@ impl EditorApp {
             &self.graphics,
             &self.capabilities.unwrap_or_default(),
             levels,
+            self.play_settings,
         ) {
             Ok(session) => {
                 self.play = Some(session);
@@ -533,7 +534,7 @@ impl EditorApp {
     /// After the game ran scripts: if it has just paused at a breakpoint,
     /// says so and shows that line in its tab, with the locals under it.
     pub(super) fn follow_pause(&mut self) {
-        let pause = self.play.as_ref().and_then(Session::pause);
+        let pause = self.play.as_ref().and_then(Play::paused);
         if pause == self.tabs.paused {
             return;
         }
@@ -594,7 +595,7 @@ impl EditorApp {
             self.viewport.clear_particles();
             self.viewport.clear_ui();
             self.pending_emits.clear();
-            let kept = self.keep_play_edits(&session);
+            let kept = self.keep_play_edits(session.server());
             let gone = session.kept().made_in_play(&self.world);
             drop(session);
             if kept == 0 {
@@ -626,7 +627,7 @@ impl EditorApp {
     }
     /// Copies the values kept from Play (see `play::kept`) from the game's
     /// world into the edit world, as one undo step. Returns how many.
-    fn keep_play_edits(&mut self, session: &Session) -> usize {
+    fn keep_play_edits(&mut self, session: &crate::play::Session) -> usize {
         let kept = session.kept().values(session.world(), &self.world);
         if kept.is_empty() {
             return 0;
@@ -818,7 +819,7 @@ impl EditorApp {
             zoom,
             seconds as f32,
         );
-        let motion = if self.focused_text.is_some() {
+        let motion = if self.focused_text.is_some() || self.chat_typing.is_some() {
             axcenity_character::MoveInput::default()
         } else {
             motion
@@ -831,10 +832,24 @@ impl EditorApp {
         if let Some(cost) = session.cost() {
             self.profiler.record_game(cost, session.load());
         }
+        let network = session
+            .network_stats()
+            .into_iter()
+            .map(|(player, stats, instances)| crate::profiler::NetworkRow {
+                player,
+                ping: stats.link.rtt,
+                sent: stats.link.bytes_sent_per_second,
+                received: stats.link.bytes_received_per_second,
+                loss: stats.link.packet_loss,
+                instances,
+            })
+            .collect();
+        self.profiler.record_network(network);
         let levels = session.take_audio_levels();
         self.mixer.record(&levels, seconds);
         session.set_audio_monitor(self.mixer.monitor.clone());
         self.pending_emits.extend(session.take_particle_emits());
+        let kicked = session.server_mut().take_kicked();
         match frame {
             Ok(Some(moved)) => self
                 .viewport
@@ -842,7 +857,77 @@ impl EditorApp {
             Ok(None) => {}
             Err(crash) => return self.crashed(crash),
         }
+        // `Player:Kick` on the player here ends Play, as the game would end.
+        if let Some(reason) = kicked {
+            self.output
+                .warning(format!("The game kicked the player: {reason}"));
+            self.stop();
+            return;
+        }
         self.follow_pause();
+    }
+
+    /// The game's chat during Play (Phase 67): `/` over the viewport opens
+    /// it, typing goes into it, Enter sends and Esc closes. `editing` is
+    /// true while an editor control has the keyboard.
+    pub(super) fn type_chat(&mut self, events: &[egui::Event], editing: bool) {
+        let Some(session) = &mut self.play else {
+            self.chat_typing = None;
+            return;
+        };
+        if !axcenity_ui::chat_enabled(session.world()) {
+            self.chat_typing = None;
+            return;
+        }
+        let Some(line) = &mut self.chat_typing else {
+            let opens = !editing
+                && self.focused_text.is_none()
+                && events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key {
+                            key: egui::Key::Slash,
+                            pressed: true,
+                            ..
+                        }
+                    )
+                });
+            if opens {
+                self.chat_typing = Some(String::new());
+            }
+            return;
+        };
+        for event in events {
+            match event {
+                egui::Event::Text(text) => line.push_str(text),
+                egui::Event::Key {
+                    key: egui::Key::Backspace,
+                    pressed: true,
+                    ..
+                } => {
+                    line.pop();
+                }
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    pressed: true,
+                    ..
+                } => {
+                    let line = std::mem::take(line);
+                    session.send_chat(&line);
+                    self.chat_typing = None;
+                    return;
+                }
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    pressed: true,
+                    ..
+                } => {
+                    self.chat_typing = None;
+                    return;
+                }
+                _ => {}
+            }
+        }
     }
     pub(super) fn update_block_lua(&mut self, path: &str) {
         let Some(source) = self.project.as_ref().and_then(|project| {

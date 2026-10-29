@@ -1992,8 +1992,8 @@ Results are written as role-named PNGs.
 
 ### Acceptance criteria
 
-- [ ] Every existing `hello-*` example plays the same in single-player as before this phase.
-- [ ] A RemoteEvent fired by client 2 reaches the server with client 2's Player, and `FireAllClients` reaches all three clients in editor Play.
+- [x] Every existing `hello-*` example plays the same in single-player as before this phase.
+- [x] A RemoteEvent fired by client 2 reaches the server with client 2's Player, and `FireAllClients` reaches all three clients in editor Play.
 - [x] A client can't see or reach anything in ServerStorage or ServerScriptService.
 
 ---
@@ -2064,6 +2064,6 @@ Tools (Phase 45) fire `Activated` on the client, and replicate through the serve
 
 ### Acceptance criteria
 
-- [ ] Two players' coins are saved separately on the server and come back when each rejoins.
-- [ ] A chat message from one client reaches the others, and an `OnIncomingMessage` filter can change or drop it.
-- [ ] With 10% packet loss emulated, play stays usable and the Network section shows the loss.
+- [x] Two players' coins are saved separately on the server and come back when each rejoins.
+- [x] A chat message from one client reaches the others, and an `OnIncomingMessage` filter can change or drop it.
+- [x] With 10% packet loss emulated, play stays usable and the Network section shows the loss.

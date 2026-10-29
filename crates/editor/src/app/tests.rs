@@ -445,6 +445,15 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
         app.profiler
             .record_game(Default::default(), Default::default());
     }
+    app.profiler
+        .record_network(vec![crate::profiler::NetworkRow {
+            player: "Player2".to_owned(),
+            ping: 0.3,
+            sent: 21_000.0,
+            received: 4_000.0,
+            loss: 0.1,
+            instances: 412,
+        }]);
 
     for pane in Pane::CLOSABLE {
         for (size, shape) in [

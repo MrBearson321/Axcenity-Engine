@@ -344,7 +344,9 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::LeaveGame
         | BlockKind::SetNetworkOwner { .. }
         | BlockKind::SetNetworkOwnershipAuto { .. }
-        | BlockKind::KickPlayer { .. } => Category::More,
+        | BlockKind::KickPlayer { .. }
+        | BlockKind::SendChatMessage { .. }
+        | BlockKind::ShowSystemMessage { .. } => Category::More,
         BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
     }
 }
@@ -1145,6 +1147,14 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
         BlockKind::SetNetworkOwnershipAuto { target } => vec![Row(vec![
             label("let the nearest player simulate"),
             Object(target, Filter::Parts),
+        ])],
+        BlockKind::SendChatMessage { text } => vec![Row(vec![
+            label("send chat message"),
+            Slot(text, SlotKind::Text),
+        ])],
+        BlockKind::ShowSystemMessage { text } => vec![Row(vec![
+            label("show system message"),
+            Slot(text, SlotKind::Text),
         ])],
         BlockKind::KickPlayer { player, reason } => vec![Row(vec![
             label("kick"),

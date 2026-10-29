@@ -48,6 +48,11 @@ pub enum SessionEvent {
     Ownership(Vec<u64>),
     /// Where the server has this device's character.
     Correction(Update),
+    /// Player `from` sent a chat message (on the host).
+    Chat { from: u32, text: String },
+    /// A chat message from the server for everyone: from a Player (a
+    /// network ID), or 0 for a system message.
+    ChatLine { player: u64, text: String },
 }
 
 /// What a host is.
@@ -67,7 +72,9 @@ pub struct Host {
     /// The host's own player, for a listen server.
     own: Option<Peer>,
     /// Connections that haven't said who they are yet, since when.
-    waiting: BTreeMap<ConnectionId, Duration>,
+    waiting: BTreeMap<ConnectionId, (u64, Duration)>,
+    /// Connections so far, so they're greeted in the order they came.
+    arrivals: u64,
     /// Refused connections, since when, until they close.
     refused: BTreeMap<ConnectionId, Duration>,
     players: BTreeMap<ConnectionId, Peer>,
@@ -88,6 +95,7 @@ impl Host {
             settings,
             own,
             waiting: BTreeMap::new(),
+            arrivals: 0,
             refused: BTreeMap::new(),
             players: BTreeMap::new(),
             clock: Duration::ZERO,
@@ -124,7 +132,8 @@ impl Host {
         for event in self.server.update(elapsed) {
             match event {
                 ServerEvent::Connected(id) => {
-                    self.waiting.insert(id, self.clock);
+                    self.arrivals += 1;
+                    self.waiting.insert(id, (self.arrivals, self.clock));
                 }
                 ServerEvent::Disconnected { id, reason } => {
                     self.waiting.remove(&id);
@@ -137,12 +146,13 @@ impl Host {
                 }
             }
         }
-        let waiting: Vec<(ConnectionId, Duration)> = self
+        let mut waiting: Vec<(u64, ConnectionId, Duration)> = self
             .waiting
             .iter()
-            .map(|(&id, &since)| (id, since))
+            .map(|(&id, &(arrival, since))| (arrival, id, since))
             .collect();
-        for (id, since) in waiting {
+        waiting.sort();
+        for (_, id, since) in waiting {
             match self.server.receive(id, Channel::ReliableOrdered) {
                 Some(bytes) => {
                     self.waiting.remove(&id);
@@ -159,11 +169,16 @@ impl Host {
         // Then the players' game messages.
         for (&id, peer) in &self.players {
             while let Some(bytes) = self.server.receive(id, Channel::ReliableOrdered) {
-                if let Some(Message::Remote { message }) = Message::from_bytes(&bytes) {
-                    events.push(SessionEvent::Remote {
+                match Message::from_bytes(&bytes) {
+                    Some(Message::Remote { message }) => events.push(SessionEvent::Remote {
                         from: peer.id,
                         message,
-                    });
+                    }),
+                    Some(Message::Chat { text }) => events.push(SessionEvent::Chat {
+                        from: peer.id,
+                        text,
+                    }),
+                    _ => {}
                 }
             }
             while let Some(bytes) = self.server.receive(id, Channel::Unreliable) {
@@ -283,10 +298,17 @@ impl Host {
         self.server.loopback_bytes_sent(self.connection_of(peer)?)
     }
 
-    /// Closes player `peer`'s connection, as `Player:Kick` does.
-    pub fn kick(&mut self, peer: u32) {
+    /// Takes player `peer` out of the game, as `Player:Kick` does: they're
+    /// told `reason`, and the connection closes a moment later.
+    pub fn kick(&mut self, peer: u32, reason: &str) {
         if let Some(connection) = self.connection_of(peer) {
-            self.server.disconnect(connection);
+            self.send(
+                connection,
+                &Message::Refused {
+                    reason: reason.to_owned(),
+                },
+            );
+            self.refused.insert(connection, self.clock);
         }
     }
 
@@ -404,7 +426,10 @@ impl Join {
                 Some(Message::Correction { update }) => {
                     events.push(SessionEvent::Correction(update));
                 }
-                Some(Message::Hello { .. }) | None => {}
+                Some(Message::ChatLine { player, text }) => {
+                    events.push(SessionEvent::ChatLine { player, text });
+                }
+                Some(Message::Hello { .. } | Message::Chat { .. }) | None => {}
             }
         }
         if matches!(self.state, JoinState::In { .. }) {

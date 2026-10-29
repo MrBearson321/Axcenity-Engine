@@ -1170,6 +1170,8 @@ declare extern type DataModel extends Instance with
 	Teams: Teams
 	--- The service that holds the SoundGroups, the game's audio buses. Its groups' volumes are saved with the world in save slots. When a group is UserAdjustable, the game has an AudioSettings ScreenGui in the Workspace (made when it starts, hidden until a script sets its Enabled) with a slider for UserGameSettings.MasterVolume and one for each of those groups.
 	SoundService: SoundService
+	--- The default chat (Phase 67): a chat window at the bottom left that `/` opens, styled with `TextChatService` rules (`TextChatService::key` styles the names). SendMessage sends from a LocalScript; on the server, OnIncomingMessage sees every message and returns its text, changed or not, or nil to drop it; DisplaySystemMessage shows a message from the game. MessageReceived fires on each device as a message arrives. ChatEnabled off hides the window.
+	TextChatService: TextChatService
 	--- Destroys Instances later (same as `game:GetService("Debris")`).
 	Debris: Debris
 	--- JSON and GUIDs (same as `game:GetService("HttpService")`).
@@ -3973,6 +3975,21 @@ end
 --- The service that holds the SoundGroups, the game's audio buses. Its groups' volumes are saved with the world in save slots. When a group is UserAdjustable, the game has an AudioSettings ScreenGui in the Workspace (made when it starts, hidden until a script sets its Enabled) with a slider for UserGameSettings.MasterVolume and one for each of those groups.
 declare extern type SoundService extends Instance with
 	[string]: any
+end
+
+--- The default chat (Phase 67): a chat window at the bottom left that `/` opens, styled with `TextChatService` rules (`TextChatService::key` styles the names). SendMessage sends from a LocalScript; on the server, OnIncomingMessage sees every message and returns its text, changed or not, or nil to drop it; DisplaySystemMessage shows a message from the game. MessageReceived fires on each device as a message arrives. ChatEnabled off hides the window.
+declare extern type TextChatService extends Instance with
+	--- If false, the default chat window isn't drawn and `/` doesn't open it, for a game with its own chat or none. Scripts can still send and hear messages.
+	ChatEnabled: boolean
+	--- Scripts only (Phase 67): sees each message a player sends before anyone else does, and returns the text to send (changed or not), or nil to drop it: `TextChatService.OnIncomingMessage = function(message) return message.Text end`. It must return at once; an error keeps the message as it was. Scripts only.
+	OnIncomingMessage: (message: { Text: string, Player: Player? }) -> string?
+	--- Fires on each device as a chat message arrives there, with the message: `message.Text`, and `message.Player` (nil for a system message). On both sides, after the server's OnIncomingMessage.
+	MessageReceived: Signal
+	[string]: any
+	--- LocalScripts only (Phase 67): sends `text` as this device's player, as the chat window's Enter does. The server's OnIncomingMessage may change or drop it; then every device's MessageReceived fires. LocalScripts only.
+	function SendMessage(self, text: string): ()
+	--- Shows `text` in the chat as the game's, with no player's name: from a Script on every device, from a LocalScript on this one.
+	function DisplaySystemMessage(self, text: string): ()
 end
 
 --- Holds `Part0` and `Part1` together where they were when it was made (or enabled). Parts welded together move as one body, an assembly: they fall and tumble together, and an anchored part anchors the whole assembly. `part:GetConnectedParts()` and `part:GetRootPart()` follow welds. Setting a welded part's Position or CFrame moves that part alone, and the weld holds it where it lands.

@@ -145,6 +145,8 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::SetNetworkOwner { .. } => ("Set Network Owner", &["Owner", "Part"]),
         BlockKind::SetNetworkOwnershipAuto { .. } => ("Network Ownership Auto", &["Part"]),
         BlockKind::KickPlayer { .. } => ("Kick Player", &["Player", "Reason"]),
+        BlockKind::SendChatMessage { .. } => ("Send Chat Message", &["Text"]),
+        BlockKind::ShowSystemMessage { .. } => ("Show System Message", &["Text"]),
         BlockKind::WhenConnectionFails { .. } => ("When Connection Fails", &[]),
         BlockKind::SetGraphicsQuality { .. } => ("Set Graphics Quality", &["Quality"]),
         BlockKind::SetGraphicsOption { .. } => ("Set Graphics Option", &["Setting", "Choice"]),

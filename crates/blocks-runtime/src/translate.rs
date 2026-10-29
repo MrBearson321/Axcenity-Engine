@@ -93,6 +93,9 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             kind if kind.networks() => {
                 services.insert("NetworkService");
             }
+            BlockKind::SendChatMessage { .. } | BlockKind::ShowSystemMessage { .. } => {
+                services.insert("TextChatService");
+            }
             BlockKind::SetLanguage { .. } => {
                 services.insert("LocalizationService");
             }
@@ -695,6 +698,14 @@ impl Writer {
             }
             BlockKind::SetNetworkOwnershipAuto { target: t } => {
                 self.line(format!("{}:SetNetworkOwnershipAuto()", target(t)?));
+            }
+            BlockKind::SendChatMessage { text } => {
+                let text = self.expression(text)?;
+                self.line(format!("TextChatService:SendMessage({text})"));
+            }
+            BlockKind::ShowSystemMessage { text } => {
+                let text = self.expression(text)?;
+                self.line(format!("TextChatService:DisplaySystemMessage({text})"));
             }
             BlockKind::KickPlayer { player, reason } => {
                 let player = self.expression(player)?;

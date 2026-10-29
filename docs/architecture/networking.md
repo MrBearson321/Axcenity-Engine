@@ -1,6 +1,6 @@
 # Networking
 
-Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, hosting and joining. Phase 64 (so far, for hosted games): a device that joins follows the server's world as a replica and runs only its LocalScripts there, RemoteEvents and RemoteFunctions cross between devices, and Players carry `UserId` and `DisplayName`. Phase 65: parts move by quantized motion within each player's budget and are smoothed on their device, and the level state follows the server. Phase 66: each player's device moves their own character, and assemblies the server gives it, with no delay; the server checks them. Single-player and the editor's Play are a listen server: the player on that device plays on the server's World, as `--host` does (chosen by the developer on 2026-10-29, so every example plays as before).
+Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, hosting and joining. Phase 64 (so far, for hosted games): a device that joins follows the server's world as a replica and runs only its LocalScripts there, RemoteEvents and RemoteFunctions cross between devices, and Players carry `UserId` and `DisplayName`. Phase 65: parts move by quantized motion within each player's budget and are smoothed on their device, and the level state follows the server. Phase 66: each player's device moves their own character, and assemblies the server gives it, with no delay; the server checks them. Phase 67: editor Play with several clients and an emulated network, the Profiler's Network section, chat, `Player:Kick`, and players' saves kept on the server. Single-player and the editor's Play are a listen server: the player on that device plays on the server's World, as `--host` does (chosen by the developer on 2026-10-29, so every example plays as before: the player test `dump_every_example`, run with `--ignored` and `AXCENITY_DUMP=<file>`, writes each example's output and part positions after three seconds, and gave the same for all 55 before Phase 64 (`0e52920`) and after Phase 67, but for hello-particles' random sparks).
 
 ## Crates
 
@@ -20,7 +20,7 @@ Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, ho
 
 ## Handshake
 
-The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (4 since Phase 66), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password and their `user_id` (missing from older engines, read as 0). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
+The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (5 since Phase 67), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password and their `user_id` (missing from older engines, read as 0). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
 
 | Check | The player's `ConnectionFailed` reason | The host's log |
 |---|---|---|
@@ -76,7 +76,31 @@ RemoteEvents and RemoteFunctions use the same `Message`s as on one device. The r
 - `axcenity-player --host [port] <game>` runs a listen server (port 47800 if not given). `--join address:port` joins one. `--password <text>` sets a host's password, or gives it when joining. A port that's taken, or an address that can't be looked up, stops the player with the reason.
 - `axcenity-server <game> [--port <port>] [--password <text>]` loads a project folder or `.axgame` and runs its Scripts (and the ModuleScripts they require, never LocalScripts) with physics at 60 Hz, with no window, audio or GPU and no player of its own (`ScriptRuntime::set_dedicated`). Its frame is network receive, scripts, `Stepped`, physics, touches, breaks, health, `Heartbeat`, network send. Characters, agents and animation belong to players' devices. On Linux it needs no display; `script` still links `audio`'s library, which needs ALSA's `libasound` installed (not a sound device). `tests/headless.rs` runs the real binary with `DISPLAY` and `WAYLAND_DISPLAY` unset.
 - The player prints who joined and left, and every refusal and failure, to stderr (`Network::take_log`).
-- The editor's Play doesn't host or join on the network: `Host` and `Join` fire `ConnectionFailed` with a reason, and `FindLanGames` returns an empty list.
+- The editor's Play doesn't host or join on the network: `Host` and `Join` fire `ConnectionFailed` with a reason, and `FindLanGames` returns an empty list. It plays several clients in the editor instead (below).
+
+## Play with several clients
+
+Beside Play and Stop, the ribbon's Game group has **Clients** (1 to 8, `play::multi::MAX_CLIENTS`; set before Play) and **Network** (latency, jitter and packet loss, which apply at once, Phase 67). With one client, Play is as before. With more (`play::Play`, `editor/src/play/multi.rs`):
+
+- The first device is the server, with its player on it (a listen server, like `--host`). Each other client is a Play `Session` of its own with its own world (`Session::start` with no scripts, then `join_through` the first's in-memory loopback with the game's LocalScripts and ModuleScripts), so it follows the server as `--join` does: RemoteEvents, replication, motion, smoothing and its own character all go over the loopback, through the emulated network. Client *n* is named `Player<n>` (the host greets connections in the order they came) and has the UserId of the first plus *n* − 1.
+- A view menu in the Game group shows **Server** (the server's world from the fly camera, taking no input) or a client by its player's name. The viewport, Explorer and Properties show that device's world, and the shown client gets the keys and mouse; the others stand still. Only the first device is heard.
+- Every device runs each editor frame, the server first. Output lines from a client end with its player's name, "(Player2)". Breakpoints, live script reloads (LocalScripts and modules on clients) and changed assets reach every device; Keep at Stop keeps the server's world.
+- The Profiler's **Network** section lists each client's connection from the server: ping, bytes sent and received a second, packet loss (renet's numbers) and how many Instances their world holds (`Play::network_stats`).
+- `a_remote_event_fired_by_client_2_reaches_the_server_with_their_player_and_fire_all_clients_reaches_all_three` and `with_10_percent_packet_loss_play_stays_usable_and_the_network_section_shows_the_loss` (`editor/src/play/tests.rs`) check it.
+
+## Chat
+
+`game:GetService("TextChatService")` (a service of `game`, saved with the world, Phase 67; `script/src/chat.rs`):
+
+- `SendMessage(text)` (LocalScripts) and the chat window's Enter send a message as the device's player. A joined device sends it to the server (`Message::Chat`); a host or single-player takes it at once.
+- On the server, `OnIncomingMessage = function(message)` gets `message.Text` and `message.Player` and returns the text to send on (changed or not), or nil to drop it. It must return at once; an error keeps the message.
+- `DisplaySystemMessage(text)` from a Script goes to every device with no player; from a LocalScript only to its own.
+- The server sends each message to every device (`Message::ChatLine`), and each fires `MessageReceived(message)` on both sides there (nil `Player` for a system message), then shows it in the chat window ([../ui.md](../ui.md)). Messages are trimmed and cut at 200 characters, whatever a modified client sends.
+- `ChatEnabled` (a property, so the server's value reaches every device) off hides the window and `/` doesn't open it.
+
+## Kicking
+
+`player:Kick(reason?)` (Scripts only) takes a player out: a player on another device gets `Refused` with the reason (their `ConnectionFailed` fires with it, "You were kicked from the game." without one), the connection closes a second later and `PlayerRemoving` fires on the server. The server's log says "Kicked Player2: reason". Kicking the player on the host's own device ends the game: the player quits with the reason on stderr, and the editor stops Play with it in Output (`Network::take_kicked`).
 
 ## LAN discovery
 

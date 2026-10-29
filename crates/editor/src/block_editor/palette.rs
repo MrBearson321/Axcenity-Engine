@@ -545,6 +545,12 @@ pub(super) fn palette(
             B(BlockKind::SetNetworkOwnershipAuto {
                 target: part.clone(),
             }),
+            B(BlockKind::SendChatMessage {
+                text: text("Hello"),
+            }),
+            B(BlockKind::ShowSystemMessage {
+                text: text("Round over"),
+            }),
             B(BlockKind::KickPlayer {
                 player: Expression::Variable {
                     name: "player".to_owned(),

@@ -86,6 +86,16 @@ pub enum Message {
     Correction {
         update: Update,
     },
+    /// A chat message the player sent (Phase 67).
+    Chat {
+        text: String,
+    },
+    /// A chat message for everyone, from a Player (a network ID), or 0 for
+    /// a system message.
+    ChatLine {
+        player: u64,
+        text: String,
+    },
 }
 
 impl Message {

@@ -320,6 +320,11 @@ impl Controllers {
     /// when there's a player set, else the first Player's.
     fn active_of(&self, world: &World) -> Option<InstanceId> {
         match self.player {
+            // Single-player: the player's character, else the first, as
+            // before there were several devices.
+            Some(player) if self.others.is_empty() => {
+                controller_of_player(world, player).or_else(|| active_id(world))
+            }
             Some(player) => controller_of_player(world, player),
             None if self.others.is_empty() => active_id(world),
             // A dedicated server: everyone's character is moved elsewhere.

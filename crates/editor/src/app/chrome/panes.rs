@@ -739,7 +739,7 @@ impl EditorApp {
         let debug_rays = self
             .play
             .as_ref()
-            .map(Session::debug_rays)
+            .map(|play| play.debug_rays())
             .unwrap_or_default();
         let agent_paths = match &self.play {
             Some(session) if self.overlays.agent_paths => session.agent_paths(),
@@ -765,11 +765,22 @@ impl EditorApp {
                             emits: &emits,
                             stylesheets,
                             focused_text: self.focused_text,
-                            loading_screen: self.play.as_ref().and_then(Session::loading_screen),
-                            hotbar: self.play.as_ref().and_then(Session::hotbar),
-                            leaderboard: self.play.as_ref().is_some_and(Session::leaderboard),
-                            prompts: self.play.as_ref().map(Session::prompts).unwrap_or_default(),
-                            click_cursor: self.play.as_ref().and_then(Session::click_cursor),
+                            loading_screen: self
+                                .play
+                                .as_ref()
+                                .and_then(|play| play.loading_screen()),
+                            hotbar: self.play.as_ref().and_then(|play| play.hotbar()),
+                            leaderboard: self.play.as_ref().is_some_and(|play| play.leaderboard()),
+                            chat: self
+                                .play
+                                .as_ref()
+                                .map(|play| (play.chat_lines(), self.chat_typing.clone())),
+                            prompts: self
+                                .play
+                                .as_ref()
+                                .map(|play| play.prompts())
+                                .unwrap_or_default(),
+                            click_cursor: self.play.as_ref().and_then(|play| play.click_cursor()),
                             light_cones: self.light_cones,
                             overlays: self.overlays,
                             debug_rays: &debug_rays,
@@ -777,7 +788,7 @@ impl EditorApp {
                             agent_paths: &agent_paths,
                             poses: sequence
                                 .map(crate::sequencer::Preview::poses)
-                                .or(self.play.as_ref().map(Session::poses)),
+                                .or(self.play.as_ref().map(|play| play.poses())),
                             terrain_brush,
                             constraint_pick: self
                                 .constraint_tool
@@ -808,7 +819,7 @@ impl EditorApp {
                             graphics: self
                                 .play
                                 .as_ref()
-                                .and_then(Session::graphics)
+                                .and_then(|play| play.graphics())
                                 .unwrap_or(&self.graphics),
                         },
                     )

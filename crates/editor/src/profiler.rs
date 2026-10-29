@@ -89,6 +89,24 @@ pub struct Profiler {
     /// The process's resident memory, as last asked; `None` where the OS
     /// doesn't say.
     memory: Option<usize>,
+    /// Each client's connection to the server, as last measured (Play with
+    /// several clients, Phase 67).
+    network: Vec<NetworkRow>,
+}
+
+/// One client's connection, from the server's end.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NetworkRow {
+    pub player: String,
+    /// The round trip, in seconds.
+    pub ping: f64,
+    /// Bytes a second the server sends them, and gets from them.
+    pub sent: f64,
+    pub received: f64,
+    /// The share of packets lost, 0 to 1.
+    pub loss: f64,
+    /// Instances in their world.
+    pub instances: usize,
 }
 
 impl Profiler {
@@ -136,6 +154,13 @@ impl Profiler {
             render: render.unwrap_or_default(),
             interval,
         });
+    }
+
+    /// Each client's connection this frame.
+    pub fn record_network(&mut self, rows: Vec<NetworkRow>) {
+        if self.is_live() {
+            self.network = rows;
+        }
     }
 
     /// The viewport drew the game frame just recorded.
@@ -326,6 +351,26 @@ impl Profiler {
                 section(ui, "Scripts and animation", |ui| {
                     row(ui, "Scripts", millis(summary.scripts));
                     row(ui, "Animation", millis(summary.animation));
+                });
+                section(ui, "Network", |ui| {
+                    if self.network.is_empty() {
+                        row(ui, "Clients", "1 (no connections)".into());
+                    }
+                    for client in &self.network {
+                        row(
+                            ui,
+                            &client.player,
+                            format!("{:.0} ms ping", client.ping * 1000.0),
+                        );
+                        row(ui, "  Sent", format!("{}/s", bytes(client.sent as usize)));
+                        row(
+                            ui,
+                            "  Received",
+                            format!("{}/s", bytes(client.received as usize)),
+                        );
+                        row(ui, "  Packet loss", format!("{:.1}%", client.loss * 100.0));
+                        row(ui, "  Instances", client.instances.to_string());
+                    }
                 });
             });
     }
@@ -610,5 +655,48 @@ mod tests {
         assert_eq!(bytes(512 * 1024), "512 KB");
         assert_eq!(bytes(3 * 1024 * 1024 / 2), "1.5 MB");
         assert_eq!(millis(Duration::from_micros(1500)), "1.50 ms");
+    }
+
+    #[test]
+    fn the_network_section_shows_each_clients_ping_bandwidth_and_loss() {
+        let mut profiler = Profiler::default();
+        profiler.start();
+        profiler.record_game(FrameCost::default(), GameLoad::default());
+        profiler.record_network(vec![NetworkRow {
+            player: "Player2".to_owned(),
+            ping: 0.302,
+            sent: 21_000.0,
+            received: 4_000.0,
+            loss: 0.098,
+            instances: 412,
+        }]);
+        let ctx = crate::theme::test_context();
+        let mut texts = Vec::new();
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(260.0, 2000.0),
+                )),
+                ..Default::default()
+            };
+            let output = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| profiler.show(ui));
+            });
+            texts = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+        }
+        for expected in ["NETWORK", "Player2", "302 ms ping", "9.8%", "412"] {
+            assert!(
+                texts.iter().any(|t| t == expected),
+                "{expected} in {texts:?}"
+            );
+        }
     }
 }

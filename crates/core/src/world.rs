@@ -254,6 +254,7 @@ pub struct World {
     starter_player_scripts: InstanceId,
     teams: InstanceId,
     sound_service: InstanceId,
+    text_chat_service: InstanceId,
     changes: ChangeLog,
     /// Each Animator's live state (see [`AnimatorState`]), made the first
     /// time something asks for it.
@@ -314,7 +315,10 @@ impl World {
         // Made last, so the other services keep the IDs they had before
         // it (Phase 64), but listed after ServerScriptService.
         let server_storage = add_service(ClassName::ServerStorage, root);
+        // After it, so nothing before it moves (Phase 67), and last.
+        let text_chat_service = add_service(ClassName::TextChatService, root);
         let game = instances.get_mut(root.0).expect("inserted first");
+        let text_chat = game.children.pop();
         game.children.pop();
         let at = game
             .children
@@ -323,6 +327,7 @@ impl World {
             .expect("a service of game")
             + 1;
         game.children.insert(at, server_storage);
+        game.children.extend(text_chat);
 
         Self {
             instances,
@@ -336,6 +341,7 @@ impl World {
             starter_player_scripts,
             teams,
             sound_service,
+            text_chat_service,
             changes: ChangeLog::default(),
             animators: HashMap::new(),
             property_animations: HashMap::new(),
@@ -616,6 +622,11 @@ impl World {
         self.sound_service
     }
 
+    /// The default chat's settings and events (Phase 67).
+    pub fn text_chat_service(&self) -> InstanceId {
+        self.text_chat_service
+    }
+
     /// The player's master volume (`UserGameSettings.MasterVolume`): a
     /// multiplier on everything the game plays, from 0 (silent) to 1 (as
     /// mixed). Copies of the world (Play) start with it, and save slots
@@ -645,6 +656,7 @@ impl World {
             ClassName::StarterPlayerScripts => self.starter_player_scripts,
             ClassName::Teams => self.teams,
             ClassName::SoundService => self.sound_service,
+            ClassName::TextChatService => self.text_chat_service,
             _ => return None,
         };
         Some(id)

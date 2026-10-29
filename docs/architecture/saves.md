@@ -17,6 +17,8 @@ Save slots, player data, settings and checkpoints (unified plan Phase 17), and s
 | `GetCheckpoint()` | The active Checkpoint, or nil (also nil once it's destroyed). |
 | `RestoreCheckpoint()` | Puts back what was captured at the active checkpoint, then stands the player character (the one whose controller owns the camera, `character::player_character`) with the middle of its feet at the checkpoint's `Position`. An error with no active checkpoint. |
 
+**On a server** (Phase 67), with a Player first, SaveService keeps that player's own data and slots, by their `UserId`, in the server's data for the game: `SetPlayerData(player, name, value)` and `GetPlayerData(player, name)` read and write `players/<UserId>.json` (read the first time it's asked for, written at most once a second while it changes, when the player leaves, after their `PlayerRemoving` handlers, and as the game ends), and `SaveSlot(n, player)`, `LoadSlot(n, player)` and `HasSlot(n, player)` use `players/<UserId>/slot-<n>.json`, with that player's data as the slot's player data (the world state is the server's). Without a Player they're the game's as before, so single-player is unchanged. LocalScripts on a player's device keep their settings (`SetSetting`) on that device. `two_players_coins_are_saved_separately_on_the_server_and_come_back_when_each_rejoins` (`net`) checks that two players' coins come back after a new server starts from the same folder.
+
 Blocks (in **More**): "save game to slot *n*", "load game from slot *n*", "set checkpoint to *checkpoint*" and "go back to checkpoint", which become `SaveService:SaveSlot(n)`, `:LoadSlot(n)`, `:SetCheckpoint(workspace.Path)` and `:RestoreCheckpoint()`, with `local SaveService = game:GetService("SaveService")` at the top.
 
 ## Checkpoint

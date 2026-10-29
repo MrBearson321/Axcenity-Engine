@@ -19,7 +19,7 @@ use crate::{
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 11] = [
+const SERVICES: [&str; 12] = [
     "UserInputService",
     "RunService",
     "Debris",
@@ -27,6 +27,7 @@ const SERVICES: [&str; 11] = [
     "SaveService",
     "LevelService",
     "NetworkService",
+    "TextChatService",
     "LocalizationService",
     "Lighting",
     "UserGameSettings",
@@ -172,6 +173,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             }
             kind if kind.networks() => {
                 services.insert("NetworkService".to_owned());
+            }
+            BlockKind::SendChatMessage { .. } | BlockKind::ShowSystemMessage { .. } => {
+                services.insert("TextChatService".to_owned());
             }
             BlockKind::SetLanguage { .. } => {
                 services.insert("LocalizationService".to_owned());
@@ -988,6 +992,9 @@ impl<'a> Converter<'a> {
         if let Some(network) = self.network_call(call, scope) {
             return Some(network);
         }
+        if let Some(chat) = self.chat_call(call, scope) {
+            return Some(chat);
+        }
         match &call.kind {
             ExprKind::Call(function, args) => {
                 if self.is_field(function, "task", "wait")
@@ -1214,6 +1221,25 @@ impl<'a> Converter<'a> {
                 address: self.expression(address, scope),
             },
             ("Disconnect", []) => BlockKind::LeaveGame,
+            _ => return None,
+        })
+    }
+
+    /// `TextChatService:SendMessage(text)` and `DisplaySystemMessage(text)`.
+    fn chat_call(&self, call: &Expr, scope: Scope) -> Option<BlockKind> {
+        let ExprKind::Method(object, method, args) = &call.kind else {
+            return None;
+        };
+        if !self.is_service(object, "TextChatService") {
+            return None;
+        }
+        Some(match (method.as_str(), args.as_slice()) {
+            ("SendMessage", [text]) => BlockKind::SendChatMessage {
+                text: self.expression(text, scope),
+            },
+            ("DisplaySystemMessage", [text]) => BlockKind::ShowSystemMessage {
+                text: self.expression(text, scope),
+            },
             _ => return None,
         })
     }

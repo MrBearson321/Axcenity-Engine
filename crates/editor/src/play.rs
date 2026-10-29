@@ -21,6 +21,7 @@ use axcenity_character::{Controllers, MoveInput};
 use axcenity_core::input::{InputEvent, InputMap, InputState};
 use axcenity_core::{InstanceId, KeyCode, MouseBehavior, Vector3, World};
 use axcenity_nav::Agents;
+use axcenity_net::Network;
 use axcenity_physics::Physics;
 use axcenity_project::{LoadingScreen, ScriptFile};
 use axcenity_render::{Capabilities, GraphicsSettings};
@@ -35,8 +36,12 @@ use crate::output::Output;
 use crate::profiler::{FrameCost, GameLoad};
 
 pub mod kept;
+pub mod multi;
 
 pub use kept::PlayEdits;
+#[cfg(test)]
+pub use multi::PlayView;
+pub use multi::{Play, PlaySettings};
 
 /// `NetworkService.ConnectionFailed`'s reason for `Host` and `Join` in Play.
 const PLAY_IS_OFFLINE: &str = "Play doesn't host or join games: run the game in the player \
@@ -82,12 +87,20 @@ pub struct Session {
     game_camera: GameCamera,
     /// Values edited in Properties during Play, and which Stop keeps.
     kept: PlayEdits,
+    /// Play with several clients (Phase 64): the first device hosts in
+    /// memory, the others join it. Offline with one.
+    network: Network,
+    /// The player's name on a client device, for its Output lines; `None`
+    /// on the first device, whose lines are as they were.
+    label: Option<String>,
+    /// The server view: no input, and the fly camera.
+    observing: bool,
 }
 
 /// The game's levels for Play's `LevelService` (Phase 48): every level by
 /// name, each a world of its own, with the start level's name and the
 /// level Play starts in. Empty for a game without levels.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PlayLevels {
     pub start: String,
     pub current: String,
@@ -139,6 +152,9 @@ impl Session {
             graphics: None,
             game_camera: GameCamera::default(),
             kept: PlayEdits::default(),
+            network: Network::new(multi::play_game()),
+            label: None,
+            observing: false,
         };
         // Up before any script runs, as in the player.
         session.loading_gui = LoadingGui::start(
@@ -212,6 +228,26 @@ impl Session {
     /// hides and shows it.
     pub fn leaderboard(&self) -> bool {
         self.scripts.leaderboard_shown()
+    }
+
+    /// The chat window's lines (Phase 67): who said each (`None` for a
+    /// system message) and what.
+    pub fn chat_lines(&self) -> Vec<(Option<String>, String)> {
+        self.scripts
+            .chat_lines()
+            .into_iter()
+            .map(|line| (line.from, line.text))
+            .collect()
+    }
+
+    /// Sends a line typed in the chat window, as this device's player.
+    pub fn send_chat(&mut self, text: &str) {
+        self.scripts.send_chat(text);
+    }
+
+    /// Why this device's player was kicked (`Player:Kick`), once.
+    pub fn take_kicked(&mut self) -> Option<String> {
+        self.network.take_kicked()
     }
 
     /// The ProximityPrompts that show (Phase 44), for the viewport to draw.
@@ -381,7 +417,8 @@ impl Session {
     /// Whether the game holds the view (a character controller, or a
     /// CameraType other than Custom), so the fly camera stays put.
     pub fn holds_camera(&self) -> bool {
-        self.characters.view(&self.world).is_some() || self.scripts.camera_scripted()
+        !self.observing
+            && (self.characters.view(&self.world).is_some() || self.scripts.camera_scripted())
     }
 
     /// The camera the viewport draws during Play, given the fly camera:
@@ -389,6 +426,10 @@ impl Session {
     /// with the scripts' field of view and shake. The fly camera itself is
     /// never moved by it, so Stop shows it where it was.
     pub fn shown_camera(&self, fly: CameraState) -> CameraView {
+        if self.observing {
+            // The server view: the fly camera, as the scripts don't move it.
+            return GameCamera::default().view(fly);
+        }
         self.game_camera.view(self.script_camera(fly))
     }
 
@@ -443,12 +484,29 @@ impl Session {
                     }
                 }
             }
-            // A Sequence that locks input leaves the character still.
-            let motion = if self.scripts.input_locked(&self.world) {
+            // Then what the other Play devices sent (Phase 64).
+            self.network
+                .receive(&mut self.world, &mut self.scripts, seconds);
+            self.forward_network_log(output);
+            self.forward_output(output);
+            let following = self.network.is_following();
+            // A Sequence that locks input leaves the character still, and
+            // the server view takes none.
+            let motion = if self.scripts.input_locked(&self.world) || self.observing {
                 MoveInput::default()
             } else {
                 motion
             };
+            let input: &[InputEvent] = if self.observing { &[] } else { input };
+            // Each device moves its own player's character (Phase 66).
+            let others = self.network.other_characters(&self.world, &self.scripts);
+            let player = if self.observing {
+                None
+            } else {
+                self.scripts.local_player()
+            };
+            self.characters.set_players(player, others);
+            self.network.set_running(motion.run);
             self.characters
                 .step(&mut self.world, &self.assets, motion, seconds as f32);
             let seats: Vec<_> = self
@@ -461,29 +519,32 @@ impl Session {
                 self.scripts.fire_seated(&mut self.world, &seats);
             }
             let landings = self.characters.take_landings();
-            if !landings.is_empty() {
-                self.scripts.fire_landed(&mut self.world, &landings);
-            }
-            // Then Humanoids: MoveTo, states and dying (Phase 46).
-            self.scripts
-                .step_humanoids(&mut self.world, &self.characters, seconds);
-            // Then players: their first character, respawns and spawn
-            // ForceFields (Phase 47).
-            self.scripts.step_players(&mut self.world, seconds);
-            // Then navigation agents, toward their destinations.
-            self.agents
-                .step(&mut self.world, &self.assets, seconds as f32);
-            for warning in self.agents.take_warnings() {
-                output.warning(warning);
-            }
-            for sensed in self.agents.take_sensed() {
-                let sense = sensed.sense.as_str().to_owned();
-                self.scripts.fire_instance_event(
-                    &mut self.world,
-                    sensed.agent,
-                    "PlayerSensed",
-                    &[sense],
-                );
+            // A device following the server leaves the rest to it.
+            if !following {
+                if !landings.is_empty() {
+                    self.scripts.fire_landed(&mut self.world, &landings);
+                }
+                // Then Humanoids: MoveTo, states and dying (Phase 46).
+                self.scripts
+                    .step_humanoids(&mut self.world, &self.characters, seconds);
+                // Then players: their first character, respawns and spawn
+                // ForceFields (Phase 47).
+                self.scripts.step_players(&mut self.world, seconds);
+                // Then navigation agents, toward their destinations.
+                self.agents
+                    .step(&mut self.world, &self.assets, seconds as f32);
+                for warning in self.agents.take_warnings() {
+                    output.warning(warning);
+                }
+                for sensed in self.agents.take_sensed() {
+                    let sense = sensed.sense.as_str().to_owned();
+                    self.scripts.fire_instance_event(
+                        &mut self.world,
+                        sensed.agent,
+                        "PlayerSensed",
+                        &[sense],
+                    );
+                }
             }
             let mut clock = Instant::now();
             // The time since `clock`, which then starts again.
@@ -500,8 +561,10 @@ impl Session {
             self.scripts.input_events(&mut self.world, input);
             // Then ProximityPrompts and ClickDetectors, by that input,
             // then Tools: pickups, the hotbar, Drop and Primary.
-            self.scripts.step_prompts(&mut self.world, seconds);
-            self.scripts.step_tools(&mut self.world);
+            if !following {
+                self.scripts.step_prompts(&mut self.world, seconds);
+                self.scripts.step_tools(&mut self.world);
+            }
             self.forward_output(output);
             if self.scripts.pause().is_some() {
                 cost.scripts += lap();
@@ -522,24 +585,37 @@ impl Session {
             // The character is not a dynamic body. Anchoring here, after
             // scripts and before physics, keeps a script from dropping it
             // for this step. Gravity and friction of other parts are unchanged.
-            self.characters.keep_kinematic(&mut self.world);
-            self.agents.keep_kinematic(&mut self.world);
-            // 3. Step physics at a fixed 60 Hz (0 to N steps this frame),
-            //    after the parts scripts shattered are replaced.
-            self.scripts
-                .apply_shatters(&mut self.world, &mut self.physics);
-            cost.physics_steps = self.physics.step(&mut self.world, seconds);
-            cost.physics += lap();
-            // 4. Fire `Touched` for parts that started touching (and
-            //    `Changed` for parts that moved), `TouchEnded` for those
-            //    that stopped, then `RunService.Heartbeat`.
-            let touches = self.physics.take_touches();
-            self.scripts.fire_touched(&mut self.world, &touches);
-            let ends = self.physics.take_touch_ends();
-            self.scripts.fire_touch_ended(&mut self.world, &ends);
-            self.scripts.fire_breaks(&mut self.world, &mut self.physics);
+            // Parts another device moves are held still here.
+            let held = self.network.held_parts(&self.world, &self.scripts);
+            self.physics.set_held(held);
+            if !following {
+                self.characters.keep_kinematic(&mut self.world);
+                self.agents.keep_kinematic(&mut self.world);
+                // 3. Step physics at a fixed 60 Hz (0 to N steps this
+                //    frame), after the parts scripts shattered are replaced.
+                self.scripts
+                    .apply_shatters(&mut self.world, &mut self.physics);
+                cost.physics_steps = self.physics.step(&mut self.world, seconds);
+                cost.physics += lap();
+                // 4. Fire `Touched` for parts that started touching (and
+                //    `Changed` for parts that moved), `TouchEnded` for
+                //    those that stopped, then `RunService.Heartbeat`.
+                let touches = self.physics.take_touches();
+                self.scripts.fire_touched(&mut self.world, &touches);
+                let ends = self.physics.take_touch_ends();
+                self.scripts.fire_touch_ended(&mut self.world, &ends);
+                self.scripts.fire_breaks(&mut self.world, &mut self.physics);
+            } else if self.network.simulates_physics() {
+                // An assembly the server gave this device (a car it drives).
+                cost.physics_steps = self.physics.step(&mut self.world, seconds);
+                let _ = self.physics.take_touches();
+                let _ = self.physics.take_touch_ends();
+                cost.physics += lap();
+            }
             if self.scripts.pause().is_none() {
-                self.scripts.step_health(&mut self.world, seconds);
+                if !following {
+                    self.scripts.step_health(&mut self.world, seconds);
+                }
                 self.scripts.heartbeat(&mut self.world, seconds);
             }
             self.forward_output(output);
@@ -583,7 +659,14 @@ impl Session {
                 // is not copied onto the fly camera.
                 moved = None;
             }
-            self.apply_audio(listener, output);
+            // Only the first device is heard: the others are the same
+            // game on more players' devices.
+            if self.label.is_none() {
+                self.apply_audio(listener, output);
+            } else {
+                drop(self.scripts.take_sound_actions());
+                self.ui_sounds.clear();
+            }
             cost.audio += lap();
             // Animators move on and pose their models, as in the player.
             let events = self
@@ -603,6 +686,10 @@ impl Session {
             // Then a Follow or Track camera follows its subject, which
             // physics and animation have moved, and shakes move on.
             self.game_camera = self.scripts.step_camera(&self.world, seconds);
+            // Network send, last: the world's changes and remote messages
+            // for the other Play devices.
+            self.network.send(&self.world, &mut self.scripts);
+            self.forward_network_log(output);
         });
         cost.total = started.elapsed();
         self.cost = Some(cost);
@@ -731,10 +818,29 @@ impl Session {
     /// Moves what scripts printed, and their errors, into the Output panel.
     fn forward_output(&mut self, output: &mut Output) {
         for line in self.scripts.take_output() {
+            // A client device's lines say whose they are.
+            let text = match &self.label {
+                Some(label) => format!("{} ({label})", line.text),
+                None => line.text,
+            };
             match line.kind {
-                OutputKind::Print => output.info(line.text),
-                OutputKind::Warning => output.warning(line.text),
-                OutputKind::Error => output.script_error(line.text, line.trace),
+                OutputKind::Print => output.info(text),
+                OutputKind::Warning => output.warning(text),
+                OutputKind::Error => output.script_error(text, line.trace),
+            }
+        }
+    }
+
+    /// Who joined and left, and corrections, from the network's log.
+    fn forward_network_log(&mut self, output: &mut Output) {
+        for line in self.network.take_log() {
+            let text = match &self.label {
+                Some(label) => format!("{line} ({label})"),
+                None => line,
+            };
+            match text.strip_prefix("warning: ") {
+                Some(warning) => output.warning(warning.to_owned()),
+                None => output.info(text),
             }
         }
     }

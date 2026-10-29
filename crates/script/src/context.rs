@@ -135,6 +135,10 @@ impl Context {
                 .expect("creating Seat methods only fails when out of memory"),
         );
         methods.extend(
+            crate::chat::methods(&lua)
+                .expect("creating the TextChatService methods only fails when out of memory"),
+        );
+        methods.extend(
             crate::ownership::methods(&lua)
                 .expect("creating the network ownership methods only fails when out of memory"),
         );
@@ -525,6 +529,56 @@ impl Context {
         with_world(&self.lua, world, || {
             events::fire(&self.lua, events::Owner::RunService, "Heartbeat", seconds);
         });
+    }
+
+    /// Fires `TextChatService.MessageReceived` with the message (Phase 67).
+    pub fn fire_chat_message(&self, world: &mut World, player: Option<InstanceId>, text: &str) {
+        let service = world.text_chat_service();
+        with_world(&self.lua, world, || {
+            if let Ok(message) = crate::chat::message_table(&self.lua, player, text) {
+                events::fire(
+                    &self.lua,
+                    events::Owner::Instance(service),
+                    "MessageReceived",
+                    message,
+                );
+            }
+        });
+    }
+
+    /// Runs `TextChatService.OnIncomingMessage` on a message: the text to
+    /// send on, or `None` to drop it. Without one, the message as it is;
+    /// an error is reported and keeps it as it is.
+    pub fn filter_chat(
+        &self,
+        world: &mut World,
+        player: Option<InstanceId>,
+        text: &str,
+    ) -> Option<String> {
+        let service = world.text_chat_service();
+        let mut result = Some(text.to_owned());
+        with_world(&self.lua, world, || {
+            let Some((callback, _)) =
+                crate::bindable::callback(&self.lua, service, "OnIncomingMessage")
+            else {
+                return;
+            };
+            let outcome = crate::chat::message_table(&self.lua, player, text)
+                .and_then(|message| callback.call::<mlua::Value>(message));
+            match outcome {
+                Ok(mlua::Value::String(changed)) => {
+                    result = crate::chat::clean(&changed.to_string_lossy());
+                }
+                Ok(mlua::Value::Nil | mlua::Value::Boolean(false)) => result = None,
+                Ok(_) => {}
+                Err(err) => crate::push_output(
+                    &self.lua,
+                    crate::OutputKind::Error,
+                    format!("TextChatService.OnIncomingMessage: {err}"),
+                ),
+            }
+        });
+        result
     }
 
     /// Fires `LevelService.LevelLoaded` with the level's name (Phase 48).

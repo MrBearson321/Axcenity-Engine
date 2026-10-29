@@ -416,3 +416,188 @@ fn a_local_script_in_play_reads_keys_and_moves_the_camera() {
         Some(axcenity_core::Vector3::new(0.0, 50.0, 0.0))
     );
 }
+
+/// Starts Play of `world` with `clients` clients.
+fn play(world: &World, scripts: &[ScriptFile], clients: usize, output: &mut Output) -> Play {
+    Play::start(
+        world,
+        scripts,
+        &Breakpoints::new(),
+        output,
+        Assets::default(),
+        CameraState::default(),
+        &LoadingScreen::default(),
+        &InputMap::default(),
+        None,
+        &GraphicsSettings::default(),
+        &Capabilities::default(),
+        PlayLevels::default(),
+        PlaySettings {
+            clients,
+            ..PlaySettings::default()
+        },
+    )
+    .unwrap()
+}
+
+fn said(output: &Output, text: &str) -> bool {
+    output.lines().iter().any(|line| line.text == text)
+}
+
+#[test]
+fn a_remote_event_fired_by_client_2_reaches_the_server_with_their_player_and_fire_all_clients_reaches_all_three()
+ {
+    let mut world = World::new();
+    let shout = world.create(ClassName::RemoteEvent).unwrap();
+    world.set_name(shout, "Shout").unwrap();
+    world
+        .set_parent(shout, Some(world.replicated_storage()))
+        .unwrap();
+    let server = script(
+        &mut world,
+        "local shout = game.ReplicatedStorage.Shout\n\
+         shout.OnServerEvent:Connect(function(player, text)\n\
+             print('server got', text, 'from', player.Name)\n\
+             shout:FireAllClients('hello from ' .. player.Name)\n\
+         end)",
+    );
+    let local = world.create(ClassName::LocalScript).unwrap();
+    world
+        .set_parent(local, Some(world.starter_player_scripts()))
+        .unwrap();
+    let client = ScriptFile {
+        instance: local,
+        path: "scripts/shout.client.lua".to_owned(),
+        source: "local me = game.Players.LocalPlayer\n\
+                 game.ReplicatedStorage.Shout.OnClientEvent:Connect(function(text)\n\
+                     print(me.Name, 'heard', text)\n\
+                 end)\n\
+                 if me.Name == 'Player2' then\n\
+                     task.wait(0.5)\n\
+                     game.ReplicatedStorage.Shout:FireServer('hi')\n\
+                 end"
+        .to_owned(),
+    };
+    let mut output = Output::default();
+    let mut play = play(&world, &[server, client], 3, &mut output);
+    assert_eq!(play.clients(), 3);
+    for _ in 0..90 {
+        play.frame(
+            1.0 / 60.0,
+            &[],
+            MoveInput::default(),
+            CameraState::default(),
+            &mut output,
+        )
+        .unwrap();
+    }
+    let lines: Vec<&str> = output.lines().iter().map(|l| l.text.as_str()).collect();
+    assert!(said(&output, "server got\thi\tfrom\tPlayer2"), "{lines:#?}");
+    assert!(
+        said(&output, "Player\theard\thello from Player2"),
+        "{lines:#?}"
+    );
+    assert!(
+        said(&output, "Player2\theard\thello from Player2 (Player2)"),
+        "{lines:#?}"
+    );
+    assert!(
+        said(&output, "Player3\theard\thello from Player2 (Player3)"),
+        "{lines:#?}"
+    );
+    // Each client has its own world, and the viewport shows one at a time.
+    let names: Vec<String> = play.views().into_iter().map(|(_, name)| name).collect();
+    assert_eq!(names, ["Server", "Player", "Player2", "Player3"]);
+    play.set_view(PlayView::Client(2));
+    assert!(!std::ptr::eq(play.world(), play.server().world()));
+}
+
+#[test]
+fn with_10_percent_packet_loss_play_stays_usable_and_the_network_section_shows_the_loss() {
+    let mut world = World::new();
+    let ping = world.create(ClassName::RemoteEvent).unwrap();
+    world.set_name(ping, "Ping").unwrap();
+    world
+        .set_parent(ping, Some(world.replicated_storage()))
+        .unwrap();
+    let crate_part = world.create(ClassName::Part).unwrap();
+    world.set_name(crate_part, "Crate").unwrap();
+    world
+        .set_property(crate_part, "Anchored", Value::Bool(true))
+        .unwrap();
+    world
+        .set_parent(crate_part, Some(world.workspace()))
+        .unwrap();
+    let server = script(
+        &mut world,
+        "local count = 0\n\
+         game.ReplicatedStorage.Ping.OnServerEvent:Connect(function(player, n)\n\
+             count += 1\n\
+             if n == 20 then print('pings', count) end\n\
+         end)\n\
+         local t = 0\n\
+         game:GetService('RunService').Heartbeat:Connect(function(dt)\n\
+             t += dt\n\
+             workspace.Crate.Position = Vector3.new(t, 1, 0)\n\
+         end)",
+    );
+    let local = world.create(ClassName::LocalScript).unwrap();
+    world
+        .set_parent(local, Some(world.starter_player_scripts()))
+        .unwrap();
+    let client = ScriptFile {
+        instance: local,
+        path: "scripts/ping.client.lua".to_owned(),
+        source: "if game.Players.LocalPlayer.Name == 'Player2' then\n\
+                     for n = 1, 20 do\n\
+                         task.wait(0.1)\n\
+                         game.ReplicatedStorage.Ping:FireServer(n)\n\
+                     end\n\
+                 end"
+        .to_owned(),
+    };
+    let mut output = Output::default();
+    let mut play = play(&world, &[server, client], 2, &mut output);
+    play.emulate(axcenity_net::Conditions {
+        loss: 0.1,
+        ..axcenity_net::Conditions::default()
+    });
+    let mut profiler = crate::profiler::Profiler::default();
+    profiler.start();
+    for _ in 0..360 {
+        play.frame(
+            1.0 / 60.0,
+            &[],
+            MoveInput::default(),
+            CameraState::default(),
+            &mut output,
+        )
+        .unwrap();
+    }
+    // Every message arrives, resent where it was lost.
+    let lines: Vec<&str> = output.lines().iter().map(|l| l.text.as_str()).collect();
+    assert!(said(&output, "pings\t20"), "{lines:#?}");
+    // The crate the server moves keeps moving on client 2.
+    let x = |world: &World| {
+        world
+            .get(crate_part)
+            .and_then(|c| c.property("Position"))
+            .and_then(Value::as_vector3)
+            .unwrap()
+            .x
+    };
+    let client_two = play.device(1).unwrap();
+    let behind = x(play.server().world()) - x(client_two.world());
+    assert!((0.0..0.5).contains(&behind), "client 2 keeps up: {behind}");
+    // The Profiler's Network section shows the loss.
+    let stats = play.network_stats();
+    assert_eq!(stats.len(), 1);
+    let (name, stats, instances) = &stats[0];
+    assert_eq!(name, "Player2");
+    assert!(*instances > 0);
+    assert!(
+        (0.03..0.25).contains(&stats.link.packet_loss),
+        "about a tenth lost: {}",
+        stats.link.packet_loss
+    );
+}

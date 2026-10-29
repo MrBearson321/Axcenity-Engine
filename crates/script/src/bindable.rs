@@ -24,6 +24,7 @@ const CALLBACKS: &[(ClassName, &str)] = &[
     (ClassName::BindableFunction, "OnInvoke"),
     (ClassName::RemoteFunction, "OnServerInvoke"),
     (ClassName::RemoteFunction, "OnClientInvoke"),
+    (ClassName::TextChatService, "OnIncomingMessage"),
 ];
 
 /// The callback member `key` of `class`, if it has one by that name.

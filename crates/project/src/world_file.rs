@@ -145,6 +145,9 @@ struct WorldFile {
     // Phase 52: the SoundGroups.
     #[serde(default)]
     sound_service: ServiceNode,
+    // Phase 67: the default chat's settings.
+    #[serde(default)]
+    text_chat_service: ServiceNode,
 }
 
 #[derive(Default, Deserialize)]
@@ -299,6 +302,7 @@ pub fn parse_world(text: &str) -> Result<World, WorldError> {
         (world.starter_player(), &file.starter_player),
         (world.teams(), &file.teams),
         (world.sound_service(), &file.sound_service),
+        (world.text_chat_service(), &file.text_chat_service),
     ];
     for (service, node) in services {
         apply_properties(&mut world, service, &node.properties, &mut references)?;
@@ -788,6 +792,7 @@ pub fn write_world(world: &World) -> String {
         ("starter_player", world.starter_player()),
         ("teams", world.teams()),
         ("sound_service", world.sound_service()),
+        ("text_chat_service", world.text_chat_service()),
     ];
     for (key, service) in services {
         let changed = world.get(service).is_some_and(|instance| {

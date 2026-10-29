@@ -89,7 +89,7 @@ use crate::import_dialog::ImportDialog;
 use crate::layout::{self, Layout, Pane};
 use crate::loading::{self, Loading};
 use crate::output::Output;
-use crate::play::{self, Crash, GameKeys, Session};
+use crate::play::{self, Crash, GameKeys, Play, PlaySettings};
 use crate::profiler::Profiler;
 use crate::properties::{self, Edit};
 use crate::rebuild::{EngineSource, Rebuilds};
@@ -210,7 +210,10 @@ pub struct EditorApp {
     /// The window title last sent to the window, to send it again only when it changes.
     shown_title: String,
     /// The game, while Play is on. `world` stays as it was before Play.
-    play: Option<Session>,
+    play: Option<Play>,
+    /// Play's clients and emulated network (Phase 64 and 67), kept until
+    /// the editor closes.
+    play_settings: PlaySettings,
     /// A button clicked in the viewport, delivered on the next Play frame.
     pending_ui_activation: Option<InstanceId>,
     /// `MouseEnter`, `MouseLeave` and buttons' sounds from the viewport,
@@ -228,6 +231,8 @@ pub struct EditorApp {
     gamepads: Option<axcenity_ui::Gamepads>,
     /// A TextBox the player is typing in during Play.
     focused_text: Option<InstanceId>,
+    /// The line being typed in the game's chat during Play (`/`, Phase 67).
+    chat_typing: Option<String>,
     pending_focus_lost: Option<InstanceId>,
     /// UI layout warnings already shown, so a PageLayout problem is not
     /// repeated every frame.
@@ -643,6 +648,7 @@ impl EditorApp {
             ui_drag_baselines: HashMap::new(),
             shown_title: String::new(),
             play: None,
+            play_settings: PlaySettings::default(),
             pending_ui_activation: None,
             pending_ui_events: Vec::new(),
             nav_keys: Vec::new(),
@@ -650,6 +656,7 @@ impl EditorApp {
             pad_nav: axcenity_ui::PadNavigation::default(),
             gamepads: None,
             focused_text: None,
+            chat_typing: None,
             pending_focus_lost: None,
             ui_warnings: Vec::new(),
             last_frame: None,
@@ -799,8 +806,8 @@ fn quoted_list(items: &[&str]) -> String {
 /// those two, and other fields (the Explorer, the viewport) can still be
 /// changed while it's in use. `'a` says the returned world lives as long as
 /// the borrowed fields.
-fn shown<'a>(world: &'a World, play: &'a Option<Session>) -> &'a World {
-    play.as_ref().map_or(world, Session::world)
+fn shown<'a>(world: &'a World, play: &'a Option<Play>) -> &'a World {
+    play.as_ref().map_or(world, |play| play.world())
 }
 
 impl eframe::App for EditorApp {
@@ -973,9 +980,12 @@ impl EditorApp {
             // Keys go to LocalScripts, unless a text box is being typed in.
             // (Read inside `input`, then used outside it: see the deadlock
             // trap in the crate's CLAUDE.md.)
-            let typing = self.focused_text.is_some() || ctx.wants_keyboard_input();
             let (events, modifiers, focused) =
                 ctx.input(|input| (input.events.clone(), input.modifiers, input.focused));
+            self.type_chat(&events, ctx.wants_keyboard_input());
+            let typing = self.focused_text.is_some()
+                || self.chat_typing.is_some()
+                || ctx.wants_keyboard_input();
             if let Some(id) = self.focused_text
                 && let Some(session) = &mut self.play
             {
@@ -1035,10 +1045,12 @@ impl EditorApp {
             self.play_frame(seconds, &input, activation, focus_lost);
             ctx.request_repaint();
         }
-        let mouse = self.play.as_ref().map_or(
-            (axcenity_core::MouseBehavior::Default, true),
-            Session::mouse,
-        );
+        let mouse = self
+            .play
+            .as_ref()
+            .map_or((axcenity_core::MouseBehavior::Default, true), |play| {
+                play.mouse()
+            });
         self.viewport.hold_cursor(ctx, mouse);
         // However Play ended (Stop, a crash, another project), the
         // Profiler's readings freeze.
