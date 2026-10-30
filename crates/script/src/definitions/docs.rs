@@ -1328,12 +1328,88 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::SpotLight,
         "Direction",
-        "The way the beam points, relative to the parent part.",
+        "The way the beam points, relative to the parent part (or to its own Orientation when it isn't in a part).",
     ),
     (
         ClassName::SpotLight,
         "Shadows",
         "If true, parts in the beam cast shadows. Only the few spot lights nearest the camera do, as the graphics settings allow.",
+    ),
+    (
+        ClassName::PointLight,
+        "Position",
+        "Where it is in the world when it isn't inside a part, in studs. Inside a part it works from the part and this isn't used.",
+    ),
+    (
+        ClassName::PointLight,
+        "Orientation",
+        "How it's turned when it isn't inside a part, in degrees, as a part's Orientation. Inside a part it turns with the part.",
+    ),
+    (
+        ClassName::SpotLight,
+        "Position",
+        "Where it is in the world when it isn't inside a part, in studs. Inside a part it works from the part and this isn't used.",
+    ),
+    (
+        ClassName::SpotLight,
+        "Orientation",
+        "How it's turned when it isn't inside a part, in degrees, as a part's Orientation. Inside a part it turns with the part.",
+    ),
+    (
+        ClassName::RectLight,
+        "Position",
+        "Where it is in the world when it isn't inside a part, in studs. Inside a part it works from the part and this isn't used.",
+    ),
+    (
+        ClassName::RectLight,
+        "Orientation",
+        "How it's turned when it isn't inside a part, in degrees, as a part's Orientation. Inside a part it turns with the part.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Position",
+        "Where it is in the world when it isn't inside a part, in studs. Inside a part it works from the part and this isn't used.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Orientation",
+        "How it's turned when it isn't inside a part, in degrees, as a part's Orientation. Inside a part it turns with the part.",
+    ),
+    (
+        ClassName::RectLight,
+        "Enabled",
+        "If false, the light is off.",
+    ),
+    (ClassName::RectLight, "Color", "The light's color."),
+    (
+        ClassName::RectLight,
+        "Brightness",
+        "How bright the light is.",
+    ),
+    (
+        ClassName::RectLight,
+        "Range",
+        "How far the light reaches, in studs.",
+    ),
+    (
+        ClassName::RectLight,
+        "Width",
+        "How wide the rectangle the light shines from is, in studs.",
+    ),
+    (
+        ClassName::RectLight,
+        "Height",
+        "How tall the rectangle the light shines from is, in studs.",
+    ),
+    (
+        ClassName::RectLight,
+        "Direction",
+        "The way the rectangle's front faces, relative to the parent part (or to its own Orientation when it isn't in a part).",
+    ),
+    (
+        ClassName::RectLight,
+        "Shadows",
+        "If true, parts in front of it cast shadows. Only the few lights nearest the camera do, as the graphics settings allow.",
     ),
     (
         ClassName::ReflectionProbe,
@@ -4718,10 +4794,13 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "A sound effect or music track that scripts can play. Spatial sounds sit on a part and get quieter with distance from the camera."
         }
         ClassName::PointLight => {
-            "A light that shines in all directions from just above its parent part. Inserting one with no part selected also inserts an anchored lamp."
+            "A light that shines in all directions from just above its parent part. Anywhere else (in the Workspace, a Model or a Folder) it needs no part: it shines from its own Position, as in Unreal, and the editor shows it as an icon you can drag."
         }
         ClassName::SpotLight => {
-            "A light that shines in a cone from just above its parent part. Inserting one with no part selected also inserts an anchored lamp."
+            "A light that shines in a cone from just above its parent part. Anywhere else it needs no part: it shines from its own Position, its Direction turned by its Orientation, and the editor shows it as an icon you can drag."
+        }
+        ClassName::RectLight => {
+            "A light that shines from a rectangle Width by Height studs, out of its front only, like a window or a softbox: on the side of its parent part its Direction points out of, or anywhere else from its own Position, turned by its Orientation (the editor shows it as an icon you can drag)."
         }
         ClassName::ReflectionProbe => {
             "Inside a Part: shiny surfaces in the part's box reflect the world as the editor baked it from the part's middle (Lighting > Bake Probes), lined up with the box's walls, in place of the sky. Overlapping probes blend, the smaller one winning, and each fades into what's around it over its BlendDistance. Changing the world doesn't change a bake until it's baked again. Drawn at Medium reflection quality and above."

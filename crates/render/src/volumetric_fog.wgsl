@@ -89,21 +89,11 @@ fn air_light(position: vec3<f32>, dir: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
     let unturned = mat2x2<f32>(1.0, 0.0, 0.0, 1.0);
     for (var i = 0u; i < count; i++) {
         let lamp = lights[tile_lights[first + 1u + i]];
+        // The same falloff, cone and rectangle as on surfaces.
+        let reach = lamp_reach(lamp, position);
+        let strength = reach.w;
+        let l = reach.xyz / max(length(reach.xyz), 0.0001);
         let to_light = lamp.position_range.xyz - position;
-        let distance_squared = dot(to_light, to_light);
-        let range = lamp.position_range.w;
-        if distance_squared >= range * range {
-            continue;
-        }
-        let dist = sqrt(distance_squared);
-        let l = to_light / max(dist, 0.0001);
-        // The same falloff and cone as on surfaces (`light_surface`).
-        let edge = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
-        var strength = edge * edge / (distance_squared + 1.0);
-        if lamp.radiance_cone.w > -1.5 {
-            strength *= smoothstep(lamp.radiance_cone.w, lamp.direction_inner.w,
-                dot(-l, lamp.direction_inner.xyz));
-        }
         if strength > 0.0 {
             light += lamp.radiance_cone.rgb * strength * fog.distance.z
                 * fog_phase(dir, l, LAMP_FORWARD)

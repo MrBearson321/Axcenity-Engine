@@ -270,3 +270,87 @@ fn a_part_that_isn_t_closed_or_can_t_be_meshed_is_refused_with_why() {
 
     let _ = std::fs::remove_dir_all(&project);
 }
+
+/// How many distinct positions `mesh`'s triangles use.
+fn points_used(mesh: &Mesh) -> usize {
+    let mut points: Vec<[u32; 3]> = mesh
+        .triangles
+        .iter()
+        .flat_map(|t| t.corners.map(|c| position_key(mesh.positions[c as usize])))
+        .collect();
+    points.sort_unstable();
+    points.dedup();
+    points.len()
+}
+
+#[test]
+fn two_blocks_side_by_side_with_one_look_union_into_a_plain_box() {
+    let block = |at: Vec3| Solid {
+        name: "Block".into(),
+        mesh: Mesh::block(Vec3::splat(2.0)),
+        materials: vec![crate::glb::plain_material()],
+        position: at,
+        rotation: Quat::IDENTITY,
+    };
+    let combined = combine(
+        &[block(Vec3::ZERO), block(Vec3::new(2.0, 0.0, 0.0))],
+        &[],
+        Operation::Union,
+    )
+    .unwrap();
+    let mesh = &combined.mesh;
+    // A 4×2×2 box: 8 corners and two triangles a side, with no seam
+    // where the blocks met.
+    assert_eq!(mesh.open_edges(), 0);
+    assert_eq!(points_used(mesh), 8);
+    assert_eq!(mesh.triangles.len(), 12);
+    assert!(close(mesh.volume(), 16.0, 1e-4));
+    // Each side's uvs run from 0 to 1 across it again.
+    for uv in &mesh.uvs {
+        assert!(
+            uv.min_element() >= -1e-4 && uv.max_element() <= 1.0 + 1e-4,
+            "{uv}"
+        );
+    }
+}
+
+#[test]
+fn a_cut_keeps_the_corners_a_shape_needs_and_no_more() {
+    // Overlapping blocks: the corners of the L they make, and no others.
+    let a = Mesh::block(Vec3::splat(2.0));
+    let b = moved(Mesh::block(Vec3::splat(2.0)), Vec3::new(1.0, 0.5, 0.3));
+    let union = boolean(&a, &b, Operation::Union);
+    assert_eq!(points_used(&union), 20);
+    // A cylinder bored through a block: the hole's rim on each side and the
+    // block's corners. Cut apart, each of the cylinder's side quads used to
+    // add a corner where its diagonal crossed the block's faces.
+    let rod = Mesh::cylinder(Vec3::new(3.0, 1.0, 1.0));
+    let sides = rod.triangles.len() / 4;
+    let bored = boolean(&a, &rod, Operation::Subtract);
+    assert_eq!(bored.open_edges(), 0);
+    assert_eq!(points_used(&bored), 8 + 2 * sides);
+}
+
+#[test]
+fn flat_faces_are_filled_without_needle_thin_triangles_where_they_can_be() {
+    // A block with a ball scooped out of a corner, and a wall with a door:
+    // the flat faces left have no triangle thinner than it must be.
+    let block = Mesh::block(Vec3::splat(2.0));
+    let ball = moved(Mesh::ball(Vec3::splat(2.0)), Vec3::ONE);
+    let wall = Mesh::block(Vec3::new(12.0, 8.0, 1.0));
+    let door = moved(
+        Mesh::block(Vec3::new(4.0, 6.0, 3.0)),
+        Vec3::new(0.0, -1.0, 0.0),
+    );
+    for mesh in [
+        boolean(&block, &ball, Operation::Subtract),
+        boolean(&wall, &door, Operation::Subtract),
+    ] {
+        for triangle in &mesh.triangles {
+            let [a, b, c] = triangle.corners.map(|k| mesh.positions[k as usize]);
+            let area = (b - a).cross(c - a).length() / 2.0;
+            let longest = (b - a).length().max((c - b).length()).max((a - c).length());
+            assert!(area / (longest * longest) > 0.02, "{a} {b} {c}");
+        }
+    }
+}

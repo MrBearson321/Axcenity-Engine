@@ -9,9 +9,12 @@
 //!
 //! Left-clicking a part selects it, and the selected part gets a blue box:
 //! the edges of its sides that face the camera, where nothing hides them.
-//! PointLights and SpotLights have no shape, so while editing each shows as
-//! an icon where it shines from, as in Unreal; click one to select it, and
-//! a selected light shows how far it reaches (a SpotLight, its cone).
+//! Lights and ParticleEmitters have no shape, so while editing one that
+//! stands free (not in a part) shows as an icon where it is, as in Unreal:
+//! click one to select it, drag it to move it, and the Move and Rotate
+//! handles move and turn it. One inside a part goes with its part. A
+//! selected light shows how far it reaches (a SpotLight, its cone; a
+//! RectLight, its rectangle and the way it faces).
 //! With the Move, Scale or Rotate tool, it also gets handles to drag
 //! (see `gizmo.rs`). With any tool, left-dragging a part by its body moves
 //! it onto the surface under the mouse (see `placing.rs`).
@@ -39,7 +42,7 @@ use axcenity_core::{ClassName, Instance, InstanceId, Value, World};
 use axcenity_render::TextureRenderer;
 use axcenity_render::glam::{Quat, Vec3};
 use axcenity_render::wgpu;
-use axcenity_scene::{FlyCamera, LightMarker, MoveKeys, Particles, TerrainCache};
+use axcenity_scene::{FlyCamera, LightMarker, MarkerKind, MoveKeys, Particles, TerrainCache};
 use axcenity_script::DebugRay;
 use axcenity_ui::{Stylesheet, UiLayout, UiRect};
 use eframe::egui;
@@ -302,6 +305,8 @@ pub struct ViewportScene<'a> {
     pub click_cursor: Option<String>,
     /// Show every light's reach, not just the selected ones' (View > Light Cones).
     pub light_cones: bool,
+    /// Whether the view cube is drawn in the corner while editing.
+    pub view_cube: bool,
     /// Editor-only visual-debug overlays (View > Overlays).
     pub overlays: OverlayToggles,
     /// What the viewport shows: lit, or a debug view (View > View Mode).
@@ -371,6 +376,45 @@ enum Dragging {
     Body(PlaceDrag, Vec<(InstanceId, Vec3)>),
     /// A UI element, by its body or a handle.
     Ui(Box<UiDrag>),
+    /// A free-standing light's or emitter's icon, and the other selected
+    /// things that move with it, each with where it was at the start.
+    Icon(IconDrag, Vec<(InstanceId, Vec3)>),
+}
+
+/// A light or ParticleEmitter dragged by its icon: it follows the mouse
+/// across the plane facing the camera that it started in.
+#[derive(Clone, Debug)]
+struct IconDrag {
+    id: InstanceId,
+    /// Where it was when the drag started.
+    start: Vec3,
+    /// From where the plane was grabbed to the light.
+    grab_offset: Vec3,
+    /// The plane's normal: the way the camera looked when it was grabbed.
+    normal: Vec3,
+}
+
+impl IconDrag {
+    /// Where the light goes for the mouse on `ray`, its move snapped to
+    /// the move grid on each axis; `None` if the ray misses the plane.
+    fn update(&self, ray: axcenity_scene::Ray, snap: &Snap) -> Option<Vec3> {
+        let grabbed = self.start - self.grab_offset;
+        let along = ray.direction.dot(self.normal);
+        if along.abs() < 1e-4 {
+            return None;
+        }
+        let distance = (grabbed - ray.origin).dot(self.normal) / along;
+        if distance <= 0.0 {
+            return None;
+        }
+        let moved = ray.at(distance) + self.grab_offset - self.start;
+        let moved = Vec3::new(
+            snap.studs(moved.x),
+            snap.studs(moved.y),
+            snap.studs(moved.z),
+        );
+        Some(self.start + moved)
+    }
 }
 
 /// What's selected, for dragging.
@@ -390,6 +434,59 @@ pub fn selected_parts(
     selection: &[InstanceId],
     selected: Option<InstanceId>,
 ) -> Vec<(InstanceId, Pose)> {
+    gather(world, selection, selected, false)
+}
+
+/// What the Move and Rotate handles and dragging move: the
+/// [`selected_parts`], and the lights and ParticleEmitters standing free
+/// (not in a part) that are selected or inside a selected Model or Folder.
+pub fn movable_parts(
+    world: &World,
+    selection: &[InstanceId],
+    selected: Option<InstanceId>,
+) -> Vec<(InstanceId, Pose)> {
+    gather(world, selection, selected, true)
+}
+
+/// How big a free-standing light's or emitter's box is for the handles.
+const FREE_POSE_SIZE: f32 = 1.0;
+
+/// Where a light or ParticleEmitter that stands free is, as a pose for
+/// the handles. `None` for anything else, or one inside a part (it moves
+/// with its part).
+pub fn free_pose(world: &World, id: InstanceId) -> Option<Pose> {
+    let instance = world.get(id)?;
+    if !instance.class().can_stand_free() {
+        return None;
+    }
+    match axcenity_scene::mount_of(world, instance)? {
+        axcenity_scene::Mount::Free { position, rotation } => Some(Pose {
+            position,
+            rotation,
+            size: Vec3::splat(FREE_POSE_SIZE),
+        }),
+        axcenity_scene::Mount::Part { .. } => None,
+    }
+}
+
+/// Keeps a drag from resizing free-standing lights and emitters: they have
+/// no Size. Those left with nothing to change are dropped.
+pub fn drop_free_sizes(world: &World, parts: &mut PartValues) {
+    parts.retain_mut(|(id, values)| {
+        if free_pose(world, *id).is_none() {
+            return true;
+        }
+        values.retain(|(name, _)| *name != "Size");
+        !values.is_empty()
+    });
+}
+
+fn gather(
+    world: &World,
+    selection: &[InstanceId],
+    selected: Option<InstanceId>,
+    free: bool,
+) -> Vec<(InstanceId, Pose)> {
     let mut ids: Vec<InstanceId> = selection.to_vec();
     if let Some(selected) = selected {
         ids.retain(|id| *id != selected);
@@ -405,7 +502,11 @@ pub fn selected_parts(
         }
         let inside = std::iter::once(id).chain(world.descendants(id));
         for part in inside {
-            let Some(pose) = world.get(part).and_then(Pose::of) else {
+            let pose = world
+                .get(part)
+                .and_then(Pose::of)
+                .or_else(|| free.then(|| free_pose(world, part)).flatten());
+            let Some(pose) = pose else {
                 continue;
             };
             // Seen again: it goes to the end, so the last selected stays last.
@@ -504,6 +605,8 @@ pub struct Viewport {
     /// Where the camera was when the culling overlay went on: culling
     /// stays there until it goes off.
     frozen_culling: Option<axcenity_render::Camera>,
+    /// The camera swinging round after a click on the view cube.
+    swing: Option<view_cube::Swing>,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -559,6 +662,7 @@ impl Viewport {
             last_rect: egui::Rect::NOTHING,
             last_pixels: (0, 0),
             frozen_culling: None,
+            swing: None,
         }
     }
 
@@ -657,6 +761,7 @@ impl Viewport {
         let speed = self.camera.speed();
         self.camera = start_camera();
         self.camera.set_speed(speed);
+        self.swing = None;
         self.drag = None;
         self.particles.clear();
     }
@@ -690,12 +795,14 @@ impl Viewport {
         position: axcenity_core::Vector3,
         orientation: axcenity_core::Vector3,
     ) {
+        self.swing = None;
         self.camera.set_view(position, orientation);
     }
 
     /// Points the camera at `target` from `position`.
     #[cfg(test)]
     pub fn look_at(&mut self, position: Vec3, target: Vec3) {
+        self.swing = None;
         self.camera = FlyCamera::looking_at(position, target);
     }
 
@@ -735,6 +842,7 @@ impl Viewport {
             prompts,
             click_cursor,
             light_cones,
+            view_cube: show_cube,
             overlays,
             view_mode,
             debug_rays,
@@ -785,6 +893,7 @@ impl Viewport {
             }
             None => false,
         };
+        let unmoved = (self.camera.position, self.camera.forward());
         self.handle_input(
             ui,
             &response,
@@ -792,6 +901,21 @@ impl Viewport {
             play_camera.is_some_and(|play| play.holds),
             wheel_taken,
         );
+        // Moving the camera yourself stops a view cube swing; otherwise it
+        // carries on.
+        if let Some(swing) = self.swing {
+            if (self.camera.position, self.camera.forward()) != unmoved {
+                self.swing = None;
+            } else {
+                let (camera, done) = swing.at(ui.input(|input| input.time));
+                self.camera = camera;
+                if done {
+                    self.swing = None;
+                } else {
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
         let camera = match play_camera {
             Some(play) => play.shown.render_camera(),
             None => self.camera.to_render_camera(),
@@ -924,21 +1048,24 @@ impl Viewport {
             Vec::new()
         };
         // Only lights whose icon is on screen can be clicked, but a light
-        // just off screen can still shine into view.
+        // just off screen can still shine into view. Only those standing
+        // free have an icon: one in a part is picked and moved by its part.
         let lights: Vec<(LightMarker, egui::Pos2)> = markers
             .iter()
+            .filter(|marker| marker.part.is_none())
             .filter_map(|marker| {
                 let at = screen.point(marker.position)?;
                 rect.contains(at).then(|| (marker.clone(), at))
             })
             .collect();
-        // The view cube's face under the mouse, while editing: a click on it
-        // turns the camera instead of selecting what's behind it.
+        // What of the view cube is under the mouse, while editing: a click
+        // on it turns the camera instead of selecting what's behind it.
         let editing = play_camera.is_none() && tool.is_some();
-        let cube_face = pointer
-            .filter(|_| editing && response.hovered())
-            .and_then(|at| view_cube::face_under(rect, self.camera.forward(), at));
-        if cube_face.is_some() {
+        let cube = editing && show_cube;
+        let cube_hit = pointer
+            .filter(|_| cube && response.hovered())
+            .and_then(|at| view_cube::hit_under(rect, self.camera.forward(), at));
+        if cube_hit.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         let drag = self.drag_input(
@@ -955,6 +1082,7 @@ impl Viewport {
             snap,
             &ui_scene,
             stylesheets,
+            &lights,
         );
         let modifiers = ui.input(|input| input.modifiers);
         let terrain = brush.map(|brush| self.terrain_input(ui, &response, &screen, world, brush));
@@ -968,7 +1096,7 @@ impl Viewport {
                 || brush.is_some()
                 || picking.is_some()
                 || plugin_button
-                || cube_face.is_some() =>
+                || cube_hit.is_some() =>
             {
                 None
             }
@@ -1117,8 +1245,9 @@ impl Viewport {
         }
         let painter = ui.painter_at(rect);
         for marker in &markers {
-            let chosen = selection.contains(&marker.id) || selection.contains(&marker.part);
-            if chosen || light_cones {
+            let chosen = selection.contains(&marker.id)
+                || marker.part.is_some_and(|part| selection.contains(&part));
+            if marker.kind != MarkerKind::Emitter && (chosen || light_cones) {
                 paint_light_reach(&painter, &screen, world, marker, chosen);
             }
         }
@@ -1212,11 +1341,24 @@ impl Viewport {
         }
         self.paint_speed_popup(ui, rect);
         // While editing, the view cube says which way the camera faces, and
-        // a click on a face looks from that side.
-        if editing {
-            view_cube::paint(ui, rect, self.camera.forward(), cube_face);
-            if let Some(side) = cube_face.filter(|_| response.clicked()) {
-                self.camera = view_cube::looking_from(&self.camera, side);
+        // a click on a face, edge or corner looks from that side.
+        if cube {
+            view_cube::paint(ui, rect, self.camera.forward(), cube_hit);
+            if let Some(hit) = cube_hit.filter(|_| response.clicked()) {
+                let side = match hit {
+                    view_cube::CubeHit::Side(side) => side,
+                    view_cube::CubeHit::Home => view_cube::home_side(),
+                };
+                // Swung round smoothly, as in Fusion; at once when motion
+                // is reduced.
+                let to = view_cube::looking_from(&self.camera, side);
+                let seconds = if ui.ctx().style().animation_time > 0.0 {
+                    view_cube::SWING_SECONDS
+                } else {
+                    0.0
+                };
+                let now = ui.input(|input| input.time);
+                self.swing = Some(view_cube::Swing::new(self.camera, to, now, seconds));
                 ui.ctx().request_repaint();
             }
         }

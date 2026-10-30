@@ -49,8 +49,9 @@ pub(super) fn light_color(marker: &LightMarker) -> egui::Color32 {
     egui::Color32::from_rgb(r, g, b)
 }
 
-/// Draws each light's icon (a bulb for a PointLight, a flashlight for a
-/// SpotLight) in the light's color.
+/// Draws each free-standing light's or emitter's icon (a bulb for a
+/// PointLight, a flashlight for a SpotLight, a frame for a RectLight,
+/// sparkles for a ParticleEmitter) in its color.
 pub(super) fn paint_lights(
     ui: &egui::Ui,
     rect: egui::Rect,
@@ -84,10 +85,11 @@ pub(super) fn paint_lights(
             egui::Stroke::new(1.0 + grow, tint.gamma_multiply(0.8))
         };
         painter.circle_stroke(*at, radius, ring);
-        let icon = if marker.spot {
-            icons::FLASHLIGHT
-        } else {
-            icons::LIGHTBULB
+        let icon = match marker.kind {
+            MarkerKind::Point => icons::LIGHTBULB,
+            MarkerKind::Spot => icons::FLASHLIGHT,
+            MarkerKind::Rect => icons::FRAME_CORNERS,
+            MarkerKind::Emitter => icons::SPARKLE,
         };
         painter.text(
             *at,
@@ -99,10 +101,12 @@ pub(super) fn paint_lights(
     }
 }
 
-/// A light's reach in its color: three rings for a PointLight's range,
-/// or for a SpotLight the cone it lights (see-through sides, edges and the
-/// far rim), the beam's middle as an arrow, and where that beam lands on a
-/// part, as a ring the size of the spot. `chosen` (the light or its part is
+/// A light's reach in its color: three rings for a PointLight's range;
+/// for a RectLight its rectangle, the box it lights out of its front and
+/// an arrow the way it faces; or for a SpotLight the cone it lights
+/// (see-through sides, edges and the far rim), the beam's middle as an
+/// arrow, and where that beam lands on a part, as a ring the size of the
+/// spot. `chosen` (the light or its part is
 /// selected) draws it stronger; View > Light Cones draws the others faintly.
 pub(super) fn paint_light_reach(
     painter: &egui::Painter,
@@ -132,6 +136,57 @@ pub(super) fn paint_light_reach(
             }
         }
     };
+    if let Some((facing, right, width, height)) = marker.rect {
+        let up = facing.cross(right);
+        let half = (right * width.max(0.0) * 0.5, up * height.max(0.0) * 0.5);
+        let face = |center: Vec3, grow: f32| {
+            let (a, b) = (half.0 * grow, half.1 * grow);
+            vec![
+                center - a - b,
+                center + a - b,
+                center + a + b,
+                center - a + b,
+                center - a - b,
+            ]
+        };
+        let near = face(marker.position, 1.0);
+        // How far out of its front it reaches, a little wider there.
+        let far = face(
+            marker.position + facing * range,
+            1.0 + range / width.max(height).max(1.0),
+        );
+        if let Some(points) = near
+            .iter()
+            .map(|&p| screen.point(p))
+            .collect::<Option<Vec<_>>>()
+        {
+            let fill = color.gamma_multiply(if chosen { 0.25 } else { 0.1 });
+            painter.add(egui::Shape::convex_polygon(
+                points[..4].to_vec(),
+                fill,
+                egui::Stroke::NONE,
+            ));
+        }
+        outline(&near, stroke);
+        outline(&far, faint);
+        for k in 0..4 {
+            if let Some(line) = screen.line(near[k], far[k]) {
+                painter.line_segment(line, faint);
+            }
+        }
+        let tip = marker.position + facing * (range * 0.25).clamp(1.0, 4.0);
+        if let (Some(from), Some(to)) = (screen.point(marker.position), screen.point(tip)) {
+            painter.arrow(
+                from,
+                to - from,
+                egui::Stroke::new(
+                    if chosen { 2.0_f32 } else { 1.0 },
+                    color.gamma_multiply(strength),
+                ),
+            );
+        }
+        return;
+    }
     let Some((direction, angle)) = marker.cone else {
         outline(&circle(marker.position, Vec3::X, Vec3::Y, range), stroke);
         outline(&circle(marker.position, Vec3::X, Vec3::Z, range), stroke);
@@ -175,8 +230,9 @@ pub(super) fn paint_light_reach(
         origin: marker.position,
         direction,
     };
-    let hit = axcenity_scene::pick_hit_skipping(world, ray, &[marker.part])
-        .filter(|hit| hit.distance <= range);
+    let own: Vec<InstanceId> = marker.part.into_iter().collect();
+    let hit =
+        axcenity_scene::pick_hit_skipping(world, ray, &own).filter(|hit| hit.distance <= range);
     let beam_end = ray.at(hit.map_or(range, |hit| hit.distance));
     if let (Some(from), Some(to)) = (screen.point(marker.position), screen.point(beam_end)) {
         let width = if chosen { 2.0_f32 } else { 1.0 };

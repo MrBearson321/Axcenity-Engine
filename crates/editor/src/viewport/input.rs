@@ -191,6 +191,7 @@ impl Viewport {
         snap: Snap,
         ui_scene: &UiScene,
         stylesheets: &[Stylesheet],
+        lights: &[(LightMarker, egui::Pos2)],
     ) -> DragInput {
         let Some(tool) = tool else {
             // Nothing to drag. A drag can't be under way either: Play
@@ -204,8 +205,9 @@ impl Viewport {
             modes,
         } = chosen;
         // The handles act on every selected part (and the parts inside
-        // selected Models), with the last selected one last.
-        let parts = selected_parts(world, selection, selected);
+        // selected Models), with the last selected one last, and on lights
+        // and emitters standing free.
+        let parts = movable_parts(world, selection, selected);
         let poses: Vec<Pose> = parts.iter().map(|(_, pose)| *pose).collect();
         let shapes = if tool.has_handles() {
             gizmo::shapes_for(tool, modes, &poses, screen)
@@ -281,6 +283,33 @@ impl Viewport {
             }
         } else if body_drag
             && let Some(origin) = press_origin
+            && let Some(id) = light_at(lights, origin)
+            && let Some(pose) = free_pose(world, id)
+        {
+            // A light's icon is in front of the parts behind it.
+            // Grabbed in the plane through the light that faces the ray.
+            let ray = screen.ray(origin);
+            let normal = ray.direction;
+            let grabbed = ray.at((pose.position - ray.origin).dot(normal).max(0.1));
+            let others: Vec<(InstanceId, Vec3)> = if selection.contains(&id) {
+                parts
+                    .iter()
+                    .filter(|(other, _)| *other != id)
+                    .map(|(other, pose)| (*other, pose.position))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let drag = IconDrag {
+                id,
+                start: pose.position,
+                grab_offset: pose.position - grabbed,
+                normal,
+            };
+            self.drag = Some(Dragging::Icon(drag, others));
+            input.grabbed = Some(id);
+        } else if body_drag
+            && let Some(origin) = press_origin
             && let Some(hit) = axcenity_scene::pick_hit(world, screen.ray(origin), None)
             // Terrain is ground, not something to carry around.
             && world.get(hit.part).map(|i| i.class()) != Some(axcenity_core::ClassName::Terrain)
@@ -341,6 +370,7 @@ impl Viewport {
                         drag.update_all(at, &snap).map(|mut parts| {
                             // An Attachment is placed by its offset on its part.
                             crate::constraints::localize(world, &mut parts);
+                            drop_free_sizes(world, &mut parts);
                             DragEdit {
                                 kind: DragKind::of(drag.handle),
                                 parts,
@@ -369,6 +399,22 @@ impl Viewport {
                             }
                         })
                     }
+                    Dragging::Icon(drag, others) => drag.update(ray, &snap).map(|at| {
+                        let moved = at - drag.start;
+                        let value = |at: Vec3| {
+                            Value::Vector3(axcenity_core::Vector3::new(at.x, at.y, at.z))
+                        };
+                        let mut parts: PartValues = others
+                            .iter()
+                            .map(|&(id, from)| (id, vec![("Position", value(from + moved))]))
+                            .collect();
+                        parts.push((drag.id, vec![("Position", value(at))]));
+                        crate::constraints::localize(world, &mut parts);
+                        DragEdit {
+                            kind: DragKind::Move,
+                            parts,
+                        }
+                    }),
                     Dragging::Ui(drag) => {
                         input.ui_edit = Some(drag.update(
                             pointer,

@@ -7,6 +7,7 @@ use super::*;
 
 mod menus;
 mod panes;
+mod ribbon_menus;
 mod toolbar;
 mod windows;
 

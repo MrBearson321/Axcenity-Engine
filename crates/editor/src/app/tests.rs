@@ -1436,6 +1436,10 @@ fn keys_1_to_4_pick_the_handle_tools_escape_selects_and_ctrl_z_and_ctrl_y_undo_a
         press(&mut app, egui::Modifiers::NONE, key);
         assert_eq!(app.tool, tool);
     }
+    // A tool's key again turns it off, like clicking its button again.
+    press(&mut app, egui::Modifiers::NONE, egui::Key::Num1);
+    press(&mut app, egui::Modifiers::NONE, egui::Key::Num1);
+    assert_eq!(app.tool, Tool::Select);
     // Ctrl with a number no longer picks a tool.
     press(&mut app, command, egui::Key::Num2);
     assert_eq!(app.tool, Tool::Select);
@@ -1552,6 +1556,59 @@ fn building_tools_change_the_whole_selection_in_one_undo_step() {
     app.undo();
     assert_ne!(property(&app, first, "Color"), red);
     assert_ne!(property(&app, second, "Color"), red);
+}
+
+#[test]
+fn a_light_with_no_part_stands_free_and_one_taken_out_of_its_part_stays_put() {
+    let mut app = EditorApp::new(Some(&example("hello-touched")));
+    app.selection.clear();
+    app.selected = None;
+    // No lamp: just the light, at the camera's focus point, which the Move
+    // and Rotate handles move like a part.
+    let light = inserted(&mut app, Insertable::PointLight, None);
+    let workspace = app.world.workspace();
+    assert_eq!(app.world.get(light).unwrap().parent(), Some(workspace));
+    assert_eq!(
+        property(&app, light, "Position"),
+        Value::Vector3(app.insert_position())
+    );
+    let movable = viewport::movable_parts(&app.world, &[light], Some(light));
+    assert_eq!(movable.len(), 1);
+    assert!(viewport::selected_parts(&app.world, &[light], Some(light)).is_empty());
+    // A resize drag leaves it alone: it has no Size.
+    let mut sized = vec![(
+        light,
+        vec![("Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0)))],
+    )];
+    viewport::drop_free_sizes(&app.world, &mut sized);
+    assert!(sized.is_empty());
+
+    // A RectLight in a part sits on the part's face; dragged out into the
+    // Workspace it stands free where it was, in one undo step.
+    let part = inserted(&mut app, Insertable::Part(PartType::Block), None);
+    let rect = inserted(&mut app, Insertable::RectLight, Some(part));
+    assert_eq!(app.world.get(rect).unwrap().parent(), Some(part));
+    let marker = |app: &EditorApp| {
+        axcenity_scene::light_markers(&app.world)
+            .into_iter()
+            .find(|marker| marker.id == rect)
+            .unwrap()
+    };
+    let before = marker(&app);
+    assert_eq!(before.part, Some(part));
+    assert!(app.move_into(rect, workspace));
+    let after = marker(&app);
+    assert_eq!(after.part, None);
+    assert!(after.position.distance(before.position) < 1e-2);
+    let (facing, right, ..) = after.rect.unwrap();
+    assert!(facing.distance(before.rect.unwrap().0) < 1e-3);
+    assert!(right.distance(before.rect.unwrap().1) < 1e-3);
+    app.undo();
+    assert_eq!(app.world.get(rect).unwrap().parent(), Some(part));
+    assert_eq!(
+        property(&app, rect, "Position"),
+        Value::Vector3(Vector3::new(0.0, 0.0, 0.0))
+    );
 }
 
 #[test]

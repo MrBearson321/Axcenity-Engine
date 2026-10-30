@@ -356,7 +356,7 @@ impl Split {
             });
         }
         cap(&mut mesh, &on_plane, outward);
-        crate::merge::merge_flat_faces(&mesh)
+        crate::merge::merge_flat_faces(&mesh, &|_| false)
     }
 }
 

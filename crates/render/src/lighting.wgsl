@@ -117,21 +117,24 @@ struct Probe {
     layer: vec4<u32>,
 }
 
-// A point or spot light. Must match `LightRaw` in renderer.rs.
+// A point, spot or rect light. Must match `LightRaw` in renderer.rs.
 struct Light {
     // xyz: position, w: range.
     position_range: vec4<f32>,
     // rgb: color times brightness, w: cosine of the cone's edge, or -2 for
-    // a point light.
+    // a point light, -3 for a rect light.
     radiance_cone: vec4<f32>,
-    // xyz: the direction a spot light points, w: cosine where its edge
-    // starts to fade.
+    // xyz: the direction a spot light points (a rect light faces), w:
+    // cosine where its edge starts to fade.
     direction_inner: vec4<f32>,
     // x: a spot light's layer of `spot_shadow_map`, or a point light's place
     // in `point_shadow_map` (its six layers start at six times it), or -1
     // if it casts no shadows, y: the width of one shadow texel per stud
     // from the light.
     shadow: vec4<f32>,
+    // A rect light's right, as long as half its width, and w: half its
+    // height.
+    rect: vec4<f32>,
 }
 
 // The most lights one tile of the screen lists. Must match `LIGHTS_PER_TILE`
@@ -825,31 +828,67 @@ fn tile_lamps(pixel: vec2<f32>) -> TileLamps {
     return TileLamps(first, count, rotation);
 }
 
+// How `light` reaches `world_position`: xyz the way to where its light
+// comes from (the light, or the nearest point of a rect light), w how
+// strong it is there, 0 beyond its range, outside its cone or behind a rect
+// light. Surfaces and volumetric fog share it, so they always agree.
+fn lamp_reach(light: Light, world_position: vec3<f32>) -> vec4<f32> {
+    let to_center = light.position_range.xyz - world_position;
+    let center_squared = dot(to_center, to_center);
+    let range = light.position_range.w;
+    if center_squared >= range * range {
+        return vec4<f32>(to_center, 0.0);
+    }
+    // Fades to exactly 0 at the range, measured from the middle, as the
+    // screen tiles that list the light are.
+    let edge = clamp(1.0 - pow(sqrt(center_squared) / range, 4.0), 0.0, 1.0);
+    var to_light = to_center;
+    var facing = 1.0;
+    if light.radiance_cone.w < -2.5 {
+        // A rect light shines from the nearest point of its rectangle,
+        // out of its front, weaker at a slant (as a softbox does).
+        let normal = light.direction_inner.xyz;
+        let from_center = -to_center;
+        if dot(from_center, normal) <= 0.0 {
+            return vec4<f32>(to_center, 0.0);
+        }
+        let half_width = length(light.rect.xyz);
+        let right = light.rect.xyz / max(half_width, 0.0001);
+        let up = cross(normal, right);
+        let nearest = light.position_range.xyz
+            + right * clamp(dot(from_center, right), -half_width, half_width)
+            + up * clamp(dot(from_center, up), -light.rect.w, light.rect.w);
+        to_light = nearest - world_position;
+        facing = clamp(dot(normalize(-to_light + normal * 0.0001), normal), 0.0, 1.0);
+    }
+    let distance_squared = dot(to_light, to_light);
+    // Inverse-square falloff.
+    var strength = edge * edge * facing / (distance_squared + 1.0);
+    if light.radiance_cone.w > -1.5 {
+        let l = to_light / max(sqrt(distance_squared), 0.0001);
+        strength *= smoothstep(light.radiance_cone.w, light.direction_inner.w,
+            dot(-l, light.direction_inner.xyz));
+    }
+    return vec4<f32>(to_light, strength);
+}
+
 // The `i`th of `lamps` at `world_position`. Beyond its range or outside
 // its cone, nothing arrives (`visible` 0).
 fn lamp_arrival(lamps: TileLamps, i: u32, world_position: vec3<f32>, geometric: vec3<f32>,
     pixel: vec2<f32>, solid: bool) -> Arrival {
     var arrival = Arrival(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0), 0.0);
     let light = lights[tile_lights[lamps.first + 1u + i]];
-    let to_light = light.position_range.xyz - world_position;
-    let distance_squared = dot(to_light, to_light);
-    let range = light.position_range.w;
-    if distance_squared >= range * range {
-        return arrival;
-    }
-    let dist = sqrt(distance_squared);
-    let l = to_light / max(dist, 0.0001);
-    // Inverse-square falloff that reaches exactly 0 at the range.
-    let edge = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
-    var strength = edge * edge / (distance_squared + 1.0);
-    if light.radiance_cone.w > -1.5 {
-        strength *= smoothstep(light.radiance_cone.w, light.direction_inner.w,
-            dot(-l, light.direction_inner.xyz));
-    }
+    let reach = lamp_reach(light, world_position);
+    let strength = reach.w;
     if strength <= 0.0 {
         return arrival;
     }
-    var visible = lamp_visibility(light, world_position, geometric, to_light, lamps.rotation);
+    let to_light = reach.xyz;
+    let dist = length(to_light);
+    let l = to_light / max(dist, 0.0001);
+    // Shadow maps are drawn from the light's middle.
+    let to_middle = light.position_range.xyz - world_position;
+    var visible = lamp_visibility(light, world_position, geometric, to_middle, lamps.rotation);
     // Contact shadows for lamps that cast shadows, up to the lamp.
     if solid && light.shadow.x >= 0.0 {
         visible *= contact_visibility(world_position, geometric, l, min(frame.contact.y, dist),

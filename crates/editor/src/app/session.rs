@@ -71,6 +71,7 @@ impl EditorApp {
                 terrain.detail_distance = self.viewport.terrain.detail_distance;
                 self.viewport.terrain = terrain;
                 self.cover_until = Some(ctx.cumulative_frame_nr() + FINISHING_FRAMES);
+                self.cover_shown = loading.shown();
                 self.follow_pending_handoff(true);
             }
             Err(err) => {
@@ -127,11 +128,12 @@ impl EditorApp {
             .project
             .as_ref()
             .map_or("", |project| project.name.as_str());
+        let shown = self.cover_shown;
         egui::Area::new(egui::Id::new("finishing load"))
             .order(egui::Order::Foreground)
             .fixed_pos(rect.min)
             .constrain(false)
-            .show(ctx, |ui| loading::show_finishing(ui, rect, name));
+            .show(ctx, |ui| loading::show_finishing(ui, rect, name, shown));
         ctx.request_repaint();
     }
     fn open_failed(&mut self, folder: &Path, err: &str) {

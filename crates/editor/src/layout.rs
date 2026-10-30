@@ -1,7 +1,7 @@
 //! The editor's dockable panels, like Unity's: every panel is a tab that can
 //! be dragged by its title onto another panel's tabs, to any side of one to
 //! split it, or out into a floating window. Panels other than the Scene can
-//! be closed and opened again from View > Panels or the View ribbon tab.
+//! be closed and opened again from View > Panels or the Home tab's Panels group.
 //!
 //! Each open script is a tab too ([`Pane::Script`]), opened beside the Scene
 //! or the script used last, so code can sit next to the viewport. Script

@@ -59,7 +59,6 @@ mod side_warnings;
 mod snapping;
 #[cfg(test)]
 mod snapshot;
-mod splash;
 mod start;
 mod style_panel;
 mod surface;
@@ -170,7 +169,7 @@ fn main() -> eframe::Result {
             app.load_settings(ctx, creation_context.storage);
             app.set_global_assets(global_assets::default_folder());
             app.set_plugin_data(plugins::default_folder());
-            // Read in the background, so the window and splash show at once.
+            // Read in the background, so the window shows at once.
             if let Some(handoff) = &handoff {
                 app.resume(ctx, handoff);
             } else if let Some(folder) = &folder {

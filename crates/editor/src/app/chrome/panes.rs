@@ -898,6 +898,7 @@ impl EditorApp {
                                 .unwrap_or_default(),
                             click_cursor: self.play.as_ref().and_then(|play| play.click_cursor()),
                             light_cones: self.light_cones,
+                            view_cube: self.view_cube,
                             overlays: self.overlays,
                             view_mode: self.view_mode,
                             debug_rays: &debug_rays,

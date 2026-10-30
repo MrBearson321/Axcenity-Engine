@@ -48,11 +48,11 @@ pub enum RibbonGroup {
     Scripts,
     /// The Terrain Studio and its main tools.
     Terrain,
-    /// Open and close the dockable panels, and reset the layout.
+    /// Explorer and Properties, and a menu of every other panel.
     Panels,
     /// Scan the open project for missing and broken assets.
     Check,
-    /// Collider, raycast, bounds and emitter overlays.
+    /// A menu of the viewport's overlays, the view cube and View Mode.
     Overlays,
     /// The toolbars the editor's Lua plugins made (Phase 54).
     Plugins,
@@ -101,7 +101,7 @@ impl RibbonGroup {
             RibbonGroup::Terrain => "Terrain",
             RibbonGroup::Panels => "Panels",
             RibbonGroup::Check => "Check",
-            RibbonGroup::Overlays => "Overlays",
+            RibbonGroup::Overlays => "View",
             RibbonGroup::Plugins => "Plugins",
         }
     }
@@ -129,9 +129,9 @@ impl RibbonGroup {
             RibbonGroup::Ui => "Insert screens, frames, text, buttons and other UI",
             RibbonGroup::Scripts => "Insert scripts",
             RibbonGroup::Terrain => "Sculpt, paint and generate terrain",
-            RibbonGroup::Panels => "Show or hide the Explorer, Properties, Console and Assets",
+            RibbonGroup::Panels => "Show or hide the Explorer, Properties and the other panels",
             RibbonGroup::Check => "Scan the project for missing and broken assets",
-            RibbonGroup::Overlays => "Collider, raycast, bounds and audio-emitter overlays",
+            RibbonGroup::Overlays => "Overlays, the view cube, light cones and view modes",
             RibbonGroup::Plugins => "Buttons the project's and your plugins add",
         }
     }
@@ -142,27 +142,25 @@ impl RibbonGroup {
 pub enum BuiltInTab {
     Home,
     Model,
+    // Gameplay and Terrain were tabs of their own; a saved one opens World.
+    #[serde(alias = "Gameplay", alias = "Terrain")]
     World,
-    Gameplay,
-    Terrain,
     Ui,
     Script,
+    // So was View; its overlays are on Test now.
+    #[serde(alias = "View")]
     Test,
-    View,
     Plugins,
 }
 
 impl BuiltInTab {
-    pub const ALL: [BuiltInTab; 10] = [
+    pub const ALL: [BuiltInTab; 7] = [
         BuiltInTab::Home,
         BuiltInTab::Model,
         BuiltInTab::World,
-        BuiltInTab::Gameplay,
-        BuiltInTab::Terrain,
         BuiltInTab::Ui,
         BuiltInTab::Script,
         BuiltInTab::Test,
-        BuiltInTab::View,
         BuiltInTab::Plugins,
     ];
 
@@ -171,12 +169,9 @@ impl BuiltInTab {
             BuiltInTab::Home => "Home",
             BuiltInTab::Model => "Model",
             BuiltInTab::World => "World",
-            BuiltInTab::Gameplay => "Gameplay",
-            BuiltInTab::Terrain => "Terrain",
             BuiltInTab::Ui => "UI",
             BuiltInTab::Script => "Script",
             BuiltInTab::Test => "Test",
-            BuiltInTab::View => "View",
             BuiltInTab::Plugins => "Plugins",
         }
     }
@@ -186,13 +181,10 @@ impl BuiltInTab {
         match self {
             BuiltInTab::Home => icons::HOUSE,
             BuiltInTab::Model => icons::CUBE,
-            BuiltInTab::World => icons::SUN,
-            BuiltInTab::Gameplay => icons::GAME_CONTROLLER,
-            BuiltInTab::Terrain => icons::MOUNTAINS,
+            BuiltInTab::World => icons::GLOBE_HEMISPHERE_WEST,
             BuiltInTab::Ui => icons::LAYOUT,
             BuiltInTab::Script => icons::CODE,
             BuiltInTab::Test => icons::FLASK,
-            BuiltInTab::View => icons::EYE,
             BuiltInTab::Plugins => icons::PUZZLE_PIECE,
         }
     }
@@ -200,17 +192,16 @@ impl BuiltInTab {
     pub fn groups(self) -> &'static [RibbonGroup] {
         use RibbonGroup::*;
         match self {
-            BuiltInTab::Home => &[Game, Tools, Snapping, Parts],
+            BuiltInTab::Home => &[Game, Tools, Snapping, Parts, Panels],
             // Building and joining parts; what lights and fills the world,
-            // and what plays in it, have tabs of their own.
+            // and what plays in it, are on World.
             BuiltInTab::Model => &[Build, Solid, Constraints, Import],
-            BuiltInTab::World => &[Lights, Effects],
-            BuiltInTab::Gameplay => &[Game, Gameplay],
-            BuiltInTab::Terrain => &[Terrain],
+            // Each of these is a few menus, not a wall of buttons: the
+            // Explorer's Insert menu has every class too.
+            BuiltInTab::World => &[Lights, Effects, Gameplay, Terrain],
             BuiltInTab::Ui => &[Ui],
             BuiltInTab::Script => &[Game, Scripts],
-            BuiltInTab::Test => &[Game, Clients, Check],
-            BuiltInTab::View => &[Panels, Overlays],
+            BuiltInTab::Test => &[Game, Clients, Check, Overlays],
             BuiltInTab::Plugins => &[Plugins],
         }
     }
@@ -631,8 +622,25 @@ mod tests {
                 RibbonGroup::Tools,
                 RibbonGroup::Snapping,
                 RibbonGroup::Parts,
+                RibbonGroup::Panels,
             ]
         );
+    }
+
+    #[test]
+    fn tabs_saved_before_they_were_merged_open_the_tab_they_joined() {
+        for (old, now) in [
+            ("View", BuiltInTab::Test),
+            ("Gameplay", BuiltInTab::World),
+            ("Terrain", BuiltInTab::World),
+        ] {
+            let text = format!(
+                r#"{{"active":{{"BuiltIn":"{old}"}},"custom":[{{"name":"Mine","groups":["Ui"]}}]}}"#
+            );
+            let tabs = RibbonTabs::from_text(&text);
+            assert_eq!(tabs.active, ActiveTab::BuiltIn(now), "{old}");
+            assert_eq!(tabs.custom.len(), 1, "custom tabs are kept");
+        }
     }
 
     #[test]
@@ -646,13 +654,17 @@ mod tests {
                 RibbonGroup::Import,
             ]
         );
-        assert!(BuiltInTab::World.groups().contains(&RibbonGroup::Lights));
-        assert!(BuiltInTab::World.groups().contains(&RibbonGroup::Effects));
-        assert!(
-            BuiltInTab::Gameplay
-                .groups()
-                .contains(&RibbonGroup::Gameplay)
+        assert_eq!(
+            BuiltInTab::World.groups(),
+            &[
+                RibbonGroup::Lights,
+                RibbonGroup::Effects,
+                RibbonGroup::Gameplay,
+                RibbonGroup::Terrain,
+            ]
         );
+        // The overlays joined Test when View went.
+        assert!(BuiltInTab::Test.groups().contains(&RibbonGroup::Overlays));
     }
 
     #[test]

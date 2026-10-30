@@ -193,6 +193,13 @@ impl EditorApp {
         )
         .on_hover_text("Off, only the selected light (or the part it's in) shows where it shines.");
         ui.checkbox(
+            &mut self.view_cube,
+            theme::with_icon(icons::CUBE_FOCUS, "Show the view cube"),
+        )
+        .on_hover_text(
+            "The cube in the viewport's corner that turns the camera to a face, edge or corner.",
+        );
+        ui.checkbox(
             &mut self.overlays.colliders,
             theme::with_icon(icons::CUBE, "Show colliders"),
         )

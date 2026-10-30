@@ -772,6 +772,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Sound => icons::MUSIC_NOTE,
         ClassName::PointLight => icons::LIGHTBULB,
         ClassName::SpotLight => icons::FLASHLIGHT,
+        ClassName::RectLight => icons::FRAME_CORNERS,
         ClassName::ReflectionProbe => icons::SPHERE,
         ClassName::LightProbeVolume => icons::DOTS_NINE,
         ClassName::Atmosphere => icons::CLOUD_SUN,
@@ -904,6 +905,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         }
         ClassName::PointLight
         | ClassName::SpotLight
+        | ClassName::RectLight
         | ClassName::ReflectionProbe
         | ClassName::LightProbeVolume
         | ClassName::Atmosphere

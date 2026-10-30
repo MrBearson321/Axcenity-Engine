@@ -9,9 +9,11 @@
 //! a frame each time, so the screen follows along. The app takes the
 //! [`Loaded`] project when the thread is done (see `app/session.rs`).
 //!
-//! The bar is real progress: reading files is the first part of it, models
-//! and textures the middle, and terrains the end. Each part fills by how
-//! many of its files are done.
+//! Nothing on the screen is made up. The bar fills by how many of the
+//! files of the kind being read are done ("12 of 40"); while the thread is
+//! on a step with no count, such as reading `world.json`, it shows a sliding
+//! bar that only says it's working. A project that opens in less than
+//! [`GRACE`] never shows the screen at all: it stays blank until then.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,10 +31,9 @@ use eframe::egui::{self, Align2, FontId, Rect, Sense, vec2};
 use crate::theme::{self, type_scale};
 use crate::widgets::{self, Role};
 
-/// Where each part of loading starts on the bar, and where it ends.
-const FILES: (f32, f32) = (0.0, 0.35);
-const ASSETS: (f32, f32) = (0.35, 0.85);
-const TERRAINS: (f32, f32) = (0.85, 1.0);
+/// How long a load runs before its screen shows, in seconds: one that's
+/// done sooner needs no screen.
+pub const GRACE: f32 = 0.3;
 /// How many finished files are listed under the bar.
 const RECENT: usize = 5;
 
@@ -50,10 +51,9 @@ pub struct Loaded {
 struct Status {
     /// Such as "Loading model assets/models/chair.glb".
     doing: String,
-    /// The file being read and how many of its kind there are.
+    /// How many files of the kind being read are done, and how many there
+    /// are. `None` for a step with nothing to count.
     count: Option<(usize, usize)>,
-    /// How full the bar is, from 0 to 1.
-    fill: f32,
     /// The last files finished, newest last.
     recent: Vec<String>,
 }
@@ -139,17 +139,23 @@ impl Loading {
         lock(&self.status).clone()
     }
 
-    /// Draws the loading screen over `rect`. Returns true when Cancel was
-    /// clicked.
+    /// Whether the screen is showing: the load has taken [`GRACE`] or more.
+    pub fn shown(&self) -> bool {
+        self.started.elapsed().as_secs_f32() >= GRACE
+    }
+
+    /// Draws the loading screen over `rect`, or only its background for the
+    /// first [`GRACE`] seconds. Returns true when Cancel was clicked.
     pub fn show(&self, ui: &mut egui::Ui, rect: Rect) -> bool {
+        let elapsed = self.started.elapsed().as_secs_f32();
+        if elapsed < GRACE {
+            paint_blank(ui, rect);
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f32(GRACE - elapsed));
+            return false;
+        }
         let status = self.status();
-        paint(
-            ui,
-            rect,
-            &self.name,
-            &status,
-            Some(self.started.elapsed().as_secs_f32()),
-        )
+        paint(ui, rect, &self.name, &status, Some(elapsed))
     }
 }
 
@@ -160,14 +166,25 @@ impl Drop for Loading {
 }
 
 /// The screen held for a frame after the project opens, while its scene is
-/// sent to the graphics card.
-pub fn show_finishing(ui: &mut egui::Ui, rect: Rect, name: &str) {
+/// sent to the graphics card. After a load too quick to show its screen,
+/// only the background, so nothing flashes up.
+pub fn show_finishing(ui: &mut egui::Ui, rect: Rect, name: &str, shown: bool) {
+    if !shown {
+        paint_blank(ui, rect);
+        return;
+    }
     let status = Status {
         doing: "Preparing the scene".to_owned(),
-        fill: 1.0,
         ..Status::default()
     };
     paint(ui, rect, name, &status, None);
+}
+
+/// The screen's background alone, covering what's under it.
+fn paint_blank(ui: &mut egui::Ui, rect: Rect) {
+    let palette = theme::palette(ui.ctx());
+    ui.allocate_rect(rect, Sense::click());
+    ui.painter_at(rect).rect_filled(rect, 0, palette.app_bg);
 }
 
 fn lock(status: &Mutex<Status>) -> std::sync::MutexGuard<'_, Status> {
@@ -188,8 +205,8 @@ impl Job {
     fn run(&self, mut terrain: TerrainCache, camera: Camera) -> Result<Loaded, LoadError> {
         let project =
             axcenity_project::load_with_level(&self.folder, self.level.as_deref(), &mut |step| {
-                let (doing, count, at) = describe(step);
-                self.report(doing, count, FILES, at);
+                let (doing, count) = describe(step);
+                self.report(doing, count);
             })?;
 
         let assets = Assets::new(&project.folder);
@@ -203,12 +220,9 @@ impl Job {
                 AssetFile::Texture(_) => "texture",
                 AssetFile::Material(_) => "material",
             };
-            let at = index as f32 / files.len() as f32;
             self.report(
                 format!("Loading {kind} {}", file.path()),
                 Some((index, files.len())),
-                ASSETS,
-                at,
             );
             file.load(&assets);
             self.finished(file.path().to_owned());
@@ -225,12 +239,9 @@ impl Job {
                 break;
             }
             let name = world.get(id).map_or("", |i| i.name()).to_owned();
-            let at = index as f32 / terrains.len() as f32;
             self.report(
                 format!("Building terrain {name}"),
                 Some((index, terrains.len())),
-                TERRAINS,
-                at,
             );
             terrain.prepare(world, id, &assets, &camera);
             self.finished(format!("Terrain {name}"));
@@ -246,16 +257,12 @@ impl Job {
         self.cancel.load(Ordering::Relaxed)
     }
 
-    /// Says what's being read now: `at` (0 to 1) of the way through `part`.
-    fn report(&self, doing: String, count: Option<(usize, usize)>, part: (f32, f32), at: f32) {
+    /// Says what's being read now, and how many of its kind are done.
+    fn report(&self, doing: String, count: Option<(usize, usize)>) {
         {
             let mut status = lock(&self.status);
             status.doing = doing;
             status.count = count;
-            // Never back: a part with nothing to do is skipped over.
-            status.fill = status
-                .fill
-                .max(part.0 + (part.1 - part.0) * at.clamp(0.0, 1.0));
         }
         self.ctx.request_repaint();
     }
@@ -268,41 +275,33 @@ impl Job {
     }
 }
 
-/// A step of reading the project's files, as the screen says it: what,
-/// how many, and how far through the files it is (0 to 1).
-fn describe(step: LoadStep) -> (String, Option<(usize, usize)>, f32) {
-    let through = |start: f32, end: f32, done: usize, total: usize| {
-        start + (end - start) * done as f32 / total.max(1) as f32
-    };
+/// A step of reading the project's files, as the screen says it: what, and
+/// how many of its kind are done, where there's something to count.
+fn describe(step: LoadStep) -> (String, Option<(usize, usize)>) {
     match step {
-        LoadStep::Manifest => (
-            format!("Reading {}", axcenity_project::MANIFEST_FILE),
-            None,
-            0.0,
-        ),
-        LoadStep::Upgrade { from } => (format!("Upgrading from project format {from}"), None, 0.05),
-        LoadStep::World => (
-            format!("Reading {}", axcenity_project::WORLD_FILE),
-            None,
-            0.1,
-        ),
-        LoadStep::Terrain { name, done, total } => (
-            format!("Reading terrain {name}"),
-            Some((done, total)),
-            through(0.3, 0.6, done, total),
-        ),
-        LoadStep::Script { path, done, total } => (
-            format!("Reading {path}"),
-            Some((done, total)),
-            through(0.6, 0.95, done, total),
-        ),
-        LoadStep::Stylesheets => ("Reading stylesheets".to_owned(), None, 0.95),
+        LoadStep::Manifest => (format!("Reading {}", axcenity_project::MANIFEST_FILE), None),
+        LoadStep::Upgrade { from } => (format!("Upgrading from project format {from}"), None),
+        LoadStep::World => (format!("Reading {}", axcenity_project::WORLD_FILE), None),
+        LoadStep::Terrain { name, done, total } => {
+            (format!("Reading terrain {name}"), Some((done, total)))
+        }
+        LoadStep::Script { path, done, total } => (format!("Reading {path}"), Some((done, total))),
+        LoadStep::Stylesheets => ("Reading stylesheets".to_owned(), None),
     }
 }
 
+/// How full the bar is for `count` (0 to 1), or `None` when there's
+/// nothing to count and the bar only slides.
+fn fill(count: Option<(usize, usize)>) -> Option<f32> {
+    count
+        .filter(|&(_, total)| total > 0)
+        .map(|(done, total)| (done as f32 / total as f32).clamp(0.0, 1.0))
+}
+
 /// The screen: the project's name, what's loading with how many, the bar
-/// with its percentage, the last files read, and the time taken with Cancel.
-/// `elapsed` is `None` once loading is done (no Cancel then).
+/// (with its percentage when there's a count), the last files read, and the
+/// time taken with Cancel. `elapsed` is `None` once loading is done (no
+/// Cancel then).
 fn paint(ui: &mut egui::Ui, rect: Rect, name: &str, status: &Status, elapsed: Option<f32>) -> bool {
     let palette = theme::palette(ui.ctx());
     // Covers what's under it, so nothing there can be clicked.
@@ -363,21 +362,45 @@ fn paint(ui: &mut egui::Ui, rect: Rect, name: &str, status: &Status, elapsed: Op
     }
     y += 24.0;
 
-    let fill = status.fill.clamp(0.0, 1.0);
     let bar = Rect::from_min_size(egui::pos2(left, y), vec2(width, 4.0));
     painter.rect_filled(bar, 2, palette.inset);
-    if fill > 0.0 {
-        let filled = Rect::from_min_size(bar.min, vec2(width * fill, bar.height()));
-        painter.rect_filled(filled, 2, palette.accent);
+    match fill(status.count) {
+        Some(fill) => {
+            if fill > 0.0 {
+                let filled = Rect::from_min_size(bar.min, vec2(width * fill, bar.height()));
+                painter.rect_filled(filled, 2, palette.accent);
+            }
+            painter.text(
+                egui::pos2(left + width, y + 12.0),
+                Align2::RIGHT_TOP,
+                format!("{}%", (fill * 100.0).round() as u32),
+                FontId::monospace(11.0),
+                palette.text_muted,
+            );
+        }
+        None => {
+            // Working, with no count to show: a short piece slides along,
+            // or sits in the middle with Reduce motion on.
+            let piece = width * 0.25;
+            let moving = ui.ctx().style().animation_time > 0.0;
+            let at = if moving {
+                let time = ui.input(|input| input.time) as f32;
+                (time * 0.8).fract() * (width + piece) - piece
+            } else {
+                (width - piece) / 2.0
+            };
+            let start = (left + at).max(left);
+            let end = (left + at + piece).min(left + width);
+            if end > start {
+                let slider = Rect::from_x_y_ranges(start..=end, bar.y_range());
+                painter.rect_filled(slider, 2, palette.accent);
+            }
+            if moving {
+                ui.ctx().request_repaint();
+            }
+        }
     }
     y += 12.0;
-    painter.text(
-        egui::pos2(left + width, y),
-        Align2::RIGHT_TOP,
-        format!("{}%", (fill * 100.0).round() as u32),
-        FontId::monospace(11.0),
-        palette.text_muted,
-    );
 
     // The last files read, the newest brightest.
     for (age, done) in status.recent.iter().rev().enumerate() {
@@ -418,7 +441,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reading_the_files_moves_forward_through_the_first_part_of_the_bar() {
+    fn the_bar_fills_only_by_what_is_counted() {
+        assert_eq!(fill(None), None);
+        assert_eq!(fill(Some((0, 0))), None);
+        assert_eq!(fill(Some((0, 4))), Some(0.0));
+        assert_eq!(fill(Some((3, 4))), Some(0.75));
+        // Steps with nothing to count have no made-up fill.
+        let (_, count) = describe(LoadStep::World);
+        assert_eq!(fill(count), None);
+    }
+
+    #[test]
+    fn reading_the_files_names_each_file_and_counts_them() {
         let steps = [
             LoadStep::Manifest,
             LoadStep::World,
@@ -439,13 +473,17 @@ mod tests {
             },
             LoadStep::Stylesheets,
         ];
-        let mut last = 0.0;
         for step in steps {
-            let (_, _, at) = describe(step);
-            assert!((last..=1.0).contains(&at), "{step:?} went back");
-            last = at;
+            let (doing, count) = describe(step);
+            assert!(!doing.is_empty(), "{step:?}");
+            if let Some((done, total)) = count {
+                assert!(done < total, "{step:?}");
+            }
         }
-        assert_eq!(describe(steps[3]).0, "Reading Main.server.lua");
+        assert_eq!(
+            describe(steps[3]),
+            ("Reading Main.server.lua".to_owned(), Some((0, 2)))
+        );
     }
 
     #[test]
@@ -453,7 +491,6 @@ mod tests {
         let status = Status {
             doing: "Loading model assets/models/castle_gate_with_a_long_name.glb".to_owned(),
             count: Some((6, 24)),
-            fill: 0.52,
             recent: (1..=RECENT)
                 .map(|n| format!("assets/textures/stone_{n}.png"))
                 .collect(),

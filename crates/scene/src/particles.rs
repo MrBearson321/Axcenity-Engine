@@ -34,7 +34,7 @@ use axcenity_render::{
     DrawList, MAX_GPU_PARTICLES, ParticleEmitter, ParticleLook, Sprite, TextureSource,
 };
 
-use crate::draw_list::{image_texture, part_placement};
+use crate::draw_list::image_texture;
 use crate::weather::WeatherState;
 
 /// The most particles one emitter keeps; past this, no more are born
@@ -633,21 +633,35 @@ fn lerp((from, to): (f32, f32), t: f32) -> f32 {
     from + (to - from) * t
 }
 
-/// Every ParticleEmitter in the Workspace.
+/// Every ParticleEmitter in the Workspace, except those out of the world
+/// as the draw list has them: in a Tool put away in an Inventory, or in the
+/// parts kept inside a UnionOperation, whose parts aren't drawn.
 fn emitters(world: &World) -> impl Iterator<Item = (InstanceId, &Instance)> {
     world
         .descendants(world.workspace())
         .into_iter()
+        .filter(move |&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(move |id| Some((id, world.get(id)?)))
         .filter(|(_, instance)| instance.class() == ClassName::ParticleEmitter)
 }
 
-/// Where the emitter's parent part is, as the transform that stretches the
-/// 1×1×1 cube to fill it. `None` if it isn't inside a part.
+/// How far across the box a free-standing emitter gives off particles
+/// from, in studs: nearly a point.
+const FREE_EMITTER_SIZE: f32 = 0.1;
+
+/// Where the emitter gives off particles from, as the transform that
+/// stretches the 1×1×1 cube to fill it: its parent part, or a small box at
+/// its own Position and Orientation when it isn't in a part (see
+/// [`crate::Mount`]).
 fn parent_transform(world: &World, emitter: &Instance) -> Option<Mat4> {
-    let parent = world.get(emitter.parent()?)?;
-    let (_, transform) = part_placement(parent)?;
-    Some(transform)
+    Some(match crate::mount_of(world, emitter)? {
+        crate::Mount::Part { transform, .. } => transform,
+        crate::Mount::Free { position, rotation } => Mat4::from_scale_rotation_translation(
+            Vec3::splat(FREE_EMITTER_SIZE),
+            rotation,
+            position,
+        ),
+    })
 }
 
 /// A built-in particle picture.
@@ -889,18 +903,61 @@ mod tests {
     }
 
     #[test]
-    fn an_emitter_outside_a_part_or_the_workspace_gives_off_nothing() {
-        let (mut world, part, emitter) = world_with_emitter(100.0);
+    fn an_emitter_outside_a_part_gives_off_from_its_own_place_and_outside_the_workspace_nothing() {
+        let (mut world, part, emitter) = world_with_emitter(0.0);
+        // Standing free in the Workspace, as a light can: from its Position,
+        // turned by its Orientation (a quarter turn about Z sends +Y to -X).
         world.set_parent(emitter, Some(world.workspace())).unwrap();
+        world
+            .set_property(
+                emitter,
+                "Position",
+                Value::Vector3(Vector3::new(30.0, 4.0, -2.0)),
+            )
+            .unwrap();
+        world
+            .set_property(
+                emitter,
+                "Orientation",
+                Value::Vector3(Vector3::new(0.0, 0.0, 90.0)),
+            )
+            .unwrap();
+        world
+            .set_property(emitter, "SpreadAngle", Value::Number(0.0))
+            .unwrap();
+        let mut particles = Particles::new();
+        particles.emit(&world, emitter, 20);
+        let start = particles.sprites(&world, &Assets::default());
+        assert_eq!(start.len(), 20);
+        for sprite in &start {
+            assert!(sprite.position.distance(Vec3::new(30.0, 4.0, -2.0)) < 0.1);
+        }
+        particles.update(&world, 0.1);
+        let later = particles.sprites(&world, &Assets::default());
+        assert!(
+            later.iter().all(|sprite| sprite.position.x < 29.8),
+            "{later:?}"
+        );
+
+        world.set_parent(emitter, Some(part)).unwrap();
+        world.set_parent(part, None).unwrap();
+        particles.update(&world, 5.0);
+        assert_eq!(particles.count(), 0);
+    }
+
+    #[test]
+    fn an_emitter_in_a_part_kept_inside_a_union_gives_off_nothing() {
+        let (mut world, part, _) = world_with_emitter(100.0);
+        let union = world.create(ClassName::UnionOperation).unwrap();
+        world.set_parent(union, Some(world.workspace())).unwrap();
+        world.set_parent(part, Some(union)).unwrap();
         let mut particles = Particles::new();
         particles.update(&world, 0.5);
-        assert_eq!(particles.count(), 0);
-        world.set_parent(emitter, Some(part)).unwrap();
-        particles.update(&world, 0.1);
-        assert!(particles.count() > 0);
-        world.set_parent(part, None).unwrap();
-        particles.update(&world, 0.1);
-        assert_eq!(particles.count(), 0);
+        assert_eq!(
+            particles.count(),
+            0,
+            "its part isn't drawn, so neither are they"
+        );
     }
 
     #[test]

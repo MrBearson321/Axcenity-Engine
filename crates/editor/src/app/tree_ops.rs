@@ -83,22 +83,18 @@ impl EditorApp {
     /// UI elements only show inside a ScreenGui, so inserting one where
     /// there's none makes a ScreenGui for it first.
     pub(super) fn insert(&mut self, what: Insertable, near: Option<InstanceId>) {
-        if matches!(what, Insertable::PointLight | Insertable::SpotLight)
+        // A light or emitter with no part to go in stands on its own at the
+        // camera's focus point, as in Unreal: no lamp or holder part.
+        if what.class().can_stand_free()
             && !tree::light_has_part_parent(&self.world, near.or(self.selected))
         {
+            let at = self.insert_position();
             self.insert_named(
-                Insertable::Part(PartType::Ball),
+                what,
                 near.or(self.selected),
-                "Lamp",
-                vec![
-                    ("Anchored", Value::Bool(true)),
-                    ("Material", Value::Material(Material::Neon)),
-                    ("Size", Value::Vector3(Vector3::new(1.2, 1.2, 1.2))),
-                    ("Color", Value::Color3(Color3::new(1.0, 0.86, 0.55))),
-                ],
+                what.class().as_str(),
+                vec![("Position", Value::Vector3(at))],
             );
-            let lamp = self.selected;
-            self.insert_named(what, lamp, what.class().as_str(), Vec::new());
             return;
         }
         if what.class().is_character_controller() {
@@ -284,25 +280,6 @@ impl EditorApp {
                 vec![
                     ("Anchored", Value::Bool(true)),
                     ("Size", Value::Vector3(Vector3::new(16.0, 10.0, 16.0))),
-                    ("Transparency", Value::Number(1.0)),
-                    ("CanCollide", Value::Bool(false)),
-                    ("CastShadow", Value::Bool(false)),
-                ],
-            );
-            let holder = self.selected;
-            self.insert_named(what, holder, what.class().as_str(), Vec::new());
-            return;
-        }
-        if what == Insertable::ParticleEmitter
-            && !tree::light_has_part_parent(&self.world, near.or(self.selected))
-        {
-            self.insert_named(
-                Insertable::Part(PartType::Block),
-                near.or(self.selected),
-                "Emitter",
-                vec![
-                    ("Anchored", Value::Bool(true)),
-                    ("Size", Value::Vector3(Vector3::new(1.0, 1.0, 1.0))),
                     ("Transparency", Value::Number(1.0)),
                     ("CanCollide", Value::Bool(false)),
                     ("CastShadow", Value::Bool(false)),
@@ -789,12 +766,98 @@ impl EditorApp {
             index: target.children().len(),
         };
         let label = format!("Move {name} into {target_name}");
-        let moved = self.place(id, Some(place), label);
+        // A light or emitter taken out of its part stays where it was
+        // shining from, instead of jumping to its old Position.
+        let stays = self.free_placement_after_move(id, parent);
+        let moved = match stays {
+            Some(edits) => self.place_keeping(id, place, label, edits),
+            None => self.place(id, Some(place), label),
+        };
         if moved {
             // Opens the new parent, so the moved row stays in view.
             self.explorer.reveal(&self.world, id);
         }
         moved
+    }
+    /// For a light or ParticleEmitter in a part about to go into `parent`,
+    /// which isn't a part: its Position and Orientation set to where it
+    /// works from now, so it stands free right there.
+    fn free_placement_after_move(
+        &self,
+        id: InstanceId,
+        parent: InstanceId,
+    ) -> Option<Vec<(&'static str, Value)>> {
+        let instance = self.world.get(id)?;
+        if !instance.class().can_stand_free()
+            || self
+                .world
+                .get(parent)
+                .is_some_and(|parent| parent.class().is_base_part())
+        {
+            return None;
+        }
+        let marker = axcenity_scene::light_markers(&self.world)
+            .into_iter()
+            .find(|marker| marker.id == id && marker.part.is_some())?;
+        let rotation = match axcenity_scene::mount_of(&self.world, instance)? {
+            axcenity_scene::Mount::Part { transform, .. } => {
+                transform.to_scale_rotation_translation().1
+            }
+            axcenity_scene::Mount::Free { .. } => return None,
+        };
+        let tidy = |value: f32| (value * 1000.0).round() / 1000.0 + 0.0;
+        let at = marker.position;
+        let (y, x, z) = rotation.to_euler(axcenity_render::glam::EulerRot::YXZ);
+        Some(vec![
+            (
+                "Position",
+                Value::Vector3(Vector3::new(tidy(at.x), tidy(at.y), tidy(at.z))),
+            ),
+            (
+                "Orientation",
+                Value::Vector3(Vector3::new(
+                    tidy(x.to_degrees()),
+                    tidy(y.to_degrees()),
+                    tidy(z.to_degrees()),
+                )),
+            ),
+        ])
+    }
+    /// [`Self::place`] that also sets `values` on `id`, in the same step.
+    fn place_keeping(
+        &mut self,
+        id: InstanceId,
+        place: Place,
+        label: String,
+        values: Vec<(&'static str, Value)>,
+    ) -> bool {
+        let before = history::place_of(&self.world, id);
+        if let Err(err) = history::put(&mut self.world, id, Some(place)) {
+            self.output.error(format!("Could not do that: {err}"));
+            return false;
+        }
+        let mut properties = Vec::new();
+        for (name, value) in values {
+            let Some(old) = self.world.get(id).and_then(|i| i.property(name)).cloned() else {
+                continue;
+            };
+            if self.world.set_property(id, name, value.clone()).is_ok() {
+                properties.push(history::PropertyEdit {
+                    id,
+                    field: Field::Property(name),
+                    before: old,
+                    after: value,
+                });
+            }
+        }
+        let moves = vec![Move {
+            id,
+            before,
+            after: Some(place),
+        }];
+        self.history
+            .record_tree_and_properties(&mut self.world, label, moves, properties);
+        true
     }
     /// `id`'s name, if it can be deleted, duplicated or moved. Otherwise
     /// says why not in Output (`doing` is "delete", say) and returns `None`.

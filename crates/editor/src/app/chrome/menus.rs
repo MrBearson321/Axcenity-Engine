@@ -337,6 +337,19 @@ impl EditorApp {
                 {
                     self.light_cones = !self.light_cones;
                 }
+                let cube = egui::Button::selectable(
+                    self.view_cube,
+                    theme::with_icon(icons::CUBE_FOCUS, "View Cube"),
+                );
+                if ui
+                    .add(cube)
+                    .on_hover_text(
+                        "Show the view cube in the viewport's corner: click a face, edge or corner to look from there.",
+                    )
+                    .clicked()
+                {
+                    self.view_cube = !self.view_cube;
+                }
                 ui.menu_button(theme::with_icon(icons::EYE, "View Mode"), |ui| {
                     for mode in ViewMode::all() {
                         let item = egui::Button::selectable(self.view_mode == mode, mode.label());

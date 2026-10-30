@@ -15,8 +15,8 @@
 //! - **Anchor**: switch `Anchored` for the selection (Enter toggles, as in
 //!   F3X). Whether parts collide is in Properties, and the Home tab's
 //!   Collision Groups.
-//! - **Lighting**: add, change or remove a PointLight or SpotLight in each
-//!   selected part.
+//! - **Lighting**: add, change or remove a PointLight, SpotLight or
+//!   RectLight in each selected part.
 //! - **Emission**: a glow of any color (`EmissiveColor` and `Emission`),
 //!   and particles: add a ParticleEmitter set up as one of the built-in
 //!   types, remove them, or see a burst.
@@ -236,6 +236,8 @@ pub fn panel(
             light(ui, scene, ClassName::PointLight, &mut actions);
             ui.separator();
             light(ui, scene, ClassName::SpotLight, &mut actions);
+            ui.separator();
+            light(ui, scene, ClassName::RectLight, &mut actions);
         }
         Tool::Emission => emission(ui, scene, &mut actions),
         Tool::Angular => angular(ui, scene, &mut settings.angular, &mut actions),
@@ -720,6 +722,8 @@ fn light(ui: &mut egui::Ui, scene: &PanelScene, class: ClassName, actions: &mut 
                 ("Brightness", 0.0..=10.0),
                 ("Range", 0.0..=60.0),
                 ("Angle", 1.0..=179.0),
+                ("Width", 0.0..=40.0),
+                ("Height", 0.0..=40.0),
             ] {
                 let Some(mut value) = number(property) else {
                     continue;

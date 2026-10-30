@@ -169,6 +169,17 @@ pub fn pick_hit_skipping(world: &World, ray: Ray, skip: &[InstanceId]) -> Option
     nearest
 }
 
+/// Where `ray` first meets the part `id` alone, as it's drawn and picked
+/// (a MeshPart by its box), or `None` if it misses or `id` isn't a part.
+pub fn part_hit(world: &World, id: InstanceId, ray: Ray) -> Option<Hit> {
+    let (shape, transform) = world.get(id).and_then(part_placement)?;
+    hit_surface(shape, transform, ray).map(|(distance, normal)| Hit {
+        part: id,
+        distance,
+        normal,
+    })
+}
+
 /// How far a Part's drawn box reaches from its center in `direction` (one
 /// stud long), or `None` if `id` isn't a Part. A part resting on a surface
 /// facing `direction` has its center this far above it.

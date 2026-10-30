@@ -7,6 +7,7 @@
 //! - [`brush`] sculpts and paints: raise, lower, smooth, flatten, sculpt,
 //!   noise, stamps, material paint and foliage, with undo records.
 //! - [`generate`] makes landscapes from settings and a seed, with presets.
+//! - [`convert`] turns a part into ground under its top.
 //! - [`erosion`] wears them down with water and with gravity.
 //! - [`materials`] lays layers down by height and slope, blended with paint.
 //! - [`mesh`] builds chunk meshes at several levels of detail.
@@ -15,6 +16,7 @@
 //! - [`job`] runs slow work on another thread, with progress and cancel.
 
 pub mod brush;
+pub mod convert;
 pub mod erosion;
 pub mod files;
 pub mod generate;

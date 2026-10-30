@@ -54,6 +54,7 @@ mod solid;
 mod tags;
 mod terrain;
 mod texture_set;
+mod to_terrain;
 mod tree_ops;
 mod ui_graphs;
 mod ui_links;
@@ -65,7 +66,7 @@ use std::time::Instant;
 
 use axcenity_assets::Assets;
 use axcenity_blocks::{BlockScript, translate};
-use axcenity_core::{ClassName, Color3, InstanceId, Material, PartType, Value, Vector3, World};
+use axcenity_core::{ClassName, Color3, InstanceId, PartType, Value, Vector3, World};
 use axcenity_project::ScriptFile;
 use axcenity_scene::{TerrainCache, orientation_from_rotation};
 use axcenity_script::CameraState;
@@ -99,7 +100,6 @@ use crate::ribbon::{self, RibbonButton};
 use crate::ribbon_tabs::{RibbonGroup, RibbonTabs};
 use crate::scripts::{self, ScriptTabs};
 use crate::side_warnings::{self, WarningCache};
-use crate::splash::Splash;
 use crate::start::{self, Brand, ProjectLink, StartAction, StartScreen};
 use crate::style_panel::{self, StyleEdit};
 use crate::terrain_studio::TerrainStudio;
@@ -294,13 +294,14 @@ pub struct EditorApp {
     toasts: Toasts,
     /// The logo images, loaded on the first frame (they need the egui context).
     brand: Option<Brand>,
-    /// The launch splash, timed from the first frame the window is drawn.
-    splash: Splash,
     /// The project being read in the background, if one is (see `loading.rs`).
     loading: Option<Loading>,
     /// The frame (egui's count) the loading screen goes at, after a
     /// project opened. Frames, not calls: egui may draw a frame twice.
     cover_until: Option<u64>,
+    /// Whether that load took long enough to show its screen; if not, the
+    /// cover is only the background.
+    cover_shown: bool,
     /// Projects opened lately, newest first, for the start screen. Saved between runs.
     recent: Vec<ProjectLink>,
     /// The start screen's thumbnails, search and dialogs.
@@ -343,6 +344,9 @@ pub struct EditorApp {
     /// View > Light Cones: show every light's reach in the viewport, not
     /// just the selected one's. Saved between runs.
     light_cones: bool,
+    /// Whether the viewport shows the view cube (Test > View, View > View
+    /// Cube). On unless turned off; saved between runs.
+    view_cube: bool,
     /// View overlay toggles (colliders, raycasts, bounds, emitters, the
     /// navigation mesh). Saved between runs. The player never draws them.
     overlays: OverlayToggles,
@@ -519,6 +523,7 @@ const RECENT_KEY: &str = "recent projects";
 const LAYOUT_KEY: &str = "panel layout";
 const RIBBON_TABS_KEY: &str = "ribbon tabs";
 const LIGHT_CONES_KEY: &str = "light cones";
+const VIEW_CUBE_KEY: &str = "view cube";
 const OVERLAY_COLLIDERS_KEY: &str = "overlay colliders";
 const OVERLAY_RAYCASTS_KEY: &str = "overlay raycasts";
 const OVERLAY_BOUNDS_KEY: &str = "overlay bounds";
@@ -694,9 +699,9 @@ impl EditorApp {
             settings: settings::SettingsWindow::default(),
             toasts: Toasts::default(),
             brand: None,
-            splash: Splash::default(),
             loading: None,
             cover_until: None,
+            cover_shown: false,
             recent: Vec::new(),
             start: StartScreen::default(),
             thumbnail: None,
@@ -717,6 +722,7 @@ impl EditorApp {
             layout: Layout::default(),
             ribbon_tabs: RibbonTabs::default(),
             light_cones: false,
+            view_cube: true,
             overlays: OverlayToggles::default(),
             view_mode: ViewMode::Lit,
             nav_mesh: None,
@@ -768,6 +774,7 @@ impl EditorApp {
                 self.ribbon_tabs = RibbonTabs::from_text(&text);
             }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
+            self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
             self.overlays.colliders =
                 storage.get_string(OVERLAY_COLLIDERS_KEY).as_deref() == Some("on");
             self.overlays.raycasts =
@@ -839,16 +846,8 @@ impl eframe::App for EditorApp {
         // Relaunching into a rebuilt editor saves the settings first.
         self.launch(ctx, frame);
         // Tests call `frame` without a window, so the window's resize edges
-        // and the splash live here.
+        // live here.
         window_frame::edges(ctx);
-        if let Some(brand) = &self.brand {
-            let project = match &self.loading {
-                Some(loading) => Some(loading.name.as_str()),
-                None => self.project.as_ref().map(|project| project.name.as_str()),
-            };
-            self.splash
-                .show(ctx, brand, project, self.appearance.reduce_motion);
-        }
     }
 
     /// Saves the look, the layout and the recent projects. eframe calls
@@ -864,6 +863,8 @@ impl eframe::App for EditorApp {
         storage.set_string(RIBBON_TABS_KEY, self.ribbon_tabs.to_text());
         let cones = if self.light_cones { "on" } else { "off" };
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
+        let cube = if self.view_cube { "on" } else { "off" };
+        storage.set_string(VIEW_CUBE_KEY, cube.to_owned());
         let flag = |on| if on { "on" } else { "off" };
         storage.set_string(
             OVERLAY_COLLIDERS_KEY,

@@ -12,11 +12,11 @@ use axcenity_assets::{
     AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial, Posed, Primitive,
 };
 use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, Value, World};
-use axcenity_render::glam::{Mat4, Vec3};
+use axcenity_render::glam::{Mat4, Quat, Vec3};
 use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, Clouds, Cone, DrawItem, DrawList, Fog, Light,
-    Material, MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage, ReflectionProbe,
-    Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, TextureMaps, TextureSource,
+    Material, MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage, RectArea,
+    ReflectionProbe, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, TextureMaps, TextureSource,
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
@@ -124,32 +124,138 @@ fn tone_mapping(curve: axcenity_core::ToneMapping) -> axcenity_render::ToneMappi
     }
 }
 
-/// The light a PointLight or SpotLight gives off from the middle of its
-/// parent part, or `None` if it's switched off or isn't inside a part.
+/// Where a light or ParticleEmitter works from: inside a part, the part
+/// (placed by the transform that stretches the 1×1×1 cube to fill it);
+/// anywhere else, its own `Position` and `Orientation`, as a light needs
+/// no mesh in Unreal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mount {
+    Part { id: InstanceId, transform: Mat4 },
+    Free { position: Vec3, rotation: Quat },
+}
+
+impl Mount {
+    /// Its turn in the world.
+    pub fn rotation(&self) -> Quat {
+        match *self {
+            Mount::Part { transform, .. } => transform.to_scale_rotation_translation().1,
+            Mount::Free { rotation, .. } => rotation,
+        }
+    }
+
+    /// The part it's in, if it's in one.
+    pub fn part(&self) -> Option<InstanceId> {
+        match *self {
+            Mount::Part { id, .. } => Some(id),
+            Mount::Free { .. } => None,
+        }
+    }
+}
+
+/// Where the light or ParticleEmitter `instance` works from (see
+/// [`Mount`]). `None` for one whose Position or Orientation isn't a
+/// finite Vector3, or with no parent.
+pub fn mount_of(world: &World, instance: &Instance) -> Option<Mount> {
+    let parent_id = instance.parent()?;
+    let parent = world.get(parent_id)?;
+    if let Some((_, transform)) = part_placement(parent) {
+        return Some(Mount::Part {
+            id: parent_id,
+            transform,
+        });
+    }
+    let vector = |name| instance.property(name).and_then(Value::as_vector3);
+    let position = vector("Position")?;
+    let position = Vec3::new(position.x, position.y, position.z);
+    let rotation = rotation_from_orientation(vector("Orientation")?);
+    (position.is_finite() && rotation.is_finite()).then_some(Mount::Free { position, rotation })
+}
+
+/// Where a light shines from, and the way a SpotLight points or a
+/// RectLight faces (turned with what it's on), with a RectLight's right.
+struct Placed {
+    position: Vec3,
+    direction: Vec3,
+    right: Vec3,
+}
+
+/// Where `instance` (a light) shines from on `mount`: just above its part,
+/// so the part's own top and the things around it are lit (a RectLight on
+/// the side of its part it faces), or at its own Position.
+fn place_light(instance: &Instance, mount: Mount) -> Placed {
+    let rotation = mount.rotation();
+    let local = instance
+        .property("Direction")
+        .and_then(Value::as_vector3)
+        .map_or(Vec3::NEG_Y, |d| Vec3::new(d.x, d.y, d.z))
+        .normalize_or(Vec3::NEG_Y);
+    // A rect's width runs along X, or along Z when it faces along X.
+    let across = if local.x.abs() > 0.9 {
+        Vec3::Z
+    } else {
+        Vec3::X
+    };
+    let direction = rotation * local;
+    let right = rotation * across;
+    let position = match mount {
+        Mount::Free { position, .. } => position,
+        Mount::Part { transform, .. } if instance.class() == ClassName::RectLight => {
+            // On the face it looks out of, a hair off it.
+            // How far the box reaches from its middle along `local`: to
+            // the first of its faces that way.
+            let (scale, _, center) = transform.to_scale_rotation_translation();
+            let half = scale.abs() * 0.5;
+            let reach = (0..3)
+                .filter(|&axis| local[axis].abs() > 1e-6)
+                .map(|axis| half[axis] / local[axis].abs())
+                .fold(f32::INFINITY, f32::min);
+            let reach = if reach.is_finite() { reach } else { 0.0 };
+            center + direction * (reach + 0.05)
+        }
+        Mount::Part { transform, .. } => light_origin(transform),
+    };
+    Placed {
+        position,
+        direction,
+        right,
+    }
+}
+
+/// The light a PointLight, SpotLight or RectLight gives off (see
+/// [`place_light`]), or `None` if it's switched off or has nowhere to be.
 fn light_of(world: &World, instance: &Instance) -> Option<Light> {
     if instance.property("Enabled").and_then(Value::as_bool) != Some(true) {
         return None;
     }
-    let parent = world.get(instance.parent()?)?;
-    let (_, transform) = part_placement(parent)?;
-    let position = light_origin(transform);
-    let (_, rotation, _) = transform.to_scale_rotation_translation();
+    let mount = mount_of(world, instance)?;
+    let placed = place_light(instance, mount);
+    let position = placed.position;
+    // How far along `direction` its own part reaches: shadows start there.
+    // A free-standing light has no part to keep out of its shadows.
+    let near = |direction: Vec3| match mount {
+        Mount::Part { transform, .. } => shadow_near(transform, position, direction),
+        Mount::Free { .. } => 0.0,
+    };
     let color = instance.property("Color").and_then(Value::as_color3)?;
     let number = |name| instance.property(name).and_then(Value::as_number);
     let shadows = instance.property("Shadows").and_then(Value::as_bool) == Some(true);
     let cone = match instance.class() {
-        ClassName::SpotLight => {
-            let direction = instance.property("Direction").and_then(Value::as_vector3)?;
-            // Relative to the part, so the beam turns with it.
-            let direction = rotation * Vec3::new(direction.x, direction.y, direction.z);
-            Some(Cone {
-                direction,
-                angle_degrees: number("Angle")? as f32,
-                shadows: shadows.then(|| SpotShadows {
-                    near: shadow_near(transform, position, direction),
-                }),
-            })
-        }
+        ClassName::SpotLight => Some(Cone {
+            direction: placed.direction,
+            angle_degrees: number("Angle")? as f32,
+            shadows: shadows.then(|| SpotShadows {
+                near: near(placed.direction),
+            }),
+        }),
+        _ => None,
+    };
+    let rect = match instance.class() {
+        ClassName::RectLight => Some(RectArea {
+            direction: placed.direction,
+            right: placed.right,
+            width: number("Width")?.max(0.0) as f32,
+            height: number("Height")?.max(0.0) as f32,
+        }),
         _ => None,
     };
     // Each way along each world axis, as the point light's shadow faces are.
@@ -162,7 +268,7 @@ fn light_of(world: &World, instance: &Instance) -> Option<Light> {
             Vec3::Z,
             Vec3::NEG_Z,
         ]
-        .map(|axis| shadow_near(transform, position, axis)),
+        .map(near),
     });
     Some(Light {
         position,
@@ -170,6 +276,7 @@ fn light_of(world: &World, instance: &Instance) -> Option<Light> {
         brightness: number("Brightness")? as f32,
         range: number("Range")? as f32,
         cone,
+        rect,
         point_shadows,
     })
 }
@@ -206,74 +313,103 @@ fn reflection_probe_of(
     })
 }
 
-/// Where a PointLight or SpotLight in the Workspace is, for the editor to
-/// show it: a light has no shape of its own, so it's drawn as an icon.
+/// What a [`LightMarker`] stands for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarkerKind {
+    Point,
+    Spot,
+    Rect,
+    Emitter,
+}
+
+/// Where a light or ParticleEmitter in the Workspace is, for the editor to
+/// show it: neither has a shape of its own, so one standing free is drawn
+/// as an icon, and a light's reach as rings, a cone or a rectangle.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LightMarker {
     pub id: InstanceId,
-    /// The part the light is in.
-    pub part: InstanceId,
-    pub spot: bool,
+    pub kind: MarkerKind,
+    /// The part it's in, or `None` when it stands free (and has an icon).
+    pub part: Option<InstanceId>,
     pub enabled: bool,
-    /// Just above the parent part, where the light shines from.
+    /// Where the light shines from (just above its part, or its own
+    /// Position), or an emitter's middle.
     pub position: Vec3,
     pub color: [f32; 3],
     pub range: f32,
     /// For a SpotLight: the way it points (one stud long), and its cone's
     /// whole angle in degrees.
     pub cone: Option<(Vec3, f32)>,
+    /// For a RectLight: the way it faces and its right (each one stud
+    /// long), and its width and height.
+    pub rect: Option<(Vec3, Vec3, f32, f32)>,
 }
 
-/// Every PointLight and SpotLight inside a part in the Workspace, switched
-/// on or not.
+/// Every light and ParticleEmitter in the Workspace, switched on or not,
+/// that has somewhere to be.
 pub fn light_markers(world: &World) -> Vec<LightMarker> {
     let mut markers = Vec::new();
     for id in world.descendants(world.workspace()) {
+        if axcenity_core::csg::out_of_world(world, id) {
+            continue;
+        }
         let Some(instance) = world.get(id) else {
             continue;
         };
-        let spot = match instance.class() {
-            ClassName::PointLight => false,
-            ClassName::SpotLight => true,
+        let kind = match instance.class() {
+            ClassName::PointLight => MarkerKind::Point,
+            ClassName::SpotLight => MarkerKind::Spot,
+            ClassName::RectLight => MarkerKind::Rect,
+            ClassName::ParticleEmitter => MarkerKind::Emitter,
             _ => continue,
         };
-        let Some(part) = instance.parent() else {
+        let Some(mount) = mount_of(world, instance) else {
             continue;
         };
-        let Some((_, transform)) = world.get(part).and_then(part_placement) else {
-            continue;
-        };
-        let position = light_origin(transform);
-        let (_, rotation, _) = transform.to_scale_rotation_translation();
         let number = |name| {
             instance
                 .property(name)
                 .and_then(Value::as_number)
                 .unwrap_or(0.0) as f32
         };
-        let cone = spot.then(|| {
-            let direction = instance
-                .property("Direction")
-                .and_then(Value::as_vector3)
-                .map_or(Vec3::NEG_Y, |d| Vec3::new(d.x, d.y, d.z));
-            (
-                (rotation * direction).normalize_or(Vec3::NEG_Y),
-                number("Angle"),
-            )
-        });
         let color = instance
             .property("Color")
             .and_then(Value::as_color3)
             .map_or([1.0; 3], |color| [color.r, color.g, color.b]);
+        let enabled = instance.property("Enabled").and_then(Value::as_bool) == Some(true);
+        if kind == MarkerKind::Emitter {
+            let position = match mount {
+                Mount::Part { transform, .. } => transform.transform_point3(Vec3::ZERO),
+                Mount::Free { position, .. } => position,
+            };
+            markers.push(LightMarker {
+                id,
+                kind,
+                part: mount.part(),
+                enabled,
+                position,
+                color,
+                range: 0.0,
+                cone: None,
+                rect: None,
+            });
+            continue;
+        }
+        let placed = place_light(instance, mount);
+        let direction = placed.direction.normalize_or(Vec3::NEG_Y);
+        let right = (placed.right - direction * placed.right.dot(direction))
+            .normalize_or(direction.any_orthogonal_vector());
         markers.push(LightMarker {
             id,
-            part,
-            spot,
-            enabled: instance.property("Enabled").and_then(Value::as_bool) == Some(true),
-            position,
+            kind,
+            part: mount.part(),
+            enabled,
+            position: placed.position,
             color,
             range: number("Range"),
-            cone,
+            cone: (kind == MarkerKind::Spot).then(|| (direction, number("Angle"))),
+            rect: (kind == MarkerKind::Rect)
+                .then(|| (direction, right, number("Width"), number("Height"))),
         });
     }
     markers
@@ -326,9 +462,7 @@ pub fn build_draw_list_posed(
                 let posed = poses.get(&id);
                 mesh_part_draw_items(world, id, instance, assets, posed, &mut items)
             }
-            ClassName::PointLight | ClassName::SpotLight => {
-                lights.extend(light_of(world, instance))
-            }
+            class if class.is_light() => lights.extend(light_of(world, instance)),
             ClassName::ReflectionProbe => {
                 reflection_probes.extend(reflection_probe_of(world, instance, assets))
             }
@@ -495,7 +629,7 @@ fn fixture_glow(world: &World, instance: &Instance) -> Option<[f32; 3]> {
         let Some(light) = world.get(*child_id) else {
             continue;
         };
-        if !matches!(light.class(), ClassName::PointLight | ClassName::SpotLight) {
+        if !light.class().is_light() {
             continue;
         }
         if light.property("Enabled").and_then(Value::as_bool) != Some(true) {
@@ -1653,6 +1787,67 @@ mod tests {
         assert_eq!(errors.len(), 1, "reported once: {errors:?}");
         assert!(errors[0].contains("gone.probe.hdr"), "{errors:?}");
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_light_with_no_part_shines_from_its_own_position_and_turn() {
+        let mut world = World::new();
+        let light = world.create(ClassName::SpotLight).unwrap();
+        world.set_parent(light, Some(world.workspace())).unwrap();
+        world
+            .set_property(light, "Position", vector(5.0, 8.0, -3.0))
+            .unwrap();
+        // Turned a quarter about X: its Direction (down) points along -Z.
+        world
+            .set_property(light, "Orientation", vector(90.0, 0.0, 0.0))
+            .unwrap();
+        let list = build_draw_list(&world, &Assets::default(), camera());
+        assert_eq!(list.lights[0].position, Vec3::new(5.0, 8.0, -3.0));
+        let direction = list.lights[0].cone.unwrap().direction;
+        assert!(direction.abs_diff_eq(Vec3::NEG_Z, 1e-5), "{direction}");
+        let markers = light_markers(&world);
+        assert_eq!(markers[0].part, None, "it stands free, so it has an icon");
+        assert_eq!(markers[0].kind, MarkerKind::Spot);
+
+        // Put in a part, it shines from the part instead.
+        let lamp = part(&mut world, vec![("Position", vector(0.0, 1.0, 0.0))]);
+        world.set_parent(light, Some(lamp)).unwrap();
+        let list = build_draw_list(&world, &Assets::default(), camera());
+        assert!((list.lights[0].position - Vec3::new(0.0, 1.55, 0.0)).length() < 1e-4);
+        assert_eq!(light_markers(&world)[0].part, Some(lamp));
+    }
+
+    #[test]
+    fn a_rect_light_in_a_part_sits_on_the_face_it_looks_out_of() {
+        let mut world = World::new();
+        let panel = part(
+            &mut world,
+            vec![
+                ("Size", vector(4.0, 1.0, 2.0)),
+                ("Position", vector(0.0, 10.0, 0.0)),
+            ],
+        );
+        let light = world.create(ClassName::RectLight).unwrap();
+        world.set_parent(light, Some(panel)).unwrap();
+        let list = build_draw_list(&world, &Assets::default(), camera());
+        let lit = list.lights[0];
+        // Down out of its bottom, a hair below it, and as big as it says.
+        assert!(
+            (lit.position - Vec3::new(0.0, 9.45, 0.0)).length() < 1e-4,
+            "{}",
+            lit.position
+        );
+        let area = lit.rect.unwrap();
+        assert_eq!((area.direction, area.right), (Vec3::NEG_Y, Vec3::X));
+        assert_eq!((area.width, area.height), (4.0, 4.0));
+        assert!(lit.cone.is_none());
+        // Facing along X, its width runs along Z.
+        world
+            .set_property(light, "Direction", vector(1.0, 0.0, 0.0))
+            .unwrap();
+        let list = build_draw_list(&world, &Assets::default(), camera());
+        assert!((list.lights[0].position - Vec3::new(2.05, 10.0, 0.0)).length() < 1e-4);
+        assert_eq!(list.lights[0].rect.unwrap().right, Vec3::Z);
     }
 
     #[test]

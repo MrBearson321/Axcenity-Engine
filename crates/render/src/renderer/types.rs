@@ -133,15 +133,19 @@ pub(super) struct LightRaw {
     /// Position, and range in the fourth number.
     pub(super) position_range: [f32; 4],
     /// Linear color times brightness, and the cosine of the cone's edge in
-    /// the fourth number (-2 for a point light).
+    /// the fourth number (-2 for a point light, -3 for a rect light).
     pub(super) radiance_cone: [f32; 4],
-    /// Where a spot light points, and the cosine where its edge starts to fade.
+    /// Where a spot light points (or a rect light faces), and the cosine
+    /// where its edge starts to fade.
     pub(super) direction_inner: [f32; 4],
     /// A spot light's layer of the spot shadow map, or a point light's
     /// place in the point shadow map (its six layers start at six times
     /// it), or -1 for no shadows. Then the width of one of its shadow
     /// texels per stud from the light.
     pub(super) shadow: [f32; 4],
+    /// A rect light's half width along its right (the first three, that
+    /// long), and its half height in the fourth.
+    pub(super) rect: [f32; 4],
 }
 
 /// The most spot lights that cast shadows at once (Ultra's). The graphics

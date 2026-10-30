@@ -26,6 +26,7 @@ pub struct RibbonButton<'a> {
     selected: bool,
     color: Option<Color32>,
     family: FontFamily,
+    dropdown: bool,
 }
 
 impl<'a> RibbonButton<'a> {
@@ -36,6 +37,7 @@ impl<'a> RibbonButton<'a> {
             selected: false,
             color: None,
             family: FontFamily::Proportional,
+            dropdown: false,
         }
     }
 
@@ -57,6 +59,12 @@ impl<'a> RibbonButton<'a> {
         self.family = family;
         self
     }
+
+    /// Marked with a small caret, for a button that opens a menu.
+    pub fn dropdown(mut self) -> Self {
+        self.dropdown = true;
+        self
+    }
 }
 
 // `Widget` is egui's trait for things `ui.add` can draw. Implementing it is
@@ -66,8 +74,13 @@ impl egui::Widget for RibbonButton<'_> {
         let density = theme::density(ui.ctx());
         let palette = theme::palette(ui.ctx());
         let compact = density == Density::Compact;
+        let caption = if self.dropdown && !compact {
+            format!("{} {}", self.label, theme::icons::CARET_DOWN)
+        } else {
+            self.label.to_string()
+        };
         let label = ui.painter().layout_no_wrap(
-            self.label.to_string(),
+            caption,
             FontId::proportional(type_scale::CAPTION),
             // Replaced by the real colour when it's painted.
             Color32::PLACEHOLDER,
@@ -138,6 +151,15 @@ impl egui::Widget for RibbonButton<'_> {
                 FontId::new(ICON_SIZE, self.family),
                 icon_color,
             );
+            if compact && self.dropdown {
+                painter.text(
+                    rect.right_bottom() - egui::vec2(3.0, 2.0),
+                    egui::Align2::RIGHT_BOTTOM,
+                    theme::icons::CARET_DOWN,
+                    FontId::proportional(8.0),
+                    text_color,
+                );
+            }
             if !compact {
                 let at = egui::pos2(
                     rect.center().x - label.size().x / 2.0,

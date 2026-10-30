@@ -38,8 +38,9 @@ mod weather;
 
 pub use camera::{FlyCamera, MoveKeys};
 pub use draw_list::{
-    LightMarker, Poses, UiFrame, attach_ui_textures, build_draw_list, build_draw_list_posed,
-    build_draw_list_with_ui, build_draw_list_with_ui_interaction, light_markers,
+    LightMarker, MarkerKind, Mount, Poses, UiFrame, attach_ui_textures, build_draw_list,
+    build_draw_list_posed, build_draw_list_with_ui, build_draw_list_with_ui_interaction,
+    light_markers, mount_of,
 };
 pub use foliage::brush_color as foliage_brush_color;
 pub use light_probes::{LightProbePoints, light_bake_fingerprint, light_probe_points};
@@ -49,8 +50,8 @@ pub use particles::{
     GPU_PARTICLE_THRESHOLD, MAX_PER_EMITTER, Particles, built_in as built_in_particle,
 };
 pub use pick::{
-    CameraView, Hit, Ray, part_box_edges, part_half_extent, pick, pick_hit, pick_hit_skipping,
-    visible_box_edges,
+    CameraView, Hit, Ray, part_box_edges, part_half_extent, part_hit, pick, pick_hit,
+    pick_hit_skipping, visible_box_edges,
 };
 pub use preload::{AssetFile, asset_files};
 pub use terrain::{DEFAULT_DETAIL_DISTANCE, TerrainCache, terrain_hit};

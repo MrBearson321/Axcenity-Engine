@@ -333,9 +333,21 @@ pub(super) fn light_tiles(
 
 pub(super) fn light_raw(light: &Light) -> LightRaw {
     let radiance = linear_color(light.color) * light.brightness * LIGHT_SCALE;
-    let (cone_edge, direction, cone_inner) = match light.cone {
-        None => (-2.0, Vec3::NEG_Y, 0.0),
-        Some(cone) => {
+    let mut rect = [0.0; 4];
+    let (cone_edge, direction, cone_inner) = match (light.cone, light.rect) {
+        (None, None) => (-2.0, Vec3::NEG_Y, 0.0),
+        (None, Some(area)) => {
+            let facing = area.direction.normalize_or(Vec3::NEG_Y);
+            // Square to the way it faces, however `right` was given.
+            let right = (area.right - facing * area.right.dot(facing))
+                .normalize_or(facing.any_orthogonal_vector());
+            let half_width = area.width.max(0.0) * 0.5;
+            rect = (right * half_width)
+                .extend(area.height.max(0.0) * 0.5)
+                .to_array();
+            (-3.0, facing, 0.0)
+        }
+        (Some(cone), _) => {
             let half = (cone.angle_degrees.clamp(1.0, 179.0) * 0.5).to_radians();
             (
                 half.cos(),
@@ -349,6 +361,7 @@ pub(super) fn light_raw(light: &Light) -> LightRaw {
         radiance_cone: radiance.extend(cone_edge).to_array(),
         direction_inner: direction.extend(cone_inner).to_array(),
         shadow: [-1.0, 0.0, 0.0, 0.0],
+        rect,
     }
 }
 

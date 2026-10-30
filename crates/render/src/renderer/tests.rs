@@ -2,7 +2,7 @@ use super::*;
 use crate::ToneMapping;
 use crate::draw_list::{
     AmbientLight, Camera, Channel, Cone, DrawItem, Light, Material, NormalMap, PostProcessing,
-    Shadows, Sky, Sun,
+    RectArea, Shadows, Sky, Sun,
 };
 use crate::graphics::ShadowQuality;
 use glam::Mat4;
@@ -387,6 +387,7 @@ fn point_light(position: Vec3, range: f32) -> Light {
         brightness: 1.0,
         range,
         cone: None,
+        rect: None,
         point_shadows: None,
     }
 }
@@ -571,6 +572,57 @@ fn a_spot_light_lights_only_inside_its_cone() {
         shadows: None,
     });
     assert_eq!(middle_pixel(&device, &queue, &list)[..3], [0, 0, 0]);
+}
+
+#[test]
+fn a_rect_light_lights_what_is_in_front_of_it_from_its_whole_face() {
+    let raw = light_raw(&Light {
+        rect: Some(RectArea {
+            direction: Vec3::new(0.0, 0.0, 3.0),
+            right: Vec3::new(2.0, 0.0, 0.5),
+            width: 4.0,
+            height: 2.0,
+        }),
+        ..point_light(Vec3::ZERO, 10.0)
+    });
+    assert_eq!(raw.radiance_cone[3], -3.0);
+    assert_eq!(raw.direction_inner[..3], [0.0, 0.0, 1.0]);
+    // Its right is made square to the way it faces, half the width long.
+    assert_eq!(raw.rect, [2.0, 0.0, 0.0, 1.0]);
+
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut list = list_of(vec![big_block()]);
+    list.sun.intensity = 0.0;
+    // Facing the block's front, between it and the camera.
+    let mut light = point_light(Vec3::new(0.0, 0.0, -1.0), 10.0);
+    light.rect = Some(RectArea {
+        direction: Vec3::NEG_Z,
+        right: Vec3::X,
+        width: 2.0,
+        height: 2.0,
+    });
+    list.lights.push(light);
+    let lit = middle_pixel(&device, &queue, &list);
+    assert!(lit[0] > 40, "in front of it: {lit:?}");
+    // Turned away, its back gives no light.
+    list.lights[0].rect.as_mut().unwrap().direction = Vec3::Z;
+    assert_eq!(middle_pixel(&device, &queue, &list)[..3], [0, 0, 0]);
+    // Moved off to one side but still facing the same way, a wide one still
+    // reaches the block from the near end of its face.
+    list.lights[0].position = Vec3::new(6.0, 0.0, -1.0);
+    list.lights[0].rect = Some(RectArea {
+        direction: Vec3::NEG_Z,
+        right: Vec3::X,
+        width: 1.0,
+        height: 1.0,
+    });
+    let narrow = middle_pixel(&device, &queue, &list);
+    list.lights[0].rect.as_mut().unwrap().width = 12.0;
+    let wide = middle_pixel(&device, &queue, &list);
+    assert!(wide[0] > narrow[0] + 20, "{narrow:?} vs {wide:?}");
 }
 
 #[test]

@@ -182,19 +182,6 @@ fn storage_info(world: &World) -> block_editor::ObjectInfo {
     }
 }
 
-pub(super) fn overlay_button(
-    ui: &mut egui::Ui,
-    on: &mut bool,
-    icon: &'static str,
-    label: &'static str,
-    hint: &'static str,
-) {
-    let button = RibbonButton::new(icon, label).selected(*on);
-    if ui.add(button).on_hover_text(hint).clicked() {
-        *on = !*on;
-    }
-}
-
 pub(super) fn overlay_menu_item(
     ui: &mut egui::Ui,
     on: &mut bool,
@@ -278,7 +265,7 @@ impl EditorApp {
             self.undo();
         }
         if let Some(tool) = keys.tool {
-            self.tool = tool;
+            self.toggle_tool(tool);
         }
         if keys.toggle && self.tool == Tool::Angular {
             self.extend_angular();

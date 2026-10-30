@@ -10,6 +10,7 @@ Foliage is painted onto the terrain the way materials are: a brush, a density, a
 |---|---|
 | Placement | World studs and the sample grid |
 | `brush` | Raise, lower, smooth, flatten, sculpt, noise, stamps, material paint, and foliage, with undo records |
+| `convert` | A part turned into ground: samples under it raised to its top and painted (the editor's Solid Modeling ▸ To Terrain) |
 | `generate` | Landscapes from settings and a seed, including presets |
 | `erosion` | Water and gravity |
 | `materials` | Layers by height and slope, blended with paint |

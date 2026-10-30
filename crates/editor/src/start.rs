@@ -49,7 +49,7 @@ const CARD_RADIUS: u8 = 8;
 const PAGE_MARGIN: f32 = 40.0;
 const MAX_PAGE_WIDTH: f32 = 1160.0;
 
-/// The logo, for the header, start screen, About box and splash. Both are
+/// The logo, for the header, start screen and About box. Both are
 /// white on a transparent background, so a tint draws them in any colour
 /// (egui multiplies an image by its tint).
 pub struct Brand {

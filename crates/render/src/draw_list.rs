@@ -1003,10 +1003,27 @@ pub struct Light {
     pub range: f32,
     /// `None` shines in every direction (a point light), `Some` in a cone.
     pub cone: Option<Cone>,
-    /// `Some` if a point light casts shadows (a PointLight's `Shadows`).
-    /// Only the nearest few to the camera do, as the graphics settings
-    /// allow. A spot light's shadows are its cone's.
+    /// `Some` for a rect light: it shines from a rectangle centered on
+    /// `position`, out of its front only. Ignored with a `cone`.
+    pub rect: Option<RectArea>,
+    /// `Some` if a point light (or a rect light) casts shadows (a
+    /// PointLight's `Shadows`), from `position`. Only the nearest few to
+    /// the camera do, as the graphics settings allow. A spot light's
+    /// shadows are its cone's.
     pub point_shadows: Option<PointShadows>,
+}
+
+/// The rectangle a rect light shines from, like a window or a softbox.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RectArea {
+    /// The way its front faces. Doesn't need to be normalized.
+    pub direction: Vec3,
+    /// Along its width, square to `direction`. Doesn't need to be
+    /// normalized.
+    pub right: Vec3,
+    /// Its width (along `right`) and height, in studs.
+    pub width: f32,
+    pub height: f32,
 }
 
 /// How a point light casts shadows, on every side of it.

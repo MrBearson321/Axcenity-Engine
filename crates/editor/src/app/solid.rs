@@ -1,6 +1,6 @@
 //! The ribbon's Solid Modeling group (Phase 50): Union, Negate, Intersect
 //! and Separate, each one undo step that keeps the whole world
-//! (`History::record_world`).
+//! (`History::record_world`), and To Terrain (`to_terrain.rs`).
 //!
 //! Union and Intersect combine the selected parts with `mesh_edit` and save
 //! the result as `assets/models/<name>.union.glb` (the file stays when the
@@ -24,14 +24,16 @@ pub enum SolidAction {
     Negate,
     Intersect,
     Separate,
+    ToTerrain,
 }
 
 impl SolidAction {
-    pub const ALL: [SolidAction; 4] = [
+    pub const ALL: [SolidAction; 5] = [
         SolidAction::Union,
         SolidAction::Negate,
         SolidAction::Intersect,
         SolidAction::Separate,
+        SolidAction::ToTerrain,
     ];
 
     pub fn label(self) -> &'static str {
@@ -40,6 +42,7 @@ impl SolidAction {
             SolidAction::Negate => "Negate",
             SolidAction::Intersect => "Intersect",
             SolidAction::Separate => "Separate",
+            SolidAction::ToTerrain => "To Terrain",
         }
     }
 
@@ -49,6 +52,7 @@ impl SolidAction {
             SolidAction::Negate => icons::SUBTRACT,
             SolidAction::Intersect => icons::INTERSECT_SQUARE,
             SolidAction::Separate => icons::ARROWS_SPLIT,
+            SolidAction::ToTerrain => icons::MOUNTAINS,
         }
     }
 
@@ -69,6 +73,10 @@ impl SolidAction {
             SolidAction::Separate => {
                 "Break the selected UnionOperations back into the parts they were made of."
             }
+            SolidAction::ToTerrain => {
+                "Turn the selected parts into ground: the Terrain under each rises to its top \
+                 and is painted with the layer most like it, and the part is removed."
+            }
         }
     }
 
@@ -78,6 +86,7 @@ impl SolidAction {
             SolidAction::Union | SolidAction::Intersect => "Select two or more parts.",
             SolidAction::Negate => "Select a Part or a negated part.",
             SolidAction::Separate => "Select a UnionOperation.",
+            SolidAction::ToTerrain => "Select parts over a Terrain.",
         }
     }
 
@@ -95,6 +104,14 @@ impl SolidAction {
             SolidAction::Separate => parts
                 .iter()
                 .any(|&id| class(id) == Some(ClassName::UnionOperation)),
+            SolidAction::ToTerrain => {
+                !parts.is_empty()
+                    && world.descendants(world.workspace()).into_iter().any(|id| {
+                        world
+                            .get(id)
+                            .is_some_and(|instance| instance.class() == ClassName::Terrain)
+                    })
+            }
         }
     }
 }
@@ -123,6 +140,7 @@ impl EditorApp {
             SolidAction::Intersect => self.combine_selected(Operation::Intersect),
             SolidAction::Negate => self.negate_selected(),
             SolidAction::Separate => self.separate_selected(),
+            SolidAction::ToTerrain => self.convert_to_terrain(),
         }
     }
 

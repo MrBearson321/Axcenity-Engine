@@ -50,6 +50,7 @@ pub enum Insertable {
     ReverbZone,
     PointLight,
     SpotLight,
+    RectLight,
     /// A reflection probe, in the selected part or a new invisible box.
     ReflectionProbe,
     /// A light probe volume, in the selected part or a new invisible box.
@@ -181,8 +182,12 @@ impl Insertable {
         Insertable::SoundEffect(ClassName::LowPassSoundEffect),
         Insertable::SoundEffect(ClassName::HighPassSoundEffect),
     ];
-    /// Lights shine from the part they are inside.
-    pub const LIGHTS: [Insertable; 2] = [Insertable::PointLight, Insertable::SpotLight];
+    /// Lights shine from the part they are inside, or stand free.
+    pub const LIGHTS: [Insertable; 3] = [
+        Insertable::PointLight,
+        Insertable::SpotLight,
+        Insertable::RectLight,
+    ];
     /// Ribbon ▸ Lighting ▸ Reflections.
     pub const PROBES: [Insertable; 2] = [Insertable::ReflectionProbe, Insertable::LightProbeVolume];
     /// Ribbon ▸ Lighting ▸ Sky.
@@ -330,6 +335,7 @@ impl Insertable {
             Insertable::ReverbZone => "Reverb Zone",
             Insertable::PointLight => "PointLight",
             Insertable::SpotLight => "SpotLight",
+            Insertable::RectLight => "RectLight",
             Insertable::ReflectionProbe => "Reflection Probe",
             Insertable::LightProbeVolume => "Light Probes",
             Insertable::Atmosphere => "Atmosphere",
@@ -408,6 +414,7 @@ impl Insertable {
             Insertable::ReverbZone => ClassName::ReverbZone,
             Insertable::PointLight => ClassName::PointLight,
             Insertable::SpotLight => ClassName::SpotLight,
+            Insertable::RectLight => ClassName::RectLight,
             Insertable::ReflectionProbe => ClassName::ReflectionProbe,
             Insertable::LightProbeVolume => ClassName::LightProbeVolume,
             Insertable::Atmosphere => ClassName::Atmosphere,
@@ -531,8 +538,8 @@ pub fn page_layout_for(world: &World, near: Option<InstanceId>) -> Option<Instan
         })
 }
 
-/// True when a new light would be parented to a part, which is the only
-/// place a light is drawn.
+/// True when a new light (or ParticleEmitter, ReflectionProbe, …) would be
+/// parented to a part.
 pub fn light_has_part_parent(world: &World, near: Option<InstanceId>) -> bool {
     world
         .get(insert_parent(world, near, Insertable::PointLight))
@@ -987,6 +994,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                     Insertable::Sound
                         | Insertable::PointLight
                         | Insertable::SpotLight
+                        | Insertable::RectLight
                         | Insertable::ReflectionProbe
                         | Insertable::LightProbeVolume
                         | Insertable::ParticleEmitter

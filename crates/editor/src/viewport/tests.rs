@@ -57,3 +57,35 @@ fn opening_another_project_keeps_the_flying_speed() {
     assert_eq!(viewport.camera.position, START_CAMERA_POSITION);
     assert_eq!(viewport.camera.speed(), speed);
 }
+
+#[test]
+fn a_light_dragged_by_its_icon_follows_the_mouse_in_the_plane_it_started_in() {
+    let mut world = World::new();
+    let id = world.create(ClassName::PointLight).unwrap();
+    let drag = IconDrag {
+        id,
+        start: Vec3::new(0.0, 2.0, -10.0),
+        grab_offset: Vec3::ZERO,
+        normal: Vec3::NEG_Z,
+    };
+    let ray = |toward: Vec3| axcenity_scene::Ray {
+        origin: Vec3::ZERO,
+        direction: toward.normalize(),
+    };
+    let snap = Snap {
+        move_on: false,
+        ..Snap::default()
+    };
+    let at = drag.update(ray(Vec3::new(3.0, 1.0, -10.0)), &snap).unwrap();
+    assert!(at.abs_diff_eq(Vec3::new(3.0, 1.0, -10.0), 1e-4), "{at}");
+    // On the move grid, each axis moves in whole steps.
+    let snap = Snap {
+        move_on: true,
+        move_step: 1.0,
+        ..Snap::default()
+    };
+    let at = drag.update(ray(Vec3::new(3.4, 1.0, -10.0)), &snap).unwrap();
+    assert!(at.abs_diff_eq(Vec3::new(3.0, 1.0, -10.0), 1e-4), "{at}");
+    // Looking away from the plane, it stays where it is.
+    assert!(drag.update(ray(Vec3::Z), &snap).is_none());
+}

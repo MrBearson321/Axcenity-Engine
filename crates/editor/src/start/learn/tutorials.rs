@@ -470,7 +470,7 @@ pub(in crate::start) const TUTORIALS: &[Tutorial] = &[
     Tutorial {
         title: "Light a scene",
         icon: icons::LIGHTBULB,
-        summary: "Add point and spot lights to parts and tune them.",
+        summary: "Add point, spot and rect lights, in parts or on their own, and tune them.",
         sample: "hello-lights",
         sample_name: "Hello Lights",
         steps: &[
@@ -494,13 +494,16 @@ pub(in crate::start) const TUTORIALS: &[Tutorial] = &[
             },
             Step {
                 title: "Add a light",
-                text: "Select a part, then press PointLight or SpotLight in the Lights & Sky \
-                       group of the World tab. The light goes into the part.",
+                text: "Select a part, then press PointLight, SpotLight or RectLight in the \
+                       Lights & Sky group of the World tab. The light goes into the part. With \
+                       nothing selected, it stands on its own where the camera looks, shown as \
+                       an icon: drag the icon, or use Move and Rotate, to place it.",
                 picture: Some(Picture::Ribbon {
                     tab: "World",
                     buttons: &[
                         (icons::LIGHTBULB, "PointLight"),
                         (icons::FLASHLIGHT, "SpotLight"),
+                        (icons::FRAME_CORNERS, "RectLight"),
                         (icons::SUN, "Atmosphere"),
                         (icons::SPARKLE, "Particles"),
                     ],
@@ -527,7 +530,12 @@ pub(in crate::start) const TUTORIALS: &[Tutorial] = &[
                 picture: None,
             },
         ],
-        look_up: &["PointLight", "SpotLight", "PointLight.Brightness"],
+        look_up: &[
+            "PointLight",
+            "SpotLight",
+            "RectLight",
+            "PointLight.Brightness",
+        ],
     },
     Tutorial {
         title: "Play a sound",

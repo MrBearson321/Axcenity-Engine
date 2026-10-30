@@ -175,10 +175,16 @@ pub enum ClassName {
     LowPassSoundEffect,
     /// Inside a Sound or SoundGroup: lets through only what's above `Cutoff`.
     HighPassSoundEffect,
-    /// Light that shines in every direction from just above its parent part.
+    /// Light that shines in every direction from just above its parent
+    /// part, or from its own `Position` when it isn't in a part.
     PointLight,
-    /// Light that shines in a cone from just above its parent part.
+    /// Light that shines in a cone from just above its parent part, or
+    /// from its own `Position` when it isn't in a part.
     SpotLight,
+    /// Light that shines from a rectangle `Width` by `Height` studs, out of
+    /// its front only, like a window or a softbox: from just above its
+    /// parent part, or from its own `Position` when it isn't in a part.
+    RectLight,
     /// Inside a Part: what's in the part's box reflects the world as the
     /// editor baked it from the part's middle (`Bake`), not the sky.
     ReflectionProbe,
@@ -380,7 +386,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 121] = [
+    pub const ALL: [ClassName; 122] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -436,6 +442,7 @@ impl ClassName {
         ClassName::HighPassSoundEffect,
         ClassName::PointLight,
         ClassName::SpotLight,
+        ClassName::RectLight,
         ClassName::ReflectionProbe,
         ClassName::LightProbeVolume,
         ClassName::Atmosphere,
@@ -565,6 +572,7 @@ impl ClassName {
             ClassName::HighPassSoundEffect => "HighPassSoundEffect",
             ClassName::PointLight => "PointLight",
             ClassName::SpotLight => "SpotLight",
+            ClassName::RectLight => "RectLight",
             ClassName::ReflectionProbe => "ReflectionProbe",
             ClassName::LightProbeVolume => "LightProbeVolume",
             ClassName::Atmosphere => "Atmosphere",
@@ -668,7 +676,7 @@ impl ClassName {
             ClassName::LocalScript => &["Script", "LuaSourceContainer"],
             ClassName::TextButton => &["GuiButton", "GuiObject", "GuiBase2d"],
             ClassName::ScreenGui | ClassName::BillboardGui => LAYER,
-            ClassName::PointLight | ClassName::SpotLight => &["Light"],
+            ClassName::PointLight | ClassName::SpotLight | ClassName::RectLight => &["Light"],
             class if class.is_joint() || class.is_mover() => &["Constraint"],
             class if class.is_sound_effect() => &["SoundEffect"],
             class if class.is_value_object() => &["ValueBase"],
@@ -686,6 +694,21 @@ impl ClassName {
     /// DamageZone or SpawnLocation: a solid in the world (`BasePart`).
     pub fn is_base_part(self) -> bool {
         self.has_model() || self.is_part()
+    }
+
+    /// A PointLight, SpotLight or RectLight.
+    pub fn is_light(self) -> bool {
+        matches!(
+            self,
+            ClassName::PointLight | ClassName::SpotLight | ClassName::RectLight
+        )
+    }
+
+    /// A light or a ParticleEmitter: inside a part it works from the part,
+    /// and elsewhere from its own `Position` and `Orientation`
+    /// ([`free_standing_properties`]).
+    pub fn can_stand_free(self) -> bool {
+        self.is_light() || self == ClassName::ParticleEmitter
     }
 
     /// A MeshPart or UnionOperation: drawn and collided as the model its
@@ -1022,29 +1045,55 @@ impl ClassName {
                 ("ClockTime", Value::Number(DEFAULT_CLOCK_TIME)),
                 ("GeographicLatitude", Value::Number(DEFAULT_LATITUDE)),
             ],
-            ClassName::PointLight => vec![
-                ("Enabled", Value::Bool(true)),
-                ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
-                ("Brightness", Value::Number(1.0)),
-                // How far the light reaches, in studs.
-                ("Range", Value::Number(16.0)),
-                // Whether parts around it cast shadows. Off, so worlds
-                // saved without it look as they did.
-                ("Shadows", Value::Bool(false)),
-            ],
-            ClassName::SpotLight => vec![
-                ("Enabled", Value::Bool(true)),
-                ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
-                ("Brightness", Value::Number(1.0)),
-                ("Range", Value::Number(32.0)),
-                // The width of the cone in degrees.
-                ("Angle", Value::Number(60.0)),
-                // Where the cone points, relative to the parent part.
-                ("Direction", Value::Vector3(Vector3::new(0.0, -1.0, 0.0))),
-                // Whether parts in the beam cast shadows. Off, so worlds
-                // saved without it look as they did.
-                ("Shadows", Value::Bool(false)),
-            ],
+            ClassName::PointLight => [
+                vec![
+                    ("Enabled", Value::Bool(true)),
+                    ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                    ("Brightness", Value::Number(1.0)),
+                    // How far the light reaches, in studs.
+                    ("Range", Value::Number(16.0)),
+                    // Whether parts around it cast shadows. Off, so worlds
+                    // saved without it look as they did.
+                    ("Shadows", Value::Bool(false)),
+                ],
+                free_standing_properties(),
+            ]
+            .concat(),
+            ClassName::SpotLight => [
+                vec![
+                    ("Enabled", Value::Bool(true)),
+                    ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                    ("Brightness", Value::Number(1.0)),
+                    ("Range", Value::Number(32.0)),
+                    // The width of the cone in degrees.
+                    ("Angle", Value::Number(60.0)),
+                    // Where the cone points, relative to the parent part
+                    // (or to its own Orientation when it isn't in one).
+                    ("Direction", Value::Vector3(Vector3::new(0.0, -1.0, 0.0))),
+                    // Whether parts in the beam cast shadows. Off, so worlds
+                    // saved without it look as they did.
+                    ("Shadows", Value::Bool(false)),
+                ],
+                free_standing_properties(),
+            ]
+            .concat(),
+            ClassName::RectLight => [
+                vec![
+                    ("Enabled", Value::Bool(true)),
+                    ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                    ("Brightness", Value::Number(1.0)),
+                    ("Range", Value::Number(24.0)),
+                    // The rectangle it shines from, in studs: across (along
+                    // its X) and up.
+                    ("Width", Value::Number(4.0)),
+                    ("Height", Value::Number(4.0)),
+                    // The way its front faces, as a SpotLight's Direction.
+                    ("Direction", Value::Vector3(Vector3::new(0.0, -1.0, 0.0))),
+                    ("Shadows", Value::Bool(false)),
+                ],
+                free_standing_properties(),
+            ]
+            .concat(),
             ClassName::ReflectionProbe => vec![
                 // The bake the editor saved (Bake Reflection Probes), such as
                 // "assets/probes/Hall.probe.hdr". Empty until it's baked,
@@ -1218,44 +1267,48 @@ impl ClassName {
                 ("Intensity", Value::Number(0.35)),
                 ("Threshold", Value::Number(1.0)),
             ],
-            ClassName::ParticleEmitter => vec![
-                ("Enabled", Value::Bool(true)),
-                // The picture each particle shows, unless Texture names an
-                // image file in the project ("assets/particles/spark.png").
-                ("ParticleType", Value::ParticleType(ParticleType::Spark)),
-                ("Texture", Value::String(String::new())),
-                // Particles a second while Enabled.
-                ("Rate", Value::Number(20.0)),
-                // Seconds each particle lives (each a little more or less).
-                ("Lifetime", Value::Number(2.0)),
-                // Studs a second, out along Direction (relative to the
-                // part), spread in a cone SpreadAngle degrees wide.
-                ("Speed", Value::Number(5.0)),
-                ("Direction", Value::Vector3(Vector3::new(0.0, 1.0, 0.0))),
-                ("SpreadAngle", Value::Number(30.0)),
-                // Added to the speed each second, in world studs (gravity is
-                // (0, -196.2, 0)), and how quickly particles slow down.
-                ("Acceleration", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
-                ("Drag", Value::Number(0.0)),
-                // On, Drag slows particles toward the Workspace's
-                // GlobalWind instead of to a stop, so the wind carries them.
-                ("WindAffectsDrag", Value::Bool(false)),
-                // Studs across, color and transparency at birth, each
-                // blending to its End value by the end of the particle's life.
-                ("Size", Value::Number(1.0)),
-                ("SizeEnd", Value::Number(1.0)),
-                ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
-                ("ColorEnd", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
-                ("Transparency", Value::Number(0.0)),
-                ("TransparencyEnd", Value::Number(1.0)),
-                // Starting turn, in degrees, and degrees a second.
-                ("Rotation", Value::Number(0.0)),
-                ("RotSpeed", Value::Number(0.0)),
-                // 0 paints over what's behind; 1 adds light (fire, sparks).
-                ("LightEmission", Value::Number(0.0)),
-                // Above 1 glows (and blooms).
-                ("Brightness", Value::Number(1.0)),
-            ],
+            ClassName::ParticleEmitter => [
+                vec![
+                    ("Enabled", Value::Bool(true)),
+                    // The picture each particle shows, unless Texture names an
+                    // image file in the project ("assets/particles/spark.png").
+                    ("ParticleType", Value::ParticleType(ParticleType::Spark)),
+                    ("Texture", Value::String(String::new())),
+                    // Particles a second while Enabled.
+                    ("Rate", Value::Number(20.0)),
+                    // Seconds each particle lives (each a little more or less).
+                    ("Lifetime", Value::Number(2.0)),
+                    // Studs a second, out along Direction (relative to the
+                    // part), spread in a cone SpreadAngle degrees wide.
+                    ("Speed", Value::Number(5.0)),
+                    ("Direction", Value::Vector3(Vector3::new(0.0, 1.0, 0.0))),
+                    ("SpreadAngle", Value::Number(30.0)),
+                    // Added to the speed each second, in world studs (gravity is
+                    // (0, -196.2, 0)), and how quickly particles slow down.
+                    ("Acceleration", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                    ("Drag", Value::Number(0.0)),
+                    // On, Drag slows particles toward the Workspace's
+                    // GlobalWind instead of to a stop, so the wind carries them.
+                    ("WindAffectsDrag", Value::Bool(false)),
+                    // Studs across, color and transparency at birth, each
+                    // blending to its End value by the end of the particle's life.
+                    ("Size", Value::Number(1.0)),
+                    ("SizeEnd", Value::Number(1.0)),
+                    ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                    ("ColorEnd", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                    ("Transparency", Value::Number(0.0)),
+                    ("TransparencyEnd", Value::Number(1.0)),
+                    // Starting turn, in degrees, and degrees a second.
+                    ("Rotation", Value::Number(0.0)),
+                    ("RotSpeed", Value::Number(0.0)),
+                    // 0 paints over what's behind; 1 adds light (fire, sparks).
+                    ("LightEmission", Value::Number(0.0)),
+                    // Above 1 glows (and blooms).
+                    ("Brightness", Value::Number(1.0)),
+                ],
+                free_standing_properties(),
+            ]
+            .concat(),
             ClassName::ScreenGui => vec![
                 ("Class", Value::String(String::new())),
                 ("Id", Value::String(String::new())),
@@ -2452,6 +2505,7 @@ impl ClassName {
             | ClassName::BillboardGui
             | ClassName::PointLight
             | ClassName::SpotLight
+            | ClassName::RectLight
             | ClassName::ReflectionProbe
             | ClassName::LightProbeVolume
             | ClassName::Atmosphere
@@ -2794,6 +2848,17 @@ fn body_properties() -> [(&'static str, Value); 4] {
             "AssemblyAngularVelocity",
             Value::Vector3(Vector3::new(0.0, 0.0, 0.0)),
         ),
+    ]
+}
+
+/// Where a light or ParticleEmitter is when it isn't inside a part, as in
+/// Unreal, where a light needs no mesh: its place and turn in the world, in
+/// a Part's terms (studs; degrees, Z then X then Y). Inside a part it
+/// shines from the part and these aren't used.
+pub fn free_standing_properties() -> Vec<(&'static str, Value)> {
+    vec![
+        ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+        ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
     ]
 }
 

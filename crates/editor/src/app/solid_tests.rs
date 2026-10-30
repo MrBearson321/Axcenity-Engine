@@ -67,6 +67,15 @@ fn union_cuts_the_negated_block_out_and_separate_gives_the_parts_back_unchanged(
     let folder = copy_of_example("hello-part", "solid-union");
     let mut app = EditorApp::new(Some(&folder));
     let (wall, door) = wall_and_negated_block(&mut app);
+    // A red door, so its cut faces keep a look of their own (parts that
+    // look the same share one).
+    app.world
+        .set_property(
+            door,
+            "Color",
+            Value::Color3(axcenity_core::Color3::new(1.0, 0.0, 0.0)),
+        )
+        .unwrap();
     let before: Vec<_> = [wall, door]
         .iter()
         .map(|&id| crate::history::snapshot(&app.world, id))
@@ -191,4 +200,65 @@ fn the_explorer_hides_the_parts_kept_inside_a_union() {
             .any(|row| row.name == "Wall" || row.name == "Door")
     );
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn to_terrain_raises_the_ground_to_a_part_s_top_and_removes_it_as_one_step() {
+    // hello-part has a 512-stud Terrain from y = -32 to 96, with Grass,
+    // Dirt and Rock layers.
+    let folder = copy_of_example("hello-part", "solid-to-terrain");
+    let mut app = EditorApp::new(Some(&folder));
+    let terrain = app
+        .world
+        .descendants(app.world.workspace())
+        .into_iter()
+        .find(|&id| class_of(&app, id) == ClassName::Terrain)
+        .unwrap();
+    let placement = axcenity_terrain::Placement::of(app.world.get(terrain).unwrap()).unwrap();
+    let ground = |app: &EditorApp, x: f32, z: f32| {
+        placement
+            .ground_y(app.world.terrain(terrain).unwrap(), x, z)
+            .unwrap()
+    };
+    let before = ground(&app, 100.0, 100.0);
+    // A hill, as a block well above the ground.
+    let hill = part(
+        &mut app,
+        "Hill",
+        [24.0, 4.0, 24.0],
+        [100.0, before + 20.0, 100.0],
+    );
+    app.select_many(vec![hill]);
+    assert!(SolidAction::ToTerrain.usable(&app.world, &app.solid_parts()));
+    app.solid_action(SolidAction::ToTerrain);
+    assert_eq!(app.history.undo_label(), Some("Convert 1 part to terrain"));
+    assert!(
+        app.world.get(hill).unwrap().parent().is_none(),
+        "the part is gone"
+    );
+    let top = before + 22.0;
+    assert!(
+        (ground(&app, 100.0, 100.0) - top).abs() < 0.6,
+        "{}",
+        ground(&app, 100.0, 100.0)
+    );
+    assert!(
+        (ground(&app, 150.0, 150.0) - before).abs() < 1.0,
+        "elsewhere as it was"
+    );
+
+    app.undo();
+    assert!(app.world.get(hill).unwrap().parent().is_some());
+    assert!((ground(&app, 100.0, 100.0) - before).abs() < 1e-3);
+
+    // A part off the terrain changes nothing, and says why.
+    let away = part(&mut app, "Away", [4.0, 4.0, 4.0], [2000.0, 0.0, 0.0]);
+    app.select_many(vec![away]);
+    app.solid_action(SolidAction::ToTerrain);
+    assert!(app.world.get(away).unwrap().parent().is_some());
+    assert!(
+        super::tests::last_line(&app)
+            .text
+            .contains("over the Terrain")
+    );
 }

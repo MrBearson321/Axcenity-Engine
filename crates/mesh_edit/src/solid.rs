@@ -132,8 +132,23 @@ pub fn combine(keep: &[Solid], cut: &[Solid], operation: Operation) -> Result<Co
     let to_frame = first.rotation.inverse();
     let mut materials: Vec<GlbMaterial> = Vec::new();
     let mut place = |solid: &Solid| {
-        let offset = materials.len() as u32;
-        materials.extend(solid.materials.iter().cloned());
+        // Parts that look the same share one surface, so where their
+        // faces meet in a plane they become one face.
+        let mut index_of: Vec<u32> = solid
+            .materials
+            .iter()
+            .map(|material| {
+                let found = materials.iter().position(|seen| seen == material);
+                found.unwrap_or_else(|| {
+                    materials.push(material.clone());
+                    materials.len() - 1
+                }) as u32
+            })
+            .collect();
+        if index_of.is_empty() {
+            materials.push(crate::glb::plain_material());
+            index_of.push(materials.len() as u32 - 1);
+        }
         let turn = to_frame * solid.rotation;
         let shift = to_frame * (solid.position - first.position);
         let mut mesh = solid.mesh.clone();
@@ -144,10 +159,11 @@ pub fn combine(keep: &[Solid], cut: &[Solid], operation: Operation) -> Result<Co
             *normal = turn * *normal;
         }
         for triangle in &mut mesh.triangles {
-            triangle.surface = match triangle.surface {
-                Surface::Outer(index) => Surface::Outer(offset + index),
-                Surface::Interior => Surface::Outer(offset),
+            let index = match triangle.surface {
+                Surface::Outer(index) => index as usize,
+                Surface::Interior => 0,
             };
+            triangle.surface = Surface::Outer(index_of[index.min(index_of.len() - 1)]);
         }
         mesh
     };
@@ -166,6 +182,18 @@ pub fn combine(keep: &[Solid], cut: &[Solid], operation: Operation) -> Result<Co
             _ => "Nothing is left once the negated parts are cut out",
         }
         .to_owned());
+    }
+    // Pieces of one face with a plain look (no texture) join even where
+    // their uvs don't meet, such as two blocks' tops side by side.
+    let plain = |surface: Surface| match surface {
+        Surface::Outer(index) => materials
+            .get(index as usize)
+            .is_some_and(|material| material.base_color_texture.is_none()),
+        Surface::Interior => false,
+    };
+    let merged = crate::merge::merge_flat_faces(&result, &plain);
+    if merged.open_edges() == 0 {
+        result = merged;
     }
     let materials = only_used(&mut result, materials);
     let (min, max) = result.bounds();

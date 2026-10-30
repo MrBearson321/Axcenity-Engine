@@ -9,6 +9,14 @@
 //! again from its outline, leaving out the corners inside it and the ones
 //! that lie in a straight line between flat faces. Both faces beside such a
 //! corner leave it out, so their edges still match.
+//!
+//! Faces are matched by position, not by vertex, so the pieces of one face
+//! that a boolean left as separate polygons are one face again. Pieces only
+//! join where their uvs meet, unless the look has no texture (`plain`): then
+//! any pieces join, and the face's uvs run from 0 to 1 across it again, as
+//! a Part's face does. Each face is then triangulated without needless thin
+//! triangles: edges inside it are flipped until no corner sits inside
+//! another triangle's circle (a Delaunay triangulation).
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -27,6 +35,13 @@ const STRAIGHT: f64 = 1e-6;
 /// fraction; otherwise it's kept as it was.
 const SAME_AREA: f64 = 1e-4;
 
+/// Uvs this close count as the same where two pieces of a face meet.
+const SAME_UV: f32 = 1e-4;
+
+/// Normals are compared on a grid this fine, so faces turned by a part's
+/// rotation (off by about 1e-7) still count as one plane.
+const NORMAL_GRID: f32 = 1e6;
+
 /// Touching triangles in one plane with one surface, which can be filled
 /// again as a whole.
 struct Face {
@@ -44,11 +59,15 @@ struct Face {
     has_inside: bool,
     /// The triangles it's filled with now, as point ids.
     filled: Option<Vec<[u32; 3]>>,
+    /// True if pieces whose uvs don't meet were joined: its uvs are worked
+    /// out again across the whole face.
+    new_uvs: bool,
 }
 
 /// `mesh` with each flat face filled again without the corners it doesn't
-/// need. Unused vertices are dropped.
-pub(crate) fn merge_flat_faces(mesh: &Mesh) -> Mesh {
+/// need. Pieces of a face whose uvs don't meet only join when `plain` says
+/// their surface has no texture. Unused vertices are dropped.
+pub(crate) fn merge_flat_faces(mesh: &Mesh, plain: &dyn Fn(Surface) -> bool) -> Mesh {
     // Number the distinct positions.
     let mut ids: HashMap<[u32; 3], u32> = HashMap::new();
     let mut points: Vec<DVec3> = Vec::new();
@@ -74,7 +93,7 @@ pub(crate) fn merge_flat_faces(mesh: &Mesh) -> Mesh {
         .max(min.abs().max(max.abs()).max_element());
     let tolerance = STRAIGHT * f64::from(size);
 
-    let face_of = group_faces(mesh);
+    let (face_of, mixed) = group_faces(mesh, plain);
     let mut faces: Vec<Face> = Vec::new();
     let mut face_index: HashMap<usize, usize> = HashMap::new();
     for (triangle, root) in face_of.iter().enumerate() {
@@ -89,10 +108,12 @@ pub(crate) fn merge_flat_faces(mesh: &Mesh) -> Mesh {
                 ok: true,
                 has_inside: false,
                 filled: None,
+                new_uvs: false,
             });
             faces.len() - 1
         });
         faces[index].triangles.push(triangle);
+        faces[index].new_uvs |= mixed[triangle];
     }
 
     // Who uses each point: a face, or `None` for triangles in no face. A
@@ -157,14 +178,8 @@ pub(crate) fn merge_flat_faces(mesh: &Mesh) -> Mesh {
         let mut changed = false;
         for face in faces.iter_mut().filter(|face| face.ok) {
             face.filled = None;
-            let drops = face
-                .loops
-                .iter()
-                .flatten()
-                .any(|&point| removable[point as usize]);
-            if !face.has_inside && !drops {
-                continue;
-            }
+            // Every face is filled again, even one with no corner to leave
+            // out, so its triangles are as even as they can be.
             match refill(face, &points, &removable, &corners) {
                 Some(triangles) => face.filled = Some(triangles),
                 None => {
@@ -184,13 +199,20 @@ pub(crate) fn merge_flat_faces(mesh: &Mesh) -> Mesh {
 }
 
 /// For each triangle, the first triangle of its flat face (the face's
-/// name), or `None` if it isn't flat. Triangles are in one face when they
-/// share an edge (the same two vertices), a surface and a normal.
-fn group_faces(mesh: &Mesh) -> Vec<Option<usize>> {
+/// name), or `None` if it isn't flat; and whether it was joined to a piece
+/// whose uvs don't meet its own. Triangles are in one face when they share
+/// an edge (the same two positions), a surface and a normal, and their uvs
+/// meet along that edge or `plain` says the surface has no texture.
+fn group_faces(mesh: &Mesh, plain: &dyn Fn(Surface) -> bool) -> (Vec<Option<usize>>, Vec<bool>) {
+    let grid = |normal: Vec3| (normal * NORMAL_GRID).round().as_ivec3().to_array();
     let key = |triangle: &Triangle| {
-        let [a, b, c] = triangle.corners.map(|c| mesh.normals[c as usize]);
-        (a == b && b == c && a != Vec3::ZERO).then(|| (triangle.surface, position_key(a)))
+        let [a, b, c] = triangle.corners.map(|c| grid(mesh.normals[c as usize]));
+        (a == b && b == c && a != [0; 3]).then_some((triangle.surface, a))
     };
+    let at = |corner: u32| position_key(mesh.positions[corner as usize]);
+    let uv = |corner: u32| mesh.uvs[corner as usize];
+    let meets = |a: u32, b: u32| (uv(a) - uv(b)).abs().max_element() <= SAME_UV;
+    let mut mixed = vec![false; mesh.triangles.len()];
     // Union-find: each triangle points toward the first of its face.
     let mut leader: Vec<usize> = (0..mesh.triangles.len()).collect();
     fn find(leader: &mut [usize], mut at: usize) -> usize {
@@ -200,27 +222,44 @@ fn group_faces(mesh: &Mesh) -> Vec<Option<usize>> {
         }
         at
     }
+    // Each edge by its two positions, with the triangle that has it and
+    // that triangle's corners at its lower and higher position.
     let mut by_edge = HashMap::new();
     for (index, triangle) in mesh.triangles.iter().enumerate() {
         let Some(key) = key(triangle) else { continue };
         let [a, b, c] = triangle.corners;
         for (from, to) in [(a, b), (b, c), (c, a)] {
-            match by_edge.entry((from.min(to), from.max(to), key)) {
+            let (low, high) = if at(from) <= at(to) {
+                (from, to)
+            } else {
+                (to, from)
+            };
+            match by_edge.entry((at(low), at(high), key)) {
                 Entry::Occupied(other) => {
-                    let (x, y) = (find(&mut leader, index), find(&mut leader, *other.get()));
+                    let &(other, other_low, other_high) = other.get();
+                    let continuous = meets(low, other_low) && meets(high, other_high);
+                    if !continuous && !plain(key.0) {
+                        continue;
+                    }
+                    if !continuous {
+                        mixed[index] = true;
+                        mixed[other] = true;
+                    }
+                    let (x, y) = (find(&mut leader, index), find(&mut leader, other));
                     // The smaller index leads, so the result never
                     // depends on the order of the map.
                     leader[x.max(y)] = x.min(y);
                 }
                 Entry::Vacant(slot) => {
-                    slot.insert(index);
+                    slot.insert((index, low, high));
                 }
             }
         }
     }
-    (0..mesh.triangles.len())
+    let faces = (0..mesh.triangles.len())
         .map(|index| key(&mesh.triangles[index]).map(|_| find(&mut leader, index)))
-        .collect()
+        .collect();
+    (faces, mixed)
 }
 
 /// Works out `face`'s outline: the edges only one of its triangles uses
@@ -291,10 +330,11 @@ fn refill(
         let p = points[point as usize] - origin;
         flat[point as usize] = DVec2::new(p.dot(u), p.dot(v));
     }
-    let triangles = fill(&flat, loops.clone());
+    let mut triangles = fill(&flat, loops.clone());
     if !has_outline(&triangles, &loops) {
         return None;
     }
+    flip_to_delaunay(&mut triangles, &flat);
 
     let area = |[a, b, c]: [u32; 3]| {
         let [a, b, c] = [a, b, c].map(|p| points[p as usize]);
@@ -308,7 +348,9 @@ fn refill(
 }
 
 /// The mesh again: each refilled face's new triangles where its first
-/// triangle was, everything else as it was, and only the vertices used.
+/// triangle was, everything else as it was, and only the vertices used. A
+/// face with `new_uvs` gets vertices of its own, with uvs from 0 to 1
+/// across it.
 fn rebuild(
     mesh: &Mesh,
     faces: &[Face],
@@ -316,6 +358,13 @@ fn rebuild(
     face_index: &HashMap<usize, usize>,
     point_of: &[u32],
 ) -> Mesh {
+    // The mesh's vertices, and any new ones after them.
+    let mut source = Mesh {
+        positions: mesh.positions.clone(),
+        normals: mesh.normals.clone(),
+        uvs: mesh.uvs.clone(),
+        triangles: Vec::new(),
+    };
     let mut triangles = Vec::with_capacity(mesh.triangles.len());
     for (index, triangle) in mesh.triangles.iter().enumerate() {
         let face = face_of[index].map(|root| (root, &faces[face_index[&root]]));
@@ -332,6 +381,9 @@ fn rebuild(
                         vertex_at.entry(point_of[corner as usize]).or_insert(corner);
                     }
                 }
+                if face.new_uvs {
+                    spread_uvs(&mut source, face, &mut vertex_at);
+                }
                 for points in face.filled.iter().flatten() {
                     triangles.push(Triangle {
                         corners: points.map(|point| vertex_at[&point]),
@@ -344,17 +396,141 @@ fn rebuild(
     }
 
     let mut compact = Mesh::default();
-    let mut index = vec![u32::MAX; mesh.positions.len()];
+    let mut index = vec![u32::MAX; source.positions.len()];
     for triangle in &mut triangles {
         for corner in &mut triangle.corners {
             let old = *corner as usize;
             if index[old] == u32::MAX {
-                index[old] =
-                    compact.push_vertex(mesh.positions[old], mesh.normals[old], mesh.uvs[old]);
+                index[old] = compact.push_vertex(
+                    source.positions[old],
+                    source.normals[old],
+                    source.uvs[old],
+                );
             }
             *corner = index[old];
         }
     }
     compact.triangles = triangles;
     compact
+}
+
+/// Gives `face`'s points new vertices in `mesh`, with uvs from 0 to 1
+/// across the face's box, the way a Part's face has them: along X and Z
+/// on a face looking up or down, and across and up on one standing.
+fn spread_uvs(mesh: &mut Mesh, face: &Face, vertex_at: &mut HashMap<u32, u32>) {
+    let normal = face.normal.as_vec3().normalize_or(Vec3::Y);
+    let (across, up) = if normal.y.abs() > 0.5 {
+        (Vec3::X, Vec3::Z)
+    } else {
+        let across = Vec3::Y.cross(normal).normalize_or(Vec3::X);
+        (across, normal.cross(across))
+    };
+    let flat = |position: Vec3| glam::Vec2::new(position.dot(across), position.dot(up));
+    // Sorted, so the new vertices come out in the same order every time.
+    let mut points: Vec<(u32, u32)> = vertex_at.iter().map(|(&p, &v)| (p, v)).collect();
+    points.sort_unstable();
+    let (min, max) = points.iter().fold(
+        (glam::Vec2::INFINITY, glam::Vec2::NEG_INFINITY),
+        |(min, max), &(_, vertex)| {
+            let at = flat(mesh.positions[vertex as usize]);
+            (min.min(at), max.max(at))
+        },
+    );
+    let span = (max - min).max(glam::Vec2::splat(1e-6));
+    for (point, vertex) in points {
+        let position = mesh.positions[vertex as usize];
+        let uv = (flat(position) - min) / span;
+        let new = mesh.push_vertex(position, mesh.normals[vertex as usize], uv);
+        vertex_at.insert(point, new);
+    }
+}
+
+/// Flips edges inside `triangles` (counter-clockwise, on the points
+/// `flat`) until no triangle's circle holds the far corner of the one
+/// beside it: of every way to fill the outline, the one with the fewest
+/// thin triangles. The outline itself never changes.
+fn flip_to_delaunay(triangles: &mut [[u32; 3]], flat: &[DVec2]) {
+    let at = |point: u32| flat[point as usize];
+    let orient = |a: u32, b: u32, c: u32| (at(b) - at(a)).perp_dot(at(c) - at(a));
+    // Sizes to measure "inside" against, so nearly round four corners
+    // (a rectangle's) never flip back and forth.
+    let size = triangles
+        .iter()
+        .flatten()
+        .map(|&p| at(p))
+        .fold((DVec2::INFINITY, DVec2::NEG_INFINITY), |(min, max), p| {
+            (min.min(p), max.max(p))
+        });
+    let size = (size.1 - size.0).max_element();
+    // Also stops for NaN.
+    if size.is_nan() || size <= 0.0 {
+        return;
+    }
+    let in_circle_tolerance = 1e-9 * size.powi(4);
+    let turn_tolerance = 1e-12 * size * size;
+    let in_circle = |a: u32, b: u32, c: u32, d: u32| {
+        let [a, b, c] = [a, b, c].map(|p| at(p) - at(d));
+        let lift = |p: DVec2| p.length_squared();
+        let det = a.x * (b.y * lift(c) - lift(b) * c.y) - a.y * (b.x * lift(c) - lift(b) * c.x)
+            + lift(a) * (b.x * c.y - b.y * c.x);
+        det > in_circle_tolerance
+    };
+
+    let mut by_edge: HashMap<(u32, u32), usize> = HashMap::new();
+    for (index, &[a, b, c]) in triangles.iter().enumerate() {
+        for edge in [(a, b), (b, c), (c, a)] {
+            by_edge.insert(edge, index);
+        }
+    }
+    // Each flip makes the triangulation strictly better, so this ends;
+    // the cap only guards against rounding.
+    let mut flips_left = 8 * triangles.len() * triangles.len().max(8);
+    let mut changed = true;
+    while changed && flips_left > 0 {
+        changed = false;
+        for t in 0..triangles.len() {
+            for k in 0..3 {
+                let [a, b, c] = rotated(triangles[t], k);
+                let Some(&u) = by_edge.get(&(b, a)) else {
+                    continue;
+                };
+                let Some(d) = triangles[u].into_iter().find(|&p| p != a && p != b) else {
+                    continue;
+                };
+                // The four corners must make a convex shape to flip.
+                if orient(a, d, c) <= turn_tolerance || orient(d, b, c) <= turn_tolerance {
+                    continue;
+                }
+                if !in_circle(a, b, c, d) {
+                    continue;
+                }
+                for &(x, y) in &[(a, b), (b, c), (c, a)] {
+                    by_edge.remove(&(x, y));
+                }
+                let [e, f, g] = triangles[u];
+                for &(x, y) in &[(e, f), (f, g), (g, e)] {
+                    by_edge.remove(&(x, y));
+                }
+                triangles[t] = [a, d, c];
+                triangles[u] = [d, b, c];
+                for (index, [x, y, z]) in [(t, [a, d, c]), (u, [d, b, c])] {
+                    for edge in [(x, y), (y, z), (z, x)] {
+                        by_edge.insert(edge, index);
+                    }
+                }
+                flips_left = flips_left.saturating_sub(1);
+                changed = true;
+                break;
+            }
+        }
+    }
+}
+
+/// `triangle`'s corners starting from its `k`th.
+fn rotated([a, b, c]: [u32; 3], k: usize) -> [u32; 3] {
+    match k {
+        0 => [a, b, c],
+        1 => [b, c, a],
+        _ => [c, a, b],
+    }
 }

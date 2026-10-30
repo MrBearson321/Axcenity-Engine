@@ -83,7 +83,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 30] = [
+const GROUPS: [(&str, &[&str]); 31] = [
     (
         "Appearance",
         &[
@@ -350,10 +350,14 @@ const GROUPS: [(&str, &[&str]); 30] = [
             "Brightness",
             "Range",
             "Angle",
+            "Width",
+            "Height",
             "Direction",
             "Shadows",
         ],
     ),
+    // Where a light or emitter stands when it isn't in a part.
+    ("Placement", &["Position", "Orientation"]),
     (
         "Emitter",
         &[
@@ -456,10 +460,8 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
                 instance.class(),
                 ClassName::ExposureEffect | ClassName::FogEffect | ClassName::BloomEffect
             ),
-            "Light" => matches!(
-                instance.class(),
-                ClassName::PointLight | ClassName::SpotLight
-            ),
+            "Light" => instance.class().is_light(),
+            "Placement" => instance.class().can_stand_free(),
             "Emitter" | "Particles" => instance.class() == ClassName::ParticleEmitter,
             "Animation" => matches!(instance.class(), ClassName::Animator | ClassName::Animation),
             "Movement" => instance.class().is_character_controller(),

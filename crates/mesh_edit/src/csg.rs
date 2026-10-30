@@ -117,7 +117,7 @@ pub fn boolean(a: &Mesh, b: &Mesh, operation: Operation) -> Mesh {
     if result.is_empty() {
         return result;
     }
-    let merged = merge_flat_faces(&result);
+    let merged = merge_flat_faces(&result, &|_| false);
     // Merging only ever leaves out corners both sides agree on; should it
     // open the mesh anyway, the unmerged one is kept.
     if merged.open_edges() == 0 {
@@ -188,9 +188,15 @@ impl Polygon {
     }
 }
 
-/// `mesh`'s triangles as polygons in the unit box. Triangles with no area
-/// are left out: they have no plane.
+/// `mesh`'s triangles as polygons in the unit box, with touching triangles
+/// in one plane joined into convex polygons (see [`join_flat`]). Triangles
+/// with no area are left out: they have no plane.
 fn polygons(mesh: &Mesh, unit: &Unit) -> Vec<Polygon> {
+    join_flat(triangle_polygons(mesh, unit))
+}
+
+/// Each of `mesh`'s triangles as a polygon in the unit box.
+fn triangle_polygons(mesh: &Mesh, unit: &Unit) -> Vec<Polygon> {
     mesh.triangles
         .iter()
         .filter_map(|triangle| {
@@ -216,6 +222,113 @@ fn polygons(mesh: &Mesh, unit: &Unit) -> Vec<Polygon> {
             })
         })
         .collect()
+}
+
+/// Joins touching polygons in one plane, with one surface and the same
+/// normals and uvs where they meet, while what they make stays convex.
+///
+/// A mesh's quads come as two triangles. Kept apart, every plane that cuts
+/// across the quad cuts its diagonal too, leaving an extra corner in the
+/// middle of the cut, and a cylinder's side cut through comes out as a
+/// zig-zag with twice the corners it needs.
+fn join_flat(polygons: Vec<Polygon>) -> Vec<Polygon> {
+    let key = |vertex: &Vertex| vertex.position.to_array().map(f64::to_bits);
+    let mut polygons: Vec<Option<Polygon>> = polygons.into_iter().map(Some).collect();
+    let mut by_edge: HashMap<([u64; 3], [u64; 3]), usize> = HashMap::new();
+    let edges = |polygon: &Polygon| -> Vec<([u64; 3], [u64; 3])> {
+        let ring = &polygon.vertices;
+        (0..ring.len())
+            .map(|k| (key(&ring[k]), key(&ring[(k + 1) % ring.len()])))
+            .collect()
+    };
+    for (index, polygon) in polygons.iter().enumerate() {
+        for edge in edges(polygon.as_ref().expect("all there")) {
+            by_edge.insert(edge, index);
+        }
+    }
+    for index in 0..polygons.len() {
+        'grow: while let Some(polygon) = &polygons[index] {
+            for (k, (from, to)) in edges(polygon).into_iter().enumerate() {
+                let Some(&other) = by_edge.get(&(to, from)) else {
+                    continue;
+                };
+                if other == index {
+                    continue;
+                }
+                let Some(joined) = polygons[other]
+                    .as_ref()
+                    .and_then(|neighbour| joined(polygon, k, neighbour))
+                else {
+                    continue;
+                };
+                for edge in edges(polygon) {
+                    by_edge.remove(&edge);
+                }
+                for edge in edges(polygons[other].as_ref().expect("checked")) {
+                    by_edge.remove(&edge);
+                }
+                for edge in edges(&joined) {
+                    by_edge.insert(edge, index);
+                }
+                polygons[index] = Some(joined);
+                polygons[other] = None;
+                continue 'grow;
+            }
+            break;
+        }
+    }
+    polygons.into_iter().flatten().collect()
+}
+
+/// `a` and `b` as one convex polygon, joined along `a`'s `k`th edge (which
+/// `b` has the other way round), or `None` if they can't be.
+fn joined(a: &Polygon, k: usize, b: &Polygon) -> Option<Polygon> {
+    let same_vertex = |x: &Vertex, y: &Vertex| {
+        x.position == y.position
+            && x.normal.distance(y.normal) <= ON_PLANE
+            && x.uv.distance(y.uv) <= ON_PLANE
+    };
+    if a.surface != b.surface || a.plane.normal.dot(b.plane.normal) < 1.0 - 1e-9 {
+        return None;
+    }
+    if b.vertices
+        .iter()
+        .any(|vertex| a.plane.distance(vertex.position).abs() > ON_PLANE)
+    {
+        return None;
+    }
+    let n = a.vertices.len();
+    let (from, to) = (a.vertices[k], a.vertices[(k + 1) % n]);
+    let start = b
+        .vertices
+        .iter()
+        .position(|vertex| vertex.position == to.position)?;
+    let m = b.vertices.len();
+    if !same_vertex(&b.vertices[start], &to) || !same_vertex(&b.vertices[(start + 1) % m], &from) {
+        return None;
+    }
+    // Round `a` from the end of the shared edge back to its start, then
+    // `b`'s corners between them.
+    let mut ring: Vec<Vertex> = (0..n).map(|i| a.vertices[(k + 1 + i) % n]).collect();
+    ring.extend((2..m).map(|i| b.vertices[(start + i) % m]));
+    // Sharing more than one edge would list a corner twice.
+    for (i, vertex) in ring.iter().enumerate() {
+        if ring[i + 1..]
+            .iter()
+            .any(|other| other.position == vertex.position)
+        {
+            return None;
+        }
+    }
+    let convex = (0..ring.len()).all(|i| {
+        let [p, q, r] = [i, i + 1, i + 2].map(|j| ring[j % ring.len()].position);
+        (q - p).cross(r - q).dot(a.plane.normal) >= -ON_PLANE * ON_PLANE
+    });
+    convex.then_some(Polygon {
+        vertices: ring,
+        plane: a.plane,
+        surface: a.surface,
+    })
 }
 
 const COPLANAR: u8 = 0;
