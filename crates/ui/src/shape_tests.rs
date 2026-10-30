@@ -305,6 +305,7 @@ fn a_top_bar_sits_below_a_phones_notch_with_device_safe_insets() {
             shown: None,
             scrolled: None,
             safe_insets: insets,
+            overrides: DesignerOverrides::default(),
         };
         layout_artboard_view(world, gui, &[], view)
             .element(bar)
@@ -351,4 +352,100 @@ fn a_top_bar_sits_below_a_phones_notch_with_device_safe_insets() {
     assert_eq!(origin, [0.0, 47.0]);
     assert!((scale - (844.0 - 81.0) / 844.0).abs() < 1e-4);
     assert!((area[1] * scale - (844.0 - 81.0)).abs() < 0.01, "{area:?}");
+}
+
+#[test]
+fn the_designer_can_hide_elements_pick_pages_and_show_only_an_enabled_screen_gui() {
+    let mut world = World::new();
+    let gui = screen_gui(&mut world);
+    let pages = element(
+        &mut world,
+        gui,
+        ClassName::PageLayout,
+        "Pages",
+        [0.0, 0.0, 400.0, 300.0],
+    );
+    let home = element(
+        &mut world,
+        pages,
+        ClassName::Frame,
+        "Home",
+        [0.0, 0.0, 400.0, 300.0],
+    );
+    let settings = element(
+        &mut world,
+        pages,
+        ClassName::Frame,
+        "Settings",
+        [0.0, 0.0, 400.0, 300.0],
+    );
+    let back = element(
+        &mut world,
+        settings,
+        ClassName::TextButton,
+        "Back",
+        [10.0, 10.0, 80.0, 30.0],
+    );
+    let badge = element(
+        &mut world,
+        gui,
+        ClassName::Frame,
+        "Badge",
+        [500.0, 0.0, 50.0, 50.0],
+    );
+    let board = |world: &World, overrides: DesignerOverrides| {
+        layout_artboard_view(
+            world,
+            gui,
+            &[],
+            ArtboardView {
+                screen: (800, 600),
+                scale: 1.0,
+                origin: [0.0, 0.0],
+                shown: None,
+                scrolled: None,
+                safe_insets: [0.0; 4],
+                overrides,
+            },
+        )
+    };
+    // As the game shows it: the first page, and the badge.
+    let game = board(&world, DesignerOverrides::default());
+    assert!(game.element(home).is_some() && game.element(back).is_none());
+    assert_eq!(shown_page(&world, pages), Some(home));
+
+    // The designer shows Settings, and hides the badge, without changing them.
+    let picked = HashMap::from([(pages, settings)]);
+    let hidden = HashSet::from([badge]);
+    let designing = board(
+        &world,
+        DesignerOverrides {
+            hidden: Some(&hidden),
+            pages: Some(&picked),
+            only_enabled: false,
+        },
+    );
+    assert!(designing.element(home).is_none());
+    assert!(designing.element(back).is_some());
+    assert!(designing.element(badge).is_none());
+    assert_eq!(shown_page(&world, pages), Some(home));
+
+    // A disabled ScreenGui is still designed, but the Live Preview shows
+    // nothing, as Play does.
+    world
+        .set_property(gui, "Enabled", Value::Bool(false))
+        .unwrap();
+    assert!(
+        board(&world, DesignerOverrides::default())
+            .element(home)
+            .is_some()
+    );
+    let preview = board(
+        &world,
+        DesignerOverrides {
+            only_enabled: true,
+            ..DesignerOverrides::default()
+        },
+    );
+    assert!(preview.elements.is_empty() && preview.draw_items.is_empty());
 }

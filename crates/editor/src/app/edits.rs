@@ -77,10 +77,11 @@ impl EditorApp {
                 format!("Change {name} of {}", instance.name()),
             ),
             &Edit::PickTexture(name) => {
-                let folder = if name == "Texture" {
-                    crate::asset_browser::PARTICLES_FOLDER
-                } else {
-                    axcenity_assets::PROJECT_TEXTURES_FOLDER
+                let folder = match name {
+                    "Texture" => crate::asset_browser::PARTICLES_FOLDER,
+                    // A UI element's picture, as the Assets panel's Images.
+                    "Image" => crate::asset_browser::IMAGES_FOLDER,
+                    _ => axcenity_assets::PROJECT_TEXTURES_FOLDER,
                 };
                 if let Some(path) = self.pick_texture(folder) {
                     self.apply(id, Edit::Property(name, Value::String(path)));

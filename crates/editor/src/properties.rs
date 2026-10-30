@@ -1079,6 +1079,7 @@ fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<
     match value {
         Value::String(path) if is_map(name) => map_control(ui, name, &path),
         Value::String(path) if name == "SoundId" => sound_control(ui, &path),
+        Value::String(path) if name == "Image" => image_control(ui, &path),
         Value::String(path) if name == "StateMachine" => controller_control(ui, &path),
         Value::String(path) if name == "Clip" => clip_control(ui, &path),
         Value::String(path) if name == "BehaviorTree" => behavior_tree_control(ui, &path),
@@ -1127,6 +1128,51 @@ fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit
         ui.add(egui::Label::new(file).truncate())
             .on_hover_text(path);
     });
+    edit
+}
+
+/// A UI element's picture: typed as a project path, uploaded from this
+/// computer (copied into `assets/images`), or dropped from the Assets
+/// panel. The UI Designer's inspector also picks from the project's images.
+fn image_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+    let mut edit = None;
+    let row = ui.horizontal(|ui| {
+        if ui
+            .small_button(icons::UPLOAD_SIMPLE)
+            .on_hover_text("Upload an image from this computer (copied into assets/images)")
+            .clicked()
+        {
+            edit = Some(Edit::PickTexture("Image"));
+        }
+        if let Some(value) = value_edit(ui, "Image", Value::String(path.to_owned())) {
+            edit = Some(Edit::Property("Image", value));
+        }
+    });
+    if let Some(held) = row
+        .response
+        .dnd_hover_payload::<crate::asset_browser::AssetPayload>()
+        && matches!(
+            held.0.kind,
+            crate::asset_browser::AssetKind::Image | crate::asset_browser::AssetKind::Texture
+        )
+    {
+        let palette = theme::palette(ui.ctx());
+        ui.painter().rect_stroke(
+            row.response.rect.expand(2.0),
+            4,
+            egui::Stroke::new(1.5_f32, palette.accent),
+            egui::StrokeKind::Outside,
+        );
+        if let Some(payload) = row
+            .response
+            .dnd_release_payload::<crate::asset_browser::AssetPayload>()
+        {
+            edit = Some(Edit::Property(
+                "Image",
+                Value::String(payload.0.path.clone()),
+            ));
+        }
+    }
     edit
 }
 

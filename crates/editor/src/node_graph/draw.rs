@@ -161,7 +161,7 @@ pub(super) fn draw_node(
     let font = FontId::proportional(12.0 * z);
     let mut y = rect.top() + s(HEADER + 4.0);
     // Fields: a label and its control.
-    for field in &shape.fields {
+    for (field, &field_width) in shape.fields.iter().zip(&shape.field_widths) {
         let middle = y + s(ROW) * 0.5;
         painter.text(
             pos2(rect.left() + s(10.0), middle),
@@ -172,10 +172,10 @@ pub(super) fn draw_node(
         );
         let control = Rect::from_min_size(
             pos2(
-                rect.right() - s(FIELD_WIDTH + 10.0),
+                rect.right() - s(field_width + 10.0),
                 middle - s(ROW - 6.0) * 0.5,
             ),
-            vec2(s(FIELD_WIDTH), s(ROW - 6.0)),
+            vec2(s(field_width), s(ROW - 6.0)),
         );
         let mut value = node.value(field.name).to_owned();
         if widgets {
@@ -190,13 +190,15 @@ pub(super) fn draw_node(
             set_value(node, field.name, value);
         } else {
             let shown = shown_value(field, &value);
-            painter.text(
-                control.left_center(),
-                egui::Align2::LEFT_CENTER,
-                shown,
-                font.clone(),
-                Color32::from_gray(190),
-            );
+            painter
+                .with_clip_rect(painter.clip_rect().intersect(control))
+                .text(
+                    control.left_center(),
+                    egui::Align2::LEFT_CENTER,
+                    shown,
+                    font.clone(),
+                    Color32::from_gray(190),
+                );
         }
         y += s(ROW);
     }
@@ -227,13 +229,15 @@ pub(super) fn draw_node(
                     value_control(ui, boxed, input.ty, &mut value, id.with(input.name));
                     set_value(node, input.name, value);
                 } else {
-                    painter.text(
-                        boxed.left_center(),
-                        egui::Align2::LEFT_CENTER,
-                        value,
-                        font.clone(),
-                        Color32::from_gray(190),
-                    );
+                    painter
+                        .with_clip_rect(painter.clip_rect().intersect(boxed))
+                        .text(
+                            boxed.left_center(),
+                            egui::Align2::LEFT_CENTER,
+                            value,
+                            font.clone(),
+                            Color32::from_gray(190),
+                        );
                 }
             }
             if interactive {
@@ -311,7 +315,7 @@ fn set_value(node: &mut GraphNode, name: &str, value: String) {
 }
 
 /// How a field's value reads when there's no control for it.
-fn shown_value(field: &FieldSpec, value: &str) -> String {
+pub(super) fn shown_value(field: &FieldSpec, value: &str) -> String {
     match field.kind {
         FieldKind::Object {
             root: ObjectRoot::Gui,
@@ -385,8 +389,10 @@ fn field_control(
         .find(|(choice, _)| choice == value)
         .map_or_else(|| shown_value(field, value), |(_, shown)| shown.clone());
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    // A value too long for the node is cut short (with …), not let out.
     egui::ComboBox::from_id_salt(id)
         .width(rect.width())
+        .truncate()
         .selected_text(selected)
         .show_ui(&mut child, |ui| {
             if choices.is_empty() {

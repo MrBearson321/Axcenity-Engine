@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use axcenity_core::{ClassName, InstanceId, Value, World};
@@ -93,6 +93,11 @@ pub(crate) struct PseudoClasses<'a> {
     /// ScrollingFrames shown scrolled to these canvas positions instead of
     /// their own `CanvasPosition`: the UI Designer scrolls them this way.
     pub(crate) scrolled: Option<&'a HashMap<InstanceId, [f32; 2]>>,
+    /// Elements the UI Designer hides on its artboard (see
+    /// [`crate::DesignerOverrides`]).
+    pub(crate) hidden: Option<&'a HashSet<InstanceId>>,
+    /// The page each PageLayout shows on the UI Designer's artboard.
+    pub(crate) pages: Option<&'a HashMap<InstanceId, InstanceId>>,
 }
 
 /// A part of an element that isn't an Instance, styled with a CSS

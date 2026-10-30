@@ -12,7 +12,7 @@
     {
       "id": 2,
       "kind": "show_page",
-      "position": [320.0, 40.0],
+      "position": [380.0, 40.0],
       "values": {
         "Page": "Settings",
         "Pages": "Pages"
@@ -29,7 +29,7 @@
     {
       "id": 4,
       "kind": "show_page",
-      "position": [320.0, 220.0],
+      "position": [380.0, 220.0],
       "values": {
         "Page": "Home",
         "Pages": "Pages"
@@ -38,7 +38,7 @@
     {
       "id": 5,
       "kind": "print",
-      "position": [600.0, 220.0],
+      "position": [660.0, 220.0],
       "values": {
         "Value": "Back on the home page"
       }
@@ -63,7 +63,7 @@
       "id": 6,
       "text": "Settings and Back switch pages",
       "position": [20.0, 0.0],
-      "size": [860.0, 380.0]
+      "size": [920.0, 380.0]
     }
   ]
 }

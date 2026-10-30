@@ -73,6 +73,45 @@ fn button_activated_to_show_page_compiles_to_ordinary_lua() {
 }
 
 #[test]
+fn parallel_starts_each_wired_branch_at_once_in_its_own_task() {
+    let mut graph = NodeGraph::default();
+    let clicked = add(&mut graph, "button_activated", &[("Button", "Play")]);
+    let parallel = add(&mut graph, "parallel", &[]);
+    let wait = add(&mut graph, "delay", &[("Seconds", "2")]);
+    let hide = add(
+        &mut graph,
+        "set_visible",
+        &[("Element", "Score"), ("Visible", "false")],
+    );
+    let show = add(
+        &mut graph,
+        "show_page",
+        &[("Pages", "Pages"), ("Page", "Settings")],
+    );
+    wire(&mut graph, (clicked, ""), (parallel, ""));
+    wire(&mut graph, (parallel, "Branch 0"), (wait, ""));
+    wire(&mut graph, (wait, "Completed"), (hide, ""));
+    // Branch 1 is left empty; Branch 2 still runs.
+    wire(&mut graph, (parallel, "Branch 2"), (show, ""));
+
+    let compiled = compile_ui_graph(&graph, &menu_objects()).unwrap();
+    assert_eq!(
+        compiled.source,
+        format!(
+            "{GENERATED_HEADER}\nlocal gui = script.Parent\n\n\
+             gui.Play.Activated:Connect(function()\n    \
+             task.spawn(function()\n        \
+             task.wait(2)\n        \
+             gui.Score.Visible = false\n    \
+             end)\n    \
+             task.spawn(function()\n        \
+             gui.Pages.CurrentPage = \"Settings\"\n    \
+             end)\nend)\n\n"
+        )
+    );
+}
+
+#[test]
 fn an_unconnected_required_pin_is_an_error_on_its_node_and_no_lua() {
     let mut graph = NodeGraph::default();
     let clicked = add(&mut graph, "button_activated", &[("Button", "Play")]);

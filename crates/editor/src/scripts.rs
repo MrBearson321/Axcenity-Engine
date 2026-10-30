@@ -468,9 +468,13 @@ fn code_editor(
     // the wrap width: long lines scroll sideways, so they stay one row each
     // and line up with the numbers.
     let stylesheet = tab.is_stylesheet();
+    // A stylesheet's colours each get a swatch before them, in a gap the
+    // layout leaves.
+    let row = ui.fonts(|fonts| fonts.row_height(&font));
+    let swatch = if stylesheet { row + 4.0 } else { 0.0 };
     let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
         let job = if stylesheet {
-            css_syntax::layout_job(text.as_str(), font.clone(), ui.visuals())
+            css_syntax::layout_job(text.as_str(), font.clone(), ui.visuals(), swatch)
         } else {
             lua_syntax::layout_job(text.as_str(), font.clone(), ui.visuals())
         };
@@ -499,6 +503,17 @@ fn code_editor(
                     .show(ui);
                 if output.response.changed() {
                     tab.highlighted = None;
+                }
+                if stylesheet {
+                    let galley_pos = output.galley_pos.to_vec2();
+                    let at = |text: &str, byte: usize| {
+                        let chars = text[..byte].chars().count();
+                        output
+                            .galley
+                            .pos_from_cursor(egui::text::CCursor::new(chars))
+                            .translate(galley_pos)
+                    };
+                    color_swatches(ui, tab, id, swatch, at);
                 }
                 let line_rect = |line: usize| {
                     let cursor = egui::text::CCursor::new(char_index_of_line(&tab.text, line));
@@ -535,6 +550,117 @@ fn code_editor(
             });
         });
     clicked
+}
+
+/// A swatch before each colour in a stylesheet (`at` is where the text at
+/// a byte of the text is drawn); clicking one opens a colour picker that rewrites the
+/// colour in place, as Roblox Studio's script editor does.
+fn color_swatches(
+    ui: &mut egui::Ui,
+    tab: &mut ScriptTab,
+    editor: egui::Id,
+    swatch: f32,
+    at: impl Fn(&str, usize) -> egui::Rect,
+) {
+    let palette = theme::palette(ui.ctx());
+    let visible = ui.clip_rect();
+    let open_id = editor.with("color picker");
+    let mut open: Option<usize> = ui.data(|data| data.get_temp(open_id));
+    let mut replace = None;
+    for (range, color) in css_syntax::colors(&tab.text) {
+        let glyph = at(&tab.text, range.start);
+        if !visible.intersects(glyph) {
+            continue;
+        }
+        let side = (swatch - 6.0).min(glyph.height() - 2.0).max(4.0);
+        let rect = egui::Rect::from_center_size(
+            egui::pos2(glyph.left() - swatch * 0.5, glyph.center().y),
+            egui::Vec2::splat(side),
+        );
+        let response = ui
+            .interact(
+                rect,
+                editor.with(("swatch", range.start)),
+                egui::Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text("Pick a colour");
+        // See-through colours show over a checker, as colour pickers do.
+        if color.a() < 255 {
+            let half = rect.width() * 0.5;
+            ui.painter().rect_filled(rect, 2.0, egui::Color32::WHITE);
+            for (dx, dy) in [(0.0, 0.0), (half, half)] {
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_size(
+                        rect.min + egui::vec2(dx, dy),
+                        egui::Vec2::splat(half),
+                    ),
+                    0.0,
+                    egui::Color32::from_gray(190),
+                );
+            }
+        }
+        ui.painter().rect_filled(rect, 2.0, color);
+        ui.painter().rect_stroke(
+            rect,
+            2.0,
+            egui::Stroke::new(1.0_f32, palette.border_strong),
+            egui::StrokeKind::Outside,
+        );
+        if response.clicked() {
+            open = if open == Some(range.start) {
+                None
+            } else {
+                Some(range.start)
+            };
+        }
+        if open != Some(range.start) {
+            continue;
+        }
+        let area = egui::Area::new(open_id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(rect.left_bottom() + egui::vec2(0.0, 4.0))
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    let mut picked = color;
+                    if egui::color_picker::color_picker_color32(
+                        ui,
+                        &mut picked,
+                        egui::color_picker::Alpha::OnlyBlend,
+                    ) && picked != color
+                    {
+                        replace = Some((range.clone(), css_syntax::color_text(picked)));
+                    }
+                });
+            });
+        // A click outside the picker (and not on its swatch) closes it.
+        let clicked_away = ui.input(|input| {
+            input.pointer.any_pressed()
+                && input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|pos| !area.response.rect.contains(pos) && !rect.contains(pos))
+        });
+        if clicked_away || ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            open = None;
+        }
+    }
+    // The colour it was opened on went (the text was edited): close it.
+    if open.is_some_and(|start| {
+        !css_syntax::colors(&tab.text)
+            .iter()
+            .any(|(range, _)| range.start == start)
+    }) {
+        open = None;
+    }
+    if let Some((range, text)) = replace {
+        tab.text.replace_range(range, &text);
+        tab.highlighted = None;
+    }
+    ui.data_mut(|data| match open {
+        Some(start) => data.insert_temp(open_id, start),
+        None => data.remove::<usize>(open_id),
+    });
 }
 
 /// The line numbers, one row per line, with a red dot on each breakpoint
@@ -671,6 +797,69 @@ mod tests {
         assert_eq!(tabs.ids().len(), 2);
         tabs.activate(a);
         assert_eq!(tabs.active_id(), Some(a));
+    }
+
+    #[test]
+    fn a_stylesheets_colours_get_swatches_that_open_a_picker() {
+        let mut tabs = ScriptTabs::default();
+        let css =
+            "#title {\n    color: #ffcc00;\n    background-color: rgba(20, 40, 200, 0.5);\n}\n";
+        tabs.open("ui.css", css, None);
+        let ctx = theme::test_context();
+        let size = egui::vec2(700.0, 260.0);
+        let frame = |tabs: &mut ScriptTabs, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| tabs.show(ui, "ui.css"));
+            });
+        };
+        frame(&mut tabs, Vec::new());
+        frame(&mut tabs, Vec::new());
+        let editor = editor_id("ui.css");
+        let start = css.find("#ffcc00").unwrap();
+        let swatch = ctx
+            .read_response(editor.with(("swatch", start)))
+            .expect("the colour has a swatch")
+            .rect;
+        // It sits in the gap before the colour, on its row.
+        let second = ctx
+            .read_response(editor.with(("swatch", css.find("rgba").unwrap())))
+            .unwrap()
+            .rect;
+        assert!(second.top() > swatch.bottom());
+        let press = |pressed| egui::Event::PointerButton {
+            pos: swatch.center(),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut tabs, vec![egui::Event::PointerMoved(swatch.center())]);
+        frame(&mut tabs, vec![press(true)]);
+        frame(&mut tabs, vec![press(false)]);
+        frame(&mut tabs, Vec::new());
+        let open: Option<usize> = ctx.data(|data| data.get_temp(editor.with("color picker")));
+        assert_eq!(open, Some(start), "the picker opened for that colour");
+        // Clicking the swatch didn't edit the text.
+        assert_eq!(tabs.get_mut("ui.css").unwrap().text, css);
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from) {
+            crate::snapshot::snapshot(
+                &folder.join("css-color-swatches.png"),
+                size + egui::vec2(0.0, 220.0),
+                vec![
+                    vec![egui::Event::PointerMoved(swatch.center())],
+                    vec![press(true)],
+                    vec![press(false)],
+                    Vec::new(),
+                ],
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| tabs.show(ui, "ui.css"));
+                },
+            );
+        }
     }
 
     #[test]

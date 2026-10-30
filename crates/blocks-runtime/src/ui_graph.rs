@@ -93,6 +93,12 @@ const VARIABLE: FieldSpec = FieldSpec {
 
 const IN: PinSpec = PinSpec::exec("");
 const THEN: PinSpec = PinSpec::exec("");
+const PARALLEL_OUTS: [PinSpec; 4] = [
+    PinSpec::exec("Branch 0"),
+    PinSpec::exec("Branch 1"),
+    PinSpec::exec("Branch 2"),
+    PinSpec::exec("Branch 3"),
+];
 
 /// Every node the UI Event Graph offers, in the node menu's order.
 pub const UI_NODES: &[NodeSpec] = &[
@@ -250,6 +256,16 @@ pub const UI_NODES: &[NodeSpec] = &[
             PinSpec::exec("Then 1"),
             PinSpec::exec("Then 2"),
         ],
+    },
+    NodeSpec {
+        kind: "parallel",
+        title: "Parallel",
+        category: "Flow",
+        help: "Starts Branch 0 to Branch 3 all at once (each in task.spawn), so a Delay \
+               or Tween in one doesn't hold up the others.",
+        fields: &[],
+        inputs: &[IN],
+        outputs: &PARALLEL_OUTS,
     },
     NodeSpec {
         kind: "delay",
@@ -776,6 +792,20 @@ impl<'a> Compiler<'a> {
             "sequence" => {
                 for out in ["Then 0", "Then 1", "Then 2"] {
                     self.chain(&PinRef::new(node.id, out), event, stack);
+                }
+                return;
+            }
+            "parallel" => {
+                for out in &PARALLEL_OUTS {
+                    let branch = PinRef::new(node.id, out.name);
+                    if self.graph.wires_from(&branch).next().is_none() {
+                        continue;
+                    }
+                    self.line("task.spawn(function()");
+                    self.indent += 1;
+                    self.chain(&branch, event, stack);
+                    self.indent -= 1;
+                    self.line("end)");
                 }
                 return;
             }

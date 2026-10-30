@@ -79,12 +79,7 @@ pub fn clean_value(value: &str) -> String {
 
 /// A colour as CSS writes it: `#rrggbb`, or `rgba()` when it's see-through.
 fn css_color(color: egui::Color32) -> String {
-    let [r, g, b, a] = color.to_srgba_unmultiplied();
-    if a == 255 {
-        format!("#{r:02x}{g:02x}{b:02x}")
-    } else {
-        format!("rgba({r}, {g}, {b}, {:.2})", f32::from(a) / 255.0)
-    }
+    crate::css_syntax::color_text(color)
 }
 
 /// The selector of `id`'s own rule, such as `#Score`, from its `Id`.

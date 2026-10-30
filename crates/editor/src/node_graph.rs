@@ -57,6 +57,8 @@ const PIN_SPACE: f32 = 20.0;
 const MIN_WIDTH: f32 = 170.0;
 /// The width of a field's control, and of a value typed into a pin.
 const FIELD_WIDTH: f32 = 130.0;
+/// The widest a field's control grows to fit its value; longer is cut short.
+const MAX_FIELD_WIDTH: f32 = 280.0;
 const VALUE_WIDTH: f32 = 70.0;
 /// A comment's title strip.
 const COMMENT_HEADER: f32 = 26.0;
@@ -139,6 +141,8 @@ pub struct NodeShape {
     pub size: Vec2,
     /// Field rows, then pin rows (an input and an output side by side).
     fields: Vec<FieldSpec>,
+    /// Each field's control width, fitted to its value.
+    field_widths: Vec<f32>,
     pin_rows: Vec<(Option<PinSpec>, Option<PinSpec>)>,
     /// The errors under the rows, and their height.
     errors: Vec<String>,
@@ -181,6 +185,16 @@ fn value_width(ctx: &egui::Context, ty: PinType, value: &str) -> f32 {
     }
 }
 
+/// How wide a field's control is: wide enough for the value it shows (a
+/// menu's text and its arrow), from [`FIELD_WIDTH`] up to [`MAX_FIELD_WIDTH`].
+fn field_width(ctx: &egui::Context, field: &FieldSpec, value: &str) -> f32 {
+    match field.kind {
+        FieldKind::Color => FIELD_WIDTH,
+        _ => (text_width(ctx, &draw::shown_value(field, value), 12.0) + 48.0)
+            .clamp(FIELD_WIDTH, MAX_FIELD_WIDTH),
+    }
+}
+
 /// `N` numbers typed as `1, 0.5, 0` (a vector or a color), or `None` when
 /// that isn't what `text` is. One number fills all `N`.
 pub fn parse_numbers<const N: usize>(text: &str) -> Option<[f32; N]> {
@@ -219,8 +233,13 @@ pub fn node_shape(
     errors: &[String],
 ) -> NodeShape {
     let mut width = MIN_WIDTH.max(text_width(ctx, spec.title, 13.0) + 40.0);
-    for field in spec.fields {
-        width = width.max(text_width(ctx, field.name, 12.0) + FIELD_WIDTH + 28.0);
+    let field_widths: Vec<f32> = spec
+        .fields
+        .iter()
+        .map(|field| field_width(ctx, field, node.value(field.name)))
+        .collect();
+    for (field, control) in spec.fields.iter().zip(&field_widths) {
+        width = width.max(text_width(ctx, field.name, 12.0) + control + 28.0);
     }
     let rows = spec.inputs.len().max(spec.outputs.len());
     let mut pin_rows = Vec::with_capacity(rows);
@@ -269,6 +288,7 @@ pub fn node_shape(
     NodeShape {
         size: vec2(width.round(), height.round()),
         fields: spec.fields.to_vec(),
+        field_widths,
         pin_rows,
         errors: errors.to_vec(),
         errors_height,

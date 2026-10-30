@@ -1398,6 +1398,8 @@ mod ui_graph_tests;
 #[cfg(test)]
 mod ui_layering_tests;
 #[cfg(test)]
+mod ui_pages_tests;
+#[cfg(test)]
 mod ui_selection_tests;
 #[cfg(test)]
 mod ui_text_style_tests;

@@ -126,6 +126,18 @@ impl EditorApp {
             .map(|gui| axcenity_blocks::ui_graph::ui_graph_path(gui.name()))
             .unwrap_or_default();
         let editing = !self.playing();
+        // The Image picker's pictures, only while an element with an
+        // `Image` is selected (each is a thumbnail to read).
+        let wants_images = editing
+            && self
+                .selected
+                .and_then(|id| self.world.get(id))
+                .is_some_and(|instance| instance.property("Image").is_some());
+        let images = if wants_images {
+            self.asset_browser.pictures(ui.ctx())
+        } else {
+            Vec::new()
+        };
         let (stylesheets, graph) = match self.project.as_mut() {
             Some(project) => {
                 let graph = document.map(|index| GraphPane {
@@ -142,6 +154,7 @@ impl EditorApp {
             selection: &self.selection,
             stylesheets,
             assets: &self.assets,
+            images: &images,
             editing,
         };
         let actions = self
@@ -265,6 +278,15 @@ impl EditorApp {
                 }
                 DesignerAction::Drag(edit) => self.apply_ui_drag(edit),
                 DesignerAction::Edit(id, edit) => self.apply(id, edit),
+                DesignerAction::Image(id, path) => {
+                    self.apply(id, crate::ui_designer::image::image_edit(path));
+                    // A pick is a whole step, not more typing.
+                    self.history.seal();
+                }
+                DesignerAction::UploadImage(id) => {
+                    self.apply(id, Edit::PickTexture("Image"));
+                    self.asset_browser.refresh();
+                }
                 DesignerAction::Style(id, edit) => self.apply_style(id, edit),
                 DesignerAction::Bevel {
                     id,

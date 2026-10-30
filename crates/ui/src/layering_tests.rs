@@ -454,6 +454,7 @@ fn the_designer_shows_a_frame_scrolled_without_changing_its_canvas_position() {
             shown: None,
             scrolled: Some(&scrolled),
             safe_insets: [0.0; 4],
+            overrides: DesignerOverrides::default(),
         },
     );
     assert_eq!(

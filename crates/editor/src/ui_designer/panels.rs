@@ -198,16 +198,22 @@ impl UiDesigner {
             widgets::paint_hover(ui, rect, &response, selected, 4.0);
             let indent = 6.0 + depth as f32 * 12.0;
             let text = theme::with_icon(theme::class_icon(instance.class()), instance.name());
+            // Not drawn on the artboard: by its eye, or not the page shown.
+            let off =
+                self.hidden_on_artboard(scene.world, id) || !self.on_shown_page(scene.world, id);
             let galley = widgets::elided(
                 ui,
                 text,
                 egui::FontId::proportional(theme::type_scale::BODY),
-                if selected {
+                if off {
+                    palette.text_muted
+                } else if selected {
                     palette.text_strong
                 } else {
                     palette.text
                 },
-                (rect.width() - indent - 4.0).max(1.0),
+                // Room for the eye at the end.
+                (rect.width() - indent - 28.0).max(1.0),
                 1,
             );
             ui.painter().galley(
@@ -218,6 +224,9 @@ impl UiDesigner {
                 galley,
                 palette.text,
             );
+            if id != gui {
+                self.eye(ui, scene.world, id, rect);
+            }
             if response.clicked() {
                 // Shift selects the rows between, Ctrl adds or takes one away.
                 let modifiers = ui.input(|input| input.modifiers);
@@ -310,6 +319,11 @@ impl UiDesigner {
             }
             if id != gui {
                 super::bevel::bevel_editor(ui, scene, id, actions);
+                if let Some(image) = instance.property("Image").and_then(Value::as_str) {
+                    responsive::form(ui, ("ui designer image", id), |ui| {
+                        super::image::image_row(ui, scene, id, image, actions);
+                    });
+                }
                 if super::slice::sliceable(instance.class()) {
                     self.slice_editor(ui, scene, id, actions);
                 }

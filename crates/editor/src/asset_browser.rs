@@ -535,6 +535,29 @@ impl AssetBrowser {
         picks
     }
 
+    /// The project's own pictures, images then textures, each with its
+    /// thumbnail once it has been read: what the UI Designer's Image picker
+    /// offers. Global ones aren't listed, since they'd need copying in first.
+    pub fn pictures(&mut self, ctx: &egui::Context) -> Vec<TexturePick> {
+        self.rescan_if_due();
+        self.thumbnails.poll(ctx);
+        let entries: Vec<AssetEntry> = self
+            .files
+            .iter()
+            .filter(|entry| matches!(entry.kind, AssetKind::Image | AssetKind::Texture))
+            .cloned()
+            .collect();
+        let mut picks: Vec<TexturePick> = entries
+            .into_iter()
+            .map(|entry| TexturePick {
+                thumbnail: self.thumbnails.get(ctx, &entry.path, false),
+                entry,
+            })
+            .collect();
+        picks.sort_by_key(|pick| pick.entry.kind != AssetKind::Image);
+        picks
+    }
+
     /// The thumbnail of the image at `path` (a project path), asked for
     /// the first time; `None` until it has been read.
     pub fn thumbnail(&mut self, ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {

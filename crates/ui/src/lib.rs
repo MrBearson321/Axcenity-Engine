@@ -49,7 +49,7 @@ use axcenity_render::{
     Camera, TextAlign, TextShadow, TextSpan, TextStroke, UiBorderSide, UiDrawItem, UiImage,
     UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use taffy::prelude::*;
 
 pub use style::{
@@ -653,6 +653,7 @@ pub fn layout_artboard_in_state(
         shown,
         scrolled: None,
         safe_insets: [0.0; 4],
+        overrides: DesignerOverrides::default(),
     };
     layout_artboard_view(world, gui, stylesheets, view)
 }
@@ -675,6 +676,22 @@ pub struct ArtboardView<'a> {
     /// The previewed device's unsafe edges, in screen pixels: a ScreenGui
     /// with `DeviceSafeInsets` keeps inside them.
     pub safe_insets: SafeInsets,
+    /// What the designer shows differently from the game.
+    pub overrides: DesignerOverrides<'a>,
+}
+
+/// What the UI Designer's artboard shows differently from the game while
+/// designing. None of it is saved or changes the world.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DesignerOverrides<'a> {
+    /// Elements hidden on the artboard (the hierarchy's eye), with what's
+    /// in them. They're left out as `Visible` off leaves them out.
+    pub hidden: Option<&'a HashSet<InstanceId>>,
+    /// The page (a Frame) each PageLayout shows, instead of its `CurrentPage`.
+    pub pages: Option<&'a HashMap<InstanceId, InstanceId>>,
+    /// Shows nothing while the ScreenGui's `Enabled` is off, as Play does
+    /// (the Live Preview). Otherwise it's drawn anyway, being designed.
+    pub only_enabled: bool,
 }
 
 /// One ScreenGui on the artboard, as `view` says.
@@ -691,8 +708,12 @@ pub fn layout_artboard_view(
         shown,
         scrolled,
         safe_insets,
+        overrides,
     } = view;
     let mut layout = UiLayout::default();
+    if overrides.only_enabled && !enabled_screen_gui(world, gui) {
+        return layout;
+    }
     let (width, height) = screen;
     layout_screen_gui(
         world,
@@ -702,6 +723,8 @@ pub fn layout_artboard_view(
         PseudoClasses {
             forced: shown,
             scrolled,
+            hidden: overrides.hidden,
+            pages: overrides.pages,
             ..PseudoClasses::default()
         },
         &mut layout,
@@ -1080,7 +1103,7 @@ pub(crate) fn layout_children(
         .children()
         .iter()
         .copied()
-        .filter(|&id| included_child(world, parent, id, out))
+        .filter(|&id| included_child(world, parent, id, out, pseudo))
         .collect();
     if children.is_empty() {
         return;
@@ -1475,10 +1498,19 @@ fn is_widget(class: ClassName) -> bool {
 /// Whether `id` is drawn under `parent`. A PageLayout shows one Frame, the
 /// page named by `CurrentPage`, or the first Frame when that name is empty
 /// or missing.
-fn included_child(world: &World, parent: InstanceId, id: InstanceId, out: &mut UiLayout) -> bool {
+fn included_child(
+    world: &World,
+    parent: InstanceId,
+    id: InstanceId,
+    out: &mut UiLayout,
+    pseudo: PseudoClasses<'_>,
+) -> bool {
     let Some(child) = world.get(id) else {
         return false;
     };
+    if pseudo.hidden.is_some_and(|hidden| hidden.contains(&id)) {
+        return false;
+    }
     if !is_widget(child.class()) {
         return false;
     }
@@ -1496,7 +1528,21 @@ fn included_child(world: &World, parent: InstanceId, id: InstanceId, out: &mut U
         ));
         return true;
     }
+    // The designer can show another page than the game would.
+    if let Some(&page) = pseudo.pages.and_then(|pages| pages.get(&parent))
+        && world
+            .get(page)
+            .is_some_and(|page| page.parent() == Some(parent))
+    {
+        return page == id;
+    }
     current_page(world, parent, out) == Some(id)
+}
+
+/// The page Frame the PageLayout `layout` shows in the game: the one its
+/// `CurrentPage` names, else its first visible Frame.
+pub fn shown_page(world: &World, layout: InstanceId) -> Option<InstanceId> {
+    current_page(world, layout, &mut UiLayout::default())
 }
 
 fn current_page(world: &World, parent: InstanceId, out: &mut UiLayout) -> Option<InstanceId> {

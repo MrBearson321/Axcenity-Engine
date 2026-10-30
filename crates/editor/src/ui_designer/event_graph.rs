@@ -31,6 +31,8 @@ pub enum DesignerTab {
     EventGraph,
     /// The string table: languages, keys and their text.
     Strings,
+    /// Every page of every ScreenGui as a slideshow (`pages.rs`).
+    Pages,
 }
 
 /// The shown ScreenGui's graph, lent by the app for a frame.
@@ -187,20 +189,38 @@ impl UiDesigner {
         graph: Option<&GraphPane>,
         actions: &mut Vec<DesignerAction>,
     ) {
-        // Below 1200 points the icons go, so the toolbar takes fewer rows.
-        let narrow = ui.max_rect().width() < 1200.0;
-        responsive::room_for(ui, if narrow { 220.0 } else { 300.0 });
+        // Below 1200 points the icons go, so the toolbar takes fewer rows,
+        // and in a column too narrow for four names Event Graph is Graph.
+        let width = ui.max_rect().width();
+        let narrow = width < 1200.0;
         let mut tab = self.tab;
         let icon = |icon| (!narrow).then_some(icon);
+        let graph_name = if width < 400.0 {
+            "Graph"
+        } else {
+            "Event Graph"
+        };
         let options = [
             (DesignerTab::Design, icon(icons::LAYOUT), "Design"),
-            (DesignerTab::EventGraph, icon(icons::GRAPH), "Event Graph"),
+            (DesignerTab::EventGraph, icon(icons::GRAPH), graph_name),
             (DesignerTab::Strings, icon(icons::TRANSLATE), "Strings"),
+            (DesignerTab::Pages, icon(icons::SLIDESHOW), "Pages"),
         ];
-        if widgets::segmented(ui, &mut tab, &options) {
-            self.tab = tab;
+        if width < 400.0 {
+            // Two halves, which wrap onto their own rows if they must.
+            for half in options.chunks(2) {
+                responsive::room_for(ui, 140.0);
+                if widgets::segmented(ui, &mut tab, half) {
+                    self.tab = tab;
+                }
+            }
+        } else {
+            responsive::room_for(ui, if narrow { 260.0 } else { 400.0 });
+            if widgets::segmented(ui, &mut tab, &options) {
+                self.tab = tab;
+            }
         }
-        responsive::room_for(ui, 150.0);
+        responsive::room_for(ui, if narrow { 40.0 } else { 150.0 });
         let live = self.live.is_some();
         let (icon, label, tip) = if live {
             (
@@ -216,10 +236,16 @@ impl UiDesigner {
                  buttons on the artboard to try it, without Play",
             )
         };
-        let button = egui::Button::new(theme::with_icon(icon, label)).selected(live);
+        // Narrow, it's its icon alone (its name is in the tooltip).
+        let text = if narrow {
+            icon.to_owned()
+        } else {
+            theme::with_icon(icon, label)
+        };
+        let button = egui::Button::new(text).selected(live);
         let clicked = ui
             .add_enabled(scene.editing && graph.is_some(), button)
-            .on_hover_text(tip)
+            .on_hover_text(format!("{label}: {tip}"))
             .clicked();
         if clicked || std::mem::take(&mut self.live_wanted) {
             if live {
@@ -307,6 +333,7 @@ impl UiDesigner {
             selection: &[],
             stylesheets: scene.stylesheets,
             assets: scene.assets,
+            images: &[],
             editing: false,
         };
         self.previewing = true;

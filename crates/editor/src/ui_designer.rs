@@ -37,8 +37,10 @@ pub(crate) use artboard::sketch;
 pub(crate) mod bevel;
 mod event_graph;
 mod group;
+pub(crate) mod image;
 mod navigation;
 pub(crate) mod order;
+pub(crate) mod pages;
 mod panels;
 mod rich_text;
 mod rotate;
@@ -56,7 +58,7 @@ pub use event_graph::{DesignerTab, GraphPane, LivePreview};
 pub use states::state_selector;
 pub use text_toolbar::Toggle;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, UDim2, Value, World};
@@ -257,6 +259,12 @@ pub enum DesignerAction {
     GraphStep(axcenity_blocks::node_graph::NodeGraph),
     /// What the Live Preview printed (true for an error), for Output.
     PreviewOutput(Vec<(bool, String)>),
+    /// Sets the element's `Image` to this project path (empty for none),
+    /// picked or dropped in the inspector: one undo step.
+    Image(InstanceId, String),
+    /// Asks for a picture on this computer, copies it into the project's
+    /// `assets/images` and sets it as the element's `Image`.
+    UploadImage(InstanceId),
 }
 
 /// The action that sets `property` for `id` in `state`: in its own `#Id`
@@ -297,6 +305,9 @@ pub struct DesignerScene<'a> {
     pub selection: &'a [InstanceId],
     pub stylesheets: &'a [Stylesheet],
     pub assets: &'a Assets,
+    /// The project's pictures, for the inspector's Image picker (empty
+    /// when the selected element has no `Image`).
+    pub images: &'a [crate::asset_browser::TexturePick],
     /// False during Play: the designer shows the game, but doesn't edit it.
     pub editing: bool,
 }
@@ -422,6 +433,19 @@ pub struct UiDesigner {
     preview_hover: Option<InstanceId>,
     /// Start the Live Preview on the next frame, as its button does.
     live_wanted: bool,
+    /// The Live Preview's hovered or pressed element, shown in that state
+    /// on its artboard as Play shows it.
+    preview_state: Option<(InstanceId, UiState)>,
+    /// Elements hidden on the artboard by their eye (`pages.rs`).
+    hidden: HashSet<InstanceId>,
+    /// The page each PageLayout shows on the artboard, picked by its eye.
+    pages: HashMap<InstanceId, InstanceId>,
+    /// The selection the artboard last showed the page of.
+    page_followed: Option<InstanceId>,
+    /// The Pages tab's slide shown large.
+    slide: usize,
+    /// The Pages tab's slides drawn by the game's renderer, large one first.
+    slide_canvases: Vec<Canvas>,
     /// The language and the key being typed in the Strings tab, to add.
     new_language: String,
     new_key: String,
@@ -477,6 +501,12 @@ impl Default for UiDesigner {
             preview_clicks: Vec::new(),
             preview_hover: None,
             live_wanted: false,
+            preview_state: None,
+            hidden: HashSet::new(),
+            pages: HashMap::new(),
+            page_followed: None,
+            slide: 0,
+            slide_canvases: Vec::new(),
             new_language: String::new(),
             new_key: String::new(),
         }
@@ -681,6 +711,9 @@ impl UiDesigner {
     /// The selected element and the state the eye shows it in on the
     /// artboard, when that isn't Normal.
     fn shown_state(&self, scene: &DesignerScene) -> Option<(InstanceId, UiState)> {
+        if self.previewing {
+            return self.preview_state;
+        }
         let id = scene.selected?;
         let state = self.state_for(scene, id);
         (self.show_state && state != UiState::Normal).then_some((id, state))
@@ -780,8 +813,14 @@ impl UiDesigner {
             }
             return actions;
         };
+        self.follow_page(scene.world, scene.selected);
         self.toolbar(ui, scene, gui, graph.as_ref(), &mut actions);
         self.run_live(ui, scene, gui, graph.as_ref(), &mut actions);
+        if self.tab == DesignerTab::Pages {
+            self.graph_hovered = false;
+            self.pages_tab(ui, scene, render_state, &mut actions);
+            return actions;
+        }
         if self.tab == DesignerTab::EventGraph {
             self.event_graph(ui, scene, gui, graph, &mut actions);
             return actions;

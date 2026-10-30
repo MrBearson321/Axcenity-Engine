@@ -134,7 +134,7 @@ fn a_graph_with_an_unconnected_required_pin_reports_its_nodes_not_lua_errors() {
     let (folder, mut app, menu, pages, settings) = hello_ui_graph("ui-graph-errors");
     let index = app.graph_document(menu).unwrap();
     let graph = &mut app.project.as_mut().unwrap().ui_graphs[index].graph;
-    let set = graph.add_node(spec("set_property"), [880.0, 220.0]);
+    let set = graph.add_node(spec("set_property"), [960.0, 220.0]);
     graph
         .connect(&UiNodes, PinRef::new(5, ""), PinRef::new(set, ""))
         .unwrap();
@@ -330,5 +330,106 @@ fn ctrl_z_over_the_event_graph_undoes_the_graph_not_the_world() {
         world_step,
         "the world's undo is untouched"
     );
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn hovering_in_live_preview_runs_parallel_branches_and_a_hidden_screen_gui_hides() {
+    let (folder, mut app, menu, _, settings) = hello_ui_graph("ui-graph-hover");
+    let index = app.graph_document(menu).unwrap();
+    {
+        let graph = &mut app.project.as_mut().unwrap().ui_graphs[index].graph;
+        let mut add = |kind: &str, values: &[(&str, &str)]| {
+            let id = graph.add_node(spec(kind), [0.0, 400.0]);
+            let node = graph.node_mut(id).unwrap();
+            for (name, value) in values {
+                node.values.insert((*name).to_owned(), (*value).to_owned());
+            }
+            id
+        };
+        // Hovering the title hides it and prints, both at once.
+        let hovered = add("hovered", &[("Element", "Pages/Home/Title")]);
+        let parallel = add("parallel", &[]);
+        let hide = add(
+            "set_visible",
+            &[("Element", "Pages/Home/Title"), ("Visible", "false")],
+        );
+        let print = add("print", &[("Value", "hovered the title")]);
+        // Hovering the Settings button hides the whole ScreenGui.
+        let button = add("hovered", &[("Element", "Pages/Home/SettingsButton")]);
+        let off = add("set_visible", &[("Element", ""), ("Visible", "false")]);
+        for (from, to) in [
+            (PinRef::new(hovered, ""), PinRef::new(parallel, "")),
+            (PinRef::new(parallel, "Branch 0"), PinRef::new(hide, "")),
+            (PinRef::new(parallel, "Branch 1"), PinRef::new(print, "")),
+            (PinRef::new(button, ""), PinRef::new(off, "")),
+        ] {
+            graph.connect(&UiNodes, from, to).unwrap();
+        }
+    }
+    let ctx = theme::test_context();
+    app.ui_designer.toggle_live_preview();
+    draw_designer(&mut app, &ctx, Vec::new());
+    draw_designer(&mut app, &ctx, Vec::new());
+    assert!(
+        app.ui_designer.live().is_some(),
+        "{:?}",
+        errors_in_output(&app)
+    );
+    let (board, zoom) = app.ui_designer.board().expect("the artboard is drawn");
+    let hover = |app: &mut EditorApp, design: egui::Vec2| {
+        let at = board.min + design * zoom;
+        draw_designer(app, &ctx, vec![egui::Event::PointerMoved(at)]);
+        draw_designer(app, &ctx, Vec::new());
+    };
+    let visible = |world: &World, id: InstanceId, property: &str| {
+        world.get(id).unwrap().property(property).cloned()
+    };
+
+    // The title is at 380, 160 to 900, 224 in the 1280 × 720 design.
+    hover(&mut app, egui::vec2(640.0, 192.0));
+    let live = app.ui_designer.live().unwrap();
+    let title = child(
+        &live.world,
+        child(&live.world, child(&live.world, menu, "Pages"), "Home"),
+        "Title",
+    );
+    assert_eq!(
+        visible(&live.world, title, "Visible"),
+        Some(Value::Bool(false))
+    );
+    assert!(
+        app.output
+            .lines()
+            .iter()
+            .any(|line| line.text == "Live Preview: hovered the title"),
+        "both branches ran"
+    );
+
+    hover(&mut app, egui::vec2(640.0, 448.0));
+    let live = app.ui_designer.live().unwrap();
+    assert_eq!(
+        visible(&live.world, menu, "Enabled"),
+        Some(Value::Bool(false))
+    );
+    // The world being edited is as it was.
+    assert_eq!(
+        visible(&app.world, menu, "Enabled"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        visible(&app.world, settings, "Visible"),
+        Some(Value::Bool(true))
+    );
+    if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
+        crate::snapshot::snapshot(
+            &snapshots.join("ui-live-preview-hidden.png"),
+            SIZE,
+            vec![Vec::new(); 3],
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+            },
+        );
+    }
     let _ = std::fs::remove_dir_all(&folder);
 }

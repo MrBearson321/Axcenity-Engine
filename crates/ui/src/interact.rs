@@ -281,7 +281,7 @@ impl UiInteraction {
             selected: self.selected,
             forced: None,
             transitions: Some(&self.transitions),
-            scrolled: None,
+            ..PseudoClasses::default()
         };
         let mut layout = layout_ui_with_pseudo(
             world,

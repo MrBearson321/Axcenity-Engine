@@ -359,6 +359,43 @@ fn a_node_with_errors_is_taller_and_lists_them() {
 }
 
 #[test]
+fn a_long_value_widens_its_node_to_fit_up_to_a_limit() {
+    let ctx = theme::test_context();
+    let _ = ctx.run(Default::default(), |_| {});
+    let mut graph = NodeGraph::default();
+    let id = graph.add_node(spec("button_activated"), [0.0, 0.0]);
+    let shape = |graph: &NodeGraph| {
+        node_shape(
+            &ctx,
+            spec("button_activated"),
+            graph.node(id).unwrap(),
+            graph,
+            &[],
+        )
+    };
+    let short = shape(&graph);
+    let path = "Pages/Home/SettingsButton";
+    let set = |graph: &mut NodeGraph, value: String| {
+        graph
+            .node_mut(id)
+            .unwrap()
+            .values
+            .insert("Button".into(), value);
+    };
+    set(&mut graph, path.into());
+    let long = shape(&graph);
+    // The menu fits the path and its arrow, and the node fits the menu
+    // beside its label, so nothing spills over the node's edge.
+    let control = long.field_widths[0];
+    assert!(control >= text_width(&ctx, path, 12.0) + 30.0, "{control}");
+    assert!(long.size.x >= text_width(&ctx, "Button", 12.0) + control + 28.0);
+    assert!(long.size.x > short.size.x);
+    // A very long one is cut short instead.
+    set(&mut graph, "Pages/".repeat(40));
+    assert_eq!(shape(&graph).field_widths[0], MAX_FIELD_WIDTH);
+}
+
+#[test]
 fn the_editor_draws_with_errors_comments_and_every_node_kind() {
     let mut graph = NodeGraph::default();
     for (index, spec) in UI_NODES.iter().enumerate() {

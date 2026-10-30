@@ -29,6 +29,7 @@ Objects are picked from menus: elements by their path under the ScreenGui (empty
 | | Print Value | `print(value)` |
 | Flow | Branch Condition → True, False | `if c then … else … end` |
 | | Sequence → Then 0, Then 1, Then 2 | each in turn |
+| | Parallel → Branch 0 … Branch 3 | each wired branch in `task.spawn(function() … end)`, so all start at once and a Delay or Tween in one doesn't hold up the others |
 | | Delay Seconds → Completed | `task.wait(s)` then Completed |
 | Data | Get Property, Get Text | `object.Property`, `element.Text` |
 | | Math (+ − × ÷ % ^), Compare (< ≤ = ≠ > ≥), Join Text | `(a op b)`, `(a .. b)` |
@@ -46,9 +47,10 @@ Objects are picked from menus: elements by their path under the ScreenGui (empty
 ## In the editor
 
 - The UI Designer's **Design · Event Graph** tabs. Event Graph edits the shown ScreenGui's graph in the generic graph editor (`crates/editor/src/node_graph.rs`; behavior trees use it too, `docs/architecture/navigation.md`): right-click (or **Add node**) for the searchable node menu, drop a wire on the canvas for nodes that fit it (wired to it), drag between pins to wire (Alt-click or right-click a pin breaks), click or box-select nodes, drag to move, Delete, Ctrl+D, Ctrl+C / Ctrl+X / Ctrl+V (as text, so between ScreenGuis too), **Comment** around the selection (drag its title to move it with what's inside, its corner to resize, double-click to rename), right- or middle-drag and the wheel to pan, Ctrl + wheel to zoom, Frame all.
+- A node is as wide as its title, pins and fields need: a field's menu or box grows to fit its value (an element's whole path) up to 280 points, and a longer value is cut short with … (its tooltip has it all), so nothing runs past the node's edge.
 - Beside it: the graph's **Variables** (name and starting value), whether it's ready to run or its problems, and **Lua · View**, the LocalScript it becomes (read-only).
 - Each finished edit (a drag, a typed value, a wire) is one step of the graph's own undo: Ctrl+Z and Ctrl+Y act on the graph while the pointer is over it, and on the world otherwise. Graphs save with Ctrl+S (a ScreenGui's first graph is only written once it has a node), which makes their LocalScripts again; a new graph's LocalScript is added under its ScreenGui then.
-- **Live Preview** (beside the tabs) copies the world and runs only this graph's Lua there (`ui_designer/event_graph.rs`, `LivePreview`), shown on the artboard: clicking a button fires `Activated`, hovering fires `MouseEnter` and `MouseLeave`, and time moves on for Delay, tweens and Every Frame. What it prints goes to Output as `Live Preview: …`. Nothing it does reaches the world being edited; it starts again when the graph changes and stops for Play or another ScreenGui. A graph with problems doesn't start, and the Event Graph tab shows why. Typing into TextBoxes and sounds aren't previewed.
+- **Live Preview** (beside the tabs) copies the world and runs only this graph's Lua there (`ui_designer/event_graph.rs`, `LivePreview`), shown on the artboard: clicking a button fires `Activated`, hovering fires `MouseEnter` and `MouseLeave`, and time moves on for Delay, tweens and Every Frame. As in Play, the hovered element shows its `:hover` styles (`:active` while a button is held), the game's pages and `Visible` show (not the designer's eyes), and a ScreenGui whose `Enabled` turns off disappears (`DesignerOverrides::only_enabled`). What it prints goes to Output as `Live Preview: …`. Nothing it does reaches the world being edited; it starts again when the graph changes and stops for Play or another ScreenGui. A graph with problems doesn't start, and the Event Graph tab shows why. Typing into TextBoxes and sounds aren't previewed.
 
 ## Code
 

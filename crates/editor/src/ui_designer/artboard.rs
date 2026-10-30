@@ -300,6 +300,7 @@ impl UiDesigner {
                 shown,
                 scrolled: Some(&self.scrolled),
                 safe_insets: safe_insets(screen),
+                overrides: self.overrides(),
             },
         );
         self.scroller.remember(&layout);
@@ -462,6 +463,18 @@ impl UiDesigner {
             {
                 self.preview_clicks.push(button);
             }
+            // Shown hovered or pressed on the next frame, as Play shows it.
+            self.preview_state = self.preview_hover.map(|id| {
+                let pressed = down && button == Some(id);
+                (
+                    id,
+                    if pressed {
+                        axcenity_ui::UiState::Pressed
+                    } else {
+                        axcenity_ui::UiState::Hover
+                    },
+                )
+            });
         }
         // A ScrollingFrame's bar being dragged scrolls it on the artboard.
         if self.scroller.scrolling() {
