@@ -8,7 +8,7 @@ python .claude/skills/implement/scripts/plan.py show <N|next>
 python .claude/skills/implement/scripts/plan.py --plan v2 show <N>
 ```
 
-The helper reads `plans/axcenity-engine-unified.md` by default; `--plan <name>` picks another file in `plans/` (`v1`, `v2`, `v3`, `unified`). `show` returns the selected phase and the full text of its linked PRD stories without loading either large document in full. `next` means the first phase with unticked criteria. For a feature name, use the matching phase if there is one.
+The helper reads `plans/axcenity-engine-unified.md` by default; `--plan <name>` picks another file in `plans/` (`v1`, `v2`, `v3`, `unified`, `graphics`). `show` returns the selected phase and the full text of its linked PRD stories without loading either large document in full. `next` means the first phase with unticked criteria. For a feature name, use the matching phase if there is one.
 
 Before implementation, check the previous phase's status and relevant code. Investigate an earlier gap only when it blocks the requested work or makes its assumptions unclear; don't stop to audit unrelated old criteria or CI. Tell the user if a blocker means the requested work depends on unresolved behavior.
 

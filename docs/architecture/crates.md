@@ -56,8 +56,8 @@ A large module is a parent file plus a folder of the same name. The parent keeps
 | `editor/src/node_graph.rs` | `draw` (nodes, pins, values), `menu` (the node menu), `variables` |
 | `editor/src/terrain_studio.rs` | `tool_settings`, `layers`, `presets` |
 | `editor/src/start.rs` | `dialogs`, `cards`, `pages`, `global` |
-| `editor/src/viewport.rs` | `input` (camera, picking, dragging), `overlays` (selection, lights, brush, debug) |
-| `render/src/renderer.rs` | `types` (GPU structs and constants), `scene` (`ScenePipeline`, the frame), `gpu`, `lighting`, `post`, `sprites`, `terrain`, `ui_pass`, `gpu_timer` (per-pass GPU time, `FramePass`) |
+| `editor/src/viewport.rs` | `input` (camera, picking, dragging), `overlays` (selection, lights, brush, debug), `game_input` (Play's mouse and touch input), `view_mode` (View > View Mode) |
+| `render/src/renderer.rs` | `types` (GPU structs and constants), `scene` (`ScenePipeline`, the frame), `gpu`, `lighting`, `post`, `sprites`, `terrain`, `ui_pass`, `gpu_timer` (per-pass GPU time, `FramePass`), plus one child per drawing feature (`fog`, `water`, `temporal`, `gpu_particles`, `debug_views` and the rest; `crates/render/CLAUDE.md` names each); its tests are `tests/` by feature |
 | `project/src/lib.rs` | `templates`, `scripts`, `stylesheets`, `ui_graphs` (plus `world_file`, `migrate`, `packed`, `versions`, `validate`, `terrain_files`) |
 | `ui/src/lib.rs` | `css` (property parsing), `paint` (draw items), `style` |
 | `blocks-runtime/src/lib.rs` | `translate` (Lua output), `node_graph` (generic graphs), `ui_graph` (UI nodes and their Lua), `behavior_tree` (the nodes behavior trees offer) |
