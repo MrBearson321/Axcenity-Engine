@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
-use axcenity_script::{LanGame, NetworkRequest, ScriptRuntime, Side};
+use axcenity_script::{ConsoleRun, LanGame, NetworkRequest, ScriptRuntime, Side};
 
 use crate::discovery::{HostInfo, LanAnswerer, LanSearch};
 use crate::handshake::{GameInfo, Message};
@@ -303,6 +303,21 @@ impl Network {
 
     pub fn is_hosting(&self) -> bool {
         matches!(self.session, Session::Hosting(_))
+    }
+
+    /// Joined to a server elsewhere: sends `line`, typed in the Developer
+    /// Console, to it for its commands (Phase 71). False, and nothing
+    /// sent, when not joined.
+    pub fn send_console_command(&mut self, line: &str) -> bool {
+        match &mut self.session {
+            Session::Joined(join) if join.you().is_some() => {
+                join.send(&Message::Console {
+                    line: line.to_owned(),
+                });
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Joined and taken in by the host.
@@ -767,6 +782,24 @@ impl Network {
                 };
                 if let Some(text) = scripts.filter_chat(world, Some(player), &text) {
                     self.deliver_chat(scripts, Some(player), text);
+                }
+            }
+            SessionEvent::Console { from, line } => {
+                let Some(&player) = self.players.get(&from) else {
+                    return;
+                };
+                let name = world
+                    .get(player)
+                    .map(|p| p.name().to_owned())
+                    .unwrap_or_default();
+                match scripts.run_remote_console_command(world, player, &line) {
+                    ConsoleRun::Ran => self.log.push(format!("{name} ran `{line}`")),
+                    ConsoleRun::NotAllowed => self.log.push(format!(
+                        "warning: {name} may not run `{line}`: their UserId isn't in ConsoleService.AllowedUserIds"
+                    )),
+                    ConsoleRun::Unknown => self
+                        .log
+                        .push(format!("warning: {name} typed an unknown command `{line}`")),
                 }
             }
             SessionEvent::ChatLine { player, text } => {

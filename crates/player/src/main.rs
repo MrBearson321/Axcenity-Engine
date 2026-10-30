@@ -8,9 +8,11 @@
 //! camera follows it; otherwise a fly camera looks around. The keyboard and
 //! game controllers can move focus through menus (`axcenity_ui::NavKey`).
 
+mod dev_console;
 mod graphics;
 mod icon;
 mod input;
+mod logs;
 mod splash;
 mod watch;
 
@@ -35,7 +37,9 @@ use axcenity_render::glam::Vec3;
 use axcenity_render::{Capabilities, GraphicsSettings, Renderer};
 use axcenity_scene::{FlyCamera, MoveKeys, UiFrame};
 use axcenity_script::{CameraState, CameraView, GameCamera, OutputKind, ScriptRuntime};
-use axcenity_ui::{LoadingGui, NavKey, UiCursor, UiEvent, UiInput, UiInteraction};
+use axcenity_ui::{
+    LoadingGui, LogLevel, LogSide, NavKey, UiCursor, UiEvent, UiInput, UiInteraction,
+};
 use input::{CursorLock, PlayerInput, script_key};
 use watch::NetworkStart;
 use winit::application::ApplicationHandler;
@@ -55,24 +59,33 @@ const MAX_FRAME_SECONDS: f32 = 0.1;
 /// Touchpads scroll in pixels; this many is one mouse wheel notch.
 const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
-const USAGE: &str = "usage: axcenity-player [--watch] [--host [port] | --join address:port] \
+const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | --join address:port] \
                      [--password text] [project-folder | game.axgame]\n\
                      example: cargo run -p axcenity-player -- examples/hello-part\n\
                      --watch reloads a project folder's changed assets while it plays\n\
+                     --dev turns on the F9 Developer Console in a built game\n\
                      --host hosts the game (port 47800 unless given); --join joins one";
 
 fn main() -> Result<()> {
     // Show warnings and errors by default. `wgpu_hal` relays harmless graphics
     // driver chatter as warnings, so only its errors are shown. Set RUST_LOG to
     // override (for example RUST_LOG=info).
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("warn,wgpu_hal=error"),
-    )
-    .init();
+    // They also go in the game's log file (Phase 71), which a panic is
+    // written to before the game exits.
+    logs::install_logger(
+        env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or("warn,wgpu_hal=error"),
+        )
+        .build(),
+    );
+    logs::install_panic_hook(logs::tell_on_stderr);
 
     // `args_os` instead of `args` so folder names that aren't valid Unicode still work.
     let arguments = watch::Arguments::parse(std::env::args_os().skip(1))?;
     let watcher = arguments.watched_folder().map(watch::start);
+    // A project folder is a development run; a `.axgame` file (or one
+    // bundled next to the player) is a built game.
+    let game_path = arguments.game.clone();
     let folder = match arguments.game {
         Some(path) if path.is_file() => {
             let temporary = PackedProjectFolder::new()?;
@@ -102,16 +115,36 @@ fn main() -> Result<()> {
     };
     let project = axcenity_project::load(&folder.path)
         .with_context(|| format!("could not open the project in `{}`", folder.path.display()))?;
+    // Saves and logs go in the player's data for this game, never the
+    // game's folder.
+    let data_folder = axcenity_save::game_folder(&project.manifest.name);
+    if let Some(data) = &data_folder {
+        match logs::start(&data.join("logs")) {
+            Ok(path) => log::info!("logging to `{}`", path.display()),
+            Err(err) => log::warn!("could not start the game's log: {err}"),
+        }
+    }
+    // The F9 Developer Console: in a development run, else only when the
+    // project turns it on or the player is started with `--dev`.
+    let console_allowed = dev_console::console_allowed(
+        game_path.as_deref(),
+        arguments.dev,
+        project.manifest.developer_console,
+    );
     if let Some(from) = project.migrated_from {
         let kept = project
             .migration_backup
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| axcenity_project::PREVIOUS_FORMAT_DIR.to_owned());
-        eprintln!(
-            "Upgraded \"{}\" from project format {from} to {}. The previous files are kept in `{kept}`.",
-            project.manifest.name,
-            axcenity_project::FORMAT_VERSION,
+        logs::line(
+            LogLevel::Warning,
+            None,
+            &format!(
+                "Upgraded \"{}\" from project format {from} to {}. The previous files are kept in `{kept}`.",
+                project.manifest.name,
+                axcenity_project::FORMAT_VERSION,
+            ),
         );
     }
     log::info!("loaded project \"{}\"", project.manifest.name);
@@ -123,7 +156,11 @@ fn main() -> Result<()> {
     let levels = game_levels(&project.folder, &start_level, &project.world, &mut problems);
     // A damaged file only takes itself out: say which, and run the rest.
     for problem in problems {
-        eprintln!("error: {:#}", anyhow::Error::new(problem));
+        logs::line(
+            LogLevel::Error,
+            None,
+            &format!("error: {:#}", anyhow::Error::new(problem)),
+        );
     }
     let mut stylesheets = Vec::new();
     for file in &project.stylesheets {
@@ -143,9 +180,13 @@ fn main() -> Result<()> {
         loading.wait_for_script,
     );
     if !loading.screen_gui.is_empty() && loading_gui.is_none() {
-        eprintln!(
-            "warning: the loading screen \"{}\" is not a ScreenGui in the Workspace",
-            loading.screen_gui
+        logs::line(
+            LogLevel::Warning,
+            None,
+            &format!(
+                "warning: the loading screen \"{}\" is not a ScreenGui in the Workspace",
+                loading.screen_gui
+            ),
         );
     }
     let show_splash = show_splash && loading_gui.is_none();
@@ -156,8 +197,6 @@ fn main() -> Result<()> {
     let assets = Assets::new(&project.folder);
     let mut scripts = ScriptRuntime::new();
     scripts.set_assets(assets.clone());
-    // Saves go in the player's data for this game, never the game's folder.
-    let data_folder = axcenity_save::game_folder(&project.manifest.name);
     scripts.set_save_folder(data_folder.clone());
     // Who plays, the same each time on this install (Phase 64).
     scripts.set_user_id(axcenity_save::user_id() as f64);
@@ -175,7 +214,7 @@ fn main() -> Result<()> {
     animators.update(&mut world, &assets, 0.0);
     // The character each player spawns as, before scripts look for it.
     if let Err(err) = axcenity_project::load_starter_character(&project.folder, &mut world) {
-        eprintln!("warning: {err}");
+        logs::line(LogLevel::Warning, None, &format!("warning: {err}"));
     }
     // The project's actions, before any LocalScript asks about them.
     scripts.set_input_map(project.input_map.clone());
@@ -232,6 +271,7 @@ fn main() -> Result<()> {
     app.data_folder = data_folder;
     app.watcher = watcher;
     app.network = network;
+    app.console_allowed = console_allowed;
     event_loop.run_app(&mut app)?;
     // Tell the other players this one is gone.
     app.network.disconnect(&mut app.world, &mut app.scripts);
@@ -335,7 +375,12 @@ fn client_scripts(world: &World, scripts: &[ScriptFile]) -> Vec<ScriptCode> {
 
 fn print_network_log(network: &mut Network) {
     for line in network.take_log() {
-        eprintln!("{line}");
+        let level = if line.starts_with("warning:") {
+            LogLevel::Warning
+        } else {
+            LogLevel::Info
+        };
+        logs::line(level, None, &line);
     }
 }
 
@@ -343,13 +388,19 @@ fn print_network_log(network: &mut Network) {
 /// error followed by its stack trace, one indented call per line.
 fn print_output(runtime: &mut ScriptRuntime) {
     for line in runtime.take_output() {
+        let side = line.side.map(|side| match side {
+            axcenity_script::Side::Server => LogSide::Server,
+            axcenity_script::Side::Client => LogSide::Client,
+        });
         match line.kind {
-            OutputKind::Print => println!("{}", line.text),
-            OutputKind::Warning => eprintln!("warning: {}", line.text),
+            OutputKind::Print => logs::line(LogLevel::Info, side, &line.text),
+            OutputKind::Warning => {
+                logs::line(LogLevel::Warning, side, &format!("warning: {}", line.text));
+            }
             OutputKind::Error => {
-                eprintln!("error: {}", line.text);
+                logs::line(LogLevel::Error, side, &format!("error: {}", line.text));
                 for frame in &line.trace {
-                    eprintln!("    {frame}");
+                    logs::line(LogLevel::Error, side, &format!("    {frame}"));
                 }
             }
         }
@@ -600,6 +651,14 @@ struct App {
     /// (Phase 64): the server moves the parts, characters and agents, and
     /// only LocalScripts run here.
     following: bool,
+    /// The F9 Developer Console (Phase 71), and whether this run has it
+    /// (`dev_console::console_allowed`).
+    console: axcenity_ui::DevConsole,
+    console_allowed: bool,
+    /// What the console's commands changed.
+    dev: dev_console::DevSettings,
+    /// The frame rate and steps' times, for the console's Stats tab.
+    frame_stats: dev_console::FrameStats,
 }
 
 impl App {
@@ -666,6 +725,10 @@ impl App {
                 version: String::new(),
             }),
             following: false,
+            console: axcenity_ui::DevConsole::default(),
+            console_allowed: false,
+            dev: dev_console::DevSettings::default(),
+            frame_stats: dev_console::FrameStats::default(),
         }
     }
 
@@ -913,6 +976,17 @@ impl App {
     }
 
     /// Lets go of every key held, for scripts and the game.
+    /// Lets go of every key and button the game sees as held, so nothing
+    /// keeps moving (the window lost focus, or the console opened).
+    fn release_game_keys(&mut self) {
+        self.keys = MoveKeys::default();
+        self.release_keys();
+        for event in self.input.game.release_all() {
+            self.input.push(event);
+        }
+        self.looking = false;
+    }
+
     fn release_keys(&mut self) {
         for key in std::mem::take(&mut self.held_keys) {
             self.input.push(InputEvent::new(InputKind::Key {
@@ -1195,6 +1269,11 @@ impl ApplicationHandler for App {
                     PhysicalKey::Code(code) => Some(code),
                     PhysicalKey::Unidentified(_) => None,
                 };
+                // F9, and every key while the Developer Console is open
+                // (Phase 71).
+                if self.console_key(key, pressed, event.repeat, event.text.as_deref()) {
+                    return;
+                }
                 if self.chat_typing.is_some() {
                     self.type_chat(&event);
                     if let Some(key) = key.and_then(script_key) {
@@ -1286,12 +1365,7 @@ impl ApplicationHandler for App {
             // so let go of everything to avoid the camera drifting on its own.
             WindowEvent::Focused(false) => {
                 self.focused = false;
-                self.keys = MoveKeys::default();
-                self.release_keys();
-                for event in self.input.game.release_all() {
-                    self.input.push(event);
-                }
-                self.looking = false;
+                self.release_game_keys();
                 if let Some(window) = &self.window {
                     capture_mouse(window, false);
                 }
@@ -1299,7 +1373,10 @@ impl ApplicationHandler for App {
             }
             // One frame, in the fixed order from docs/architecture/frame-loop.md.
             WindowEvent::RedrawRequested => {
-                let seconds = frame_seconds(&mut self.last_frame);
+                // `timescale` in the console speeds the game up or slows it.
+                let real_seconds = frame_seconds(&mut self.last_frame);
+                let seconds = self.game_seconds(real_seconds);
+                let mut watch = dev_console::Stopwatch::start();
                 let size = self
                     .window
                     .as_ref()
@@ -1320,7 +1397,7 @@ impl ApplicationHandler for App {
                     let lines =
                         watch::reload(&paths, &self.assets, &mut self.animators, &mut self.audio);
                     for line in lines {
-                        eprintln!("{line}");
+                        logs::line(LogLevel::Info, None, &line);
                     }
                 }
 
@@ -1332,7 +1409,11 @@ impl ApplicationHandler for App {
                 print_output(&mut self.scripts);
                 // `Player:Kick` on this device's player ends the game.
                 if let Some(reason) = self.network.take_kicked() {
-                    eprintln!("You were kicked from the game: {reason}");
+                    logs::line(
+                        LogLevel::Warning,
+                        None,
+                        &format!("You were kicked from the game: {reason}"),
+                    );
                     event_loop.exit();
                     return;
                 }
@@ -1345,6 +1426,8 @@ impl ApplicationHandler for App {
                 // A device following a server only runs its LocalScripts:
                 // the server moves parts, characters and agents.
                 let simulates = !self.following;
+
+                watch.lap("Network");
 
                 // 1. Input. A character controller moves first and owns
                 //    the camera, by the input map's actions (with the
@@ -1382,7 +1465,7 @@ impl ApplicationHandler for App {
                     // Then navigation agents, toward their destinations.
                     self.agents.step(&mut self.world, &self.assets, seconds);
                     for warning in self.agents.take_warnings() {
-                        eprintln!("warning: {warning}");
+                        logs::line(LogLevel::Warning, None, &format!("warning: {warning}"));
                     }
                     fire_sensed(&mut self.scripts, &mut self.world, &mut self.agents);
                 }
@@ -1400,6 +1483,8 @@ impl ApplicationHandler for App {
                 }
                 print_output(&mut self.scripts);
 
+                watch.lap("Input");
+
                 // 2. Resume scripts whose wait is over (and due `task.delay`s).
                 //    Game time is the sum of the (capped) frame times, so a
                 //    long pause doesn't make every waiting script fire at once.
@@ -1407,6 +1492,8 @@ impl ApplicationHandler for App {
                 //    Then `RunService.Stepped`, before physics.
                 self.scripts.stepped(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
+
+                watch.lap("Scripts");
 
                 // 3. Hold characters and agents kinematic, then step physics at a
                 //    fixed 60 Hz (0 to N steps this frame). Anchoring is
@@ -1448,6 +1535,7 @@ impl ApplicationHandler for App {
                 }
                 self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
+                watch.lap("Physics");
                 let heard = listener_of_view(self.shown_view());
                 apply_audio(
                     &mut self.scripts,
@@ -1480,7 +1568,7 @@ impl ApplicationHandler for App {
                 }
                 print_output(&mut self.scripts);
                 for error in self.animators.take_errors() {
-                    eprintln!("error: {error}");
+                    logs::line(LogLevel::Error, None, &format!("error: {error}"));
                 }
                 // Tools in hand follow the posed hands.
                 self.scripts
@@ -1498,6 +1586,8 @@ impl ApplicationHandler for App {
                 if let Some(loading) = &mut self.loading_gui {
                     loading.advance(&mut self.world, seconds, ready);
                 }
+
+                watch.lap("Animation");
 
                 // 5. Lay out ScreenGuis at this window's current pixel size.
                 let ui_size = (size.width, size.height);
@@ -1601,6 +1691,12 @@ impl ApplicationHandler for App {
                 self.particles.add_weather(&mut draw_list);
                 self.shader_time += seconds;
                 draw_list.time = self.shader_time;
+                // The console's outlines and readout, then the console,
+                // over the game's UI (Phase 71).
+                self.take_log();
+                draw_list
+                    .ui
+                    .extend(self.console_items(render_camera, (size.width, size.height)));
                 if self.show_splash {
                     // The first drawn frame starts the splash clock.
                     self.splash.tick();
@@ -1612,11 +1708,12 @@ impl ApplicationHandler for App {
                 }
                 // Models that couldn't be loaded, by physics or for drawing.
                 for error in self.assets.take_errors() {
-                    eprintln!("error: {error}");
+                    logs::line(LogLevel::Error, None, &format!("error: {error}"));
                 }
                 // Network send: after the frame's scripts, physics and UI
                 // layout, before rendering.
                 self.network.send(&self.world, &mut self.scripts);
+                watch.lap("UI");
                 // `|| ...` is a closure: a small function the renderer calls at the right moment.
                 let window = self
                     .window
@@ -1634,9 +1731,11 @@ impl ApplicationHandler for App {
                 // Materials whose shaders don't compile (drawn magenta).
                 if let Some(renderer) = &mut self.renderer {
                     for error in renderer.take_shader_errors() {
-                        eprintln!("error: {error}");
+                        logs::line(LogLevel::Error, None, &format!("error: {error}"));
                     }
                 }
+                watch.lap("Render");
+                self.frame_stats.finish(real_seconds, watch);
             }
             _ => {}
         }
@@ -1689,6 +1788,8 @@ mod time_of_day_tests;
 
 #[cfg(test)]
 mod clouds_tests;
+#[cfg(test)]
+mod console_tests;
 
 #[cfg(test)]
 mod volume_tests;

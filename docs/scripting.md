@@ -20,6 +20,7 @@ Map only. Luau and block scripts (shown as blocks or as a graph) share one runti
 - LevelService (levels, `LoadLevel`, `AddLevel`): [project/levels.md](project/levels.md)
 - Sequence (cutscenes: `Play`, `Completed`, `EventReached`, skipping, locked input): [project/sequences.md](project/sequences.md)
 - DataService and data tables: [project/data-tables.md](project/data-tables.md)
+- ConsoleService (Developer Console commands): [developer-console.md](developer-console.md)
 - LocalizationService, the string table and `TextKey`: [ui.md](ui.md)
 - GuiService (text scale, contrast, reduced motion) and `AccessibleName`: [ui.md](ui.md)
 - Error text: [scripting/errors.md](scripting/errors.md)

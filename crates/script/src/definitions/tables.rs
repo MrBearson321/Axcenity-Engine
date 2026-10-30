@@ -893,6 +893,26 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         }],
     },
     ValueType {
+        class: "ConsoleService",
+        doc: "The game's own commands for the Developer Console (F9), from `game:GetService(\"ConsoleService\")`. A LocalScript's commands run on that device, a Script's on the server.",
+        fields: &[Field {
+            name: "AllowedUserIds",
+            ty: "{number}",
+            doc: "On the server: the `UserId`s of the players who may run its commands from another device, such as `{123}`. The device that hosts, or plays offline, always may.",
+        }],
+        operators: &[],
+        methods: &[Function {
+            name: "RegisterCommand",
+            doc: "Adds the command `name` (one word), with `help` for the console's `help` list. Typed as `name arg1 arg2`, it calls `callback(player, \"arg1\", \"arg2\")` in a task of its own; `player` is who typed it. Registering a name again replaces it.",
+            params: &[
+                ("name", "string"),
+                ("help", "string"),
+                ("callback", "(player: Player?, ...string) -> ()"),
+            ],
+            returns: "()",
+        }],
+    },
+    ValueType {
         class: "DataTable",
         doc: "A data table, read-only. Each call reads the version in use now, so an edit made during Play is what the next call sees.",
         fields: &[],
@@ -2369,7 +2389,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"NetworkService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"NetworkService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"ConsoleService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -3054,6 +3074,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "LevelService",
             ty: "LevelService",
             doc: "The game's levels (same as `game:GetService(\"LevelService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "ConsoleService",
+            ty: "ConsoleService",
+            doc: "The game's Developer Console commands (same as `game:GetService(\"ConsoleService\")`).",
         },
     ),
     (

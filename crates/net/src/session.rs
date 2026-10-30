@@ -53,6 +53,8 @@ pub enum SessionEvent {
     /// A chat message from the server for everyone: from a Player (a
     /// network ID), or 0 for a system message.
     ChatLine { player: u64, text: String },
+    /// Player `from` typed a console command for the server (on the host).
+    Console { from: u32, line: String },
 }
 
 /// What a host is.
@@ -177,6 +179,10 @@ impl Host {
                     Some(Message::Chat { text }) => events.push(SessionEvent::Chat {
                         from: peer.id,
                         text,
+                    }),
+                    Some(Message::Console { line }) => events.push(SessionEvent::Console {
+                        from: peer.id,
+                        line,
                     }),
                     _ => {}
                 }
@@ -429,7 +435,8 @@ impl Join {
                 Some(Message::ChatLine { player, text }) => {
                     events.push(SessionEvent::ChatLine { player, text });
                 }
-                Some(Message::Hello { .. } | Message::Chat { .. }) | None => {}
+                Some(Message::Hello { .. } | Message::Chat { .. } | Message::Console { .. })
+                | None => {}
             }
         }
         if matches!(self.state, JoinState::In { .. }) {

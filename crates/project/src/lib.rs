@@ -153,6 +153,10 @@ pub struct Manifest {
     /// only join a host running the same one.
     #[serde(default = "default_game_version")]
     pub version: String,
+    /// The built game's F9 Developer Console (Phase 71). A project folder
+    /// run in the player, or a game started with `--dev`, has it anyway.
+    #[serde(default)]
+    pub developer_console: bool,
 }
 
 fn default_show_splash() -> bool {
@@ -253,6 +257,11 @@ pub struct Project {
 /// Stores whether exported players show the brief engine splash screen.
 pub fn set_show_splash(folder: &Path, show: bool) -> Result<(), SaveError> {
     update_manifest(folder, "show_splash", serde_json::Value::Bool(show))
+}
+
+/// Stores whether the built game has the F9 Developer Console (Phase 71).
+pub fn set_developer_console(folder: &Path, on: bool) -> Result<(), SaveError> {
+    update_manifest(folder, "developer_console", serde_json::Value::Bool(on))
 }
 
 /// Stores how the player's loading screen goes.
@@ -465,6 +474,7 @@ pub(crate) fn load_project(
                 loading_screen: LoadingScreen::default(),
                 start_level: default_start_level(),
                 version: default_game_version(),
+                developer_console: false,
             }
         }
     };

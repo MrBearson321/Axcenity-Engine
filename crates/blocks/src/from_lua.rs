@@ -19,7 +19,7 @@ use crate::{
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 12] = [
+const SERVICES: [&str; 13] = [
     "UserInputService",
     "RunService",
     "Debris",
@@ -32,6 +32,7 @@ const SERVICES: [&str; 12] = [
     "Lighting",
     "UserGameSettings",
     "DataService",
+    "ConsoleService",
 ];
 
 /// Why some Lua couldn't become blocks.
@@ -176,6 +177,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             }
             BlockKind::SendChatMessage { .. } | BlockKind::ShowSystemMessage { .. } => {
                 services.insert("TextChatService".to_owned());
+            }
+            BlockKind::WhenCommandRun { .. } => {
+                services.insert("ConsoleService".to_owned());
             }
             BlockKind::SetLanguage { .. } => {
                 services.insert("LocalizationService".to_owned());
@@ -383,6 +387,19 @@ impl<'a> Converter<'a> {
         let ExprKind::Method(signal, method, args) = &call.kind else {
             return None;
         };
+        // ConsoleService:RegisterCommand(name, help, function() ... end)
+        if method == "RegisterCommand"
+            && self.is_service(signal, "ConsoleService")
+            && let [command, help, handler] = args.as_slice()
+            && let Some(function) = self.handler(handler, 0)
+        {
+            let scope = Scope::default();
+            return Some(Block::new(BlockKind::WhenCommandRun {
+                command: self.expression(command, scope),
+                help: self.expression(help, scope),
+                body: self.body(&function.body, scope),
+            }));
+        }
         if method != "Connect" {
             return None;
         }

@@ -427,6 +427,9 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "Debris") => LuaDebris.into_lua(lua)?,
         (ClassName::DataModel, "HttpService") => LuaHttpService.into_lua(lua)?,
         (ClassName::DataModel, "DataService") => LuaDataService.into_lua(lua)?,
+        (ClassName::DataModel, "ConsoleService") => {
+            crate::console_service::LuaConsoleService.into_lua(lua)?
+        }
         (ClassName::DataModel, "ReplicatedFirst") => LuaReplicatedFirst.into_lua(lua)?,
         (ClassName::DataModel, "UserGameSettings") => LuaUserGameSettings.into_lua(lua)?,
         (ClassName::Workspace, "CurrentCamera") => LuaCamera.into_lua(lua)?,
@@ -969,7 +972,7 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 /// `"Players"`, or `"UserInputService"`, `"ContextActionService"` or
 /// `"UserGameSettings"` (LocalScripts only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`, `"LevelService"`,
 /// `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`,
-/// `"DataService"` or `"ReplicatedFirst"`, which aren't Instances.
+/// `"DataService"`, `"ConsoleService"` or `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
         if let Some(service) = crate::edit::extra_service(lua, &name) {
@@ -999,6 +1002,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "Debris" => return LuaDebris.into_lua(lua),
             "HttpService" => return LuaHttpService.into_lua(lua),
             "DataService" => return LuaDataService.into_lua(lua),
+            "ConsoleService" => return crate::console_service::LuaConsoleService.into_lua(lua),
             "PhysicsService" => return crate::query::LuaPhysicsService.into_lua(lua),
             "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
             _ => {}

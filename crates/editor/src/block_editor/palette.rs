@@ -78,6 +78,11 @@ pub(super) fn palette(
                 detector: first(Filter::ClickDetectors),
                 body: Vec::new(),
             }),
+            B(BlockKind::WhenCommandRun {
+                command: text("heal"),
+                help: text("Heals the player"),
+                body: Vec::new(),
+            }),
             B(BlockKind::WhenClicked {
                 button: first(Filter::Buttons),
                 body: Vec::new(),

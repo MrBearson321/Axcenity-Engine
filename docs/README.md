@@ -14,6 +14,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Union, Negate, Intersect, Separate, `UnionOperation`, `CollisionFidelity` | [architecture/solid-modeling.md](architecture/solid-modeling.md) |
 | The navigation mesh, agents, or behavior trees | [architecture/navigation.md](architecture/navigation.md) |
 | Play and Stop | [architecture/play-mode.md](architecture/play-mode.md) |
+| The F9 Developer Console, `ConsoleService`, the player's log files and crash message | [developer-console.md](developer-console.md) |
 | Save slots, checkpoints, `SaveService` | [architecture/saves.md](architecture/saves.md) |
 | Multiplayer: the `net` crate, `axcenity-server`, `NetworkService`, hosting, joining, LAN discovery | [architecture/networking.md](architecture/networking.md) |
 | Levels, `LevelService`, the Levels panel | [project/levels.md](project/levels.md) |

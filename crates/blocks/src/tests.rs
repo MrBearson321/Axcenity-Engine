@@ -62,6 +62,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenSeatOccupied { .. }
         | BlockKind::WhenPromptTriggered { .. }
         | BlockKind::WhenPartClicked { .. }
+        | BlockKind::WhenCommandRun { .. }
         | BlockKind::Unattached { .. }
         | BlockKind::TopCode { .. } => return None,
         BlockKind::Wait { .. } => 0,
@@ -891,6 +892,14 @@ fn translation_covers_every_event_block() {
                 body: quiet(49),
             },
         ),
+        block(
+            94,
+            BlockKind::WhenCommandRun {
+                command: text("heal"),
+                help: text("Heals the player"),
+                body: quiet(95),
+            },
+        ),
         block(38, BlockKind::BeforePhysics { body: quiet(39) }),
         block(40, BlockKind::BeforeRender { body: quiet(41) }),
         block(
@@ -934,6 +943,8 @@ fn translation_covers_every_event_block() {
         "    if workspace.Chair.Occupant then",
         "workspace.Door.ProximityPrompt.Triggered:Connect(function()",
         "workspace.Button.ClickDetector.MouseClick:Connect(function()",
+        "local ConsoleService = game:GetService(\"ConsoleService\")",
+        "ConsoleService:RegisterCommand(\"heal\", \"Heals the player\", function()",
         "RunService.Stepped:Connect(function(time, deltaTime)",
         "RunService.RenderStepped:Connect(function(deltaTime)",
         "game.ReplicatedStorage.Scored.Event:Connect(function()",
@@ -943,7 +954,7 @@ fn translation_covers_every_event_block() {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 19, "{source}");
+    assert_eq!(source.matches("do return end").count(), 20, "{source}");
 }
 
 #[test]
@@ -1192,6 +1203,46 @@ fn translated_blocks_run_in_the_scheduler_like_typed_lua() {
         .map(|line| (line.kind, line.text))
         .collect();
     assert_eq!(output, [(OutputKind::Print, "moves: 3".to_owned())]);
+}
+
+/// The When Command Run block registers a Developer Console command that
+/// runs its blocks when typed (Phase 71).
+#[test]
+fn a_when_command_run_block_runs_its_blocks_when_the_command_is_typed() {
+    let blocks = vec![block(
+        1,
+        BlockKind::WhenCommandRun {
+            command: text("heal"),
+            help: text("Heals the player"),
+            body: vec![block(
+                2,
+                BlockKind::Print {
+                    value: text("healed"),
+                },
+            )],
+        },
+    )];
+    let source = translate(&script(blocks)).unwrap().source;
+    let mut world = World::new();
+    let lua = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(lua, Some(world.server_script_service()))
+        .unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, lua, "scripts/Heal.server.blocks.json", &source);
+    let commands = runtime.console_commands();
+    assert_eq!(commands.len(), 1, "{source}");
+    assert_eq!(commands[0].help, "Heals the player");
+    assert_eq!(
+        runtime.run_console_command(&mut world, "heal"),
+        axcenity_script::ConsoleRun::Ran
+    );
+    let output: Vec<_> = runtime
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(output, ["healed"]);
 }
 
 /// The time of day and atmosphere blocks set Lighting's ClockTime and its
@@ -1787,6 +1838,14 @@ fn every_block_script() -> BlockScript {
             18,
             BlockKind::WhenPartClicked {
                 detector: "Button.ClickDetector".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            21,
+            BlockKind::WhenCommandRun {
+                command: text("heal"),
+                help: text("Heals the player"),
                 body: body(),
             },
         ),

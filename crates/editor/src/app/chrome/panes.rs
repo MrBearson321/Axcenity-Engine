@@ -854,6 +854,7 @@ impl EditorApp {
             .iter()
             .any(|entry| entry.running.is_some())
             .then(|| self.plugin_has_mouse());
+        let mut console = self.dev_console_items();
         let emits = std::mem::take(&mut self.pending_emits);
         let debug_rays = self
             .play
@@ -900,6 +901,7 @@ impl EditorApp {
                                 .map(|play| play.prompts())
                                 .unwrap_or_default(),
                             click_cursor: self.play.as_ref().and_then(|play| play.click_cursor()),
+                            console: std::mem::take(&mut console),
                             light_cones: self.light_cones,
                             view_cube: self.view_cube,
                             overlays: self.overlays,

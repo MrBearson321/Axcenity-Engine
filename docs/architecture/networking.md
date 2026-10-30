@@ -20,7 +20,7 @@ Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, ho
 
 ## Handshake
 
-The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (5 since Phase 67), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password and their `user_id` (missing from older engines, read as 0). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
+The joining player's first message, on the reliable channel as JSON, is `Hello`: `PROTOCOL_VERSION` (6 since Phase 71), the game's name, its version (`version` in `axcenity.json`, `"1.0"` when it isn't set), the player's name, the password and their `user_id` (missing from older engines, read as 0). The host checks them in this order and refuses with a reason worded for each side (`handshake::admit`):
 
 | Check | The player's `ConnectionFailed` reason | The host's log |
 |---|---|---|
@@ -97,6 +97,10 @@ Beside Play and Stop, the ribbon's Game group has **Clients** (1 to 8, `play::mu
 - `DisplaySystemMessage(text)` from a Script goes to every device with no player; from a LocalScript only to its own.
 - The server sends each message to every device (`Message::ChatLine`), and each fires `MessageReceived(message)` on both sides there (nil `Player` for a system message), then shows it in the chat window ([../ui.md](../ui.md)). Messages are trimmed and cut at 200 characters, whatever a modified client sends.
 - `ChatEnabled` (a property, so the server's value reaches every device) off hides the window and `/` doesn't open it.
+
+## Console commands
+
+A line typed in a joined player's Developer Console for the server goes as `Message::Console`; the host runs it as one of its Scripts' `ConsoleService` commands when the player's `UserId` is in `AllowedUserIds`, and logs it either way ([../developer-console.md](../developer-console.md)).
 
 ## Kicking
 

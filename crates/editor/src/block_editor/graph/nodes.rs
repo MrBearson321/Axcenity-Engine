@@ -58,6 +58,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::WhenSeatOccupied { .. } => ("When Someone Sits", &["Seat"]),
         BlockKind::WhenPromptTriggered { .. } => ("When Prompt Triggered", &["Prompt"]),
         BlockKind::WhenPartClicked { .. } => ("When Part Clicked", &["Click Detector"]),
+        BlockKind::WhenCommandRun { .. } => ("When Command Run", &["Command", "Help"]),
         BlockKind::Unattached { .. } => ("Loose Blocks", &[]),
         BlockKind::TopCode { .. } => ("Lua (runs first)", &["Code"]),
         BlockKind::Wait { .. } => ("Wait", &["Seconds"]),

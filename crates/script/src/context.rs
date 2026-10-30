@@ -250,6 +250,12 @@ impl Context {
         if let Some(mut searches) = self.lua.app_data_mut::<crate::network::LanSearches>() {
             searches.forget_script(script);
         }
+        if let Some(mut commands) = self
+            .lua
+            .app_data_mut::<crate::console_service::ConsoleCommands>()
+        {
+            commands.forget_script(script);
+        }
     }
 
     /// Compiles `source` without running it, for its syntax errors.
@@ -288,6 +294,43 @@ impl Context {
             scheduler::resume(&self.lua, &thread, ())
         });
         Ok(())
+    }
+
+    /// The commands scripts on this side registered with
+    /// `ConsoleService:RegisterCommand`, by name.
+    pub fn console_commands(&self) -> Vec<crate::ConsoleCommandInfo> {
+        crate::console_service::commands(&self.lua)
+    }
+
+    /// Starts this side's console command `name` with `args`, for
+    /// `player`. `remote` says the player typed it on another device, so
+    /// they must be in `AllowedUserIds`.
+    pub fn run_console_command(
+        &self,
+        world: &mut World,
+        name: &str,
+        args: &[String],
+        player: Option<InstanceId>,
+        remote: bool,
+    ) -> crate::ConsoleRun {
+        let Some(command) = crate::console_service::find(&self.lua, name) else {
+            return crate::ConsoleRun::Unknown;
+        };
+        if remote && !crate::console_service::allowed(&self.lua, world, player) {
+            return crate::ConsoleRun::NotAllowed;
+        }
+        with_world(&self.lua, world, || {
+            crate::console_service::start(&self.lua, command, player, args);
+        });
+        crate::ConsoleRun::Ran
+    }
+
+    /// Whether `name` means something to Lua typed in the console: one of
+    /// its globals, or one an earlier command set.
+    pub fn console_knows(&self, world: &World, name: &str) -> bool {
+        console::environment(&self.lua, world)
+            .and_then(|env| env.get::<mlua::Value>(name))
+            .is_ok_and(|value| !value.is_nil())
     }
 
     /// Compiles a script into a coroutine that hasn't started yet.

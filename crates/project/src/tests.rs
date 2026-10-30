@@ -52,6 +52,16 @@ fn splash_defaults_on_and_can_be_changed_in_the_manifest() {
 }
 
 #[test]
+fn the_developer_console_defaults_off_and_can_be_turned_on_in_the_manifest() {
+    let folder = project_with_scripts("developer-console-setting", &[]);
+    assert!(!load(&folder).unwrap().manifest.developer_console);
+
+    set_developer_console(&folder, true).unwrap();
+    assert!(load(&folder).unwrap().manifest.developer_console);
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
 fn the_loading_screen_defaults_to_the_splash_and_keeps_a_chosen_screen_gui() {
     let folder = project_with_scripts("loading-screen-setting", &[]);
     assert_eq!(

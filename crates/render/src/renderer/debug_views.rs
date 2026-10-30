@@ -3,8 +3,8 @@
 //! overdraw, or colored by level of detail
 //! ([`TextureRenderer::set_debug_view`](super::TextureRenderer::set_debug_view)).
 //! Only the `debug-views` feature builds this, which the editor turns on
-//! and the player doesn't, and nothing here exists while the lit view is
-//! shown.
+//! (and the player, for its console's `wireframe`), and nothing here
+//! exists while the lit view is shown.
 //!
 //! A debug view is drawn after the frame's own passes, over the finished
 //! picture and under the UI, at the output's size, with a depth target of

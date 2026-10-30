@@ -532,6 +532,19 @@ impl EditorApp {
             }
             ui.separator();
             self.loading_screen_menu(ui);
+            ui.separator();
+            if let Some(project) = &self.project {
+                let mut on = project.developer_console;
+                if ui
+                    .checkbox(&mut on, "Developer Console (F9)")
+                    .on_hover_text(
+                        "Built games open the Developer Console with F9: the log, stats and                          commands. Play in the editor and --dev have it anyway.",
+                    )
+                    .changed()
+                {
+                    self.set_developer_console(on);
+                }
+            }
         });
     }
 

@@ -146,6 +146,8 @@ pub(super) enum Command {
     BuildGame(Option<ExportTarget>),
     LoadingScreen(LoadingChoice),
     WaitForScript,
+    /// File ▸ Build Game's Developer Console switch (Phase 71).
+    DeveloperConsole,
     OpenStylesheet,
     NewStylesheet,
     CheckAssets,
@@ -429,6 +431,14 @@ impl EditorApp {
                 "Loading Screen: Wait for a Script",
                 "File › Build Game",
                 &["Wait for a script"],
+                None,
+                Ok(()),
+            );
+            add(
+                Command::DeveloperConsole,
+                "Developer Console in Built Games",
+                "File › Build Game",
+                &["Developer Console (F9)"],
                 None,
                 Ok(()),
             );
@@ -927,6 +937,12 @@ impl EditorApp {
                         loading.screen_gui = name;
                         self.set_loading_screen(loading);
                     }
+                }
+            }
+            Command::DeveloperConsole => {
+                if let Some(project) = &self.project {
+                    let on = !project.developer_console;
+                    self.set_developer_console(on);
                 }
             }
             Command::WaitForScript => {

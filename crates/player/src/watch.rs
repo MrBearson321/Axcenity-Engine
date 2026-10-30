@@ -20,6 +20,8 @@ use crate::USAGE;
 
 /// The flag that turns live reload on.
 pub const WATCH_FLAG: &str = "--watch";
+/// The flag that turns the Developer Console on in a built game.
+pub const DEV_FLAG: &str = "--dev";
 
 /// What the player was started with.
 #[derive(Debug, Default, PartialEq)]
@@ -33,6 +35,9 @@ pub struct Arguments {
     pub network: Option<NetworkStart>,
     /// `--password <text>`: the password a host asks for, or a join gives.
     pub password: Option<String>,
+    /// `--dev`: the F9 Developer Console, even in a built game whose
+    /// project setting has it off (Phase 71).
+    pub dev: bool,
 }
 
 /// Hosting or joining from the start.
@@ -55,6 +60,8 @@ impl Arguments {
         while let Some(argument) = arguments.next() {
             if argument == WATCH_FLAG {
                 parsed.watch = true;
+            } else if argument == DEV_FLAG {
+                parsed.dev = true;
             } else if argument == "--host" || argument == "--join" {
                 if parsed.network.is_some() {
                     bail!("a player can host or join, not both\n\n{USAGE}");
@@ -217,6 +224,15 @@ mod tests {
         assert_eq!(join.password.as_deref(), Some("moat"));
         assert!(parse(&["--host", "--join", "127.0.0.1:4000"]).is_err());
         assert!(parse(&["--join"]).is_err());
+    }
+
+    #[test]
+    fn dev_turns_the_console_on_before_or_after_the_game() {
+        assert!(!parse(&["game.axgame"]).unwrap().dev);
+        let dev = parse(&["game.axgame", "--dev"]).unwrap();
+        assert!(dev.dev);
+        assert_eq!(dev.game, Some(PathBuf::from("game.axgame")));
+        assert!(parse(&["--dev"]).unwrap().dev);
     }
 
     /// A one-triangle glTF `width` studs wide at `assets/models/tri.gltf`.

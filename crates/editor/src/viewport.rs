@@ -303,6 +303,9 @@ pub struct ViewportScene<'a> {
     pub prompts: Vec<axcenity_ui::PromptView>,
     /// The cursor over a ClickDetector during Play (a CSS cursor name).
     pub click_cursor: Option<String>,
+    /// The Developer Console and its `fps` readout during Play (Phase 71),
+    /// drawn over everything else.
+    pub console: Vec<axcenity_render::UiDrawItem>,
     /// Show every light's reach, not just the selected ones' (View > Light Cones).
     pub light_cones: bool,
     /// Whether the view cube is drawn in the corner while editing.
@@ -841,6 +844,7 @@ impl Viewport {
             chat,
             prompts,
             click_cursor,
+            console,
             light_cones,
             view_cube: show_cube,
             overlays,
@@ -1208,6 +1212,7 @@ impl Viewport {
             width,
             height,
         ));
+        draw_list.ui.extend(console);
         axcenity_scene::attach_ui_textures(&mut draw_list.ui, assets);
         draw_list.time = shader_time(ui, &draw_list);
         if let Err(error) = target.renderer.render(&draw_list) {

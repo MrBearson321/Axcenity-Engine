@@ -407,6 +407,44 @@ impl Session {
         Ok(result)
     }
 
+    /// Runs `line`, typed in the Developer Console (Phase 71), as one of
+    /// the game's `ConsoleService` commands. What it prints goes to `output`.
+    pub fn run_console_command(
+        &mut self,
+        line: &str,
+        output: &mut Output,
+    ) -> Result<axcenity_script::ConsoleRun, Crash> {
+        let mut run = axcenity_script::ConsoleRun::Unknown;
+        guard(|| {
+            run = self.scripts.run_console_command(&mut self.world, line);
+            self.forward_output(output);
+        })?;
+        Ok(run)
+    }
+
+    /// The commands the game's scripts registered, for the console's `help`.
+    pub fn console_commands(&self) -> Vec<axcenity_script::ConsoleCommandInfo> {
+        self.scripts.console_commands()
+    }
+
+    /// Whether `name` means something to Lua typed in the console.
+    pub fn console_knows(&self, name: &str) -> bool {
+        self.scripts.console_knows(&self.world, name)
+    }
+
+    /// Turns the console's `noclip` on or off; returns whether it's on.
+    pub fn toggle_noclip(&mut self) -> bool {
+        let on = !self.characters.noclip();
+        self.characters.set_noclip(on);
+        on
+    }
+
+    /// Moves the player's character so its feet are at `to` (the console's
+    /// `teleport`). False when there's none.
+    pub fn teleport(&mut self, to: Vector3) -> bool {
+        self.characters.teleport(&mut self.world, to)
+    }
+
     /// The follow camera of a third-person controller, if the play world has
     /// one with a body. The fly camera is left alone; Stop shows it again.
     #[cfg(test)]

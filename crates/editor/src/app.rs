@@ -33,6 +33,7 @@ mod commands;
 mod constraint_tool;
 mod controls_ui;
 mod data_tables;
+mod dev_console;
 mod edits;
 mod engine;
 mod files;
@@ -250,6 +251,8 @@ pub struct EditorApp {
     focused_text: Option<InstanceId>,
     /// The line being typed in the game's chat during Play (`/`, Phase 67).
     chat_typing: Option<String>,
+    /// The F9 Developer Console during Play (Phase 71).
+    dev: dev_console::DevPlay,
     pending_focus_lost: Option<InstanceId>,
     /// UI layout warnings already shown, so a PageLayout problem is not
     /// repeated every frame.
@@ -604,6 +607,9 @@ struct OpenProject {
     /// (Phase 48). Saving writes its Workspace there.
     level: Option<String>,
     show_splash: bool,
+    /// Whether built games have the F9 Developer Console (File > Build
+    /// Game, Phase 71).
+    developer_console: bool,
     /// How built games' loading screen goes (File > Build Game).
     loading_screen: axcenity_project::LoadingScreen,
     /// The actions and their bindings (`input.json`, the Input window).
@@ -687,6 +693,7 @@ impl EditorApp {
             gamepads: None,
             focused_text: None,
             chat_typing: None,
+            dev: dev_console::DevPlay::default(),
             pending_focus_lost: None,
             ui_warnings: Vec::new(),
             last_frame: None,
@@ -1030,6 +1037,10 @@ impl EditorApp {
         // straight away: games keep moving without input. Paused at a
         // breakpoint, the game holds still and waits for Continue.
         self.sync_breakpoints();
+        if self.play.is_none() {
+            // Outside Play the console starts over.
+            self.type_dev_console(&[], false);
+        }
         if self.playing() && !self.paused() {
             let now = Instant::now();
             let seconds = self
@@ -1042,9 +1053,12 @@ impl EditorApp {
             // trap in the crate's CLAUDE.md.)
             let (events, modifiers, focused) =
                 ctx.input(|input| (input.events.clone(), input.modifiers, input.focused));
-            self.type_chat(&events, ctx.wants_keyboard_input());
+            // F9 opens the Developer Console, which then has the keys.
+            let console = self.type_dev_console(&events, ctx.wants_keyboard_input());
+            self.type_chat(&events, ctx.wants_keyboard_input() || console);
             let typing = self.focused_text.is_some()
                 || self.chat_typing.is_some()
+                || console
                 || ctx.wants_keyboard_input();
             if let Some(id) = self.focused_text
                 && let Some(session) = &mut self.play
@@ -1102,6 +1116,9 @@ impl EditorApp {
             input.extend(keys.into_iter().map(axcenity_core::input::InputEvent::from));
             let activation = self.pending_ui_activation.take();
             let focus_lost = self.pending_focus_lost.take();
+            // `timescale` in the console speeds the game up or slows it.
+            self.note_dev_frame(seconds);
+            let seconds = seconds * self.dev.time_scale;
             self.play_frame(seconds, &input, activation, focus_lost);
             ctx.request_repaint();
         }
@@ -1368,6 +1385,8 @@ mod camera_tests;
 mod constraint_tests;
 #[cfg(test)]
 mod data_table_tests;
+#[cfg(test)]
+mod dev_console_tests;
 #[cfg(test)]
 mod find_tests;
 #[cfg(test)]

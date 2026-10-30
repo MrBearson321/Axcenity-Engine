@@ -16,7 +16,8 @@ axcenity-nav.workspace = true
 axcenity-net.workspace = true
 axcenity-physics.workspace = true
 axcenity-project.workspace = true
-axcenity-render.workspace = true
+# `debug-views` for the Developer Console's `wireframe` (Phase 71).
+axcenity-render = { workspace = true, features = ["debug-views"] }
 axcenity-save.workspace = true
 axcenity-scene.workspace = true
 axcenity-script.workspace = true
@@ -24,6 +25,7 @@ axcenity-ui.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
 log.workspace = true
+memory-stats.workspace = true
 png.workspace = true
 pollster.workspace = true
 serde_json.workspace = true

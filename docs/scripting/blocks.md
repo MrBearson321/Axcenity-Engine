@@ -17,6 +17,7 @@ How each block becomes Lua. One-way: blocks translate to Lua, and there is one r
 | | when *key* key pressed (client) | `UserInputService.InputBegan:Connect(function(input) if input.KeyCode == Enum.KeyCode.Key then … end end)` |
 | | when *button* is clicked (client) | `button.Activated:Connect(function() … end)` |
 | | when prompt *prompt* is triggered, when *click detector* is clicked (Phase 44) | `prompt.Triggered:Connect(function() … end)`; `detector.MouseClick:Connect(function() … end)`. The menus offer the Workspace's ProximityPrompts and ClickDetectors |
+| | when console command *name* is run, help *text* (Phase 71) | `ConsoleService:RegisterCommand(name, help, function() … end)`: runs when *name* is typed in the Developer Console ([../developer-console.md](../developer-console.md)) |
 | | when mouse enters *element*, when mouse leaves *element* (client) | `element.MouseEnter:Connect(function() … end)`, `element.MouseLeave:Connect(function() … end)` |
 | | when *widget* value changes (a Slider, Toggle, Dropdown or ProgressBar) | `widget.ValueChanged:Connect(function() … end)`; the body reads the new value as the widget's `Value` property |
 | | every frame | `RunService.Heartbeat:Connect(function(deltaTime) … end)` |

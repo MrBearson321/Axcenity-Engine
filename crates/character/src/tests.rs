@@ -226,6 +226,50 @@ fn a_wall_stops_the_character_and_a_crate_still_falls() {
     assert_eq!(axcenity_physics::GRAVITY, 196.2);
 }
 
+#[test]
+fn noclip_flies_through_a_wall_and_up_and_teleport_puts_the_feet_where_asked() {
+    let assets = Assets::default();
+    let (mut world, controller, body) = standing();
+    set(&mut world, controller, "WalkSpeed", 16.0);
+    solid(
+        &mut world,
+        PartType::Block,
+        Vector3::new(6.0, 4.0, 1.0),
+        Vector3::new(0.0, 1.0, -4.0),
+    );
+    let mut controllers = Controllers::default();
+    controllers.set_noclip(true);
+    assert!(controllers.noclip());
+    controllers.step(&mut world, &assets, forward(), 1.0);
+    let through = pos(&world, body);
+    assert!(through.z < -10.0, "past the wall: {through:?}");
+    assert!((through.y - 1.0).abs() < 1e-3, "no gravity: {through:?}");
+    let up = MoveInput {
+        jump: true,
+        ..MoveInput::default()
+    };
+    run(&mut world, &mut controllers, up, 30);
+    assert!(pos(&world, body).y > 5.0, "{:?}", pos(&world, body));
+
+    assert!(controllers.teleport(&mut world, Vector3::new(10.0, 0.0, 5.0)));
+    let there = pos(&world, body);
+    assert!(
+        (there.x - 10.0).abs() < 1e-3
+            && (there.y - 1.0).abs() < 1e-3
+            && (there.z - 5.0).abs() < 1e-3,
+        "{there:?}"
+    );
+    // Off again, it stands on the floor.
+    controllers.set_noclip(false);
+    run(&mut world, &mut controllers, MoveInput::default(), 30);
+    assert!(
+        (pos(&world, body).y - 1.0).abs() < 0.05,
+        "{:?}",
+        pos(&world, body)
+    );
+    assert!(!Controllers::default().teleport(&mut World::new(), Vector3::new(0.0, 0.0, 0.0)));
+}
+
 /// Where a crate dropped next to the character is after half a second of
 /// physics, with the controller's properties set by `tune` first.
 fn fallen_crate(tune: impl Fn(&mut World, InstanceId)) -> Vector3 {

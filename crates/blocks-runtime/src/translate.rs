@@ -96,6 +96,9 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             BlockKind::SendChatMessage { .. } | BlockKind::ShowSystemMessage { .. } => {
                 services.insert("TextChatService");
             }
+            BlockKind::WhenCommandRun { .. } => {
+                services.insert("ConsoleService");
+            }
             BlockKind::SetLanguage { .. } => {
                 services.insert("LocalizationService");
             }
@@ -334,6 +337,18 @@ impl Writer {
                 format!("{}.MouseClick:Connect(function()", target(detector)?),
                 body,
             ),
+            BlockKind::WhenCommandRun {
+                command,
+                help,
+                body,
+            } => {
+                let command = self.expression(command)?;
+                let help = self.expression(help)?;
+                (
+                    format!("ConsoleService:RegisterCommand({command}, {help}, function()"),
+                    body,
+                )
+            }
             BlockKind::WhenSeatOccupied { seat, body } => {
                 let seat = target(seat)?;
                 self.line(format!(
@@ -945,6 +960,7 @@ impl Writer {
             | BlockKind::WhenSeatOccupied { .. }
             | BlockKind::WhenPromptTriggered { .. }
             | BlockKind::WhenPartClicked { .. }
+            | BlockKind::WhenCommandRun { .. }
             | BlockKind::Unattached { .. }
             | BlockKind::TopCode { .. } => {
                 return Err(TranslateError::InvalidEventPlacement);

@@ -164,6 +164,7 @@ impl EditorApp {
 
         let scripts = project.scripts.len();
         let show_splash = project.manifest.show_splash;
+        let developer_console = project.manifest.developer_console;
         let loading_screen = project.manifest.loading_screen.clone();
         self.output.info(format!(
             "Opened \"{}\" from `{}`: {} objects, {scripts} {}. Press Play (F5) \
@@ -266,6 +267,7 @@ impl EditorApp {
             start_level,
             level,
             show_splash,
+            developer_console,
             loading_screen,
             input_map: project.input_map,
             watcher: Watcher::start(project.folder.clone()),

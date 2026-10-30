@@ -334,6 +334,14 @@ declare extern type DataService with
 	function GetTable(self, name: string): DataTable
 end
 
+--- The game's own commands for the Developer Console (F9), from `game:GetService("ConsoleService")`. A LocalScript's commands run on that device, a Script's on the server.
+declare extern type ConsoleService with
+	--- On the server: the `UserId`s of the players who may run its commands from another device, such as `{123}`. The device that hosts, or plays offline, always may.
+	AllowedUserIds: {number}
+	--- Adds the command `name` (one word), with `help` for the console's `help` list. Typed as `name arg1 arg2`, it calls `callback(player, "arg1", "arg2")` in a task of its own; `player` is who typed it. Registering a name again replaces it.
+	function RegisterCommand(self, name: string, help: string, callback: (player: Player?, ...string) -> ()): ()
+end
+
 --- A data table, read-only. Each call reads the version in use now, so an edit made during Play is what the next call sees.
 declare extern type DataTable with
 	--- The row with this key, or nil if there's none.
@@ -1241,6 +1249,8 @@ declare extern type DataModel extends Instance with
 	SaveService: SaveService
 	--- The game's levels (same as `game:GetService("LevelService")`).
 	LevelService: LevelService
+	--- The game's Developer Console commands (same as `game:GetService("ConsoleService")`).
+	ConsoleService: ConsoleService
 	--- Hosting and joining games (same as `game:GetService("NetworkService")`).
 	NetworkService: NetworkService
 	--- The language UI text shows (same as `game:GetService("LocalizationService")`).
@@ -1252,7 +1262,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"ConsoleService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 

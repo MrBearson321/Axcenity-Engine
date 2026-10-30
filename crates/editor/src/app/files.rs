@@ -283,6 +283,28 @@ impl EditorApp {
         }
     }
 
+    /// Stores whether built games have the F9 Developer Console, and says so.
+    pub(super) fn set_developer_console(&mut self, on: bool) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        match project::set_developer_console(&folder, on) {
+            Ok(()) => {
+                if let Some(project) = &mut self.project {
+                    project.developer_console = on;
+                }
+                self.output.info(if on {
+                    "Built games will open the Developer Console with F9."
+                } else {
+                    "Built games will not have the Developer Console (start one with --dev to use it)."
+                });
+            }
+            Err(err) => self.output.error(format!(
+                "Could not update the Developer Console setting: {err}"
+            )),
+        }
+    }
+
     /// Stores how built games' loading screen goes, and says so.
     pub(super) fn set_loading_screen(&mut self, loading: project::LoadingScreen) {
         let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {

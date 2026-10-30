@@ -263,6 +263,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WhenConnectionFails { .. }
         | BlockKind::WhenPromptTriggered { .. }
         | BlockKind::WhenPartClicked { .. }
+        | BlockKind::WhenCommandRun { .. }
         | BlockKind::Unattached { .. } => Category::Events,
         BlockKind::Wait { .. }
         | BlockKind::WaitUntil { .. }
@@ -940,6 +941,12 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("when"),
             Object(detector, Filter::ClickDetectors),
             label("is clicked"),
+        ])],
+        BlockKind::WhenCommandRun { command, help, .. } => vec![Row(vec![
+            label("when console command"),
+            Slot(command, SlotKind::Text),
+            label("is run, help"),
+            Slot(help, SlotKind::Text),
         ])],
         BlockKind::WhenSeatOccupied { seat, .. } => vec![Row(vec![
             label("when someone sits on"),

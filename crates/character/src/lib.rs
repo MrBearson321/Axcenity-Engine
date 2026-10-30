@@ -296,6 +296,9 @@ pub struct Controllers {
     player: Option<InstanceId>,
     /// Characters another device moves (other players' own), left alone.
     others: BTreeSet<InstanceId>,
+    /// The Developer Console's `noclip` (Phase 71): the character that
+    /// takes input flies through everything, Jump up and Crouch down.
+    noclip: bool,
 }
 
 impl Controllers {
@@ -305,6 +308,37 @@ impl Controllers {
     pub fn set_players(&mut self, player: Option<InstanceId>, others: BTreeSet<InstanceId>) {
         self.player = player;
         self.others = others;
+    }
+
+    /// Turns the console's `noclip` on or off: the character that takes
+    /// input flies where it's steered, through walls and floors, with no
+    /// gravity (Jump rises, Crouch sinks). Off, it falls from where it is.
+    pub fn set_noclip(&mut self, on: bool) {
+        self.noclip = on;
+    }
+
+    pub fn noclip(&self) -> bool {
+        self.noclip
+    }
+
+    /// Moves the character that takes input so its feet are at `feet`
+    /// (the console's `teleport`). False when there's none.
+    pub fn teleport(&mut self, world: &mut World, feet: Vector3) -> bool {
+        let Some(id) = self.active_of(world) else {
+            return false;
+        };
+        let Some(mut body) = Body::read(world, id) else {
+            return false;
+        };
+        body.shift(
+            world,
+            feet.x - body.pivot_x,
+            feet.y - body.feet_y,
+            feet.z - body.pivot_z,
+        );
+        // It falls from there, rather than carrying on a jump.
+        self.falls.remove(&id);
+        true
     }
 
     /// Whether another device moves the character `id` controls.
@@ -462,6 +496,12 @@ impl Controllers {
             {
                 body = turned;
             }
+        }
+        if self.noclip && view.is_some() {
+            let rise = f32::from(u8::from(input.jump)) - f32::from(u8::from(input.crouch));
+            body.shift(world, dx, rise * speed * dt, dz);
+            self.falls.remove(&id);
+            return;
         }
         let fall = self.falls.entry(id).or_default();
         if jump && fall.grounded {

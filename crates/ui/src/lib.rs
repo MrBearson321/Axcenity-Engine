@@ -9,6 +9,7 @@ mod style;
 
 mod accessibility;
 mod chat;
+mod console;
 mod css;
 mod gamepad;
 mod hotbar;
@@ -24,6 +25,11 @@ mod turn;
 mod widget;
 
 pub use chat::{CHAT_SHOWN, chat_enabled, chat_items};
+pub use console::{
+    BUILT_INS, BuiltIn, CONSOLE_LOG_LINES, ConsoleKey, ConsoleStats, ConsoleTab, DevConsole,
+    LevelFilter, LogEntry, LogLevel, LogSide, NetworkStats, SideFilter, built_in, console_items,
+    fps_items, is_command_word, line_items, looks_like_command, stats_lines,
+};
 pub use css::*;
 pub use gamepad::{GamepadButton, Gamepads, NavRepeat, PadNavigation, nav_key, pad_key};
 pub use hotbar::hotbar_items;

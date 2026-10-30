@@ -221,3 +221,40 @@ end)
     assert_eq!(names, ["Player"]);
     assert!(!players[0].said("failed Cheating"));
 }
+
+#[test]
+fn a_joined_players_console_command_runs_on_the_server_only_when_their_user_id_is_allowed() {
+    let server_code = r#"
+local ConsoleService = game:GetService("ConsoleService")
+ConsoleService.AllowedUserIds = {1}
+ConsoleService:RegisterCommand("give", "Gives coins", function(player, amount)
+    print("gave", player.Name, amount)
+end)
+"#;
+    let (mut server, mut players) = game(server_code, "", &[1.0, 2.0], None);
+    assert!(players[0].network.send_console_command("give 5"));
+    assert!(players[1].network.send_console_command("give 9"));
+    frames(&mut server, &mut players, 30);
+    assert!(server.said("gave Player 5"), "{:?}", server.output);
+    assert!(
+        !server
+            .output
+            .iter()
+            .any(|line| line.contains("gave Player2")),
+        "{:?}",
+        server.output
+    );
+    assert!(
+        server.said(
+            "warning: Player2 may not run `give 9`: their UserId isn't in ConsoleService.AllowedUserIds"
+        ),
+        "{:?}",
+        server.output
+    );
+    // Offline, nothing is sent.
+    let mut offline = Network::new(GameInfo {
+        name: String::new(),
+        version: String::new(),
+    });
+    assert!(!offline.send_console_command("give 1"));
+}

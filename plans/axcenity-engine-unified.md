@@ -2173,10 +2173,10 @@ Each has a pause menu, a settings menu with rebindable input, and a working save
 
 ### Acceptance criteria
 
-- [ ] In an exported development build, F9 opens the console, `timescale 0.5` slows the game, and a registered Lua command runs.
-- [ ] A shipped build with `DeveloperConsole` off doesn't open the console on F9.
-- [ ] A forced panic in the player leaves a log with the panic message, and the message names the log's path.
-- [ ] `player` still doesn't depend on `egui`.
+- [x] In an exported development build, F9 opens the console, `timescale 0.5` slows the game, and a registered Lua command runs.
+- [x] A shipped build with `DeveloperConsole` off doesn't open the console on F9.
+- [x] A forced panic in the player leaves a log with the panic message, and the message names the log's path.
+- [x] `player` still doesn't depend on `egui`.
 
 ---
 

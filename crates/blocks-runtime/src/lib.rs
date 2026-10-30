@@ -322,6 +322,14 @@ pub enum BlockKind {
         detector: String,
         body: Vec<Block>,
     },
+    /// When `command` is typed in the Developer Console (Phase 71):
+    /// `ConsoleService:RegisterCommand(command, help, function() ... end)`.
+    /// A LocalScript's runs on that device, a Script's on the server.
+    WhenCommandRun {
+        command: Expression,
+        help: Expression,
+        body: Vec<Block>,
+    },
     /// Loose blocks on the canvas, under no event. They don't run.
     Unattached {
         body: Vec<Block>,
@@ -881,6 +889,7 @@ impl BlockKind {
                 | BlockKind::WhenSeatOccupied { .. }
                 | BlockKind::WhenPromptTriggered { .. }
                 | BlockKind::WhenPartClicked { .. }
+                | BlockKind::WhenCommandRun { .. }
                 | BlockKind::Unattached { .. }
                 | BlockKind::TopCode { .. }
         )
@@ -924,6 +933,7 @@ impl BlockKind {
             | BlockKind::WhenSeatOccupied { body, .. }
             | BlockKind::WhenPromptTriggered { body, .. }
             | BlockKind::WhenPartClicked { body, .. }
+            | BlockKind::WhenCommandRun { body, .. }
             | BlockKind::Unattached { body }
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }
@@ -963,6 +973,7 @@ impl BlockKind {
             | BlockKind::WhenSeatOccupied { body, .. }
             | BlockKind::WhenPromptTriggered { body, .. }
             | BlockKind::WhenPartClicked { body, .. }
+            | BlockKind::WhenCommandRun { body, .. }
             | BlockKind::Unattached { body }
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }
@@ -1032,6 +1043,7 @@ impl BlockKind {
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::LoadLevel { level, spawn } => vec![level, spawn],
+            BlockKind::WhenCommandRun { command, help, .. } => vec![command, help],
             BlockKind::KickPlayer { player, reason } => vec![player, reason],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
@@ -1161,6 +1173,7 @@ impl BlockKind {
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::LoadLevel { level, spawn } => vec![level, spawn],
+            BlockKind::WhenCommandRun { command, help, .. } => vec![command, help],
             BlockKind::KickPlayer { player, reason } => vec![player, reason],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],

@@ -96,6 +96,11 @@ pub enum Message {
         player: u64,
         text: String,
     },
+    /// A line the player typed in their Developer Console for the
+    /// server's commands (Phase 71).
+    Console {
+        line: String,
+    },
 }
 
 impl Message {

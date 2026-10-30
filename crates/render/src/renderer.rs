@@ -292,6 +292,14 @@ impl Renderer {
         &self.scene.graphics
     }
 
+    /// Shows `view` in place of the lit scene from the next frame, or the
+    /// lit scene for `None`: the player's console `wireframe` (Phase 71).
+    /// Built with the `debug-views` feature, as on [`TextureRenderer`].
+    #[cfg(feature = "debug-views")]
+    pub fn set_debug_view(&mut self, view: Option<DebugView>) {
+        self.scene.set_debug_view(view);
+    }
+
     /// The materials' surface shaders that didn't compile since the last
     /// call, each once. Their items draw in glowing magenta checks.
     pub fn take_shader_errors(&mut self) -> Vec<ShaderError> {

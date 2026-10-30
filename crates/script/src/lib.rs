@@ -54,6 +54,7 @@ mod click;
 mod client;
 mod collection;
 mod console;
+mod console_service;
 mod context;
 mod csg;
 mod data;
@@ -114,6 +115,7 @@ use crate::context::Context;
 
 pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, GameCamera};
 pub use chat::ChatLine;
+pub use console_service::{ConsoleCommandInfo, ConsoleRun, split_command};
 pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
 pub use definitions::{ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions};
 pub use edit::EditRuntime;
@@ -148,6 +150,9 @@ pub struct OutputLine {
     /// to it, innermost first: `scripts/util.module.lua:5: in field 'explode'`.
     /// Empty for `print`, syntax errors and engine messages.
     pub trace: Vec<String>,
+    /// The side whose scripts it came from; `None` for the runtime's own
+    /// messages, such as a script that can't start.
+    pub side: Option<Side>,
 }
 
 /// How many rounds of change events [`ScriptRuntime::fire_changes`] runs in
@@ -595,6 +600,7 @@ impl ScriptRuntime {
                 kind: OutputKind::Error,
                 text: text.clone(),
                 trace: Vec::new(),
+                side: None,
             });
             return Err(text);
         }
@@ -714,6 +720,7 @@ impl ScriptRuntime {
                 kind: OutputKind::Warning,
                 text: format!("SaveService: {err}"),
                 trace: Vec::new(),
+                side: None,
             });
         }
     }
@@ -1005,6 +1012,86 @@ impl ScriptRuntime {
         result
     }
 
+    /// Lua typed into the player's Developer Console (Phase 71): on the
+    /// server side, or on the client side on a device following a server
+    /// elsewhere. Otherwise as [`run_command`](Self::run_command).
+    pub fn run_console_lua(&mut self, world: &mut World, source: &str) -> Result<(), String> {
+        if !self.client_only {
+            return self.run_command(world, source);
+        }
+        self.fire_changes(world);
+        let result = self.client.run_command(world, source);
+        self.collect(Side::Client);
+        self.fire_changes(world);
+        result
+    }
+
+    /// Whether `name` means something to the console's Lua here: a global,
+    /// or one an earlier command set.
+    pub fn console_knows(&self, world: &World, name: &str) -> bool {
+        let side = if self.client_only {
+            &self.client
+        } else {
+            &self.server
+        };
+        side.console_knows(world, name)
+    }
+
+    /// The commands scripts registered with `ConsoleService:RegisterCommand`
+    /// (Phase 71): the LocalScripts', then the Scripts' (none on a device
+    /// following a server elsewhere), each by name.
+    pub fn console_commands(&self) -> Vec<ConsoleCommandInfo> {
+        let mut commands = self.client.console_commands();
+        if !self.client_only {
+            commands.extend(self.server.console_commands());
+        }
+        commands
+    }
+
+    /// Runs `line`, typed in this device's console, as a registered
+    /// command, for the player on this device: a LocalScript's first, then
+    /// a Script's. [`ConsoleRun::Unknown`] when its first word isn't one.
+    pub fn run_console_command(&mut self, world: &mut World, line: &str) -> ConsoleRun {
+        let Some((name, args)) = split_command(line) else {
+            return ConsoleRun::Unknown;
+        };
+        let player = self.local_player();
+        self.fire_changes(world);
+        let mut run = self
+            .client
+            .run_console_command(world, name, &args, player, false);
+        self.collect(Side::Client);
+        if run == ConsoleRun::Unknown && !self.client_only {
+            run = self
+                .server
+                .run_console_command(world, name, &args, player, false);
+            self.collect(Side::Server);
+        }
+        self.fire_changes(world);
+        run
+    }
+
+    /// On the server: runs `line`, which `player` typed in their console on
+    /// another device, as one of the Scripts' commands, when their `UserId`
+    /// is in `ConsoleService.AllowedUserIds`.
+    pub fn run_remote_console_command(
+        &mut self,
+        world: &mut World,
+        player: InstanceId,
+        line: &str,
+    ) -> ConsoleRun {
+        let Some((name, args)) = split_command(line) else {
+            return ConsoleRun::Unknown;
+        };
+        self.fire_changes(world);
+        let run = self
+            .server
+            .run_console_command(world, name, &args, Some(player), true);
+        self.collect(Side::Server);
+        self.fire_changes(world);
+        run
+    }
+
     /// Frame-order step 1: the keys pressed and released since the last
     /// frame, in order. LocalScripts see them through `UserInputService`.
     pub fn input(&mut self, world: &mut World, keys: &[KeyEvent]) {
@@ -1093,6 +1180,7 @@ impl ScriptRuntime {
                     kind: OutputKind::Warning,
                     text: format!("SaveService: {err}"),
                     trace: Vec::new(),
+                    side: None,
                 });
             }
         }
@@ -1156,6 +1244,7 @@ impl ScriptRuntime {
                         kind: OutputKind::Warning,
                         text: format!("a sequence couldn't add a level: {why}"),
                         trace: Vec::new(),
+                        side: None,
                     });
                 }
             }
@@ -1168,6 +1257,7 @@ impl ScriptRuntime {
                 kind: OutputKind::Warning,
                 text: warning,
                 trace: Vec::new(),
+                side: None,
             });
         }
         for (id, event, args) in stepped.events {
@@ -1603,6 +1693,7 @@ impl ScriptRuntime {
                      property it listens to."
                 ),
                 trace: Vec::new(),
+                side: None,
             });
         }
     }
@@ -1796,7 +1887,11 @@ impl ScriptRuntime {
             Side::Server => &self.server,
             Side::Client => &self.client,
         };
-        self.output.extend(context.take_output());
+        self.output
+            .extend(context.take_output().into_iter().map(|mut line| {
+                line.side = Some(side);
+                line
+            }));
         self.sound_actions.extend(context.take_sound_actions());
         self.particle_emits.extend(context.take_particle_emits());
         self.shatters.extend(context.take_shatters());
@@ -1908,6 +2003,7 @@ fn push_output(lua: &Lua, kind: OutputKind, text: String) {
             kind,
             text,
             trace: Vec::new(),
+            side: None,
         },
     );
 }
@@ -1920,6 +2016,7 @@ fn push_error(lua: &Lua, err: &mlua::Error) {
             kind: OutputKind::Error,
             text: errors::error_message(err),
             trace: errors::error_trace(err),
+            side: None,
         },
     );
 }
@@ -1983,6 +2080,8 @@ mod cframe_tests;
 mod assembly_tests;
 #[cfg(test)]
 mod collection_tests;
+#[cfg(test)]
+mod console_service_tests;
 #[cfg(test)]
 mod data_tests;
 #[cfg(test)]

@@ -751,6 +751,7 @@ dependencies = [
  "axcenity-workspace-hack",
  "env_logger",
  "log",
+ "memory-stats",
  "png",
  "pollster",
  "serde_json",
