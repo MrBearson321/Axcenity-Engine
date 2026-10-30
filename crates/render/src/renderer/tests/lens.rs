@@ -425,6 +425,7 @@ fn lens_effects_cost_nothing_while_absent_or_turned_off() {
             }),
             chromatic_aberration: Some(0.5),
             sharpen: Some(0.5),
+            motion_blur: None,
         },
     );
     assert_ne!(draw(&mut renderer, &everything), plain);

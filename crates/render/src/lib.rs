@@ -29,7 +29,7 @@ pub use draw_list::{
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
-    EffectiveGraphics, EnvironmentMapSize, GraphicsSettings, POINT_SHADOW_FACES,
+    EffectiveGraphics, EnvironmentMapSize, GraphicsSettings, MotionBlurQuality, POINT_SHADOW_FACES,
     PointShadowMapSize, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowMapSize,
     ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,
 };

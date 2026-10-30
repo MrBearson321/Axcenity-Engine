@@ -14,6 +14,7 @@ Map only. `render` draws a draw list. It does not know about Instances. Open the
 - Water (a material file's `water`: waves, seeing through it, reflections, depth tint, foam, the scene copy): [rendering/water.md](rendering/water.md)
 - Shading models and outlines (a material file's `shading`: Standard, Unlit, Toon bands, ramp, rim and highlight; its `outline`; Lighting's `OutlineEffect`): [rendering/stylized.md](rendering/stylized.md)
 - Bloom, tone mapping, color grading (Lighting's `ColorCorrectionEffect`: brightness, contrast, saturation, tint, `.cube` and strip lookup tables, posterize, palettes) and lens effects (depth of field, vignette, film grain, chromatic aberration, sharpening): [rendering/post.md](rendering/post.md)
+- Motion vectors, TAA and motion blur (a `MotionBlurEffect`; what's kept between frames, and the render graph decision): [rendering/temporal.md](rendering/temporal.md)
 - Graphics volumes (a `GraphicsVolume`: a place's own exposure, fog, Atmosphere, bloom and color correction, blended in around the camera by `BlendDistance` and `Priority`): [rendering/volumes.md](rendering/volumes.md)
 - Sprites and particles: [rendering/particles.md](rendering/particles.md)
 - The machine's graphics settings (presets, overrides, capabilities, `UserGameSettings`, `graphics.json`, the per-preset references): [rendering/settings.md](rendering/settings.md)

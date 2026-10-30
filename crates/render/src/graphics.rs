@@ -156,7 +156,9 @@ impl TextureQuality {
     }
 }
 
-/// How the scene's edges are smoothed. Ordered from cheapest to dearest.
+/// How the scene's edges are smoothed. Ordered from cheapest to dearest,
+/// then TAA, which `effective` never lowers to (it needs no more than one
+/// sample per pixel, so every GPU can draw it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum AntiAliasing {
     /// Hard, stair-stepped edges.
@@ -166,14 +168,19 @@ pub enum AntiAliasing {
     /// Draws the scene with 2 or 4 samples per pixel and averages them.
     Msaa2,
     Msaa4,
+    /// Moves the scene by part of a pixel each frame and blends each frame
+    /// with the last ones, followed by its motion: smooths edges and thin
+    /// shapes, a little soft.
+    Taa,
 }
 
 impl AntiAliasing {
-    pub const ALL: [AntiAliasing; 4] = [
+    pub const ALL: [AntiAliasing; 5] = [
         AntiAliasing::Off,
         AntiAliasing::Fxaa,
         AntiAliasing::Msaa2,
         AntiAliasing::Msaa4,
+        AntiAliasing::Taa,
     ];
 
     pub fn label(self) -> &'static str {
@@ -182,13 +189,14 @@ impl AntiAliasing {
             AntiAliasing::Fxaa => "FXAA",
             AntiAliasing::Msaa2 => "MSAA 2×",
             AntiAliasing::Msaa4 => "MSAA 4×",
+            AntiAliasing::Taa => "TAA",
         }
     }
 
     /// How many samples per pixel the scene is drawn with.
     pub fn samples(self) -> u32 {
         match self {
-            AntiAliasing::Off | AntiAliasing::Fxaa => 1,
+            AntiAliasing::Off | AntiAliasing::Fxaa | AntiAliasing::Taa => 1,
             AntiAliasing::Msaa2 => 2,
             AntiAliasing::Msaa4 => 4,
         }
@@ -361,6 +369,43 @@ impl DepthOfFieldQuality {
     }
 }
 
+/// How a `MotionBlurEffect` streaks what moves across the view. Ordered
+/// from cheapest to dearest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum MotionBlurQuality {
+    /// No streaks, and no motion or blur targets for them.
+    Off,
+    /// 8 samples per pixel.
+    Low,
+    /// 16 samples per pixel.
+    High,
+}
+
+impl MotionBlurQuality {
+    pub const ALL: [MotionBlurQuality; 3] = [
+        MotionBlurQuality::Off,
+        MotionBlurQuality::Low,
+        MotionBlurQuality::High,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MotionBlurQuality::Off => "Off",
+            MotionBlurQuality::Low => "Low",
+            MotionBlurQuality::High => "High",
+        }
+    }
+
+    /// How many points along its streak each pixel averages: 0 when it's off.
+    pub fn samples(self) -> u32 {
+        match self {
+            MotionBlurQuality::Off => 0,
+            MotionBlurQuality::Low => 8,
+            MotionBlurQuality::High => 16,
+        }
+    }
+}
+
 /// The smallest and largest render scale: the scene is drawn at this
 /// fraction of the output's width and height.
 pub const RENDER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
@@ -468,6 +513,9 @@ pub struct GraphicsSettings {
     pub chromatic_aberration: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sharpen: Option<bool>,
+    /// How a world's `MotionBlurEffect` is drawn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub motion_blur: Option<MotionBlurQuality>,
 }
 
 impl GraphicsSettings {
@@ -651,6 +699,16 @@ impl GraphicsSettings {
         self.sharpen.unwrap_or(self.quality != Quality::Low)
     }
 
+    /// How motion blur is drawn: the override, or the preset's (off at Low,
+    /// Low at Medium, High above).
+    pub fn motion_blur(&self) -> MotionBlurQuality {
+        self.motion_blur.unwrap_or(match self.quality {
+            Quality::Low => MotionBlurQuality::Off,
+            Quality::Medium => MotionBlurQuality::Low,
+            Quality::High | Quality::Ultra => MotionBlurQuality::High,
+        })
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -752,6 +810,9 @@ impl GraphicsSettings {
             film_grain: self.film_grain(),
             chromatic_aberration: self.chromatic_aberration(),
             sharpen: self.sharpen(),
+            // Like depth of field: full-screen passes over the prepass's
+            // depth and the motion it finds.
+            motion_blur: self.motion_blur(),
             notes,
         }
     }
@@ -868,6 +929,8 @@ pub struct EffectiveGraphics {
     pub film_grain: bool,
     pub chromatic_aberration: bool,
     pub sharpen: bool,
+    /// Motion blur's samples (needs the prepass's depth and motion vectors).
+    pub motion_blur: MotionBlurQuality,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -918,7 +981,10 @@ mod tests {
             values(Quality::Ultra),
             (map(4096, 4), 300.0, true, 1.0, Full, Msaa4)
         );
-        assert_eq!(AntiAliasing::ALL.map(AntiAliasing::samples), [1, 1, 2, 4]);
+        assert_eq!(
+            AntiAliasing::ALL.map(AntiAliasing::samples),
+            [1, 1, 2, 4, 1]
+        );
         assert_eq!(
             [Quarter, Half, Full].map(TextureQuality::skipped_levels),
             [2, 1, 0]
@@ -1216,6 +1282,54 @@ mod tests {
     }
 
     #[test]
+    fn motion_blur_has_its_own_setting_and_taa_is_never_lowered() {
+        use MotionBlurQuality as Blur;
+        let presets = Quality::ALL.map(|quality| GraphicsSettings::preset(quality).motion_blur());
+        assert_eq!(presets, [Blur::Off, Blur::Low, Blur::High, Blur::High]);
+        assert_eq!(Blur::ALL.map(Blur::samples), [0, 8, 16]);
+        for quality in Quality::ALL {
+            let preset = GraphicsSettings::preset(quality);
+            let blur = GraphicsSettings {
+                motion_blur: Some(Blur::Low),
+                ..preset.clone()
+            };
+            assert_eq!(blur.motion_blur(), Blur::Low);
+            assert_eq!(blur.depth_of_field(), preset.depth_of_field());
+            assert_eq!(blur.anti_aliasing(), preset.anti_aliasing());
+            assert_eq!(
+                blur.effective(&Capabilities::default()).motion_blur,
+                Blur::Low
+            );
+        }
+        // No preset picks TAA, and every GPU can draw it and motion blur.
+        assert!(
+            Quality::ALL
+                .iter()
+                .all(|&quality| GraphicsSettings::preset(quality).anti_aliasing()
+                    != AntiAliasing::Taa)
+        );
+        let tiny = Capabilities {
+            max_texture_size: 64,
+            max_texture_layers: 1,
+            msaa_samples: 1,
+            compute_shaders: false,
+            ..Capabilities::default()
+        };
+        let taa = GraphicsSettings {
+            anti_aliasing: Some(AntiAliasing::Taa),
+            ..GraphicsSettings::preset(Quality::Ultra)
+        }
+        .effective(&tiny);
+        assert_eq!(taa.anti_aliasing, AntiAliasing::Taa);
+        assert_eq!(taa.motion_blur, Blur::High);
+        assert!(taa.notes.iter().all(|note| !note.contains("Anti-aliasing")));
+        // A GPU without MSAA 4× still never gets TAA in its place.
+        let msaa = GraphicsSettings::preset(Quality::High).effective(&tiny);
+        assert_ne!(msaa.anti_aliasing, AntiAliasing::Taa);
+        assert_eq!(AntiAliasing::Taa.samples(), 1);
+    }
+
+    #[test]
     fn settings_round_trip_through_json() {
         let settings = GraphicsSettings {
             quality: Quality::Medium,
@@ -1238,6 +1352,7 @@ mod tests {
             film_grain: Some(true),
             chromatic_aberration: Some(false),
             sharpen: Some(true),
+            motion_blur: Some(MotionBlurQuality::Low),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -1516,6 +1631,7 @@ mod tests {
                         film_grain: post,
                         chromatic_aberration: post,
                         sharpen: post,
+                        motion_blur: Some(MotionBlurQuality::Low),
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);

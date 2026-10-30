@@ -631,6 +631,9 @@ pub(super) struct DrawPlan {
     /// Every drawn skin's joints, each skin's after the one before
     /// (`InstanceRaw::skin` says where an item's start).
     pub(super) joints: Vec<JointRaw>,
+    /// Where each drawn skin's joints are in `joints` (start and count), by
+    /// the skin's address, for the motion vectors' instances.
+    pub(super) skins: HashMap<*const Skin, [u32; 2]>,
 }
 
 /// Puts the `draws` (`list`'s items at their levels of detail, see
@@ -788,6 +791,7 @@ pub(super) fn plan_draws(
             }),
         }
     }
+    plan.skins = skins;
     plan
 }
 

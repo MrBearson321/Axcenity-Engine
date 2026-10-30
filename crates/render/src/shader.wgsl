@@ -185,7 +185,9 @@ struct InstanceIn {
 }
 
 struct VertexOut {
-    @builtin(position) clip_position: vec4<f32>,
+    // Invariant, so the prepass and the moving items' motion pass
+    // (`vs_motion`) put a corner at exactly the same depth.
+    @builtin(position) @invariant clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) base_color: vec4<f32>,
@@ -551,6 +553,98 @@ fn fs_prepass(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0)
         discard;
     }
     return prepass_normal(normalize(in.normal) * facing);
+}
+
+// Motion vectors for items that moved since last frame (renderer/temporal.rs):
+// how far each pixel of a moved item went across the screen, drawn over
+// the camera's motion where the prepass shows the item.
+
+// Must match the start of `TemporalUniform` in renderer/temporal.rs: this
+// frame's and last frame's views, without TAA's jitter.
+struct MotionView {
+    view_proj: mat4x4<f32>,
+    previous_view_proj: mat4x4<f32>,
+}
+
+@group(3) @binding(0) var<uniform> motion_view: MotionView;
+// Last frame's joints, where this frame's are in `frame_joints`.
+@group(3) @binding(1) var<storage, read> previous_joints: array<Joint>;
+
+// A moved item: where it is now and where it was. Must match
+// `MotionInstance` in renderer/temporal.rs.
+struct MotionIn {
+    @location(2) model_0: vec4<f32>,
+    @location(3) model_1: vec4<f32>,
+    @location(4) model_2: vec4<f32>,
+    @location(5) model_3: vec4<f32>,
+    @location(6) previous_0: vec4<f32>,
+    @location(7) previous_1: vec4<f32>,
+    @location(8) previous_2: vec4<f32>,
+    @location(9) previous_3: vec4<f32>,
+    @location(10) skin: vec2<u32>,
+    @location(11) sway: vec4<f32>,
+    @location(12) fade: f32,
+}
+
+struct MotionOut {
+    @builtin(position) @invariant clip_position: vec4<f32>,
+    @location(0) now: vec4<f32>,
+    @location(1) before: vec4<f32>,
+    @location(2) @interpolate(flat) fade: f32,
+}
+
+// Corner `index` posed by last frame's joints (`pose_corner`'s position).
+fn previous_corner(index: u32, skin: vec2<u32>, position: vec3<f32>) -> vec3<f32> {
+    if skin.y == 0u {
+        return position;
+    }
+    let corner = skin_corners[index];
+    var matrix = mat4x4<f32>();
+    var total = 0.0;
+    for (var i = 0u; i < 4u; i += 1u) {
+        let weight = corner.weights[i];
+        let joint = corner.joints[i];
+        if weight <= 0.0 || joint >= skin.y {
+            continue;
+        }
+        matrix += previous_joints[skin.x + joint].position * weight;
+        total += weight;
+    }
+    if total <= 1e-6 {
+        return position;
+    }
+    return (matrix * vec4<f32>(position, 1.0)).xyz / total;
+}
+
+@vertex
+fn vs_motion(@builtin(vertex_index) index: u32, @location(0) position: vec3<f32>,
+    instance: MotionIn) -> MotionOut {
+    let model = mat4x4<f32>(instance.model_0, instance.model_1, instance.model_2, instance.model_3);
+    let previous = mat4x4<f32>(instance.previous_0, instance.previous_1, instance.previous_2,
+        instance.previous_3);
+    // Placed as `item_vertex` places it, so the depth matches the prepass's.
+    let posed = pose_corner(index, instance.skin, position, vec3<f32>(0.0), vec3<f32>(0.0));
+    let world = vec4<f32>(swayed((model * vec4<f32>(posed.position, 1.0)).xyz, instance.sway), 1.0);
+    let was = previous_corner(index, instance.skin, position);
+    let world_before = vec4<f32>(swayed((previous * vec4<f32>(was, 1.0)).xyz, instance.sway), 1.0);
+    var out: MotionOut;
+    out.clip_position = frame.view_proj * world;
+    out.now = motion_view.view_proj * world;
+    out.before = motion_view.previous_view_proj * world_before;
+    out.fade = instance.fade;
+    return out;
+}
+
+// How far the pixel moved since last frame, in texture coordinates (0 to 1
+// across the scene, down the screen).
+@fragment
+fn fs_motion(in: MotionOut) -> @location(0) vec4<f32> {
+    if dithered_out(in.fade, in.clip_position.xy) {
+        discard;
+    }
+    let now = in.now.xy / in.now.w;
+    let before = in.before.xy / in.before.w;
+    return vec4<f32>((now - before) * vec2<f32>(0.5, -0.5), 0.0, 0.0);
 }
 
 // A full-screen triangle at the far plane, for drawing the sky.

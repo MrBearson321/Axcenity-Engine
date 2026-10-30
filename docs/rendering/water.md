@@ -48,7 +48,7 @@ The copy (`SceneCopy`, Rgba16Float at the scene's size) exists only while water 
 
 Glass and other see-through items under water aren't in the copy, and water writes depth, so they're hidden under it from Medium up. Water seen from below isn't drawn (its back faces are culled).
 
-**Render graph** (the Audit in `plans/axcenity-engine-graphics.md` reopens it here): still not built. Water adds one optional copy between two halves of the scene pass, decided once per frame by `WaterMode`, and the copy is owned like volumetric fog's grid (made and freed by use). The frame stays one readable function with a fixed order. The question comes back with TAA (Phase 35), the first feature that keeps last frame's image.
+**Render graph** (the Audit in `plans/axcenity-engine-graphics.md` reopens it here): still not built. Water adds one optional copy between two halves of the scene pass, decided once per frame by `WaterMode`, and the copy is owned like volumetric fog's grid (made and freed by use). The frame stays one readable function with a fixed order. TAA (Phase 35), the first feature that keeps last frame's image, reopened it and kept the same answer ([temporal.md](temporal.md)).
 
 ## Cost
 

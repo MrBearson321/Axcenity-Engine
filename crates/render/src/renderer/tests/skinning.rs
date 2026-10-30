@@ -6,7 +6,7 @@ use crate::Skin;
 
 /// A unit square facing +Z, 30 studs to the right of where it's drawn
 /// until its skin moves it: every corner is weighted to one joint.
-struct SkinnedSquare {
+pub(super) struct SkinnedSquare {
     joints: [[u16; 4]; 4],
 }
 
@@ -40,14 +40,14 @@ impl MeshSource for SkinnedSquare {
 }
 
 /// A skin of `count` joints, the last moving its corners by `offset`.
-fn skin(count: usize, offset: Vec3) -> Arc<Skin> {
+pub(super) fn skin(count: usize, offset: Vec3) -> Arc<Skin> {
     let mut joints = vec![Mat4::IDENTITY; count];
     joints[count - 1] = Mat4::from_translation(offset);
     Arc::new(Skin::new(joints))
 }
 
 /// The square, glowing white so it shows however it's lit.
-fn square(joint: u16, skin: Option<Arc<Skin>>) -> DrawItem {
+pub(super) fn square(joint: u16, skin: Option<Arc<Skin>>) -> DrawItem {
     let mut item = item(
         Shape::Mesh(Arc::new(SkinnedSquare {
             joints: [[joint, 0, 0, 0]; 4],

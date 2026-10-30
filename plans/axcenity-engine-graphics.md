@@ -563,7 +563,7 @@ Motion vectors (from this frame's and last frame's transforms, posed meshes incl
 
 ### Acceptance criteria
 
-- [ ] TAA smooths edges and thin geometry without ghosting behind moving parts. Motion blur streaks only what moves relative to the camera.
+- [x] TAA smooths edges and thin geometry without ghosting behind moving parts. Motion blur streaks only what moves relative to the camera.
 
 ---
 

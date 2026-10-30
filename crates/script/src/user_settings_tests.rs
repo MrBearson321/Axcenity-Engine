@@ -178,6 +178,42 @@ fn each_lens_effect_has_its_own_setting_for_local_scripts() {
 }
 
 #[test]
+fn taa_and_motion_blur_are_settings_for_local_scripts() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    runtime.set_graphics(
+        &GraphicsSettings::preset(Quality::Medium),
+        &Capabilities::default(),
+    );
+    let printed = run(
+        &mut runtime,
+        &mut world,
+        "scripts/motion.client.lua",
+        "local s = game:GetService('UserGameSettings')
+        print(s.AntiAliasing, s.MotionBlur)
+        s.AntiAliasing = Enum.AntiAliasing.TAA
+        s.MotionBlur = Enum.MotionBlur.High
+        print(s.AntiAliasing, s.MotionBlur)
+        s.MotionBlur = Enum.MotionBlur.Off
+        print(s.MotionBlur)
+        print(pcall(function() s.MotionBlur = Enum.DepthOfField.Low end))",
+    );
+    assert_eq!(printed[0], "Enum.AntiAliasing.FXAA	Enum.MotionBlur.Low");
+    assert_eq!(printed[1], "Enum.AntiAliasing.TAA	Enum.MotionBlur.High");
+    assert_eq!(printed[2], "Enum.MotionBlur.Off");
+    assert!(printed[3].starts_with("false	"), "{printed:?}");
+    let change = runtime.take_graphics_change().unwrap();
+    assert_eq!(
+        change,
+        GraphicsSettings {
+            anti_aliasing: Some(axcenity_render::AntiAliasing::Taa),
+            motion_blur: Some(axcenity_render::MotionBlurQuality::Off),
+            ..GraphicsSettings::preset(Quality::Medium)
+        }
+    );
+}
+
+#[test]
 fn automatic_picks_the_machines_quality() {
     let mut world = World::new();
     let mut runtime = ScriptRuntime::new();

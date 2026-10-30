@@ -741,6 +741,10 @@ pub struct LensEffects {
     pub chromatic_aberration: Option<f32>,
     /// How much the edges between colors are sharpened: 0 none, 1 strong.
     pub sharpen: Option<f32>,
+    /// How much of what moves across the view in a frame streaks behind
+    /// it: 0 none, 1 the whole way it moved (a camera's shutter open the
+    /// whole frame).
+    pub motion_blur: Option<f32>,
 }
 
 /// Blur by distance from the camera: sharp from `focus_distance -

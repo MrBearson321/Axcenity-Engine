@@ -212,13 +212,17 @@ impl ScenePipeline {
         let occlusion =
             OcclusionPasses::new(&device, [&frame_layout, &material_layout, &skinning.layout]);
         let edge_pipeline = create_edge_pipeline(&device, &occlusion.layout, samples);
+        let temporal = temporal::TemporalPasses::new(
+            &device,
+            [&frame_layout, &skinning.empty_layout, &skinning.layout],
+        );
         let targets_alive = TargetsAlive::default();
         let frame_targets = FrameTargets::new(
             &device,
-            (&post, &occlusion),
+            (&post, &occlusion, &temporal),
             scene_size((width, height), &graphics, &capabilities),
             (width, height),
-            targets_used(&graphics, false, false),
+            targets_used(&graphics, false, false, false),
             &targets_alive,
         );
         let ui_pipeline = create_ui_pipeline(&device, color_format);
@@ -269,6 +273,9 @@ impl ScenePipeline {
             edge_pipeline,
             edges: false,
             depth_of_field: false,
+            motion_blur: false,
+            temporal,
+            history: Default::default(),
             surface_shaders: Default::default(),
             sprites,
             post,
@@ -462,11 +469,16 @@ impl ScenePipeline {
 
     /// Remakes the scene's targets if they weren't made for this output
     /// size, render scale, anti-aliasing, ambient occlusion, contact
-    /// shadows, volumetric fog, screen-space outlines and depth of field.
-    /// The old ones are freed.
+    /// shadows, volumetric fog, screen-space outlines, depth of field, TAA
+    /// and motion blur. The old ones are freed, and TAA's history with them.
     fn fit_targets(&mut self) {
         let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
-        let used = targets_used(&self.graphics, self.edges, self.depth_of_field);
+        let used = targets_used(
+            &self.graphics,
+            self.edges,
+            self.depth_of_field,
+            self.motion_blur,
+        );
         let targets = &self.frame_targets;
         let made_for = (
             targets.size,
@@ -476,17 +488,22 @@ impl ScenePipeline {
                 targets.fxaa.is_some(),
                 targets.occlusion.is_some(),
                 targets.depth_of_field.is_some(),
+                targets
+                    .temporal
+                    .as_ref()
+                    .map_or_else(Default::default, |temporal| temporal.used()),
             ),
         );
         if made_for != (size, self.output_size, used) {
             self.frame_targets = FrameTargets::new(
                 &self.device,
-                (&self.post, &self.occlusion),
+                (&self.post, &self.occlusion, &self.temporal),
                 size,
                 self.output_size,
                 used,
                 &self.targets_alive,
             );
+            self.history.valid = false;
             // The frame bindings held the old occlusion texture.
             self.bind_frame();
         }
@@ -503,11 +520,17 @@ impl ScenePipeline {
     ) -> Result<()> {
         // Screen-space outlines keep the prepass's targets alive while the
         // world has them.
-        // So does depth of field, with a target of its own.
+        // So does depth of field, with a target of its own, and motion blur,
+        // with the motion targets.
         let depth_of_field = lens::wants_depth_of_field(&list.lens);
-        if self.edges != list.edges.is_some() || self.depth_of_field != depth_of_field {
+        let motion_blur = temporal::wants_motion_blur(&list.lens);
+        if self.edges != list.edges.is_some()
+            || self.depth_of_field != depth_of_field
+            || self.motion_blur != motion_blur
+        {
             self.edges = list.edges.is_some();
             self.depth_of_field = depth_of_field;
+            self.motion_blur = motion_blur;
             self.fit_targets();
         }
         // Lights are planned in the scene's pixels, which the render scale
@@ -563,6 +586,17 @@ impl ScenePipeline {
             self.realtime_gi = None;
         }
         let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
+        // With TAA, the scene is drawn a fraction of a pixel to one side,
+        // a different way each frame (renderer/temporal.rs).
+        let view_proj = camera_view_projection(&list.camera, aspect);
+        let drawn_view_proj = match &self.frame_targets.temporal {
+            Some(temporal) if temporal.has_taa() => {
+                self.history.jittered(view_proj, self.frame_targets.size)
+            }
+            _ => view_proj,
+        };
+        frame_uniform.view_proj = drawn_view_proj.to_cols_array_2d();
+        frame_uniform.inv_view_proj = drawn_view_proj.inverse().to_cols_array_2d();
         (frame_uniform.environment, frame_uniform.sky_light) = self.environment.uniform();
         let sky_colors = [
             &mut frame_uniform.sky_top,
@@ -729,6 +763,7 @@ impl ScenePipeline {
             casters,
             culled,
             joints,
+            skins,
         } = plan_draws(
             list,
             &draws,
@@ -737,6 +772,24 @@ impl ScenePipeline {
             self.frozen_view.is_some().then_some(&mut seen),
         );
         self.culling_bounds = seen;
+        // What moved since last frame, for the motion vectors.
+        let moved = self.frame_targets.temporal.as_ref().map(|_| {
+            let moved = self.history.moved(&draws, &joints, &skins);
+            let blur = list
+                .lens
+                .motion_blur
+                .filter(|share| share.is_finite())
+                .map_or(0.0, |share| share.clamp(0.0, 1.0));
+            self.temporal.prepare(
+                (&self.device, &self.queue),
+                &self.history,
+                (view_proj, drawn_view_proj),
+                self.frame_targets.size,
+                (blur, self.graphics.motion_blur),
+                &moved,
+            );
+            moved
+        });
         let joints_remade = self
             .skinning
             .write_joints(&self.device, &self.queue, &joints);
@@ -823,7 +876,7 @@ impl ScenePipeline {
                 &self.device,
                 &self.queue,
                 list,
-                (view_projection(list, aspect), frame_uniform.fog),
+                (drawn_view_proj, frame_uniform.fog),
                 &camera_view,
                 |key| {
                     textures
@@ -984,6 +1037,7 @@ impl ScenePipeline {
         }
         let frame_bind_group = &self.frame_bind_group;
         mark(&mut encoder, FramePass::Prepass);
+        let mut motion_draws = 0;
 
         // While ambient occlusion or contact shadows are on: solid items'
         // depth and normals, then (for ambient occlusion) how hidden each
@@ -1019,6 +1073,26 @@ impl ScenePipeline {
                     count(mesh.index_count, &batch.instances);
                     pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
                 }
+            }
+            // The motion vectors, from what the prepass drew.
+            if let (Some(targets), Some(moved)) = (&self.frame_targets.temporal, &moved) {
+                motion_draws = self.temporal.draw_motion(
+                    &mut encoder,
+                    (targets, &self.history),
+                    (
+                        &occlusion.depth_view,
+                        &self.prepass_frame_bind_group,
+                        &self.skinning.empty,
+                    ),
+                    moved,
+                    |pass, key| {
+                        let mesh = self.gpu_mesh(key)?;
+                        pass.set_bind_group(2, self.skin_group(mesh), &[]);
+                        pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                        pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
+                        Some(mesh.index_count)
+                    },
+                );
             }
             mark(&mut encoder, FramePass::AmbientOcclusion);
             if ambient_occlusion {
@@ -1135,6 +1209,7 @@ impl ScenePipeline {
             self.sprites.draw(&mut pass, &sprite_draws);
         }
         (counts.items_drawn, counts.batches) = drawn;
+        counts.draw_calls += motion_draws;
         // The light the volumetric fog scattered in front of what was drawn.
         if let (Some(fog), Some(occlusion)) = (&self.volumetric_fog, &self.frame_targets.occlusion)
         {
@@ -1148,6 +1223,14 @@ impl ScenePipeline {
         }
         mark(&mut encoder, FramePass::PostProcessing);
 
+        // TAA, then motion blur, each copied over the scene.
+        if let Some(temporal) = &self.frame_targets.temporal {
+            self.temporal.draw_post(
+                &mut encoder,
+                (temporal, &self.history),
+                &self.frame_targets.hdr,
+            );
+        }
         if let Some(target) = &self.frame_targets.depth_of_field {
             self.post.depth_of_field.draw(&mut encoder, target);
         }
@@ -1257,6 +1340,10 @@ impl ScenePipeline {
         }
         counts.shadow_casters_drawn = shadow_casters_drawn;
         self.counts = counts;
+        match &self.frame_targets.temporal {
+            Some(temporal) => self.history.finish(list, view_proj, temporal.has_taa()),
+            None => self.history.reset(),
+        }
         self.forget_undrawn();
         Ok(())
     }
@@ -1453,6 +1540,18 @@ impl ScenePipeline {
     #[cfg(test)]
     pub(super) fn water_copies_alive(&self) -> usize {
         Arc::strong_count(&self.targets_alive.water) - 1
+    }
+
+    /// How many sets of motion targets, TAA histories and motion blur
+    /// targets are alive: 0 or 1 each, unless one leaked.
+    #[cfg(test)]
+    pub(super) fn temporal_targets_alive(&self) -> (usize, usize, usize) {
+        let alive = &self.targets_alive;
+        (
+            Arc::strong_count(&alive.motion) - 1,
+            Arc::strong_count(&alive.taa) - 1,
+            Arc::strong_count(&alive.motion_blur) - 1,
+        )
     }
 
     /// How many multisampled and FXAA targets are alive: 0 or 1 each.
@@ -2201,15 +2300,18 @@ fn frame_layout_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
 /// volumetric fog need only the prepass's depth, and screen-space outlines,
 /// the draw list's `edges`, its depth and normals), and whether depth of
 /// field (`wants_depth_of_field`, if its setting allows) needs its target
-/// and the prepass's depth.
+/// and the prepass's depth, and which motion targets TAA and motion blur
+/// (`wants_motion_blur`, if its setting allows) need, with the prepass's.
 fn targets_used(
     graphics: &EffectiveGraphics,
     edges: bool,
     wants_depth_of_field: bool,
-) -> (u32, bool, bool, bool) {
+    wants_motion_blur: bool,
+) -> (u32, bool, bool, bool, temporal::TemporalUse) {
     let anti_aliasing = graphics.anti_aliasing;
     let depth_of_field =
         wants_depth_of_field && graphics.depth_of_field != crate::DepthOfFieldQuality::Off;
+    let temporal = temporal::TemporalUse::of(graphics, wants_motion_blur);
     (
         anti_aliasing.samples(),
         anti_aliasing == crate::AntiAliasing::Fxaa,
@@ -2217,8 +2319,10 @@ fn targets_used(
             || graphics.contact_shadows
             || graphics.volumetric_fog
             || edges
-            || depth_of_field,
+            || depth_of_field
+            || temporal.any(),
         depth_of_field,
+        temporal,
     )
 }
 

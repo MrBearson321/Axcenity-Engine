@@ -64,6 +64,7 @@ mod realtime_gi;
 mod skinning;
 mod sprites;
 mod surface_shaders;
+mod temporal;
 mod terrain;
 pub(crate) mod text;
 mod texture_budget;
@@ -86,10 +87,10 @@ use gpu::{
 use lighting::{
     DrawPlan, camera_view_projection, casters_in, frame_uniform, linear_color, maps_uniform_of,
     material_key, material_textures, plan_draws, plan_lights, post_drawn, post_uniform,
-    shadows_drawn, view_projection,
+    shadows_drawn,
 };
 #[cfg(test)]
-use lighting::{cascade_ends, light_raw, uv_matrix};
+use lighting::{cascade_ends, light_raw, uv_matrix, view_projection};
 use lod::{Draw, LodStates, Resolved};
 use occlusion::{create_edge_pipeline, edge_uniform, occlusion_uniform};
 use skinning::Skinning;

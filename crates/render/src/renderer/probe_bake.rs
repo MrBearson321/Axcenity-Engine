@@ -92,12 +92,18 @@ impl ProbeCamera {
         camera
     }
 
-    /// Draws with `settings`, at a render scale of 100% and never tracing
-    /// light probes of its own.
+    /// Draws with `settings`, at a render scale of 100%, never tracing
+    /// light probes of its own, and without TAA (each face is a different
+    /// view, so there's no last frame to blend with).
     pub(super) fn set_graphics(&mut self, settings: &GraphicsSettings) {
+        let anti_aliasing = match settings.anti_aliasing() {
+            crate::AntiAliasing::Taa => crate::AntiAliasing::Off,
+            mode => mode,
+        };
         self.renderer.set_graphics(&GraphicsSettings {
             render_scale: Some(1.0),
             realtime_gi: Some(false),
+            anti_aliasing: Some(anti_aliasing),
             ..settings.clone()
         });
     }

@@ -784,6 +784,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::FilmGrainEffect => icons::FILM_STRIP,
         ClassName::ChromaticAberrationEffect => icons::RAINBOW,
         ClassName::SharpenEffect => icons::DIAMOND,
+        ClassName::MotionBlurEffect => icons::WIND,
         ClassName::ParticleEmitter => icons::SPARKLE,
         ClassName::Animator => AnimKind::Animator.icon(),
         ClassName::Animation => AnimKind::Animation.icon(),
@@ -915,6 +916,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::FilmGrainEffect
         | ClassName::ChromaticAberrationEffect
         | ClassName::SharpenEffect
+        | ClassName::MotionBlurEffect
         | ClassName::ExposureEffect
         | ClassName::FogEffect
         | ClassName::BloomEffect => pick((232, 205, 110), (150, 115, 0)),

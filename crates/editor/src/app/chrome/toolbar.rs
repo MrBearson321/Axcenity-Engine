@@ -372,6 +372,9 @@ impl EditorApp {
                         ClassName::ChromaticAberrationEffect => {
                             "Insert a ChromaticAberrationEffect into Lighting: red and blue                              drift apart toward the picture's edges."
                         }
+                        ClassName::MotionBlurEffect => {
+                            "Insert a MotionBlurEffect into Lighting: what moves across the                              view streaks along its motion, as through a camera's shutter."
+                        }
                         _ => {
                             "Insert a SharpenEffect into Lighting: crisper edges between                              colors, useful with a render scale below 100%."
                         }

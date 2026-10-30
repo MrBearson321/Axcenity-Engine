@@ -51,6 +51,7 @@ Graphics Phase 34. Five effect Instances inside Lighting, each off until one is 
 | `FilmGrainEffect` | `Intensity` 0.3, `Size` 1 | Noise of ±0.2 × `Intensity` in sRGB, a new pattern every frame, in grains `Size` pixels of a 1080-pixel-tall view across (never under one pixel). The average brightness stays. |
 | `ChromaticAberrationEffect` | `Intensity` 0.5 | Red is read from farther out and blue from farther in, by 2% × `Intensity` of the distance from the middle (1% of the width at the side edges for 1): nothing in the middle, colored fringes toward the edges. |
 | `SharpenEffect` | `Intensity` 0.5 | Each pixel moves away from the average of its four neighbors by 2 × `Intensity` of the difference: flat areas stay, edges steepen. Useful with a render scale below 100%. |
+| `MotionBlurEffect` (graphics Phase 35) | `Intensity` 0.5 | What moves across the view streaks along `Intensity` of the way it moved in a frame; what moves with the camera stays sharp. Drawn from the motion vectors: [temporal.md](temporal.md). |
 
 Each also has `Enabled` (true). Disabled, absent, or turned off in the settings, an effect costs nothing.
 

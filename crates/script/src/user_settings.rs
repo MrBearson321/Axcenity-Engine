@@ -15,8 +15,8 @@
 
 use axcenity_render::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
-    GraphicsSettings, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowQuality,
-    TextureQuality,
+    GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, ReflectionQuality,
+    ShadowQuality, TextureQuality,
 };
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -77,6 +77,12 @@ pub(crate) fn depth_of_field_quality_names() -> Vec<&'static str> {
         .to_vec()
 }
 
+pub(crate) fn motion_blur_quality_names() -> Vec<&'static str> {
+    MotionBlurQuality::ALL
+        .map(MotionBlurQuality::label)
+        .to_vec()
+}
+
 /// `mode`'s item name in `Enum.AntiAliasing`. Its label ("MSAA 4×") isn't a
 /// Lua name.
 fn anti_aliasing_name(mode: AntiAliasing) -> &'static str {
@@ -85,6 +91,7 @@ fn anti_aliasing_name(mode: AntiAliasing) -> &'static str {
         AntiAliasing::Fxaa => "FXAA",
         AntiAliasing::Msaa2 => "MSAA2",
         AntiAliasing::Msaa4 => "MSAA4",
+        AntiAliasing::Taa => "TAA",
     }
 }
 
@@ -411,6 +418,23 @@ impl UserData for LuaUserGameSettings {
         fields.add_field_method_set("Sharpen", |lua, _, value: mlua::Value| {
             let chosen = bool_choice(lua, "Sharpen", value)?;
             change(lua, |settings, _| settings.sharpen = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("MotionBlur", |lua, _| {
+            let name = settings(lua).motion_blur().label();
+            Ok(item(EnumType::MotionBlur, name))
+        });
+        fields.add_field_method_set("MotionBlur", |lua, _, value: mlua::Value| {
+            let chosen = enum_choice(
+                lua,
+                "MotionBlur",
+                EnumType::MotionBlur,
+                &MotionBlurQuality::ALL,
+                MotionBlurQuality::label,
+                value,
+            )?;
+            change(lua, |settings, _| settings.motion_blur = chosen);
             Ok(())
         });
 

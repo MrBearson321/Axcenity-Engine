@@ -769,7 +769,7 @@ pub const ATMOSPHERE_NUMBERS: [&str; 4] = ["Density", "Offset", "Glare", "Haze"]
 /// `Enum.GraphicsQuality`'s items, which the graphics quality block offers.
 pub const GRAPHICS_QUALITIES: [&str; 5] = ["Automatic", "Low", "Medium", "High", "Ultra"];
 /// The `UserGameSettings` overrides the graphics option block sets.
-pub const GRAPHICS_OPTIONS: [&str; 15] = [
+pub const GRAPHICS_OPTIONS: [&str; 16] = [
     "ShadowQuality",
     "AntiAliasing",
     "TextureQuality",
@@ -777,6 +777,7 @@ pub const GRAPHICS_OPTIONS: [&str; 15] = [
     "ReflectionQuality",
     "CloudQuality",
     "DepthOfField",
+    "MotionBlur",
     "PostProcessing",
     "ContactShadows",
     "RealtimeGI",
@@ -808,9 +809,9 @@ pub const PRESET: &str = "Preset";
 pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
     match setting {
         "ShadowQuality" => &["Off", "Low", "Medium", "High", "Ultra", PRESET],
-        "AntiAliasing" => &["Off", "FXAA", "MSAA2", "MSAA4", PRESET],
+        "AntiAliasing" => &["Off", "FXAA", "MSAA2", "MSAA4", "TAA", PRESET],
         "TextureQuality" => &["Quarter", "Half", "Full", PRESET],
-        "AmbientOcclusion" | "DepthOfField" => &["Off", "Low", "High", PRESET],
+        "AmbientOcclusion" | "DepthOfField" | "MotionBlur" => &["Off", "Low", "High", PRESET],
         "ReflectionQuality" | "CloudQuality" => &["Low", "Medium", "High", "Ultra", PRESET],
         "PostProcessing"
         | "ContactShadows"

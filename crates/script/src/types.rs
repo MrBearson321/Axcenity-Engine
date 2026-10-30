@@ -519,6 +519,7 @@ pub enum EnumType {
     ReflectionQuality,
     CloudQuality,
     DepthOfField,
+    MotionBlur,
     UserInputType,
     UserInputState,
     MouseBehavior,
@@ -538,7 +539,7 @@ pub enum EnumType {
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 33] = [
+    pub const ALL: [EnumType; 34] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -556,6 +557,7 @@ impl EnumType {
         EnumType::ReflectionQuality,
         EnumType::CloudQuality,
         EnumType::DepthOfField,
+        EnumType::MotionBlur,
         EnumType::UserInputType,
         EnumType::UserInputState,
         EnumType::MouseBehavior,
@@ -593,6 +595,7 @@ impl EnumType {
             EnumType::ReflectionQuality => "ReflectionQuality",
             EnumType::CloudQuality => "CloudQuality",
             EnumType::DepthOfField => "DepthOfField",
+            EnumType::MotionBlur => "MotionBlur",
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
             EnumType::MouseBehavior => "MouseBehavior",
@@ -632,6 +635,7 @@ impl EnumType {
             EnumType::ReflectionQuality => user_settings::reflection_quality_names(),
             EnumType::CloudQuality => user_settings::cloud_quality_names(),
             EnumType::DepthOfField => user_settings::depth_of_field_quality_names(),
+            EnumType::MotionBlur => user_settings::motion_blur_quality_names(),
             EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
             EnumType::MouseBehavior => MouseBehavior::ALL.iter().map(|b| b.as_str()).collect(),
@@ -773,6 +777,7 @@ impl LuaEnumItem {
             | EnumType::ReflectionQuality
             | EnumType::CloudQuality
             | EnumType::DepthOfField
+            | EnumType::MotionBlur
             | EnumType::UserInputType
             | EnumType::UserInputState
             | EnumType::MouseBehavior

@@ -628,6 +628,11 @@ pub(super) struct TargetsAlive {
     pub(super) water: Arc<()>,
     /// Depth of field's blurred copies of the scene.
     pub(super) depth_of_field: Arc<()>,
+    /// Sets of motion targets (`temporal::TemporalTargets`), and TAA's
+    /// histories and motion blur's targets among them.
+    pub(super) motion: Arc<()>,
+    pub(super) taa: Arc<()>,
+    pub(super) motion_blur: Arc<()>,
 }
 
 /// The multisampled color the scene is drawn into while MSAA is on. Its
@@ -681,6 +686,10 @@ pub(super) struct FrameTargets {
     /// Only while depth of field is drawn: the blurred scene, which bloom
     /// and the composite pass read in `hdr_view`'s place.
     pub(super) depth_of_field: Option<super::lens::DepthOfFieldTarget>,
+    /// Only while TAA is on or motion blur is drawn: the motion vectors,
+    /// and TAA's history and motion blur's target (`renderer/temporal.rs`),
+    /// which are copied over `hdr` before depth of field and bloom.
+    pub(super) temporal: Option<super::temporal::TemporalTargets>,
     /// Bloom levels from half the scene's size down, each half the one before.
     pub(super) levels: Vec<wgpu::TextureView>,
     /// Scene to the first level.
@@ -733,6 +742,13 @@ pub(super) struct ScenePipeline {
     /// Whether the last draw list asked for depth of field, which (while
     /// its setting allows it) keeps the prepass's targets and its own alive.
     pub(super) depth_of_field: bool,
+    /// Whether the last draw list asked for motion blur, which (while its
+    /// setting allows it) keeps the prepass's and the motion targets alive.
+    pub(super) motion_blur: bool,
+    /// Motion vectors', TAA's and motion blur's pipelines and buffers.
+    pub(super) temporal: super::temporal::TemporalPasses,
+    /// What those keep from one frame to the next.
+    pub(super) history: super::temporal::History,
     /// Pipelines for materials' own surface shaders.
     pub(super) surface_shaders: surface_shaders::SurfaceShaders,
     /// Camera-facing pictures, such as particles.

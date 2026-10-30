@@ -1,7 +1,7 @@
 //! Lens effects (graphics Phase 34): Lighting's first enabled
 //! `DepthOfFieldEffect`, `VignetteEffect`, `FilmGrainEffect`,
-//! `ChromaticAberrationEffect` and `SharpenEffect`. Without one of a kind
-//! there is none of it.
+//! `ChromaticAberrationEffect`, `SharpenEffect` and (graphics Phase 35)
+//! `MotionBlurEffect`. Without one of a kind there is none of it.
 
 use axcenity_core::{ClassName, Instance, Value, World};
 use axcenity_render::{DepthOfField, FilmGrain, LensEffects, Vignette};
@@ -43,6 +43,8 @@ pub(crate) fn lens_of(world: &World) -> LensEffects {
         chromatic_aberration: first(ClassName::ChromaticAberrationEffect)
             .map(|effect| number(effect, "Intensity", 0.5)),
         sharpen: first(ClassName::SharpenEffect).map(|effect| number(effect, "Intensity", 0.5)),
+        motion_blur: first(ClassName::MotionBlurEffect)
+            .map(|effect| number(effect, "Intensity", 0.5)),
     }
 }
 
@@ -58,6 +60,12 @@ fn number(effect: &Instance, name: &str, default: f32) -> f32 {
 mod tests {
     use super::*;
     use axcenity_core::{Color3, InstanceId};
+
+    fn set_number(world: &mut World, id: InstanceId, value: f64) {
+        world
+            .set_property(id, "Intensity", Value::Number(value))
+            .unwrap();
+    }
 
     fn add(world: &mut World, class: ClassName) -> InstanceId {
         let effect = world.create(class).unwrap();
@@ -79,6 +87,7 @@ mod tests {
         add(&mut world, ClassName::FilmGrainEffect);
         add(&mut world, ClassName::ChromaticAberrationEffect);
         add(&mut world, ClassName::SharpenEffect);
+        let streak = add(&mut world, ClassName::MotionBlurEffect);
         assert_eq!(
             lens_of(&world),
             LensEffects {
@@ -99,9 +108,16 @@ mod tests {
                 }),
                 chromatic_aberration: Some(0.5),
                 sharpen: Some(0.5),
+                motion_blur: Some(0.5),
             },
             "each class's defaults"
         );
+        set_number(&mut world, streak, 1.0);
+        assert_eq!(lens_of(&world).motion_blur, Some(1.0));
+        world
+            .set_property(streak, "Enabled", Value::Bool(false))
+            .unwrap();
+        assert_eq!(lens_of(&world).motion_blur, None);
 
         let set = |world: &mut World, id, name: &str, value| {
             world.set_property(id, name, value).unwrap();

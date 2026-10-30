@@ -22,6 +22,7 @@ mod reflection_probes;
 mod shading;
 mod skinning;
 mod surface_shaders;
+mod temporal;
 mod texture_budget;
 mod water;
 mod weather;
@@ -3228,6 +3229,23 @@ fn every_setting_and_value() -> Vec<GraphicsSettings> {
             s.sharpen = Some(on);
         }));
     }
+    // TAA and motion blur alone still draw the prepass, with the motion
+    // targets.
+    for quality in crate::MotionBlurQuality::ALL {
+        all.push(with(&|s| {
+            s.ambient_occlusion = Some(AmbientOcclusion::Off);
+            s.contact_shadows = Some(false);
+            s.depth_of_field = Some(crate::DepthOfFieldQuality::Off);
+            s.motion_blur = Some(quality);
+        }));
+    }
+    all.push(with(&|s| {
+        s.ambient_occlusion = Some(AmbientOcclusion::Off);
+        s.contact_shadows = Some(false);
+        s.depth_of_field = Some(crate::DepthOfFieldQuality::Off);
+        s.motion_blur = Some(crate::MotionBlurQuality::Off);
+        s.anti_aliasing = Some(AntiAliasing::Taa);
+    }));
     all.push(high);
     all
 }
@@ -3318,6 +3336,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
         }),
         chromatic_aberration: Some(0.5),
         sharpen: Some(0.5),
+        motion_blur: Some(0.5),
     };
     let settings = every_setting_and_value();
     // What a renderer holds: its caches and its targets.
@@ -3346,6 +3365,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             (
                 scene.volumetric_fogs_alive(),
                 scene.depth_of_field_targets_alive(),
+                scene.temporal_targets_alive(),
             ),
         )
     };
@@ -3370,7 +3390,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 (sun, (spot, point), targets, occlusion, (msaa, fxaa)),
                 environment,
                 gi,
-                (fogs, depth_of_field),
+                (fogs, depth_of_field, (motion, taa, motion_blur)),
             ) = counts(&renderer);
             let context = format!("round {round}, step {step}: {settings:?}");
             // A ceiling of 0 studs draws no sun shadows, so needs no map.
@@ -3391,10 +3411,18 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             // volumetric fog or depth of field.
             let blurred = used.depth_of_field != crate::DepthOfFieldQuality::Off;
             assert_eq!(depth_of_field, usize::from(blurred), "{context}");
+            // TAA and motion blur keep the motion targets, each with its own.
+            let jittered = used.anti_aliasing == crate::AntiAliasing::Taa;
+            let streaked = used.motion_blur != crate::MotionBlurQuality::Off;
+            assert_eq!(taa, usize::from(jittered), "{context}");
+            assert_eq!(motion_blur, usize::from(streaked), "{context}");
+            assert_eq!(motion, usize::from(jittered || streaked), "{context}");
             let prepass = used.ambient_occlusion != crate::AmbientOcclusion::Off
                 || used.contact_shadows
                 || used.volumetric_fog
-                || blurred;
+                || blurred
+                || jittered
+                || streaked;
             assert_eq!(occlusion, usize::from(prepass), "{context}");
             assert_eq!(
                 msaa,

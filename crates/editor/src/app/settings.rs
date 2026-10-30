@@ -10,8 +10,8 @@ use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, type_scale
 use crate::widgets;
 use axcenity_render::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
-    GraphicsSettings, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowQuality,
-    TEXTURE_BUDGET_RANGE, TextureQuality,
+    GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, ReflectionQuality,
+    ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 
 /// Ctrl+, (Cmd+, on macOS) opens Settings, as in most desktop apps.
@@ -764,6 +764,20 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
+            ui.label("Motion blur");
+            let label = |quality: Option<MotionBlurQuality>| match quality {
+                Some(quality) => quality.label().to_owned(),
+                None => format!("Preset ({})", preset.motion_blur().label()),
+            };
+            egui::ComboBox::from_id_salt("motion blur")
+                .selected_text(label(settings.motion_blur))
+                .show_ui(ui, |ui| {
+                    for choice in std::iter::once(None).chain(MotionBlurQuality::ALL.map(Some)) {
+                        ui.selectable_value(&mut settings.motion_blur, choice, label(choice));
+                    }
+                });
+            ui.end_row();
+
             let switches = [
                 ("Vignette", preset.vignette(), &mut settings.vignette),
                 ("Film grain", preset.film_grain(), &mut settings.film_grain),
@@ -868,6 +882,14 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
         DepthOfFieldQuality::Off => "Depth of field: off".to_owned(),
         quality => format!(
             "Depth of field: {}, {} samples per pixel",
+            quality.label(),
+            quality.samples()
+        ),
+    });
+    ui.label(match effective.motion_blur {
+        MotionBlurQuality::Off => "Motion blur: off".to_owned(),
+        quality => format!(
+            "Motion blur: {}, {} samples per pixel",
             quality.label(),
             quality.samples()
         ),
@@ -1177,7 +1199,7 @@ mod tests {
             render_scale: Some(0.5),
             texture_quality: Some(TextureQuality::Half),
             texture_budget: Some(128),
-            anti_aliasing: Some(AntiAliasing::Msaa2),
+            anti_aliasing: Some(AntiAliasing::Taa),
             ambient_occlusion: Some(AmbientOcclusion::Low),
             reflection_quality: Some(ReflectionQuality::Medium),
             contact_shadows: Some(false),
@@ -1189,6 +1211,7 @@ mod tests {
             film_grain: Some(true),
             chromatic_aberration: None,
             sharpen: Some(false),
+            motion_blur: Some(MotionBlurQuality::Low),
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);

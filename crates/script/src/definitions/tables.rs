@@ -1233,7 +1233,7 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
             Field {
                 name: "AntiAliasing",
                 ty: "EnumAntiAliasing",
-                doc: "How edges are smoothed: Off, FXAA, MSAA2 or MSAA4.",
+                doc: "How edges are smoothed: Off, FXAA, MSAA2, MSAA4 or TAA (each frame drawn a fraction of a pixel aside and blended with the frames before, following what moves: smooths edges and thin shapes, a little soft). No preset picks TAA.",
             },
             Field {
                 name: "AmbientOcclusion",
@@ -1294,6 +1294,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 name: "Sharpen",
                 ty: "boolean",
                 doc: "Whether a SharpenEffect is drawn. Off at Low, on above.",
+            },
+            Field {
+                name: "MotionBlur",
+                ty: "EnumMotionBlur",
+                doc: "How a MotionBlurEffect streaks what moves: Off, Low (8 samples per pixel) or High (16). Off at Low, Low at Medium, High above.",
             },
         ],
         operators: &[],

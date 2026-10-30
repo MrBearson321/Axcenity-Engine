@@ -8,6 +8,7 @@
 use super::gpu::{create_depth_view, target_bytes};
 use super::grading::GradingPass;
 use super::lens::{DepthOfFieldPass, DepthOfFieldTarget};
+use super::temporal::{SceneViews, TemporalPasses, TemporalTargets, TemporalUse};
 use super::{
     BLOOM_LEVELS, DEPTH_FORMAT, FXAA_FORMAT, FrameTargets, FxaaTarget, HDR_FORMAT, MsaaTarget,
     OcclusionPasses, OcclusionTargets, PostPasses, PostUniform, TargetsAlive,
@@ -256,15 +257,16 @@ impl FrameTargets {
     /// `samples` per pixel and the bloom levels below it, down to
     /// [`BLOOM_LEVELS`] halvings of the `output`'s size, with the bind
     /// groups that connect them, FXAA's target if `fxaa`, the prepass's and
-    /// ambient occlusion's if `occlusion`, and depth of field's if
-    /// `depth_of_field` (which needs the prepass's). Each target holds a
+    /// ambient occlusion's if `occlusion`, depth of field's if
+    /// `depth_of_field` (which needs the prepass's), and the motion targets
+    /// `temporal` uses (which need the prepass's too). Each target holds a
     /// clone of its counter in `alive`.
     pub(super) fn new(
         device: &wgpu::Device,
-        (post, occlusion_passes): (&PostPasses, &OcclusionPasses),
+        (post, occlusion_passes, temporal_passes): (&PostPasses, &OcclusionPasses, &TemporalPasses),
         (width, height): (u32, u32),
         output: (u32, u32),
-        (samples, fxaa, occlusion, depth_of_field): (u32, bool, bool, bool),
+        (samples, fxaa, occlusion, depth_of_field, temporal): (u32, bool, bool, bool, TemporalUse),
         alive: &TargetsAlive,
     ) -> Self {
         // Bytes of every texture made, for `RenderStats::target_bytes`.
@@ -274,13 +276,15 @@ impl FrameTargets {
             bytes.set(bytes.get() + target_bytes((width, height, 1), format, samples));
             // A multisampled texture can't be sampled or copied, only
             // resolved. The others can be copied out (a reflection probe's
-            // bake reads the scene's).
+            // bake reads the scene's) and into (TAA and motion blur copy
+            // their results over the scene's).
             let usage = if samples > 1 {
                 wgpu::TextureUsages::RENDER_ATTACHMENT
             } else {
                 wgpu::TextureUsages::RENDER_ATTACHMENT
                     | wgpu::TextureUsages::TEXTURE_BINDING
                     | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST
             };
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
@@ -354,6 +358,22 @@ impl FrameTargets {
         let occlusion = occlusion.then(|| {
             OcclusionTargets::new(device, occlusion_passes, (width, height), &alive.occlusion)
         });
+        let temporal = occlusion
+            .as_ref()
+            .filter(|_| temporal.any())
+            .map(|prepass| {
+                TemporalTargets::new(
+                    device,
+                    temporal_passes,
+                    (width, height),
+                    SceneViews {
+                        hdr: &hdr_view,
+                        depth: &prepass.depth_view,
+                    },
+                    temporal,
+                    alive,
+                )
+            });
         let depth_of_field = occlusion
             .as_ref()
             .filter(|_| depth_of_field)
@@ -393,7 +413,10 @@ impl FrameTargets {
             size: (width, height),
             output,
             samples,
-            bytes: bytes.get() + depth_bytes + occlusion.as_ref().map_or(0, |o| o.bytes),
+            bytes: bytes.get()
+                + depth_bytes
+                + occlusion.as_ref().map_or(0, |o| o.bytes)
+                + temporal.as_ref().map_or(0, |t| t.bytes),
             _alive: alive.sets.clone(),
             hdr,
             hdr_view,
@@ -402,6 +425,7 @@ impl FrameTargets {
             fxaa,
             occlusion,
             depth_of_field,
+            temporal,
             levels,
             prefilter_group,
             downsample_groups,

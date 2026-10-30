@@ -217,6 +217,9 @@ pub enum ClassName {
     ChromaticAberrationEffect,
     /// Inside Lighting: makes the edges between colors crisper.
     SharpenEffect,
+    /// Inside Lighting: streaks what moves across the view, as a camera's
+    /// shutter open while it moves does.
+    MotionBlurEffect,
     /// An invisible part that changes the look while the camera is inside
     /// it, fading in over `BlendDistance` outside it: the effects inside it
     /// (color correction, exposure, fog, atmosphere and bloom) replace the
@@ -377,7 +380,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 120] = [
+    pub const ALL: [ClassName; 121] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -445,6 +448,7 @@ impl ClassName {
         ClassName::FilmGrainEffect,
         ClassName::ChromaticAberrationEffect,
         ClassName::SharpenEffect,
+        ClassName::MotionBlurEffect,
         ClassName::GraphicsVolume,
         ClassName::ExposureEffect,
         ClassName::FogEffect,
@@ -573,6 +577,7 @@ impl ClassName {
             ClassName::FilmGrainEffect => "FilmGrainEffect",
             ClassName::ChromaticAberrationEffect => "ChromaticAberrationEffect",
             ClassName::SharpenEffect => "SharpenEffect",
+            ClassName::MotionBlurEffect => "MotionBlurEffect",
             ClassName::GraphicsVolume => "GraphicsVolume",
             ClassName::ExposureEffect => "ExposureEffect",
             ClassName::FogEffect => "FogEffect",
@@ -717,6 +722,7 @@ impl ClassName {
                 | ClassName::FilmGrainEffect
                 | ClassName::ChromaticAberrationEffect
                 | ClassName::SharpenEffect
+                | ClassName::MotionBlurEffect
         )
     }
 
@@ -1181,6 +1187,12 @@ impl ClassName {
             ClassName::SharpenEffect => vec![
                 ("Enabled", Value::Bool(true)),
                 // 0 changes nothing, 1 is strong.
+                ("Intensity", Value::Number(0.5)),
+            ],
+            ClassName::MotionBlurEffect => vec![
+                ("Enabled", Value::Bool(true)),
+                // How much of the way something moved in a frame it streaks
+                // over, 0 to 1 (a shutter open for that share of the frame).
                 ("Intensity", Value::Number(0.5)),
             ],
             ClassName::ExposureEffect => vec![
@@ -2452,6 +2464,7 @@ impl ClassName {
             | ClassName::FilmGrainEffect
             | ClassName::ChromaticAberrationEffect
             | ClassName::SharpenEffect
+            | ClassName::MotionBlurEffect
             | ClassName::ExposureEffect
             | ClassName::FogEffect
             | ClassName::BloomEffect

@@ -1551,6 +1551,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "How much crisper the edges between colors get, from 0 (no change) to 1 (strong). 0.5 by default.",
     ),
     (
+        ClassName::MotionBlurEffect,
+        "Enabled",
+        "Whether it's drawn. Off (or with no MotionBlurEffect in Lighting) it costs nothing.",
+    ),
+    (
+        ClassName::MotionBlurEffect,
+        "Intensity",
+        "How much of the way something moved across the view in a frame it streaks over, from 0 (none) to 1 (all of it, a shutter open the whole frame). 0.5 by default. Streaks are at most 1/18 of the view's height long.",
+    ),
+    (
         ClassName::Weather,
         "Precipitation",
         "What falls around the camera (`Enum.Precipitation`): None, Rain (the default) or Snow. Rain wets surfaces as it falls, up to its Intensity; snow covers the ones facing up.",
@@ -4745,6 +4755,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::SharpenEffect => {
             "Inside Lighting: makes the edges between colors crisper (useful with a render scale below 100%). The first enabled one in Lighting is used; off at Low graphics (UserGameSettings.Sharpen)."
+        }
+        ClassName::MotionBlurEffect => {
+            "Inside Lighting: streaks what moves across the view along its motion, as a camera's shutter does: parts that move, posed characters, and everything when the camera moves. What moves with the camera stays sharp. The first enabled one in Lighting is used. The player's graphics settings choose how finely it's drawn (UserGameSettings.MotionBlur); it's off at Low."
         }
         ClassName::OutlineEffect => {
             "Inside Lighting: lines drawn along the edges of everything solid, around each silhouette and along creases where a surface turns sharply, found on screen from what's drawn, so no part needs any setup. A material file's outline draws a line around its own parts instead (see docs/rendering/stylized.md)."
