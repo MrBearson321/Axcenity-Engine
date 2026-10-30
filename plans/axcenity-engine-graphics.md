@@ -575,7 +575,7 @@ Particle emitters with large counts simulate and sort on the GPU (compute), alon
 
 ### Acceptance criteria
 
-- [ ] An emitter with 100,000 particles runs, the existing particle examples look the same, and machines without compute support fall back to the CPU path.
+- [x] An emitter with 100,000 particles runs, the existing particle examples look the same, and machines without compute support fall back to the CPU path.
 
 ---
 

@@ -40,6 +40,7 @@ use glyphon::{
     Buffer, Cache as GlyphCache, FontSystem, Resolution, SwashCache, TextArea, TextAtlas,
     TextBounds, TextRenderer as GlyphTextRenderer, Viewport as TextViewport,
 };
+pub use gpu_particles::MAX_GPU_PARTICLES;
 pub use gpu_timer::FramePass;
 pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE};
 pub use surface_shaders::{ShaderError, SurfaceShader};
@@ -50,6 +51,7 @@ mod culling;
 mod environment;
 mod fog;
 mod gpu;
+mod gpu_particles;
 mod gpu_timer;
 mod grading;
 mod lens;
@@ -164,6 +166,9 @@ pub struct RenderStats {
     pub shadow_casters_culled: u32,
     /// Sprites (particles) outside the camera's view.
     pub sprites_culled: u32,
+    /// Particles kept on the GPU: every GPU particle emitter's capacity
+    /// (alive or not, as nothing is read back).
+    pub gpu_particles: u32,
     /// Bytes of textures on the GPU, every mip level included, counted when
     /// uploaded and when freed.
     pub texture_bytes: u64,
@@ -173,7 +178,8 @@ pub struct RenderStats {
     /// prepass and ambient occlusion targets, the shadow maps, the sky's
     /// environment maps and sky image, and the turned-text sheet.
     pub target_bytes: u64,
-    /// Bytes of buffers: instances, lights, tiles, uniforms and UI vertices.
+    /// Bytes of buffers: instances, lights, tiles, uniforms, UI vertices
+    /// and GPU particles.
     pub buffer_bytes: u64,
 }
 

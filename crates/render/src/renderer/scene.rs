@@ -287,6 +287,7 @@ impl ScenePipeline {
             light_probes,
             realtime_gi: None,
             volumetric_fog: None,
+            gpu_particles: None,
             water,
             water_frame_bind_group: None,
             cloud_drift: Default::default(),
@@ -870,7 +871,7 @@ impl ScenePipeline {
             self.queue
                 .write_buffer(&self.ui_buffer, 0, bytemuck::cast_slice(&ui_vertices));
         }
-        let (sprite_draws, sprites_culled) = {
+        let (sprite_draws, sprites_culled, emitter_textures) = {
             let textures = &self.textures;
             self.sprites.prepare(
                 &self.device,
@@ -886,6 +887,14 @@ impl ScenePipeline {
                 },
             )
         };
+        // GPU particles, where compute shaders run.
+        if list.particle_emitters.is_empty() || !self.capabilities.compute_shaders {
+            self.gpu_particles = None;
+        } else {
+            self.gpu_particles
+                .get_or_insert_with(|| Box::new(gpu_particles::GpuParticles::new(&self.device)))
+                .prepare(&self.device, &self.queue, list, &emitter_textures);
+        }
 
         // The spot and point lights' shadow maps exist only while one of
         // them casts shadows.
@@ -1105,7 +1114,15 @@ impl ScenePipeline {
         if let Some(fog) = &self.volumetric_fog {
             fog.scatter(&mut encoder);
         }
+        mark(&mut encoder, FramePass::Particles);
+        if let Some(particles) = &self.gpu_particles {
+            particles.run(&mut encoder);
+        }
         mark(&mut encoder, FramePass::Scene);
+        let emitter_draws = self
+            .gpu_particles
+            .as_ref()
+            .map_or_else(Vec::new, |particles| particles.draws());
 
         // The scene is drawn into the HDR texture; post-processing then brings
         // it to `view`. With MSAA it's drawn into the multisampled texture,
@@ -1188,7 +1205,7 @@ impl ScenePipeline {
             if !copied {
                 draw_batches(&mut pass, see_through);
                 // Last, over everything, but hidden behind solid items.
-                self.sprites.draw(&mut pass, &sprite_draws);
+                self.sprites.draw(&mut pass, &sprite_draws, &emitter_draws);
             }
         }
         if copied {
@@ -1206,7 +1223,7 @@ impl ScenePipeline {
             pass.set_bind_group(0, frame_bind_group, &[]);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             draw_batches(&mut pass, see_through);
-            self.sprites.draw(&mut pass, &sprite_draws);
+            self.sprites.draw(&mut pass, &sprite_draws, &emitter_draws);
         }
         (counts.items_drawn, counts.batches) = drawn;
         counts.draw_calls += motion_draws;
@@ -1333,6 +1350,7 @@ impl ScenePipeline {
                 prepass,
                 prepass && ambient_occlusion,
                 self.volumetric_fog.is_some(),
+                self.gpu_particles.is_some(),
                 true,
                 true,
                 turned.drawn || ui_drawn,
@@ -1535,6 +1553,12 @@ impl ScenePipeline {
         Arc::strong_count(&self.targets_alive.volumetric_fog) - 1
     }
 
+    /// How many GPU particle emitters have buffers.
+    #[cfg(test)]
+    pub(super) fn gpu_particle_emitters(&self) -> usize {
+        self.gpu_particles.as_ref().map_or(0, |p| p.emitters())
+    }
+
     /// How many of water's copies of the scene are alive: 0 or 1, unless
     /// one leaked.
     #[cfg(test)]
@@ -1598,6 +1622,7 @@ impl ScenePipeline {
             shadow_casters_drawn: counts.shadow_casters_drawn,
             shadow_casters_culled: counts.shadow_casters_culled,
             sprites_culled: counts.sprites_culled,
+            gpu_particles: self.gpu_particles.as_ref().map_or(0, |p| p.count()),
             texture_bytes: self.texture_bytes.total(),
             mesh_bytes: self.mesh_bytes.total(),
             target_bytes: self.frame_targets.bytes
@@ -1608,7 +1633,8 @@ impl ScenePipeline {
                 + self.realtime_gi.as_ref().map_or(0, |gi| gi.bytes())
                 + self.volumetric_fog.as_ref().map_or(0, |fog| fog.bytes())
                 + self.water.copy.as_ref().map_or(0, |copy| copy.bytes),
-            buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum(),
+            buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum::<u64>()
+                + self.gpu_particles.as_ref().map_or(0, |p| p.bytes()),
         }
     }
 
@@ -1879,10 +1905,10 @@ impl ScenePipeline {
                 self.note_texture(source.as_ref(), frame, true);
             }
         }
-        for sprite in &list.sprites {
-            if let Some(source) = &sprite.texture {
-                self.note_texture(source.as_ref(), frame, false);
-            }
+        let emitter_textures = list.particle_emitters.iter().map(|e| &e.look.texture);
+        let sprite_textures = list.sprites.iter().map(|s| &s.texture);
+        for source in sprite_textures.chain(emitter_textures).flatten() {
+            self.note_texture(source.as_ref(), frame, false);
         }
         let replaced = self.fit_texture_budget(list);
         if !replaced.is_empty() {

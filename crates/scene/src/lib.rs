@@ -45,7 +45,9 @@ pub use foliage::brush_color as foliage_brush_color;
 pub use light_probes::{LightProbePoints, light_bake_fingerprint, light_probe_points};
 pub use material::part_material_file;
 pub use orientation::{orientation_from_rotation, rotation_from_orientation};
-pub use particles::{MAX_PER_EMITTER, Particles, built_in as built_in_particle};
+pub use particles::{
+    GPU_PARTICLE_THRESHOLD, MAX_PER_EMITTER, Particles, built_in as built_in_particle,
+};
 pub use pick::{
     CameraView, Hit, Ray, part_box_edges, part_half_extent, pick, pick_hit, pick_hit_skipping,
     visible_box_edges,

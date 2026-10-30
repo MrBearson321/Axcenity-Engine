@@ -7,16 +7,21 @@
 //! premultiplied by their opacity, and the alpha written is
 //! `opacity × (1 - light emission)`, so one blend state covers painting over
 //! what's behind (light emission 0) and adding light (1).
+//!
+//! GPU particle emitters (`gpu_particles.rs`) write their particles as
+//! `SpriteRaw`s into buffers of their own, which this pass draws before
+//! the list's sprites.
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
 use super::culling::Frustum;
 use super::{DEPTH_FORMAT, HDR_FORMAT, linear_color};
-use crate::draw_list::DrawList;
+use crate::draw_list::{DrawList, TextureSource};
 
 /// One sprite for the GPU. Must match `SpriteIn` in sprite.wgsl.
 #[repr(C)]
@@ -152,8 +157,9 @@ impl SpritePass {
     }
 
     /// Uploads `list`'s sprites that `view` can see, farthest first, and
-    /// returns the runs to draw and how many were culled. `view_of` finds
-    /// an uploaded texture by its key; a sprite whose texture couldn't be
+    /// returns the runs to draw, how many were culled, and the texture keys
+    /// of `list`'s GPU particle emitters, in its order. `view_of` finds an
+    /// uploaded texture by its key; a sprite whose texture couldn't be
     /// uploaded is drawn as a plain square.
     pub(super) fn prepare<'a>(
         &mut self,
@@ -163,9 +169,9 @@ impl SpritePass {
         (view_proj, fog): (Mat4, super::fog::FogRaw),
         view: &Frustum,
         view_of: impl Fn(u64) -> Option<&'a wgpu::TextureView>,
-    ) -> (Vec<SpriteDraw>, u32) {
-        if list.sprites.is_empty() {
-            return (Vec::new(), 0);
+    ) -> (Vec<SpriteDraw>, u32, Vec<Option<u64>>) {
+        if list.sprites.is_empty() && list.particle_emitters.is_empty() {
+            return (Vec::new(), 0, Vec::new());
         }
         let eye = list.camera.position;
         let forward = (list.camera.look_at - eye).normalize_or(Vec3::NEG_Z);
@@ -199,22 +205,24 @@ impl SpritePass {
 
         let mut raws = Vec::with_capacity(order.len());
         let mut draws: Vec<SpriteDraw> = Vec::new();
+        // The key of an uploaded texture, with its bind group made.
+        let mut uploaded = |texture: &Option<Arc<dyn TextureSource>>| {
+            let key = texture.as_ref()?.key();
+            let view = view_of(key)?;
+            let (layout, sampler) = (&self.texture_layout, &self.sampler);
+            self.groups
+                .entry(key)
+                .or_insert_with(|| texture_group(device, layout, view, sampler));
+            Some(key)
+        };
+        let emitter_textures = list
+            .particle_emitters
+            .iter()
+            .map(|emitter| uploaded(&emitter.look.texture))
+            .collect();
         for i in order {
             let sprite = &list.sprites[i];
-            let texture = sprite.texture.as_ref().map(|t| t.key());
-            let texture = match texture {
-                Some(key) => match view_of(key) {
-                    Some(view) => {
-                        let (layout, sampler) = (&self.texture_layout, &self.sampler);
-                        self.groups
-                            .entry(key)
-                            .or_insert_with(|| texture_group(device, layout, view, sampler));
-                        Some(key)
-                    }
-                    None => None,
-                },
-                None => None,
-            };
+            let texture = uploaded(&sprite.texture);
             let opacity = sprite.opacity.clamp(0.0, 1.0);
             let color = linear_color(sprite.color) * sprite.brightness.max(0.0) * opacity;
             let index = raws.len() as u32;
@@ -240,24 +248,39 @@ impl SpritePass {
             self.capacity = raws.len().next_power_of_two();
             self.buffer = create_buffer(device, self.capacity);
         }
-        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&raws));
-        (draws, culled)
+        if !raws.is_empty() {
+            queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&raws));
+        }
+        (draws, culled, emitter_textures)
     }
 
-    /// Draws the runs [`prepare`](Self::prepare) returned into the scene pass.
-    pub(super) fn draw(&self, pass: &mut wgpu::RenderPass, draws: &[SpriteDraw]) {
-        if draws.is_empty() {
+    /// Draws GPU particle emitters' sprites (`emitters`: each one's buffer
+    /// of `SpriteRaw`s, how many, and its texture key), then the runs
+    /// [`prepare`](Self::prepare) returned, into the scene pass.
+    pub(super) fn draw(
+        &self,
+        pass: &mut wgpu::RenderPass,
+        draws: &[SpriteDraw],
+        emitters: &[(&wgpu::Buffer, u32, Option<u64>)],
+    ) {
+        if draws.is_empty() && emitters.is_empty() {
             return;
         }
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.uniform_group, &[]);
+        let group = |texture: Option<u64>| {
+            texture
+                .and_then(|key| self.groups.get(&key))
+                .unwrap_or(&self.white_group)
+        };
+        for &(buffer, count, texture) in emitters {
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.set_bind_group(1, group(texture), &[]);
+            pass.draw(0..6, 0..count);
+        }
         pass.set_vertex_buffer(0, self.buffer.slice(..));
         for draw in draws {
-            let group = draw
-                .texture
-                .and_then(|key| self.groups.get(&key))
-                .unwrap_or(&self.white_group);
-            pass.set_bind_group(1, group, &[]);
+            pass.set_bind_group(1, group(draw.texture), &[]);
             pass.draw(0..6, draw.instances.clone());
         }
     }

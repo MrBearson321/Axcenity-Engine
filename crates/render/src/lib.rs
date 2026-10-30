@@ -19,12 +19,13 @@ pub use atmosphere::Atmosphere;
 pub use draw_list::{
     AmbientLight, Camera, Channel, ChannelMap, Clouds, ColorGrading, ColorLookup, Cone,
     DepthOfField, DrawItem, DrawList, Edges, FilmGrain, Fog, LensEffects, Light, LightProbeGrid,
-    LightProbeVolume, MAX_PALETTE_COLORS, Material, MeshSource, NormalMap, Outline, PointShadows,
-    PostProcessing, ProbeImage, ReflectionProbe, SURFACE_PARAMETERS, Shading, Shadows, Shape, Skin,
-    Sky, SkyImage, SpotShadows, Sprite, Sun, Sway, TerrainLayer, TerrainLayers, TerrainSurface,
-    TerrainView, TextAlign, TextShadow, TextSpan, TextStroke, TextureMaps, TextureSource, Toon,
-    UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle, UiShadow, UiSlice, UiText,
-    VerticalAlign, Vignette, Weather, is_turned, turn_point, turned_bounds,
+    LightProbeVolume, MAX_PALETTE_COLORS, Material, MeshSource, NormalMap, Outline,
+    ParticleEmitter, ParticleLook, PointShadows, PostProcessing, ProbeImage, ReflectionProbe,
+    SURFACE_PARAMETERS, Shading, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, Sprite, Sun,
+    Sway, TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow,
+    TextSpan, TextStroke, TextureMaps, TextureSource, Toon, UiBorderSide, UiClip, UiDrawItem,
+    UiImage, UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign, Vignette, Weather, is_turned,
+    turn_point, turned_bounds,
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{
@@ -34,8 +35,8 @@ pub use graphics::{
     ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 pub use renderer::{
-    CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE, RenderStats, Renderer,
-    ShaderError, SurfaceShader, TextureRenderer,
+    CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, MAX_GPU_PARTICLES, PROBE_BAKE_SIZE,
+    RenderStats, Renderer, ShaderError, SurfaceShader, TextureRenderer,
 };
 pub use tone_mapping::ToneMapping;
 pub use water::{WATER_GRID, Water, water_surface};

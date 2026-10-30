@@ -61,6 +61,8 @@ pub(super) const TERRAIN_SHADER: &str = concat!(
 /// The sprites' shader: the fog, then `sprite.wgsl`.
 pub(super) const SPRITE_SHADER: &str =
     concat!(include_str!("../fog.wgsl"), include_str!("../sprite.wgsl"));
+/// GPU particles' compute passes (`particles.wgsl`).
+pub(super) const PARTICLE_SHADER: &str = include_str!("../particles.wgsl");
 /// The volumetric fog's passes: the sky's colors, the fog and the shared
 /// lighting (for the frame's bindings and shadows), then
 /// `volumetric_fog.wgsl`.

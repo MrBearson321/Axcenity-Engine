@@ -511,3 +511,66 @@ fn animated_characters(bench: &str, example: &str, character: &str, y: f32) {
     assert!(animators.take_errors().is_empty());
     assert!(assets.take_errors().is_empty());
 }
+
+/// One emitter keeping `out` particles alive (Rate × Lifetime), moved and
+/// sorted on the CPU, then on the GPU, to find the count above which the
+/// GPU is faster (`axcenity_scene::GPU_PARTICLE_THRESHOLD`, graphics Phase
+/// 36). The emitter fills a cloud in front of the camera. With the GPU
+/// allowed, an emitter below the threshold still moves on the CPU, so to
+/// measure the GPU there, lower the threshold first.
+#[test]
+#[ignore = "benchmark: run with --release -- --ignored bench_"]
+fn bench_particles() {
+    for out in [1000.0, 2000.0, 3000.0, 4000.0] {
+        for gpu in [false, true] {
+            particles(out, gpu);
+        }
+    }
+    particles(100_000.0, true);
+}
+
+fn particles(out: f32, gpu: bool) {
+    let mut world = World::new();
+    add_floor(&mut world, 100.0);
+    let part = add_part(
+        &mut world,
+        ClassName::Part,
+        &[
+            ("Position", vector(0.0, 2.0, 0.0)),
+            ("Size", vector(2.0, 1.0, 2.0)),
+        ],
+    );
+    let emitter = world.create(ClassName::ParticleEmitter).unwrap();
+    world.set_parent(emitter, Some(part)).unwrap();
+    for (name, value) in [
+        ("Rate", f64::from(out) / 2.0),
+        ("Lifetime", 2.0),
+        ("Speed", 4.0),
+        ("SpreadAngle", 120.0),
+        ("Size", 0.4),
+    ] {
+        world
+            .set_property(emitter, name, Value::Number(value))
+            .unwrap();
+    }
+    let assets = Assets::default();
+    let mut particles = axcenity_scene::Particles::new();
+    particles.set_gpu(gpu);
+    // Filled before measuring: lives last up to 2.4 seconds.
+    for _ in 0..180 {
+        particles.update(&world, 1.0 / 60.0);
+    }
+    let camera = camera(Vec3::new(0.0, 6.0, 16.0), Vec3::new(0.0, 4.0, 0.0));
+    let path = if gpu { "GPU" } else { "CPU" };
+    run(&format!("bench_particles: {out} on the {path}"), |steps| {
+        steps.time("Particles::update", || particles.update(&world, 1.0 / 60.0));
+        let mut list = steps.time("build_draw_list", || {
+            axcenity_scene::build_draw_list(&world, &assets, camera)
+        });
+        steps.time("Particles::draw", || {
+            particles.draw(&mut list, &world, &assets)
+        });
+        list
+    });
+    println!("  particles out: {}\n", particles.count());
+}

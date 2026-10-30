@@ -15,15 +15,24 @@
 //! The weather's rain and snow are particles too: the host's `Particles`
 //! keeps the world's weather (`WeatherState`, `weather.rs`), and
 //! [`Particles::add_weather`] puts it into a draw list.
+//!
+//! Where the host's renderer runs compute shaders ([`Particles::set_gpu`]),
+//! an emitter expected to keep [`GPU_PARTICLE_THRESHOLD`] or more particles
+//! out moves them on the GPU instead: they're still born here, step by
+//! step, but live in the renderer (`render::ParticleEmitter`), which moves
+//! them the same way (`particles.wgsl`) and draws them as the same sprites,
+//! up to [`MAX_GPU_PARTICLES`] of them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::f32::consts::TAU;
 use std::sync::{Arc, OnceLock};
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, ParticleType, Value, World};
-use axcenity_render::glam::Vec3;
-use axcenity_render::{DrawList, Sprite, TextureSource};
+use axcenity_render::glam::{Mat4, Vec3};
+use axcenity_render::{
+    DrawList, MAX_GPU_PARTICLES, ParticleEmitter, ParticleLook, Sprite, TextureSource,
+};
 
 use crate::draw_list::{image_texture, part_placement};
 use crate::weather::WeatherState;
@@ -36,6 +45,13 @@ pub const MAX_PER_EMITTER: usize = 4000;
 const MAX_BIRTHS_PER_FRAME: usize = 1000;
 /// The built-in pictures' size in pixels.
 const PICTURE: u32 = 64;
+/// An emitter whose Rate × Lifetime (the particles it keeps out) reaches
+/// this moves them on the GPU where it can, and one already there stays
+/// until it falls below half. Below it, the CPU is as fast: see the
+/// particle benchmark in `docs/rendering/performance.md`.
+pub const GPU_PARTICLE_THRESHOLD: f32 = 3000.0;
+/// The fewest particles a GPU emitter has room for.
+const MIN_GPU_CAPACITY: u32 = 1024;
 
 /// One particle in flight.
 #[derive(Clone, Copy, Debug)]
@@ -51,6 +67,70 @@ struct Emitter {
     particles: Vec<Particle>,
     /// Births owed from earlier frames' fractions of a particle.
     owed: f32,
+    /// Its particles on the GPU, while it has some there or gives them off
+    /// there. It can have some on the CPU too, while those die out.
+    gpu: Option<GpuEmitter>,
+}
+
+/// An emitter's particles on the GPU: what the renderer is told each step.
+#[derive(Debug)]
+struct GpuEmitter {
+    /// The last step, its look filled in when drawn.
+    draw: ParticleEmitter,
+    /// Births `emit` asked for since the last step.
+    pending: u32,
+    /// Each step's births that may still be alive, oldest first.
+    batches: VecDeque<Batch>,
+}
+
+#[derive(Debug)]
+struct Batch {
+    /// Seconds since they were born.
+    age: f32,
+    count: u32,
+    /// The emitter's Lifetime then: each lives 0.8 to 1.2 times it.
+    lifetime: f32,
+}
+
+impl GpuEmitter {
+    fn new(key: u64) -> Self {
+        Self {
+            draw: ParticleEmitter {
+                key,
+                step: 0,
+                seconds: 0.0,
+                capacity: MIN_GPU_CAPACITY,
+                born: 0,
+                births: 0,
+                spawn: Mat4::IDENTITY,
+                direction: Vec3::Y,
+                spread: 0.0,
+                speed: 0.0,
+                lifetime: 0.0,
+                acceleration: Vec3::ZERO,
+                drag: 0.0,
+                air: Vec3::ZERO,
+                look: ParticleLook::default(),
+            },
+            pending: 0,
+            batches: VecDeque::new(),
+        }
+    }
+
+    /// About how many are alive, as nothing is read back from the GPU:
+    /// each batch's share whose lives (spread evenly from 0.8 to 1.2 times
+    /// its lifetime) haven't ended, up to the capacity.
+    fn alive(&self) -> usize {
+        let alive: f32 = self
+            .batches
+            .iter()
+            .map(|batch| {
+                let left = (1.2 - batch.age / batch.lifetime.max(1e-4)) / 0.4;
+                batch.count as f32 * left.clamp(0.0, 1.0)
+            })
+            .sum();
+        (alive.ceil() as usize).min(self.draw.capacity as usize)
+    }
 }
 
 /// An emitter's properties, read once per frame.
@@ -105,6 +185,11 @@ pub struct Particles {
     random: Random,
     /// The world's weather as it eases in, and its rain or snow.
     weather: WeatherState,
+    /// Whether big emitters move on the GPU.
+    gpu: bool,
+    /// The next GPU emitter's key, new for each, so the renderer never
+    /// shows one's particles for another's.
+    next_key: u64,
 }
 
 impl Default for Particles {
@@ -119,6 +204,22 @@ impl Particles {
             emitters: HashMap::new(),
             random: Random::default(),
             weather: WeatherState::default(),
+            gpu: false,
+            next_key: 1,
+        }
+    }
+
+    /// Lets emitters with many particles move them on the GPU: true where
+    /// the host's renderer runs compute shaders
+    /// (`Capabilities::compute_shaders`). Off at first, so every emitter
+    /// moves on the CPU, at most [`MAX_PER_EMITTER`] particles each.
+    /// Turning it off takes the GPU's particles away.
+    pub fn set_gpu(&mut self, on: bool) {
+        self.gpu = on;
+        if !on {
+            for state in self.emitters.values_mut() {
+                state.gpu = None;
+            }
         }
     }
 
@@ -129,9 +230,18 @@ impl Particles {
         self.weather.reset();
     }
 
-    /// How many particles are out.
+    /// How many particles are out. For those on the GPU, which aren't
+    /// read back, it's how many should be alive.
     pub fn count(&self) -> usize {
-        self.emitters.values().map(|e| e.particles.len()).sum()
+        self.emitters
+            .values()
+            .map(|e| e.particles.len() + e.gpu.as_ref().map_or(0, GpuEmitter::alive))
+            .sum()
+    }
+
+    /// How many emitters move their particles on the GPU.
+    pub fn gpu_emitters(&self) -> usize {
+        self.emitters.values().filter(|e| e.gpu.is_some()).count()
     }
 
     /// True while something moves: particles are out, an emitter in the
@@ -168,12 +278,41 @@ impl Particles {
         let Some(transform) = parent_transform(world, instance) else {
             return;
         };
-        let count = (count as usize).min(MAX_BIRTHS_PER_FRAME);
         let mut state = self.emitters.remove(&emitter).unwrap_or_default();
-        for _ in 0..count {
-            self.birth(&mut state, &settings, transform);
+        // A big burst goes to the GPU, as do births of an emitter already
+        // there. They're born at its next step.
+        let burst = count as f32 >= GPU_PARTICLE_THRESHOLD;
+        if self.gpu && (burst || self.on_gpu(&state, &settings)) {
+            let gpu = self.gpu_state(&mut state);
+            gpu.pending = gpu.pending.saturating_add(count).min(MAX_GPU_PARTICLES);
+        } else {
+            let count = (count as usize).min(MAX_BIRTHS_PER_FRAME);
+            for _ in 0..count {
+                self.birth(&mut state, &settings, transform);
+            }
         }
         self.emitters.insert(emitter, state);
+    }
+
+    /// True if `state`'s births belong on the GPU: it's allowed, and the
+    /// emitter keeps enough out, or more than half that once there.
+    fn on_gpu(&self, state: &Emitter, settings: &Settings) -> bool {
+        let out = settings.rate * settings.lifetime;
+        let threshold = if state.gpu.is_some() {
+            GPU_PARTICLE_THRESHOLD / 2.0
+        } else {
+            GPU_PARTICLE_THRESHOLD
+        };
+        self.gpu && out >= threshold
+    }
+
+    /// `state`'s GPU particles, made if it has none yet.
+    fn gpu_state<'a>(&mut self, state: &'a mut Emitter) -> &'a mut GpuEmitter {
+        state.gpu.get_or_insert_with(|| {
+            let key = self.next_key;
+            self.next_key += 1;
+            GpuEmitter::new(key)
+        })
     }
 
     /// Moves every particle on by `seconds`, lets old ones die, and gives
@@ -186,16 +325,15 @@ impl Particles {
             0.0
         };
         self.weather.update(world, seconds, &mut self.random);
-        let live: Vec<(InstanceId, Settings, Option<axcenity_render::glam::Mat4>)> =
-            emitters(world)
-                .map(|(id, instance)| {
-                    (
-                        id,
-                        Settings::read(instance),
-                        parent_transform(world, instance),
-                    )
-                })
-                .collect();
+        let live: Vec<(InstanceId, Settings, Option<Mat4>)> = emitters(world)
+            .map(|(id, instance)| {
+                (
+                    id,
+                    Settings::read(instance),
+                    parent_transform(world, instance),
+                )
+            })
+            .collect();
         self.emitters
             .retain(|id, _| live.iter().any(|(live, _, _)| live == id));
         let wind = global_wind(world);
@@ -217,25 +355,67 @@ impl Particles {
                 particle.age += seconds;
             }
             state.particles.retain(|p| p.age < p.life);
+            let on_gpu = self.on_gpu(&state, &settings);
+            let mut gpu_births = 0;
             match (settings.enabled, transform) {
                 (true, Some(transform)) => {
                     state.owed += settings.rate * seconds;
-                    let births = (state.owed.floor() as usize).min(MAX_BIRTHS_PER_FRAME);
-                    state.owed -= state.owed.floor();
-                    for _ in 0..births {
-                        self.birth(&mut state, &settings, transform);
+                    let owed = state.owed.floor();
+                    state.owed -= owed;
+                    if on_gpu {
+                        gpu_births = (owed as u32).min(MAX_GPU_PARTICLES);
+                    } else {
+                        for _ in 0..(owed as usize).min(MAX_BIRTHS_PER_FRAME) {
+                            self.birth(&mut state, &settings, transform);
+                        }
                     }
                 }
                 _ => state.owed = 0.0,
             }
-            if !state.particles.is_empty() || settings.enabled {
+            if on_gpu || state.gpu.is_some() {
+                let gpu = self.gpu_state(&mut state);
+                step_gpu(gpu, &settings, (transform, air), seconds, gpu_births);
+                // Off the GPU once its last particles there have died, unless
+                // it's still giving them off there.
+                let giving = on_gpu && settings.enabled && transform.is_some();
+                if !giving && gpu.alive() == 0 && gpu.pending == 0 {
+                    state.gpu = None;
+                }
+            }
+            if !state.particles.is_empty() || settings.enabled || state.gpu.is_some() {
                 self.emitters.insert(id, state);
             }
         }
     }
 
-    /// The sprites to draw for every particle now. Textures named by
-    /// emitters come from `assets`.
+    /// Puts every particle into `list` (built from the same world): those
+    /// on the CPU as [`sprites`](Self::sprites), and those on the GPU as
+    /// [`DrawList::particle_emitters`].
+    pub fn draw(&self, list: &mut DrawList, world: &World, assets: &Assets) {
+        list.sprites.extend(self.sprites(world, assets));
+        for (&id, state) in &self.emitters {
+            let (Some(gpu), Some(instance)) = (&state.gpu, world.get(id)) else {
+                continue;
+            };
+            let look = Look::read(instance, assets);
+            list.particle_emitters.push(ParticleEmitter {
+                look: ParticleLook {
+                    size: [look.size.0, look.size.1],
+                    color: [rgb(look.color.0), rgb(look.color.1)],
+                    transparency: [look.transparency.0, look.transparency.1],
+                    rotation_degrees: look.rotation,
+                    spin_degrees: look.spin,
+                    brightness: look.brightness,
+                    light_emission: look.light_emission,
+                    texture: look.texture,
+                },
+                ..gpu.draw.clone()
+            });
+        }
+    }
+
+    /// The sprites to draw for every particle on the CPU now. Textures
+    /// named by emitters come from `assets`.
     pub fn sprites(&self, world: &World, assets: &Assets) -> Vec<Sprite> {
         let mut sprites = Vec::with_capacity(self.count());
         for (&id, state) in &self.emitters {
@@ -267,12 +447,7 @@ impl Particles {
 
     /// Adds one particle to `state`, somewhere inside the part, heading out
     /// along the emitter's direction within its spread.
-    fn birth(
-        &mut self,
-        state: &mut Emitter,
-        settings: &Settings,
-        transform: axcenity_render::glam::Mat4,
-    ) {
+    fn birth(&mut self, state: &mut Emitter, settings: &Settings, transform: Mat4) {
         if state.particles.len() >= MAX_PER_EMITTER {
             return;
         }
@@ -395,6 +570,65 @@ pub(crate) fn global_wind(world: &World) -> Vec3 {
         .unwrap_or(Vec3::ZERO)
 }
 
+/// Moves `gpu` on a step: its old births age, `births` more are born (with
+/// those `emit` asked for) inside the part at `transform`, if it's in one,
+/// and the renderer is told the emitter's settings. Drag slows its
+/// particles toward `air`.
+fn step_gpu(
+    gpu: &mut GpuEmitter,
+    settings: &Settings,
+    (transform, air): (Option<Mat4>, Vec3),
+    seconds: f32,
+    births: u32,
+) {
+    for batch in &mut gpu.batches {
+        batch.age += seconds;
+    }
+    gpu.batches.retain(|batch| batch.age < batch.lifetime * 1.2);
+    let births = match transform {
+        Some(_) => births.saturating_add(gpu.pending).min(MAX_GPU_PARTICLES),
+        None => 0,
+    };
+    gpu.pending = 0;
+    if births > 0 {
+        gpu.batches.push_back(Batch {
+            age: 0.0,
+            count: births,
+            lifetime: settings.lifetime,
+        });
+    }
+    let draw = &mut gpu.draw;
+    draw.step += 1;
+    draw.seconds = seconds;
+    draw.born = draw.born.wrapping_add(draw.births);
+    draw.births = births;
+    // Room for all its particles to live out their longest lives. More
+    // room starts it again, empty, so it only ever grows.
+    let out = (settings.rate * settings.lifetime * 1.2)
+        .ceil()
+        .min(MAX_GPU_PARTICLES as f32);
+    let needed = (out as u32)
+        .saturating_add(births)
+        .clamp(MIN_GPU_CAPACITY, MAX_GPU_PARTICLES)
+        .next_power_of_two();
+    draw.capacity = draw.capacity.max(needed);
+    if let Some(transform) = transform {
+        let (_, rotation, _) = transform.to_scale_rotation_translation();
+        draw.spawn = transform;
+        draw.direction = (rotation * settings.direction).normalize_or(Vec3::Y);
+    }
+    draw.spread = settings.spread.to_radians() / 2.0;
+    draw.speed = settings.speed;
+    draw.lifetime = settings.lifetime;
+    draw.acceleration = settings.acceleration;
+    draw.drag = settings.drag;
+    draw.air = air;
+}
+
+fn rgb(color: Color3) -> [f32; 3] {
+    [color.r, color.g, color.b]
+}
+
 fn lerp((from, to): (f32, f32), t: f32) -> f32 {
     from + (to - from) * t
 }
@@ -410,7 +644,7 @@ fn emitters(world: &World) -> impl Iterator<Item = (InstanceId, &Instance)> {
 
 /// Where the emitter's parent part is, as the transform that stretches the
 /// 1×1×1 cube to fill it. `None` if it isn't inside a part.
-fn parent_transform(world: &World, emitter: &Instance) -> Option<axcenity_render::glam::Mat4> {
+fn parent_transform(world: &World, emitter: &Instance) -> Option<Mat4> {
     let parent = world.get(emitter.parent()?)?;
     let (_, transform) = part_placement(parent)?;
     Some(transform)
@@ -726,5 +960,197 @@ mod tests {
             .unwrap();
         // Close to the wind's 20 studs/s by the end of the second.
         assert!(drift(&world) > 10.0, "{}", drift(&world));
+    }
+
+    /// A draw list of `particles` alone.
+    fn drawn(particles: &Particles, world: &World) -> DrawList {
+        let camera = axcenity_render::Camera {
+            position: Vec3::ZERO,
+            look_at: Vec3::NEG_Z,
+            fov_y_degrees: 70.0,
+        };
+        let mut list = crate::build_draw_list(world, &Assets::default(), camera);
+        list.sprites.clear();
+        particles.draw(&mut list, world, &Assets::default());
+        list
+    }
+
+    fn set(world: &mut World, emitter: InstanceId, name: &str, value: f64) {
+        world
+            .set_property(emitter, name, Value::Number(value))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_hundred_thousand_particles_move_on_the_gpu_and_only_where_it_can() {
+        let (mut world, _, emitter) = world_with_emitter(50_000.0);
+        set(&mut world, emitter, "Lifetime", 2.0);
+        let mut particles = Particles::new();
+        particles.set_gpu(true);
+        for _ in 0..150 {
+            particles.update(&world, 1.0 / 60.0);
+        }
+        // Two and a half seconds of births at 50,000 a second, each living
+        // 1.6 to 2.4 seconds: 100,000 out.
+        let out = particles.count();
+        assert!((95_000..=105_000).contains(&out), "{out}");
+        assert_eq!(particles.gpu_emitters(), 1);
+        let list = drawn(&particles, &world);
+        assert!(list.sprites.is_empty());
+        let [gpu] = &list.particle_emitters[..] else {
+            panic!("one GPU emitter: {:?}", list.particle_emitters.len());
+        };
+        assert_eq!(gpu.capacity, 1 << 17);
+        assert_eq!(gpu.step, 150);
+        // Every birth so far, 50,000 a second.
+        let births = gpu.born + gpu.births;
+        assert!(births.abs_diff(125_000) <= 1, "{births}");
+
+        // Without compute shaders, the CPU keeps as many as it can.
+        particles.set_gpu(false);
+        assert_eq!(particles.gpu_emitters(), 0);
+        for _ in 0..30 {
+            particles.update(&world, 1.0 / 60.0);
+        }
+        assert_eq!(particles.count(), MAX_PER_EMITTER);
+        let list = drawn(&particles, &world);
+        assert!(list.particle_emitters.is_empty());
+        assert_eq!(list.sprites.len(), MAX_PER_EMITTER);
+    }
+
+    #[test]
+    fn small_emitters_stay_on_the_cpu_with_the_gpu_allowed() {
+        // hello-particles' busiest emitter: 40 a second for a second.
+        let (mut world, _, emitter) = world_with_emitter(40.0);
+        set(&mut world, emitter, "Lifetime", 1.0);
+        let mut particles = Particles::new();
+        particles.set_gpu(true);
+        for _ in 0..60 {
+            particles.update(&world, 1.0 / 60.0);
+        }
+        let list = drawn(&particles, &world);
+        assert!(list.particle_emitters.is_empty());
+        assert_eq!(list.sprites.len(), particles.count());
+        assert!(particles.count() > 30);
+        // So does a burst below the threshold.
+        particles.emit(&world, emitter, 500);
+        assert_eq!(particles.gpu_emitters(), 0);
+    }
+
+    #[test]
+    fn a_big_burst_is_born_on_the_gpu_at_the_next_step() {
+        let (mut world, _, emitter) = world_with_emitter(0.0);
+        set(&mut world, emitter, "Lifetime", 5.0);
+        let mut particles = Particles::new();
+        particles.set_gpu(true);
+        particles.emit(&world, emitter, 50_000);
+        particles.update(&world, 1.0 / 60.0);
+        let list = drawn(&particles, &world);
+        let gpu = &list.particle_emitters[0];
+        assert_eq!((gpu.born, gpu.births), (0, 50_000));
+        assert_eq!(gpu.capacity, 1 << 16);
+        assert_eq!(particles.count(), 50_000);
+        // Each step is new; drawing again repeats it.
+        particles.update(&world, 1.0 / 60.0);
+        let again = drawn(&particles, &world);
+        let next = &again.particle_emitters[0];
+        assert_eq!(
+            (next.step, next.born, next.births),
+            (gpu.step + 1, 50_000, 0)
+        );
+        assert_eq!(
+            drawn(&particles, &world).particle_emitters[0].step,
+            next.step
+        );
+    }
+
+    #[test]
+    fn gpu_particles_die_out_and_their_emitter_leaves_the_gpu() {
+        let (mut world, _, emitter) = world_with_emitter(10_000.0);
+        set(&mut world, emitter, "Lifetime", 1.0);
+        let mut particles = Particles::new();
+        particles.set_gpu(true);
+        particles.update(&world, 0.1);
+        let key = drawn(&particles, &world).particle_emitters[0].key;
+        world
+            .set_property(emitter, "Enabled", Value::Bool(false))
+            .unwrap();
+        // All gone by 1.2 seconds.
+        particles.update(&world, 0.25);
+        assert!(particles.count() > 0 && particles.is_active(&world));
+        for _ in 0..5 {
+            particles.update(&world, 0.25);
+        }
+        assert_eq!(particles.count(), 0);
+        assert_eq!(particles.gpu_emitters(), 0);
+        assert!(!particles.is_active(&world));
+        assert!(drawn(&particles, &world).particle_emitters.is_empty());
+
+        // Back on, it's a new emitter to the renderer.
+        world
+            .set_property(emitter, "Enabled", Value::Bool(true))
+            .unwrap();
+        particles.update(&world, 0.1);
+        assert_ne!(drawn(&particles, &world).particle_emitters[0].key, key);
+    }
+
+    #[test]
+    fn gpu_emitters_are_told_the_emitters_settings_and_look() {
+        let (mut world, part, emitter) = world_with_emitter(5000.0);
+        world
+            .set_property(
+                part,
+                "Orientation",
+                Value::Vector3(Vector3::new(0.0, 0.0, 90.0)),
+            )
+            .unwrap();
+        for (name, value) in [
+            ("Speed", 7.0),
+            ("SpreadAngle", 40.0),
+            ("Drag", 2.0),
+            ("Size", 2.0),
+            ("SizeEnd", 0.5),
+            ("Transparency", 0.25),
+            ("Rotation", 15.0),
+            ("RotSpeed", 90.0),
+            ("Brightness", 3.0),
+            ("LightEmission", 1.0),
+        ] {
+            set(&mut world, emitter, name, value);
+        }
+        let workspace = world.workspace();
+        world
+            .set_property(
+                workspace,
+                "GlobalWind",
+                Value::Vector3(Vector3::new(4.0, 0.0, 0.0)),
+            )
+            .unwrap();
+        world
+            .set_property(emitter, "WindAffectsDrag", Value::Bool(true))
+            .unwrap();
+        let mut particles = Particles::new();
+        particles.set_gpu(true);
+        particles.update(&world, 0.1);
+        let list = drawn(&particles, &world);
+        let gpu = &list.particle_emitters[0];
+        // Direction is +Y turned with the part: a quarter turn about Z.
+        assert!(
+            (gpu.direction - Vec3::NEG_X).length() < 1e-4,
+            "{}",
+            gpu.direction
+        );
+        assert!((gpu.spread - 20f32.to_radians()).abs() < 1e-5);
+        assert_eq!(
+            (gpu.speed, gpu.drag, gpu.air),
+            (7.0, 2.0, Vec3::new(4.0, 0.0, 0.0))
+        );
+        assert!((gpu.spawn.w_axis.truncate() - Vec3::new(0.0, 10.0, 0.0)).length() < 1e-4);
+        let look = &gpu.look;
+        assert_eq!(look.size, [2.0, 0.5]);
+        assert_eq!(look.transparency, [0.25, 1.0]);
+        assert_eq!((look.rotation_degrees, look.spin_degrees), (15.0, 90.0));
+        assert_eq!((look.brightness, look.light_emission), (3.0, 1.0));
+        assert!(look.texture.is_some(), "the built-in circle");
     }
 }

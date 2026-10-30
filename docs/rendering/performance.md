@@ -5,7 +5,7 @@ How drawing is measured, and the baseline that optimizations (culling, LOD, GPU 
 ## What's measured
 
 - **`RenderStats`** (`TextureRenderer::stats`, `render/src/renderer.rs`), for the last frame: draw calls and triangles (shadow views and the prepass included); items submitted (in the draw list), drawn (by the scene pass) and culled (outside the camera's view); shadow casters drawn into and culled from the shadow views (summed over views) and sprites culled (graphics Phase 12, see Frustum culling in [pipeline.md](pipeline.md)); batches (the scene pass's instanced draws, one per mesh and material); GPU bytes by kind: textures and meshes (counted at upload and when freed), render targets (`FrameTargets`, the shadow maps and the turned-text sheet, counted when made) and buffers; and the GPU's time for the frame and for each pass (`pass_times`, `pass_time(FramePass)`).
-- **Per-pass GPU time** (`renderer/gpu_timer.rs`) needs `Features::TIMESTAMP_QUERY`, which the editor and the benchmarks ask for where the adapter has it and the player never does. An empty compute pass writes a timestamp before each `FramePass` (Shadows, Depth prepass, Ambient occlusion, Volumetric fog, Scene, Post-processing, UI) and one after the last, so a part made of many render passes (three cascades, the bloom chain) is timed whole. A pass the frame didn't draw (shadows, ambient occlusion or volumetric fog off, no UI) is `None`. The readings come back a frame or two later without the CPU waiting.
+- **Per-pass GPU time** (`renderer/gpu_timer.rs`) needs `Features::TIMESTAMP_QUERY`, which the editor and the benchmarks ask for where the adapter has it and the player never does. An empty compute pass writes a timestamp before each `FramePass` (Shadows, Depth prepass, Ambient occlusion, Volumetric fog, GPU particles, Scene, Post-processing, UI) and one after the last, so a part made of many render passes (three cascades, the bloom chain) is timed whole. A pass the frame didn't draw (shadows, ambient occlusion or volumetric fog off, no GPU particles, no UI) is `None`. The readings come back a frame or two later without the CPU waiting.
 - **The editor's Profiler** (`editor/src/profiler.rs`) shows these while playing: draw calls, batches, triangles, items drawn of submitted, items culled, shadow casters drawn and culled, sprites culled, a **GPU passes** section with each pass's average time ("off" for one no recent frame drew, or one "not available on this GPU" line without timestamps), and a **GPU memory** section by kind.
 
 ## Benchmarks
@@ -150,3 +150,22 @@ What it says:
 - **Culling them by a Hi-Z pyramid would save at most 1.9 ms of GPU** (the prepass and scene), not the 1.3 ms of shadows: casters behind the wall still shade what the sun's cascades cover, and camera occlusion doesn't cull shadow casters. That is from a scene built to be its best case, 2,000 15,500-triangle models packed behind one wall, and its frame still takes 3.5 ms at 1280 × 720 on High. The other benchmarks have no large occluders, so it would save nothing there.
 - **It would cost more than it saves today.** The prepass exists only with ambient occlusion on (Off at Low), so Low, the preset for weak GPUs, would need a depth pass of its own. Testing last frame's bounds on the CPU needs a readback a frame or two old, which culls an item for those frames as it comes out from behind something: the popping the criterion rules out, unless items are drawn GPU-driven (compute culling and indirect draws), a rewrite of `plan_draws` and its batching.
 - **When to reconsider:** a real scene (an interior, a city) whose GPU scene and prepass time is mostly hidden items, measured the same way (with and without what's hidden). Cheaper fixes come first: a cull distance on dense models (as foliage has, `DrawItem::cull_distance`) and coarser LODs.
+
+## GPU particles (graphics Phase 36)
+
+`bench_particles` draws one emitter keeping 1,000 to 4,000 particles alive (`Rate × Lifetime`, Lifetime 2, a cloud in front of the camera), moved and sorted on the CPU and then on the GPU, then 100,000 on the GPU. CPU steps are `Particles::update`, `build_draw_list`, `Particles::draw` and `ScenePipeline::draw`. Measured on the machine above (AMD Radeon RX 9070 XT, Vulkan). The 2,000-on-the-GPU row was taken with the threshold lowered to 2,000. Times are milliseconds.
+
+| Particles out | 2,000 CPU | 2,000 GPU | 3,000 CPU | 3,000 GPU | 4,000 CPU | 4,000 GPU | 100,000 GPU |
+|---|---|---|---|---|---|---|---|
+| CPU, all steps | 0.39 | 0.35 | 0.46 | 0.26–0.29 | 0.60 | 0.34 | 0.43 |
+| GPU frame | 0.50 | 0.62 | 0.53 | 0.56–0.62 | 0.55 | 0.68 | 1.81 |
+| GPU particles pass | | 0.12 | | 0.10–0.11 | | 0.13 | 0.23 |
+| GPU scene | 0.32 | 0.32 | 0.34 | 0.30–0.33 | 0.37 | 0.36 | 1.48 |
+| CPU + GPU | 0.89 | 0.97 | 0.99 | 0.82–0.92 | 1.15 | 1.02 | 2.24 |
+
+What it says:
+
+- **On the CPU, particles cost about 0.1 ms of CPU time per 1,000**, mostly building, sorting and uploading their sprites in `ScenePipeline::draw`. On the GPU they cost a nearly fixed 0.10 to 0.13 ms (the sort's dispatches, whatever the count up to its 4,096 slots) and almost no CPU time.
+- **The GPU wins from about 3,000 particles**, so `scene::GPU_PARTICLE_THRESHOLD` is 3,000. At 2,000 the GPU path costs more GPU time than it saves on the CPU. Weaker GPUs pay more for the fixed cost, and weaker CPUs more per particle. The CPU's cap is 4,000 per emitter, so an emitter needing more than that has to be on the GPU anyway.
+- **100,000 particles take 0.23 ms to move and sort** (131,072 slots), and 1.5 ms to draw: filling overlapping squares, not moving them, is the cost there. That's the same per pixel as the CPU path would pay.
+- `RenderStats::gpu_particles` counts the slots kept, and their buffers (88 bytes a slot) count in the buffer bytes.

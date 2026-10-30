@@ -51,6 +51,10 @@ pub struct DrawList {
     /// Pictures that always face the camera, such as particles, drawn
     /// after every item. They aren't lit or shadowed.
     pub sprites: Vec<Sprite>,
+    /// Particle emitters whose particles live and move on the GPU, drawn
+    /// like sprites just before [`DrawList::sprites`]. Only drawn where
+    /// [`crate::Capabilities::compute_shaders`] holds.
+    pub particle_emitters: Vec<ParticleEmitter>,
     /// Screen-space UI, drawn after the 3D scene.
     pub ui: Vec<UiDrawItem>,
     /// The project's own fonts, which UI text can name besides the built-in
@@ -178,6 +182,86 @@ pub struct Sprite {
     pub light_emission: f32,
     /// Its picture, whose alpha is its shape. `None` is a plain square.
     pub texture: Option<Arc<dyn TextureSource>>,
+}
+
+/// A particle emitter whose particles the renderer keeps, moves and sorts
+/// on the GPU (compute shaders), for counts too large to send as
+/// [`Sprite`]s each frame. The caller decides when particles are born, as
+/// for sprites; the renderer moves them as `scene`'s particles move (see
+/// `docs/rendering/particles.md`) and draws each as a sprite.
+#[derive(Clone, Debug)]
+pub struct ParticleEmitter {
+    /// Stays the same for as long as its particles should live: the
+    /// renderer keeps them by it, and frees them in the first frame drawn
+    /// without it.
+    pub key: u64,
+    /// Counts up each time the caller moves particles on. Drawing the same
+    /// step again (a second view, a still) doesn't move them again.
+    pub step: u64,
+    /// The seconds this step moves particles on by.
+    pub seconds: f32,
+    /// How many particles it holds, a power of two. A birth past it takes
+    /// the oldest particle's place. A new capacity starts it empty.
+    pub capacity: u32,
+    /// Particles born before this step (counting on past `u32::MAX`).
+    pub born: u32,
+    /// Particles born this step, at most `capacity`.
+    pub births: u32,
+    /// Where they're born: the transform that stretches the 1×1×1 cube
+    /// (centered on the origin) to fill the emitter's part.
+    pub spawn: Mat4,
+    /// The way they head when born, in world space, one stud long.
+    pub direction: Vec3,
+    /// The most they head away from `direction`, in radians.
+    pub spread: f32,
+    /// Studs a second when born.
+    pub speed: f32,
+    /// Each lives from 0.8 to 1.2 times this, in seconds.
+    pub lifetime: f32,
+    /// Studs a second, each second.
+    pub acceleration: Vec3,
+    /// How fast they slow toward `air`: `v = air + (v − air) / (1 + drag·dt)`.
+    pub drag: f32,
+    /// The air's speed: still, or the wind.
+    pub air: Vec3,
+    pub look: ParticleLook,
+}
+
+/// How a [`ParticleEmitter`]'s particles look over their lives: each pair
+/// goes from the first value when born to the second when it dies.
+#[derive(Clone, Debug)]
+pub struct ParticleLook {
+    /// Studs across.
+    pub size: [f32; 2],
+    /// sRGB colors that tint the texture.
+    pub color: [[f32; 3]; 2],
+    /// 0 is solid, 1 invisible.
+    pub transparency: [f32; 2],
+    /// The turn when born, in degrees, and how fast it turns, in degrees a
+    /// second.
+    pub rotation_degrees: f32,
+    pub spin_degrees: f32,
+    /// As [`Sprite::brightness`].
+    pub brightness: f32,
+    /// As [`Sprite::light_emission`].
+    pub light_emission: f32,
+    /// As [`Sprite::texture`].
+    pub texture: Option<Arc<dyn TextureSource>>,
+}
+
+impl Default for ParticleLook {
+    fn default() -> Self {
+        Self {
+            size: [1.0; 2],
+            color: [[1.0; 3]; 2],
+            transparency: [0.0, 1.0],
+            rotation_degrees: 0.0,
+            spin_degrees: 0.0,
+            brightness: 1.0,
+            light_emission: 0.0,
+            texture: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -994,6 +994,9 @@ impl Viewport {
                 );
         }
 
+        // Big emitters move on the GPU, where it runs compute shaders.
+        self.particles
+            .set_gpu(target.renderer.capabilities().compute_shaders);
         for &(emitter, count) in emits {
             self.particles.emit(world, emitter, count);
         }
@@ -1007,7 +1010,7 @@ impl Viewport {
         let render_started = Instant::now();
         let mut draw_list =
             axcenity_scene::build_draw_list_posed(world, assets, camera, poses, &mut self.terrain);
-        draw_list.sprites = self.particles.sprites(world, assets);
+        self.particles.draw(&mut draw_list, world, assets);
         self.particles.add_weather(&mut draw_list);
         draw_list.ui = ui_layout.draw_items.clone();
         if let Some(inventory) = hotbar {

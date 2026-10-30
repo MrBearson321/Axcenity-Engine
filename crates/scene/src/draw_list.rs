@@ -384,6 +384,7 @@ pub fn build_draw_list_posed(
         lens: crate::lens::lens_of(world),
         items,
         sprites: Vec::new(),
+        particle_emitters: Vec::new(),
         ui: Vec::new(),
         fonts: assets
             .fonts()

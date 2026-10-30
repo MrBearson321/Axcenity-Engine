@@ -1457,7 +1457,13 @@ impl ApplicationHandler for App {
                     heard,
                     std::mem::take(&mut self.ui_sounds),
                 );
-                // Particles move on, after scripts and physics moved their parts.
+                // Particles move on, after scripts and physics moved their
+                // parts: big emitters on the GPU, where it runs compute shaders.
+                self.particles.set_gpu(
+                    self.renderer
+                        .as_ref()
+                        .is_some_and(|renderer| renderer.capabilities().compute_shaders),
+                );
                 for (emitter, count) in self.scripts.take_particle_emits() {
                     self.particles.emit(&self.world, emitter, count);
                 }
@@ -1590,7 +1596,8 @@ impl ApplicationHandler for App {
                     &render_camera,
                     size,
                 ));
-                draw_list.sprites = self.particles.sprites(&self.world, &self.assets);
+                self.particles
+                    .draw(&mut draw_list, &self.world, &self.assets);
                 self.particles.add_weather(&mut draw_list);
                 self.shader_time += seconds;
                 draw_list.time = self.shader_time;
@@ -1690,6 +1697,9 @@ mod weather_tests;
 
 #[cfg(test)]
 mod bench_tests;
+
+#[cfg(test)]
+mod gpu_particles_tests;
 
 #[cfg(test)]
 mod skinning_tests;

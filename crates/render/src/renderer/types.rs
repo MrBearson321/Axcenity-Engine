@@ -773,6 +773,9 @@ pub(super) struct ScenePipeline {
     /// The sun's and lamps' light in height fog, while volumetric fog is
     /// on and the world has some; `None` otherwise.
     pub(super) volumetric_fog: Option<Box<fog::VolumetricFog>>,
+    /// The list's GPU particle emitters, while it has some and the device
+    /// runs compute shaders; `None` otherwise.
+    pub(super) gpu_particles: Option<Box<gpu_particles::GpuParticles>>,
     pub(super) water: water::WaterPass,
     /// The frame bindings with water's copy of the scene in ambient
     /// occlusion's place, while there's a copy.

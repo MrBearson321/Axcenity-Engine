@@ -12,6 +12,7 @@ mod color_grading;
 mod environment_maps;
 mod fog;
 mod frustum_culling;
+mod gpu_particles;
 mod lens;
 mod level_of_detail;
 mod light_probe_volumes;
@@ -163,6 +164,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
         },
         items,
         sprites: Vec::new(),
+        particle_emitters: Vec::new(),
         shadows: Shadows::default(),
         lights: Vec::new(),
         post: PostProcessing {
@@ -911,13 +913,16 @@ fn stats_time_each_pass_the_frame_draws() {
         renderer.stats()
     };
 
-    // Shadows and ambient occlusion on, no UI or fog.
+    // Shadows and ambient occlusion on, no UI, fog or GPU particles.
     renderer.set_graphics(&with_occlusion(crate::AmbientOcclusion::High));
     let mut list = list_of(vec![big_block()]);
     list.shadows.enabled = true;
     let stats = draw(&mut renderer, &list);
     for pass in FramePass::ALL {
-        let expected = !matches!(pass, FramePass::Ui | FramePass::VolumetricFog);
+        let expected = !matches!(
+            pass,
+            FramePass::Ui | FramePass::VolumetricFog | FramePass::Particles
+        );
         assert_eq!(stats.pass_time(pass).is_some(), expected, "{pass:?}");
     }
     let passes: Duration = stats.pass_times.iter().flatten().sum();
