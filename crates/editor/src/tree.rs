@@ -1106,7 +1106,8 @@ pub fn check_editable(world: &World, id: InstanceId) -> Result<(), &'static str>
     if instance.class() == ClassName::Player {
         return Err("Players only exist while the game runs.");
     }
-    if !is_saved(world, id) {
+    // What's in Lighting (an Atmosphere, effects) is saved with it.
+    if !is_saved(world, id) && !world.is_descendant_of(id, world.lighting()) {
         return Err(
             "Only things in the Workspace and ReplicatedStorage are saved, so only those can be changed.",
         );
@@ -1405,5 +1406,12 @@ mod tests {
         let workspace = world.workspace();
         let part = child(&mut world, workspace, ClassName::Part, "Part");
         assert_eq!(check_editable(&world, part), Ok(()));
+        // What's in Lighting is saved with it, so it can be deleted, but
+        // Lighting itself can't.
+        let lighting = world.lighting();
+        let outlines = child(&mut world, lighting, ClassName::OutlineEffect, "Outlines");
+        assert_eq!(check_delete(&world, outlines), Ok(()));
+        assert!(check_delete(&world, lighting).is_err());
+        assert!(check_move(&world, part, lighting).is_err());
     }
 }

@@ -243,6 +243,49 @@ fn screen_space_edges_outline_a_scene_without_per_material_setup() {
 }
 
 #[test]
+fn thick_screen_space_edges_stay_on_the_block_and_off_the_floor() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // 30 at 1080 pixels tall is 6 pixels here.
+    let thick = Edges {
+        color: [0.0; 3],
+        thickness: 30.0,
+    };
+    let mut renderer = renderer(&device, &queue, AntiAliasing::Off);
+    let without = draw(&mut renderer, &plain_block_on_floor(None));
+    let with = draw(&mut renderer, &plain_block_on_floor(Some(thick)));
+    let list = plain_block_on_floor(None);
+    let screen = |point: Vec3| {
+        let clip = view_projection(&list, 1.0) * point.extend(1.0);
+        let ndc = clip.truncate() / clip.w;
+        (
+            ((ndc.x * 0.5 + 0.5) * SIZE as f32) as u32,
+            ((0.5 - ndc.y * 0.5) * SIZE as f32) as u32,
+        )
+    };
+    // Across the block's left edge, halfway up and just above the floor:
+    // the line fills the block's side of it and leaves the floor alone.
+    for height in [2.0, 0.3] {
+        let (edge, y) = screen(Vec3::new(-2.0, height, -8.0));
+        for x in edge + 1..edge + 5 {
+            assert!(
+                brightness(pixel(&with, x, y)) < 150,
+                "{height}: ({x}, {y}) inside the edge is dark"
+            );
+        }
+        for x in edge - 8..edge - 1 {
+            assert_eq!(
+                pixel(&with, x, y),
+                pixel(&without, x, y),
+                "{height}: ({x}, {y}) on the floor is unchanged"
+            );
+        }
+    }
+}
+
+#[test]
 fn screen_space_edges_keep_the_prepass_alive_only_while_the_world_has_them() {
     let Some((device, queue)) = test_device() else {
         eprintln!("skipped: no graphics adapter on this machine");

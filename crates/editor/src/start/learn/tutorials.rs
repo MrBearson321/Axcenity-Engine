@@ -494,17 +494,17 @@ pub(in crate::start) const TUTORIALS: &[Tutorial] = &[
             },
             Step {
                 title: "Add a light",
-                text: "Select a part, then press PointLight or SpotLight in the Effects group \
-                       of the Model tab. The light goes into the part.",
+                text: "Select a part, then press PointLight or SpotLight in the Lights & Sky \
+                       group of the World tab. The light goes into the part.",
                 picture: Some(Picture::Ribbon {
-                    tab: "Model",
+                    tab: "World",
                     buttons: &[
-                        (icons::SPEAKER_HIGH, "Sound"),
-                        (icons::SPARKLE, "Particles"),
                         (icons::LIGHTBULB, "PointLight"),
                         (icons::FLASHLIGHT, "SpotLight"),
+                        (icons::SUN, "Atmosphere"),
+                        (icons::SPARKLE, "Particles"),
                     ],
-                    pressed: 2,
+                    pressed: 0,
                 }),
             },
             Step {
@@ -562,7 +562,7 @@ pub(in crate::start) const TUTORIALS: &[Tutorial] = &[
             },
             Step {
                 title: "Add your own",
-                text: "Select a part and press Sound on the Model tab, then pick an audio \
+                text: "Select a part and press Sound on the World tab, then pick an audio \
                        file in Properties. Turn on `Playing` to start it with the game.",
                 picture: None,
             },

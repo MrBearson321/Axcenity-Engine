@@ -741,68 +741,87 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         }
     }
     ui.menu_button(theme::with_icon(icons::PLUS, "Insert"), |ui| {
-        for what in Insertable::PARTS {
-            if ui.button(insert_item(ui, what)).clicked() {
-                chosen = Some(RowCommand::Insert(what));
-            }
-        }
-        ui.separator();
-        for what in Insertable::GROUPS {
-            if ui.button(insert_item(ui, what)).clicked() {
-                chosen = Some(RowCommand::Insert(what));
-            }
-        }
-        ui.separator();
-        for what in Insertable::UI {
-            if ui.button(insert_item(ui, what)).clicked() {
-                chosen = Some(RowCommand::Insert(what));
-            }
-        }
-        ui.separator();
-        for what in Insertable::AUDIO {
-            if ui.button(insert_item(ui, what)).clicked() {
-                chosen = Some(RowCommand::Insert(what));
-            }
-        }
-        ui.menu_button("Sound effect", |ui| {
-            for what in Insertable::SOUND_EFFECTS {
+        // Buttons for `items`, noting the one clicked in `chosen`.
+        let items = |ui: &mut egui::Ui,
+                     chosen: &mut Option<RowCommand>,
+                     items: &mut dyn Iterator<Item = Insertable>| {
+            for what in items {
                 if ui.button(insert_item(ui, what)).clicked() {
-                    chosen = Some(RowCommand::Insert(what));
+                    *chosen = Some(RowCommand::Insert(what));
                 }
             }
+        };
+        // Parts and groups are used most, so they're first and one click
+        // away; everything else is in a submenu by kind.
+        items(ui, &mut chosen, &mut Insertable::PARTS.into_iter());
+        ui.separator();
+        items(
+            ui,
+            &mut chosen,
+            &mut Insertable::GROUPS
+                .into_iter()
+                .chain(Insertable::CONSTRAINTS),
+        );
+        ui.separator();
+        ui.menu_button(theme::with_icon(icons::SUN, "Lighting & Sky"), |ui| {
+            items(
+                ui,
+                &mut chosen,
+                &mut Insertable::LIGHTS
+                    .into_iter()
+                    .chain(Insertable::PROBES)
+                    .chain(Insertable::SKY),
+            );
+            ui.separator();
+            items(ui, &mut chosen, &mut Insertable::LENS.into_iter());
+            ui.separator();
+            items(ui, &mut chosen, &mut Insertable::VOLUMES.into_iter());
         });
-        for what in Insertable::LIGHTS
-            .into_iter()
-            .chain(Insertable::PROBES)
-            .chain(Insertable::SKY)
-            .chain(Insertable::VOLUMES)
-            .chain(Insertable::EFFECTS)
-            .chain(Insertable::BREAKING)
-            .chain(Insertable::ANIMATION)
-            .chain(Insertable::CHARACTERS)
-            .chain(Insertable::HEALTH)
-            .chain(Insertable::SEATS)
-            .chain(Insertable::INTERACTION)
-            .chain(Insertable::HUMANOIDS)
-            .chain(Insertable::SPAWNING)
-            .chain(Insertable::TOOLS)
-            .chain(Insertable::VEHICLES)
-            .chain(Insertable::AGENTS)
-            .chain(Insertable::CHECKPOINTS)
-            .chain(Insertable::CAMERAS)
-            .chain(Insertable::CONSTRAINTS)
-        {
-            if ui.button(insert_item(ui, what)).clicked() {
-                chosen = Some(RowCommand::Insert(what));
-            }
-        }
-        ui.separator();
-        ui.menu_button("Value", |ui| {
-            for what in Insertable::VALUES {
-                if ui.button(insert_item(ui, what)).clicked() {
-                    chosen = Some(RowCommand::Insert(what));
-                }
-            }
+        ui.menu_button(theme::with_icon(icons::SPARKLE, "Effects"), |ui| {
+            items(
+                ui,
+                &mut chosen,
+                &mut Insertable::EFFECTS
+                    .into_iter()
+                    .chain(Insertable::BREAKING)
+                    .chain(Insertable::ANIMATION),
+            );
+        });
+        ui.menu_button(theme::with_icon(icons::SPEAKER_HIGH, "Audio"), |ui| {
+            items(ui, &mut chosen, &mut Insertable::AUDIO.into_iter());
+            ui.menu_button("Sound effect", |ui| {
+                items(ui, &mut chosen, &mut Insertable::SOUND_EFFECTS.into_iter());
+            });
+        });
+        ui.menu_button(theme::with_icon(icons::GAME_CONTROLLER, "Gameplay"), |ui| {
+            items(
+                ui,
+                &mut chosen,
+                &mut Insertable::HUMANOIDS
+                    .into_iter()
+                    .chain(Insertable::CHARACTERS)
+                    .chain(Insertable::HEALTH)
+                    .chain(Insertable::INTERACTION)
+                    .chain(Insertable::SEATS),
+            );
+            ui.separator();
+            items(
+                ui,
+                &mut chosen,
+                &mut Insertable::SPAWNING
+                    .into_iter()
+                    .chain(Insertable::TOOLS)
+                    .chain(Insertable::VEHICLES)
+                    .chain(Insertable::AGENTS)
+                    .chain(Insertable::CHECKPOINTS)
+                    .chain(Insertable::CAMERAS),
+            );
+        });
+        ui.menu_button(theme::with_icon(icons::LAYOUT, "UI"), |ui| {
+            items(ui, &mut chosen, &mut Insertable::UI.into_iter());
+        });
+        ui.menu_button(theme::with_icon(icons::HASH, "Value"), |ui| {
+            items(ui, &mut chosen, &mut Insertable::VALUES.into_iter());
         });
         ui.separator();
         for class in SCRIPT_CLASSES {
@@ -816,23 +835,25 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
                 chosen = Some(RowCommand::InsertScript(class));
             }
         }
-        let remote = Insertable::RemoteEvent;
-        if ui
-            .button(insert_item(ui, remote))
-            .on_hover_text(REMOTE_EVENT_HOVER)
-            .clicked()
-        {
-            chosen = Some(RowCommand::Insert(remote));
-        }
-        for what in Insertable::MESSENGERS {
+        ui.menu_button(theme::with_icon(icons::BROADCAST, "Events"), |ui| {
+            let remote = Insertable::RemoteEvent;
             if ui
-                .button(insert_item(ui, what))
-                .on_hover_text(messenger_hover(what.class()))
+                .button(insert_item(ui, remote))
+                .on_hover_text(REMOTE_EVENT_HOVER)
                 .clicked()
             {
-                chosen = Some(RowCommand::Insert(what));
+                chosen = Some(RowCommand::Insert(remote));
             }
-        }
+            for what in Insertable::MESSENGERS {
+                if ui
+                    .button(insert_item(ui, what))
+                    .on_hover_text(messenger_hover(what.class()))
+                    .clicked()
+                {
+                    chosen = Some(RowCommand::Insert(what));
+                }
+            }
+        });
     });
     if ui
         .add_enabled(

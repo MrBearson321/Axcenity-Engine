@@ -142,6 +142,8 @@ impl RibbonGroup {
 pub enum BuiltInTab {
     Home,
     Model,
+    World,
+    Gameplay,
     Terrain,
     Ui,
     Script,
@@ -151,9 +153,11 @@ pub enum BuiltInTab {
 }
 
 impl BuiltInTab {
-    pub const ALL: [BuiltInTab; 8] = [
+    pub const ALL: [BuiltInTab; 10] = [
         BuiltInTab::Home,
         BuiltInTab::Model,
+        BuiltInTab::World,
+        BuiltInTab::Gameplay,
         BuiltInTab::Terrain,
         BuiltInTab::Ui,
         BuiltInTab::Script,
@@ -166,6 +170,8 @@ impl BuiltInTab {
         match self {
             BuiltInTab::Home => "Home",
             BuiltInTab::Model => "Model",
+            BuiltInTab::World => "World",
+            BuiltInTab::Gameplay => "Gameplay",
             BuiltInTab::Terrain => "Terrain",
             BuiltInTab::Ui => "UI",
             BuiltInTab::Script => "Script",
@@ -180,6 +186,8 @@ impl BuiltInTab {
         match self {
             BuiltInTab::Home => icons::HOUSE,
             BuiltInTab::Model => icons::CUBE,
+            BuiltInTab::World => icons::SUN,
+            BuiltInTab::Gameplay => icons::GAME_CONTROLLER,
             BuiltInTab::Terrain => icons::MOUNTAINS,
             BuiltInTab::Ui => icons::LAYOUT,
             BuiltInTab::Script => icons::CODE,
@@ -193,7 +201,11 @@ impl BuiltInTab {
         use RibbonGroup::*;
         match self {
             BuiltInTab::Home => &[Game, Tools, Snapping, Parts],
-            BuiltInTab::Model => &[Build, Solid, Constraints, Lights, Effects, Gameplay, Import],
+            // Building and joining parts; what lights and fills the world,
+            // and what plays in it, have tabs of their own.
+            BuiltInTab::Model => &[Build, Solid, Constraints, Import],
+            BuiltInTab::World => &[Lights, Effects],
+            BuiltInTab::Gameplay => &[Game, Gameplay],
             BuiltInTab::Terrain => &[Terrain],
             BuiltInTab::Ui => &[Ui],
             BuiltInTab::Script => &[Game, Scripts],
@@ -620,6 +632,26 @@ mod tests {
                 RibbonGroup::Snapping,
                 RibbonGroup::Parts,
             ]
+        );
+    }
+
+    #[test]
+    fn model_is_only_building_and_insertables_have_their_own_tabs() {
+        assert_eq!(
+            BuiltInTab::Model.groups(),
+            &[
+                RibbonGroup::Build,
+                RibbonGroup::Solid,
+                RibbonGroup::Constraints,
+                RibbonGroup::Import,
+            ]
+        );
+        assert!(BuiltInTab::World.groups().contains(&RibbonGroup::Lights));
+        assert!(BuiltInTab::World.groups().contains(&RibbonGroup::Effects));
+        assert!(
+            BuiltInTab::Gameplay
+                .groups()
+                .contains(&RibbonGroup::Gameplay)
         );
     }
 
