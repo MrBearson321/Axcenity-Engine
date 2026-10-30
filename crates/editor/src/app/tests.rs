@@ -685,6 +685,82 @@ fn animate_makes_an_animator_a_clip_and_an_animation_as_one_undo_step() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+/// The Open check's door: from a bare Model, Animate, turn the Hinge in the
+/// preview with Record on, tick AutoPlay, and it swings in Play with no
+/// script.
+#[test]
+fn a_bare_door_animated_with_record_on_and_auto_play_swings_in_play_with_no_script() {
+    use axcenity_anim::{EvaluatedProperty, PropertyName};
+    let folder = copy_of_example("hello-touched", "door-auto-play");
+    let mut app = EditorApp::new(Some(&folder));
+    let world = &mut app.world;
+    let door = world.create(ClassName::Model).unwrap();
+    world.set_name(door, "Door").unwrap();
+    world.set_parent(door, Some(world.workspace())).unwrap();
+    let hinge = world.create(ClassName::Part).unwrap();
+    world.set_name(hinge, "Hinge").unwrap();
+    world.set_parent(hinge, Some(door)).unwrap();
+    let panel = world.create(ClassName::Part).unwrap();
+    world.set_name(panel, "Panel").unwrap();
+    let closed = Vector3::new(2.0, 0.0, 0.0);
+    world
+        .set_property(panel, "Position", Value::Vector3(closed))
+        .unwrap();
+    world.set_parent(panel, Some(hinge)).unwrap();
+
+    app.animate(door);
+    assert!(app.animation.recording());
+    app.animation.set_playhead(1.0);
+    app.animation.move_in_preview(vec![EvaluatedProperty {
+        target: "Hinge".into(),
+        property: PropertyName::Orientation,
+        value: vec![0.0, 90.0, 0.0],
+    }]);
+    let _ = app.animation.write_all(&folder, &mut app.output);
+    let animation = crate::animation::Subject::of(&app.world, door)
+        .unwrap()
+        .animations[0]
+        .id;
+    app.world
+        .set_property(animation, "AutoPlay", Value::Bool(true))
+        .unwrap();
+    let scripts = |world: &World| {
+        world
+            .descendants(door)
+            .into_iter()
+            .filter(|&id| world.get(id).unwrap().class().is_script())
+            .count()
+    };
+    assert_eq!(scripts(&app.world), 0, "no script");
+
+    app.play();
+    let at = |app: &EditorApp| {
+        app.play
+            .as_ref()
+            .unwrap()
+            .world()
+            .get(panel)
+            .and_then(|panel| panel.property("Position"))
+            .and_then(Value::as_vector3)
+            .unwrap()
+    };
+    assert_eq!(at(&app), closed);
+    play_for(&mut app, 0.5);
+    let swinging = at(&app);
+    play_for(&mut app, 0.6);
+    let open = at(&app);
+    assert!(
+        swinging != closed && swinging != open,
+        "{closed:?} -> {swinging:?} -> {open:?}"
+    );
+    assert!(
+        open.x.abs() < 0.01 && (open.z + 2.0).abs() < 0.01,
+        "swung a quarter turn about the hinge: {open:?}"
+    );
+    app.stop();
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 /// The breadcrumb names the object and what's being edited, and the tab
 /// fits 600×400 and a 260×900 column with a clip or a state machine
 /// shown. With `AXCENITY_SNAPSHOTS` set, each is saved as

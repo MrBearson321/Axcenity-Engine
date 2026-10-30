@@ -312,6 +312,12 @@ impl AnimationStudio {
         }
     }
 
+    /// Moves parts in an open property clip's preview, as the gizmo does:
+    /// keyed at the playhead with Record on.
+    pub fn move_in_preview(&mut self, edits: Vec<axcenity_anim::EvaluatedProperty>) {
+        self.preview_events(vec![PreviewEvent::Edit(edits)]);
+    }
+
     /// Turns Record on or off.
     pub fn set_record(&mut self, on: bool) {
         self.clip.record = on;

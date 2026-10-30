@@ -341,6 +341,81 @@ fn find_lan_games_lists_a_game_hosted_on_this_computer() {
     assert!(searcher.said("searched 1"), "{:?}", searcher.output);
 }
 
+/// This computer's address on its network, if it has one: the one its
+/// packets to the internet would leave from (none are sent).
+fn network_address() -> Option<std::net::Ipv4Addr> {
+    let socket = std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect(("192.0.2.1", 9)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ip) if !ip.is_loopback() && !ip.is_unspecified() => Some(ip),
+        _ => None,
+    }
+}
+
+/// Another computer on the LAN: its search reaches the host at this
+/// computer's network address, as its broadcast does, not the loopback;
+/// the game is listed at that address and can be joined there.
+#[test]
+fn a_search_from_the_network_lists_the_game_at_its_network_address_and_joins_it() {
+    let Some(lan) = network_address() else {
+        eprintln!("skipped: this computer has no network address");
+        return;
+    };
+    let discovery = 47926;
+    let mut host = Game::new("1.0", discovery);
+    let port = host.host_udp();
+    let mut search = LanSearch::start(discovery, "Castle")
+        .unwrap()
+        .asking_only(lan);
+    let found = loop {
+        host.frame();
+        if let Some(found) = search.update(Duration::from_secs_f64(SECONDS)) {
+            break found;
+        }
+        std::thread::sleep(Duration::from_millis(16));
+    };
+    let [game] = found.as_slice() else {
+        panic!("one game: {found:?}\nhost: {:?}", host.output);
+    };
+    assert_eq!(game.address, format!("{lan}:{port}"));
+    assert_eq!((game.players, game.max_players), (1, 8));
+
+    let mut joiner = Game::new("1.0", 47927);
+    joiner
+        .network
+        .join(&mut joiner.world, &mut joiner.scripts, &game.address, None)
+        .unwrap();
+    run_until(&mut host, &mut joiner, "the join", |a, b| {
+        a.players().len() == 2 && b.players().len() == 2
+    });
+}
+
+/// The check by hand for a game on the LAN showing on another computer.
+/// Host `examples/hello-part` on one computer (`cargo run -p
+/// axcenity-player -- --host examples/hello-part`), then on another on the
+/// same network run `cargo test -p axcenity-net -- --ignored --nocapture
+/// a_game_hosted_on_another_computer`.
+#[test]
+#[ignore = "needs examples/hello-part hosted on another computer on the LAN"]
+fn a_game_hosted_on_another_computer_shows_in_a_lan_search() {
+    let mut search = LanSearch::start(DISCOVERY_PORT, "Hello Part").unwrap();
+    let found = loop {
+        if let Some(found) = search.update(Duration::from_millis(50)) {
+            break found;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    println!("found: {found:?}");
+    let here = network_address().map(std::net::IpAddr::V4);
+    assert!(
+        found.iter().any(|game| {
+            let ip = game.address.parse::<std::net::SocketAddr>().unwrap().ip();
+            !ip.is_loopback() && Some(ip) != here
+        }),
+        "no game from another computer: {found:?}"
+    );
+}
+
 #[test]
 fn hosting_on_a_taken_port_fires_connection_failed() {
     let mut first = Game::new("1.0", 47924);

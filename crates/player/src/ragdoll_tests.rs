@@ -270,6 +270,17 @@ fn an_enabled_ragdoll_collapses_without_bending_a_joint_past_its_limit() {
     let head = sim.body(ragdoll, "Head");
     let hips = sim.body(ragdoll, "Hips");
     let head_before = vector(&sim.world, head, "Position");
+    let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
+    let look = |sim: &Sim, name: &str| {
+        if let Some(folder) = &snapshots {
+            snapshot(
+                sim,
+                head_before,
+                &folder.join(format!("ragdoll-{name}.png")),
+            );
+        }
+    };
+    look(&sim, "standing");
     // Landing hard, a joint can be knocked past its limit for a few frames
     // (rapier pulls it back at up to 3 radians a second); it must never go
     // far, and once the ragdoll lies still every joint is within its limits.
@@ -284,7 +295,11 @@ fn an_enabled_ragdoll_collapses_without_bending_a_joint_past_its_limit() {
         if frame >= 3 * 60 {
             settled = settled.max(past);
         }
+        if frame == 20 {
+            look(&sim, "falling");
+        }
     }
+    look(&sim, "lying");
     let head_after = vector(&sim.world, head, "Position");
     let hips_after = vector(&sim.world, hips, "Position");
     assert!(
@@ -311,6 +326,49 @@ fn an_enabled_ragdoll_collapses_without_bending_a_joint_past_its_limit() {
     let still = vector(&sim.world, hips, "AssemblyLinearVelocity");
     assert!(still.length() < 0.5, "{still}");
     assert!(sim.animators.poses().contains_key(&dummy));
+}
+
+/// Draws the ragdoll's MeshPart as posed by its bodies, from the side and
+/// a little above `at`, into `path`, when there's a GPU.
+fn snapshot(sim: &Sim, at: Vec3, path: &Path) {
+    use axcenity_render::{Camera, TextureRenderer, wgpu};
+    const VIEW: (u32, u32) = (480, 360);
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+        return;
+    };
+    let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+    else {
+        return;
+    };
+    let target = Vec3::new(at.x, 1.0, at.z);
+    let camera = Camera {
+        position: target + Vec3::new(4.5, 2.5, 4.5),
+        look_at: target,
+        fov_y_degrees: 60.0,
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, VIEW.0, VIEW.1);
+    let mut terrain = axcenity_scene::TerrainCache::new();
+    for _ in 0..2 {
+        let list = axcenity_scene::build_draw_list_posed(
+            &sim.world,
+            &sim.assets,
+            camera,
+            sim.animators.poses(),
+            &mut terrain,
+        );
+        renderer.render(&list).unwrap();
+    }
+    let pixels = renderer.read_pixels();
+    let file = std::fs::File::create(path).unwrap();
+    let mut encoder = png::Encoder::new(file, VIEW.0, VIEW.1);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&pixels)
+        .unwrap();
 }
 
 /// hello-character running in the player's frame order, from its start:

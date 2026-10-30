@@ -44,11 +44,12 @@ impl AnimationStudio {
             });
         } else {
             // Across the whole body, so the preview has room beside its
-            // parameters; the graph keeps at least half the height.
+            // parameters; the graph keeps at least half the height, and
+            // starts with two thirds of a short tab.
             let room = ui.available_height();
             egui::TopBottomPanel::bottom("state machine preview")
                 .resizable(true)
-                .default_height(CONTROLLER_PREVIEW.min(room * 0.5))
+                .default_height(CONTROLLER_PREVIEW.min(room / 3.0).max(100.0))
                 .min_height(100.0)
                 .max_height((room * 0.5).max(100.0))
                 .show_inside(ui, |ui| self.controller_live(ui, assets, render_state, dt));

@@ -4,6 +4,17 @@ impl PropertyDoc {
     /// Keys every value at the playhead, making the tracks it needs, and
     /// selects those keys.
     pub fn key_values(&mut self, values: &[EvaluatedProperty]) {
+        self.key_values_from(values, |_| None);
+    }
+
+    /// [`Self::key_values`], where `rest` says what a property was before
+    /// the clip moved it, so its first key after 0 also keys that at 0 and
+    /// it moves.
+    pub fn key_values_from(
+        &mut self,
+        values: &[EvaluatedProperty],
+        rest: impl Fn(&EvaluatedProperty) -> Option<Vec<f32>>,
+    ) {
         if self.read_only {
             return;
         }
@@ -11,10 +22,13 @@ impl PropertyDoc {
         let mut keyed = BTreeSet::new();
         for value in values {
             // A bone's first key after 0 starts from its rest pose.
-            let start = (value.property == PropertyName::Bone)
-                .then_some(self.rig.as_deref())
-                .flatten()
-                .and_then(|rig| rest_numbers(rig, &value.target));
+            let start = if value.property == PropertyName::Bone {
+                self.rig
+                    .as_deref()
+                    .and_then(|rig| rest_numbers(rig, &value.target))
+            } else {
+                rest(value)
+            };
             let Some(key) = set_key(&mut self.file.tracks, value, time, self.new_keys, start)
             else {
                 continue;

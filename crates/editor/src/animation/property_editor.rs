@@ -322,13 +322,25 @@ impl PropertyDoc {
 
     /// Something was moved in the preview: with `record`, it's keyed at the
     /// playhead; otherwise it shows until the playhead moves.
+    #[cfg(test)]
     pub fn edit(&mut self, edits: Vec<EvaluatedProperty>, record: bool) {
+        self.edit_from(edits, record, |_| None);
+    }
+
+    /// [`Self::edit`], with what each property was before the clip moved it
+    /// (see [`Self::key_values_from`]).
+    pub fn edit_from(
+        &mut self,
+        edits: Vec<EvaluatedProperty>,
+        record: bool,
+        rest: impl Fn(&EvaluatedProperty) -> Option<Vec<f32>>,
+    ) {
         if self.read_only {
             return;
         }
         self.playing = false;
         if record {
-            self.key_values(&edits);
+            self.key_values_from(&edits, rest);
             return;
         }
         self.pending_at = self.playhead;

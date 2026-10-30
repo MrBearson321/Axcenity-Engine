@@ -104,7 +104,7 @@ Beside Play and Stop, the ribbon's Game group has **Clients** (1 to 8, `play::mu
 
 ## LAN discovery
 
-A host answers on UDP port 47801 (`DISCOVERY_PORT`, `discovery.rs`). `FindLanGames` broadcasts a question to `255.255.255.255:47801` and to `127.0.0.1:47801` (a broadcast may not come back to the computer that sent it), asks again every 0.3 s, and after one second lists the hosts of the same game, with their version, address, players, `MaxPlayers` and whether they need a password. A host found at two addresses is listed once, by its network address. Only the first host on a computer gets the discovery port; another still takes joins by address and logs a warning.
+A host answers on UDP port 47801 (`DISCOVERY_PORT`, `discovery.rs`). `FindLanGames` broadcasts a question to `255.255.255.255:47801` and to `127.0.0.1:47801` (a broadcast may not come back to the computer that sent it), asks again every 0.3 s, and after one second lists the hosts of the same game, with their version, address, players, `MaxPlayers` and whether they need a password. A host found at two addresses is listed once, by its network address. Only the first host on a computer gets the discovery port; another still takes joins by address and logs a warning. Tests: `find_lan_games_lists_a_game_hosted_on_this_computer`, and `a_search_from_the_network_lists_the_game_at_its_network_address_and_joins_it` (a question arriving at this computer's network address, as one from another computer does). Two real computers are checked by hand with the ignored `a_game_hosted_on_another_computer_shows_in_a_lan_search` ([development.md](../development.md)).
 
 ## Lua and blocks
 

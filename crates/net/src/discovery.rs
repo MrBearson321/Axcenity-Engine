@@ -94,6 +94,9 @@ pub struct LanSearch {
     port: u16,
     /// Only this game's hosts are listed.
     game: String,
+    /// Where questions go: the whole network, and this computer (a
+    /// broadcast may not come back to the computer that sent it).
+    ask_at: Vec<Ipv4Addr>,
     elapsed: Duration,
     asked: Option<Duration>,
     found: Vec<(u64, LanGame)>,
@@ -109,16 +112,23 @@ impl LanSearch {
             socket,
             port,
             game: game.to_owned(),
+            ask_at: vec![Ipv4Addr::BROADCAST, Ipv4Addr::LOCALHOST],
             elapsed: Duration::ZERO,
             asked: None,
             found: Vec::new(),
         })
     }
 
+    /// Asks only at `address`, as a question from another computer arrives
+    /// at this one's network address (tests).
+    #[cfg(test)]
+    pub(crate) fn asking_only(mut self, address: Ipv4Addr) -> LanSearch {
+        self.ask_at = vec![address];
+        self
+    }
+
     fn ask(&mut self) {
-        // The whole network, and this computer (a broadcast may not come
-        // back to the computer that sent it).
-        for to in [Ipv4Addr::BROADCAST, Ipv4Addr::LOCALHOST] {
+        for &to in &self.ask_at {
             if let Err(err) = self.socket.send_to(QUESTION, (to, self.port)) {
                 log::debug!("LAN search to {to}: {err}");
             }

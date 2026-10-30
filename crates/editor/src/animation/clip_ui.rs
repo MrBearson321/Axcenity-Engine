@@ -220,7 +220,10 @@ impl AnimationStudio {
                             doc.selected_track = Some(track.id.clone());
                         }
                     }
-                    PreviewEvent::Edit(edits) => doc.edit(edits, self.clip.record),
+                    PreviewEvent::Edit(edits) => {
+                        let objects = &self.clip.objects;
+                        doc.edit_from(edits, self.clip.record, |edit| objects.rest_value(edit));
+                    }
                     // Said in Output where the preview is drawn.
                     PreviewEvent::Warn(_) => {}
                 }

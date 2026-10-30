@@ -33,6 +33,19 @@ nextest prints a test's output only when it fails, unless you pass `--no-capture
 
 Keep single tests short. `axcenity-player`'s `every_example_renders` draws every example on up to four threads sharing one GPU device (15 s one at a time, 5 s now).
 
+## Checking another platform
+
+CI is off, so check Windows, macOS and Linux on those computers. From the repository root:
+
+| Platform | Command |
+|---|---|
+| macOS, Linux | `scripts/check-platform.sh` |
+| Windows | `powershell -ExecutionPolicy Bypass -File scripts\check-platform.ps1` |
+
+It runs what CI runs (build, the player having no editor code, clippy, every test, doc tests), then `axcenity-test examples/hello-character` and the dedicated server started with no display (`crates/server/tests/headless.rs`; on Linux, run it from a terminal with no desktop, or over SSH, to be sure). Every step runs even after a failure. The summary is saved to `target/platform-check-<os>.txt`.
+
+LAN discovery between two computers is checked by hand: host `examples/hello-part` on one (`cargo run -p axcenity-player -- --host examples/hello-part`), then on another on the same network run `cargo test -p axcenity-net -- --ignored --nocapture a_game_hosted_on_another_computer`. A firewall must let the player take UDP on ports 47800 and 47801.
+
 ## The workspace-hack crate
 
 Cargo turns on a dependency's features from the packages a command builds. Without help, `cargo test -p axcenity-script` or `cargo run -p axcenity-player` builds libraries like `serde`, `libc` and `winit` with fewer features than `--workspace` does. Cargo then compiles a second copy of them and of everything built on them. Measured after a full workspace build:

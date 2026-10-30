@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use axcenity_anim::{
     Applied, EvaluatedProperty, PropertyName, apply_evaluated, bone_numbers, bone_paths,
-    numbers_of, target_path,
+    numbers_of, resolve_target, target_path,
 };
 use axcenity_assets::{Assets, BoneTransform, Model};
 use axcenity_core::{ClassName, InstanceId, Value, World};
@@ -274,6 +274,13 @@ impl ObjectPreview {
         self.posed = copy.clone();
         self.pristine = copy;
         self.applied = Applied::default();
+    }
+
+    /// What `edit`'s property was in the copy as it was taken, before the
+    /// clip moved it: where a first key after 0 starts from.
+    pub fn rest_value(&self, edit: &EvaluatedProperty) -> Option<Vec<f32>> {
+        let id = resolve_target(&self.pristine, self.root?, &edit.target)?;
+        numbers_of(self.pristine.get(id)?.property(edit.property.as_str())?)
     }
 
     /// Poses the copy: `evaluated` applied to the copy as it was taken.

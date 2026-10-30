@@ -439,6 +439,129 @@ mod tests {
         let _ = fs::remove_dir_all(&folder);
     }
 
+    /// The noodle's mesh and the door's position each frame for 1.2 s of
+    /// play: the Animators started on `world` and the door's `Animation`
+    /// played, as `animation:Play()` does.
+    fn played(folder: &Path, world: &mut axcenity_core::World) -> Vec<(Vec<String>, String)> {
+        let assets = axcenity_assets::Assets::new(folder);
+        let model = assets.model("assets/models/noodle.fbx").unwrap();
+        let workspace = world.workspace();
+        let noodle = world.find_first_child(workspace, "Noodle").unwrap();
+        let door = world.find_first_child(workspace, "Door").unwrap();
+        let open = world.find_first_child(door, "Open").unwrap();
+        world.property_animation_mut(open).unwrap().play = true;
+        let mut animators = axcenity_anim::Animators::new();
+        (0..36)
+            .map(|_| {
+                animators.update(world, &assets, 1.0 / 30.0);
+                assert_eq!(animators.take_errors(), Vec::<String>::new());
+                // Debug text: the same pose prints the same.
+                let mesh = animators.poses()[&noodle]
+                    .primitives(&model)
+                    .into_iter()
+                    .map(|primitive| format!("{primitive:?}"))
+                    .collect();
+                let position = world.get(door).unwrap().property("Position").cloned();
+                (mesh, format!("{position:?}"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_older_project_plays_the_same_once_migrated_as_one_made_in_the_new_format() {
+        let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-animation");
+        let fbx = example.join("assets/models/noodle.fbx");
+        let door_keys = r#"[ { "id": "a", "time": 0, "value": [0, 2, 0] },
+                             { "id": "b", "time": 1, "value": [4, 2, 0] } ]"#;
+        let noodle = r#"{ "class": "MeshPart", "name": "Noodle", "properties": {
+                            "MeshId": "assets/models/noodle.fbx", "Size": [1, 3.8, 1] }, "children": ["#;
+        let door = r#"{ "class": "Part", "name": "Door", "children": [
+                         { "class": "Animation", "name": "Open", "properties": { "Clip": "#;
+
+        // Format 2: a controller playing Walk at double speed, and a door's
+        // property clip with no Animator.
+        let old = old_project("play");
+        fs::create_dir_all(old.join("assets/models")).unwrap();
+        fs::copy(&fbx, old.join("assets/models/noodle.fbx")).unwrap();
+        fs::write(
+            old.join("assets/animations/Door.anim.json"),
+            format!(
+                r#"{{ "format_version": 1, "kind": "property", "duration": 1.5, "loop": false,
+                     "tracks": [ {{ "id": "p", "target": ".", "property": "Position", "keys": {door_keys} }} ] }}"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            old.join(WORLD_FILE),
+            format!(
+                r#"{{ "format_version": 1, "workspace": {{ "children": [
+                     {noodle} {{ "class": "Animator", "name": "Animator",
+                       "properties": {{ "Controller": "assets/animations/noodle.controller.json" }} }} ] }},
+                     {door} "assets/animations/Door.anim.json" }} }} ] }} ] }} }}"#
+            ),
+        )
+        .unwrap();
+        let mut migrated = crate::load(&old).unwrap();
+        assert_eq!(migrated.migrated_from, Some(2));
+        assert!(migrated.problems.is_empty(), "{:?}", migrated.problems);
+
+        // The same game made today: a state machine playing Walk, its clip
+        // half a second long (double speed), and the door's clip.
+        let new = old.with_file_name(format!("{}-new", old.file_name().unwrap().display()));
+        let _ = fs::remove_dir_all(&new);
+        let write = |path: &str, text: &str| {
+            let path = new.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        };
+        write(
+            "axcenity.json",
+            &format!(
+                r#"{{ "name": "New", "format_version": {} }}"#,
+                crate::FORMAT_VERSION
+            ),
+        );
+        fs::create_dir_all(new.join("assets/models")).unwrap();
+        fs::copy(&fbx, new.join("assets/models/noodle.fbx")).unwrap();
+        let mut walk = ClipFile::linked("assets/models/noodle.fbx", "Walk", 0.0, 1.0);
+        walk.duration = 0.5;
+        write("assets/animations/Walk/Walk.anim.json", &walk.to_json());
+        write(
+            "assets/animations/Walk/Walk.statemachine.json",
+            r#"{ "format_version": 2, "default_state": "Walk", "states": [
+                 { "name": "Walk", "motion": { "clip": "assets/animations/Walk/Walk.anim.json" } } ] }"#,
+        );
+        write(
+            "assets/animations/Door/Door.anim.json",
+            &format!(
+                r#"{{ "format_version": 2, "duration": 1.5, "loop": false,
+                     "tracks": [ {{ "id": "p", "target": ".", "property": "Position", "keys": {door_keys} }} ] }}"#
+            ),
+        );
+        write(
+            WORLD_FILE,
+            &format!(
+                r#"{{ "format_version": 1, "workspace": {{ "children": [
+                     {noodle} {{ "class": "Animator", "name": "Animator",
+                       "properties": {{ "StateMachine": "assets/animations/Walk/Walk.statemachine.json" }} }} ] }},
+                     {door} "assets/animations/Door/Door.anim.json" }} }},
+                       {{ "class": "Animator", "name": "Animator" }} ] }} ] }} }}"#
+            ),
+        );
+        let mut made = crate::load(&new).unwrap();
+        assert_eq!(made.migrated_from, None);
+        assert!(made.problems.is_empty(), "{:?}", made.problems);
+
+        let then = played(&old, &mut migrated.world);
+        let now = played(&new, &mut made.world);
+        assert_ne!(then[0], then[20], "it moves");
+        for (frame, (then, now)) in then.iter().zip(&now).enumerate() {
+            assert_eq!(then, now, "frame {frame}");
+        }
+        let _ = fs::remove_dir_all(&old);
+        let _ = fs::remove_dir_all(&new);
+    }
+
     #[test]
     fn files_directly_in_animations_get_a_folder_and_controllers_a_new_name() {
         let taken: BTreeSet<String> = [

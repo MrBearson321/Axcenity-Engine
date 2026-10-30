@@ -351,6 +351,9 @@ pub(super) fn hint(painter: &egui::Painter, rect: Rect, text: &str) {
     );
 }
 
+/// A graph shorter than this shows only the guide's next step.
+const GUIDE_IN_FULL: f32 = 260.0;
+
 /// The three steps to a working state machine, shown until it has a
 /// transition, each ticked once it's done.
 pub(super) fn draw_guide(painter: &egui::Painter, rect: Rect, file: &StateMachineFile) {
@@ -370,8 +373,15 @@ pub(super) fn draw_guide(painter: &egui::Painter, rect: Rect, file: &StateMachin
     let width = (rect.width() - 20.0).clamp(80.0, 300.0);
     let wrap = width - 20.0;
     let font = FontId::proportional(12.0);
+    // A short graph shows only the next step, so the card doesn't cover it.
+    let short = rect.height() < GUIDE_IN_FULL;
+    let next = steps.iter().position(|(done, _)| !done).unwrap_or(2);
     let title = painter.layout(
-        "Make it work in three steps".to_owned(),
+        if short {
+            format!("Step {} of 3", next + 1)
+        } else {
+            "Make it work in three steps".to_owned()
+        },
         FontId::proportional(12.5),
         Color32::WHITE,
         wrap,
@@ -379,6 +389,7 @@ pub(super) fn draw_guide(painter: &egui::Painter, rect: Rect, file: &StateMachin
     let galleys: Vec<_> = steps
         .iter()
         .enumerate()
+        .filter(|(n, _)| !short || *n == next)
         .map(|(n, (done, text))| {
             let mark = if *done {
                 icons::CHECK.to_owned()
@@ -390,7 +401,13 @@ pub(super) fn draw_guide(painter: &egui::Painter, rect: Rect, file: &StateMachin
             } else {
                 PIN_TEXT
             };
-            painter.layout(format!("{mark}  {text}"), font.clone(), color, wrap)
+            // The short card's title already numbers its one step.
+            let line = if short {
+                (*text).to_owned()
+            } else {
+                format!("{mark}  {text}")
+            };
+            painter.layout(line, font.clone(), color, wrap)
         })
         .collect();
     let height = title.size().y + galleys.iter().map(|g| g.size().y + 4.0).sum::<f32>() + 22.0;
