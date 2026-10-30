@@ -3,13 +3,17 @@
 //! already take. The panel only reads them, so closing it changes nothing
 //! in the game.
 //!
+//! Two tabs: **Game** (frame rate, memory, physics, audio, scripts and
+//! the network) and **Graphics** (frame and pass times, draws, culling,
+//! levels of detail, GPU memory and shaders, all from [`RenderStats`]).
+//!
 //! Readings start fresh at each Play, update every frame, and freeze at
 //! Stop. The player has no profiler.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use axcenity_render::{FramePass, RenderStats};
+use axcenity_render::{FramePass, LOD_LEVELS, RenderStats, ShaderError};
 use eframe::egui::{self, RichText};
 
 use crate::responsive;
@@ -21,6 +25,8 @@ const WINDOW: usize = 120;
 /// Asking the OS for the process's memory every frame would be wasted
 /// work; every this many frames is plenty.
 const MEMORY_EVERY: u64 = 15;
+/// How many shader messages the Graphics tab keeps, newest last.
+const SHADER_MESSAGES: usize = 20;
 
 /// What one Play frame's steps took on the CPU.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -54,8 +60,6 @@ pub struct GameLoad {
 pub struct RenderCost {
     /// Building the draw list and recording the GPU's work, on the CPU.
     pub cpu: Duration,
-    /// Parts, meshes and terrain chunks in the draw list.
-    pub items: usize,
     pub lights: usize,
     pub stats: RenderStats,
 }
@@ -80,8 +84,17 @@ enum State {
     Frozen,
 }
 
+/// Which of the panel's tabs is shown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tab {
+    #[default]
+    Game,
+    Graphics,
+}
+
 #[derive(Default)]
 pub struct Profiler {
+    pub tab: Tab,
     samples: VecDeque<Sample>,
     state: State,
     last_frame: Option<Instant>,
@@ -92,6 +105,9 @@ pub struct Profiler {
     /// Each client's connection to the server, as last measured (Play with
     /// several clients, Phase 67).
     network: Vec<NetworkRow>,
+    /// Materials' surface shaders that didn't compile, as reported (each
+    /// once, in or out of Play), so they're kept across Plays.
+    shader_messages: VecDeque<String>,
 }
 
 /// One client's connection, from the server's end.
@@ -114,6 +130,8 @@ impl Profiler {
     pub fn start(&mut self) {
         *self = Profiler {
             state: State::Live,
+            tab: self.tab,
+            shader_messages: std::mem::take(&mut self.shader_messages),
             ..Profiler::default()
         };
     }
@@ -160,6 +178,16 @@ impl Profiler {
     pub fn record_network(&mut self, rows: Vec<NetworkRow>) {
         if self.is_live() {
             self.network = rows;
+        }
+    }
+
+    /// Surface shaders the renderer just found don't compile.
+    pub fn record_shader_errors(&mut self, errors: &[ShaderError]) {
+        for error in errors {
+            if self.shader_messages.len() == SHADER_MESSAGES {
+                self.shader_messages.pop_front();
+            }
+            self.shader_messages.push_back(error.to_string());
         }
     }
 
@@ -220,21 +248,7 @@ impl Profiler {
                 / f64::from(count),
             bodies: newest.load.bodies,
             render_cpu: average(|s| s.render.cpu),
-            draw_calls: newest.render.stats.draw_calls,
-            triangles: newest.render.stats.triangles,
-            batches: newest.render.stats.batches,
-            items_drawn: newest.render.stats.items_drawn,
-            items_culled: newest.render.stats.items_culled,
-            shadow_casters: (
-                newest.render.stats.shadow_casters_drawn,
-                newest.render.stats.shadow_casters_culled,
-            ),
-            sprites_culled: newest.render.stats.sprites_culled,
-            texture_bytes: newest.render.stats.texture_bytes,
-            mesh_bytes: newest.render.stats.mesh_bytes,
-            target_bytes: newest.render.stats.target_bytes,
-            buffer_bytes: newest.render.stats.buffer_bytes,
-            items: newest.render.items,
+            stats: newest.render.stats,
             lights: newest.render.lights,
             audio: average(|s| s.game.audio),
             sounds_playing: newest.load.sounds_playing,
@@ -247,7 +261,7 @@ impl Profiler {
     }
 
     /// The panel.
-    pub fn show(&self, ui: &mut egui::Ui) {
+    pub fn show(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.ctx());
         let (status, color) = match self.state {
             State::Empty => ("Not playing", palette.text_weak),
@@ -255,126 +269,201 @@ impl Profiler {
             State::Frozen => ("Stopped: last Play's readings", palette.text_weak),
         };
         ui.horizontal_wrapped(|ui| {
+            widgets::segmented(
+                ui,
+                &mut self.tab,
+                &[(Tab::Game, None, "Game"), (Tab::Graphics, None, "Graphics")],
+            );
             ui.label(RichText::new(theme::with_icon(theme::icons::CIRCLE, status)).color(color));
         });
-        let Some(summary) = self.summary() else {
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new(
-                    "Press Play to profile the game. Readings average the last two seconds.",
-                )
-                .color(palette.text_secondary),
-            );
-            return;
-        };
+        let summary = self.summary();
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                let Some(summary) = &summary else {
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(
+                            "Press Play to profile the game. Readings average the last two \
+                             seconds.",
+                        )
+                        .color(palette.text_secondary),
+                    );
+                    if self.tab == Tab::Graphics {
+                        self.shaders(ui, None);
+                    }
+                    return;
+                };
                 ui.add_space(4.0);
                 history(ui, &summary.history);
-                section(ui, "Frame", |ui| {
-                    row(
-                        ui,
-                        "Frame rate",
-                        summary
-                            .fps
-                            .map_or("-".into(), |fps| format!("{fps:.0} fps")),
-                    );
-                    row(
-                        ui,
-                        "CPU time",
-                        format!(
-                            "{} (peak {})",
-                            millis(summary.cpu),
-                            millis(summary.cpu_peak)
-                        ),
-                    );
-                    row(ui, "GPU time", gpu_text(summary.gpu, summary.gpu_timing));
-                });
-                section(ui, "Memory", |ui| {
-                    row(
-                        ui,
-                        "Editor process",
-                        summary.memory.map_or("-".into(), bytes),
-                    );
-                    row(ui, "Lua", bytes(summary.lua_bytes));
-                });
-                section(ui, "Rendering", |ui| {
-                    row(ui, "CPU", millis(summary.render_cpu));
-                    row(ui, "GPU", gpu_text(summary.gpu, summary.gpu_timing));
-                    row(ui, "Draw calls", summary.draw_calls.to_string());
-                    row(ui, "Batches", summary.batches.to_string());
-                    row(ui, "Triangles", thousands(summary.triangles));
-                    row(
-                        ui,
-                        "Items drawn",
-                        format!("{} of {}", summary.items_drawn, summary.items),
-                    );
-                    row(ui, "Items culled", summary.items_culled.to_string());
-                    let (casters, casters_culled) = summary.shadow_casters;
-                    row(
-                        ui,
-                        "Shadow casters",
-                        format!("{casters} drawn, {casters_culled} culled"),
-                    );
-                    row(ui, "Sprites culled", summary.sprites_culled.to_string());
-                    row(ui, "Lights", summary.lights.to_string());
-                });
-                section(ui, "GPU passes", |ui| {
-                    if summary.gpu_timing {
-                        for (pass, time) in FramePass::ALL.iter().zip(summary.passes) {
-                            row(ui, pass.label(), time.map_or("off".into(), millis));
-                        }
-                    } else {
-                        row(ui, "Per pass", "not available on this GPU".into());
-                    }
-                });
-                section(ui, "GPU memory", |ui| {
-                    row(ui, "Textures", bytes(summary.texture_bytes as usize));
-                    row(ui, "Meshes", bytes(summary.mesh_bytes as usize));
-                    row(ui, "Render targets", bytes(summary.target_bytes as usize));
-                    row(ui, "Buffers", bytes(summary.buffer_bytes as usize));
-                });
-                section(ui, "Physics", |ui| {
-                    row(ui, "CPU", millis(summary.physics));
-                    row(
-                        ui,
-                        "Steps per frame",
-                        format!("{:.1}", summary.physics_steps),
-                    );
-                    row(ui, "Bodies", summary.bodies.to_string());
-                });
-                section(ui, "Audio", |ui| {
-                    row(ui, "CPU", millis(summary.audio));
-                    row(ui, "Sounds playing", summary.sounds_playing.to_string());
-                });
-                section(ui, "Scripts and animation", |ui| {
-                    row(ui, "Scripts", millis(summary.scripts));
-                    row(ui, "Animation", millis(summary.animation));
-                });
-                section(ui, "Network", |ui| {
-                    if self.network.is_empty() {
-                        row(ui, "Clients", "1 (no connections)".into());
-                    }
-                    for client in &self.network {
-                        row(
-                            ui,
-                            &client.player,
-                            format!("{:.0} ms ping", client.ping * 1000.0),
-                        );
-                        row(ui, "  Sent", format!("{}/s", bytes(client.sent as usize)));
-                        row(
-                            ui,
-                            "  Received",
-                            format!("{}/s", bytes(client.received as usize)),
-                        );
-                        row(ui, "  Packet loss", format!("{:.1}%", client.loss * 100.0));
-                        row(ui, "  Instances", client.instances.to_string());
-                    }
-                });
+                match self.tab {
+                    Tab::Game => self.game(ui, summary),
+                    Tab::Graphics => self.graphics(ui, summary),
+                }
             });
     }
+
+    /// The Game tab.
+    fn game(&self, ui: &mut egui::Ui, summary: &Summary) {
+        section(ui, "Frame", |ui| {
+            row(
+                ui,
+                "Frame rate",
+                summary
+                    .fps
+                    .map_or("-".into(), |fps| format!("{fps:.0} fps")),
+            );
+            row(
+                ui,
+                "CPU time",
+                format!(
+                    "{} (peak {})",
+                    millis(summary.cpu),
+                    millis(summary.cpu_peak)
+                ),
+            );
+            row(ui, "GPU time", gpu_text(summary.gpu, summary.gpu_timing));
+        });
+        section(ui, "Memory", |ui| {
+            row(
+                ui,
+                "Editor process",
+                summary.memory.map_or("-".into(), bytes),
+            );
+            row(ui, "Lua", bytes(summary.lua_bytes));
+        });
+        section(ui, "Physics", |ui| {
+            row(ui, "CPU", millis(summary.physics));
+            row(
+                ui,
+                "Steps per frame",
+                format!("{:.1}", summary.physics_steps),
+            );
+            row(ui, "Bodies", summary.bodies.to_string());
+        });
+        section(ui, "Audio", |ui| {
+            row(ui, "CPU", millis(summary.audio));
+            row(ui, "Sounds playing", summary.sounds_playing.to_string());
+        });
+        section(ui, "Scripts and animation", |ui| {
+            row(ui, "Scripts", millis(summary.scripts));
+            row(ui, "Animation", millis(summary.animation));
+        });
+        section(ui, "Network", |ui| {
+            if self.network.is_empty() {
+                row(ui, "Clients", "1 (no connections)".into());
+            }
+            for client in &self.network {
+                row(
+                    ui,
+                    &client.player,
+                    format!("{:.0} ms ping", client.ping * 1000.0),
+                );
+                row(ui, "  Sent", format!("{}/s", bytes(client.sent as usize)));
+                row(
+                    ui,
+                    "  Received",
+                    format!("{}/s", bytes(client.received as usize)),
+                );
+                row(ui, "  Packet loss", format!("{:.1}%", client.loss * 100.0));
+                row(ui, "  Instances", client.instances.to_string());
+            }
+        });
+    }
+
+    /// The Graphics tab: the viewport's newest [`RenderStats`], with times
+    /// averaged like the Game tab's.
+    fn graphics(&self, ui: &mut egui::Ui, summary: &Summary) {
+        let stats = &summary.stats;
+        section(ui, "Frame", |ui| {
+            row(
+                ui,
+                "CPU frame",
+                format!(
+                    "{} (peak {})",
+                    millis(summary.cpu),
+                    millis(summary.cpu_peak)
+                ),
+            );
+            row(ui, "Rendering CPU", millis(summary.render_cpu));
+            row(ui, "GPU frame", gpu_text(summary.gpu, summary.gpu_timing));
+        });
+        section(ui, "GPU passes", |ui| {
+            if summary.gpu_timing {
+                for (pass, time) in FramePass::ALL.iter().zip(summary.passes) {
+                    row(ui, pass.label(), time.map_or("off".into(), millis));
+                }
+            } else {
+                row(ui, "Per pass", "not available on this GPU".into());
+            }
+        });
+        section(ui, "Draws", |ui| {
+            row(ui, "Draw calls", stats.draw_calls.to_string());
+            row(ui, "Batches", stats.batches.to_string());
+            row(ui, "Triangles", thousands(stats.triangles));
+            row(ui, "Vertices", thousands(stats.vertices));
+        });
+        section(ui, "Culling", |ui| {
+            row(
+                ui,
+                "Items drawn",
+                format!("{} of {}", stats.items_drawn, stats.items_submitted),
+            );
+            row(ui, "Items culled", stats.items_culled.to_string());
+            row(
+                ui,
+                "Shadow casters",
+                format!(
+                    "{} drawn, {} culled",
+                    stats.shadow_casters_drawn, stats.shadow_casters_culled
+                ),
+            );
+            row(ui, "Sprites culled", stats.sprites_culled.to_string());
+            row(ui, "GPU particles", thousands(stats.gpu_particles.into()));
+            row(ui, "Lights", summary.lights.to_string());
+        });
+        section(ui, "Levels of detail", |ui| {
+            for (name, count) in LOD_NAMES.iter().zip(stats.lod_items) {
+                row(ui, name, count.to_string());
+            }
+        });
+        section(ui, "GPU memory", |ui| {
+            let kinds = [
+                ("Textures", stats.texture_bytes),
+                ("Meshes", stats.mesh_bytes),
+                ("Render targets", stats.target_bytes),
+                ("Buffers", stats.buffer_bytes),
+            ];
+            for (kind, count) in kinds {
+                row(ui, kind, bytes(count as usize));
+            }
+            let total = kinds.iter().map(|(_, count)| count).sum::<u64>();
+            row(ui, "Total", bytes(total as usize));
+        });
+        self.shaders(ui, Some(stats));
+    }
+
+    /// The surface shaders compiled, once a frame was drawn, and the
+    /// messages of those that didn't compile.
+    fn shaders(&self, ui: &mut egui::Ui, stats: Option<&RenderStats>) {
+        section(ui, "Shaders", |ui| {
+            if let Some(stats) = stats {
+                row(ui, "Surface shaders", stats.surface_shaders.to_string());
+                row(ui, "Not compiling", stats.broken_shaders.to_string());
+            }
+            if self.shader_messages.is_empty() {
+                row(ui, "Messages", "none".into());
+            }
+        });
+        let palette = theme::palette(ui.ctx());
+        for message in &self.shader_messages {
+            ui.label(RichText::new(message).color(palette.error));
+        }
+    }
 }
+
+/// The Graphics tab's names for [`RenderStats::lod_items`]' levels.
+const LOD_NAMES: [&str; LOD_LEVELS] = ["Full detail", "Level 1", "Level 2"];
 
 /// The readings the panel shows.
 struct Summary {
@@ -394,22 +483,8 @@ struct Summary {
     physics_steps: f64,
     bodies: usize,
     render_cpu: Duration,
-    draw_calls: u32,
-    triangles: u64,
-    batches: u32,
-    items_drawn: u32,
-    /// Items outside the camera's view.
-    items_culled: u32,
-    /// Casters drawn into shadow views and left out of them, summed over
-    /// the views.
-    shadow_casters: (u32, u32),
-    sprites_culled: u32,
-    /// GPU bytes by kind.
-    texture_bytes: u64,
-    mesh_bytes: u64,
-    target_bytes: u64,
-    buffer_bytes: u64,
-    items: usize,
+    /// The newest frame's counts.
+    stats: RenderStats,
     lights: usize,
     audio: Duration,
     sounds_playing: usize,
@@ -542,13 +617,13 @@ mod tests {
         for _ in 0..WINDOW {
             profiler.record_game(frame(1), light);
             profiler.record_render(RenderCost {
-                items: 2,
+                lights: 2,
                 ..RenderCost::default()
             });
         }
         let summary = profiler.summary().unwrap();
         assert_eq!(summary.physics, Duration::from_millis(1));
-        assert_eq!((summary.bodies, summary.items), (2, 2));
+        assert_eq!((summary.bodies, summary.lights), (2, 2));
 
         // A heavier scene raises the numbers, and they drop back after.
         let heavy = GameLoad {
@@ -579,8 +654,9 @@ mod tests {
         assert!(profiler.summary().is_none());
     }
 
-    /// Every piece of text the panel shows.
-    fn shown_text(profiler: &Profiler) -> String {
+    /// Each piece of text the panel shows, in the order it's drawn: a
+    /// row's name is just before its value.
+    fn shown_texts(profiler: &mut Profiler) -> Vec<String> {
         let ctx = theme::test_context();
         // Tall enough that nothing is scrolled out of view.
         let input = egui::RawInput {
@@ -593,14 +669,19 @@ mod tests {
         let output = ctx.run(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| profiler.show(ui));
         });
-        let mut text = String::new();
-        for clipped in output.shapes {
-            if let egui::Shape::Text(shape) = clipped.shape {
-                text.push_str(shape.galley.text());
-                text.push('\n');
-            }
-        }
-        text
+        output
+            .shapes
+            .into_iter()
+            .filter_map(|clipped| match clipped.shape {
+                egui::Shape::Text(shape) => Some(shape.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every piece of text the panel shows.
+    fn shown_text(profiler: &mut Profiler) -> String {
+        shown_texts(profiler).join("\n")
     }
 
     fn timed_render(scene_ms: u64) -> RenderCost {
@@ -632,7 +713,8 @@ mod tests {
             Some(Duration::from_millis(3))
         );
         assert_eq!(summary.passes[FramePass::Shadows as usize], None);
-        let text = shown_text(&profiler);
+        profiler.tab = Tab::Graphics;
+        let text = shown_text(&mut profiler);
         for pass in FramePass::ALL {
             assert!(text.contains(pass.label()), "{pass:?} in {text}");
         }
@@ -643,9 +725,248 @@ mod tests {
         profiler.start();
         profiler.record_game(frame(1), GameLoad::default());
         profiler.record_render(RenderCost::default());
-        let text = shown_text(&profiler);
+        let text = shown_text(&mut profiler);
         assert!(text.contains("Per pass"), "{text}");
         assert!(!text.contains(FramePass::Scene.label()), "{text}");
+    }
+
+    /// The Graphics tab's rows for `stats`, as they should read.
+    fn graphics_rows(stats: &RenderStats) -> Vec<(&'static str, String)> {
+        let total =
+            stats.texture_bytes + stats.mesh_bytes + stats.target_bytes + stats.buffer_bytes;
+        vec![
+            ("Draw calls", stats.draw_calls.to_string()),
+            ("Batches", stats.batches.to_string()),
+            ("Triangles", thousands(stats.triangles)),
+            ("Vertices", thousands(stats.vertices)),
+            (
+                "Items drawn",
+                format!("{} of {}", stats.items_drawn, stats.items_submitted),
+            ),
+            ("Items culled", stats.items_culled.to_string()),
+            (
+                "Shadow casters",
+                format!(
+                    "{} drawn, {} culled",
+                    stats.shadow_casters_drawn, stats.shadow_casters_culled
+                ),
+            ),
+            ("Sprites culled", stats.sprites_culled.to_string()),
+            ("GPU particles", thousands(stats.gpu_particles.into())),
+            ("Full detail", stats.lod_items[0].to_string()),
+            ("Level 1", stats.lod_items[1].to_string()),
+            ("Level 2", stats.lod_items[2].to_string()),
+            ("Textures", bytes(stats.texture_bytes as usize)),
+            ("Meshes", bytes(stats.mesh_bytes as usize)),
+            ("Render targets", bytes(stats.target_bytes as usize)),
+            ("Buffers", bytes(stats.buffer_bytes as usize)),
+            ("Total", bytes(total as usize)),
+            ("Surface shaders", stats.surface_shaders.to_string()),
+            ("Not compiling", stats.broken_shaders.to_string()),
+        ]
+    }
+
+    /// Asserts the Graphics tab shows each of `stats`' numbers on its row.
+    fn assert_graphics_tab_shows(profiler: &mut Profiler, stats: &RenderStats) {
+        profiler.tab = Tab::Graphics;
+        let texts = shown_texts(profiler);
+        for (name, value) in graphics_rows(stats) {
+            let at = texts.iter().position(|text| text == name);
+            let shown = at.and_then(|at| texts.get(at + 1));
+            assert_eq!(shown, Some(&value), "{name} in {texts:?}");
+        }
+    }
+
+    #[test]
+    fn the_graphics_tab_shows_every_render_stat_on_its_own_row() {
+        // Every number different, so a row showing the wrong one fails.
+        let stats = RenderStats {
+            draw_calls: 11,
+            triangles: 1_234_567,
+            vertices: 2_345_678,
+            items_submitted: 40,
+            items_drawn: 31,
+            batches: 7,
+            items_culled: 9,
+            shadow_casters_drawn: 21,
+            shadow_casters_culled: 13,
+            sprites_culled: 5,
+            gpu_particles: 100_000,
+            lod_items: [3, 4, 6],
+            surface_shaders: 2,
+            broken_shaders: 1,
+            texture_bytes: 3 << 20,
+            mesh_bytes: 5 << 20,
+            target_bytes: 7 << 20,
+            buffer_bytes: 512 << 10,
+            ..RenderStats::default()
+        };
+        let mut profiler = Profiler::default();
+        profiler.start();
+        profiler.record_game(frame(1), GameLoad::default());
+        profiler.record_render(RenderCost {
+            stats,
+            lights: 8,
+            ..RenderCost::default()
+        });
+        assert_graphics_tab_shows(&mut profiler, &stats);
+        let text = shown_text(&mut profiler);
+        assert!(text.contains("Lights\n8"), "{text}");
+        assert!(!text.contains("Bodies"), "the Game tab's rows stay there");
+
+        // A newer frame's counts replace them.
+        let busier = RenderStats {
+            draw_calls: 90,
+            triangles: 9_000,
+            lod_items: [0, 0, 12],
+            ..stats
+        };
+        profiler.record_game(frame(1), GameLoad::default());
+        profiler.record_render(RenderCost {
+            stats: busier,
+            ..RenderCost::default()
+        });
+        assert_graphics_tab_shows(&mut profiler, &busier);
+
+        profiler.tab = Tab::Game;
+        let text = shown_text(&mut profiler);
+        assert!(
+            text.contains("Bodies") && !text.contains("Draw calls"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn shader_messages_are_listed_and_kept_across_plays() {
+        let error = ShaderError {
+            material: "assets/materials/broken.material.json".to_owned(),
+            line: Some(4),
+            column: Some(3),
+            message: "expected `;`".to_owned(),
+        };
+        let mut profiler = Profiler {
+            tab: Tab::Graphics,
+            ..Profiler::default()
+        };
+        assert!(shown_text(&mut profiler).contains("none"));
+        // Reported in edit mode, before Play.
+        profiler.record_shader_errors(std::slice::from_ref(&error));
+        let text = shown_text(&mut profiler);
+        assert!(text.contains(&error.to_string()), "{text}");
+        profiler.start();
+        profiler.record_game(frame(1), GameLoad::default());
+        let text = shown_text(&mut profiler);
+        assert!(text.contains(&error.to_string()), "{text}");
+        assert_eq!(profiler.tab, Tab::Graphics, "Play keeps the tab");
+        // Only the newest are kept.
+        for _ in 0..SHADER_MESSAGES * 2 {
+            profiler.record_shader_errors(std::slice::from_ref(&error));
+        }
+        assert_eq!(profiler.shader_messages.len(), SHADER_MESSAGES);
+    }
+
+    #[test]
+    fn both_tabs_fit_a_narrow_column() {
+        let mut profiler = Profiler::default();
+        profiler.start();
+        profiler.record_game(frame(1), GameLoad::default());
+        profiler.record_render(timed_render(2));
+        profiler.record_shader_errors(&[ShaderError {
+            material: "assets/materials/AVeryLongMaterialName.material.json".to_owned(),
+            line: Some(12),
+            column: None,
+            message: "no definition in scope for identifier: `scrolled_uv_coordinates`".to_owned(),
+        }]);
+        let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from);
+        let size = egui::vec2(260.0, 1400.0);
+        for (tab, name) in [(Tab::Game, "game"), (Tab::Graphics, "graphics")] {
+            profiler.tab = tab;
+            let mut fit = None;
+            let mut draw = |ctx: &egui::Context| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let room = ui.max_rect();
+                    profiler.show(ui);
+                    fit = Some((ui.min_rect(), room));
+                });
+            };
+            let ctx = theme::test_context();
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..Default::default()
+                };
+                let _ = ctx.run(input, &mut draw);
+            }
+            if let Some(folder) = &snapshots {
+                let path = folder.join(format!("profiler-{name}.png"));
+                crate::snapshot::snapshot(&path, size, vec![Vec::new(); 3], &mut draw);
+            }
+            let (used, room) = fit.expect("the panel was drawn");
+            assert!(
+                used.width() <= room.width() + 0.5,
+                "{tab:?} drew {} points wide in {}",
+                used.width(),
+                room.width()
+            );
+        }
+    }
+
+    /// A world of `parts` parts in a row in front of the camera.
+    fn world_of(parts: usize) -> axcenity_core::World {
+        use axcenity_core::{ClassName, Value, Vector3};
+        let mut world = axcenity_core::World::new();
+        for index in 0..parts {
+            let part = world.create(ClassName::Part).unwrap();
+            let x = index as f32 * 3.0 - 10.0;
+            world
+                .set_property(part, "Position", Value::Vector3(Vector3::new(x, 0.0, 0.0)))
+                .unwrap();
+            world.set_parent(part, Some(world.workspace())).unwrap();
+        }
+        world
+    }
+
+    #[test]
+    fn the_graphics_tab_follows_the_renderers_stats_as_the_scene_changes() {
+        use axcenity_render::wgpu;
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let Some((device, queue)) =
+            pollster::block_on(instance.request_adapter(&Default::default()))
+                .ok()
+                .and_then(|adapter| {
+                    pollster::block_on(adapter.request_device(&Default::default())).ok()
+                })
+        else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut renderer = axcenity_render::TextureRenderer::new(&device, &queue, 160, 90);
+        // Parts need no files: an empty project folder.
+        let assets = axcenity_assets::Assets::new(std::path::Path::new("no project"));
+        let camera = axcenity_render::Camera {
+            position: axcenity_render::glam::Vec3::new(0.0, 6.0, 25.0),
+            look_at: axcenity_render::glam::Vec3::ZERO,
+            fov_y_degrees: 70.0,
+        };
+        let mut profiler = Profiler::default();
+        profiler.start();
+        let mut shown = Vec::new();
+        for parts in [1, 6] {
+            let list = axcenity_scene::build_draw_list(&world_of(parts), &assets, camera);
+            renderer.render(&list).unwrap();
+            let stats = renderer.stats();
+            profiler.record_game(frame(1), GameLoad::default());
+            profiler.record_render(RenderCost {
+                lights: list.lights.len(),
+                stats,
+                ..RenderCost::default()
+            });
+            assert_graphics_tab_shows(&mut profiler, &stats);
+            shown.push(stats);
+        }
+        let [one, six] = [shown[0], shown[1]];
+        assert_eq!((one.items_drawn, six.items_drawn), (1, 6));
+        assert!(six.triangles > one.triangles && six.vertices > one.vertices);
     }
 
     #[test]

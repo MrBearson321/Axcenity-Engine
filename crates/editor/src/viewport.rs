@@ -1056,7 +1056,6 @@ impl Viewport {
         let shader_errors = target.renderer.take_shader_errors();
         let render = RenderCost {
             cpu: render_started.elapsed(),
-            items: draw_list.items.len(),
             lights: draw_list.lights.len(),
             stats: target.renderer.stats(),
         };

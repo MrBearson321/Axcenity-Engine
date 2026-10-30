@@ -589,7 +589,7 @@ A Graphics tab in the editor's Profiler: CPU and GPU frame time, time per pass, 
 
 ### Acceptance criteria
 
-- [ ] Every number matches `RenderStats` and changes as the scene changes.
+- [x] Every number matches `RenderStats` and changes as the scene changes.
 
 ---
 

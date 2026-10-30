@@ -765,6 +765,7 @@ impl ScenePipeline {
             culled,
             joints,
             skins,
+            lod_items,
         } = plan_draws(
             list,
             &draws,
@@ -980,13 +981,15 @@ impl ScenePipeline {
             items_culled: culled + past_cull_distance,
             shadow_casters_culled: casters_by_view.iter().map(|(_, culled)| culled).sum(),
             sprites_culled,
+            lod_items,
             ..FrameCounts::default()
         };
         let mut shadow_casters_drawn = 0;
-        let mut count = |index_count: u32, instances: &Range<u32>| {
+        let mut count = |mesh: &GpuMesh, instances: &Range<u32>| {
+            let instances = u64::from(instances.end - instances.start);
             counts.draw_calls += 1;
-            counts.triangles +=
-                u64::from(index_count / 3) * u64::from(instances.end - instances.start);
+            counts.triangles += u64::from(mesh.index_count / 3) * instances;
+            counts.vertices += u64::from(mesh.vertex_count) * instances;
         };
 
         // One pass per cascade, each drawing into its own layer of the map,
@@ -1039,7 +1042,7 @@ impl ScenePipeline {
                 pass.set_bind_group(2, self.skin_group(mesh), &[]);
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
-                count(mesh.index_count, instances);
+                count(mesh, instances);
                 shadow_casters_drawn += instances.end - instances.start;
                 pass.draw_indexed(0..mesh.index_count, 0, instances.clone());
             }
@@ -1079,7 +1082,7 @@ impl ScenePipeline {
                     let Some(mesh) = self.bind_batch(&mut pass, batch, true) else {
                         continue;
                     };
-                    count(mesh.index_count, &batch.instances);
+                    count(mesh, &batch.instances);
                     pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
                 }
             }
@@ -1163,7 +1166,7 @@ impl ScenePipeline {
                 let Some(mesh) = self.bind_batch(pass, batch, false) else {
                     continue;
                 };
-                count(mesh.index_count, &batch.instances);
+                count(mesh, &batch.instances);
                 drawn.0 += batch.instances.end - batch.instances.start;
                 drawn.1 += 1;
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
@@ -1177,7 +1180,7 @@ impl ScenePipeline {
                     continue;
                 };
                 pass.set_pipeline(&self.outline_pipeline);
-                count(mesh.index_count, &batch.instances);
+                count(mesh, &batch.instances);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
             }
         };
@@ -1606,9 +1609,11 @@ impl ScenePipeline {
             &self.cascade_buffer,
             self.light_probes.buffer(),
         ];
+        let (surface_shaders, broken_shaders) = self.surface_shaders.counts();
         RenderStats {
             draw_calls: counts.draw_calls,
             triangles: counts.triangles,
+            vertices: counts.vertices,
             gpu_time: self.gpu_timer.as_ref().and_then(gpu_timer::GpuTimer::last),
             gpu_timing: self.gpu_timer.is_some(),
             pass_times: self
@@ -1622,6 +1627,9 @@ impl ScenePipeline {
             shadow_casters_drawn: counts.shadow_casters_drawn,
             shadow_casters_culled: counts.shadow_casters_culled,
             sprites_culled: counts.sprites_culled,
+            lod_items: counts.lod_items,
+            surface_shaders,
+            broken_shaders,
             gpu_particles: self.gpu_particles.as_ref().map_or(0, |p| p.count()),
             texture_bytes: self.texture_bytes.total(),
             mesh_bytes: self.mesh_bytes.total(),

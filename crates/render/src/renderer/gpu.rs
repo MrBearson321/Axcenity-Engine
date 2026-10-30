@@ -650,6 +650,7 @@ pub(super) fn upload_buffers(
         vertices,
         indices,
         index_count: index_count as u32,
+        vertex_count: corners.len() as u32,
         index_format,
         version: 0,
         skin: None,

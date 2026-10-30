@@ -834,6 +834,7 @@ impl EditorApp {
         if let Some(render) = output.render {
             self.profiler.record_render(render);
         }
+        self.profiler.record_shader_errors(&output.shader_errors);
         for error in output.shader_errors.drain(..) {
             self.output.error(error.to_string());
         }

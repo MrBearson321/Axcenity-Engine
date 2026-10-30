@@ -248,6 +248,13 @@ impl SurfaceShaders {
         }
     }
 
+    /// How many surface shaders have pipelines, and how many don't compile.
+    pub(super) fn counts(&self) -> (u32, u32) {
+        let compiled = self.compiled.values().filter(|cached| cached.gpu.is_some());
+        let compiled = compiled.count() as u32;
+        (compiled, self.compiled.len() as u32 - compiled)
+    }
+
     /// How many surface shaders have pipelines, and whether the error
     /// surface's are alive.
     #[cfg(test)]

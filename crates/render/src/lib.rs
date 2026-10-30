@@ -35,8 +35,8 @@ pub use graphics::{
     ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 pub use renderer::{
-    CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, MAX_GPU_PARTICLES, PROBE_BAKE_SIZE,
-    RenderStats, Renderer, ShaderError, SurfaceShader, TextureRenderer,
+    CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, MAX_GPU_PARTICLES,
+    PROBE_BAKE_SIZE, RenderStats, Renderer, ShaderError, SurfaceShader, TextureRenderer,
 };
 pub use tone_mapping::ToneMapping;
 pub use water::{WATER_GRID, Water, water_surface};

@@ -811,6 +811,8 @@ fn stats_count_draws_and_triangles_and_time_the_gpu_where_it_can() {
     // Both blocks share a mesh: one draw of two instances.
     assert_eq!(stats.draw_calls, 1);
     assert_eq!(stats.triangles, 2 * 12, "a block is 12 triangles");
+    let corners = crate::mesh::block().vertices.len() as u64;
+    assert_eq!(stats.vertices, 2 * corners);
     // Each shadow cascade draws them again.
     two.shadows.enabled = true;
     renderer.render(&two).unwrap();

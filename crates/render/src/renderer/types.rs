@@ -379,6 +379,8 @@ pub(super) struct GpuMesh {
     pub(super) vertices: wgpu::Buffer,
     pub(super) indices: wgpu::Buffer,
     pub(super) index_count: u32,
+    /// Its corners, for [`RenderStats::vertices`](crate::RenderStats::vertices).
+    pub(super) vertex_count: u32,
     /// 16-bit for the built-in shapes, 32-bit for callers' meshes, which
     /// can have more than 65,536 corners.
     pub(super) index_format: wgpu::IndexFormat,
@@ -912,8 +914,10 @@ pub(super) struct ScenePipeline {
 pub(super) struct FrameCounts {
     /// Indexed draws, the shadow passes' and prepass's included.
     pub(super) draw_calls: u32,
-    /// Triangles those draws sent, counting every instance.
+    /// Triangles those draws sent, and their meshes' corners, counting
+    /// every instance.
     pub(super) triangles: u64,
+    pub(super) vertices: u64,
     pub(super) items_submitted: u32,
     /// Instances drawn in the scene pass.
     pub(super) items_drawn: u32,
@@ -926,6 +930,8 @@ pub(super) struct FrameCounts {
     pub(super) shadow_casters_drawn: u32,
     pub(super) shadow_casters_culled: u32,
     pub(super) sprites_culled: u32,
+    /// Items in view with levels of detail, by level.
+    pub(super) lod_items: [u32; crate::LOD_LEVELS],
 }
 
 /// Turned UI text: glyphon only draws text upright, so each turned text is

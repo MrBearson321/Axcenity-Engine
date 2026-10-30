@@ -132,6 +132,10 @@ pub struct TextureRenderer {
     view: wgpu::TextureView,
 }
 
+/// How many levels of detail an item can be drawn at, its own mesh included
+/// (see [`RenderStats::lod_items`]).
+pub const LOD_LEVELS: usize = lod::LOD_SCREEN_SIZES.len() + 1;
+
 /// What the last frame drawn cost, for the editor's profiler.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RenderStats {
@@ -139,6 +143,8 @@ pub struct RenderStats {
     pub draw_calls: u32,
     /// Triangles those draws sent, counting every instance.
     pub triangles: u64,
+    /// The corners of the meshes those draws sent, counting every instance.
+    pub vertices: u64,
     /// The GPU's time for a recent frame (a frame or two behind), or `None`
     /// before the first reading or when it can't be measured.
     pub gpu_time: Option<Duration>,
@@ -166,6 +172,14 @@ pub struct RenderStats {
     pub shadow_casters_culled: u32,
     /// Sprites (particles) outside the camera's view.
     pub sprites_culled: u32,
+    /// Items in the camera's view whose mesh has levels of detail, by the
+    /// level they're drawn at: 0 is the mesh itself, then its simpler
+    /// copies. An item cross-fading between two counts at the one coming in.
+    pub lod_items: [u32; LOD_LEVELS],
+    /// Materials' surface shaders compiled into pipelines, and those that
+    /// don't compile (drawn in the error color).
+    pub surface_shaders: u32,
+    pub broken_shaders: u32,
     /// Particles kept on the GPU: every GPU particle emitter's capacity
     /// (alive or not, as nothing is read back).
     pub gpu_particles: u32,

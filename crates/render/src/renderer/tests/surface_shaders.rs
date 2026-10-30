@@ -44,6 +44,8 @@ fn a_surface_shader_scrolls_its_texture_with_the_draw_lists_time() {
     assert_eq!(start, around, "a whole texture along, it's back");
     assert!(renderer.take_shader_errors().is_empty());
     assert_eq!(renderer.scene.surface_shaders.alive(), (1, false));
+    let stats = renderer.stats();
+    assert_eq!((stats.surface_shaders, stats.broken_shaders), (1, 0));
 }
 
 #[test]
@@ -113,6 +115,8 @@ fn a_shader_with_an_error_is_reported_once_on_its_line_and_draws_magenta_alone()
     renderer.render(&list).unwrap();
     assert!(renderer.take_shader_errors().is_empty(), "reported once");
     assert_eq!(renderer.scene.surface_shaders.alive(), (0, true));
+    let stats = renderer.stats();
+    assert_eq!((stats.surface_shaders, stats.broken_shaders), (0, 1));
 }
 
 #[test]

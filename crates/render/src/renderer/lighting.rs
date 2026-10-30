@@ -17,7 +17,7 @@ use crate::draw_list::{
 use crate::graphics::{AmbientOcclusion, EffectiveGraphics, ShadowMapSize, ShadowQuality};
 
 use super::culling::{Bounds, CullingBounds, Frustum, Sphere};
-use super::lod::Draw;
+use super::lod::{Draw, OPAQUE};
 use super::skinning::JointRaw;
 use super::{
     Batch, CASCADE_SPLIT_BLEND, CONTACT_SHADOW_LENGTH, CONTACT_SHADOW_THICKNESS, FAR_PLANE,
@@ -634,6 +634,9 @@ pub(super) struct DrawPlan {
     /// Where each drawn skin's joints are in `joints` (start and count), by
     /// the skin's address, for the motion vectors' instances.
     pub(super) skins: HashMap<*const Skin, [u32; 2]>,
+    /// Items in view with levels of detail, by level (see
+    /// [`RenderStats::lod_items`](crate::RenderStats::lod_items)).
+    pub(super) lod_items: [u32; crate::LOD_LEVELS],
 }
 
 /// Puts the `draws` (`list`'s items at their levels of detail, see
@@ -758,6 +761,12 @@ pub(super) fn plan_draws(
         raw.emissive_fade[3] = draw.fade;
         if !visible {
             continue;
+        }
+        // The copy fading out of a switch isn't counted.
+        if let Some(level) = draw.level
+            && draw.fade <= OPAQUE
+        {
+            plan.lod_items[level] += 1;
         }
         let index = plan.instances.len() as u32;
         plan.instances.push(raw);

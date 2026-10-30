@@ -44,6 +44,9 @@ pub(super) struct Draw<'a> {
     pub(super) item: &'a DrawItem,
     /// The simpler copy it's drawn with, or `None` for the item's own shape.
     pub(super) lod: Option<Arc<dyn MeshSource>>,
+    /// Its level of detail (0 for its own mesh), or `None` for an item
+    /// whose mesh has no simpler copies.
+    pub(super) level: Option<usize>,
     /// 1 draws it all, below 1 fades it in and above 1 fades it out
     /// (`dithered_out` in shader.wgsl).
     pub(super) fade: f32,
@@ -57,6 +60,7 @@ impl<'a> Draw<'a> {
         Self {
             item,
             lod: None,
+            level: None,
             fade: OPAQUE,
             casts_shadow: item.casts_shadow,
         }
@@ -170,6 +174,7 @@ impl LodStates {
             let size = screen_size(Bounds::UNIT.sphere(item.transform), camera);
             let with_level = |level: usize| Draw {
                 lod: (level > 0).then(|| source.lod(level)).flatten(),
+                level: Some(level),
                 ..draw.clone()
             };
             if item.id == 0 {
