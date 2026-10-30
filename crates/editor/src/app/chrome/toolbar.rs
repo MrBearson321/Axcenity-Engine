@@ -121,7 +121,7 @@ impl EditorApp {
 
     /// Picks `tool`, or, if it's already picked, goes back to Select: a
     /// tool's button (or key) turns it off again, as well as on.
-    pub(super) fn toggle_tool(&mut self, tool: Tool) {
+    pub(in crate::app) fn toggle_tool(&mut self, tool: Tool) {
         self.tool = if self.tool == tool {
             Tool::Select
         } else {

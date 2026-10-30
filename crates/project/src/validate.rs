@@ -891,7 +891,11 @@ pub(crate) fn string_prop(value: Option<&Value>) -> Option<&str> {
 
 /// Where `id` is in a prefab read into `world`: its index among `roots`,
 /// then among its parent's children at each level down.
-fn prefab_place(world: &World, roots: &[InstanceId], id: InstanceId) -> Option<Vec<usize>> {
+pub(crate) fn prefab_place(
+    world: &World,
+    roots: &[InstanceId],
+    id: InstanceId,
+) -> Option<Vec<usize>> {
     let mut place = Vec::new();
     let mut current = id;
     loop {
@@ -929,7 +933,7 @@ fn warning_site(model: &str, warning: &str, otherwise: impl FnOnce() -> Site) ->
     }
 }
 
-fn owner_name(world: &World, id: InstanceId, prefab: Option<&str>) -> String {
+pub(crate) fn owner_name(world: &World, id: InstanceId, prefab: Option<&str>) -> String {
     let name = world.full_name(id).unwrap_or_else(|| "?".to_owned());
     match prefab {
         Some(file) => {

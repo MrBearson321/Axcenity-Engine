@@ -270,6 +270,15 @@ impl EditorApp {
                 let _ = self.assets.reload(&blob.path);
             }
         }
+        // A script Replace All (or its undo) rewrote: its tab and blocks take it.
+        for blob in blobs.iter().take(written) {
+            if crate::app::find_in_scripts::is_script_file(&blob.path)
+                && let Some(bytes) = &blob.after
+            {
+                let text = String::from_utf8_lossy(bytes).into_owned();
+                self.take_script_text(&blob.path, &text);
+            }
+        }
         self.hand_over_tables();
         written
     }

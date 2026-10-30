@@ -23,10 +23,12 @@
 //! - `asset_fixes.rs` — the Asset Check scan and its fixes
 
 mod asset_fixes;
+mod asset_refs;
 mod assets;
 mod behavior_trees;
 mod chrome;
 mod collision_groups;
+mod command_palette;
 mod commands;
 mod constraint_tool;
 mod controls_ui;
@@ -34,6 +36,7 @@ mod data_tables;
 mod edits;
 mod engine;
 mod files;
+mod find_in_scripts;
 mod game_tests;
 mod input_settings;
 mod levels;
@@ -181,6 +184,12 @@ pub struct EditorApp {
     input_settings: input_settings::InputWindow,
     /// Model ▸ Build ▸ Collision Groups.
     collision_groups: collision_groups::CollisionGroupsWindow,
+    /// The command palette and Quick Open (Phase 70), Quick Open's rows
+    /// while it's showing, Find in Scripts, and an asset's references.
+    palette: crate::command_palette::Palette,
+    quick_open: Vec<(crate::command_palette::Entry, command_palette::OpenTarget)>,
+    find: crate::find_in_scripts::FindWindow,
+    references: Option<asset_refs::ReferencesWindow>,
     /// Every change made to `world` since it was opened, for undo and redo.
     /// It also knows whether the world is as saved.
     history: History,
@@ -648,6 +657,10 @@ impl EditorApp {
             versions_open: false,
             input_settings: Default::default(),
             collision_groups: Default::default(),
+            palette: Default::default(),
+            quick_open: Vec::new(),
+            find: Default::default(),
+            references: None,
             history: History::new(),
             tool: Tool::default(),
             snap: Snap::default(),
@@ -791,6 +804,9 @@ impl EditorApp {
             if let Some(text) = storage.get_string(CONSOLE_HISTORY_KEY) {
                 self.console.load_history(&text);
             }
+            if let Some(text) = storage.get_string(command_palette::RECENT_COMMANDS_KEY) {
+                self.palette.load_recent(&text);
+            }
             if let Some(settings) = storage
                 .get_string(GRAPHICS_KEY)
                 .and_then(|text| serde_json::from_str(&text).ok())
@@ -892,6 +908,10 @@ impl eframe::App for EditorApp {
             flag(self.overlays.constraints).to_owned(),
         );
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
+        storage.set_string(
+            command_palette::RECENT_COMMANDS_KEY,
+            self.palette.recent_text(),
+        );
         if let Ok(text) = serde_json::to_string(&self.graphics) {
             storage.set_string(GRAPHICS_KEY, text);
         }
@@ -999,6 +1019,7 @@ impl EditorApp {
             self.settings.open = !self.settings.open;
         }
         self.terrain_frame(ctx);
+        self.palette_frame(ctx);
         self.shortcuts(ctx);
         // Set again if the Model Studio is drawn under the mouse this frame;
         // a closed or hidden tab mustn't keep the keys.
@@ -1285,6 +1306,7 @@ impl EditorApp {
         }
         self.input_window(ctx);
         self.collision_groups_window(ctx);
+        self.references_window(ctx);
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);
         self.sky_prompt(ctx);
@@ -1335,6 +1357,8 @@ mod agent_tests;
 #[cfg(test)]
 mod asset_fix_tests;
 #[cfg(test)]
+mod asset_refs_tests;
+#[cfg(test)]
 mod attribute_tests;
 #[cfg(test)]
 mod behavior_tree_tests;
@@ -1344,6 +1368,8 @@ mod camera_tests;
 mod constraint_tests;
 #[cfg(test)]
 mod data_table_tests;
+#[cfg(test)]
+mod find_tests;
 #[cfg(test)]
 mod fracture_tests;
 #[cfg(test)]
@@ -1364,6 +1390,8 @@ mod live_script_tests;
 mod mover_tests;
 #[cfg(test)]
 mod navigation_tests;
+#[cfg(test)]
+mod palette_tests;
 #[cfg(test)]
 mod play_tests;
 #[cfg(test)]

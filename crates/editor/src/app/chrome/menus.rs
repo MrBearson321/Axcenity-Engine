@@ -57,7 +57,7 @@ impl EditorApp {
 
     /// The logo and the menus, then Play's badge and Settings at the right.
     /// Returns the space left between them, for the window title.
-    pub(super) fn menu_bar(&mut self, ui: &mut egui::Ui) -> egui::Rect {
+    pub(in crate::app) fn menu_bar(&mut self, ui: &mut egui::Ui) -> egui::Rect {
         let palette = theme::palette(ui.ctx());
         egui::MenuBar::new().ui(ui, |ui| {
             let (mark, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
@@ -272,6 +272,23 @@ impl EditorApp {
                     .shortcut_text(DELETE_KEY_TEXT);
                 if ui.add_enabled(deletable, delete).clicked() && selected.is_some() {
                     self.delete_selected();
+                }
+                ui.separator();
+                let palette = egui::Button::new(theme::with_icon(icons::COMMAND, "Command Palette"))
+                    .shortcut_text(ui.ctx().format_shortcut(&command_palette::PALETTE_SHORTCUT));
+                if ui.add(palette).clicked() {
+                    self.palette.toggle(crate::command_palette::Mode::Commands);
+                }
+                let quick = egui::Button::new(theme::with_icon(icons::FILE_MAGNIFYING_GLASS, "Quick Open…"))
+                    .shortcut_text(ui.ctx().format_shortcut(&command_palette::QUICK_OPEN_SHORTCUT));
+                if ui.add_enabled(self.project.is_some(), quick).clicked() {
+                    self.open_quick_open();
+                }
+                let find = egui::Button::new(theme::with_icon(icons::MAGNIFYING_GLASS, "Find in Scripts…"))
+                    .shortcut_text(ui.ctx().format_shortcut(&command_palette::FIND_SHORTCUT));
+                if ui.add_enabled(self.project.is_some(), find).clicked() {
+                    self.find.show_and_focus();
+                    self.search_scripts();
                 }
             });
             ui.menu_button("View", |ui| {

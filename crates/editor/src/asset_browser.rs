@@ -357,6 +357,13 @@ pub enum BrowserAction {
     EditMaterial(String),
     /// Open the model file at this path in the Model Studio.
     EditModel(String),
+    /// List what uses the asset at this path (Phase 70).
+    FindReferences(String),
+    /// Rename or move the asset at `from` to `to`, with every reference.
+    RenameAsset { from: String, to: String },
+    /// Work out which of these project files nothing uses, for the Unused
+    /// filter ([`AssetBrowser::set_unused`]).
+    FindUnused(Vec<String>),
     /// A line for Output. `error` is a failure.
     Notice { error: bool, text: String },
 }
@@ -369,6 +376,8 @@ enum AssetDialog {
         name: String,
         error: Option<String>,
     },
+    /// Rename or move the asset at `from`; `to` is the path being typed.
+    Move { from: String, to: String },
     /// Delete `files`, the own files of the assets called `name`. `global`
     /// when one of them is a global asset, whose library copy stays.
     Delete {
@@ -401,6 +410,11 @@ pub struct AssetBrowser {
     local_paths: HashSet<String>,
     global_paths: HashSet<String>,
     global_thumbnails: Thumbnails,
+    /// The Unused chip: only assets nothing uses.
+    unused_only: bool,
+    /// The project files nothing uses, as the app last worked out; `None`
+    /// until it has (or after a change).
+    unused: Option<HashSet<String>>,
 }
 
 impl AssetBrowser {
@@ -427,6 +441,30 @@ impl AssetBrowser {
     /// Walks the folder again on the next frame the panel is shown.
     pub fn refresh(&mut self) {
         self.scanned_at = None;
+        self.unused = None;
+    }
+
+    /// Shows the asset at `path` (Quick Open): every category, searched
+    /// for its path, and picked.
+    pub fn reveal(&mut self, path: &str) {
+        self.category = Category::All;
+        self.unused_only = false;
+        self.open_package = None;
+        self.search = path.to_owned();
+        self.picked = vec![path.to_owned()];
+    }
+
+    /// The files nothing uses, for the Unused filter.
+    pub fn set_unused(&mut self, unused: Vec<String>) {
+        self.unused = Some(unused.into_iter().collect());
+    }
+
+    /// The files the Unused filter shows, in path order.
+    #[cfg(test)]
+    pub fn unused_paths(&self) -> Vec<String> {
+        let mut paths: Vec<String> = self.unused.iter().flatten().cloned().collect();
+        paths.sort();
+        paths
     }
 
     /// The file at `path` changed on disk: list it again, with a new
@@ -676,7 +714,26 @@ impl AssetBrowser {
             .filter(|entry| self.category.holds(entry.kind))
             .filter(|entry| self.category != Category::Global || self.is_global(&entry.path))
             .filter(|entry| search.is_empty() || entry.path.to_lowercase().contains(&search))
+            .filter(|entry| {
+                !self.unused_only
+                    || self
+                        .unused
+                        .as_ref()
+                        .is_some_and(|unused| unused.contains(&entry.path))
+            })
             .collect();
+        if self.unused_only && self.unused.is_none() && action.is_none() {
+            // Worked out again after each change; nothing shows meanwhile.
+            let candidates: Vec<String> = self
+                .files
+                .iter()
+                .filter(|entry| entry.kind != AssetKind::Prop)
+                .filter(|entry| !axcenity_project::is_model_part(&entry.path))
+                .map(|entry| entry.path.clone())
+                .collect();
+            self.unused = Some(HashSet::new());
+            action = Some(BrowserAction::FindUnused(candidates));
+        }
         let packages = packages::packages(&self.files_and_shared());
         // A folder that's gone (deleted, or another project) closes.
         let open = self.open_package.as_ref().and_then(|name| {
@@ -688,7 +745,12 @@ impl AssetBrowser {
             self.open_package = None;
         }
         let in_folder = open.is_some() && search.is_empty();
-        let shown = shown(entries, &packages, open, !search.is_empty());
+        let shown = shown(
+            entries,
+            &packages,
+            open,
+            !search.is_empty() || self.unused_only,
+        );
         if let Some(package) = open
             && search.is_empty()
             && self.folder_header(ui, package)
@@ -827,6 +889,13 @@ impl AssetBrowser {
             }
             ItemMenu::EditMaterial { path } => return Some(BrowserAction::EditMaterial(path)),
             ItemMenu::EditModel { path } => return Some(BrowserAction::EditModel(path)),
+            ItemMenu::FindReferences { path } => return Some(BrowserAction::FindReferences(path)),
+            ItemMenu::Move { path } => {
+                self.dialog = Some(AssetDialog::Move {
+                    to: path.clone(),
+                    from: path,
+                });
+            }
         }
         None
     }
@@ -889,6 +958,16 @@ impl AssetBrowser {
             if chip(ui, category.label(), self.category == category).clicked() {
                 self.category = category;
             }
+        }
+        if chip(ui, "Unused", self.unused_only)
+            .on_hover_text(
+                "Only the assets nothing uses: no Instance, script (by its path), material, \
+                 prefab, level or data table names them.",
+            )
+            .clicked()
+        {
+            self.unused_only = !self.unused_only;
+            self.unused = None;
         }
     }
 
@@ -1014,6 +1093,49 @@ impl AssetBrowser {
                                 }
                                 Err(problem) => *error = Some(problem),
                             }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    });
+                }
+                AssetDialog::Move { from, to } => {
+                    ui.heading("Rename or move");
+                    ui.label(
+                        egui::RichText::new(format!("`{from}`"))
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                    let response =
+                        ui.add(egui::TextEdit::singleline(to).desired_width(f32::INFINITY));
+                    ui.label(
+                        "A new name, or a path under assets/ to move it. Every Instance, \
+                         script, material, prefab, level and data table that uses it is \
+                         changed to match, as one undo step.",
+                    );
+                    let enter =
+                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.horizontal(|ui| {
+                        let to = to.trim();
+                        // A bare name stays in its folder.
+                        let to = if to.contains('/') {
+                            to.to_owned()
+                        } else {
+                            match from.rsplit_once('/') {
+                                Some((folder, _)) => format!("{folder}/{to}"),
+                                None => to.to_owned(),
+                            }
+                        };
+                        let changed = !to.is_empty() && to != *from;
+                        if ui
+                            .add_enabled(changed, egui::Button::new("Rename"))
+                            .clicked()
+                            || (enter && changed)
+                        {
+                            action = Some(BrowserAction::RenameAsset {
+                                from: from.clone(),
+                                to,
+                            });
+                            close = true;
                         }
                         if ui.button("Cancel").clicked() {
                             close = true;
@@ -1300,6 +1422,18 @@ impl AssetBrowser {
                 .cloned()
                 .collect();
             response.context_menu(|ui| {
+                if local
+                    && ui
+                        .button(format!("{} Find References", icons::MAGNIFYING_GLASS))
+                        .on_hover_text(
+                            "List every Instance, script, material, prefab, level and data \
+                             table that uses it.",
+                        )
+                        .clicked()
+                {
+                    menu = Some(ItemMenu::FindReferences { path: path.clone() });
+                    ui.close();
+                }
                 if let Some(picked) = self.global_checkbox(ui, &path) {
                     menu = Some(picked);
                 }
@@ -1328,6 +1462,18 @@ impl AssetBrowser {
                         .clicked()
                 {
                     menu = Some(ItemMenu::EditModel { path: path.clone() });
+                    ui.close();
+                }
+                if !prefab
+                    && ui
+                        .button(format!("{} Rename or Move…", icons::PENCIL_SIMPLE))
+                        .on_hover_text(
+                            "Give it another name or folder. Everything that uses it is \
+                             changed to match, as one undo step.",
+                        )
+                        .clicked()
+                {
+                    menu = Some(ItemMenu::Move { path: path.clone() });
                     ui.close();
                 }
                 if prefab {
@@ -1420,6 +1566,13 @@ pub fn icon_of(entry: &AssetEntry) -> &'static str {
 
 /// What a tile's right-click menu asked for.
 pub(super) enum ItemMenu {
+    FindReferences {
+        path: String,
+    },
+    /// Rename or move a project asset (not a prefab, which has its own).
+    Move {
+        path: String,
+    },
     /// Make the asset at `path` global, or local again.
     Global {
         path: String,

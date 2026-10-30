@@ -109,6 +109,8 @@ renet_netcode = "2"
 rapier3d = "0.36"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Find in Scripts' regex option (MIT OR Apache-2.0); already in the tree through env_logger.
+regex = "1"
 # Reads zip archives (ambientCG texture downloads). Deflate only: that is
 # the method those archives use. MIT.
 zip = { version = "2", default-features = false, features = ["deflate"] }

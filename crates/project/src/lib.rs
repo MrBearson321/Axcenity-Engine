@@ -31,6 +31,7 @@
 //! `watch.rs` notices files changed by other programs ([`Watcher`]).
 
 mod asset_fix;
+mod asset_refs;
 mod levels;
 mod migrate;
 mod migrate_animation;
@@ -74,6 +75,9 @@ use serde::{Deserialize, Serialize};
 pub use asset_fix::{
     FileWrite, Fix, FixPlan, IGNORED_FILE, Ignored, PropertyFix, files_of_kind, list_project_files,
     plan_fix, read_ignored, suggestion, write_ignored,
+};
+pub use asset_refs::{
+    RefPlace, Reference, find_references, is_model_part, plan_rename, unused_assets,
 };
 pub use levels::{
     DEFAULT_START_LEVEL, FileChange, LEVEL_SUFFIX, LEVELS_FOLDER, check_level_name,

@@ -387,6 +387,18 @@ fn shortcuts_page(ui: &mut egui::Ui) {
                 ("Settings".into(), format(&SETTINGS_SHORTCUT)),
                 ("Play".into(), format(&PLAY_SHORTCUT)),
                 ("Stop".into(), format(&STOP_SHORTCUT)),
+                (
+                    "Command palette".into(),
+                    format(&super::command_palette::PALETTE_SHORTCUT),
+                ),
+                (
+                    "Quick Open".into(),
+                    format(&super::command_palette::QUICK_OPEN_SHORTCUT),
+                ),
+                (
+                    "Find in Scripts".into(),
+                    format(&super::command_palette::FIND_SHORTCUT),
+                ),
             ],
         ),
         (

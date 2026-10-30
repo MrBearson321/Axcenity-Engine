@@ -2150,9 +2150,9 @@ Each has a pause menu, a settings menu with rebindable input, and a working save
 
 ### Acceptance criteria
 
-- [ ] Every ribbon and menu command can be run from the palette.
-- [ ] Find in scripts finds a name used in both a Lua script and a block script, and Replace All changes both and undoes in one step.
-- [ ] Renaming a texture used by a material, a MeshPart and a script keeps all three working in Play.
+- [x] Every ribbon and menu command can be run from the palette.
+- [x] Find in scripts finds a name used in both a Lua script and a block script, and Replace All changes both and undoes in one step.
+- [x] Renaming a texture used by a material, a MeshPart and a script keeps all three working in Play.
 
 ---
 
