@@ -9,6 +9,8 @@ use glam::Mat4;
 
 mod clouds;
 mod color_grading;
+#[cfg(feature = "debug-views")]
+mod debug_views;
 mod environment_maps;
 mod fog;
 mod frustum_culling;

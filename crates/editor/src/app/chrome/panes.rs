@@ -783,6 +783,7 @@ impl EditorApp {
                             click_cursor: self.play.as_ref().and_then(|play| play.click_cursor()),
                             light_cones: self.light_cones,
                             overlays: self.overlays,
+                            view_mode: self.view_mode,
                             debug_rays: &debug_rays,
                             nav_mesh: self.nav_mesh.as_ref().map(|cache| &cache.mesh),
                             agent_paths: &agent_paths,

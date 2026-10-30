@@ -169,3 +169,19 @@ What it says:
 - **The GPU wins from about 3,000 particles**, so `scene::GPU_PARTICLE_THRESHOLD` is 3,000. At 2,000 the GPU path costs more GPU time than it saves on the CPU. Weaker GPUs pay more for the fixed cost, and weaker CPUs more per particle. The CPU's cap is 4,000 per emitter, so an emitter needing more than that has to be on the GPU anyway.
 - **100,000 particles take 0.23 ms to move and sort** (131,072 slots), and 1.5 ms to draw: filling overlapping squares, not moving them, is the cost there. That's the same per pixel as the CPU path would pay.
 - `RenderStats::gpu_particles` counts the slots kept, and their buffers (88 bytes a slot) count in the buffer bytes.
+
+## Debug views (graphics Phase 38)
+
+View > View Mode in the editor (`editor/src/viewport/view_mode.rs`) shows the viewport **Lit** (the game's frame), as one of the renderer's debug views, or as **Culling Bounds**: the lit frame with the culling overlay on (culling held where the camera was when it was picked, each item's bounds green where drawn and red where culled). The mode isn't saved between runs. The debug views (`render/src/renderer/debug_views.rs`, `debug_views.wgsl`, `TextureRenderer::set_debug_view`):
+
+- **Unlit**: each surface's base color plus its glow. **Base Color**: the base color alone, its color map included. Both are as the color is written (sRGB), with no light, shadow, fog or post-processing.
+- **Wireframe**: each triangle's edges, one pixel wide, over its surface dimmed. The edges come from each corner's place in its triangle, worked out in the shader (line drawing isn't on every backend).
+- **Normals**: the way each surface faces in the world, normal maps included, x, y and z as red, green and blue from -1 (0) to 1 (255).
+- **Metalness**, **Roughness**: the value, maps included, as grey from 0 (black) to 1 (white).
+- **Ambient Occlusion**: the occlusion map times screen-space ambient occlusion (solid items only, and only while the Ambient Occlusion graphics setting is on), white for open.
+- **Overdraw**: every surface drawn over a pixel adds the same orange light, hidden ones included, with back faces culled as the scene culls them.
+- **LOD Levels**: green for an item drawn with its own mesh, then yellow, orange and red for its simpler copies (graphics Phase 13); grey for a mesh without levels.
+
+A debug view draws after the frame's own passes, over the finished picture and under the UI, at the output's size, with its own depth target and the camera's view (without TAA's jitter). Each batch is drawn again with its material, posed and swayed as in the scene, reading its corners from the mesh's buffers ("vertex pulling"). See-through items draw as solid. Terrain chunks show their shape and normals with the plain white material, and a material's own surface shader is left out: its maps and values show as the standard material reads them. Sprites and the sky aren't drawn.
+
+The debug views are built only with `render`'s `debug-views` feature, which the editor turns on and the player doesn't (`cargo tree -p axcenity-player -e features -i axcenity-render` lists no `debug-views`), so the player never has them. With the feature, mesh buffers can also be read as storage buffers. While the lit view is shown, nothing is kept for the debug views: their pipelines, depth target and uniforms are freed when the mode goes back to Lit.

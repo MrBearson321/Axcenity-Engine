@@ -337,6 +337,15 @@ impl EditorApp {
                 {
                     self.light_cones = !self.light_cones;
                 }
+                ui.menu_button(theme::with_icon(icons::EYE, "View Mode"), |ui| {
+                    for mode in ViewMode::all() {
+                        let item = egui::Button::selectable(self.view_mode == mode, mode.label());
+                        if ui.add(item).on_hover_text(mode.hint()).clicked() {
+                            self.view_mode = mode;
+                            ui.close();
+                        }
+                    }
+                });
                 ui.weak("Overlays");
                 overlay_menu_item(
                     ui,

@@ -109,7 +109,7 @@ use crate::tree::{self, Insertable};
 use crate::ui_designer::{DesignerAction, DesignerScene, GraphPane, UiDesigner};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
 use crate::viewport::{
-    self, DragEdit, DragKind, OverlayToggles, Viewport, ViewportOutput, ViewportScene,
+    self, DragEdit, DragKind, OverlayToggles, ViewMode, Viewport, ViewportOutput, ViewportScene,
 };
 use crate::watcher::Watcher;
 use crate::widgets;
@@ -338,6 +338,8 @@ pub struct EditorApp {
     /// View overlay toggles (colliders, raycasts, bounds, emitters, the
     /// navigation mesh). Saved between runs. The player never draws them.
     overlays: OverlayToggles,
+    /// View > View Mode: the lit scene or a debug view. Not saved between runs.
+    view_mode: ViewMode,
     /// The navigation mesh the overlay draws, while it's on.
     nav_mesh: Option<nav_overlay::NavCache>,
     /// This computer's graphics settings (Settings > Graphics), for the
@@ -706,6 +708,7 @@ impl EditorApp {
             ribbon_tabs: RibbonTabs::default(),
             light_cones: false,
             overlays: OverlayToggles::default(),
+            view_mode: ViewMode::Lit,
             nav_mesh: None,
             graphics: axcenity_render::GraphicsSettings::default(),
             capabilities: None,

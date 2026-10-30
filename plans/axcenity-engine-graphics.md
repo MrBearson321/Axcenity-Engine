@@ -601,4 +601,4 @@ Viewport View modes: lit, unlit, wireframe (drawn in the shader from barycentric
 
 ### Acceptance criteria
 
-- [ ] Each view shows what it names on `hello-graphics`, and switching back to lit restores the normal frame.
+- [x] Each view shows what it names on `hello-graphics`, and switching back to lit restores the normal frame.

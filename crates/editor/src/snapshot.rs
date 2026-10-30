@@ -130,6 +130,11 @@ pub fn snapshot_rendered(
         .flat_map(|line| &line[..(width * 4) as usize])
         .copied()
         .collect();
+    save_png(path, (width, height), &pixels);
+}
+
+/// Saves rows of RGBA `pixels`, `width` × `height`, as a PNG at `path`.
+pub fn save_png(path: &std::path::Path, (width, height): (u32, u32), pixels: &[u8]) {
     let file = std::fs::File::create(path).unwrap();
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
     encoder.set_color(png::ColorType::Rgba);
@@ -137,6 +142,6 @@ pub fn snapshot_rendered(
     encoder
         .write_header()
         .unwrap()
-        .write_image_data(&pixels)
+        .write_image_data(pixels)
         .unwrap();
 }

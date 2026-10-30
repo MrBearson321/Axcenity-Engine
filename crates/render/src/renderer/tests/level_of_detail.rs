@@ -8,8 +8,8 @@ use crate::renderer::lod::{FADE_FRAMES, LOD_SCREEN_SIZES};
 /// `copies` times, so each level has a known triangle count and looks the
 /// same. Level 0 has two simpler copies, with half and a quarter of its
 /// triangles.
-struct Detailed {
-    level: usize,
+pub(super) struct Detailed {
+    pub(super) level: usize,
 }
 
 const FULL_TRIANGLES: u64 = 64;

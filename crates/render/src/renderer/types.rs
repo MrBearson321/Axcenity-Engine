@@ -904,6 +904,9 @@ pub(super) struct ScenePipeline {
     pub(super) culling_bounds: Vec<CullingBounds>,
     /// Each item's level of detail, kept between frames.
     pub(super) lods: LodStates,
+    /// The editor's debug view, while one is shown (renderer/debug_views.rs).
+    #[cfg(feature = "debug-views")]
+    pub(super) debug_views: Option<Box<super::debug_views::DebugViews>>,
     /// Bytes of textures and of meshes on the GPU.
     pub(super) texture_bytes: GpuBytes,
     pub(super) mesh_bytes: GpuBytes,

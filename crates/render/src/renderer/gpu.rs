@@ -91,6 +91,24 @@ pub(super) fn shader_module(
     })
 }
 
+/// [`InstanceRaw`]'s fields, as `InstanceIn` in shader.wgsl reads them.
+pub(super) const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 12] = wgpu::vertex_attr_array![
+    2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4,
+    6 => Float32x3, 7 => Float32x3, 8 => Float32x3,
+    9 => Float32x4,
+    10 => Float32x4,
+    11 => Float32x4,
+    14 => Uint32x2,
+    15 => Float32x4,
+];
+
+/// How else a mesh's buffers are used: the editor's debug views read them
+/// as storage buffers (renderer/debug_views.rs). Nothing else, without them.
+#[cfg(feature = "debug-views")]
+const MESH_READ: wgpu::BufferUsages = wgpu::BufferUsages::STORAGE;
+#[cfg(not(feature = "debug-views"))]
+const MESH_READ: wgpu::BufferUsages = wgpu::BufferUsages::empty();
+
 /// A pipeline that draws meshes with their instances into the HDR scene:
 /// solid items, see-through ones when `transparent` is true, or terrain
 /// chunks, by `shader`'s `entry_points` (vertex, fragment). `layouts` are
@@ -121,15 +139,7 @@ pub(super) fn create_pipeline(
     let instance_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<InstanceRaw>() as u64,
         step_mode: wgpu::VertexStepMode::Instance,
-        attributes: &wgpu::vertex_attr_array![
-            2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4,
-            6 => Float32x3, 7 => Float32x3, 8 => Float32x3,
-            9 => Float32x4,
-            10 => Float32x4,
-            11 => Float32x4,
-            14 => Uint32x2,
-            15 => Float32x4,
-        ],
+        attributes: &INSTANCE_ATTRIBUTES,
     };
 
     let blend = if transparent {
@@ -637,12 +647,12 @@ pub(super) fn upload_buffers(
         label: Some(name),
         contents: bytemuck::cast_slice(corners),
         // COPY_DST so a posed mesh's corners can be rewritten in place.
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST | MESH_READ,
     });
     let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(name),
         contents: indices,
-        usage: wgpu::BufferUsages::INDEX,
+        usage: wgpu::BufferUsages::INDEX | MESH_READ,
     });
     GpuMesh {
         bounds: vertex_bounds(corners),

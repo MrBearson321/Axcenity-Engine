@@ -18,7 +18,8 @@ axcenity-nav.workspace = true
 axcenity-physics.workspace = true
 axcenity-plugins.workspace = true
 axcenity-project.workspace = true
-axcenity-render.workspace = true
+# Its debug views (View > View Mode) are the editor's only; the player leaves them out.
+axcenity-render = { workspace = true, features = ["debug-views"] }
 axcenity-save.workspace = true
 axcenity-scene.workspace = true
 axcenity-net.workspace = true

@@ -34,6 +34,8 @@ pub use graphics::{
     PointShadowMapSize, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowMapSize,
     ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
+#[cfg(feature = "debug-views")]
+pub use renderer::DebugView;
 pub use renderer::{
     CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, MAX_GPU_PARTICLES,
     PROBE_BAKE_SIZE, RenderStats, Renderer, ShaderError, SurfaceShader, TextureRenderer,

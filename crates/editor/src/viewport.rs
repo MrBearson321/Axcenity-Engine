@@ -56,8 +56,10 @@ use crate::ui_handles::{self, Grip, Handles, UiDrag, UiDragEdit};
 mod game_input;
 mod input;
 mod overlays;
+mod view_mode;
 pub(crate) use overlays::paint_agent_paths;
 use overlays::*;
+pub use view_mode::ViewMode;
 
 /// Where the camera starts, looking at the origin (the same as the player).
 const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
@@ -300,6 +302,8 @@ pub struct ViewportScene<'a> {
     pub light_cones: bool,
     /// Editor-only visual-debug overlays (View > Overlays).
     pub overlays: OverlayToggles,
+    /// What the viewport shows: lit, or a debug view (View > View Mode).
+    pub view_mode: ViewMode,
     /// Recent `workspace:Raycast` calls during Play, for the raycast overlay.
     pub debug_rays: &'a [DebugRay],
     /// The navigation mesh, for its overlay.
@@ -523,6 +527,15 @@ impl Viewport {
             .map(|target| target.renderer.read_pixels())
     }
 
+    /// How many items' bounds the culling overlay holds (none while
+    /// culling isn't held).
+    #[cfg(test)]
+    pub fn culling_bounds_held(&self) -> usize {
+        self.target
+            .as_ref()
+            .map_or(0, |target| target.renderer.culling_bounds().len())
+    }
+
     pub fn new() -> Self {
         Self {
             camera: start_camera(),
@@ -721,6 +734,7 @@ impl Viewport {
             click_cursor,
             light_cones,
             overlays,
+            view_mode,
             debug_rays,
             nav_mesh,
             agent_paths,
@@ -976,8 +990,8 @@ impl Viewport {
         });
         // Does nothing unless the settings changed.
         target.renderer.set_graphics(graphics);
-        self.frozen_culling = overlays
-            .culling
+        target.renderer.set_debug_view(view_mode.debug_view());
+        self.frozen_culling = (overlays.culling || view_mode.holds_culling())
             .then(|| self.frozen_culling.unwrap_or(camera));
         target.renderer.freeze_culling(self.frozen_culling);
         if target.renderer.size() != (width.max(1), height.max(1)) {

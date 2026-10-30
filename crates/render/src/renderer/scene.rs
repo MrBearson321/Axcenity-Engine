@@ -355,6 +355,8 @@ impl ScenePipeline {
             frozen_view: None,
             culling_bounds: Vec::new(),
             lods: LodStates::default(),
+            #[cfg(feature = "debug-views")]
+            debug_views: None,
             texture_bytes,
             mesh_bytes,
         };
@@ -1261,6 +1263,14 @@ impl ScenePipeline {
             post.enabled && post.bloom_enabled && post.bloom_intensity > 0.0,
         );
 
+        // The editor's debug view, over the finished frame and under the
+        // UI (renderer/debug_views.rs).
+        #[cfg(feature = "debug-views")]
+        if let Some(mut debug) = self.debug_views.take() {
+            debug.draw(self, &mut encoder, view, (&batches, &draws), view_proj);
+            self.debug_views = Some(debug);
+        }
+
         mark(&mut encoder, FramePass::Ui);
         if turned.drawn
             && let Some((sheet, _, _)) = &self.turned_text.sheet
@@ -1421,7 +1431,7 @@ impl ScenePipeline {
 
     /// The skin binding `mesh` is drawn with: its joints and weights, or
     /// none for a mesh that isn't animated.
-    fn skin_group<'a>(&'a self, mesh: &'a GpuMesh) -> &'a wgpu::BindGroup {
+    pub(super) fn skin_group<'a>(&'a self, mesh: &'a GpuMesh) -> &'a wgpu::BindGroup {
         mesh.skin
             .as_ref()
             .map_or(&self.skinning.none, |skin| &skin.bind_group)

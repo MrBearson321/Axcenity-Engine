@@ -36,6 +36,8 @@ use crate::mesh::{self};
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
 pub use culling::CullingBounds;
+#[cfg(feature = "debug-views")]
+pub use debug_views::DebugView;
 use glyphon::{
     Buffer, Cache as GlyphCache, FontSystem, Resolution, SwashCache, TextArea, TextAtlas,
     TextBounds, TextRenderer as GlyphTextRenderer, Viewport as TextViewport,
@@ -48,6 +50,8 @@ pub use surface_shaders::{ShaderError, SurfaceShader};
 mod atmosphere_sky;
 mod clouds;
 mod culling;
+#[cfg(feature = "debug-views")]
+mod debug_views;
 mod environment;
 mod fog;
 mod gpu;
@@ -416,6 +420,21 @@ impl TextureRenderer {
         if camera.is_none() {
             self.scene.culling_bounds = Vec::new();
         }
+    }
+
+    /// Shows `view` in place of the lit scene from the next frame, or the
+    /// lit scene for `None` (see [`DebugView`]). Editor only: built with
+    /// the `debug-views` feature. Nothing is kept for the debug views while
+    /// the lit scene is shown.
+    #[cfg(feature = "debug-views")]
+    pub fn set_debug_view(&mut self, view: Option<DebugView>) {
+        self.scene.set_debug_view(view);
+    }
+
+    /// Whether anything is kept for a debug view: only while one is shown.
+    #[cfg(all(test, feature = "debug-views"))]
+    pub(crate) fn debug_view_alive(&self) -> bool {
+        self.scene.debug_views.is_some()
     }
 
     /// Each item's bounding sphere in the last frame, and whether it was

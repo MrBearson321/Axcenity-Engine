@@ -1705,3 +1705,71 @@ fn a_first_person_camera_stays_at_the_eyes_during_play_and_stop_restores_the_fly
     assert_eq!(app.viewport.camera_view(), fly);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// View > View Mode switches what the viewport draws at once: a debug view,
+/// back to lit, then Culling Bounds, which holds culling and outlines
+/// every item's bounds over the lit frame. With `AXCENITY_SNAPSHOTS` naming
+/// a folder, the Culling Bounds frame is saved there.
+#[test]
+fn the_view_mode_changes_the_viewport_at_once_and_lit_comes_back() {
+    use crate::viewport::ViewMode;
+    let mut app = EditorApp::new(Some(&example("hello-graphics")));
+    // Models load the first time they're drawn, so the lit frame is the
+    // second, and the third shows it's steady.
+    let modes = [
+        ViewMode::Lit,
+        ViewMode::Lit,
+        ViewMode::Lit,
+        ViewMode::Debug(axcenity_render::DebugView::Wireframe),
+        ViewMode::Lit,
+        ViewMode::CullingBounds,
+        ViewMode::CullingBounds,
+    ];
+    let mut frame = 0;
+    let mut seen: Vec<(Vec<u8>, usize)> = Vec::new();
+    let path = std::env::var_os("AXCENITY_SNAPSHOTS").map_or_else(
+        || std::env::temp_dir().join(format!("axcenity-view-mode-{}.png", std::process::id())),
+        |folder| PathBuf::from(folder).join("view-mode-Culling-Bounds-viewport.png"),
+    );
+    crate::snapshot::snapshot_rendered(
+        &path,
+        egui::vec2(320.0, 200.0),
+        vec![Vec::new(); modes.len()],
+        |ctx, render_state| {
+            app.view_mode = modes[frame];
+            frame += 1;
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.scene_pane(ui, Some(render_state));
+            });
+            if let Some(pixels) = app.viewport.pixels() {
+                seen.push((pixels, app.viewport.culling_bounds_held()));
+            }
+        },
+    );
+    if seen.is_empty() {
+        return; // No GPU.
+    }
+    // How far apart two frames are, on average per channel.
+    let apart = |a: &[u8], b: &[u8]| {
+        let total: u64 = a
+            .chunks(4)
+            .zip(b.chunks(4))
+            .flat_map(|(a, b)| {
+                (0..3).map(move |channel| u64::from(a[channel].abs_diff(b[channel])))
+            })
+            .sum();
+        total as f64 / (a.len() / 4 * 3) as f64
+    };
+    let lit = &seen[1].0;
+    let distances: Vec<f64> = seen.iter().map(|(frame, _)| apart(lit, frame)).collect();
+    assert_eq!(seen[1].1, 0);
+    assert!(distances[2] < 1.0, "the lit frame is steady");
+    assert!(distances[3] > 20.0, "the wireframe shows");
+    assert!(distances[4] < 1.0, "lit comes back");
+    // Culling Bounds draws the lit frame and holds every item's bounds.
+    assert!(distances[6] < 1.0, "Culling Bounds draws the lit frame");
+    assert!(seen[6].1 > 10, "{} bounds held", seen[6].1);
+    let _ = std::fs::remove_file(
+        std::env::temp_dir().join(format!("axcenity-view-mode-{}.png", std::process::id())),
+    );
+}

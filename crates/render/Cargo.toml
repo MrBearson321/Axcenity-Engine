@@ -17,6 +17,11 @@ serde.workspace = true
 wgpu.workspace = true
 axcenity-workspace-hack.workspace = true
 
+[features]
+# The editor's debug views (`TextureRenderer::set_debug_view`: wireframe,
+# normals, overdraw and the rest). The player leaves them out.
+debug-views = []
+
 [dev-dependencies]
 # GPU tests set up a device without a window.
 pollster.workspace = true
