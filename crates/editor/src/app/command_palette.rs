@@ -139,6 +139,8 @@ pub(super) enum Command {
     OpenProject,
     Save,
     VersionHistory,
+    SaveCheckpoint,
+    BackUpProject,
     Input,
     CloseProject,
     Import,
@@ -341,6 +343,22 @@ impl EditorApp {
             "Version History…",
             "File",
             &[],
+            None,
+            when(editing, not_editing),
+        );
+        add(
+            Command::SaveCheckpoint,
+            "Save Checkpoint…",
+            "File",
+            &["version", "pin", "history"],
+            None,
+            when(editing, not_editing),
+        );
+        add(
+            Command::BackUpProject,
+            "Back Up Project",
+            "File",
+            &["zip", "backup", "archive"],
             None,
             when(editing, not_editing),
         );
@@ -916,7 +934,9 @@ impl EditorApp {
                     self.save();
                 }
             }
-            Command::VersionHistory => self.versions_open = true,
+            Command::VersionHistory => self.version_history.open = true,
+            Command::SaveCheckpoint => self.version_history.open_for_checkpoint(),
+            Command::BackUpProject => self.back_up_project(false),
             Command::Input => self.input_settings.open = true,
             Command::CloseProject => self.request_and_go_ahead(ctx, Discard::CloseProject),
             Command::Import => self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER),

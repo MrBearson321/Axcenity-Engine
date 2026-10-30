@@ -63,6 +63,7 @@ mod tree_ops;
 mod ui_graphs;
 mod ui_links;
 mod ui_selection;
+mod version_history;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -179,8 +180,9 @@ pub struct EditorApp {
     /// Every selected Instance, in the order they were added. The viewport and
     /// Explorer highlight all of them. Ctrl toggles; Shift extends.
     selection: Vec<InstanceId>,
-    /// File > Version History, and the same window after a restore.
-    versions_open: bool,
+    /// File > Version History (its timeline, checkpoints, restores and
+    /// backups), and the same window after a restore.
+    version_history: version_history::VersionHistory,
     /// File ▸ Input…: the project's input map.
     input_settings: input_settings::InputWindow,
     /// Model ▸ Build ▸ Collision Groups.
@@ -660,7 +662,7 @@ impl EditorApp {
             assets: Assets::default(),
             selected: None,
             selection: Vec::new(),
-            versions_open: false,
+            version_history: Default::default(),
             input_settings: Default::default(),
             collision_groups: Default::default(),
             palette: Default::default(),
@@ -1318,7 +1320,7 @@ impl EditorApp {
             ctx.request_repaint();
         }
 
-        if self.versions_open {
+        if self.version_history.open {
             self.version_window(ctx);
         }
         self.input_window(ctx);
@@ -1460,3 +1462,5 @@ mod ui_text_style_tests;
 mod undo_tests;
 #[cfg(test)]
 mod vehicle_tests;
+#[cfg(test)]
+mod version_history_tests;

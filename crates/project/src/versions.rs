@@ -1,10 +1,15 @@
 //! Saved versions of a project, so a game can be rolled back.
 //!
 //! Each version is a copy of `world.json`, the levels in `levels/`, the
-//! `scripts` folder and every `.css` file, under `.axcenity/history/<id>/`. Assets, the manifest and
-//! the thumbnail stay as they are. The newest [`MAX_VERSIONS`] are kept.
+//! `scripts` folder and every `.css` file, under `.axcenity/history/<id>/`,
+//! with a list of the assets as they were (size and time, not their bytes).
+//! Assets, the manifest and the thumbnail stay as they are on restore. The
+//! newest [`MAX_VERSIONS`] unpinned versions are kept; pinned ones
+//! (checkpoints, and what a restore replaced) are kept until unpinned.
 //! Restoring copies those files back and removes scripts or styles the
 //! version doesn't have. `.axcenity` is already left out of exports.
+
+mod changes;
 
 use std::fs;
 use std::io::{self, ErrorKind};
@@ -13,21 +18,34 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{COLLISION_GROUPS_FILE, STRINGS_FILE, WORLD_FILE, find_scripts, find_stylesheets};
 
+pub use changes::{
+    AssetChange, Change, ChangedFile, Changes, InstanceChange, Line, around_changes,
+};
+
 /// Where versions live, relative to the project folder.
 pub const HISTORY_DIR: &str = ".axcenity/history";
+/// The label on its first line, then `pinned` when it is.
 const META_FILE: &str = "meta.txt";
-/// How many versions to keep. Older ones are deleted.
+/// One line per file under `assets/`: size, modified time and path.
+const ASSETS_FILE: &str = "assets.txt";
+const ASSETS_DIR: &str = "assets";
+const PINNED: &str = "pinned";
+/// How many unpinned versions to keep. Older ones are deleted.
 const MAX_VERSIONS: usize = 40;
+/// The label of what a restore replaced.
+const BEFORE_RESTORE: &str = "Before restore";
 
 /// One saved version of a project.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Version {
     /// The folder name under [`HISTORY_DIR`]. Safe to pass to [`restore_version`].
     pub id: String,
-    /// Why it was saved, such as "Save" or "Before restore".
+    /// Why it was saved, such as "Save", "Before restore" or a checkpoint's message.
     pub label: String,
     /// Seconds since the Unix epoch, UTC.
     pub saved_unix: u64,
+    /// Kept however many saves follow (a checkpoint, or what a restore replaced).
+    pub pinned: bool,
 }
 
 impl Version {
@@ -48,20 +66,13 @@ pub fn list_versions(folder: &Path) -> Vec<Version> {
         if !valid_id(&name) || !entry.path().is_dir() {
             continue;
         }
-        let label = fs::read_to_string(entry.path().join(META_FILE))
-            .ok()
-            .and_then(|text| text.lines().next().map(str::trim).map(str::to_owned))
-            .filter(|label| !label.is_empty())
-            .unwrap_or_else(|| "Save".to_owned());
-        let saved_unix = name
-            .split('-')
-            .next()
-            .and_then(|secs| secs.parse().ok())
-            .unwrap_or(0);
+        let (label, pinned) = read_meta(&entry.path());
+        let saved_unix = parse_id(&name).map_or(0, |(secs, _)| secs);
         versions.push(Version {
             id: name,
             label,
             saved_unix,
+            pinned,
         });
     }
     versions.sort_by(|a, b| b.id.cmp(&a.id));
@@ -72,47 +83,39 @@ pub fn list_versions(folder: &Path) -> Vec<Version> {
 /// `label`. Does nothing when that is identical to the newest version.
 /// Returns whether a new version was written.
 pub fn record_version(folder: &Path, label: &str) -> io::Result<bool> {
-    let files = tracked_files(folder);
-    if let Some(newest) = list_versions(folder).into_iter().next()
-        && let Some(dir) = version_dir(folder, &newest.id)
-        && same_files(folder, &dir, &files)?
-    {
-        return Ok(false);
-    }
-    let id = fresh_id(folder)?;
+    record(folder, label).map(|(_, new)| new)
+}
+
+/// File > Version History's Save Checkpoint: keeps the current files as a
+/// pinned version labeled `message` ("Checkpoint" when it's empty). When the
+/// newest version already has these files, that one is relabeled and pinned
+/// instead. Returns the version's id.
+pub fn record_checkpoint(folder: &Path, message: &str) -> io::Result<String> {
+    let (id, _) = record(folder, message)?;
     let dir = folder.join(HISTORY_DIR).join(&id);
-    fs::create_dir_all(&dir)?;
-    for path in &files {
-        copy_in(folder, &dir, path)?;
+    write_meta(&dir, &clean_label(message, "Checkpoint"), true)?;
+    Ok(id)
+}
+
+/// Pins or unpins version `id`. An unpinned version is dropped once
+/// [`MAX_VERSIONS`] newer unpinned ones exist.
+pub fn set_pinned(folder: &Path, id: &str, pinned: bool) -> io::Result<()> {
+    let dir = existing_version(folder, id)?;
+    let (label, _) = read_meta(&dir);
+    write_meta(&dir, &label, pinned)?;
+    if !pinned {
+        prune(folder)?;
     }
-    let label = label.replace(['\n', '\r'], " ");
-    let label = if label.trim().is_empty() {
-        "Save".to_owned()
-    } else {
-        label
-    };
-    fs::write(dir.join(META_FILE), format!("{label}\n"))?;
-    prune(folder)?;
-    Ok(true)
+    Ok(())
 }
 
 /// Puts the version `id` back into `folder`: world, string table, scripts
 /// and styles.
 /// Scripts or styles that aren't in the version are removed. Assets and the
-/// manifest are left as they are.
+/// manifest are left as they are. The current files are kept first, as a
+/// pinned version labeled "Before restore", so the restore can be undone.
 pub fn restore_version(folder: &Path, id: &str) -> io::Result<()> {
-    let Some(dir) = version_dir(folder, id) else {
-        return Err(io::Error::new(
-            ErrorKind::InvalidInput,
-            "that version name isn't valid",
-        ));
-    };
-    if !dir.is_dir() {
-        return Err(io::Error::new(
-            ErrorKind::NotFound,
-            "that version is not there",
-        ));
-    }
+    let dir = existing_version(folder, id)?;
     let snapshot = snapshot_files(&dir)?;
     if !snapshot.iter().any(|path| path == WORLD_FILE) {
         return Err(io::Error::new(
@@ -120,6 +123,7 @@ pub fn restore_version(folder: &Path, id: &str) -> io::Result<()> {
             "that version has no world file",
         ));
     }
+    keep_before_restore(folder)?;
     for path in &snapshot {
         copy_in(&dir, folder, path)?;
     }
@@ -129,6 +133,65 @@ pub fn restore_version(folder: &Path, id: &str) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Puts one file of version `id` back, such as `scripts/door.server.lua`.
+/// A file the version doesn't have is removed from the project. Like
+/// [`restore_version`], the current files are kept first.
+pub fn restore_file(folder: &Path, id: &str, path: &str) -> io::Result<()> {
+    let dir = existing_version(folder, id)?;
+    if !safe_relative(path) || path == META_FILE || path == ASSETS_FILE {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "that isn't a file a version keeps",
+        ));
+    }
+    let in_version = dir.join(path).is_file();
+    let in_project = tracked_files(folder).iter().any(|tracked| tracked == path);
+    if !in_version && !in_project {
+        return Err(io::Error::new(
+            ErrorKind::NotFound,
+            format!("`{path}` is in neither that version nor the project"),
+        ));
+    }
+    keep_before_restore(folder)?;
+    if in_version {
+        copy_in(&dir, folder, path)
+    } else {
+        fs::remove_file(folder.join(path))
+    }
+}
+
+/// What changed in version `id` since the version before it (everything is
+/// "added" in the oldest): Instances in the world and levels, the lines of
+/// scripts and other files, and which assets were added, removed or changed.
+pub fn version_changes(folder: &Path, id: &str) -> io::Result<Changes> {
+    let dir = existing_version(folder, id)?;
+    let versions = list_versions(folder);
+    let older = versions
+        .iter()
+        .position(|version| version.id == id)
+        .and_then(|index| versions.get(index + 1))
+        .and_then(|version| version_dir(folder, &version.id));
+    let read_side = |dir: &Path| -> io::Result<changes::Side> {
+        let mut files = Vec::new();
+        for path in snapshot_files(dir)? {
+            let bytes = fs::read(dir.join(&path))?;
+            files.push((path, String::from_utf8_lossy(&bytes).into_owned()));
+        }
+        let assets = fs::read_to_string(dir.join(ASSETS_FILE)).ok();
+        Ok(changes::Side { files, assets })
+    };
+    let new = read_side(&dir)?;
+    let old = match &older {
+        Some(dir) => read_side(dir)?,
+        // Nothing before it: every file is new, and so is every asset.
+        None => changes::Side {
+            files: Vec::new(),
+            assets: new.assets.as_ref().map(|_| String::new()),
+        },
+    };
+    Ok(changes::compare(&old, &new))
 }
 
 /// `world.json`, `strings.json`, `collision-groups.json`, every level in
@@ -153,10 +216,97 @@ fn tracked_files(folder: &Path) -> Vec<String> {
     files
 }
 
+/// Writes a version of the current files, unless the newest already has
+/// them. Returns the id of the version that has them and whether it's new.
+fn record(folder: &Path, label: &str) -> io::Result<(String, bool)> {
+    let files = tracked_files(folder);
+    let assets = asset_listing(folder);
+    if let Some(newest) = list_versions(folder).into_iter().next()
+        && let Some(dir) = version_dir(folder, &newest.id)
+        && same_files(folder, &dir, &files)?
+        && fs::read_to_string(dir.join(ASSETS_FILE)).ok().as_deref() == Some(assets.as_str())
+    {
+        return Ok((newest.id, false));
+    }
+    let id = fresh_id(folder)?;
+    let dir = folder.join(HISTORY_DIR).join(&id);
+    fs::create_dir_all(&dir)?;
+    for path in &files {
+        copy_in(folder, &dir, path)?;
+    }
+    fs::write(dir.join(ASSETS_FILE), assets)?;
+    write_meta(&dir, &clean_label(label, "Save"), false)?;
+    prune(folder)?;
+    Ok((id, true))
+}
+
+/// Keeps the current files as a pinned version before a restore replaces
+/// them. When the newest version already has them, that one is pinned, and
+/// a plain "Save" is relabeled to say why.
+fn keep_before_restore(folder: &Path) -> io::Result<()> {
+    let (id, _) = record(folder, BEFORE_RESTORE)?;
+    let dir = folder.join(HISTORY_DIR).join(&id);
+    let (label, _) = read_meta(&dir);
+    let label = if label == "Save" {
+        BEFORE_RESTORE
+    } else {
+        &label
+    };
+    write_meta(&dir, label, true)
+}
+
+fn clean_label(label: &str, default: &str) -> String {
+    let label = label.replace(['\n', '\r'], " ");
+    let label = label.trim();
+    if label.is_empty() {
+        default.to_owned()
+    } else {
+        label.to_owned()
+    }
+}
+
+fn read_meta(dir: &Path) -> (String, bool) {
+    let text = fs::read_to_string(dir.join(META_FILE)).unwrap_or_default();
+    let mut lines = text.lines().map(str::trim);
+    let label = lines
+        .next()
+        .filter(|label| !label.is_empty())
+        .unwrap_or("Save")
+        .to_owned();
+    let pinned = lines.any(|line| line == PINNED);
+    (label, pinned)
+}
+
+fn write_meta(dir: &Path, label: &str, pinned: bool) -> io::Result<()> {
+    let pin = if pinned { "pinned\n" } else { "" };
+    fs::write(dir.join(META_FILE), format!("{label}\n{pin}"))
+}
+
+/// Every file under `assets/`, one per line: size, modified time and path,
+/// in path order. Cheap to make, so it's taken on every save.
+fn asset_listing(folder: &Path) -> String {
+    let mut files = Vec::new();
+    let _ = walk(&folder.join(ASSETS_DIR), ASSETS_DIR, &mut files);
+    files.sort();
+    let mut listing = String::new();
+    for path in files {
+        let Ok(meta) = fs::metadata(folder.join(&path)) else {
+            continue;
+        };
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |since| since.as_millis());
+        listing.push_str(&format!("{}\t{modified}\t{path}\n", meta.len()));
+    }
+    listing
+}
+
 fn snapshot_files(dir: &Path) -> io::Result<Vec<String>> {
     let mut files = Vec::new();
     walk(dir, "", &mut files)?;
-    files.retain(|path| path != META_FILE && safe_relative(path));
+    files.retain(|path| path != META_FILE && path != ASSETS_FILE && safe_relative(path));
     files.sort();
     Ok(files)
 }
@@ -210,23 +360,45 @@ fn same_files(project: &Path, snapshot: &Path, files: &[String]) -> io::Result<b
     Ok(true)
 }
 
+/// A name after every existing one, so the newest always sorts first even
+/// with many saves in one second (or a clock that went back).
 fn fresh_id(folder: &Path) -> io::Result<String> {
-    let secs = SystemTime::now()
+    let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    for n in 0..100 {
+    let (mut secs, mut n) = (now, 0);
+    if let Some((newest, k)) = list_versions(folder)
+        .first()
+        .and_then(|version| parse_id(&version.id))
+        && newest >= now
+    {
+        (secs, n) = (newest, k + 1);
+    }
+    for _ in 0..1000 {
+        if n > 99 {
+            (secs, n) = (secs + 1, 0);
+        }
         let id = format!("{secs:016}-{n:02}");
         if !folder.join(HISTORY_DIR).join(&id).exists() {
             return Ok(id);
         }
+        n += 1;
     }
     Err(io::Error::other("could not pick a new version name"))
 }
 
+/// `0000001760000000-03` as its seconds and its number within that second.
+fn parse_id(id: &str) -> Option<(u64, u32)> {
+    let (secs, n) = id.split_once('-')?;
+    Some((secs.parse().ok()?, n.parse().ok()?))
+}
+
 fn prune(folder: &Path) -> io::Result<()> {
-    let versions = list_versions(folder);
-    for version in versions.into_iter().skip(MAX_VERSIONS) {
+    let unpinned = list_versions(folder)
+        .into_iter()
+        .filter(|version| !version.pinned);
+    for version in unpinned.skip(MAX_VERSIONS) {
         if let Some(dir) = version_dir(folder, &version.id) {
             fs::remove_dir_all(dir)?;
         }
@@ -236,6 +408,23 @@ fn prune(folder: &Path) -> io::Result<()> {
 
 fn version_dir(folder: &Path, id: &str) -> Option<PathBuf> {
     valid_id(id).then(|| folder.join(HISTORY_DIR).join(id))
+}
+
+/// The folder of version `id`, or an error saying why there isn't one.
+fn existing_version(folder: &Path, id: &str) -> io::Result<PathBuf> {
+    let Some(dir) = version_dir(folder, id) else {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "that version name isn't valid",
+        ));
+    };
+    if !dir.is_dir() {
+        return Err(io::Error::new(
+            ErrorKind::NotFound,
+            "that version is not there",
+        ));
+    }
+    Ok(dir)
 }
 
 fn valid_id(id: &str) -> bool {
@@ -251,7 +440,7 @@ fn safe_relative(path: &str) -> bool {
 }
 
 /// `secs` as `YYYY-MM-DD HH:MM:SS UTC`.
-fn format_unix(secs: u64) -> String {
+pub(crate) fn format_unix(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let tod = secs % 86_400;
     let (year, month, day) = civil_from_days(days);
@@ -279,64 +468,4 @@ fn civil_from_days(days: i64) -> (i32, u32, u32) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn temp_folder() -> PathBuf {
-        let folder =
-            std::env::temp_dir().join(format!("axcenity-versions-test-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&folder);
-        fs::create_dir_all(folder.join("scripts")).unwrap();
-        fs::write(folder.join(WORLD_FILE), "{\"format_version\":1}").unwrap();
-        fs::create_dir_all(folder.join("levels")).unwrap();
-        fs::write(
-            folder.join("levels/Cave.world.json"),
-            "{\"format_version\":1}",
-        )
-        .unwrap();
-        fs::write(folder.join("scripts/hello.server.lua"), "print(1)\n").unwrap();
-        fs::write(folder.join("ui.css"), "Frame { }\n").unwrap();
-        folder
-    }
-
-    #[test]
-    fn a_save_can_be_listed_and_restored_and_a_repeat_is_skipped() {
-        let folder = temp_folder();
-        assert!(list_versions(&folder).is_empty());
-        assert!(record_version(&folder, "Save").unwrap());
-        assert!(!record_version(&folder, "Save again").unwrap());
-        let versions = list_versions(&folder);
-        assert_eq!(versions.len(), 1);
-        assert_eq!(versions[0].label, "Save");
-        assert!(versions[0].when().contains("UTC"));
-
-        fs::write(
-            folder.join(WORLD_FILE),
-            "{\"format_version\":1,\"changed\":true}",
-        )
-        .unwrap();
-        fs::write(folder.join("scripts/extra.client.lua"), "print(2)\n").unwrap();
-        fs::write(folder.join("levels/Cave.world.json"), "{}").unwrap();
-        fs::write(folder.join("levels/Moon.world.json"), "{}").unwrap();
-        assert!(record_version(&folder, "Second").unwrap());
-
-        restore_version(&folder, &versions[0].id).unwrap();
-        assert_eq!(
-            fs::read_to_string(folder.join(WORLD_FILE)).unwrap(),
-            "{\"format_version\":1}"
-        );
-        assert!(!folder.join("scripts/extra.client.lua").exists());
-        // Levels come back too, and one made since goes.
-        assert_eq!(
-            fs::read_to_string(folder.join("levels/Cave.world.json")).unwrap(),
-            "{\"format_version\":1}"
-        );
-        assert!(!folder.join("levels/Moon.world.json").exists());
-        assert_eq!(
-            fs::read_to_string(folder.join("scripts/hello.server.lua")).unwrap(),
-            "print(1)\n"
-        );
-        assert!(folder.join("ui.css").is_file());
-        let _ = fs::remove_dir_all(&folder);
-    }
-}
+mod tests;

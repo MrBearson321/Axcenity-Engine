@@ -583,7 +583,7 @@ fn apply_properties(
 }
 
 /// Reads `json` as a value of `kind`, or explains what was expected.
-fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
+pub(crate) fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
     match kind {
         ValueKind::Bool => json
             .as_bool()

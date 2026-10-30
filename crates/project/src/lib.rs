@@ -32,6 +32,7 @@
 
 mod asset_fix;
 mod asset_refs;
+mod backup;
 mod levels;
 mod migrate;
 mod migrate_animation;
@@ -79,6 +80,9 @@ pub use asset_fix::{
 pub use asset_refs::{
     RefPlace, Reference, find_references, is_model_part, plan_rename, unused_assets,
 };
+pub use backup::{
+    BACKUP_SETTINGS_FILE, BackupSettings, back_up_project, backup_settings, save_backup_settings,
+};
 pub use levels::{
     DEFAULT_START_LEVEL, FileChange, LEVEL_SUFFIX, LEVELS_FOLDER, check_level_name,
     copy_workspace_into, keep_level_file, level_file, level_names, level_path, load_levels,
@@ -101,7 +105,11 @@ pub use terrain_files::{
 pub use validate::{
     AssetKind, Finding, FindingKind, Report, Site, check_assets, check_assets_in_level,
 };
-pub use versions::{Version, list_versions, record_version, restore_version};
+pub use versions::{
+    AssetChange, Change, ChangedFile, Changes, InstanceChange, Line, Version, around_changes,
+    list_versions, record_checkpoint, record_version, restore_file, restore_version, set_pinned,
+    version_changes,
+};
 pub use watch::{Watched, Watcher, is_asset_path};
 pub use world_file::{WorldError, parse_prefab, parse_world, write_prefab, write_world};
 

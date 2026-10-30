@@ -196,6 +196,8 @@ enum Dialog {
         folder: PathBuf,
         error: Option<String>,
         notice: Option<String>,
+        /// The version Restore was clicked on, waiting to be confirmed.
+        confirm: Option<String>,
     },
 }
 
@@ -593,6 +595,7 @@ impl StartScreen {
                         folder: link.folder,
                         error: None,
                         notice: None,
+                        confirm: None,
                     });
                 }
                 CardAction::Reveal => {

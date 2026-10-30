@@ -2198,8 +2198,8 @@ Each has a pause menu, a settings menu with rebindable input, and a working save
 
 ### Acceptance criteria
 
-- [ ] Three pinned checkpoints survive 50 later saves, and restoring the first keeps a snapshot of what was replaced.
-- [ ] The change view names a moved Part and an edited script correctly.
+- [x] Three pinned checkpoints survive 50 later saves, and restoring the first keeps a snapshot of what was replaced.
+- [x] The change view names a moved Part and an edited script correctly.
 - [ ] A backup `.zip` opens as a project on another computer.
 
 ---

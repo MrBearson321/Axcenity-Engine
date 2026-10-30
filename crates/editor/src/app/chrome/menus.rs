@@ -106,7 +106,31 @@ impl EditorApp {
                     )
                     .clicked()
                 {
-                    self.versions_open = true;
+                    self.version_history.open = true;
+                }
+                if ui
+                    .add_enabled(
+                        editing,
+                        egui::Button::new(theme::with_icon(icons::PUSH_PIN, "Save Checkpoint…")),
+                    )
+                    .on_hover_text(
+                        "Save with a message, and keep that version however many saves follow.",
+                    )
+                    .clicked()
+                {
+                    self.version_history.open_for_checkpoint();
+                }
+                if ui
+                    .add_enabled(
+                        editing,
+                        egui::Button::new(theme::with_icon(icons::ARCHIVE, "Back Up Project")),
+                    )
+                    .on_hover_text(
+                        "Write a .zip of the project to its backup folder (asked the first time).",
+                    )
+                    .clicked()
+                {
+                    self.back_up_project(false);
                 }
                 if ui
                     .add_enabled(

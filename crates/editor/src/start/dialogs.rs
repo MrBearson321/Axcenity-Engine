@@ -564,6 +564,7 @@ impl StartScreen {
                         folder,
                         error,
                         notice,
+                        confirm,
                     } => {
                         ui.set_width(460.0);
                         dialog_title(
@@ -571,8 +572,10 @@ impl StartScreen {
                             &palette,
                             "Version History",
                             Some(
-                                "Each save keeps the world, scripts and styles. Restoring puts \
-                                 that version back. Assets and the project name stay as they are.",
+                                "Each save keeps the world, scripts and styles; pinned ones are \
+                                 never dropped. Restoring puts that version back and keeps the \
+                                 current files as a version first. Assets and the project name \
+                                 stay as they are.",
                             ),
                         );
                         let versions = axcenity_project::list_versions(folder);
@@ -601,11 +604,17 @@ impl StartScreen {
                                                 .show(ui, |ui| {
                                                     ui.horizontal(|ui| {
                                                         ui.vertical(|ui| {
-                                                            ui.label(
-                                                                RichText::new(
-                                                                    version.label.as_str(),
+                                                            let label = if version.pinned {
+                                                                theme::with_icon(
+                                                                    theme::filled_icons::PUSH_PIN,
+                                                                    &version.label,
                                                                 )
-                                                                .family(theme::medium_family()),
+                                                            } else {
+                                                                version.label.clone()
+                                                            };
+                                                            ui.label(
+                                                                RichText::new(label)
+                                                                    .family(theme::medium_family()),
                                                             );
                                                             ui.label(
                                                                 RichText::new(version.when())
@@ -629,24 +638,8 @@ impl StartScreen {
                                                                     ),
                                                                 );
                                                                 if restore.clicked() {
-                                                                    match axcenity_project::restore_version(
-                                                                        folder,
-                                                                        &version.id,
-                                                                    ) {
-                                                                        Ok(()) => {
-                                                                            *notice = Some(format!(
-                                                                                "Restored the version from {}.",
-                                                                                version.when()
-                                                                            ));
-                                                                            *error = None;
-                                                                            restored =
-                                                                                Some(folder.clone());
-                                                                        }
-                                                                        Err(err) => {
-                                                                            *error =
-                                                                                Some(err.to_string())
-                                                                        }
-                                                                    }
+                                                                    *confirm =
+                                                                        Some(version.id.clone());
                                                                 }
                                                             },
                                                         );
@@ -655,6 +648,48 @@ impl StartScreen {
                                         }
                                     });
                             });
+                        // Restore asks first.
+                        if let Some(version) = confirm.clone().and_then(|id| {
+                            versions.iter().find(|version| version.id == id).cloned()
+                        }) {
+                            ui.add_space(8.0);
+                            ui.label(format!(
+                                "Restore \"{}\" ({})? The current files are kept first as a \
+                                 pinned version named \"Before restore\".",
+                                version.label,
+                                version.when()
+                            ));
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add(widgets::button(
+                                        Role::Primary,
+                                        Some(icons::CLOCK_COUNTER_CLOCKWISE),
+                                        "Restore",
+                                        &palette,
+                                    ))
+                                    .clicked()
+                                {
+                                    *confirm = None;
+                                    match axcenity_project::restore_version(folder, &version.id) {
+                                        Ok(()) => {
+                                            *notice = Some(format!(
+                                                "Restored the version from {}.",
+                                                version.when()
+                                            ));
+                                            *error = None;
+                                            restored = Some(folder.clone());
+                                        }
+                                        Err(err) => *error = Some(err.to_string()),
+                                    }
+                                }
+                                if ui
+                                    .add(widgets::button(Role::Secondary, None, "Cancel", &palette))
+                                    .clicked()
+                                {
+                                    *confirm = None;
+                                }
+                            });
+                        }
                         if let Some(notice) = notice {
                             ui.add_space(6.0);
                             ui.label(
