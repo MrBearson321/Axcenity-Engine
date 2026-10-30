@@ -53,8 +53,8 @@ use std::collections::{HashMap, HashSet};
 use taffy::prelude::*;
 
 pub use style::{
-    CssDeclaration, SUPPORTED_PROPERTIES, StyleWarning, Stylesheet, applied_declaration,
-    applied_declarations, has_rule, own_rules, parse_stylesheet, rule_declaration,
+    CssDeclaration, RuleSet, SUPPORTED_PROPERTIES, StyleWarning, Stylesheet, applied_declaration,
+    applied_declarations, has_rule, own_rules, parse_stylesheet, rule_declaration, rule_sets,
 };
 use style::{PseudoClasses, ResolvedStyles, resolve_styles, resolve_variables};
 

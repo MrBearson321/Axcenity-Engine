@@ -8,16 +8,18 @@
 //! show the game's own `Visible` and `CurrentPage`. Selecting an element on
 //! another page shows that page.
 //!
-//! **Pages** (the designer's fourth tab) is a slideshow of every page of
-//! every ScreenGui (a ScreenGui without a PageLayout is one slide), each
-//! drawn as it looks in the game at its design size: one large, with ◀ and
-//! ▶ (or the arrow keys), and all of them as thumbnails below. A click on a
-//! thumbnail shows it large; **Edit page** (or a double-click) opens it in
-//! the Design tab with the page shown and selected.
+//! **Pages** (the designer's fourth tab) lists every ScreenGui as a card;
+//! the picked one (the designer's ScreenGui) shows its pages, each drawn as
+//! it looks in the game at its design size: one large, with ◀ and ▶ (or
+//! the arrow keys), then each of its PageLayouts with its pages as
+//! thumbnails, the one the game starts on flagged. A click on a thumbnail
+//! shows it large; **Edit page** (or a double-click) opens it in the Design
+//! tab with the page shown and selected. A ScreenGui without a PageLayout
+//! is one slide.
 
 use std::collections::{HashMap, HashSet};
 
-use axcenity_core::{ClassName, InstanceId, World};
+use axcenity_core::{ClassName, InstanceId, Value, World};
 use axcenity_render::glam::Vec3;
 use axcenity_render::{Camera, UiDrawItem, UiRectangle};
 use axcenity_ui::DesignerOverrides;
@@ -26,11 +28,17 @@ use eframe::egui_wgpu::RenderState;
 
 use super::{DesignerAction, DesignerScene, DesignerTab, UiDesigner, screen_guis, sketch};
 use crate::animation::preview::Canvas;
+use crate::properties::Edit;
 use crate::theme::{self, icons};
+use crate::tree::Insertable;
 use crate::widgets;
 
-/// A thumbnail's width, in points.
+/// A page thumbnail's width, in points.
 const THUMBNAIL: f32 = 200.0;
+/// A ScreenGui card's width, in points.
+const CARD: f32 = 160.0;
+/// The width of the column of ScreenGui cards, in points.
+const SCREEN_LIST: f32 = 184.0;
 /// What's behind a slide's UI, as on the artboard.
 const BACKDROP: [f32; 4] = [0.16, 0.17, 0.19, 1.0];
 
@@ -43,56 +51,77 @@ pub struct Slide {
     pub title: String,
 }
 
-/// Every slide: each ScreenGui in the Workspace in tree order, one per
-/// page of each of its PageLayouts (in tree order), or one for the
-/// ScreenGui when it has no pages.
+/// Every slide: each ScreenGui in the Workspace in tree order, then its
+/// [`screen_slides`].
+#[cfg(test)]
 pub fn slides(world: &World) -> Vec<Slide> {
-    let mut slides = Vec::new();
-    for gui in screen_guis(world) {
-        let gui_name = world.get(gui).map_or("", |instance| instance.name());
-        let layouts: Vec<InstanceId> = super::hierarchy(world, gui)
-            .into_iter()
-            .map(|(id, _)| id)
-            .filter(|&id| {
-                world
-                    .get(id)
-                    .is_some_and(|instance| instance.class() == ClassName::PageLayout)
+    screen_guis(world)
+        .into_iter()
+        .flat_map(|gui| screen_slides(world, gui))
+        .collect()
+}
+
+/// A ScreenGui's PageLayouts, at any depth in tree order, each with its
+/// pages (the Frames in it).
+pub fn page_layouts(world: &World, gui: InstanceId) -> Vec<(InstanceId, Vec<InstanceId>)> {
+    super::hierarchy(world, gui)
+        .into_iter()
+        .filter_map(|(id, _)| {
+            let instance = world.get(id)?;
+            (instance.class() == ClassName::PageLayout).then(|| {
+                let pages = instance
+                    .children()
+                    .iter()
+                    .copied()
+                    .filter(|&page| page_layout_of(world, page) == Some(id))
+                    .collect();
+                (id, pages)
             })
-            .collect();
-        let mut pages = 0;
-        for &layout in &layouts {
-            let Some(instance) = world.get(layout) else {
-                continue;
+        })
+        .collect()
+}
+
+/// One ScreenGui's slides: one per page of each of its PageLayouts, or
+/// one for the ScreenGui when it has no pages.
+pub fn screen_slides(world: &World, gui: InstanceId) -> Vec<Slide> {
+    let name = |id| world.get(id).map_or("", |instance| instance.name());
+    let layouts = page_layouts(world, gui);
+    let mut slides = Vec::new();
+    for (layout, pages) in &layouts {
+        for &page in pages {
+            let title = if layouts.len() > 1 {
+                format!("{} › {} › {}", name(gui), name(*layout), name(page))
+            } else {
+                format!("{} › {}", name(gui), name(page))
             };
-            for &page in instance.children() {
-                let Some(frame) = world.get(page) else {
-                    continue;
-                };
-                if frame.class() != ClassName::Frame {
-                    continue;
-                }
-                let title = if layouts.len() > 1 {
-                    format!("{gui_name} › {} › {}", instance.name(), frame.name())
-                } else {
-                    format!("{gui_name} › {}", frame.name())
-                };
-                slides.push(Slide {
-                    gui,
-                    page: Some((layout, page)),
-                    title,
-                });
-                pages += 1;
-            }
-        }
-        if pages == 0 {
             slides.push(Slide {
                 gui,
-                page: None,
-                title: gui_name.to_owned(),
+                page: Some((*layout, page)),
+                title,
             });
         }
     }
+    if slides.is_empty() {
+        slides.push(Slide {
+            gui,
+            page: None,
+            title: name(gui).to_owned(),
+        });
+    }
     slides
+}
+
+/// "3 pages", "1 page" or "No pages", for a ScreenGui's card.
+fn page_count(world: &World, gui: InstanceId) -> String {
+    match page_layouts(world, gui)
+        .iter()
+        .map(|(_, pages)| pages.len())
+        .sum::<usize>()
+    {
+        0 => "No pages".to_owned(),
+        1 => "1 page".to_owned(),
+        count => format!("{count} pages"),
+    }
 }
 
 /// The PageLayout `id` is a page of, when it's one (a Frame in a PageLayout).
@@ -246,13 +275,31 @@ impl UiDesigner {
         }
     }
 
-    /// The slide shown large in the Pages tab.
+    /// The slide shown large in the Pages tab, among its ScreenGui's.
     #[cfg(test)]
     pub fn slide(&self) -> usize {
         self.slide
     }
 
-    /// The Pages tab: the slideshow, then every slide as a thumbnail.
+    /// Forgets the slides' canvases, for drawing with another renderer.
+    #[cfg(test)]
+    pub fn forget_canvases(&mut self) {
+        self.slide_canvases.clear();
+        self.canvas = Canvas::default();
+    }
+
+    /// Picks the ScreenGui whose pages the Pages tab shows, as clicking its
+    /// card does: it becomes the designer's ScreenGui, and is selected.
+    pub fn pick_screen(&mut self, gui: InstanceId, actions: &mut Vec<DesignerAction>) {
+        if self.gui != Some(gui) {
+            self.slide = 0;
+        }
+        self.gui = Some(gui);
+        actions.push(DesignerAction::Select(Some(gui)));
+    }
+
+    /// The Pages tab: every ScreenGui as a card (a column at the left, or a
+    /// row on top when narrow), and the picked one's pages.
     pub(super) fn pages_tab(
         &mut self,
         ui: &mut egui::Ui,
@@ -260,12 +307,128 @@ impl UiDesigner {
         render_state: Option<&RenderState>,
         actions: &mut Vec<DesignerAction>,
     ) {
-        let world = scene.world;
-        let slides = slides(world);
-        if slides.is_empty() {
+        let guis = screen_guis(scene.world);
+        let Some(&first) = guis.first() else {
             ui.weak("There's no ScreenGui yet.");
             return;
+        };
+        let gui = self.gui.filter(|gui| guis.contains(gui)).unwrap_or(first);
+        // Canvas 0 is the large slide, then one per card, then the pages.
+        let first_page_canvas = guis.len() + 1;
+        let mut cards = |designer: &mut Self, ui: &mut egui::Ui| {
+            for (index, &id) in guis.iter().enumerate() {
+                designer.screen_card(ui, scene, id, id == gui, index + 1, render_state, actions);
+            }
+        };
+        if ui.available_width() >= super::STACK_BELOW {
+            let height = ui.available_height();
+            let top_down = egui::Layout::top_down(egui::Align::Min);
+            let mut pages = Vec::new();
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(egui::vec2(SCREEN_LIST, height), top_down, |ui| {
+                    ui.strong("Screens");
+                    egui::ScrollArea::vertical()
+                        .id_salt("ui designer screens")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| cards(self, ui));
+                });
+                ui.separator();
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), height),
+                    top_down,
+                    |ui| {
+                        self.screen_pages(
+                            ui,
+                            scene,
+                            gui,
+                            first_page_canvas,
+                            render_state,
+                            &mut pages,
+                        )
+                    },
+                );
+            });
+            actions.extend(pages);
+        } else {
+            egui::ScrollArea::horizontal()
+                .id_salt("ui designer screens")
+                .show(ui, |ui| ui.horizontal_top(|ui| cards(self, ui)));
+            ui.separator();
+            self.screen_pages(ui, scene, gui, first_page_canvas, render_state, actions);
         }
+    }
+
+    /// A ScreenGui's card: how it looks, its name and how many pages it
+    /// has. A click shows its pages; a double-click opens it to design.
+    #[allow(clippy::too_many_arguments)]
+    fn screen_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        scene: &DesignerScene,
+        gui: InstanceId,
+        chosen: bool,
+        canvas: usize,
+        render_state: Option<&RenderState>,
+        actions: &mut Vec<DesignerAction>,
+    ) {
+        let world = scene.world;
+        let (width, height) = axcenity_ui::design_size(world, gui);
+        let size = egui::vec2(CARD, CARD * height as f32 / width.max(1) as f32);
+        let name = world.get(gui).map_or("", |instance| instance.name());
+        let slide = Slide {
+            gui,
+            page: None,
+            title: name.to_owned(),
+        };
+        let response = ui
+            .vertical(|ui| {
+                ui.set_width(CARD);
+                let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                self.draw_slide(ui, rect, scene, &slide, canvas, render_state);
+                let palette = theme::palette(ui.ctx());
+                if chosen || response.hovered() {
+                    ui.painter().rect_stroke(
+                        rect,
+                        3,
+                        egui::Stroke::new(if chosen { 2.0_f32 } else { 1.0 }, palette.accent),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                ui.add(egui::Label::new(egui::RichText::new(name).strong()).truncate());
+                ui.label(
+                    egui::RichText::new(page_count(world, gui))
+                        .small()
+                        .color(palette.text_muted),
+                );
+                ui.add_space(6.0);
+                response
+            })
+            .inner
+            .on_hover_text(format!(
+                "{name}: click to see its pages, double-click to design it"
+            ));
+        if response.clicked() {
+            self.pick_screen(gui, actions);
+        }
+        if response.double_clicked() {
+            self.edit_slide(world, &slide, actions);
+        }
+    }
+
+    /// One ScreenGui's pages: the slideshow over all of them, then each
+    /// PageLayout with its pages as thumbnails, its start page flagged.
+    fn screen_pages(
+        &mut self,
+        ui: &mut egui::Ui,
+        scene: &DesignerScene,
+        gui: InstanceId,
+        first_canvas: usize,
+        render_state: Option<&RenderState>,
+        actions: &mut Vec<DesignerAction>,
+    ) {
+        let world = scene.world;
+        let name = |id| world.get(id).map_or("", |instance| instance.name());
+        let slides = screen_slides(world, gui);
         self.slide = self.slide.min(slides.len() - 1);
         // The arrow keys move through the slides while nothing is typed in.
         if !ui.ctx().wants_keyboard_input() {
@@ -283,10 +446,9 @@ impl UiDesigner {
             }
         }
         let mut edit = None;
-        let current = slides[self.slide].clone();
 
         // The bar over the large slide.
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if widgets::icon_button(ui, icons::CARET_LEFT, "Previous page (←)", false).clicked() {
                 self.slide = self.slide.saturating_sub(1);
             }
@@ -294,7 +456,7 @@ impl UiDesigner {
             if widgets::icon_button(ui, icons::CARET_RIGHT, "Next page (→)", false).clicked() {
                 self.slide = (self.slide + 1).min(slides.len() - 1);
             }
-            ui.strong(&current.title);
+            ui.strong(&slides[self.slide].title);
             if ui
                 .button(theme::with_icon(icons::PENCIL_SIMPLE, "Edit page"))
                 .on_hover_text("Open this page in the Design tab")
@@ -306,8 +468,8 @@ impl UiDesigner {
         let current = slides[self.slide].clone();
         // The large slide: as much of the room as leaves a row of thumbnails.
         let room = ui.available_size();
-        let large_height = (room.y - THUMBNAIL * 0.75 - 40.0)
-            .max(room.y * 0.5)
+        let large_height = (room.y - THUMBNAIL * 0.75 - 70.0)
+            .max(room.y * 0.45)
             .max(80.0);
         let (large, response) =
             ui.allocate_exact_size(egui::vec2(room.x, large_height), egui::Sense::click());
@@ -319,59 +481,161 @@ impl UiDesigner {
         }
         ui.separator();
 
-        // Every slide, as thumbnails that wrap onto rows.
+        let layouts = page_layouts(world, gui);
         egui::ScrollArea::vertical()
-            .id_salt("ui designer pages")
+            .id_salt(("ui designer pages", gui))
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for (index, slide) in slides.iter().enumerate() {
-                        let (width, height) = axcenity_ui::design_size(world, slide.gui);
-                        let size =
-                            egui::vec2(THUMBNAIL, THUMBNAIL * height as f32 / width.max(1) as f32);
-                        let response = ui
-                            .vertical(|ui| {
-                                ui.set_width(THUMBNAIL);
-                                let (rect, response) =
-                                    ui.allocate_exact_size(size, egui::Sense::click());
-                                self.draw_slide(ui, rect, scene, slide, index + 1, render_state);
-                                let palette = theme::palette(ui.ctx());
-                                let chosen = index == self.slide;
-                                if chosen || response.hovered() {
-                                    ui.painter().rect_stroke(
-                                        rect,
-                                        3,
-                                        egui::Stroke::new(
-                                            if chosen { 2.0_f32 } else { 1.0 },
-                                            palette.accent,
-                                        ),
-                                        egui::StrokeKind::Outside,
-                                    );
-                                }
-                                ui.add(
-                                    egui::Label::new(egui::RichText::new(&slide.title).small())
-                                        .truncate(),
-                                );
-                                response
-                            })
-                            .inner
-                            .on_hover_text(format!(
-                                "{}: click to show it above, double-click to edit it",
-                                slide.title
-                            ));
-                        if response.clicked() {
-                            self.slide = index;
-                        }
-                        if response.double_clicked() {
-                            edit = Some(index);
-                        }
+                if layouts.is_empty() {
+                    ui.weak(
+                        "This ScreenGui has no pages: it's one screen. Add pages to switch \
+                         between screens in it, such as a menu's Home and Settings.",
+                    );
+                    if ui
+                        .add_enabled(
+                            scene.editing,
+                            egui::Button::new(theme::with_icon(icons::PLUS, "Add pages")),
+                        )
+                        .on_hover_text("Put a PageLayout with its first page in this ScreenGui")
+                        .clicked()
+                    {
+                        actions.push(DesignerAction::Insert {
+                            what: Insertable::Page,
+                            parent: gui,
+                            at: [0.0, 0.0],
+                        });
                     }
-                });
+                }
+                let mut index = 0;
+                for (layout, pages) in &layouts {
+                    let start = axcenity_ui::shown_page(world, *layout);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(icons::STACK);
+                        ui.strong(name(*layout));
+                        let count = match pages.len() {
+                            1 => "1 page".to_owned(),
+                            count => format!("{count} pages"),
+                        };
+                        let starts = start.map_or(String::new(), |start| {
+                            format!(" · the game starts on {}", name(start))
+                        });
+                        ui.weak(format!("PageLayout · {count}{starts}"));
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        for &page in pages {
+                            let slide_index = index;
+                            index += 1;
+                            let response = self.page_thumbnail(
+                                ui,
+                                scene,
+                                &slides[slide_index],
+                                slide_index == self.slide,
+                                start == Some(page),
+                                first_canvas + slide_index,
+                                render_state,
+                            );
+                            if response.clicked() {
+                                self.slide = slide_index;
+                            }
+                            if response.double_clicked() {
+                                edit = Some(slide_index);
+                            }
+                            response.context_menu(|ui| {
+                                if ui.button("Edit page").clicked() {
+                                    edit = Some(slide_index);
+                                    ui.close();
+                                }
+                                let starts_here = start == Some(page);
+                                if ui
+                                    .add_enabled(
+                                        scene.editing && !starts_here,
+                                        egui::Button::new("Start on this page"),
+                                    )
+                                    .on_hover_text("Set the PageLayout's CurrentPage to it")
+                                    .clicked()
+                                {
+                                    actions.push(DesignerAction::Edit(
+                                        *layout,
+                                        Edit::Property(
+                                            "CurrentPage",
+                                            Value::String(name(page).to_owned()),
+                                        ),
+                                    ));
+                                    ui.close();
+                                }
+                            });
+                        }
+                        if ui
+                            .add_enabled(
+                                scene.editing,
+                                egui::Button::new(theme::with_icon(icons::PLUS, "Page")),
+                            )
+                            .on_hover_text(format!("Add a page to {}", name(*layout)))
+                            .clicked()
+                        {
+                            actions.push(DesignerAction::Insert {
+                                what: Insertable::Page,
+                                parent: *layout,
+                                at: [0.0, 0.0],
+                            });
+                        }
+                    });
+                    ui.add_space(8.0);
+                }
             });
 
         if let Some(index) = edit {
             self.edit_slide(world, &slides[index], actions);
         }
+    }
+
+    /// A page's thumbnail with its name under it (flagged when the game
+    /// starts on it), outlined when it's the one shown large.
+    #[allow(clippy::too_many_arguments)]
+    fn page_thumbnail(
+        &mut self,
+        ui: &mut egui::Ui,
+        scene: &DesignerScene,
+        slide: &Slide,
+        chosen: bool,
+        start: bool,
+        canvas: usize,
+        render_state: Option<&RenderState>,
+    ) -> egui::Response {
+        let world = scene.world;
+        let (width, height) = axcenity_ui::design_size(world, slide.gui);
+        let size = egui::vec2(THUMBNAIL, THUMBNAIL * height as f32 / width.max(1) as f32);
+        let page_name = slide
+            .page
+            .and_then(|(_, page)| world.get(page))
+            .map_or("", |page| page.name());
+        ui.vertical(|ui| {
+            ui.set_width(THUMBNAIL);
+            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+            self.draw_slide(ui, rect, scene, slide, canvas, render_state);
+            let palette = theme::palette(ui.ctx());
+            if chosen || response.hovered() {
+                ui.painter().rect_stroke(
+                    rect,
+                    3,
+                    egui::Stroke::new(if chosen { 2.0_f32 } else { 1.0 }, palette.accent),
+                    egui::StrokeKind::Outside,
+                );
+            }
+            let label = if start {
+                format!("{} {page_name}", icons::FLAG)
+            } else {
+                page_name.to_owned()
+            };
+            ui.add(egui::Label::new(egui::RichText::new(label).small()).truncate());
+            response
+        })
+        .inner
+        .on_hover_text(if start {
+            format!("{}: the game starts on this page. Click to show it above, double-click to edit it, right-click for more", slide.title)
+        } else {
+            format!("{}: click to show it above, double-click to edit it, right-click for more", slide.title)
+        })
     }
 
     /// Opens `slide` in the Design tab: its ScreenGui, with its page shown

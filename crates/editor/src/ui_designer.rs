@@ -10,8 +10,10 @@
 //!
 //! Around the artboard are a palette of UI elements to drag onto it, the
 //! ScreenGui's hierarchy, and an inspector with the element's name, text,
-//! anchor and font, the states editor (Normal, Hover, Pressed and Disabled,
-//! `states.rs`) and the same Style (CSS) section as Properties. The
+//! anchor and font, ready-made and imported style sets (`style_sets.rs`),
+//! links to its scripts and animations (`links.rs`), the states editor
+//! (Normal, Hover, Pressed and Disabled, `states.rs`) and the same Style
+//! (CSS) section as Properties. The
 //! selected element gets the viewport's handles, snapping and distances in
 //! pixels (`ui_handles.rs`), and also snaps to guides dragged out of the
 //! rulers. Double-click text on the artboard to type over it. Several
@@ -38,6 +40,7 @@ pub(crate) mod bevel;
 mod event_graph;
 mod group;
 pub(crate) mod image;
+pub(crate) mod links;
 mod navigation;
 pub(crate) mod order;
 pub(crate) mod pages;
@@ -49,6 +52,7 @@ mod selection;
 mod slice;
 mod states;
 mod strings;
+pub(crate) mod style_sets;
 mod text_toolbar;
 mod widget_section;
 
@@ -265,6 +269,28 @@ pub enum DesignerAction {
     /// Asks for a picture on this computer, copies it into the project's
     /// `assets/images` and sets it as the element's `Image`.
     UploadImage(InstanceId),
+    /// A style set picked in the inspector's Styles (`style_sets.rs`):
+    /// each of `rules` (`""`, `:hover`, `::thumb` and their declarations)
+    /// written into each element's own rule for it, as one undo step named
+    /// after `name`. An element without an `Id` gets one.
+    ApplyStyleSet {
+        ids: Vec<InstanceId>,
+        name: String,
+        rules: Vec<(String, Vec<(String, String)>)>,
+    },
+    /// Asks for a `.css` file on this computer and offers its rule sets
+    /// in the element's Styles (applied at once when there's one).
+    ImportStyleFile(InstanceId),
+    /// Writes a handler for `event` on the element into its ScreenGui's
+    /// LocalScript (made if there's none), with `body` inside, and opens
+    /// it there (see `links.rs`).
+    AddHandler {
+        id: InstanceId,
+        event: String,
+        body: Option<String>,
+    },
+    /// Opens the script at `path` with the cursor on `line`.
+    OpenScript { path: String, line: usize },
 }
 
 /// The action that sets `property` for `id` in `state`: in its own `#Id`
@@ -308,6 +334,9 @@ pub struct DesignerScene<'a> {
     /// The project's pictures, for the inspector's Image picker (empty
     /// when the selected element has no `Image`).
     pub images: &'a [crate::asset_browser::TexturePick],
+    /// The project's Lua scripts as the editor has them, for the
+    /// inspector's Code & animation (`links.rs`).
+    pub scripts: &'a [links::ScriptText<'a>],
     /// False during Play: the designer shows the game, but doesn't edit it.
     pub editing: bool,
 }
@@ -449,6 +478,9 @@ pub struct UiDesigner {
     /// The language and the key being typed in the Strings tab, to add.
     new_language: String,
     new_key: String,
+    /// The rule sets of the `.css` file last imported in Styles, with its
+    /// file name, until put away.
+    imported_styles: Option<(String, Vec<axcenity_ui::RuleSet>)>,
 }
 
 impl Default for UiDesigner {
@@ -509,6 +541,7 @@ impl Default for UiDesigner {
             slide_canvases: Vec::new(),
             new_language: String::new(),
             new_key: String::new(),
+            imported_styles: None,
         }
     }
 }
@@ -748,6 +781,11 @@ impl UiDesigner {
         if screen_gui_of(world, self.gui) != self.gui || self.gui.is_none() {
             self.gui = screen_guis(world).first().copied();
         }
+    }
+
+    /// Offers the rule sets read from the `.css` file `file` in Styles.
+    pub fn offer_imported_styles(&mut self, file: String, sets: Vec<axcenity_ui::RuleSet>) {
+        self.imported_styles = Some((file, sets));
     }
 
     /// Fits the artboard into view on the next frame.

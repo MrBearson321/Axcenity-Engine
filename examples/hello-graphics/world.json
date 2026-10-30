@@ -7,29 +7,14 @@
         "name": "Floor",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [0.32, 0.33, 0.35],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Plastic",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
           "Position": [0, -0.5, 0],
           "Roughness": 0.8,
           "Shape": "Block",
-          "Size": [200, 1, 200],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [200, 1, 200]
         }
       },
       {
@@ -37,29 +22,14 @@
         "name": "NearBlock",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [0.2, 0.45, 0.85],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Plastic",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 15, 0],
           "Position": [5, 1, 7],
           "Roughness": 0.5,
           "Shape": "Block",
-          "Size": [2, 2, 2],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [2, 2, 2]
         }
       },
       {
@@ -67,29 +37,14 @@
         "name": "Plastic",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [0.8, 0.2, 0.15],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Plastic",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
           "Position": [-4, 1, 2],
           "Roughness": 0.5,
           "Shape": "Block",
-          "Size": [2, 2, 2],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [2, 2, 2]
         }
       },
       {
@@ -97,29 +52,14 @@
         "name": "Metal",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [0.95, 0.8, 0.45],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Metal",
-          "MaterialVariant": "",
           "Metalness": 1,
           "Orientation": [0, 0, 0],
           "Position": [-1, 1.5, 0],
           "Roughness": 0.25,
           "Shape": "Ball",
-          "Size": [3, 3, 3],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [3, 3, 3]
         }
       },
       {
@@ -127,29 +67,14 @@
         "name": "Glass",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [0.6, 0.85, 0.95],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Glass",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, -20, 0],
           "Position": [2.5, 1.5, 2],
           "Roughness": 0.05,
           "Shape": "Block",
-          "Size": [3, 3, 0.5],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [3, 3, 0.5]
         }
       },
       {
@@ -157,29 +82,14 @@
         "name": "Neon",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [0.1, 0.9, 0.8],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Neon",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
           "Position": [-7, 1.5, -1],
           "Roughness": 0.5,
           "Shape": "Cylinder",
-          "Size": [3, 0.6, 0.6],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [3, 0.6, 0.6]
         }
       },
       {
@@ -187,29 +97,14 @@
         "name": "Wedge",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [0.55, 0.7, 0.3],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Plastic",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 30, 0],
           "Position": [7, 1, 1],
           "Roughness": 0.6,
           "Shape": "Wedge",
-          "Size": [6, 2, 2],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [6, 2, 2]
         }
       },
       {
@@ -217,22 +112,10 @@
         "name": "PbrPanel",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
-          "CustomPhysicalProperties": null,
-          "Massless": false,
-          "MaterialVariant": "",
           "MeshId": "assets/models/pbr_panel.fbx",
           "Orientation": [0, -25, 0],
           "Position": [-2, 1.5, -5],
-          "Size": [4, 3, 4],
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [4, 3, 4]
         }
       },
       {
@@ -240,57 +123,24 @@
         "name": "Tiled",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [1, 1, 1],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Plastic",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
           "Position": [4, 1, -5],
           "Roughness": 0.7,
           "Shape": "Block",
           "Size": [4, 2, 4],
-          "TileSize": 2,
-          "Transparency": 0,
-          "WindAffected": false
+          "TileSize": 2
         },
         "children": [
           {
             "class": "SurfaceAppearance",
             "name": "SurfaceAppearance",
             "properties": {
-              "AmbientOcclusionChannel": "Red",
-              "AmbientOcclusionMap": "",
-              "AmbientOcclusionStrength": 1,
-              "Color": [1, 1, 1],
               "ColorMap": "assets/models/maps/color.png",
-              "EmissiveMap": "",
-              "EmissiveStrength": 1,
-              "InvertOpacity": false,
-              "InvertRoughness": false,
-              "MaterialName": "",
-              "MetalnessChannel": "Red",
-              "MetalnessMap": "",
               "NormalMap": "assets/models/maps/normal.png",
-              "NormalMapDirectX": false,
-              "NormalStrength": 1,
-              "Offset": [0, 0],
-              "OpacityChannel": "Alpha",
-              "OpacityMap": "",
-              "RoughnessChannel": "Red",
-              "RoughnessMap": "assets/models/maps/roughness.png",
-              "SpecularMap": "",
-              "Tiling": [1, 1]
+              "RoughnessMap": "assets/models/maps/roughness.png"
             }
           }
         ]
@@ -300,29 +150,16 @@
         "name": "Beacon",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [1, 0.7, 0.4],
-          "CustomPhysicalProperties": null,
-          "Emission": 6,
           "EmissiveColor": [1, 0.55, 0.2],
-          "Massless": false,
+          "Emission": 6,
           "Material": "Plastic",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
           "Position": [7, 3.5, -3],
           "Roughness": 0.5,
           "Shape": "Ball",
-          "Size": [1.2, 1.2, 1.2],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [1.2, 1.2, 1.2]
         }
       },
       {
@@ -330,29 +167,15 @@
         "name": "Lamp",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
           "CastShadow": false,
-          "CollisionGroup": "Default",
           "Color": [1, 0.85, 0.6],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Neon",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
           "Position": [-6, 3.5, 4],
           "Roughness": 0.5,
           "Shape": "Ball",
-          "Size": [0.8, 0.8, 0.8],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [0.8, 0.8, 0.8]
         },
         "children": [
           {
@@ -362,8 +185,7 @@
               "Brightness": 8,
               "Color": [1, 0.75, 0.45],
               "Enabled": true,
-              "Range": 14,
-              "Shadows": false
+              "Range": 14
             }
           }
         ]
@@ -373,29 +195,15 @@
         "name": "Spotlight",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
           "CastShadow": false,
-          "CollisionGroup": "Default",
           "Color": [0.2, 0.2, 0.22],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Metal",
-          "MaterialVariant": "",
           "Metalness": 1,
           "Orientation": [0, 0, 0],
           "Position": [1, 6, 5],
           "Roughness": 0.6,
           "Shape": "Cylinder",
-          "Size": [1.5, 1.2, 1.2],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [1.5, 1.2, 1.2]
         },
         "children": [
           {
@@ -407,8 +215,7 @@
               "Color": [0.6, 0.8, 1],
               "Direction": [0, -1, 0],
               "Enabled": true,
-              "Range": 24,
-              "Shadows": false
+              "Range": 24
             }
           }
         ]
@@ -418,29 +225,14 @@
         "name": "FarPillar1",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [0.75, 0.7, 0.6],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Plastic",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
           "Position": [-10, 4, -40],
           "Roughness": 0.7,
           "Shape": "Block",
-          "Size": [3, 8, 3],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [3, 8, 3]
         }
       },
       {
@@ -448,29 +240,14 @@
         "name": "FarPillar2",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [0.75, 0.7, 0.6],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Plastic",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
           "Position": [-26, 5, -50],
           "Roughness": 0.7,
           "Shape": "Block",
-          "Size": [3, 10, 3],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [3, 10, 3]
         }
       },
       {
@@ -478,67 +255,24 @@
         "name": "MidPillar",
         "properties": {
           "Anchored": true,
-          "AssemblyAngularVelocity": [0, 0, 0],
-          "AssemblyLinearVelocity": [0, 0, 0],
-          "CanCollide": true,
-          "CanQuery": true,
-          "CanTouch": true,
-          "CastShadow": true,
-          "CollisionGroup": "Default",
           "Color": [0.75, 0.7, 0.6],
-          "CustomPhysicalProperties": null,
-          "Emission": 0,
-          "EmissiveColor": [1, 1, 1],
-          "Massless": false,
           "Material": "Plastic",
-          "MaterialVariant": "",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
           "Position": [-12, 3, -14],
           "Roughness": 0.7,
           "Shape": "Block",
-          "Size": [2, 6, 2],
-          "TileSize": 8,
-          "Transparency": 0,
-          "WindAffected": false
+          "Size": [2, 6, 2]
         }
       }
     ]
   },
   "lighting": {
     "properties": {
-      "AmbientOcclusionIntensity": 1,
-      "BloomEnabled": true,
       "BloomIntensity": 0.5,
-      "BloomThreshold": 1,
-      "ClockTime": 10.2748873292782,
       "EnvironmentIntensity": 0.5,
-      "Exposure": 1,
-      "FogColor": [0.7529412, 0.7529412, 0.7529412],
-      "FogEnd": 100000,
-      "FogStart": 0,
-      "GeographicLatitude": 14.0362434679265,
-      "GroundColor": [0.35, 0.33, 0.3],
-      "PostProcessingEnabled": true,
-      "ShadowDistance": 150,
-      "ShadowSoftness": 0.2,
-      "ShadowsEnabled": true,
-      "SkyHorizonColor": [0.63, 0.8, 0.95],
-      "SkyImage": "",
-      "SkyTopColor": [0.25, 0.5, 0.9],
-      "ToneMapping": "Classic"
-    },
-    "children": [
-      {
-        "class": "Clouds",
-        "name": "Clouds",
-        "properties": {
-          "Color": [1, 1, 1],
-          "Cover": 0.8,
-          "Density": 0.45
-        }
-      }
-    ]
+      "Exposure": 1
+    }
   },
   "players": {
     "properties": {

@@ -138,6 +138,17 @@ impl EditorApp {
         } else {
             Vec::new()
         };
+        // The scripts, only while an element is selected (the inspector's
+        // Code & animation searches them).
+        let texts = if self.selected.is_some() {
+            self.script_texts()
+        } else {
+            Vec::new()
+        };
+        let scripts: Vec<crate::ui_designer::links::ScriptText> = texts
+            .iter()
+            .map(|(path, text)| crate::ui_designer::links::ScriptText { path, text })
+            .collect();
         let (stylesheets, graph) = match self.project.as_mut() {
             Some(project) => {
                 let graph = document.map(|index| GraphPane {
@@ -155,6 +166,7 @@ impl EditorApp {
             stylesheets,
             assets: &self.assets,
             images: &images,
+            scripts: &scripts,
             editing,
         };
         let actions = self
@@ -288,6 +300,21 @@ impl EditorApp {
                     self.asset_browser.refresh();
                 }
                 DesignerAction::Style(id, edit) => self.apply_style(id, edit),
+                DesignerAction::ApplyStyleSet { ids, name, rules } => {
+                    let label = match ids.as_slice() {
+                        [only] => format!(
+                            "Style {} as {name}",
+                            self.world.get(*only).map_or("", |i| i.name())
+                        ),
+                        _ => format!("Style {} elements as {name}", ids.len()),
+                    };
+                    self.apply_style_set(ids, label, rules);
+                }
+                DesignerAction::ImportStyleFile(id) => self.import_style_file(id),
+                DesignerAction::AddHandler { id, event, body } => {
+                    self.add_ui_handler(id, &event, body.as_deref())
+                }
+                DesignerAction::OpenScript { path, line } => self.open_script(&path, Some(line)),
                 DesignerAction::Bevel {
                     id,
                     normal,
@@ -332,6 +359,51 @@ impl EditorApp {
                 | DesignerAction::Language(_)
                 | DesignerAction::UiSettings(_) => {}
             }
+        }
+    }
+
+    /// Asks for a `.css` file and reads its rule sets: one is applied to
+    /// `id` at once, several are offered in the designer's Styles.
+    fn import_style_file(&mut self, id: InstanceId) {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Import styles from a stylesheet")
+            .add_filter("Stylesheet", &["css"]);
+        if let Some(project) = &self.project {
+            dialog = dialog.set_directory(&project.folder);
+        }
+        let Some(file) = dialog.pick_file() else {
+            return;
+        };
+        let name = file
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        let source = match std::fs::read_to_string(&file) {
+            Ok(source) => source,
+            Err(err) => {
+                self.output
+                    .error(format!("Could not read `{}`: {err}", file.display()));
+                return;
+            }
+        };
+        let (sheet, warnings) = axcenity_ui::parse_stylesheet(&name, &source);
+        for warning in warnings {
+            self.output.warning(format!("{name}: {}", warning.message));
+        }
+        let mut sets = axcenity_ui::rule_sets(&sheet);
+        match sets.len() {
+            0 => self.output.warning(format!(
+                "`{name}` has no rules for one element to import (rules like `.card {{ … }}` and \
+                 `.card:hover {{ … }}`)."
+            )),
+            1 => {
+                let set = sets.remove(0);
+                self.designer_actions(vec![DesignerAction::ApplyStyleSet {
+                    ids: vec![id],
+                    name: set.selector,
+                    rules: set.rules,
+                }]);
+            }
+            _ => self.ui_designer.offer_imported_styles(name, sets),
         }
     }
 
@@ -490,7 +562,9 @@ impl EditorApp {
 
     /// Puts a new `what` from the designer's palette into `parent`, its top
     /// left `at` design pixels from the parent's, and selects it. A Page
-    /// goes into the PageLayout there (made if there isn't one).
+    /// goes into `parent` when it's a PageLayout, else into the PageLayout
+    /// around it, else into a new PageLayout made in `parent` (never one
+    /// in another ScreenGui).
     pub(in crate::app) fn designer_insert(
         &mut self,
         what: Insertable,
@@ -498,7 +572,27 @@ impl EditorApp {
         at: [f32; 2],
     ) {
         if what == Insertable::Page {
-            self.insert(Insertable::Page, Some(parent));
+            let is_layout = |world: &World, id| {
+                world
+                    .get(id)
+                    .is_some_and(|instance| instance.class() == ClassName::PageLayout)
+            };
+            let around = std::iter::successors(Some(parent), |&id| {
+                self.world.get(id).and_then(|instance| instance.parent())
+            })
+            .take_while(|&id| self.world.get(id).map(|i| i.class()) != Some(ClassName::ScreenGui))
+            .find(|&id| is_layout(&self.world, id));
+            let layout = match around {
+                Some(layout) => layout,
+                None => {
+                    self.insert_named(Insertable::PageLayout, Some(parent), "PageLayout", vec![]);
+                    match self.selected.filter(|&id| is_layout(&self.world, id)) {
+                        Some(layout) => layout,
+                        None => return,
+                    }
+                }
+            };
+            self.insert_named(Insertable::Frame, Some(layout), "Page", Vec::new());
             return;
         }
         let mut properties = vec![(

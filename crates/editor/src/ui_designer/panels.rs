@@ -330,6 +330,14 @@ impl UiDesigner {
                 super::widget_section::widget_section(ui, scene, id, actions);
                 look_section(ui, scene, id, actions);
                 anchor_picker(ui, scene, gui, id, actions);
+                super::style_sets::styles_section(
+                    ui,
+                    scene,
+                    id,
+                    &mut self.imported_styles,
+                    actions,
+                );
+                super::links::links_section(ui, scene, gui, id, actions);
             }
             if scene.editing
                 && let Some(edit) = style_panel::show(ui, world, Some(id), scene.stylesheets)

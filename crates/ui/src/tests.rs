@@ -1227,6 +1227,44 @@ fn border_image_values_read_and_write_back() {
 }
 
 #[test]
+fn rule_sets_group_each_simple_selector_with_its_states_and_parts() {
+    let (sheet, _) = parse_stylesheet(
+        "styles.css",
+        ".card { background-color: #222; border-radius: 8px; }\n\
+         .card:hover { background-color: #333; }\n\
+         TextButton { color: white; }\n\
+         .card::thumb { width: 8px; }\n\
+         .card { background-color: #111; }\n\
+         .menu .card, #a { color: black; }\n\
+         .empty { }\n",
+    );
+    let pair = |property: &str, value: &str| (property.to_owned(), value.to_owned());
+    assert_eq!(
+        rule_sets(&sheet),
+        vec![
+            RuleSet {
+                selector: ".card".into(),
+                rules: vec![
+                    (
+                        String::new(),
+                        vec![
+                            pair("background-color", "#111"),
+                            pair("border-radius", "8px")
+                        ]
+                    ),
+                    (":hover".into(), vec![pair("background-color", "#333")]),
+                    ("::thumb".into(), vec![pair("width", "8px")]),
+                ],
+            },
+            RuleSet {
+                selector: "TextButton".into(),
+                rules: vec![(String::new(), vec![pair("color", "white")])],
+            },
+        ]
+    );
+}
+
+#[test]
 fn own_rules_are_an_elements_id_rule_and_its_states_and_parts_alone() {
     let (sheet, _) = parse_stylesheet(
         "ui.css",

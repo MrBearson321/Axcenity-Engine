@@ -150,9 +150,10 @@ fn film_grain_adds_moving_noise_and_keeps_the_average() {
         let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32;
         (mean, variance.sqrt())
     };
+    // 0.5 is 127.5 in 8 bits: GPUs round it to 127 or 128.
     let (mean, deviation) = spread(&reds(&plain));
     assert!(
-        (mean - 128.0).abs() < 1.0 && deviation < 0.5,
+        (mean - 127.5).abs() <= 0.5 && deviation < 0.5,
         "{mean} {deviation}"
     );
 
@@ -166,7 +167,7 @@ fn film_grain_adds_moving_noise_and_keeps_the_average() {
     let grainy = with_lens(grey.clone(), grain(5.0));
     let first = draw(&mut renderer, &grainy);
     let (mean, deviation) = spread(&reds(&first));
-    assert!((mean - 128.0).abs() < 3.0, "the average stays: {mean}");
+    assert!((mean - 127.5).abs() < 3.0, "the average stays: {mean}");
     assert!(deviation > 6.0, "noisy: {deviation}");
     let second = draw(&mut renderer, &grainy);
     let moved = first

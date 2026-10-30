@@ -143,6 +143,7 @@ fn ctrl_b_i_u_toggle_the_selected_labels_text_unless_typing() {
         stylesheets: &sheets,
         assets: &app.assets,
         images: &[],
+        scripts: &[],
         editing: true,
     };
     let press = |key: egui::Key| egui::RawInput {

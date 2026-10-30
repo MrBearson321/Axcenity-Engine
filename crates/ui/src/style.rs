@@ -439,6 +439,69 @@ pub fn own_rules(
     rules
 }
 
+/// One look in a stylesheet, to copy onto an element: a simple selector
+/// (`.card`, `#play`, `TextButton`) and its states and parts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RuleSet {
+    /// The selector without states or parts, such as `.card`.
+    pub selector: String,
+    /// What follows `selector` in each of its rules (`""`, `:hover`,
+    /// `::thumb`) with its declarations, in the order first written; a
+    /// later declaration of a property replaces the earlier one in place.
+    pub rules: Vec<(String, Vec<(String, String)>)>,
+}
+
+/// Every [`RuleSet`] in `stylesheet`, in the order first written. Rules
+/// with descendant or several selectors (`.menu .title`, `a, b`) style
+/// elements by where they are, so they aren't a look of one element and
+/// are left out.
+pub fn rule_sets(stylesheet: &Stylesheet) -> Vec<RuleSet> {
+    let mut sets: Vec<RuleSet> = Vec::new();
+    for rule in &stylesheet.rules {
+        let selector = rule.selector_text.trim();
+        if selector.is_empty() || selector.contains([' ', ',', '>', '+', '~']) {
+            continue;
+        }
+        let (base, suffix) = selector.split_at(selector.find(':').unwrap_or(selector.len()));
+        if base.is_empty() {
+            continue;
+        }
+        let set = match sets.iter().position(|set| set.selector == base) {
+            Some(index) => &mut sets[index],
+            None => {
+                sets.push(RuleSet {
+                    selector: base.to_owned(),
+                    rules: Vec::new(),
+                });
+                sets.last_mut().expect("just pushed")
+            }
+        };
+        let index = match set.rules.iter().position(|(known, _)| known == suffix) {
+            Some(index) => index,
+            None => {
+                set.rules.push((suffix.to_owned(), Vec::new()));
+                set.rules.len() - 1
+            }
+        };
+        let declarations = &mut set.rules[index].1;
+        for declaration in &rule.declarations {
+            match declarations
+                .iter_mut()
+                .find(|(name, _)| *name == declaration.name)
+            {
+                Some((_, value)) => value.clone_from(&declaration.value),
+                None => declarations.push((declaration.name.clone(), declaration.value.clone())),
+            }
+        }
+    }
+    sets.retain(|set| {
+        set.rules
+            .iter()
+            .any(|(_, declarations)| !declarations.is_empty())
+    });
+    sets
+}
+
 /// Whether any stylesheet has a rule written exactly as `selector`.
 pub fn has_rule(stylesheets: &[Stylesheet], selector: &str) -> bool {
     stylesheets

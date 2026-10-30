@@ -131,6 +131,75 @@ fn the_pages_tab_shows_every_page_and_opens_one_to_edit() {
 }
 
 #[test]
+fn picking_a_screen_gui_in_the_pages_tab_shows_its_page_layouts_and_pages() {
+    use crate::ui_designer::pages::{page_layouts, screen_slides};
+    let (folder, mut app, [menu, pages, home, settings]) = menu("ui-pages-screens");
+    assert_eq!(
+        page_layouts(&app.world, menu),
+        [(pages, vec![home, settings])]
+    );
+    // A second ScreenGui, with no pages: one slide, the ScreenGui itself.
+    act(&mut app, DesignerAction::NewScreenGui);
+    let hud = app.selected.unwrap();
+    assert_eq!(app.world.get(hud).unwrap().class(), ClassName::ScreenGui);
+    assert!(page_layouts(&app.world, hud).is_empty());
+    let hud_slides = screen_slides(&app.world, hud);
+    assert_eq!(hud_slides.len(), 1);
+    assert_eq!(hud_slides[0].page, None);
+
+    // Its card shows only its pages; picking Menu shows Menu's two.
+    let ctx = theme::test_context();
+    app.ui_designer.set_tab(DesignerTab::Pages);
+    let mut actions = Vec::new();
+    app.ui_designer.pick_screen(menu, &mut actions);
+    assert_eq!(actions, [DesignerAction::Select(Some(menu))]);
+    act(&mut app, actions.remove(0));
+    draw_designer(&mut app, &ctx);
+    assert_eq!(app.ui_designer.current_gui(), Some(menu));
+    assert_eq!(screen_slides(&app.world, menu).len(), 2);
+    if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
+        for (name, size) in [
+            ("ui-designer-pages-screens.png", SIZE),
+            ("ui-designer-pages-narrow.png", egui::vec2(420.0, 900.0)),
+        ] {
+            app.ui_designer.forget_canvases();
+            crate::snapshot::snapshot_rendered(
+                &snapshots.join(name),
+                size,
+                vec![Vec::new(); 3],
+                |ctx, render_state| {
+                    egui::CentralPanel::default()
+                        .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                },
+            );
+        }
+    }
+
+    // Add pages to the HUD: a PageLayout with its first page, one step.
+    act(
+        &mut app,
+        DesignerAction::Insert {
+            what: crate::tree::Insertable::Page,
+            parent: hud,
+            at: [0.0, 0.0],
+        },
+    );
+    let hud_layouts = page_layouts(&app.world, hud);
+    assert_eq!(hud_layouts.len(), 1);
+    assert_eq!(hud_layouts[0].1.len(), 1);
+    // Start on Settings: the PageLayout's CurrentPage.
+    act(
+        &mut app,
+        DesignerAction::Edit(
+            pages,
+            crate::properties::Edit::Property("CurrentPage", Value::String("Settings".into())),
+        ),
+    );
+    assert_eq!(axcenity_ui::shown_page(&app.world, pages), Some(settings));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
 fn picking_an_image_sets_it_as_one_undo_step() {
     let (folder, mut app, [menu, ..]) = menu("ui-pages-image");
     act(&mut app, DesignerAction::Select(Some(menu)));

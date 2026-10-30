@@ -154,5 +154,96 @@ fn the_examples_pieces_are_what_generate_makes_from_the_same_seed() {
     let assets = Assets::new(&game.folder);
     let made = axcenity_mesh_edit::generate(&game.world, &assets, &game.folder, fracture);
     assert_eq!(made.as_deref(), Ok(path));
-    assert_eq!(std::fs::read(game.folder.join(path)).unwrap(), saved);
+    let generated = std::fs::read(game.folder.join(path)).unwrap();
+    assert_same_pieces(&generated, &saved);
+}
+
+/// How far a number in the pieces may be from the saved one. Another
+/// computer's maths library rounds the cuts' sines and roots in the last
+/// bit (about 1e-6); a different seed or cut moves corners by whole studs.
+const PIECES_TOLERANCE: f64 = 1e-4;
+
+/// Splits a `.glb` into its JSON and its binary chunk.
+fn glb_chunks(bytes: &[u8]) -> (serde_json::Value, &[u8]) {
+    let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+    let json_length = word(12);
+    let json = serde_json::from_slice(&bytes[20..20 + json_length]).unwrap();
+    let binary = 20 + json_length;
+    (json, &bytes[binary + 8..binary + 8 + word(binary)])
+}
+
+/// The same JSON, with numbers within [`PIECES_TOLERANCE`].
+fn assert_same_json(made: &serde_json::Value, saved: &serde_json::Value, at: &str) {
+    use serde_json::Value as Json;
+    match (made, saved) {
+        (Json::Number(a), Json::Number(b)) => {
+            let (a, b) = (a.as_f64().unwrap(), b.as_f64().unwrap());
+            assert!((a - b).abs() <= PIECES_TOLERANCE, "{at}: {a} ≠ {b}");
+        }
+        (Json::Array(a), Json::Array(b)) => {
+            assert_eq!(a.len(), b.len(), "{at}");
+            for (index, (a, b)) in a.iter().zip(b).enumerate() {
+                assert_same_json(a, b, &format!("{at}[{index}]"));
+            }
+        }
+        (Json::Object(a), Json::Object(b)) => {
+            assert_eq!(
+                a.keys().collect::<Vec<_>>(),
+                b.keys().collect::<Vec<_>>(),
+                "{at}"
+            );
+            for (key, a) in a {
+                assert_same_json(a, &b[key], &format!("{at}.{key}"));
+            }
+        }
+        _ => assert_eq!(made, saved, "{at}"),
+    }
+}
+
+/// The same pieces: the same glTF structure and the same indices, with
+/// every float (corners, normals, UVs) within [`PIECES_TOLERANCE`].
+fn assert_same_pieces(made: &[u8], saved: &[u8]) {
+    let (made_json, made_binary) = glb_chunks(made);
+    let (saved_json, saved_binary) = glb_chunks(saved);
+    assert_same_json(&made_json, &saved_json, "glTF");
+    assert_eq!(made_binary.len(), saved_binary.len());
+    for (index, accessor) in saved_json["accessors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        let view = &saved_json["bufferViews"][accessor["bufferView"].as_u64().unwrap() as usize];
+        let start = view["byteOffset"].as_u64().unwrap_or(0) as usize
+            + accessor["byteOffset"].as_u64().unwrap_or(0) as usize;
+        let parts = match accessor["type"].as_str().unwrap() {
+            "SCALAR" => 1,
+            "VEC2" => 2,
+            "VEC3" => 3,
+            "VEC4" => 4,
+            other => panic!("accessor type {other}"),
+        };
+        let count = accessor["count"].as_u64().unwrap() as usize * parts;
+        // 5126 is FLOAT; the rest (indices) are whole numbers.
+        let size = match accessor["componentType"].as_u64().unwrap() {
+            5126 | 5125 => 4,
+            5123 => 2,
+            _ => 1,
+        };
+        let (made, saved) = (
+            &made_binary[start..start + count * size],
+            &saved_binary[start..start + count * size],
+        );
+        if accessor["componentType"] != 5126 {
+            assert_eq!(made, saved, "accessor {index}");
+            continue;
+        }
+        for (a, b) in made.as_chunks::<4>().0.iter().zip(saved.as_chunks::<4>().0) {
+            let (a, b) = (f32::from_le_bytes(*a), f32::from_le_bytes(*b));
+            assert!(
+                f64::from((a - b).abs()) <= PIECES_TOLERANCE,
+                "accessor {index}: {a} ≠ {b}"
+            );
+        }
+    }
 }

@@ -154,6 +154,21 @@ impl EditorApp {
         ids: Vec<InstanceId>,
         declarations: Vec<(String, String)>,
     ) {
+        let label = format!("Paste style onto {}", named(&self.world, &ids));
+        self.apply_style_set(ids, label, vec![(String::new(), declarations)]);
+    }
+
+    /// A style set from the designer's Styles: each of `ids` gets each of
+    /// `rules` (what follows `#Id` in the selector, such as `""`, `:hover`
+    /// or `::thumb`, and its declarations) in its own rule for it, changed
+    /// in place where it has them, as one undo step named `label`. An
+    /// element without an `Id` gets one from its name.
+    pub(super) fn apply_style_set(
+        &mut self,
+        ids: Vec<InstanceId>,
+        label: String,
+        rules: Vec<(String, Vec<(String, String)>)>,
+    ) {
         if self.playing() || self.project.is_none() {
             return;
         }
@@ -183,12 +198,14 @@ impl EditorApp {
                     element_id
                 }
             };
-            let selector = style_panel::own_selector(&element_id);
-            for (property, value) in &declarations {
-                texts.extend(self.put_declaration(&selector, property, value));
+            let own = style_panel::own_selector(&element_id);
+            for (suffix, declarations) in &rules {
+                let selector = format!("{own}{suffix}");
+                for (property, value) in declarations {
+                    texts.extend(self.put_declaration(&selector, property, value));
+                }
             }
         }
-        let label = format!("Paste style onto {}", named(&self.world, &ids));
         self.history
             .record_asset(&mut self.world, label, merged(texts), properties);
         self.history.seal();

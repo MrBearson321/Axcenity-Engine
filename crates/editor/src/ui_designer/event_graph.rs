@@ -31,7 +31,8 @@ pub enum DesignerTab {
     EventGraph,
     /// The string table: languages, keys and their text.
     Strings,
-    /// Every page of every ScreenGui as a slideshow (`pages.rs`).
+    /// Every ScreenGui as a card, and the picked one's PageLayouts and
+    /// pages as a slideshow (`pages.rs`).
     Pages,
 }
 
@@ -334,6 +335,7 @@ impl UiDesigner {
             stylesheets: scene.stylesheets,
             assets: scene.assets,
             images: &[],
+            scripts: &[],
             editing: false,
         };
         self.previewing = true;

@@ -58,6 +58,13 @@ const BEFORE_PHASE_34: [(&str, Vector3); 7] = [
     ),
 ];
 
+/// How far (studs, on any axis) a part may be from [`BEFORE_PHASE_34`].
+/// Rapier isn't bit-for-bit the same on every CPU: the positions were
+/// recorded on another computer, and a Mac running that same pre-Phase 34
+/// engine puts the Target 0.002 away. Without the upgrade the parts end
+/// 0.29 (MetalSlider) to 9.5 (Target) studs away, so this still catches it.
+const BEFORE_PHASE_34_TOLERANCE: f32 = 0.01;
+
 #[test]
 fn a_world_saved_before_physical_properties_simulates_the_same() {
     let (_, moved) = simulate_format_3_world();
@@ -68,7 +75,10 @@ fn a_world_saved_before_physical_properties_simulates_the_same() {
             .map(f32::abs)
             .into_iter()
             .fold(0.0, f32::max);
-        assert!(apart < 1e-3, "{name} is at {now:?}, not {before:?}");
+        assert!(
+            apart < BEFORE_PHASE_34_TOLERANCE,
+            "{name} is at {now:?}, not {before:?}"
+        );
     }
 }
 

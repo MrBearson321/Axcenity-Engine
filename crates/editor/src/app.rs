@@ -56,6 +56,7 @@ mod terrain;
 mod texture_set;
 mod tree_ops;
 mod ui_graphs;
+mod ui_links;
 mod ui_selection;
 
 use std::collections::{HashMap, VecDeque};
@@ -1401,6 +1402,8 @@ mod ui_layering_tests;
 mod ui_pages_tests;
 #[cfg(test)]
 mod ui_selection_tests;
+#[cfg(test)]
+mod ui_styles_tests;
 #[cfg(test)]
 mod ui_text_style_tests;
 #[cfg(test)]
