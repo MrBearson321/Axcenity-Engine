@@ -454,7 +454,7 @@ pub(super) const TOPICS: [(&str, &str, &str); 7] = [
         icons::CUBE,
         "Build",
         "Insert parts from the Home tab, then move, resize and rotate them with the \
-             handles (Ctrl+2, 3, 4). Drag a part by its body to drop it onto others.",
+             handles (keys 1 to 4). Drag a part by its body to drop it onto others.",
     ),
     (
         icons::PUZZLE_PIECE,

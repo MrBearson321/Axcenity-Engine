@@ -90,17 +90,17 @@ pub(in crate::start) const TUTORIALS: &[Tutorial] = &[
             },
             Step {
                 title: "Move it",
-                text: "Pick Move (Ctrl+2). Drag the red, green or blue arrow to slide the \
+                text: "Pick Move (1). Drag the red, green or blue arrow to slide the \
                        part along X, Y or Z, one stud at a time while Snap is on. You can \
                        also drag the part by its body to drop it onto another surface.",
                 picture: Some(Picture::MoveHandles),
             },
             Step {
                 title: "Resize and rotate it",
-                text: "Resize (Ctrl+3) drags one face and keeps the opposite face still. \
-                       Rotate (Ctrl+4) turns the part around a ring in 15° steps. For exact \
-                       values, type into `Position`, `Orientation` and `Size` under Part in \
-                       Properties.",
+                text: "Resize (2) drags one face and keeps the opposite face still. \
+                       Rotate (3) turns the part around a ring in 15° steps, and Transform \
+                       (4) has all three. For exact values, type into its panel, or into \
+                       `Position`, `Orientation` and `Size` under Part in Properties.",
                 picture: None,
             },
             Step {

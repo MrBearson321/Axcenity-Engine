@@ -613,6 +613,28 @@ impl EditorApp {
             self.output.warning("Select two or more parts to weld.");
             return;
         }
+        let label = format!("Weld {} parts", pairs.len() + 1);
+        self.add_welds(pairs, label);
+    }
+    /// Join Surfaces: welds the parts a drag just moved to the parts
+    /// they're left touching, as one undo step after the drag's.
+    pub(super) fn join_surfaces(&mut self, moved: &[InstanceId]) {
+        if self.playing() {
+            return;
+        }
+        let pairs = crate::snapping::joins(&self.world, moved);
+        if pairs.is_empty() {
+            return;
+        }
+        let label = match pairs.len() {
+            1 => "Join 1 surface".to_owned(),
+            n => format!("Join {n} surfaces"),
+        };
+        self.add_welds(pairs, label);
+    }
+    /// A WeldConstraint for each `(Part0, Part1)` pair, inside Part1, as
+    /// one undo step named `label`.
+    fn add_welds(&mut self, pairs: Vec<(InstanceId, InstanceId)>, label: String) {
         let mut moves = Vec::new();
         for (part0, part1) in pairs {
             let weld = crate::constraints::new_weld(&mut self.world, part0, part1);
@@ -631,7 +653,6 @@ impl EditorApp {
                 });
             }
         }
-        let label = format!("Weld {} parts", moves.len() + 1);
         self.history.record_tree(&mut self.world, label, moves);
     }
     /// Takes `id` and everything inside it out of the world, as one undo step.

@@ -233,28 +233,24 @@ impl EditorApp {
         // over the Model Studio, its own single keys and Enter are.
         let studio = self.model_studio.has_pointer();
         let animating = self.animation.wants_keys(ctx) || studio;
-        let studio_tool = |input: &mut egui::InputState| {
-            Tool::ALL.into_iter().find(|tool| {
-                tool.shortcut()
-                    .is_some_and(|shortcut| input.consume_shortcut(&shortcut))
-            })
-        };
-        // F3X's single keys only while editing, so a game gets every key.
-        let f3x_tool = |input: &mut egui::InputState| {
+        // The tools' single keys (1 to 4, F3X's letters) only while
+        // editing, so a game gets every key. Escape goes back to Select; it
+        // isn't taken, so it still closes a menu or stops the Constraint tool.
+        let tool_key = |input: &mut egui::InputState| {
             if playing || animating {
                 return None;
             }
-            Tool::ALL.into_iter().find(|tool| {
-                tool.key()
-                    .is_some_and(|key| input.consume_key(egui::Modifiers::NONE, key))
-            })
+            Tool::ALL
+                .into_iter()
+                .find(|tool| {
+                    tool.key()
+                        .is_some_and(|key| input.consume_key(egui::Modifiers::NONE, key))
+                })
+                .or_else(|| input.key_pressed(egui::Key::Escape).then_some(Tool::Select))
         };
         let keys = ctx.input_mut(|input| {
             if typing {
-                return Keys {
-                    tool: studio_tool(input),
-                    ..Keys::default()
-                };
+                return Keys::default();
             }
             // Redo first: egui counts Ctrl+Shift+Z as Ctrl+Z too.
             let redo = input.consume_shortcut(&REDO_SHIFT_SHORTCUT)
@@ -263,7 +259,7 @@ impl EditorApp {
             Keys {
                 redo,
                 undo: input.consume_shortcut(&UNDO_SHORTCUT),
-                tool: studio_tool(input).or_else(|| f3x_tool(input)),
+                tool: tool_key(input),
                 toggle: !playing && !studio && input.consume_key(none, egui::Key::Enter),
                 // Taken before the viewport sees them, so Ctrl+D doesn't
                 // also fly the camera right.
@@ -286,12 +282,8 @@ impl EditorApp {
         }
         if keys.toggle && self.tool == Tool::Angular {
             self.extend_angular();
-        } else if keys.toggle && matches!(self.tool, Tool::Anchor | Tool::Collision) {
-            let property = if self.tool == Tool::Anchor {
-                "Anchored"
-            } else {
-                "CanCollide"
-            };
+        } else if keys.toggle && self.tool == Tool::Anchor {
+            let property = "Anchored";
             let parts = self.tool_parts();
             let all_on = parts.iter().all(|&id| {
                 self.world

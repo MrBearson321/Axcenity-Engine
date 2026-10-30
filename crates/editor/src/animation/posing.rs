@@ -81,6 +81,7 @@ impl Default for PoseSettings {
                 move_step: 0.05,
                 rotate_on: true,
                 rotate_step: 5.0,
+                ..Snap::default()
             },
             axes: Axes::World,
             chain: 2,

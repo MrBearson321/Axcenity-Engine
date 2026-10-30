@@ -10,12 +10,19 @@
 //! the surface, so parts line up. Its height off the surface always comes
 //! from the surface. Surfaces that aren't flat or upright (slopes, balls)
 //! have no grid, so there it follows the mouse exactly.
+//!
+//! With Surfaces on, a part near the edge of a face lines up with it: its
+//! own faces snap flush with (or in line with) those of the parts around
+//! it, along the surface, from up to `reach` studs away. With Collisions
+//! on, it won't go where it would be inside a solid part; it waits at the
+//! last place it fit (see `snapping.rs`).
 
 use axcenity_core::{InstanceId, Value, Vector3, World};
 use axcenity_render::glam::Vec3;
 use axcenity_scene::Ray;
 
-use crate::gizmo::Snap;
+use crate::gizmo::{Pose, Snap};
+use crate::snapping::{self, Obb, Obstacle};
 
 /// How close a surface's facing must be to an axis to count as flat or
 /// upright for snapping (about 2.5°).
@@ -31,6 +38,12 @@ pub struct PlaceDrag {
     grab_offset: Vec3,
     /// Other parts being dragged along with it, which it can't rest on.
     pub skip: Vec<InstanceId>,
+    /// The parts it can line up with or bump into (see `snapping::obstacles`).
+    pub obstacles: Vec<Obstacle>,
+    /// How far (studs) it's pulled to line up with a face.
+    pub reach: f32,
+    /// Where it last fit, with Collisions on.
+    last_free: Option<Vec3>,
 }
 
 impl PlaceDrag {
@@ -43,12 +56,15 @@ impl PlaceDrag {
             start,
             grab_offset: start - grabbed,
             skip: Vec::new(),
+            obstacles: Vec::new(),
+            reach: 0.0,
+            last_free: None,
         })
     }
 
     /// The part's new Position for the mouse pointing along `ray`, or `None`
     /// if there's no surface under the mouse (the part then stays put).
-    pub fn update(&self, world: &World, ray: Ray, snap: &Snap) -> Option<Value> {
+    pub fn update(&mut self, world: &World, ray: Ray, snap: &Snap) -> Option<Value> {
         // Skip the part itself, so it looks for what's behind it.
         let mut skip = self.skip.clone();
         skip.push(self.part);
@@ -63,7 +79,37 @@ impl PlaceDrag {
         }
         // Lift the part off the surface so its box just touches it.
         let lift = axcenity_scene::part_half_extent(world, self.part, normal)?;
-        let position = position + normal * lift;
+        let mut position = position + normal * lift;
+        let pose = world.get(self.part).and_then(Pose::of);
+        if snap.surfaces
+            && let Some(pose) = pose
+        {
+            // Along the two ways across a flat or upright surface.
+            let off = (0..3).find(|&i| normal[i].abs() > AXIS_ALIGNED);
+            for i in (0..3).filter(|&i| Some(i) != off && off.is_some()) {
+                let along = Vec3::AXES[i];
+                let obb = Obb::of(Pose { position, ..pose });
+                if let Some(shift) =
+                    snapping::flush_moves(&[obb], along, 0.0, self.reach, &self.obstacles)
+                {
+                    position += along * shift;
+                }
+            }
+        }
+        if snap.collisions
+            && let Some(pose) = pose
+        {
+            let from = Obb::of(Pose {
+                position: self.start,
+                ..pose
+            });
+            let to = Obb::of(Pose { position, ..pose });
+            if snapping::collides(&[from], &[to], &self.obstacles) {
+                position = self.last_free?;
+            } else {
+                self.last_free = Some(position);
+            }
+        }
         Some(Value::Vector3(Vector3::new(
             position.x, position.y, position.z,
         )))
@@ -136,6 +182,9 @@ mod tests {
         move_step: 1.0,
         rotate_on: false,
         rotate_step: 15.0,
+        surfaces: false,
+        collisions: false,
+        join: false,
     };
 
     fn assert_at(value: Option<Value>, expected: Vec3) {
@@ -151,7 +200,7 @@ mod tests {
     fn dragging_over_the_floor_rests_the_part_on_top_of_it() {
         let (world, block) = scene();
         // Grabbed in the middle of its top.
-        let drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 1.0, 0.0)).unwrap();
+        let mut drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 1.0, 0.0)).unwrap();
         let position = drag.update(&world, straight_down(-6.3, 4.2), &NO_SNAP);
         assert_at(position, Vec3::new(-6.3, 0.5, 4.2));
     }
@@ -160,7 +209,7 @@ mod tests {
     fn the_point_grabbed_stays_under_the_mouse() {
         let (world, block) = scene();
         // Grabbed near its right end, 1.5 studs right of its center.
-        let drag = PlaceDrag::start(&world, block, Vec3::new(1.5, 1.0, 0.0)).unwrap();
+        let mut drag = PlaceDrag::start(&world, block, Vec3::new(1.5, 1.0, 0.0)).unwrap();
         let position = drag.update(&world, straight_down(5.0, 0.0), &NO_SNAP);
         assert_at(position, Vec3::new(3.5, 0.5, 0.0));
     }
@@ -168,7 +217,7 @@ mod tests {
     #[test]
     fn dragging_onto_another_part_stacks_it_and_against_a_wall_puts_it_beside() {
         let (world, block) = scene();
-        let drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 1.0, 0.0)).unwrap();
+        let mut drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 1.0, 0.0)).unwrap();
         // On top of the 10-stud wall.
         let position = drag.update(&world, straight_down(10.0, 3.0), &NO_SNAP);
         assert_at(position, Vec3::new(10.0, 10.5, 3.0));
@@ -187,7 +236,7 @@ mod tests {
     #[test]
     fn over_empty_sky_there_is_nowhere_to_put_it() {
         let (world, block) = scene();
-        let drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 1.0, 0.0)).unwrap();
+        let mut drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 1.0, 0.0)).unwrap();
         let up = Ray {
             origin: Vec3::new(0.0, 5.0, 0.0),
             direction: Vec3::Y,
@@ -198,7 +247,7 @@ mod tests {
     #[test]
     fn snapping_puts_it_on_the_world_grid_along_the_surface() {
         let (world, block) = scene();
-        let drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 1.0, 0.0)).unwrap();
+        let mut drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 1.0, 0.0)).unwrap();
         // Across the floor: X and Z snap, the height comes from the floor.
         let position = drag.update(&world, straight_down(-6.3, 4.2), &Snap::default());
         assert_at(position, Vec3::new(-6.0, 0.5, 4.0));
@@ -224,8 +273,51 @@ mod tests {
         world
             .set_property(block, "Orientation", vector(Vec3::new(0.0, 0.0, 90.0)))
             .unwrap();
-        let drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 2.5, 0.0)).unwrap();
+        let mut drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 2.5, 0.0)).unwrap();
         let position = drag.update(&world, straight_down(-3.0, -3.0), &NO_SNAP);
         assert_at(position, Vec3::new(-3.0, 2.0, -3.0));
+    }
+
+    /// The floor and the wall, as the viewport gives them when the block's
+    /// drag starts.
+    fn around_block(world: &World, block: InstanceId) -> Vec<Obstacle> {
+        snapping::obstacles(world, &[block])
+    }
+
+    #[test]
+    fn with_surfaces_it_lines_up_flush_with_a_wall_it_comes_near() {
+        let (world, block) = scene();
+        let mut drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 1.0, 0.0)).unwrap();
+        drag.obstacles = around_block(&world, block);
+        drag.reach = 0.5;
+        let surfaces = Snap {
+            surfaces: true,
+            ..NO_SNAP
+        };
+        // Its right face (8.7) is 0.3 from the wall's (9): pulled flush.
+        let position = drag.update(&world, straight_down(6.7, 0.2), &surfaces);
+        assert_at(position, Vec3::new(7.0, 0.5, 0.2));
+        // Further off, it follows the mouse.
+        let position = drag.update(&world, straight_down(5.0, 0.2), &surfaces);
+        assert_at(position, Vec3::new(5.0, 0.5, 0.2));
+    }
+
+    #[test]
+    fn with_collisions_it_waits_where_it_last_fit_instead_of_going_into_the_wall() {
+        let (world, block) = scene();
+        let mut drag = PlaceDrag::start(&world, block, Vec3::new(0.0, 1.0, 0.0)).unwrap();
+        drag.obstacles = around_block(&world, block);
+        let collisions = Snap {
+            collisions: true,
+            ..NO_SNAP
+        };
+        let position = drag.update(&world, straight_down(5.0, 0.0), &collisions);
+        assert_at(position, Vec3::new(5.0, 0.5, 0.0));
+        // At 8 it would reach x = 10, into the wall (9 to 11).
+        let position = drag.update(&world, straight_down(8.0, 0.0), &collisions);
+        assert_at(position, Vec3::new(5.0, 0.5, 0.0));
+        // Resting on the floor never counts as going into it.
+        let position = drag.update(&world, straight_down(-3.0, 2.0), &collisions);
+        assert_at(position, Vec3::new(-3.0, 0.5, 2.0));
     }
 }

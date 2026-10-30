@@ -613,10 +613,7 @@ impl Pen<'_> {
         self.text(
             rect.left_bottom() + vec2(14.0, -14.0),
             egui::Align2::LEFT_CENTER,
-            &theme::with_icon(
-                icons::ARROWS_OUT_CARDINAL,
-                "Move  ·  Ctrl+2  ·  Snap 1 stud",
-            ),
+            &theme::with_icon(icons::ARROWS_OUT_CARDINAL, "Move  ·  1  ·  Snap 1 stud"),
             type_scale::CAPTION,
             palette.text_weak,
         );

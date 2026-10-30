@@ -343,6 +343,20 @@ impl EditorApp {
                     format!("{} particles", kind.as_str()),
                 );
             }
+            ToolAction::MoveBy(by) => {
+                let moved = parts
+                    .iter()
+                    .filter_map(|&id| {
+                        let at = self.world.get(id)?.property("Position")?.as_vector3()?;
+                        let at = axcenity_core::Vector3::new(at.x + by.x, at.y + by.y, at.z + by.z);
+                        Some((id, vec![("Position", Value::Vector3(at))]))
+                    })
+                    .collect();
+                self.apply_drag(DragEdit {
+                    kind: DragKind::Move,
+                    parts: moved,
+                });
+            }
             ToolAction::Burst => {
                 let emitters =
                     build_tools::lights_in(&self.world, &parts, ClassName::ParticleEmitter);

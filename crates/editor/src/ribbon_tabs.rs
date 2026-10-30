@@ -17,17 +17,27 @@ use crate::widgets;
 pub enum RibbonGroup {
     /// Play and Stop.
     Game,
-    /// Select, Move, Scale and Rotate.
+    /// How many clients Play runs and the network between them (Phases 64
+    /// and 67), and which one the viewport shows.
+    Clients,
+    /// Select, Move, Scale, Rotate and Transform.
     Tools,
-    /// Paint, Material, Anchor, Collision, Lighting, Emission and Angular.
+    /// Paint, Material, Anchor, Lighting, Emission and Angular.
     Build,
     /// Union, Negate, Intersect and Separate (Phase 50).
     Solid,
+    /// The move and rotate steps, Surfaces, Collisions, Join Surfaces and
+    /// Collision Groups.
     Snapping,
     /// Block, Ball, Cylinder and Wedge.
     Parts,
-    /// Sounds, particle emitters, lights, and a third-person character.
+    /// Lights, probes, the sky and the looks that go in Lighting.
+    Lights,
+    /// Sounds, particle emitters, lens effects and Graphics Volumes.
     Effects,
+    /// Characters, health, seats, prompts, spawns, tools, vehicles, agents,
+    /// checkpoints and cameras.
+    Gameplay,
     /// Weld parts together, and insert Attachments.
     Constraints,
     /// Import…, for models, images, sounds and prefabs.
@@ -49,14 +59,17 @@ pub enum RibbonGroup {
 }
 
 impl RibbonGroup {
-    pub const ALL: [RibbonGroup; 16] = [
+    pub const ALL: [RibbonGroup; 19] = [
         RibbonGroup::Game,
+        RibbonGroup::Clients,
         RibbonGroup::Tools,
         RibbonGroup::Build,
         RibbonGroup::Solid,
         RibbonGroup::Snapping,
         RibbonGroup::Parts,
+        RibbonGroup::Lights,
         RibbonGroup::Effects,
+        RibbonGroup::Gameplay,
         RibbonGroup::Constraints,
         RibbonGroup::Import,
         RibbonGroup::Ui,
@@ -72,12 +85,15 @@ impl RibbonGroup {
     pub fn label(self) -> &'static str {
         match self {
             RibbonGroup::Game => "Game",
+            RibbonGroup::Clients => "Clients",
             RibbonGroup::Tools => "Tools",
             RibbonGroup::Build => "Build",
             RibbonGroup::Solid => "Solid Modeling",
             RibbonGroup::Snapping => "Snapping",
             RibbonGroup::Parts => "Parts",
+            RibbonGroup::Lights => "Lights & Sky",
             RibbonGroup::Effects => "Effects",
+            RibbonGroup::Gameplay => "Gameplay",
             RibbonGroup::Constraints => "Constraints",
             RibbonGroup::Import => "Import",
             RibbonGroup::Ui => "UI",
@@ -93,15 +109,20 @@ impl RibbonGroup {
     fn description(self) -> &'static str {
         match self {
             RibbonGroup::Game => "Play and Stop",
-            RibbonGroup::Tools => "Select, Move, Scale and Rotate",
-            RibbonGroup::Build => {
-                "Paint, materials, anchor, collision, lights and the angular tool"
-            }
+            RibbonGroup::Clients => "How many clients Play runs, and the network between them",
+            RibbonGroup::Tools => "Select, Move, Scale, Rotate and Transform",
+            RibbonGroup::Build => "Paint, materials, anchor, lights and the angular tool",
             RibbonGroup::Solid => "Union, negate, intersect and separate parts",
-            RibbonGroup::Snapping => "Move and rotate steps",
+            RibbonGroup::Snapping => {
+                "Move and rotate steps, snapping to surfaces, collisions and joining surfaces"
+            }
             RibbonGroup::Parts => "Insert blocks, balls, cylinders and wedges",
+            RibbonGroup::Lights => "Insert lights, probes, the sky, clouds, weather and outlines",
             RibbonGroup::Effects => {
-                "Insert sounds, particle emitters, lights, and a third-person character"
+                "Insert sounds, particle emitters, lens effects and Graphics Volumes"
+            }
+            RibbonGroup::Gameplay => {
+                "Insert characters, health, seats, prompts, spawns, tools, vehicles and cameras"
             }
             RibbonGroup::Constraints => "Weld parts together and insert Attachments",
             RibbonGroup::Import => "Import models, images, sounds and prefabs",
@@ -172,11 +193,11 @@ impl BuiltInTab {
         use RibbonGroup::*;
         match self {
             BuiltInTab::Home => &[Game, Tools, Snapping, Parts],
-            BuiltInTab::Model => &[Build, Solid, Constraints, Effects, Import],
+            BuiltInTab::Model => &[Build, Solid, Constraints, Lights, Effects, Gameplay, Import],
             BuiltInTab::Terrain => &[Terrain],
             BuiltInTab::Ui => &[Ui],
             BuiltInTab::Script => &[Game, Scripts],
-            BuiltInTab::Test => &[Game, Check],
+            BuiltInTab::Test => &[Game, Clients, Check],
             BuiltInTab::View => &[Panels, Overlays],
             BuiltInTab::Plugins => &[Plugins],
         }
@@ -600,6 +621,19 @@ mod tests {
                 RibbonGroup::Parts,
             ]
         );
+    }
+
+    #[test]
+    fn clients_and_the_network_are_only_on_the_test_tab() {
+        for tab in BuiltInTab::ALL {
+            assert_eq!(
+                tab.groups().contains(&RibbonGroup::Clients),
+                tab == BuiltInTab::Test,
+                "{tab:?}"
+            );
+        }
+        // Play and Stop are still beside them.
+        assert!(BuiltInTab::Test.groups().contains(&RibbonGroup::Game));
     }
 
     #[test]

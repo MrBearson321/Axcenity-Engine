@@ -34,6 +34,9 @@ const NO_SNAP: Snap = Snap {
     move_step: 1.0,
     rotate_on: false,
     rotate_step: 15.0,
+    surfaces: false,
+    collisions: false,
+    join: false,
 };
 
 fn assert_near(a: Vec3, b: Vec3) {
@@ -614,4 +617,146 @@ fn center_pivot_turns_the_selection_around_its_middle_and_local_turns_each_in_pl
         value_of(&values, parts[0].0, "Orientation"),
         Vec3::new(0.0, 0.0, 90.0),
     );
+}
+
+#[test]
+fn transform_shows_every_kind_of_handle_and_each_drags_from_its_own_frame() {
+    let start = pose(Vec3::ZERO, Vec3::new(4.0, 1.0, 2.0));
+    let screen = screen_along_z(Vec3::ZERO, 3.0);
+    let shapes = shapes_for(Tool::Transform, Modes::default(), &[start], &screen);
+    let count = |kind: fn(&Handle) -> bool| shapes.iter().filter(|s| kind(&s.handle)).count();
+    assert_eq!(count(|h| matches!(h, Handle::Rotate(_))), 3);
+    assert!(
+        count(|h| matches!(h, Handle::Scale(..))) >= 4,
+        "faces seen side on are hidden"
+    );
+    assert!(count(|h| matches!(h, Handle::Move(_))) >= 2);
+    // Its arrows start out at the rings, unlike Move's from the middle.
+    let arrow = |tool| {
+        shapes_for(tool, Modes::default(), &[start], &screen)
+            .into_iter()
+            .find(|s| s.handle == Handle::Move(Axis::X))
+            .unwrap()
+    };
+    let middle = screen.point(Vec3::ZERO).unwrap();
+    let from = |shape: &Shape| shape.lines()[0][0].distance(middle);
+    assert!(from(&arrow(Tool::Move)) < 1.0);
+    assert!((from(&arrow(Tool::Transform)) - HANDLE_POINTS).abs() < 5.0);
+    assert_eq!(
+        frame_of(&shapes, Handle::Rotate(Axis::Z)),
+        Some(Pose {
+            rotation: Quat::IDENTITY,
+            ..start
+        })
+    );
+}
+
+/// A visible, solid 2×2×2 part at `x` on the X axis, in the way.
+fn block_at(x: f32) -> snapping::Obstacle {
+    snapping::wall(snapping::obb(
+        Vec3::new(x, 0.0, 0.0),
+        Vec3::splat(2.0),
+        Quat::IDENTITY,
+    ))
+}
+
+#[test]
+fn with_surfaces_a_move_lands_flush_against_the_part_in_its_way() {
+    let start = pose(Vec3::ZERO, Vec3::splat(2.0));
+    let snap = Snap {
+        surfaces: true,
+        ..NO_SNAP
+    };
+    let mut drag = Drag::start(
+        Handle::Move(Axis::X),
+        some_part(),
+        start,
+        ray_through(0.0, 0.0),
+    )
+    .unwrap()
+    .among(vec![block_at(6.0)], 0.5);
+    // 3.7 studs is within half a stud of flush (4).
+    let values = drag.update(ray_through(3.7, 0.0), &snap).unwrap();
+    assert_near(vector(&values, "Position"), Vec3::new(4.0, 0.0, 0.0));
+    // Off, it goes where the mouse says.
+    let values = drag.update(ray_through(3.7, 0.0), &NO_SNAP).unwrap();
+    assert_near(vector(&values, "Position"), Vec3::new(3.7, 0.0, 0.0));
+}
+
+#[test]
+fn with_collisions_a_move_or_a_resize_stops_at_a_solid_part() {
+    let start = pose(Vec3::ZERO, Vec3::splat(2.0));
+    let snap = Snap {
+        collisions: true,
+        ..NO_SNAP
+    };
+    let mut drag = Drag::start(
+        Handle::Move(Axis::X),
+        some_part(),
+        start,
+        ray_through(0.0, 0.0),
+    )
+    .unwrap()
+    .among(vec![block_at(6.0)], 0.5);
+    let values = drag.update(ray_through(9.0, 0.0), &snap).unwrap();
+    assert_near(vector(&values, "Position"), Vec3::new(4.0, 0.0, 0.0));
+
+    // The +X face grows to the other part's face (5) and no further.
+    let handle = Handle::Scale(Axis::X, Side::Plus);
+    let mut drag = Drag::start(handle, some_part(), start, ray_through(1.5, 0.0))
+        .unwrap()
+        .among(vec![block_at(6.0)], 0.5);
+    let values = drag.update(ray_through(10.0, 0.0), &snap).unwrap();
+    let size = vector(&values, "Size");
+    assert!((size.x - 6.0).abs() < 0.03, "{size}");
+}
+
+#[test]
+fn with_collisions_a_turn_stops_where_it_meets_a_solid_part() {
+    // A long bar along X, with a block just above its right end.
+    let start = pose(Vec3::ZERO, Vec3::new(8.0, 0.5, 0.5));
+    let above = snapping::wall(snapping::obb(
+        Vec3::new(3.5, 1.5, 0.0),
+        Vec3::splat(1.0),
+        Quat::IDENTITY,
+    ));
+    let screen = screen_along_z(Vec3::ZERO, 0.0);
+    let snap = Snap {
+        collisions: true,
+        ..NO_SNAP
+    };
+    let frame = Pose {
+        rotation: Quat::IDENTITY,
+        ..start
+    };
+    let grab = ring_point(&screen, frame, Axis::Z, 0.0);
+    let mut drag = Drag::start_many(
+        Handle::Rotate(Axis::Z),
+        frame,
+        vec![(some_part(), start)],
+        Modes::default(),
+        &screen,
+        grab,
+    )
+    .unwrap()
+    .among(vec![above], 0.5);
+    let z = |values: PartValues| vector(&values[0].1, "Orientation").z;
+    // A small turn the other way is free.
+    let down = drag.update_all(Pointer::on(&screen, grab - drag.spin() * 5.0, false), &snap);
+    assert!(z(down.unwrap()) < -3.0);
+    // Back and well past (38°): the bar's top corner meets the block at
+    // about 10.8°, so it stops just short of that instead of swinging
+    // through it.
+    let up = drag.update_all(
+        Pointer::on(&screen, grab + drag.spin() * 60.0, false),
+        &snap,
+    );
+    let stopped = z(up.unwrap());
+    assert!((8.0..10.8).contains(&stopped), "{stopped}");
+    // Pushing further doesn't get it past.
+    let more = drag.update_all(
+        Pointer::on(&screen, grab + drag.spin() * 120.0, false),
+        &snap,
+    );
+    assert_eq!(z(more.unwrap()), stopped);
 }

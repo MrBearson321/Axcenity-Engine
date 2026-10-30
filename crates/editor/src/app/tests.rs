@@ -1422,19 +1422,23 @@ pub(super) fn press(app: &mut EditorApp, modifiers: egui::Modifiers, key: egui::
 }
 
 #[test]
-fn ctrl_1_to_4_pick_the_tools_and_ctrl_z_and_ctrl_y_undo_and_redo() {
+fn keys_1_to_4_pick_the_handle_tools_escape_selects_and_ctrl_z_and_ctrl_y_undo_and_redo() {
     let mut app = EditorApp::new(Some(&example("hello-touched")));
     let command = egui::Modifiers::COMMAND;
     assert_eq!(app.tool, Tool::Select);
     for (key, tool) in [
-        (egui::Key::Num2, Tool::Move),
-        (egui::Key::Num3, Tool::Scale),
-        (egui::Key::Num4, Tool::Rotate),
-        (egui::Key::Num1, Tool::Select),
+        (egui::Key::Num1, Tool::Move),
+        (egui::Key::Num2, Tool::Scale),
+        (egui::Key::Num3, Tool::Rotate),
+        (egui::Key::Num4, Tool::Transform),
+        (egui::Key::Escape, Tool::Select),
     ] {
-        press(&mut app, command, key);
+        press(&mut app, egui::Modifiers::NONE, key);
         assert_eq!(app.tool, tool);
     }
+    // Ctrl with a number no longer picks a tool.
+    press(&mut app, command, egui::Key::Num2);
+    assert_eq!(app.tool, Tool::Select);
 
     let pad = part(&app, "Pad");
     app.apply(pad, Edit::Property("Anchored", Value::Bool(false)));
@@ -1554,11 +1558,8 @@ fn building_tools_change_the_whole_selection_in_one_undo_step() {
 fn f3x_keys_pick_tools_while_editing() {
     let mut app = EditorApp::new(Some(&example("hello-touched")));
     for (key, tool) in [
-        (egui::Key::Z, Tool::Move),
-        (egui::Key::X, Tool::Scale),
         (egui::Key::V, Tool::Paint),
         (egui::Key::M, Tool::Anchor),
-        (egui::Key::K, Tool::Collision),
         (egui::Key::U, Tool::Lighting),
         (egui::Key::P, Tool::Emission),
     ] {
@@ -1772,4 +1773,31 @@ fn the_view_mode_changes_the_viewport_at_once_and_lit_comes_back() {
     let _ = std::fs::remove_file(
         std::env::temp_dir().join(format!("axcenity-view-mode-{}.png", std::process::id())),
     );
+}
+
+#[test]
+fn frames_keep_coming_for_a_second_after_input_then_stop() {
+    let mut app = EditorApp::new(None);
+    let ctx = egui::Context::default();
+    let mut frame = |time: f64, events: Vec<egui::Event>| {
+        let input = egui::RawInput {
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| app.keep_frames_steady(ctx));
+        ctx.has_requested_repaint()
+    };
+    // egui asks for more of its own first frames.
+    frame(0.0, Vec::new());
+    frame(0.1, Vec::new());
+    assert!(!frame(0.2, Vec::new()), "no input yet: nothing to draw");
+    assert!(frame(
+        1.0,
+        vec![egui::Event::PointerMoved(egui::pos2(5.0, 5.0))]
+    ));
+    assert!(frame(1.6, Vec::new()), "still drawing steadily");
+    // egui settles the pointer's velocity on a frame of its own.
+    frame(2.2, Vec::new());
+    assert!(!frame(2.3, Vec::new()), "idle again");
 }

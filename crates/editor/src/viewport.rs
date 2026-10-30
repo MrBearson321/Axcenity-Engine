@@ -50,12 +50,14 @@ use crate::gizmo::{self, Drag, Handle, Modes, PartValues, Pose, Snap, Tool};
 use crate::placing::PlaceDrag;
 use crate::profiler::RenderCost;
 use crate::screen::Screen;
+use crate::snapping;
 use crate::theme::{self, icons};
 use crate::ui_handles::{self, Grip, Handles, UiDrag, UiDragEdit};
 
 mod game_input;
 mod input;
 mod overlays;
+mod view_cube;
 mod view_mode;
 pub(crate) use overlays::paint_agent_paths;
 use overlays::*;
@@ -930,6 +932,15 @@ impl Viewport {
                 rect.contains(at).then(|| (marker.clone(), at))
             })
             .collect();
+        // The view cube's face under the mouse, while editing: a click on it
+        // turns the camera instead of selecting what's behind it.
+        let editing = play_camera.is_none() && tool.is_some();
+        let cube_face = pointer
+            .filter(|_| editing && response.hovered())
+            .and_then(|at| view_cube::face_under(rect, self.camera.forward(), at));
+        if cube_face.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
         let drag = self.drag_input(
             ui,
             &response,
@@ -953,7 +964,14 @@ impl Viewport {
                 modifiers,
                 keep_group: selection.contains(&part),
             }),
-            None if drag.in_use || brush.is_some() || picking.is_some() || plugin_button => None,
+            None if drag.in_use
+                || brush.is_some()
+                || picking.is_some()
+                || plugin_button
+                || cube_face.is_some() =>
+            {
+                None
+            }
             None => self.clicked_part(ui, &response, &screen, world, &ui_scene, &lights),
         };
         let playing = tool.is_none() && response.clicked_by(egui::PointerButton::Primary);
@@ -1193,6 +1211,15 @@ impl Viewport {
             );
         }
         self.paint_speed_popup(ui, rect);
+        // While editing, the view cube says which way the camera faces, and
+        // a click on a face looks from that side.
+        if editing {
+            view_cube::paint(ui, rect, self.camera.forward(), cube_face);
+            if let Some(side) = cube_face.filter(|_| response.clicked()) {
+                self.camera = view_cube::looking_from(&self.camera, side);
+                ui.ctx().request_repaint();
+            }
+        }
         let drop = self.drop_target(ui, rect, &screen, world, &ui_scene);
         if let Some(target) = &drop
             && let Some(at) = screen.point(target.point)

@@ -5,12 +5,16 @@
 //!
 //! - **Move / Resize / Rotate**: the axes, directions or pivot (see
 //!   `gizmo.rs`), and the step to snap to.
+//! - **Transform**: the last selected part's Position, Rotation and Size to
+//!   type in (a new Position moves the whole selection by as much), the
+//!   axes and the pivot, and both steps.
 //! - **Paint**: a palette of swatches and a color picker. Picking a color
 //!   paints the selection; with this tool, clicking a part paints it.
 //! - **Material**: the material, transparency, metalness, roughness and
 //!   whether it casts a shadow.
-//! - **Anchor** and **Collision**: switch `Anchored` and `CanCollide` for
-//!   the selection (Enter toggles, as in F3X).
+//! - **Anchor**: switch `Anchored` for the selection (Enter toggles, as in
+//!   F3X). Whether parts collide is in Properties, and the Home tab's
+//!   Collision Groups.
 //! - **Lighting**: add, change or remove a PointLight or SpotLight in each
 //!   selected part.
 //! - **Emission**: a glow of any color (`EmissiveColor` and `Emission`),
@@ -103,6 +107,8 @@ pub enum ToolAction {
     AddEmitter(ParticleType),
     /// Give off a burst from every emitter in the selected parts, to see it.
     Burst,
+    /// Move every selected part by this much (the Transform panel's Position).
+    MoveBy(Vector3),
 }
 
 /// What the panel shows: the world and the parts the tools act on.
@@ -177,28 +183,7 @@ pub fn panel(
     match tool {
         Tool::Select => {}
         Tool::Move => {
-            choice(
-                ui,
-                "Axes",
-                &mut modes.axes,
-                &[
-                    (
-                        MoveAxes::Global,
-                        "Global",
-                        "The world's axes, from the middle of the selection.",
-                    ),
-                    (
-                        MoveAxes::Local,
-                        "Local",
-                        "Each part moves along its own axes.",
-                    ),
-                    (
-                        MoveAxes::Last,
-                        "Last",
-                        "Every part moves along the last selected part's axes.",
-                    ),
-                ],
-            );
+            axes_choice(ui, modes);
             studs_step(ui, snap);
         }
         Tool::Scale => {
@@ -222,38 +207,16 @@ pub fn panel(
             studs_step(ui, snap);
         }
         Tool::Rotate => {
-            choice(
-                ui,
-                "Pivot",
-                &mut modes.pivot,
-                &[
-                    (
-                        RotatePivot::Center,
-                        "Center",
-                        "Around the middle of the selection, on the world's axes.",
-                    ),
-                    (
-                        RotatePivot::Local,
-                        "Local",
-                        "Each part around its own center and axes.",
-                    ),
-                    (
-                        RotatePivot::Last,
-                        "Last",
-                        "Around the last selected part's center and axes.",
-                    ),
-                ],
-            );
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut snap.rotate_on, "Increment");
-                ui.add_enabled(
-                    snap.rotate_on,
-                    egui::DragValue::new(&mut snap.rotate_step)
-                        .range(Snap::MIN_ROTATE_STEP..=180.0)
-                        .speed(0.5)
-                        .suffix("°"),
-                );
-            });
+            pivot_choice(ui, modes);
+            turn_step(ui, snap);
+        }
+        Tool::Transform => {
+            transform(ui, scene, &mut actions);
+            ui.separator();
+            axes_choice(ui, modes);
+            pivot_choice(ui, modes);
+            studs_step(ui, snap);
+            turn_step(ui, snap);
         }
         Tool::Paint => paint(ui, scene, settings, &mut actions),
         Tool::Material => material(ui, scene, &mut actions),
@@ -266,18 +229,6 @@ pub fn panel(
                 "Unanchor",
                 icons::ANCHOR_SIMPLE,
                 "Unanchored parts fall and collide.",
-            ),
-            &mut actions,
-        ),
-        Tool::Collision => switch(
-            ui,
-            scene,
-            "CanCollide",
-            ("Collide", icons::CUBE, "can collide"),
-            (
-                "Pass through",
-                icons::INTERSECT,
-                "Other parts pass through; Touched still fires.",
             ),
             &mut actions,
         ),
@@ -384,6 +335,131 @@ fn angular(
     {
         actions.push(ToolAction::Extend);
     }
+}
+
+/// The Transform panel's numbers: the last selected part's Position,
+/// Rotation (its Orientation, in degrees) and Size, each X, Y and Z.
+fn transform(ui: &mut egui::Ui, scene: &PanelScene, actions: &mut Vec<ToolAction>) {
+    if !needs_parts(ui, scene) {
+        return;
+    }
+    let vector = |name| scene.last()?.property(name).and_then(Value::as_vector3);
+    let rows: [(&str, &'static str, &str, f64); 3] = [
+        ("Position", "Position", "", 0.05),
+        ("Rotation", "Orientation", "°", 0.5),
+        ("Size", "Size", "", 0.05),
+    ];
+    egui::Grid::new("transform numbers")
+        .num_columns(4)
+        .spacing([4.0, 4.0])
+        .show(ui, |ui| {
+            for (label, property, suffix, speed) in rows {
+                let Some(before) = vector(property) else {
+                    continue;
+                };
+                ui.label(label);
+                let mut after = before;
+                for (axis, value) in [
+                    ("X", &mut after.x),
+                    ("Y", &mut after.y),
+                    ("Z", &mut after.z),
+                ] {
+                    let mut drag = egui::DragValue::new(value)
+                        .speed(speed)
+                        .max_decimals(3)
+                        .prefix(format!("{axis} "))
+                        .suffix(suffix);
+                    if property == "Size" {
+                        drag = drag.range(crate::properties::MIN_SIZE..=f32::MAX);
+                    }
+                    ui.add_sized([62.0, 20.0], drag);
+                }
+                ui.end_row();
+                if after != before {
+                    actions.push(if property == "Position" {
+                        ToolAction::MoveBy(Vector3::new(
+                            after.x - before.x,
+                            after.y - before.y,
+                            after.z - before.z,
+                        ))
+                    } else {
+                        ToolAction::Set {
+                            property,
+                            value: Value::Vector3(after),
+                        }
+                    });
+                }
+            }
+        });
+    if scene.parts.len() > 1 {
+        ui.weak("The last selected part's numbers. A new Position moves them all.");
+    }
+}
+
+/// Which way the Move handles point.
+fn axes_choice(ui: &mut egui::Ui, modes: &mut Modes) {
+    choice(
+        ui,
+        "Axes",
+        &mut modes.axes,
+        &[
+            (
+                MoveAxes::Global,
+                "Global",
+                "The world's axes, from the middle of the selection.",
+            ),
+            (
+                MoveAxes::Local,
+                "Local",
+                "Each part moves along its own axes.",
+            ),
+            (
+                MoveAxes::Last,
+                "Last",
+                "Every part moves along the last selected part's axes.",
+            ),
+        ],
+    );
+}
+
+/// What the Rotate rings turn parts around.
+fn pivot_choice(ui: &mut egui::Ui, modes: &mut Modes) {
+    choice(
+        ui,
+        "Pivot",
+        &mut modes.pivot,
+        &[
+            (
+                RotatePivot::Center,
+                "Center",
+                "Around the middle of the selection, on the world's axes.",
+            ),
+            (
+                RotatePivot::Local,
+                "Local",
+                "Each part around its own center and axes.",
+            ),
+            (
+                RotatePivot::Last,
+                "Last",
+                "Around the last selected part's center and axes.",
+            ),
+        ],
+    );
+}
+
+/// The rotate snapping step.
+fn turn_step(ui: &mut egui::Ui, snap: &mut Snap) {
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut snap.rotate_on, "Turn");
+        ui.add_enabled(
+            snap.rotate_on,
+            egui::DragValue::new(&mut snap.rotate_step)
+                .range(Snap::MIN_ROTATE_STEP..=180.0)
+                .speed(0.5)
+                .suffix("°"),
+        );
+    });
 }
 
 /// A row of buttons picking one of `options`.

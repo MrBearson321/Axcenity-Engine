@@ -403,13 +403,11 @@ fn shortcuts_page(ui: &mut egui::Ui) {
     let tools = Tool::ALL
         .into_iter()
         .filter_map(|tool| {
-            let keys: Vec<String> = tool
-                .shortcut()
-                .map(|shortcut| format(&shortcut))
-                .into_iter()
-                .chain(tool.key().map(|key| key.name().to_owned()))
-                .collect();
-            (!keys.is_empty()).then(|| (format!("{} tool", tool.label()), keys.join("  or  ")))
+            let key = match tool {
+                Tool::Select => Some(egui::Key::Escape.name().to_owned()),
+                _ => tool.key().map(|key| key.name().to_owned()),
+            };
+            key.map(|key| (format!("{} tool", tool.label()), key))
         })
         .collect();
     groups.push(("Tools", tools));

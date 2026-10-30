@@ -134,6 +134,9 @@ const STOP_SHORTCUT: egui::KeyboardShortcut =
 const MAX_FRAME_SECONDS: f64 = 0.1;
 /// How many frames the loading screen stays up after a project opens.
 const FINISHING_FRAMES: u64 = 2;
+/// After the last input, frames keep coming at the display's rate for this
+/// long (see [`EditorApp::keep_frames_steady`]).
+const STEADY_FRAME_SECONDS: f64 = 1.0;
 /// Ctrl+S, or Cmd+S on macOS (`COMMAND` picks the right one).
 const SAVE_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
@@ -209,6 +212,10 @@ pub struct EditorApp {
     ui_drag_baselines: HashMap<String, String>,
     /// The window title last sent to the window, to send it again only when it changes.
     shown_title: String,
+    /// When the last input came (egui's clock), for steady frame pacing.
+    last_input_at: Option<f64>,
+    /// The parts the viewport drag under way has moved, for Join Surfaces.
+    dragged_parts: Vec<InstanceId>,
     /// The game, while Play is on. `world` stays as it was before Play.
     play: Option<Play>,
     /// Play's clients and emulated network (Phase 64 and 67), kept until
@@ -649,6 +656,8 @@ impl EditorApp {
             viewport: Viewport::new(),
             ui_drag_baselines: HashMap::new(),
             shown_title: String::new(),
+            last_input_at: None,
+            dragged_parts: Vec::new(),
             play: None,
             play_settings: PlaySettings::default(),
             pending_ui_activation: None,
@@ -900,6 +909,30 @@ impl eframe::App for EditorApp {
 }
 
 impl EditorApp {
+    /// egui only draws when input comes, so small mouse movements give
+    /// bursts of frames with gaps between them. On a variable refresh rate
+    /// (FreeSync, G-Sync) display the refresh rate then swings with them,
+    /// and many panels (OLED and VA especially) brighten and dim as it
+    /// does: a flicker. Windows puts windowed apps on VRR too. So after any
+    /// input, keep drawing for [`STEADY_FRAME_SECONDS`]: the rate holds
+    /// steady while someone works, and an idle editor still draws nothing.
+    fn keep_frames_steady(&mut self, ctx: &egui::Context) {
+        let (now, input) = ctx.input(|input| {
+            let active =
+                !input.events.is_empty() || input.pointer.any_down() || !input.keys_down.is_empty();
+            (input.time, active)
+        });
+        if input {
+            self.last_input_at = Some(now);
+        }
+        if self
+            .last_input_at
+            .is_some_and(|at| now - at < STEADY_FRAME_SECONDS)
+        {
+            ctx.request_repaint();
+        }
+    }
+
     /// One frame: game time during Play, then the menu bar, the ribbon and
     /// the dock (or the start screen), then windows and overlays. Separate
     /// from `update` so tests can draw it without a window.
@@ -911,6 +944,7 @@ impl EditorApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.asking = Some(Discard::Quit);
         }
+        self.keep_frames_steady(ctx);
         if self.brand.is_none() {
             self.brand = Some(Brand::load(ctx));
         }
@@ -1206,6 +1240,7 @@ impl EditorApp {
             ctx.request_repaint();
         }
         if let Some(edit) = output.drag {
+            self.dragged_parts = edit.parts.iter().map(|(id, _)| *id).collect();
             self.apply_drag(edit);
             // The viewport was drawn before this change, so draw it again.
             ctx.request_repaint();
@@ -1224,6 +1259,13 @@ impl EditorApp {
         if output.drag_released || (!busy && !self.viewport.is_dragging()) {
             self.history.seal();
             self.ui_drag_baselines.clear();
+        }
+        // Join Surfaces welds what the drag left touching, once it's let go.
+        if output.drag_released {
+            let moved = std::mem::take(&mut self.dragged_parts);
+            if self.snap.join {
+                self.join_surfaces(&moved);
+            }
         }
 
         // Models that couldn't be loaded, found while drawing or playing.

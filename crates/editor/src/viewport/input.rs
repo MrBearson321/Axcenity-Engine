@@ -207,14 +207,10 @@ impl Viewport {
         // selected Models), with the last selected one last.
         let parts = selected_parts(world, selection, selected);
         let poses: Vec<Pose> = parts.iter().map(|(_, pose)| *pose).collect();
-        let frame = if tool.has_handles() {
-            gizmo::handle_frame(tool, modes, &poses)
+        let shapes = if tool.has_handles() {
+            gizmo::shapes_for(tool, modes, &poses, screen)
         } else {
-            None
-        };
-        let shapes = match frame {
-            Some(frame) => gizmo::shapes(tool, frame, screen),
-            None => Vec::new(),
+            Vec::new()
         };
         let (pressed, down, pointer, press_origin, alt, shift) = ui.input(|input| {
             (
@@ -251,10 +247,15 @@ impl Viewport {
                 .map(|drag| Dragging::Ui(Box::new(drag)));
         } else if pressed
             && !alt
-            && let (Some(handle), Some(pointer), Some(frame)) = (hovered, pointer, frame)
+            && let (Some(handle), Some(pointer)) = (hovered, pointer)
+            && let Some(frame) = gizmo::frame_of(&shapes, handle)
         {
+            // The other parts, for Surfaces and Collisions.
+            let moving: Vec<InstanceId> = parts.iter().map(|(id, _)| *id).collect();
+            let reach = screen.studs_per_point(frame.position) * snapping::SNAP_POINTS;
+            let obstacles = snapping::obstacles(world, &moving);
             self.drag = Drag::start_many(handle, frame, parts.clone(), modes, screen, pointer)
-                .map(Dragging::Handle);
+                .map(|drag| Dragging::Handle(drag.among(obstacles, reach)));
         }
         // A UI element or part's body only once the mouse has moved far
         // enough to be a drag, so a plain click still just selects. It's
@@ -297,6 +298,11 @@ impl Viewport {
                 Vec::new()
             };
             place.skip = others.iter().map(|(id, _)| *id).collect();
+            let mut moving = place.skip.clone();
+            moving.push(hit.part);
+            place.obstacles = snapping::obstacles(world, &moving);
+            place.reach =
+                screen.studs_per_point(screen.ray(origin).at(hit.distance)) * snapping::SNAP_POINTS;
             self.drag = Some(Dragging::Body(place, others));
             input.grabbed = Some(hit.part);
         }

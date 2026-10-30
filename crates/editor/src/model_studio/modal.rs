@@ -299,6 +299,9 @@ mod tests {
         move_step: 1.0,
         rotate_on: false,
         rotate_step: 15.0,
+        surfaces: false,
+        collisions: false,
+        join: false,
     };
 
     #[test]

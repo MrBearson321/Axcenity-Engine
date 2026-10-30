@@ -247,3 +247,46 @@ fn the_constraints_overlay_draws_welds_and_attachments() {
         });
     }
 }
+
+#[test]
+fn join_surfaces_welds_a_moved_part_to_the_parts_it_is_left_touching_as_one_undo_step() {
+    let mut app = EditorApp::new(Some(&example("hello-part")));
+    let place = |app: &mut EditorApp, at: Vec3| {
+        let id = inserted(app, Insertable::Part(PartType::Block), None);
+        for (name, value) in [("Position", at), ("Size", Vec3::splat(2.0))] {
+            app.world
+                .set_property(
+                    id,
+                    name,
+                    Value::Vector3(Vector3::new(value.x, value.y, value.z)),
+                )
+                .unwrap();
+        }
+        id
+    };
+    // High above everything else: one block, one flush beside it, one apart.
+    let base = place(&mut app, Vec3::new(0.0, 100.0, 0.0));
+    let moved = place(&mut app, Vec3::new(2.0, 100.0, 0.0));
+    let apart = place(&mut app, Vec3::new(0.0, 100.0, 9.0));
+    app.join_surfaces(&[moved, apart]);
+    let welds: Vec<InstanceId> = app
+        .world
+        .get(moved)
+        .unwrap()
+        .children()
+        .iter()
+        .copied()
+        .filter(|&id| app.world.get(id).unwrap().class() == ClassName::WeldConstraint)
+        .collect();
+    assert_eq!(welds.len(), 1);
+    let weld = app.world.get(welds[0]).unwrap();
+    assert_eq!(weld.property("Part0"), Some(&Value::Instance(Some(base))));
+    assert_eq!(weld.property("Part1"), Some(&Value::Instance(Some(moved))));
+    assert!(app.world.get(apart).unwrap().children().is_empty());
+    assert_eq!(app.history.undo_label(), Some("Join 1 surface"));
+    // Joining again doesn't weld them twice.
+    app.join_surfaces(&[moved]);
+    assert_eq!(app.world.get(moved).unwrap().children().len(), 1);
+    app.undo();
+    assert!(app.world.get(welds[0]).is_none_or(|w| w.parent().is_none()));
+}

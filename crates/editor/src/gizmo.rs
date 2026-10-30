@@ -14,10 +14,15 @@
 //!   how far the mouse moves along the ring on screen, at a steady
 //!   [`TURN_PER_POINT`], so a ring seen nearly edge-on turns as steadily as
 //!   one facing the camera. Holding Shift turns at a quarter of the speed.
+//! - **Transform**: all three at once, like Studio's: the rings, the Resize
+//!   balls, and Move arrows reaching out past the rings.
 //!
 //! With snapping on, moves and size changes go in steps of `Snap::move_step`
 //! studs and turns in steps of `Snap::rotate_step` degrees, counted from
 //! where the drag started (like Studio), so a part off the grid stays off it.
+//! With Surfaces on, a move or resize that comes near a face of a part in
+//! its way lands flush with it instead; with Collisions on, parts stop at
+//! solid parts instead of going into them (see `snapping.rs`).
 //!
 //! The handles keep the same size on screen however far away the part is.
 //! Everything here is plain math on rays and points, so tests can drive a
@@ -30,6 +35,7 @@ use eframe::egui;
 
 use crate::properties::MIN_SIZE;
 use crate::screen::Screen;
+use crate::snapping::{self, Obb, Obstacle};
 
 /// How long the Move arrows and how big the Rotate rings are, in points.
 const HANDLE_POINTS: f32 = 90.0;
@@ -57,9 +63,16 @@ const PARALLEL: f32 = 1e-3;
 pub const TURN_PER_POINT: f32 = 1.0 / HANDLE_POINTS;
 /// Holding Shift turns at this much of the speed.
 pub const FINE_TURN: f32 = 0.25;
+/// With the Transform tool, how far the Move arrows reach, as a share of
+/// [`HANDLE_POINTS`]: they start at the rings and end out past them.
+const TRANSFORM_ARROW_REACH: f32 = 1.4;
+/// With Collisions, how far apart (radians, about 2°) the angles a turn
+/// checks on its way are.
+const TURN_CHECK_STEP: f32 = 0.035;
 
 /// The tool picked in the toolbar. Select only selects; Move, Resize
-/// (`Scale`) and Rotate also show handles on the selection, and the others
+/// (`Scale`), Rotate and Transform (all three) also show handles on the
+/// selection, and the others
 /// (modelled on F3X Building Tools) show an options panel in the viewport
 /// that acts on every selected part (see `build_tools.rs`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -69,10 +82,11 @@ pub enum Tool {
     Move,
     Scale,
     Rotate,
+    /// Move, Resize and Rotate's handles together, like Studio's Transform.
+    Transform,
     Paint,
     Material,
     Anchor,
-    Collision,
     Lighting,
     Emission,
     /// Places copies of a part at an angle, like Archimedes (`angular.rs`).
@@ -80,15 +94,20 @@ pub enum Tool {
 }
 
 impl Tool {
-    /// Select, Move, Resize and Rotate: the tools on the Home tab.
-    pub const TRANSFORM: [Tool; 4] = [Tool::Select, Tool::Move, Tool::Scale, Tool::Rotate];
+    /// Select, Move, Resize, Rotate and Transform: the tools on the Home tab.
+    pub const TRANSFORM: [Tool; 5] = [
+        Tool::Select,
+        Tool::Move,
+        Tool::Scale,
+        Tool::Rotate,
+        Tool::Transform,
+    ];
 
     /// Paint through Angular: the tools on the Model tab.
-    pub const BUILD: [Tool; 7] = [
+    pub const BUILD: [Tool; 6] = [
         Tool::Paint,
         Tool::Material,
         Tool::Anchor,
-        Tool::Collision,
         Tool::Lighting,
         Tool::Emission,
         Tool::Angular,
@@ -99,10 +118,10 @@ impl Tool {
         Tool::Move,
         Tool::Scale,
         Tool::Rotate,
+        Tool::Transform,
         Tool::Paint,
         Tool::Material,
         Tool::Anchor,
-        Tool::Collision,
         Tool::Lighting,
         Tool::Emission,
         Tool::Angular,
@@ -114,10 +133,10 @@ impl Tool {
             Tool::Move => "Move",
             Tool::Scale => "Resize",
             Tool::Rotate => "Rotate",
+            Tool::Transform => "Transform",
             Tool::Paint => "Paint",
             Tool::Material => "Material",
             Tool::Anchor => "Anchor",
-            Tool::Collision => "Collision",
             Tool::Lighting => "Lighting",
             Tool::Emission => "Emission",
             Tool::Angular => "Angular",
@@ -126,30 +145,20 @@ impl Tool {
 
     const _TOOLS_SPLIT: () = assert!(Self::TRANSFORM.len() + Self::BUILD.len() == Self::ALL.len());
 
-    /// Ctrl+1 to Ctrl+4 (Cmd on macOS), as in Studio, for the first four.
-    pub fn shortcut(self) -> Option<egui::KeyboardShortcut> {
-        let key = match self {
-            Tool::Select => egui::Key::Num1,
-            Tool::Move => egui::Key::Num2,
-            Tool::Scale => egui::Key::Num3,
-            Tool::Rotate => egui::Key::Num4,
-            _ => return None,
-        };
-        Some(egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key))
-    }
-
-    /// The single key that picks the tool in F3X, pressed on its own while
-    /// editing (not typing, not during Play).
+    /// The single key that picks the tool, pressed on its own while
+    /// editing (not typing, not during Play): 1 to 4 for the tools with
+    /// handles, in the ribbon's order, and F3X's letters for the building
+    /// tools. Select is Escape (see `EditorApp::shortcuts`).
     pub fn key(self) -> Option<egui::Key> {
         Some(match self {
             Tool::Select => return None,
-            Tool::Move => egui::Key::Z,
-            Tool::Scale => egui::Key::X,
-            Tool::Rotate => egui::Key::C,
+            Tool::Move => egui::Key::Num1,
+            Tool::Scale => egui::Key::Num2,
+            Tool::Rotate => egui::Key::Num3,
+            Tool::Transform => egui::Key::Num4,
             Tool::Paint => egui::Key::V,
             Tool::Material => egui::Key::N,
             Tool::Anchor => egui::Key::M,
-            Tool::Collision => egui::Key::K,
             Tool::Lighting => egui::Key::U,
             Tool::Emission => egui::Key::P,
             // Not an F3X tool; R is free in F3X and in the camera keys.
@@ -159,7 +168,10 @@ impl Tool {
 
     /// True for the tools with handles to drag.
     pub fn has_handles(self) -> bool {
-        matches!(self, Tool::Move | Tool::Scale | Tool::Rotate)
+        matches!(
+            self,
+            Tool::Move | Tool::Scale | Tool::Rotate | Tool::Transform
+        )
     }
 }
 
@@ -172,16 +184,29 @@ pub struct Snap {
     pub rotate_on: bool,
     /// In degrees.
     pub rotate_step: f32,
+    /// Moves and resizes land flush with (or in line with) the faces of
+    /// parts near them.
+    pub surfaces: bool,
+    /// Moved, resized and turned parts stop at solid parts instead of
+    /// going into them.
+    pub collisions: bool,
+    /// When a drag ends, the parts it moved are welded to the parts
+    /// they're left touching.
+    pub join: bool,
 }
 
 impl Default for Snap {
-    /// Studio's defaults: 1 stud and 15 degrees, both on.
+    /// Studio's defaults: 1 stud and 15 degrees, both on, and parts snap
+    /// to each other's faces; Collisions and Join Surfaces start off.
     fn default() -> Self {
         Self {
             move_on: true,
             move_step: 1.0,
             rotate_on: true,
             rotate_step: 15.0,
+            surfaces: true,
+            collisions: false,
+            join: false,
         }
     }
 }
@@ -332,6 +357,9 @@ fn to_value(v: Vec3) -> Value {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Shape {
     pub handle: Handle,
+    /// Where the handles it's one of are (see [`handle_frame`]): a drag
+    /// that grabs it starts from here.
+    pub frame: Pose,
     lines: Vec<[egui::Pos2; 2]>,
     end: End,
 }
@@ -398,7 +426,8 @@ pub struct Modes {
 
 /// Where `tool`'s handles go for the selected parts `poses` (the last one
 /// is the last selected): a center and the axes they follow, with the last
-/// part's size for the Resize balls.
+/// part's size for the Resize balls. Transform's handles each go where
+/// their own tool's would (see [`transform_shapes`]); this is its arrows'.
 pub fn handle_frame(tool: Tool, modes: Modes, poses: &[Pose]) -> Option<Pose> {
     let last = *poses.last()?;
     let middle = || Pose {
@@ -407,7 +436,7 @@ pub fn handle_frame(tool: Tool, modes: Modes, poses: &[Pose]) -> Option<Pose> {
         size: last.size,
     };
     Some(match tool {
-        Tool::Move if modes.axes == MoveAxes::Global => middle(),
+        Tool::Move | Tool::Transform if modes.axes == MoveAxes::Global => middle(),
         Tool::Rotate if modes.pivot == RotatePivot::Center => middle(),
         _ => last,
     })
@@ -430,29 +459,81 @@ pub fn middle_of(poses: &[Pose]) -> Vec3 {
     (min + max) / 2.0
 }
 
+/// The handles `tool` shows for the selected parts `poses` (the last one
+/// is the last selected) with `modes`, as seen through `screen`. Each of
+/// Transform's goes where its own tool's would.
+pub fn shapes_for(tool: Tool, modes: Modes, poses: &[Pose], screen: &Screen) -> Vec<Shape> {
+    if tool == Tool::Transform {
+        return transform_shapes(modes, poses, screen);
+    }
+    handle_frame(tool, modes, poses).map_or_else(Vec::new, |frame| shapes(tool, frame, screen))
+}
+
+/// The Transform tool's handles: Resize's balls and Rotate's rings, each
+/// where their own tool puts them, and Move's arrows out past the rings.
+pub fn transform_shapes(modes: Modes, poses: &[Pose], screen: &Screen) -> Vec<Shape> {
+    [Tool::Rotate, Tool::Scale, Tool::Transform]
+        .into_iter()
+        .filter_map(|tool| Some((tool, handle_frame(tool, modes, poses)?)))
+        .flat_map(|(tool, frame)| handles_of(tool, frame, screen))
+        .collect()
+}
+
+/// Where the handles `handle` is one of are, among `shapes`.
+pub fn frame_of(shapes: &[Shape], handle: Handle) -> Option<Pose> {
+    shapes
+        .iter()
+        .find(|shape| shape.handle == handle)
+        .map(|shape| shape.frame)
+}
+
 /// The handles `tool` shows around `pose` (from [`handle_frame`]), as seen
-/// through `screen`.
+/// through `screen`. Transform shows all three tools' around it.
 pub fn shapes(tool: Tool, pose: Pose, screen: &Screen) -> Vec<Shape> {
+    if tool == Tool::Transform {
+        return [Tool::Rotate, Tool::Scale, Tool::Transform]
+            .into_iter()
+            .flat_map(|tool| handles_of(tool, pose, screen))
+            .collect();
+    }
+    handles_of(tool, pose, screen)
+}
+
+/// `tool`'s handles around `pose`; for Transform, only its arrows.
+fn handles_of(tool: Tool, pose: Pose, screen: &Screen) -> Vec<Shape> {
     let length = screen.studs_per_point(pose.position) * HANDLE_POINTS;
     let center = pose.position;
     let mut shapes = Vec::new();
     match tool {
-        Tool::Move => {
+        Tool::Move | Tool::Transform => {
+            // Transform's arrows start at the rings, so they don't run
+            // through the Resize balls inside them.
+            let (from, to) = if tool == Tool::Transform {
+                (1.0, TRANSFORM_ARROW_REACH)
+            } else {
+                (0.0, 1.0)
+            };
             for axis in Axis::ALL {
                 let direction = pose.rotation * axis.vector();
-                let Some(line) = screen.line(center, center + direction * length) else {
+                let Some(whole) = screen.line(center, center + direction * length * to) else {
                     continue;
                 };
-                let along = line[1] - line[0];
-                if along.length() < MIN_VISIBLE_POINTS {
+                if (whole[1] - whole[0]).length() < MIN_VISIBLE_POINTS {
                     continue;
                 }
+                let Some(line) = screen.line(
+                    center + direction * length * from,
+                    center + direction * length * to,
+                ) else {
+                    continue;
+                };
                 shapes.push(Shape {
                     handle: Handle::Move(axis),
+                    frame: pose,
                     lines: vec![line],
                     end: End::Arrow {
                         tip: line[1],
-                        toward: along.normalized(),
+                        toward: (whole[1] - whole[0]).normalized(),
                     },
                 });
             }
@@ -471,6 +552,7 @@ pub fn shapes(tool: Tool, pose: Pose, screen: &Screen) -> Vec<Shape> {
                     }
                     shapes.push(Shape {
                         handle: Handle::Scale(axis, side),
+                        frame: pose,
                         lines: vec![line],
                         end: End::Ball(line[1]),
                     });
@@ -490,6 +572,7 @@ pub fn shapes(tool: Tool, pose: Pose, screen: &Screen) -> Vec<Shape> {
                     .collect();
                 shapes.push(Shape {
                     handle: Handle::Rotate(axis),
+                    frame: pose,
                     lines,
                     end: End::None,
                 });
@@ -588,6 +671,13 @@ pub struct Drag {
     spin: egui::Vec2,
     last_at: egui::Pos2,
     turned: f32,
+    /// The other parts, for Surfaces and Collisions (see [`Drag::among`]).
+    obstacles: Vec<Obstacle>,
+    /// How far (studs) a part is pulled to line up with a face.
+    reach: f32,
+    /// With Collisions, the last turn (radians) that didn't go into a
+    /// solid part: each turn sweeps from here, so it can't pass through one.
+    free_turn: f32,
 }
 
 /// The mouse during a drag: the ray it points along, where it is in the
@@ -717,7 +807,24 @@ impl Drag {
             spin,
             last_at,
             turned: 0.0,
+            obstacles: Vec::new(),
+            reach: 0.0,
+            free_turn: 0.0,
         })
+    }
+
+    /// The drag with the other parts around it (see `snapping::obstacles`),
+    /// for Surfaces and Collisions, pulling faces into line from up to
+    /// `reach` studs away.
+    pub fn among(mut self, obstacles: Vec<Obstacle>, reach: f32) -> Self {
+        self.obstacles = obstacles;
+        self.reach = reach;
+        self
+    }
+
+    /// Each part's box as the drag started.
+    fn start_boxes(&self) -> Vec<Obb> {
+        self.parts.iter().map(|(_, pose)| Obb::of(*pose)).collect()
     }
 
     /// A ring drag's forward way on screen, one point long.
@@ -751,16 +858,43 @@ impl Drag {
         match self.handle {
             Handle::Move(axis) => {
                 let (origin, direction) = handle_line(self.handle, frame);
-                let moved = snap.studs(along_line(origin, direction, ray)? - self.grabbed);
+                let raw = along_line(origin, direction, ray)? - self.grabbed;
+                let mut moved = snap.studs(raw);
+                // Each part's own way along the axis.
+                let directions: Vec<Vec3> = self
+                    .parts
+                    .iter()
+                    .map(|(_, start)| match modes.axes {
+                        MoveAxes::Local => start.rotation * axis.vector(),
+                        MoveAxes::Global | MoveAxes::Last => direction,
+                    })
+                    .collect();
+                let boxes = self.start_boxes();
+                // Flush faces only when every part goes the same way.
+                if snap.surfaces
+                    && modes.axes != MoveAxes::Local
+                    && let Some(flush) =
+                        snapping::flush_moves(&boxes, direction, raw, self.reach, &self.obstacles)
+                {
+                    moved = flush;
+                }
+                if snap.collisions {
+                    // As far as the part that's stopped soonest can go.
+                    moved = boxes
+                        .iter()
+                        .zip(&directions)
+                        .map(|(obb, &way)| {
+                            snapping::limit_travel(&[*obb], way, moved, &self.obstacles)
+                        })
+                        .min_by(|a, b| a.abs().total_cmp(&b.abs()))
+                        .unwrap_or(moved);
+                }
                 Some(
                     self.parts
                         .iter()
-                        .map(|&(id, start)| {
-                            let direction = match modes.axes {
-                                MoveAxes::Local => start.rotation * axis.vector(),
-                                MoveAxes::Global | MoveAxes::Last => direction,
-                            };
-                            let position = start.position + direction * moved;
+                        .zip(&directions)
+                        .map(|(&(id, start), &way)| {
+                            let position = start.position + way * moved;
                             (id, vec![("Position", to_value(position))])
                         })
                         .collect(),
@@ -768,28 +902,61 @@ impl Drag {
             }
             Handle::Scale(axis, side) => {
                 let (origin, direction) = handle_line(self.handle, frame);
-                let pulled = snap.studs(along_line(origin, direction, ray)? - self.grabbed);
-                let i = axis.index();
-                Some(
+                let raw = along_line(origin, direction, ray)? - self.grabbed;
+                let mut pulled = snap.studs(raw);
+                if snap.surfaces
+                    && modes.directions == ResizeDirections::Normal
+                    && let Some(&(_, last)) = self.parts.last()
+                {
+                    let outward = last.rotation * axis.vector() * side.sign();
+                    if let Some(flush) = snapping::flush_faces(
+                        &Obb::of(last),
+                        outward,
+                        raw,
+                        self.reach,
+                        &self.obstacles,
+                    ) {
+                        pulled = flush;
+                    }
+                }
+                let resized = |pulled: f32| -> Vec<(InstanceId, Pose)> {
                     self.parts
                         .iter()
-                        .map(|&(id, start)| {
-                            let outward = start.rotation * axis.vector() * side.sign();
-                            let mut size = start.size;
-                            let position = match modes.directions {
-                                ResizeDirections::Normal => {
-                                    size[i] = (start.size[i] + pulled).max(MIN_SIZE);
-                                    // The center moves half as far as the
-                                    // face, so the opposite face stays put.
-                                    start.position + outward * (size[i] - start.size[i]) / 2.0
-                                }
-                                ResizeDirections::Both => {
-                                    size[i] = (start.size[i] + pulled * 2.0).max(MIN_SIZE);
-                                    start.position
-                                }
-                            };
-                            let values =
-                                vec![("Size", to_value(size)), ("Position", to_value(position))];
+                        .map(|&(id, start)| (id, resize(start, axis, side, pulled, modes)))
+                        .collect()
+                };
+                // Growing stops where a face meets a solid part; the most
+                // it can grow is found by halving.
+                if snap.collisions && pulled > 0.0 {
+                    let boxes = self.start_boxes();
+                    let blocked = |pulled: f32| {
+                        let grown: Vec<Obb> = resized(pulled)
+                            .into_iter()
+                            .map(|(_, pose)| Obb::of(pose))
+                            .collect();
+                        snapping::collides(&boxes, &grown, &self.obstacles)
+                    };
+                    if blocked(pulled) {
+                        let (mut free, mut hit) = (0.0, pulled);
+                        for _ in 0..16 {
+                            let middle = (free + hit) / 2.0;
+                            if blocked(middle) {
+                                hit = middle;
+                            } else {
+                                free = middle;
+                            }
+                        }
+                        pulled = free;
+                    }
+                }
+                Some(
+                    resized(pulled)
+                        .into_iter()
+                        .map(|(id, pose)| {
+                            let values = vec![
+                                ("Size", to_value(pose.size)),
+                                ("Position", to_value(pose.position)),
+                            ];
                             (id, values)
                         })
                         .collect(),
@@ -801,9 +968,9 @@ impl Drag {
                 let speed = if pointer.fine { FINE_TURN } else { 1.0 };
                 self.turned += (pointer.at - self.last_at).dot(self.spin) * TURN_PER_POINT * speed;
                 self.last_at = pointer.at;
-                let radians = snap.degrees(self.turned.to_degrees()).to_radians();
+                let mut radians = snap.degrees(self.turned.to_degrees()).to_radians();
                 let world_axis = frame.rotation * axis.vector();
-                Some(
+                let turned_by = |radians: f32| -> Vec<(InstanceId, Pose, Pose)> {
                     self.parts
                         .iter()
                         .map(|&(id, start)| {
@@ -818,18 +985,79 @@ impl Drag {
                             };
                             // `turn * start.rotation` turns the already-turned
                             // part further around the axis.
-                            let orientation = orientation_from_rotation(turn * start.rotation);
-                            let position = pivot + turn * (start.position - pivot);
-                            let mut values = vec![("Orientation", Value::Vector3(orientation))];
-                            if !position.abs_diff_eq(start.position, 1e-5) {
-                                values.push(("Position", to_value(position)));
-                            }
-                            (id, values)
+                            let pose = Pose {
+                                position: pivot + turn * (start.position - pivot),
+                                rotation: turn * start.rotation,
+                                size: start.size,
+                            };
+                            (id, start, pose)
                         })
-                        .collect(),
-                )
+                        .collect()
+                };
+                // A turn stops at the last angle, on the way from the last
+                // free one, that didn't go into a solid part.
+                if snap.collisions {
+                    let from: Vec<Obb> = self.start_boxes();
+                    let blocked = |radians: f32| {
+                        let to: Vec<Obb> = turned_by(radians)
+                            .iter()
+                            .map(|(_, _, pose)| Obb::of(*pose))
+                            .collect();
+                        snapping::collides(&from, &to, &self.obstacles)
+                    };
+                    let steps =
+                        ((radians - self.free_turn).abs() / TURN_CHECK_STEP).ceil() as usize;
+                    let mut free = self.free_turn;
+                    for step in 1..=steps {
+                        let at = self.free_turn
+                            + (radians - self.free_turn) * step as f32 / steps as f32;
+                        if blocked(at) {
+                            break;
+                        }
+                        free = at;
+                    }
+                    radians = free;
+                    self.free_turn = free;
+                }
+                let values: PartValues = turned_by(radians)
+                    .into_iter()
+                    .map(|(id, start, pose)| {
+                        let orientation = orientation_from_rotation(pose.rotation);
+                        let mut values = vec![("Orientation", Value::Vector3(orientation))];
+                        if !pose.position.abs_diff_eq(start.position, 1e-5) {
+                            values.push(("Position", to_value(pose.position)));
+                        }
+                        (id, values)
+                    })
+                    .collect();
+                Some(values)
             }
         }
+    }
+}
+
+/// `start` with its face on `side` of `axis` pulled `pulled` studs out
+/// (both opposite faces, with Both directions), as a Resize drag does.
+fn resize(start: Pose, axis: Axis, side: Side, pulled: f32, modes: Modes) -> Pose {
+    let i = axis.index();
+    let outward = start.rotation * axis.vector() * side.sign();
+    let mut size = start.size;
+    let position = match modes.directions {
+        ResizeDirections::Normal => {
+            size[i] = (start.size[i] + pulled).max(MIN_SIZE);
+            // The center moves half as far as the face, so the opposite
+            // face stays put.
+            start.position + outward * (size[i] - start.size[i]) / 2.0
+        }
+        ResizeDirections::Both => {
+            size[i] = (start.size[i] + pulled * 2.0).max(MIN_SIZE);
+            start.position
+        }
+    };
+    Pose {
+        position,
+        size,
+        ..start
     }
 }
 

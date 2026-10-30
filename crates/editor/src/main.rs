@@ -56,6 +56,7 @@ mod screen;
 mod scripts;
 mod sequencer;
 mod side_warnings;
+mod snapping;
 #[cfg(test)]
 mod snapshot;
 mod splash;

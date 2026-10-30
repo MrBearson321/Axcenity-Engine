@@ -128,7 +128,7 @@ fn dragging_a_part_onto_another_stacks_it_in_one_undo_step() {
     // Grab the ball (2 studs across, at (0, 10, 0)) on top, then drag it
     // across the floor and onto the pad (8×0.5×8 at (0, 0.25, 0)).
     let grabbed = Vec3::new(0.0, 11.0, 0.0);
-    let place = PlaceDrag::start(&app.world, ball, grabbed).unwrap();
+    let mut place = PlaceDrag::start(&app.world, ball, grabbed).unwrap();
     let down = |x: f32, z: f32| Ray {
         origin: Vec3::new(x, 50.0, z),
         direction: Vec3::NEG_Y,

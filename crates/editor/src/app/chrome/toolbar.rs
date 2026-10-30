@@ -97,15 +97,13 @@ impl EditorApp {
     /// The ribbon buttons for `tools`. Clicking one picks it.
     pub(super) fn tool_buttons(&mut self, ui: &mut egui::Ui, tools: &[Tool]) {
         for tool in tools {
-            let keys: Vec<String> = tool
-                .shortcut()
-                .map(|shortcut| ui.ctx().format_shortcut(&shortcut))
-                .into_iter()
-                .chain(tool.key().map(|key| key.name().to_owned()))
-                .collect();
-            let hover = match keys.as_slice() {
-                [] => format!("{} tool", tool.label()),
-                keys => format!("{} tool ({})", tool.label(), keys.join(" or ")),
+            let key = match tool {
+                Tool::Select => Some(egui::Key::Escape),
+                _ => tool.key(),
+            };
+            let hover = match key {
+                Some(key) => format!("{} tool ({})", tool.label(), key.name()),
+                None => format!("{} tool", tool.label()),
             };
             let button = RibbonButton::new(theme::tool_icon(*tool), tool.label())
                 .selected(self.tool == *tool);
@@ -160,7 +158,8 @@ impl EditorApp {
                         ui.ctx().format_shortcut(&STOP_SHORTCUT)
                     ))
                     .clicked();
-
+            }),
+            RibbonGroup::Clients => ribbon::group(ui, "Clients", |ui| {
                 self.play_settings_controls(ui, playing);
             }),
             RibbonGroup::Check => ribbon::group(ui, "Check", |ui| {
@@ -180,21 +179,12 @@ impl EditorApp {
             }),
             RibbonGroup::Build => ribbon::group(ui, "Build", |ui| {
                 self.tool_buttons(ui, &Tool::BUILD);
-                let button = RibbonButton::new(icons::INTERSECT, "Collision Groups");
-                if ui
-                    .add(button)
-                    .on_hover_text(
-                        "Name collision groups and choose which of them collide: parts in                          groups that don't pass through each other.",
-                    )
-                    .clicked()
-                {
-                    self.collision_groups.open = true;
-                }
             }),
             RibbonGroup::Snapping => ribbon::group(ui, "Snapping", |ui| {
                 let snap = &mut self.snap;
+                let mut open_groups = false;
                 egui::Grid::new("snapping")
-                    .num_columns(2)
+                    .num_columns(4)
                     .spacing([6.0, 4.0])
                     .show(ui, |ui| {
                         ui.checkbox(
@@ -210,6 +200,22 @@ impl EditorApp {
                                 .max_decimals(3)
                                 .suffix(" studs"),
                         );
+                        ui.checkbox(
+                            &mut snap.surfaces,
+                            theme::with_icon(icons::MAGNET, "Surfaces"),
+                        )
+                        .on_hover_text(
+                            "Moved and resized parts snap flush against, or in line with, the \
+                             faces of parts near them.",
+                        );
+                        ui.checkbox(
+                            &mut snap.join,
+                            theme::with_icon(icons::LINK_SIMPLE, "Join Surfaces"),
+                        )
+                        .on_hover_text(
+                            "When you let go of a part you moved, weld it to the parts it's \
+                             touching, so they move as one in the game.",
+                        );
                         ui.end_row();
                         ui.checkbox(
                             &mut snap.rotate_on,
@@ -224,8 +230,26 @@ impl EditorApp {
                                 .max_decimals(2)
                                 .suffix("°"),
                         );
+                        ui.checkbox(
+                            &mut snap.collisions,
+                            theme::with_icon(icons::CUBE, "Collisions"),
+                        )
+                        .on_hover_text(
+                            "Moved, resized and turned parts stop at solid parts (CanCollide) \
+                             instead of going into them.",
+                        );
+                        open_groups = ui
+                            .button(theme::with_icon(icons::INTERSECT, "Collision Groups…"))
+                            .on_hover_text(
+                                "Name collision groups and choose which of them collide: parts \
+                                 in groups that don't pass through each other.",
+                            )
+                            .clicked();
                         ui.end_row();
                     });
+                if open_groups {
+                    self.collision_groups.open = true;
+                }
             }),
             RibbonGroup::Parts => ribbon::group(ui, "Parts", |ui| {
                 for what in Insertable::PARTS {
@@ -282,6 +306,71 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::LENS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    let hover = match what.class() {
+                        ClassName::DepthOfFieldEffect => {
+                            "Insert a DepthOfFieldEffect into Lighting: what's nearer or                              farther than its FocusDistance blurs, as through a camera's lens."
+                        }
+                        ClassName::VignetteEffect => {
+                            "Insert a VignetteEffect into Lighting: the picture darkens (or                              takes its Color) toward the corners."
+                        }
+                        ClassName::FilmGrainEffect => {
+                            "Insert a FilmGrainEffect into Lighting: moving noise over the                              picture, as on film."
+                        }
+                        ClassName::ChromaticAberrationEffect => {
+                            "Insert a ChromaticAberrationEffect into Lighting: red and blue                              drift apart toward the picture's edges."
+                        }
+                        ClassName::MotionBlurEffect => {
+                            "Insert a MotionBlurEffect into Lighting: what moves across the                              view streaks along its motion, as through a camera's shutter."
+                        }
+                        _ => {
+                            "Insert a SharpenEffect into Lighting: crisper edges between                              colors, useful with a render scale below 100%."
+                        }
+                    };
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hover)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+                for what in Insertable::VOLUMES {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    let hover = match what {
+                        Insertable::GraphicsVolume => {
+                            "Insert a Graphics Volume: an invisible box that changes the look \
+                             while the camera is inside it, fading in over its BlendDistance. \
+                             Put Exposure, Fog, Bloom, Color Correction or an Atmosphere inside \
+                             it; where volumes overlap, the higher Priority wins."
+                        }
+                        Insertable::ExposureEffect => {
+                            "Insert an ExposureEffect into the selected Graphics Volume (or a \
+                             new one): the exposure inside it, in place of Lighting's."
+                        }
+                        Insertable::FogEffect => {
+                            "Insert a FogEffect into the selected Graphics Volume (or a new \
+                             one): distance fog inside it, in place of the world's."
+                        }
+                        _ => {
+                            "Insert a BloomEffect into the selected Graphics Volume (or a new \
+                             one): how bright light blooms inside it, in place of Lighting's \
+                             bloom."
+                        }
+                    };
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hover)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+            }),
+            RibbonGroup::Lights => ribbon::group(ui, "Lights & Sky", |ui| {
                 for what in Insertable::LIGHTS {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui
@@ -357,69 +446,8 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
-                for what in Insertable::LENS {
-                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
-                    let hover = match what.class() {
-                        ClassName::DepthOfFieldEffect => {
-                            "Insert a DepthOfFieldEffect into Lighting: what's nearer or                              farther than its FocusDistance blurs, as through a camera's lens."
-                        }
-                        ClassName::VignetteEffect => {
-                            "Insert a VignetteEffect into Lighting: the picture darkens (or                              takes its Color) toward the corners."
-                        }
-                        ClassName::FilmGrainEffect => {
-                            "Insert a FilmGrainEffect into Lighting: moving noise over the                              picture, as on film."
-                        }
-                        ClassName::ChromaticAberrationEffect => {
-                            "Insert a ChromaticAberrationEffect into Lighting: red and blue                              drift apart toward the picture's edges."
-                        }
-                        ClassName::MotionBlurEffect => {
-                            "Insert a MotionBlurEffect into Lighting: what moves across the                              view streaks along its motion, as through a camera's shutter."
-                        }
-                        _ => {
-                            "Insert a SharpenEffect into Lighting: crisper edges between                              colors, useful with a render scale below 100%."
-                        }
-                    };
-                    if ui
-                        .add_enabled(!playing, button)
-                        .on_hover_text(hover)
-                        .on_disabled_hover_text("Press Stop to edit.")
-                        .clicked()
-                    {
-                        clicks.insert = Some(what);
-                    }
-                }
-                for what in Insertable::VOLUMES {
-                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
-                    let hover = match what {
-                        Insertable::GraphicsVolume => {
-                            "Insert a Graphics Volume: an invisible box that changes the look \
-                             while the camera is inside it, fading in over its BlendDistance. \
-                             Put Exposure, Fog, Bloom, Color Correction or an Atmosphere inside \
-                             it; where volumes overlap, the higher Priority wins."
-                        }
-                        Insertable::ExposureEffect => {
-                            "Insert an ExposureEffect into the selected Graphics Volume (or a \
-                             new one): the exposure inside it, in place of Lighting's."
-                        }
-                        Insertable::FogEffect => {
-                            "Insert a FogEffect into the selected Graphics Volume (or a new \
-                             one): distance fog inside it, in place of the world's."
-                        }
-                        _ => {
-                            "Insert a BloomEffect into the selected Graphics Volume (or a new \
-                             one): how bright light blooms inside it, in place of Lighting's \
-                             bloom."
-                        }
-                    };
-                    if ui
-                        .add_enabled(!playing, button)
-                        .on_hover_text(hover)
-                        .on_disabled_hover_text("Press Stop to edit.")
-                        .clicked()
-                    {
-                        clicks.insert = Some(what);
-                    }
-                }
+            }),
+            RibbonGroup::Gameplay => ribbon::group(ui, "Gameplay", |ui| {
                 for what in Insertable::CHARACTERS {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui
