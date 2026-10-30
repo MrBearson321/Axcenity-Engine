@@ -253,9 +253,71 @@ fn every_template_makes_a_project_that_loads_cleanly() {
                 assert!(script.source.contains("workspace.Spinner.Orientation"));
                 assert!(script.source.contains("workspace.Pad.Touched:Connect"));
             }
+            // The genre templates' own tests are `axcenity-testing`'s
+            // `templates` tests; here, what they all have.
+            _ => {
+                assert!(parts > 10, "{template:?}");
+                let menu = project
+                    .world
+                    .find_first_child(project.world.workspace(), "GameMenu")
+                    .unwrap();
+                // The placed copy is filled in from the shared prefab.
+                assert!(project.world.find_first_child(menu, "Pause").is_some());
+                assert!(project.world.find_first_child(menu, "Settings").is_some());
+                let paths: Vec<_> = project.scripts.iter().map(|s| s.path.as_str()).collect();
+                for shared in [
+                    "scripts/GameMenu.client.lua",
+                    "scripts/GameSaves.server.lua",
+                    "scripts/LocalGui.module.lua",
+                    "scripts/MenuSettings.module.lua",
+                ] {
+                    assert!(paths.contains(&shared), "{template:?}: {paths:?}");
+                }
+                assert!(
+                    paths.iter().any(|path| path.ends_with(".blocks.json")),
+                    "{template:?} has a block script: {paths:?}"
+                );
+                assert!(folder.join("tests/menu.spec.lua").exists());
+                assert!(folder.join(THUMBNAIL_FILE).exists());
+            }
         }
     }
     fs::remove_dir_all(parent).unwrap();
+}
+
+/// A genre template's own file wins over the shared one of the same path:
+/// the Arena's Save keeps players' stats, not a world slot.
+#[test]
+fn a_genre_templates_own_files_replace_the_shared_ones() {
+    let parent = temp_folder("template-files");
+    let arena = create_project_from(&parent, "Arena", Template::Arena).unwrap();
+    let saves = fs::read_to_string(arena.join("scripts/GameSaves.server.lua")).unwrap();
+    assert!(saves.contains("stats.save(player)"));
+    let first_person = create_project_from(&parent, "Shooter", Template::FirstPerson).unwrap();
+    let saves = fs::read_to_string(first_person.join("scripts/GameSaves.server.lua")).unwrap();
+    assert!(saves.contains("SaveService:SaveSlot(slot)"));
+    // The manifest is the new project's, whatever the template.
+    let manifest = read_manifest(&arena).unwrap();
+    assert_eq!(manifest.name, "Arena");
+    fs::remove_dir_all(parent).unwrap();
+}
+
+/// Each genre template's picture for New Project is a 320 × 180 PNG.
+#[test]
+fn every_genre_template_has_a_320_by_180_picture() {
+    for template in Template::GAMES {
+        let png = template.picture().unwrap_or_else(|| panic!("{template:?}"));
+        assert_eq!(&png[1..4], b"PNG", "{template:?}");
+        // The IHDR chunk's width and height, big-endian, after the
+        // 8-byte signature and the chunk's length and type.
+        let width = u32::from_be_bytes(png[16..20].try_into().unwrap());
+        let height = u32::from_be_bytes(png[20..24].try_into().unwrap());
+        assert_eq!((width, height), (320, 180), "{template:?}");
+    }
+    for template in Template::BLANK {
+        assert!(template.picture().is_none());
+        assert!(template.files().is_empty());
+    }
 }
 
 fn tone_mapping(world: &World) -> ToneMapping {

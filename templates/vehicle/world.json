@@ -1,0 +1,855 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Grass",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            50,
+            -0.6,
+            0
+          ],
+          "Size": [
+            400,
+            1,
+            400
+          ],
+          "Color": [
+            0.33,
+            0.52,
+            0.3
+          ]
+        }
+      },
+      {
+        "class": "Folder",
+        "name": "Track",
+        "children": [
+          {
+            "class": "Part",
+            "name": "West",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                0,
+                -0.5,
+                0
+              ],
+              "Size": [
+                20,
+                1,
+                140
+              ],
+              "Color": [
+                0.22,
+                0.23,
+                0.25
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "East",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                100,
+                -0.5,
+                0
+              ],
+              "Size": [
+                20,
+                1,
+                140
+              ],
+              "Color": [
+                0.22,
+                0.23,
+                0.25
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "North",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                50,
+                -0.5,
+                -60
+              ],
+              "Size": [
+                120,
+                1,
+                20
+              ],
+              "Color": [
+                0.22,
+                0.23,
+                0.25
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "South",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                50,
+                -0.5,
+                60
+              ],
+              "Size": [
+                120,
+                1,
+                20
+              ],
+              "Color": [
+                0.22,
+                0.23,
+                0.25
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Infield",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                50,
+                1,
+                0
+              ],
+              "Size": [
+                70,
+                2,
+                110
+              ],
+              "Color": [
+                0.3,
+                0.48,
+                0.28
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Folder",
+        "name": "Gates",
+        "children": [
+          {
+            "class": "Model",
+            "name": "Gate1",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Sensor",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    0,
+                    3,
+                    20
+                  ],
+                  "Size": [
+                    20,
+                    6,
+                    2
+                  ],
+                  "Color": [
+                    1.0,
+                    0.95,
+                    0.95
+                  ],
+                  "Transparency": 1,
+                  "CanCollide": false,
+                  "CastShadow": false
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Post",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    -11,
+                    3,
+                    20
+                  ],
+                  "Size": [
+                    1,
+                    6,
+                    1
+                  ],
+                  "Color": [
+                    1.0,
+                    0.95,
+                    0.95
+                  ],
+                  "Material": "Neon",
+                  "CastShadow": false
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Post",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    11,
+                    3,
+                    20
+                  ],
+                  "Size": [
+                    1,
+                    6,
+                    1
+                  ],
+                  "Color": [
+                    1.0,
+                    0.95,
+                    0.95
+                  ],
+                  "Material": "Neon",
+                  "CastShadow": false
+                }
+              }
+            ]
+          },
+          {
+            "class": "Model",
+            "name": "Gate2",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Sensor",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    50,
+                    3,
+                    -60
+                  ],
+                  "Size": [
+                    2,
+                    6,
+                    20
+                  ],
+                  "Color": [
+                    0.2,
+                    0.85,
+                    1.0
+                  ],
+                  "Transparency": 1,
+                  "CanCollide": false,
+                  "CastShadow": false
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Post",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    50,
+                    3,
+                    -71
+                  ],
+                  "Size": [
+                    1,
+                    6,
+                    1
+                  ],
+                  "Color": [
+                    0.2,
+                    0.85,
+                    1.0
+                  ],
+                  "Material": "Neon",
+                  "CastShadow": false
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Post",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    50,
+                    3,
+                    -49
+                  ],
+                  "Size": [
+                    1,
+                    6,
+                    1
+                  ],
+                  "Color": [
+                    0.2,
+                    0.85,
+                    1.0
+                  ],
+                  "Material": "Neon",
+                  "CastShadow": false
+                }
+              }
+            ]
+          },
+          {
+            "class": "Model",
+            "name": "Gate3",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Sensor",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    100,
+                    3,
+                    0
+                  ],
+                  "Size": [
+                    20,
+                    6,
+                    2
+                  ],
+                  "Color": [
+                    0.2,
+                    0.85,
+                    1.0
+                  ],
+                  "Transparency": 1,
+                  "CanCollide": false,
+                  "CastShadow": false
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Post",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    89,
+                    3,
+                    0
+                  ],
+                  "Size": [
+                    1,
+                    6,
+                    1
+                  ],
+                  "Color": [
+                    0.2,
+                    0.85,
+                    1.0
+                  ],
+                  "Material": "Neon",
+                  "CastShadow": false
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Post",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    111,
+                    3,
+                    0
+                  ],
+                  "Size": [
+                    1,
+                    6,
+                    1
+                  ],
+                  "Color": [
+                    0.2,
+                    0.85,
+                    1.0
+                  ],
+                  "Material": "Neon",
+                  "CastShadow": false
+                }
+              }
+            ]
+          },
+          {
+            "class": "Model",
+            "name": "Gate4",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Sensor",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    50,
+                    3,
+                    60
+                  ],
+                  "Size": [
+                    2,
+                    6,
+                    20
+                  ],
+                  "Color": [
+                    0.2,
+                    0.85,
+                    1.0
+                  ],
+                  "Transparency": 1,
+                  "CanCollide": false,
+                  "CastShadow": false
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Post",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    50,
+                    3,
+                    49
+                  ],
+                  "Size": [
+                    1,
+                    6,
+                    1
+                  ],
+                  "Color": [
+                    0.2,
+                    0.85,
+                    1.0
+                  ],
+                  "Material": "Neon",
+                  "CastShadow": false
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Post",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    50,
+                    3,
+                    71
+                  ],
+                  "Size": [
+                    1,
+                    6,
+                    1
+                  ],
+                  "Color": [
+                    0.2,
+                    0.85,
+                    1.0
+                  ],
+                  "Material": "Neon",
+                  "CastShadow": false
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "class": "SpawnLocation",
+        "name": "Spawn",
+        "properties": {
+          "Position": [
+            -16,
+            0.5,
+            34
+          ],
+          "Size": [
+            6,
+            1,
+            6
+          ],
+          "Duration": 0
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Car",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Chassis",
+            "properties": {
+              "Anchored": false,
+              "Position": [
+                0,
+                2,
+                32
+              ],
+              "Size": [
+                6,
+                1,
+                10
+              ],
+              "Color": [
+                0.85,
+                0.2,
+                0.18
+              ]
+            },
+            "children": [
+              {
+                "class": "WeldConstraint",
+                "name": "SeatWeld",
+                "properties": {
+                  "Part0": [
+                    "Workspace",
+                    "Car",
+                    "Chassis"
+                  ],
+                  "Part1": [
+                    "Workspace",
+                    "Car",
+                    "DriverSeat"
+                  ]
+                }
+              },
+              {
+                "class": "VehicleWheel",
+                "name": "FrontLeft",
+                "properties": {
+                  "Position": [
+                    -3.5,
+                    -1,
+                    -3.5
+                  ],
+                  "Steers": true,
+                  "WheelPart": [
+                    "Workspace",
+                    "Car",
+                    "FrontLeftWheel"
+                  ]
+                }
+              },
+              {
+                "class": "VehicleWheel",
+                "name": "FrontRight",
+                "properties": {
+                  "Position": [
+                    3.5,
+                    -1,
+                    -3.5
+                  ],
+                  "Steers": true,
+                  "WheelPart": [
+                    "Workspace",
+                    "Car",
+                    "FrontRightWheel"
+                  ]
+                }
+              },
+              {
+                "class": "VehicleWheel",
+                "name": "BackLeft",
+                "properties": {
+                  "Position": [
+                    -3.5,
+                    -1,
+                    3.5
+                  ],
+                  "Steers": false,
+                  "WheelPart": [
+                    "Workspace",
+                    "Car",
+                    "BackLeftWheel"
+                  ]
+                }
+              },
+              {
+                "class": "VehicleWheel",
+                "name": "BackRight",
+                "properties": {
+                  "Position": [
+                    3.5,
+                    -1,
+                    3.5
+                  ],
+                  "Steers": false,
+                  "WheelPart": [
+                    "Workspace",
+                    "Car",
+                    "BackRightWheel"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "class": "VehicleSeat",
+            "name": "DriverSeat",
+            "properties": {
+              "Anchored": false,
+              "Position": [
+                -1.5,
+                3,
+                33
+              ],
+              "Size": [
+                2,
+                1,
+                2
+              ],
+              "Color": [
+                0.2,
+                0.2,
+                0.22
+              ],
+              "Disabled": true
+            },
+            "children": [
+              {
+                "class": "ProximityPrompt",
+                "name": "DrivePrompt",
+                "properties": {
+                  "ActionText": "Drive",
+                  "ObjectText": "Car"
+                }
+              }
+            ]
+          },
+          {
+            "class": "Part",
+            "name": "FrontLeftWheel",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                -3.5,
+                1,
+                28.5
+              ],
+              "Size": [
+                0.8,
+                2,
+                2
+              ],
+              "Color": [
+                0.1,
+                0.1,
+                0.1
+              ],
+              "Shape": "Cylinder",
+              "CanCollide": false
+            }
+          },
+          {
+            "class": "Part",
+            "name": "FrontRightWheel",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                3.5,
+                1,
+                28.5
+              ],
+              "Size": [
+                0.8,
+                2,
+                2
+              ],
+              "Color": [
+                0.1,
+                0.1,
+                0.1
+              ],
+              "Shape": "Cylinder",
+              "CanCollide": false
+            }
+          },
+          {
+            "class": "Part",
+            "name": "BackLeftWheel",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                -3.5,
+                1,
+                35.5
+              ],
+              "Size": [
+                0.8,
+                2,
+                2
+              ],
+              "Color": [
+                0.1,
+                0.1,
+                0.1
+              ],
+              "Shape": "Cylinder",
+              "CanCollide": false
+            }
+          },
+          {
+            "class": "Part",
+            "name": "BackRightWheel",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                3.5,
+                1,
+                35.5
+              ],
+              "Size": [
+                0.8,
+                2,
+                2
+              ],
+              "Color": [
+                0.1,
+                0.1,
+                0.1
+              ],
+              "Shape": "Cylinder",
+              "CanCollide": false
+            }
+          }
+        ]
+      },
+      {
+        "class": "ScreenGui",
+        "name": "Hud",
+        "properties": {
+          "ScaleMode": "Scale",
+          "DesignWidth": 1280,
+          "DesignHeight": 720
+        },
+        "children": [
+          {
+            "class": "TextLabel",
+            "name": "Lap",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                30
+              ],
+              "Size": [
+                0,
+                360,
+                0,
+                40
+              ],
+              "Text": "Lap 0:00.0",
+              "BackgroundTransparency": 1,
+              "Class": "hud-lap"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Best",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                74
+              ],
+              "Size": [
+                0,
+                460,
+                0,
+                32
+              ],
+              "Text": "Best -",
+              "BackgroundTransparency": 1,
+              "Class": "hud-best"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Gates",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                110
+              ],
+              "Size": [
+                0,
+                360,
+                0,
+                28
+              ],
+              "Text": "Next gate 1 of 4",
+              "BackgroundTransparency": 1,
+              "Class": "hud-small"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Medals",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                142
+              ],
+              "Size": [
+                0,
+                600,
+                0,
+                28
+              ],
+              "Text": "",
+              "BackgroundTransparency": 1,
+              "Class": "hud-small"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Hint",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                660
+              ],
+              "Size": [
+                0,
+                700,
+                0,
+                30
+              ],
+              "Text": "Press E at the car to drive. W/S to go, A/D to steer, Space to get out.",
+              "BackgroundTransparency": 1,
+              "Class": "hud-small"
+            }
+          }
+        ]
+      },
+      {
+        "class": "ScreenGui",
+        "name": "GameMenu",
+        "prefab": "assets/prefabs/GameMenu.prefab.json"
+      }
+    ]
+  },
+  "lighting": {
+    "properties": {
+      "ToneMapping": "Neutral",
+      "ShadowSoftness": 0.35,
+      "ClockTime": 13
+    }
+  }
+}

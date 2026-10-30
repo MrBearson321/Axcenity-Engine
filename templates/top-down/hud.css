@@ -1,0 +1,19 @@
+/* The HUD: health, wins and the status line. */
+
+.hud-health {
+    color: #fecaca;
+    font-size: 26px;
+    font-weight: bold;
+}
+
+.hud-small {
+    color: #1f2937;
+    font-size: 16px;
+}
+
+.hud-status {
+    color: #111827;
+    font-size: 34px;
+    font-weight: bold;
+    text-align: center;
+}

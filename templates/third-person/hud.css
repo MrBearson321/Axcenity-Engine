@@ -1,0 +1,12 @@
+/* The HUD: the coin count and the hint. */
+
+.hud-coins {
+    color: #fde68a;
+    font-size: 26px;
+    font-weight: bold;
+}
+
+.hud-hint {
+    color: #f3f4f6;
+    font-size: 15px;
+}

@@ -1,0 +1,489 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Ground",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            0,
+            -0.5,
+            8
+          ],
+          "Size": [
+            110,
+            1,
+            130
+          ],
+          "Color": [
+            0.62,
+            0.56,
+            0.45
+          ]
+        }
+      },
+      {
+        "class": "Folder",
+        "name": "Walls",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Wall1",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                -14,
+                2,
+                12
+              ],
+              "Size": [
+                24,
+                4,
+                2
+              ],
+              "Color": [
+                0.42,
+                0.38,
+                0.33
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Wall2",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                16,
+                2,
+                0
+              ],
+              "Size": [
+                2,
+                4,
+                26
+              ],
+              "Color": [
+                0.42,
+                0.38,
+                0.33
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Wall3",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                -6,
+                2,
+                -14
+              ],
+              "Size": [
+                30,
+                4,
+                2
+              ],
+              "Color": [
+                0.42,
+                0.38,
+                0.33
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Pillar1",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                -24,
+                2,
+                -2
+              ],
+              "Size": [
+                4,
+                4,
+                4
+              ],
+              "Color": [
+                0.42,
+                0.38,
+                0.33
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Pillar2",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                28,
+                2,
+                -26
+              ],
+              "Size": [
+                4,
+                4,
+                4
+              ],
+              "Color": [
+                0.42,
+                0.38,
+                0.33
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Model",
+        "name": "Hero",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Anchored": false,
+              "Position": [
+                0,
+                2.5,
+                34
+              ],
+              "Size": [
+                2,
+                5,
+                2
+              ],
+              "Color": [
+                0.25,
+                0.6,
+                0.95
+              ]
+            }
+          },
+          {
+            "class": "ThirdPersonController",
+            "name": "ThirdPersonController",
+            "properties": {
+              "WalkSpeed": 16
+            }
+          },
+          {
+            "class": "NavigationAgent",
+            "name": "NavigationAgent",
+            "properties": {
+              "Destination": [
+                0,
+                0,
+                34
+              ],
+              "WalkSpeed": 18,
+              "SightRange": 0,
+              "HearingRange": 0
+            }
+          },
+          {
+            "class": "Health",
+            "name": "Health",
+            "properties": {
+              "RegenRate": 4,
+              "RegenDelay": 3
+            }
+          }
+        ]
+      },
+      {
+        "class": "Folder",
+        "name": "Enemies",
+        "children": [
+          {
+            "class": "Model",
+            "name": "Patroller",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Body",
+                "properties": {
+                  "Anchored": false,
+                  "Position": [
+                    -30,
+                    2,
+                    -30
+                  ],
+                  "Size": [
+                    2,
+                    4,
+                    2
+                  ],
+                  "Color": [
+                    0.6,
+                    0.15,
+                    0.15
+                  ]
+                }
+              },
+              {
+                "class": "NavigationAgent",
+                "name": "NavigationAgent",
+                "properties": {
+                  "BehaviorTree": "assets/ai/Patrol.behaviortree.json",
+                  "Destination": [
+                    -30,
+                    0,
+                    -30
+                  ],
+                  "WalkSpeed": 9,
+                  "SightRange": 24,
+                  "SightAngle": 140,
+                  "HearingRange": 0
+                }
+              }
+            ],
+            "tags": [
+              "Enemy"
+            ]
+          },
+          {
+            "class": "Model",
+            "name": "Guard1",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Body",
+                "properties": {
+                  "Anchored": false,
+                  "Position": [
+                    0,
+                    2,
+                    0
+                  ],
+                  "Size": [
+                    2,
+                    4,
+                    2
+                  ],
+                  "Color": [
+                    0.6,
+                    0.15,
+                    0.15
+                  ]
+                }
+              },
+              {
+                "class": "NavigationAgent",
+                "name": "NavigationAgent",
+                "properties": {
+                  "BehaviorTree": "assets/ai/Guard.behaviortree.json",
+                  "Destination": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "WalkSpeed": 9,
+                  "SightRange": 24,
+                  "SightAngle": 140,
+                  "HearingRange": 0
+                }
+              }
+            ],
+            "tags": [
+              "Enemy"
+            ]
+          },
+          {
+            "class": "Model",
+            "name": "Guard2",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Body",
+                "properties": {
+                  "Anchored": false,
+                  "Position": [
+                    30,
+                    2,
+                    20
+                  ],
+                  "Size": [
+                    2,
+                    4,
+                    2
+                  ],
+                  "Color": [
+                    0.6,
+                    0.15,
+                    0.15
+                  ]
+                }
+              },
+              {
+                "class": "NavigationAgent",
+                "name": "NavigationAgent",
+                "properties": {
+                  "BehaviorTree": "assets/ai/Guard.behaviortree.json",
+                  "Destination": [
+                    30,
+                    0,
+                    20
+                  ],
+                  "WalkSpeed": 9,
+                  "SightRange": 24,
+                  "SightAngle": 140,
+                  "HearingRange": 0
+                }
+              }
+            ],
+            "tags": [
+              "Enemy"
+            ]
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Goal",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            0,
+            0.1,
+            -40
+          ],
+          "Size": [
+            8,
+            0.2,
+            8
+          ],
+          "Color": [
+            0.25,
+            0.9,
+            0.45
+          ],
+          "Material": "Neon",
+          "CanCollide": false,
+          "CastShadow": false
+        }
+      },
+      {
+        "class": "ScreenGui",
+        "name": "Hud",
+        "properties": {
+          "ScaleMode": "Scale",
+          "DesignWidth": 1280,
+          "DesignHeight": 720
+        },
+        "children": [
+          {
+            "class": "TextLabel",
+            "name": "Health",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                30
+              ],
+              "Size": [
+                0,
+                300,
+                0,
+                36
+              ],
+              "Text": "Health 100",
+              "BackgroundTransparency": 1,
+              "Class": "hud-health"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Wins",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                70
+              ],
+              "Size": [
+                0,
+                300,
+                0,
+                30
+              ],
+              "Text": "Wins: 0",
+              "BackgroundTransparency": 1,
+              "Class": "hud-small"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Status",
+            "properties": {
+              "Position": [
+                0,
+                340,
+                0,
+                300
+              ],
+              "Size": [
+                0,
+                600,
+                0,
+                60
+              ],
+              "Text": "",
+              "BackgroundTransparency": 1,
+              "Class": "hud-status"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Hint",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                660
+              ],
+              "Size": [
+                0,
+                800,
+                0,
+                30
+              ],
+              "Text": "Click to move. Reach the green goal without getting caught. Escape for the menu.",
+              "BackgroundTransparency": 1,
+              "Class": "hud-small"
+            }
+          }
+        ]
+      },
+      {
+        "class": "ScreenGui",
+        "name": "GameMenu",
+        "prefab": "assets/prefabs/GameMenu.prefab.json"
+      }
+    ]
+  },
+  "replicated_storage": {
+    "children": [
+      {
+        "class": "RemoteEvent",
+        "name": "MoveTo"
+      }
+    ]
+  },
+  "lighting": {
+    "properties": {
+      "ToneMapping": "Neutral",
+      "ShadowSoftness": 0.35,
+      "ClockTime": 12
+    }
+  }
+}

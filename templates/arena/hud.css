@@ -1,0 +1,17 @@
+/* The HUD: health, team and the hint. */
+
+.hud-health {
+    color: #fecaca;
+    font-size: 26px;
+    font-weight: bold;
+}
+
+.hud-team {
+    color: #e5e7eb;
+    font-size: 18px;
+}
+
+.hud-small {
+    color: #d1d5db;
+    font-size: 16px;
+}

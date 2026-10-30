@@ -1,0 +1,26 @@
+{
+  "blocks": [
+    {
+      "id": 2,
+      "kind": {
+        "type": "when_started",
+        "body": [
+          {
+            "id": 1,
+            "kind": {
+              "type": "show_system_message",
+              "text": {
+                "type": "text",
+                "value": "Welcome to the arena: red against blue. Knock out the other team!"
+              }
+            }
+          }
+        ]
+      },
+      "position": [
+        40,
+        40
+      ]
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "blocks": [
+    {
+      "id": 3,
+      "kind": {
+        "type": "when_agent_senses",
+        "agent": "Enemies.Patroller.NavigationAgent",
+        "sense": "Sight",
+        "body": [
+          {
+            "id": 1,
+            "kind": {
+              "type": "set_color",
+              "target": "Enemies.Patroller.Body",
+              "color": {
+                "type": "color3",
+                "r": 1,
+                "g": 0.1,
+                "b": 0.1
+              }
+            }
+          },
+          {
+            "id": 2,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "text",
+                "value": "Patroller has seen you!"
+              }
+            }
+          }
+        ]
+      },
+      "position": [
+        40,
+        40
+      ]
+    },
+    {
+      "id": 6,
+      "kind": {
+        "type": "when_agent_senses",
+        "agent": "Enemies.Guard1.NavigationAgent",
+        "sense": "Sight",
+        "body": [
+          {
+            "id": 4,
+            "kind": {
+              "type": "set_color",
+              "target": "Enemies.Guard1.Body",
+              "color": {
+                "type": "color3",
+                "r": 1,
+                "g": 0.1,
+                "b": 0.1
+              }
+            }
+          },
+          {
+            "id": 5,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "text",
+                "value": "Guard1 has seen you!"
+              }
+            }
+          }
+        ]
+      },
+      "position": [
+        40,
+        240
+      ]
+    },
+    {
+      "id": 9,
+      "kind": {
+        "type": "when_agent_senses",
+        "agent": "Enemies.Guard2.NavigationAgent",
+        "sense": "Sight",
+        "body": [
+          {
+            "id": 7,
+            "kind": {
+              "type": "set_color",
+              "target": "Enemies.Guard2.Body",
+              "color": {
+                "type": "color3",
+                "r": 1,
+                "g": 0.1,
+                "b": 0.1
+              }
+            }
+          },
+          {
+            "id": 8,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "text",
+                "value": "Guard2 has seen you!"
+              }
+            }
+          }
+        ]
+      },
+      "position": [
+        40,
+        440
+      ]
+    }
+  ]
+}

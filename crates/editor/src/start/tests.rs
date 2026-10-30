@@ -57,35 +57,42 @@ fn the_start_screen_draws_each_page_and_the_new_project_dialog() {
         (
             "start-projects",
             Page::Projects,
-            false,
+            None,
             theme::ThemeChoice::Dark,
         ),
         (
             "start-projects-light",
             Page::Projects,
-            false,
+            None,
             theme::ThemeChoice::Light,
         ),
-        ("start-learn", Page::Learn, false, theme::ThemeChoice::Dark),
+        ("start-learn", Page::Learn, None, theme::ThemeChoice::Dark),
         (
             "start-reference",
             Page::Reference,
-            false,
+            None,
             theme::ThemeChoice::Dark,
         ),
         (
             "start-new-project",
             Page::Projects,
-            true,
+            Some(Template::Starter),
             theme::ThemeChoice::Dark,
+        ),
+        // A genre template picked: its picture, and the rest beside it.
+        (
+            "start-new-project-arena",
+            Page::Projects,
+            Some(Template::Arena),
+            theme::ThemeChoice::Light,
         ),
     ] {
         let mut start = StartScreen {
             page,
             ..Default::default()
         };
-        if dialog {
-            start.new_project(Template::Starter);
+        if let Some(template) = dialog {
+            start.new_project(template);
         }
         let appearance = theme::Appearance {
             theme,

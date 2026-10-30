@@ -1,0 +1,84 @@
+{
+  "blocks": [
+    {
+      "id": 6,
+      "kind": {
+        "type": "when_started",
+        "body": [
+          {
+            "id": 5,
+            "kind": {
+              "type": "forever",
+              "body": [
+                {
+                  "id": 1,
+                  "kind": {
+                    "type": "tween",
+                    "target": "MovingTarget.Board",
+                    "property": "Position",
+                    "value": {
+                      "type": "vector3",
+                      "x": 12,
+                      "y": 4.5,
+                      "z": -26
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "value": 3
+                    },
+                    "style": "Sine",
+                    "direction": "InOut"
+                  }
+                },
+                {
+                  "id": 2,
+                  "kind": {
+                    "type": "wait",
+                    "seconds": {
+                      "type": "number",
+                      "value": 3
+                    }
+                  }
+                },
+                {
+                  "id": 3,
+                  "kind": {
+                    "type": "tween",
+                    "target": "MovingTarget.Board",
+                    "property": "Position",
+                    "value": {
+                      "type": "vector3",
+                      "x": -12,
+                      "y": 4.5,
+                      "z": -26
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "value": 3
+                    },
+                    "style": "Sine",
+                    "direction": "InOut"
+                  }
+                },
+                {
+                  "id": 4,
+                  "kind": {
+                    "type": "wait",
+                    "seconds": {
+                      "type": "number",
+                      "value": 3
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "position": [
+        40,
+        40
+      ]
+    }
+  ]
+}

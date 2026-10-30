@@ -74,14 +74,19 @@ pub(super) fn dialog_buttons(
     clicked
 }
 
-/// A template to pick in the New Project dialog.
+/// How big a template's tile is in the New Project dialog.
+pub(super) const TEMPLATE_TILE: egui::Vec2 = vec2(148.0, 128.0);
+
+/// A template to pick in the New Project dialog: its picture (or its icon,
+/// for the blank templates), its name and a line of what it is.
 pub(super) fn template_choice(
     ui: &mut egui::Ui,
     palette: &Palette,
     template: Template,
     picked: bool,
+    picture: Option<&egui::TextureHandle>,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(150.0, 34.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(TEMPLATE_TILE, Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, picked, template.name())
     });
@@ -98,7 +103,7 @@ pub(super) fn template_choice(
     };
     ui.painter().rect(
         rect,
-        6,
+        8,
         fill,
         Stroke::new(1.0_f32, stroke),
         egui::StrokeKind::Inside,
@@ -106,26 +111,84 @@ pub(super) fn template_choice(
     if response.has_focus() && !picked {
         ui.painter().rect_stroke(
             rect,
-            6,
+            8,
             Stroke::new(1.0_f32, palette.accent),
             egui::StrokeKind::Inside,
         );
     }
+    let inner = rect.shrink(5.0);
+    let image = Rect::from_min_size(inner.min, vec2(inner.width(), inner.width() * 9.0 / 16.0));
+    template_picture(
+        ui,
+        palette,
+        template,
+        image,
+        picture,
+        CornerRadius::same(5),
+        hover,
+    );
     let color = if picked {
         palette.accent_text
     } else {
-        palette.text
+        palette.text_strong
     };
     ui.painter().text(
-        rect.left_center() + vec2(12.0, 0.0),
+        pos2(inner.left() + 2.0, image.bottom() + 12.0),
         egui::Align2::LEFT_CENTER,
-        theme::with_icon(template_icon(template), template.name()),
+        template.name(),
         FontId::new(type_scale::BODY, theme::medium_family()),
         color,
+    );
+    let line = widgets::elided(
+        ui,
+        template.description(),
+        FontId::proportional(type_scale::CAPTION),
+        palette.text_weak,
+        inner.width() - 4.0,
+        1,
+    );
+    ui.painter().galley(
+        pos2(inner.left() + 2.0, image.bottom() + 22.0),
+        line,
+        palette.text_weak,
     );
     response
         .on_hover_text(template.description())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A template's picture in `rect`: the built-in screenshot of a genre
+/// template, or a tile with the template's icon.
+pub(super) fn template_picture(
+    ui: &egui::Ui,
+    palette: &Palette,
+    template: Template,
+    rect: Rect,
+    picture: Option<&egui::TextureHandle>,
+    radius: CornerRadius,
+    hover: f32,
+) {
+    match picture {
+        Some(texture) => egui::Image::new(texture)
+            .corner_radius(radius)
+            .paint_at(ui, rect),
+        None => {
+            ui.painter().rect(
+                rect,
+                radius,
+                theme::mix(palette.surface, palette.control_hover, hover),
+                Stroke::new(1.0_f32, palette.border),
+                egui::StrokeKind::Inside,
+            );
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                template_icon(template),
+                FontId::proportional(rect.height() * 0.36),
+                theme::mix(palette.text_secondary, palette.text_strong, hover),
+            );
+        }
+    }
 }
 
 pub(super) fn template_icon(template: Template) -> &'static str {
@@ -133,6 +196,11 @@ pub(super) fn template_icon(template: Template) -> &'static str {
         Template::Baseplate => icons::SQUARE,
         Template::Empty => icons::FILE_DASHED,
         Template::Starter => icons::SPARKLE,
+        Template::FirstPerson => icons::CROSSHAIR,
+        Template::ThirdPerson => icons::PERSON_SIMPLE_RUN,
+        Template::Vehicle => icons::CAR_PROFILE,
+        Template::TopDown => icons::MAP_TRIFOLD,
+        Template::Arena => icons::USERS_THREE,
     }
 }
 
@@ -186,6 +254,57 @@ pub(super) fn template_card(ui: &mut egui::Ui, template: Template, width: f32) -
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// A card to start a new project from a genre template: its picture, its
+/// name and what it is.
+pub(super) fn game_template_card(
+    ui: &mut egui::Ui,
+    template: Template,
+    picture: Option<&egui::TextureHandle>,
+    width: f32,
+) -> egui::Response {
+    let image_height = (width - 16.0) * 9.0 / 16.0;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, image_height + 74.0), Sense::click());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, template.name()));
+    let palette = theme::palette(ui.ctx());
+    let hover = theme::ease(ui.ctx(), response.id.with("hover"), response.hovered());
+    card_frame(ui, rect, &response, hover, &palette);
+    let image = Rect::from_min_size(rect.min + vec2(8.0, 8.0), vec2(width - 16.0, image_height));
+    template_picture(
+        ui,
+        &palette,
+        template,
+        image,
+        picture,
+        CornerRadius::same(6),
+        hover,
+    );
+    let left = rect.left() + 12.0;
+    ui.painter().text(
+        pos2(left, image.bottom() + 18.0),
+        egui::Align2::LEFT_CENTER,
+        template.name(),
+        FontId::new(type_scale::BODY, theme::medium_family()),
+        palette.text_strong,
+    );
+    let description = widgets::elided(
+        ui,
+        template.description(),
+        FontId::proportional(type_scale::SMALL),
+        palette.text_weak,
+        rect.right() - left - 12.0,
+        2,
+    );
+    ui.painter().galley(
+        pos2(left, image.bottom() + 30.0),
+        description,
+        palette.text_weak,
+    );
+    response
+        .on_hover_text(format!("New project: {}", template.description()))
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 impl StartScreen {
     /// Draws the open dialog, if any. Returns the folder of a project that
     /// was just created, to open it.
@@ -194,6 +313,15 @@ impl StartScreen {
         ctx: &egui::Context,
         projects: &mut Vec<ProjectLink>,
     ) -> Option<PathBuf> {
+        // The pictures first: the dialog borrows `self.dialog` from here on.
+        let pictures: Vec<_> = if matches!(self.dialog, Some(Dialog::New { .. })) {
+            Template::ALL
+                .into_iter()
+                .map(|template| self.picture(ctx, template))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let dialog = self.dialog.as_mut()?;
         let palette = theme::palette(ctx);
         let mut close = false;
@@ -215,13 +343,15 @@ impl StartScreen {
                         template,
                         error,
                     } => {
-                        ui.set_width(480.0);
+                        let columns = 4.0;
+                        ui.set_width(TEMPLATE_TILE.x * columns + 8.0 * (columns - 1.0));
                         dialog_title(ui, &palette, "New Project", None);
                         field_label(ui, &palette, "Template");
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 8.0;
-                            for choice in Template::ALL {
-                                if template_choice(ui, &palette, choice, *template == choice)
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                            for (choice, picture) in Template::ALL.into_iter().zip(&pictures) {
+                                let picked = *template == choice;
+                                if template_choice(ui, &palette, choice, picked, picture.as_ref())
                                     .clicked()
                                 {
                                     *template = choice;

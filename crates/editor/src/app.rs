@@ -1372,6 +1372,8 @@ mod plugin_tests;
 mod posing_tests;
 #[cfg(test)]
 mod prefab_tests;
+#[cfg(test)]
+mod template_tests;
 
 #[cfg(test)]
 mod level_tests;

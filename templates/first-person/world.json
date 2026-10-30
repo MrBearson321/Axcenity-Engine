@@ -1,0 +1,681 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            0,
+            -0.5,
+            0
+          ],
+          "Size": [
+            120,
+            1,
+            120
+          ],
+          "Color": [
+            0.35,
+            0.37,
+            0.4
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "BackWall",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            0,
+            6,
+            -40
+          ],
+          "Size": [
+            60,
+            12,
+            2
+          ],
+          "Color": [
+            0.55,
+            0.57,
+            0.6
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "LeftWall",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            -30,
+            6,
+            -10
+          ],
+          "Size": [
+            2,
+            12,
+            60
+          ],
+          "Color": [
+            0.55,
+            0.57,
+            0.6
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "RightWall",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            30,
+            6,
+            -10
+          ],
+          "Size": [
+            2,
+            12,
+            60
+          ],
+          "Color": [
+            0.55,
+            0.57,
+            0.6
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Crate1",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            -8,
+            1.5,
+            6
+          ],
+          "Size": [
+            3,
+            3,
+            3
+          ],
+          "Color": [
+            0.62,
+            0.45,
+            0.28
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Crate2",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            9,
+            1.5,
+            0
+          ],
+          "Size": [
+            3,
+            3,
+            3
+          ],
+          "Color": [
+            0.62,
+            0.45,
+            0.28
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Crate3",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            9,
+            4.5,
+            0
+          ],
+          "Size": [
+            3,
+            3,
+            3
+          ],
+          "Color": [
+            0.62,
+            0.45,
+            0.28
+          ]
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Character",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Anchored": false,
+              "Position": [
+                0,
+                2.5,
+                24
+              ],
+              "Size": [
+                2,
+                5,
+                1
+              ],
+              "Color": [
+                0.2,
+                0.55,
+                0.9
+              ]
+            }
+          },
+          {
+            "class": "FirstPersonController",
+            "name": "FirstPersonController"
+          },
+          {
+            "class": "Health",
+            "name": "Health",
+            "properties": {
+              "RegenRate": 5
+            }
+          },
+          {
+            "class": "Inventory",
+            "name": "Inventory",
+            "properties": {
+              "Capacity": 3
+            },
+            "children": [
+              {
+                "class": "Tool",
+                "name": "Blaster",
+                "properties": {
+                  "ToolTip": "Click to fire, R to reload",
+                  "CanBeDropped": false
+                },
+                "children": [
+                  {
+                    "class": "Part",
+                    "name": "Handle",
+                    "properties": {
+                      "Anchored": false,
+                      "Position": [
+                        0.6,
+                        3.6,
+                        22.6
+                      ],
+                      "Size": [
+                        0.4,
+                        0.5,
+                        1.6
+                      ],
+                      "Color": [
+                        0.15,
+                        0.16,
+                        0.18
+                      ],
+                      "Material": "Metal",
+                      "CanCollide": false
+                    },
+                    "children": [
+                      {
+                        "class": "Attachment",
+                        "name": "Grip",
+                        "properties": {
+                          "Position": [
+                            0,
+                            0,
+                            0.5
+                          ]
+                        }
+                      },
+                      {
+                        "class": "PointLight",
+                        "name": "Muzzle",
+                        "properties": {
+                          "Color": [
+                            1,
+                            0.6,
+                            0.3
+                          ],
+                          "Brightness": 0,
+                          "Range": 8
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "attributes": {
+                  "Ammo": 12,
+                  "ClipSize": 12,
+                  "Damage": 25
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "class": "Folder",
+        "name": "Targets",
+        "children": [
+          {
+            "class": "Model",
+            "name": "Target1",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Board",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    -10,
+                    4.5,
+                    -12
+                  ],
+                  "Size": [
+                    3,
+                    3,
+                    0.5
+                  ],
+                  "Color": [
+                    0.85,
+                    0.22,
+                    0.22
+                  ]
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Stand",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    -10,
+                    1.5,
+                    -12
+                  ],
+                  "Size": [
+                    0.5,
+                    3,
+                    0.5
+                  ],
+                  "Color": [
+                    0.55,
+                    0.57,
+                    0.6
+                  ]
+                }
+              },
+              {
+                "class": "Health",
+                "name": "Health",
+                "properties": {
+                  "MaxHealth": 50,
+                  "Health": 50,
+                  "RegenRate": 0
+                }
+              }
+            ],
+            "tags": [
+              "Target"
+            ]
+          },
+          {
+            "class": "Model",
+            "name": "Target2",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Board",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    0,
+                    4.5,
+                    -20
+                  ],
+                  "Size": [
+                    3,
+                    3,
+                    0.5
+                  ],
+                  "Color": [
+                    0.85,
+                    0.22,
+                    0.22
+                  ]
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Stand",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    0,
+                    1.5,
+                    -20
+                  ],
+                  "Size": [
+                    0.5,
+                    3,
+                    0.5
+                  ],
+                  "Color": [
+                    0.55,
+                    0.57,
+                    0.6
+                  ]
+                }
+              },
+              {
+                "class": "Health",
+                "name": "Health",
+                "properties": {
+                  "MaxHealth": 50,
+                  "Health": 50,
+                  "RegenRate": 0
+                }
+              }
+            ],
+            "tags": [
+              "Target"
+            ]
+          },
+          {
+            "class": "Model",
+            "name": "Target3",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Board",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    10,
+                    4.5,
+                    -14
+                  ],
+                  "Size": [
+                    3,
+                    3,
+                    0.5
+                  ],
+                  "Color": [
+                    0.85,
+                    0.22,
+                    0.22
+                  ]
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Stand",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    10,
+                    1.5,
+                    -14
+                  ],
+                  "Size": [
+                    0.5,
+                    3,
+                    0.5
+                  ],
+                  "Color": [
+                    0.55,
+                    0.57,
+                    0.6
+                  ]
+                }
+              },
+              {
+                "class": "Health",
+                "name": "Health",
+                "properties": {
+                  "MaxHealth": 50,
+                  "Health": 50,
+                  "RegenRate": 0
+                }
+              }
+            ],
+            "tags": [
+              "Target"
+            ]
+          },
+          {
+            "class": "Model",
+            "name": "Target4",
+            "children": [
+              {
+                "class": "Part",
+                "name": "Board",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    -4,
+                    4.5,
+                    -32
+                  ],
+                  "Size": [
+                    3,
+                    3,
+                    0.5
+                  ],
+                  "Color": [
+                    0.85,
+                    0.22,
+                    0.22
+                  ]
+                }
+              },
+              {
+                "class": "Part",
+                "name": "Stand",
+                "properties": {
+                  "Anchored": true,
+                  "Position": [
+                    -4,
+                    1.5,
+                    -32
+                  ],
+                  "Size": [
+                    0.5,
+                    3,
+                    0.5
+                  ],
+                  "Color": [
+                    0.55,
+                    0.57,
+                    0.6
+                  ]
+                }
+              },
+              {
+                "class": "Health",
+                "name": "Health",
+                "properties": {
+                  "MaxHealth": 50,
+                  "Health": 50,
+                  "RegenRate": 0
+                }
+              }
+            ],
+            "tags": [
+              "Target"
+            ]
+          }
+        ]
+      },
+      {
+        "class": "Model",
+        "name": "MovingTarget",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Board",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                -12,
+                4.5,
+                -26
+              ],
+              "Size": [
+                3,
+                3,
+                0.5
+              ],
+              "Color": [
+                0.95,
+                0.6,
+                0.15
+              ]
+            }
+          },
+          {
+            "class": "Health",
+            "name": "Health",
+            "properties": {
+              "MaxHealth": 50,
+              "Health": 50,
+              "RegenRate": 0
+            }
+          }
+        ],
+        "tags": [
+          "Target"
+        ]
+      },
+      {
+        "class": "ScreenGui",
+        "name": "Hud",
+        "properties": {
+          "ScaleMode": "Scale",
+          "DesignWidth": 1280,
+          "DesignHeight": 720
+        },
+        "children": [
+          {
+            "class": "Frame",
+            "name": "Crosshair",
+            "properties": {
+              "Position": [
+                0,
+                636,
+                0,
+                356
+              ],
+              "Size": [
+                0,
+                8,
+                0,
+                8
+              ],
+              "Class": "crosshair"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Ammo",
+            "properties": {
+              "Position": [
+                0,
+                1060,
+                0,
+                640
+              ],
+              "Size": [
+                0,
+                190,
+                0,
+                48
+              ],
+              "Text": "12 / 12",
+              "BackgroundTransparency": 1,
+              "Class": "hud-ammo"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Score",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                30
+              ],
+              "Size": [
+                0,
+                320,
+                0,
+                40
+              ],
+              "Text": "Targets down: 0",
+              "BackgroundTransparency": 1,
+              "Class": "hud-score"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Hint",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                72
+              ],
+              "Size": [
+                0,
+                420,
+                0,
+                30
+              ],
+              "Text": "Click to fire, R to reload, Escape for the menu",
+              "BackgroundTransparency": 1,
+              "Class": "hud-hint"
+            }
+          }
+        ]
+      },
+      {
+        "class": "ScreenGui",
+        "name": "GameMenu",
+        "prefab": "assets/prefabs/GameMenu.prefab.json"
+      }
+    ]
+  },
+  "replicated_storage": {
+    "children": [
+      {
+        "class": "RemoteEvent",
+        "name": "Blaster"
+      }
+    ]
+  },
+  "lighting": {
+    "properties": {
+      "ToneMapping": "Neutral",
+      "ShadowSoftness": 0.35,
+      "ClockTime": 15
+    }
+  }
+}

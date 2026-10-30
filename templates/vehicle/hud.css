@@ -1,0 +1,17 @@
+/* The HUD: the lap time, the best lap, the gates and the medal times. */
+
+.hud-lap {
+    color: #f9fafb;
+    font-size: 30px;
+    font-weight: bold;
+}
+
+.hud-best {
+    color: #fde68a;
+    font-size: 22px;
+}
+
+.hud-small {
+    color: #e5e7eb;
+    font-size: 16px;
+}

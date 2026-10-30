@@ -2126,9 +2126,9 @@ Each has a pause menu, a settings menu with rebindable input, and a working save
 
 ### Acceptance criteria
 
-- [ ] Each template creates a project that plays with no errors in editor Play and as an exported game.
-- [ ] Each template's game tests pass in `axcenity-test` and in the Tests panel.
-- [ ] The Multiplayer Arena template works with `--host` and two `--join` clients.
+- [x] Each template creates a project that plays with no errors in editor Play and as an exported game.
+- [x] Each template's game tests pass in `axcenity-test` and in the Tests panel.
+- [x] The Multiplayer Arena template works with `--host` and two `--join` clients.
 
 ---
 

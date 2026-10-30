@@ -1,0 +1,39 @@
+{
+  "blocks": [
+    {
+      "id": 3,
+      "kind": {
+        "type": "when_seat_occupied",
+        "seat": "Car.DriverSeat",
+        "body": [
+          {
+            "id": 1,
+            "kind": {
+              "type": "set_property",
+              "target": "Car.DriverSeat.DrivePrompt",
+              "property": "Enabled",
+              "value": {
+                "type": "boolean",
+                "value": false
+              }
+            }
+          },
+          {
+            "id": 2,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "text",
+                "value": "Driving! Through every gate in order, then the white start line."
+              }
+            }
+          }
+        ]
+      },
+      "position": [
+        40,
+        40
+      ]
+    }
+  ]
+}

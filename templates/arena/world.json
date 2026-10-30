@@ -1,0 +1,380 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            0,
+            -0.5,
+            0
+          ],
+          "Size": [
+            90,
+            1,
+            70
+          ],
+          "Color": [
+            0.3,
+            0.32,
+            0.36
+          ]
+        }
+      },
+      {
+        "class": "Folder",
+        "name": "Cover",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Block1",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                0,
+                2,
+                12
+              ],
+              "Size": [
+                6,
+                4,
+                2
+              ],
+              "Color": [
+                0.5,
+                0.52,
+                0.56
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Block2",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                0,
+                2,
+                -12
+              ],
+              "Size": [
+                6,
+                4,
+                2
+              ],
+              "Color": [
+                0.5,
+                0.52,
+                0.56
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Block3",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                -14,
+                2,
+                0
+              ],
+              "Size": [
+                2,
+                4,
+                8
+              ],
+              "Color": [
+                0.5,
+                0.52,
+                0.56
+              ]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Block4",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                14,
+                2,
+                0
+              ],
+              "Size": [
+                2,
+                4,
+                8
+              ],
+              "Color": [
+                0.5,
+                0.52,
+                0.56
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "class": "SpawnLocation",
+        "name": "RedSpawn",
+        "properties": {
+          "Position": [
+            -36,
+            0.5,
+            0
+          ],
+          "Color": [
+            0.85,
+            0.2,
+            0.2
+          ],
+          "Neutral": false,
+          "TeamColor": [
+            0.85,
+            0.2,
+            0.2
+          ],
+          "Duration": 3
+        }
+      },
+      {
+        "class": "SpawnLocation",
+        "name": "BlueSpawn",
+        "properties": {
+          "Position": [
+            36,
+            0.5,
+            0
+          ],
+          "Color": [
+            0.2,
+            0.4,
+            0.9
+          ],
+          "Neutral": false,
+          "TeamColor": [
+            0.2,
+            0.4,
+            0.9
+          ],
+          "Duration": 3
+        }
+      },
+      {
+        "class": "Model",
+        "name": "TrainingDummy",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Anchored": true,
+              "Position": [
+                0,
+                2.5,
+                26
+              ],
+              "Size": [
+                2,
+                5,
+                1
+              ],
+              "Color": [
+                0.85,
+                0.75,
+                0.55
+              ]
+            }
+          },
+          {
+            "class": "Health",
+            "name": "Health",
+            "properties": {
+              "RegenRate": 50,
+              "RegenDelay": 2
+            }
+          }
+        ],
+        "tags": [
+          "Dummy"
+        ]
+      },
+      {
+        "class": "ScreenGui",
+        "name": "Hud",
+        "properties": {
+          "ScaleMode": "Scale",
+          "DesignWidth": 1280,
+          "DesignHeight": 720
+        },
+        "children": [
+          {
+            "class": "TextLabel",
+            "name": "Health",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                30
+              ],
+              "Size": [
+                0,
+                300,
+                0,
+                36
+              ],
+              "Text": "Health 100",
+              "BackgroundTransparency": 1,
+              "Class": "hud-health"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Team",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                70
+              ],
+              "Size": [
+                0,
+                300,
+                0,
+                30
+              ],
+              "Text": "",
+              "BackgroundTransparency": 1,
+              "Class": "hud-team"
+            }
+          },
+          {
+            "class": "TextLabel",
+            "name": "Hint",
+            "properties": {
+              "Position": [
+                0,
+                30,
+                0,
+                660
+              ],
+              "Size": [
+                0,
+                900,
+                0,
+                30
+              ],
+              "Text": "Click to swing. Tab shows the leaderboard, / chats, Escape for the menu.",
+              "BackgroundTransparency": 1,
+              "Class": "hud-small"
+            }
+          }
+        ]
+      },
+      {
+        "class": "ScreenGui",
+        "name": "GameMenu",
+        "prefab": "assets/prefabs/GameMenu.prefab.json"
+      }
+    ]
+  },
+  "lighting": {
+    "properties": {
+      "ToneMapping": "Neutral",
+      "ShadowSoftness": 0.35,
+      "ClockTime": 18
+    }
+  },
+  "players": {
+    "properties": {
+      "RespawnTime": 3
+    }
+  },
+  "teams": {
+    "children": [
+      {
+        "class": "Team",
+        "name": "Red",
+        "properties": {
+          "TeamColor": [
+            0.85,
+            0.2,
+            0.2
+          ]
+        }
+      },
+      {
+        "class": "Team",
+        "name": "Blue",
+        "properties": {
+          "TeamColor": [
+            0.2,
+            0.4,
+            0.9
+          ]
+        }
+      }
+    ]
+  },
+  "server_storage": {
+    "children": [
+      {
+        "class": "Tool",
+        "name": "Sword",
+        "properties": {
+          "ToolTip": "Click to swing",
+          "CanBeDropped": false
+        },
+        "children": [
+          {
+            "class": "Part",
+            "name": "Handle",
+            "properties": {
+              "Anchored": false,
+              "Position": [
+                0,
+                1,
+                0
+              ],
+              "Size": [
+                0.4,
+                0.4,
+                4
+              ],
+              "Color": [
+                0.82,
+                0.84,
+                0.88
+              ],
+              "Material": "Metal",
+              "CanCollide": false
+            },
+            "children": [
+              {
+                "class": "Attachment",
+                "name": "Grip",
+                "properties": {
+                  "Position": [
+                    0,
+                    0,
+                    1.5
+                  ]
+                }
+              }
+            ]
+          }
+        ],
+        "attributes": {
+          "Damage": 25,
+          "Reach": 7
+        }
+      }
+    ]
+  }
+}

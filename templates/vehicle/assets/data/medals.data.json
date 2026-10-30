@@ -1,0 +1,54 @@
+{
+  "columns": [
+    {
+      "name": "Seconds",
+      "type": "number"
+    },
+    {
+      "name": "Title",
+      "type": "string"
+    },
+    {
+      "name": "Tint",
+      "type": "color3"
+    }
+  ],
+  "rows": [
+    {
+      "key": "gold",
+      "cells": {
+        "Seconds": 20,
+        "Title": "Gold",
+        "Tint": [
+          1,
+          0.8,
+          0.2
+        ]
+      }
+    },
+    {
+      "key": "silver",
+      "cells": {
+        "Seconds": 30,
+        "Title": "Silver",
+        "Tint": [
+          0.8,
+          0.82,
+          0.86
+        ]
+      }
+    },
+    {
+      "key": "bronze",
+      "cells": {
+        "Seconds": 45,
+        "Title": "Bronze",
+        "Tint": [
+          0.8,
+          0.5,
+          0.25
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,331 @@
+{
+  "format_version": 1,
+  "instances": [
+    {
+      "class": "ScreenGui",
+      "name": "GameMenu",
+      "properties": {
+        "ScaleMode": "Scale",
+        "DesignWidth": 1280,
+        "DesignHeight": 720,
+        "DisplayOrder": 10
+      },
+      "children": [
+        {
+          "class": "Frame",
+          "name": "Pause",
+          "properties": {
+            "Position": [
+              0,
+              440,
+              0,
+              120
+            ],
+            "Size": [
+              0,
+              400,
+              0,
+              480
+            ],
+            "Visible": false,
+            "Class": "menu-panel",
+            "Id": "pause"
+          },
+          "children": [
+            {
+              "class": "TextLabel",
+              "name": "Title",
+              "properties": {
+                "Position": [
+                  0,
+                  40,
+                  0,
+                  28
+                ],
+                "Size": [
+                  0,
+                  320,
+                  0,
+                  40
+                ],
+                "Text": "Paused",
+                "BackgroundTransparency": 1,
+                "Class": "menu-title"
+              }
+            },
+            {
+              "class": "TextButton",
+              "name": "Resume",
+              "properties": {
+                "Position": [
+                  0,
+                  40,
+                  0,
+                  96
+                ],
+                "Size": [
+                  0,
+                  320,
+                  0,
+                  44
+                ],
+                "Text": "Resume",
+                "Class": "menu-button"
+              }
+            },
+            {
+              "class": "TextButton",
+              "name": "Settings",
+              "properties": {
+                "Position": [
+                  0,
+                  40,
+                  0,
+                  156
+                ],
+                "Size": [
+                  0,
+                  320,
+                  0,
+                  44
+                ],
+                "Text": "Settings",
+                "Class": "menu-button"
+              }
+            },
+            {
+              "class": "TextButton",
+              "name": "Save",
+              "properties": {
+                "Position": [
+                  0,
+                  40,
+                  0,
+                  216
+                ],
+                "Size": [
+                  0,
+                  320,
+                  0,
+                  44
+                ],
+                "Text": "Save",
+                "Class": "menu-button"
+              }
+            },
+            {
+              "class": "TextButton",
+              "name": "Load",
+              "properties": {
+                "Position": [
+                  0,
+                  40,
+                  0,
+                  276
+                ],
+                "Size": [
+                  0,
+                  320,
+                  0,
+                  44
+                ],
+                "Text": "Load",
+                "Class": "menu-button"
+              }
+            },
+            {
+              "class": "TextLabel",
+              "name": "Status",
+              "properties": {
+                "Position": [
+                  0,
+                  40,
+                  0,
+                  344
+                ],
+                "Size": [
+                  0,
+                  320,
+                  0,
+                  32
+                ],
+                "Text": "Escape closes this menu",
+                "BackgroundTransparency": 1,
+                "Class": "menu-status"
+              }
+            }
+          ]
+        },
+        {
+          "class": "Frame",
+          "name": "Settings",
+          "properties": {
+            "Position": [
+              0,
+              440,
+              0,
+              80
+            ],
+            "Size": [
+              0,
+              400,
+              0,
+              560
+            ],
+            "Visible": false,
+            "Class": "menu-panel",
+            "Id": "settings"
+          },
+          "children": [
+            {
+              "class": "TextLabel",
+              "name": "Title",
+              "properties": {
+                "Position": [
+                  0,
+                  40,
+                  0,
+                  24
+                ],
+                "Size": [
+                  0,
+                  320,
+                  0,
+                  40
+                ],
+                "Text": "Settings",
+                "BackgroundTransparency": 1,
+                "Class": "menu-title"
+              }
+            },
+            {
+              "class": "TextLabel",
+              "name": "Hint",
+              "properties": {
+                "Position": [
+                  0,
+                  40,
+                  0,
+                  68
+                ],
+                "Size": [
+                  0,
+                  320,
+                  0,
+                  28
+                ],
+                "Text": "Click an action, then press its new key",
+                "BackgroundTransparency": 1,
+                "Class": "menu-status"
+              }
+            },
+            {
+              "class": "Frame",
+              "name": "Rows",
+              "properties": {
+                "Position": [
+                  0,
+                  40,
+                  0,
+                  104
+                ],
+                "Size": [
+                  0,
+                  320,
+                  0,
+                  360
+                ],
+                "BackgroundTransparency": 1
+              },
+              "children": [
+                {
+                  "class": "Frame",
+                  "name": "Row",
+                  "properties": {
+                    "Position": [
+                      0,
+                      0,
+                      0,
+                      0
+                    ],
+                    "Size": [
+                      0,
+                      320,
+                      0,
+                      40
+                    ],
+                    "Visible": false,
+                    "BackgroundTransparency": 1
+                  },
+                  "children": [
+                    {
+                      "class": "TextLabel",
+                      "name": "Label",
+                      "properties": {
+                        "Position": [
+                          0,
+                          0,
+                          0,
+                          0
+                        ],
+                        "Size": [
+                          0,
+                          140,
+                          0,
+                          40
+                        ],
+                        "Text": "Action",
+                        "BackgroundTransparency": 1,
+                        "Class": "menu-row-label"
+                      }
+                    },
+                    {
+                      "class": "TextButton",
+                      "name": "Binding",
+                      "properties": {
+                        "Position": [
+                          0,
+                          150,
+                          0,
+                          0
+                        ],
+                        "Size": [
+                          0,
+                          170,
+                          0,
+                          40
+                        ],
+                        "Text": "",
+                        "Class": "menu-binding"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "class": "TextButton",
+              "name": "Back",
+              "properties": {
+                "Position": [
+                  0,
+                  40,
+                  0,
+                  484
+                ],
+                "Size": [
+                  0,
+                  320,
+                  0,
+                  44
+                ],
+                "Text": "Back",
+                "Class": "menu-button"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+/* The pause and settings menus (the GameMenu ScreenGui). Change the
+   colours here; every template's menus use these classes. */
+
+.menu-panel {
+    background-color: #111827;
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.menu-title {
+    color: #f9fafb;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+.menu-button {
+    background-color: #374151;
+    color: #f9fafb;
+    font-size: 20px;
+    border-radius: 10px;
+    transition: all 0.12s ease;
+}
+
+.menu-button:hover {
+    background-color: #4b5563;
+}
+
+.menu-button:focus {
+    background-color: #2563eb;
+    border: 2px solid #bfdbfe;
+}
+
+.menu-status {
+    color: #9ca3af;
+    font-size: 15px;
+}
+
+.menu-row-label {
+    color: #e5e7eb;
+    font-size: 18px;
+}
+
+.menu-binding {
+    background-color: #1f2937;
+    color: #93c5fd;
+    font-size: 16px;
+    border-radius: 8px;
+    border: 1px solid #374151;
+}
+
+.menu-binding:hover {
+    background-color: #374151;
+}

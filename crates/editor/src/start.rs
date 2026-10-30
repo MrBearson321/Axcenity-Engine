@@ -44,6 +44,8 @@ const SIDEBAR_WIDTH: f32 = 220.0;
 /// as fit, all the same width.
 const MIN_CARD_WIDTH: f32 = 230.0;
 const CARD_SPACING: f32 = 16.0;
+/// The narrowest a genre template's card gets before the row wraps.
+const MIN_GAME_CARD_WIDTH: f32 = 180.0;
 const CARD_RADIUS: u8 = 8;
 /// The page's margin around its content, and the widest the content gets.
 const PAGE_MARGIN: f32 = 40.0;
@@ -213,6 +215,8 @@ enum CardAction {
 pub struct StartScreen {
     /// `None` for a project without a thumbnail yet.
     thumbnails: HashMap<PathBuf, Option<egui::TextureHandle>>,
+    /// The genre templates' pictures, decoded the first time they're shown.
+    pictures: HashMap<Template, egui::TextureHandle>,
     /// When each project's world was last saved, read once.
     edited: HashMap<PathBuf, Option<SystemTime>>,
     filter: String,
@@ -263,6 +267,17 @@ impl StartScreen {
     /// Shows `message` under the Projects heading, in red.
     pub fn set_notice(&mut self, message: String) {
         self.notice = Some(message);
+    }
+
+    /// The picture of `template`, if it has one.
+    fn picture(&mut self, ctx: &egui::Context, template: Template) -> Option<egui::TextureHandle> {
+        let png = template.picture()?;
+        Some(
+            self.pictures
+                .entry(template)
+                .or_insert_with(|| texture(ctx, template.name(), png))
+                .clone(),
+        )
     }
 
     fn thumbnail(&mut self, ctx: &egui::Context, folder: &Path) -> Option<egui::TextureHandle> {
@@ -443,12 +458,30 @@ impl StartScreen {
         widgets::section_label(ui, "Start from a template");
         ui.add_space(6.0);
         let width = ui.available_width();
-        let columns = Template::ALL.len() as f32;
+        let columns = Template::BLANK.len() as f32;
         let template_width = ((width - CARD_SPACING * (columns - 1.0)) / columns).max(200.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(CARD_SPACING, CARD_SPACING);
-            for template in Template::ALL {
+            for template in Template::BLANK {
                 if template_card(ui, template, template_width).clicked() {
+                    self.new_project(template);
+                }
+            }
+        });
+
+        // The genre templates, as pictures: whole small games to change.
+        ui.add_space(20.0);
+        widgets::section_label(ui, "Or from a game");
+        ui.add_space(6.0);
+        let columns = ((width + CARD_SPACING) / (MIN_GAME_CARD_WIDTH + CARD_SPACING))
+            .floor()
+            .clamp(1.0, Template::GAMES.len() as f32);
+        let game_width = (width - CARD_SPACING * (columns - 1.0)) / columns;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(CARD_SPACING, CARD_SPACING);
+            for template in Template::GAMES {
+                let picture = self.picture(ui.ctx(), template);
+                if game_template_card(ui, template, picture.as_ref(), game_width).clicked() {
                     self.new_project(template);
                 }
             }

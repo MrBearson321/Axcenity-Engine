@@ -1,0 +1,134 @@
+{
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "kind": "root",
+      "position": [
+        40.0,
+        200.0
+      ]
+    },
+    {
+      "id": 2,
+      "kind": "selector",
+      "position": [
+        260.0,
+        200.0
+      ]
+    },
+    {
+      "id": 3,
+      "kind": "sequence",
+      "position": [
+        500.0,
+        80.0
+      ]
+    },
+    {
+      "id": 4,
+      "kind": "sees_player",
+      "position": [
+        760.0,
+        40.0
+      ]
+    },
+    {
+      "id": 5,
+      "kind": "chase_player",
+      "position": [
+        760.0,
+        130.0
+      ]
+    },
+    {
+      "id": 6,
+      "kind": "wait",
+      "position": [
+        500.0,
+        320.0
+      ],
+      "values": {
+        "Seconds": "0.5"
+      }
+    }
+  ],
+  "wires": [
+    {
+      "from": {
+        "node": 1,
+        "pin": ""
+      },
+      "to": {
+        "node": 2,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 2,
+        "pin": "1"
+      },
+      "to": {
+        "node": 3,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 3,
+        "pin": "1"
+      },
+      "to": {
+        "node": 4,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 3,
+        "pin": "2"
+      },
+      "to": {
+        "node": 5,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 2,
+        "pin": "2"
+      },
+      "to": {
+        "node": 6,
+        "pin": ""
+      }
+    }
+  ],
+  "comments": [
+    {
+      "id": 7,
+      "text": "Chase while it sees you",
+      "position": [
+        480.0,
+        0.0
+      ],
+      "size": [
+        520.0,
+        220.0
+      ]
+    },
+    {
+      "id": 8,
+      "text": "Otherwise, stand guard",
+      "position": [
+        480.0,
+        260.0
+      ],
+      "size": [
+        300.0,
+        140.0
+      ]
+    }
+  ]
+}

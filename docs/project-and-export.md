@@ -11,6 +11,7 @@ Map only. Open the one file that matches the change.
 - Asset packages (`.axpkg`): [project/packages.md](project/packages.md)
 - Data tables (`*.data.json`, the Data Table tab, `DataService`): [project/data-tables.md](project/data-tables.md)
 - Game tests (`tests/**/*.spec.lua`, the Tests panel, `axcenity-test`): [project/game-tests.md](project/game-tests.md)
+- New Project's genre templates (`templates/`, their pictures and tests): [project/templates.md](project/templates.md)
 - Export, version history, splash: [project/export.md](project/export.md)
 - GitHub releases and version tags: [project/releases.md](project/releases.md)
 - Installing a release: [project/install.md](project/install.md)

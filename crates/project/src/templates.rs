@@ -1,7 +1,7 @@
 use super::*;
 
 /// What a new project starts with.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Template {
     /// A grey baseplate to build on.
     #[default]
@@ -11,16 +11,58 @@ pub enum Template {
     /// A small lit scene: a baseplate, a glowing part that spins, a pad that
     /// changes colour when touched, and the block script doing both.
     Starter,
+    /// The genre templates (Phase 69): whole small games, each a folder in
+    /// the repository's `templates/` with the shared pause and settings
+    /// menu (`templates/shared/`) copied in.
+    FirstPerson,
+    ThirdPerson,
+    Vehicle,
+    TopDown,
+    Arena,
 }
 
+/// What every genre template has too: the pause menu, the settings menu
+/// with rebinding, and the save slot. A template's own file of the same
+/// path is used instead.
+const SHARED_FOLDER: &str = "shared";
+
+// The `templates/` files, embedded by `build.rs`.
+include!(concat!(env!("OUT_DIR"), "/template_files.rs"));
+
 impl Template {
-    pub const ALL: [Template; 3] = [Template::Baseplate, Template::Empty, Template::Starter];
+    pub const ALL: [Template; 8] = [
+        Template::Baseplate,
+        Template::Empty,
+        Template::Starter,
+        Template::FirstPerson,
+        Template::ThirdPerson,
+        Template::Vehicle,
+        Template::TopDown,
+        Template::Arena,
+    ];
+
+    /// The templates that start from (almost) nothing.
+    pub const BLANK: [Template; 3] = [Template::Baseplate, Template::Empty, Template::Starter];
+
+    /// The playable genre templates.
+    pub const GAMES: [Template; 5] = [
+        Template::FirstPerson,
+        Template::ThirdPerson,
+        Template::Vehicle,
+        Template::TopDown,
+        Template::Arena,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Template::Baseplate => "Baseplate",
             Template::Empty => "Empty",
             Template::Starter => "Starter scene",
+            Template::FirstPerson => "First Person",
+            Template::ThirdPerson => "Third Person",
+            Template::Vehicle => "Vehicle",
+            Template::TopDown => "Top Down",
+            Template::Arena => "Multiplayer Arena",
         }
     }
 
@@ -31,7 +73,62 @@ impl Template {
             Template::Starter => {
                 "A lit scene with a spinning neon part and a touch pad, run by blocks."
             }
+            Template::FirstPerson => {
+                "Shoot targets in first person with a blaster, with ammo on the HUD."
+            }
+            Template::ThirdPerson => {
+                "Explore as a character: open a door, reach a checkpoint, save your coins."
+            }
+            Template::Vehicle => "Drive a car round a track against lap times from a data table.",
+            Template::TopDown => "Click to move from above, past enemies run by a behavior tree.",
+            Template::Arena => {
+                "Red against blue for up to 8 players, with a leaderboard, chat and respawns."
+            }
         }
+    }
+
+    /// The template's folder in `templates/`, for the genre templates.
+    pub fn folder(self) -> Option<&'static str> {
+        match self {
+            Template::Baseplate | Template::Empty | Template::Starter => None,
+            Template::FirstPerson => Some("first-person"),
+            Template::ThirdPerson => Some("third-person"),
+            Template::Vehicle => Some("vehicle"),
+            Template::TopDown => Some("top-down"),
+            Template::Arena => Some("arena"),
+        }
+    }
+
+    /// The template's picture for New Project (a PNG, 320 × 180), which
+    /// also starts as the new project's `thumbnail.png`.
+    pub fn picture(self) -> Option<&'static [u8]> {
+        let folder = self.folder()?;
+        TEMPLATE_FILES
+            .iter()
+            .find(|(template, path, _)| *template == folder && *path == THUMBNAIL_FILE)
+            .map(|(_, _, bytes)| *bytes)
+    }
+
+    /// Every file a project made from this genre template starts with, by
+    /// its path in the project: the shared files, then the template's own
+    /// (which win). Empty for the others.
+    pub fn files(self) -> Vec<(&'static str, &'static [u8])> {
+        let Some(folder) = self.folder() else {
+            return Vec::new();
+        };
+        let mut files: Vec<(&str, &[u8])> = Vec::new();
+        for wanted in [SHARED_FOLDER, folder] {
+            for (template, path, bytes) in TEMPLATE_FILES {
+                if *template != wanted {
+                    continue;
+                }
+                match files.iter_mut().find(|(have, _)| have == path) {
+                    Some(file) => file.1 = bytes,
+                    None => files.push((path, bytes)),
+                }
+            }
+        }
+        files
     }
 
     pub(super) fn world(self) -> &'static str {
@@ -39,6 +136,8 @@ impl Template {
             Template::Baseplate => BASEPLATE_WORLD,
             Template::Empty => EMPTY_WORLD,
             Template::Starter => STARTER_WORLD,
+            // The genre templates have their own `world.json`.
+            _ => EMPTY_WORLD,
         }
     }
 }
@@ -238,6 +337,17 @@ pub fn create_project_from(
         .map_err(SaveError::new(&folder))
         .and_then(|()| write_through_temporary(&folder.join(MANIFEST_FILE), &manifest_text))
         .and_then(|()| write_through_temporary(&folder.join(WORLD_FILE), template.world()));
+    for (path, bytes) in template.files() {
+        if written.is_err() {
+            break;
+        }
+        let path = folder.join(path);
+        written = match path.parent() {
+            Some(parent) => fs::create_dir_all(parent).map_err(SaveError::new(parent)),
+            None => Ok(()),
+        }
+        .and_then(|()| fs::write(&path, bytes).map_err(SaveError::new(&path)));
+    }
     if template == Template::Starter && written.is_ok() {
         let path = folder
             .join(SCRIPTS_FOLDER)

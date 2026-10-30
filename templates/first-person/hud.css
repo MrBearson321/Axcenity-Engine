@@ -1,0 +1,24 @@
+/* The HUD: the crosshair, the ammo and the score. */
+
+.crosshair {
+    background-color: #f9fafb;
+    border-radius: 4px;
+}
+
+.hud-ammo {
+    color: #f9fafb;
+    font-size: 32px;
+    font-weight: bold;
+    text-align: right;
+}
+
+.hud-score {
+    color: #f9fafb;
+    font-size: 22px;
+    font-weight: bold;
+}
+
+.hud-hint {
+    color: #d1d5db;
+    font-size: 15px;
+}

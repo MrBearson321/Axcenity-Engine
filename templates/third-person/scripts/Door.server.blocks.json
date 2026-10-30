@@ -1,0 +1,101 @@
+{
+  "blocks": [
+    {
+      "id": 7,
+      "kind": {
+        "type": "when_prompt_triggered",
+        "prompt": "Door.Panel.OpenPrompt",
+        "body": [
+          {
+            "id": 1,
+            "kind": {
+              "type": "set_property",
+              "target": "Door.Panel.OpenPrompt",
+              "property": "Enabled",
+              "value": {
+                "type": "boolean",
+                "value": false
+              }
+            }
+          },
+          {
+            "id": 2,
+            "kind": {
+              "type": "tween",
+              "target": "Door.Panel",
+              "property": "Position",
+              "value": {
+                "type": "vector3",
+                "x": 6,
+                "y": 3.5,
+                "z": -10
+              },
+              "seconds": {
+                "type": "number",
+                "value": 0.8
+              },
+              "style": "Quad",
+              "direction": "Out"
+            }
+          },
+          {
+            "id": 3,
+            "kind": {
+              "type": "wait",
+              "seconds": {
+                "type": "number",
+                "value": 4
+              }
+            }
+          },
+          {
+            "id": 4,
+            "kind": {
+              "type": "tween",
+              "target": "Door.Panel",
+              "property": "Position",
+              "value": {
+                "type": "vector3",
+                "x": 0,
+                "y": 3.5,
+                "z": -10
+              },
+              "seconds": {
+                "type": "number",
+                "value": 0.8
+              },
+              "style": "Quad",
+              "direction": "InOut"
+            }
+          },
+          {
+            "id": 5,
+            "kind": {
+              "type": "wait",
+              "seconds": {
+                "type": "number",
+                "value": 0.8
+              }
+            }
+          },
+          {
+            "id": 6,
+            "kind": {
+              "type": "set_property",
+              "target": "Door.Panel.OpenPrompt",
+              "property": "Enabled",
+              "value": {
+                "type": "boolean",
+                "value": true
+              }
+            }
+          }
+        ]
+      },
+      "position": [
+        40,
+        40
+      ]
+    }
+  ]
+}
