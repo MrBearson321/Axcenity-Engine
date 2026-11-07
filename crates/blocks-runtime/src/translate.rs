@@ -316,6 +316,23 @@ impl Writer {
                 self.line("end)");
                 return Ok(());
             }
+            BlockKind::WhenSplineReached {
+                follower,
+                which,
+                body,
+            } => {
+                self.line(format!(
+                    "{}.Reached:Connect(function(which)",
+                    target(follower)?
+                ));
+                self.indent += 1;
+                self.line(format!("if which == {} then", quote(which)));
+                self.nested(body, ids)?;
+                self.line("end");
+                self.indent -= 1;
+                self.line("end)");
+                return Ok(());
+            }
             BlockKind::WhenAgentSenses { agent, sense, body } => {
                 self.line(format!(
                     "{}.PlayerSensed:Connect(function(sense)",
@@ -804,6 +821,21 @@ impl Writer {
             BlockKind::PlayCutscene { sequence } => {
                 self.line(format!("{}:Play()", target(sequence)?))
             }
+            BlockKind::PlaceOnSpline {
+                target: t,
+                spline,
+                distance,
+            } => {
+                let distance = self.expression(distance)?;
+                self.line(format!(
+                    "{}:PivotTo({}:GetCFrameAt({distance}))",
+                    target(t)?,
+                    target(spline)?
+                ));
+            }
+            BlockKind::Patrol { agent, spline } => {
+                self.line(format!("{}:Patrol({})", target(agent)?, target(spline)?));
+            }
             BlockKind::StopSound { target: t } => self.line(format!("{}:Stop()", target(t)?)),
             BlockKind::PauseSound { target: t } => self.line(format!("{}:Pause()", target(t)?)),
             BlockKind::ResumeSound { target: t } => {
@@ -957,6 +989,7 @@ impl Writer {
             | BlockKind::WhenStateChanged { .. }
             | BlockKind::WhenAnimationEvent { .. }
             | BlockKind::WhenAgentSenses { .. }
+            | BlockKind::WhenSplineReached { .. }
             | BlockKind::WhenSeatOccupied { .. }
             | BlockKind::WhenPromptTriggered { .. }
             | BlockKind::WhenPartClicked { .. }
@@ -998,6 +1031,7 @@ impl Writer {
             | Expression::Color3 { .. }
             | Expression::Lerp { .. }
             | Expression::DataRow { .. }
+            | Expression::SplinePosition { .. }
             | Expression::DataValue { .. } => text,
             _ => format!("({text})"),
         })
@@ -1111,6 +1145,14 @@ impl Writer {
             Expression::IsA { value, class } => {
                 format!("{}:IsA({})", self.receiver(value)?, quote(class))
             }
+            Expression::SplinePosition { spline, t } => {
+                format!("{}:GetPositionAt({})", target(spline)?, self.expression(t)?)
+            }
+            Expression::SplineClosestDistance { spline, position } => format!(
+                "{}:GetClosestDistance({})",
+                target(spline)?,
+                self.expression(position)?
+            ),
             Expression::DataRow { table, key } => format!(
                 "DataService:GetTable({}):Get({})",
                 quote(table),

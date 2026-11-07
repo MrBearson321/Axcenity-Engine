@@ -1,0 +1,11 @@
+{
+  "format_version": 1,
+  "duration": 6.0,
+  "camera_cuts": [
+    {
+      "id": "ride",
+      "time": 0.0,
+      "camera": "Workspace/CameraRail"
+    }
+  ]
+}

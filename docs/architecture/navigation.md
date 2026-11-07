@@ -114,6 +114,8 @@ Example: `examples/hello-behavior` (a Guard whose tree patrols and chases, and a
 
 ### Scripts and blocks
 
+Phase 73: an agent with a `PatrolSpline` walks to its points in order with no script, round a Closed spline or back and forth along an open one, setting its own `Destination` before trees decide (`Agents::patrol`); `agent:Patrol(spline)` and the block **patrol *agent* along *spline*** set it. See [splines.md](splines.md).
+
 Scripts set `Destination` and `Velocity` and read `Status`, `SeesPlayer` and `HearsPlayer`, and connect to `PlayerSensed`; blocks have **walk *agent* to (x, y, z)**, **set velocity of *agent* to (x, y, z)** and **when *agent* senses the player by *Sight/Hearing*** (`docs/scripting/blocks.md`). Example: `examples/hello-agent`. Tests: `crates/nav/src/agent_tests.rs`, the player's `hello_agent_walks_to_destinations_from_properties_lua_and_blocks`, and `crates/editor/src/app/agent_tests.rs`.
 
 ## In the editor

@@ -384,8 +384,9 @@ impl EditorApp {
                 insert_menu(
                     ui,
                     (icons::CAR, "Vehicle"),
-                    "Insert a ready-to-drive car, or a Vehicle Seat and Wheels to build one.",
-                    &[&Insertable::VEHICLES],
+                    "Insert a ready-to-drive car, a Vehicle Seat and Wheels to build one, or a \
+                     Spline and a Spline Follower that carries a part along it.",
+                    &[&Insertable::VEHICLES, &Insertable::SPLINES],
                     playing,
                     &mut clicks.insert,
                 );

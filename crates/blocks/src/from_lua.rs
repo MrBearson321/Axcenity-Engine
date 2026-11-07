@@ -543,6 +543,18 @@ impl<'a> Converter<'a> {
                     body,
                 }))
             }
+            "Reached" => {
+                let follower = self.target(object)?;
+                let (which, body) = self.one_name_branch(handler)?;
+                if !crate::SPLINE_ENDS.contains(&which.as_str()) {
+                    return None;
+                }
+                Some(Block::new(BlockKind::WhenSplineReached {
+                    follower,
+                    which,
+                    body,
+                }))
+            }
             "Heartbeat" if self.is_service(object, "RunService") => {
                 let function = self.handler(handler, 1)?;
                 let body = self.body(&function.body, Scope::default());
@@ -1124,6 +1136,31 @@ impl<'a> Converter<'a> {
                 Some(BlockKind::DestroyAfter {
                     target: self.target(item)?,
                     seconds: self.expression(seconds, scope),
+                })
+            }
+            // workspace.Cart:PivotTo(workspace.Track:GetCFrameAt(12))
+            ExprKind::Method(object, method, args)
+                if method == "PivotTo"
+                    && let [
+                        Expr {
+                            kind: ExprKind::Method(spline, at, distance),
+                            ..
+                        },
+                    ] = args.as_slice()
+                    && at == "GetCFrameAt"
+                    && distance.len() == 1 =>
+            {
+                Some(BlockKind::PlaceOnSpline {
+                    target: self.target(object)?,
+                    spline: self.target(spline)?,
+                    distance: self.expression(&distance[0], scope),
+                })
+            }
+            // workspace.Guard.NavigationAgent:Patrol(workspace.Route)
+            ExprKind::Method(object, method, args) if method == "Patrol" && args.len() == 1 => {
+                Some(BlockKind::Patrol {
+                    agent: self.target(object)?,
+                    spline: self.target(&args[0])?,
                 })
             }
             // workspace.Ball:ApplyImpulse(Vector3.new(0, 50, 0))
@@ -1977,6 +2014,23 @@ impl<'a> Converter<'a> {
                     return Some(Expression::IsA {
                         value: boxed(object),
                         class: class.clone(),
+                    });
+                }
+                // workspace.Track:GetPositionAt(t) and GetClosestDistance(p)
+                if let [arg] = args.as_slice()
+                    && matches!(method.as_str(), "GetPositionAt" | "GetClosestDistance")
+                    && let Some(spline) = self.target(object)
+                {
+                    return Some(if method == "GetPositionAt" {
+                        Expression::SplinePosition {
+                            spline,
+                            t: boxed(arg),
+                        }
+                    } else {
+                        Expression::SplineClosestDistance {
+                            spline,
+                            position: boxed(arg),
+                        }
                     });
                 }
                 // v:Lerp(goal, alpha)

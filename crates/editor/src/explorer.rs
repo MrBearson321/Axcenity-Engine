@@ -813,6 +813,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
                     .chain(Insertable::TOOLS)
                     .chain(Insertable::VEHICLES)
                     .chain(Insertable::AGENTS)
+                    .chain(Insertable::SPLINES)
                     .chain(Insertable::CHECKPOINTS)
                     .chain(Insertable::CAMERAS),
             );

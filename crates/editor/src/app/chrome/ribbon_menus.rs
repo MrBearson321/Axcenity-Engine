@@ -225,6 +225,16 @@ pub(super) fn insert_hint(what: Insertable) -> String {
              navigation mesh to its Destination during Play. With nothing selected, makes a \
              simple character for it."
         }
+        Insertable::Spline => {
+            "Insert a Spline in front of you: a curve through its points, for a Spline Follower \
+             to carry a part along, an agent to patrol or a cutscene camera to ride. Click it to \
+             drag its points; Alt-drag a point to add one after it."
+        }
+        Insertable::SplineFollower => {
+            "Insert a Spline Follower into the selected part or model: during Play it carries \
+             it along its Spline at Speed, there and back by default. Characters standing on \
+             it ride along."
+        }
         Insertable::Checkpoint => {
             "Insert a Checkpoint on top of the selected part: a place \
              SaveService:RestoreCheckpoint (or the \"go back to checkpoint\" block) puts the \
@@ -287,6 +297,7 @@ mod tests {
             &Insertable::EFFECTS,
             &Insertable::CHARACTERS,
             &Insertable::AGENTS,
+            &Insertable::SPLINES,
             &Insertable::CHECKPOINTS,
             &Insertable::HEALTH,
             &Insertable::SEATS,

@@ -1184,3 +1184,106 @@ fn a_players_character_comes_before_the_first_controller() {
         .unwrap();
     assert_eq!(player_character(&world), Some(second));
 }
+
+/// A 10×1×10 platform under the standing character (its top at y = 0),
+/// with the floor far below.
+fn on_a_platform() -> (World, InstanceId, InstanceId, InstanceId) {
+    let (mut world, controller, body) = standing();
+    let floor = world.descendants(world.workspace())[0];
+    world
+        .set_property(
+            floor,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, -40.0, 0.0)),
+        )
+        .unwrap();
+    let platform = solid(
+        &mut world,
+        PartType::Block,
+        Vector3::new(10.0, 1.0, 10.0),
+        Vector3::new(0.0, -0.5, 0.0),
+    );
+    (world, controller, body, platform)
+}
+
+#[test]
+fn a_standing_character_rides_a_platform_that_moves_and_rises_under_it() {
+    let (mut world, mut controllers, body, platform) = {
+        let (world, _, body, platform) = on_a_platform();
+        (world, Controllers::default(), body, platform)
+    };
+    run(&mut world, &mut controllers, MoveInput::default(), 5);
+    let start = pos(&world, body);
+    // The platform goes 6 studs across and 3 up over two seconds; each
+    // step the character keeps its place on it, its feet on its top.
+    for frame in 1..=120 {
+        let share = frame as f32 / 120.0;
+        world
+            .set_property(
+                platform,
+                "Position",
+                Value::Vector3(Vector3::new(6.0 * share, -0.5 + 3.0 * share, 0.0)),
+            )
+            .unwrap();
+        run(&mut world, &mut controllers, MoveInput::default(), 1);
+        let here = pos(&world, body);
+        assert!(
+            (here.x - (start.x + 6.0 * share)).abs() < 1e-3,
+            "{frame}: {here:?}"
+        );
+        assert!(
+            (here.y - (start.y + 3.0 * share)).abs() < 1e-3,
+            "{frame}: {here:?}"
+        );
+    }
+    // And walking on it still walks.
+    run(&mut world, &mut controllers, forward(), 10);
+    assert!(pos(&world, body).z < start.z - 1.0);
+}
+
+#[test]
+fn a_platform_that_turns_carries_the_character_round_with_it() {
+    let (mut world, _, body, platform) = on_a_platform();
+    let mut controllers = Controllers::default();
+    world
+        .set_property(
+            body,
+            "Position",
+            Value::Vector3(Vector3::new(3.0, 1.0, 0.0)),
+        )
+        .unwrap();
+    run(&mut world, &mut controllers, MoveInput::default(), 5);
+    for frame in 1..=90 {
+        world
+            .set_property(
+                platform,
+                "Orientation",
+                Value::Vector3(Vector3::new(0.0, frame as f32, 0.0)),
+            )
+            .unwrap();
+        run(&mut world, &mut controllers, MoveInput::default(), 1);
+    }
+    // A quarter turn round Y takes +X to -Z.
+    let here = pos(&world, body);
+    assert!(
+        here.x.abs() < 0.01 && (here.z + 3.0).abs() < 0.01,
+        "{here:?}"
+    );
+}
+
+#[test]
+fn a_platform_put_far_away_leaves_the_character_to_fall() {
+    let (mut world, _, body, platform) = on_a_platform();
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, MoveInput::default(), 5);
+    world
+        .set_property(
+            platform,
+            "Position",
+            Value::Vector3(Vector3::new(100.0, -0.5, 0.0)),
+        )
+        .unwrap();
+    run(&mut world, &mut controllers, MoveInput::default(), 10);
+    let here = pos(&world, body);
+    assert!(here.x.abs() < 1e-3 && here.y < 0.5, "{here:?}");
+}

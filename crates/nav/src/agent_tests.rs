@@ -622,3 +622,78 @@ fn players_and_npcs_set_as_non_colliding_walk_through_each_other_and_still_colli
         "the player stays"
     );
 }
+
+/// A Spline in the Workspace through `points`, at floor height.
+fn spline(world: &mut World, points: &[(f32, f32)], closed: bool) -> InstanceId {
+    let spline = world.create(ClassName::Spline).unwrap();
+    world.set_parent(spline, Some(world.workspace())).unwrap();
+    set(world, spline, "Closed", Value::Bool(closed));
+    for &(x, z) in points {
+        let point = world.create(ClassName::SplinePoint).unwrap();
+        world.set_parent(point, Some(spline)).unwrap();
+        set(world, point, "Position", Value::Vector3(at(x, 0.0, z)));
+    }
+    spline
+}
+
+#[test]
+fn an_agent_patrols_a_closed_spline_round_and_round_with_no_script() {
+    let mut world = floor_and_wall();
+    let corners = [(10.0, 15.0), (20.0, 15.0), (20.0, 25.0), (10.0, 25.0)];
+    let route = spline(&mut world, &corners, true);
+    let (agent, body) = agent_at(&mut world, at(9.0, 0.0, 14.0));
+    set(
+        &mut world,
+        agent,
+        "PatrolSpline",
+        Value::Instance(Some(route)),
+    );
+    let mut agents = Agents::default();
+    // Each side is 10 studs at 16 a second: it visits every corner in
+    // order, nearest first, and comes round to the first again.
+    let mut visited = Vec::new();
+    for _ in 0..(6.0 * 60.0) as usize {
+        agents.step(&mut world, &Assets::default(), 1.0 / 60.0);
+        let here = feet(&world, body);
+        if let Some(i) = corners
+            .iter()
+            .position(|&(x, z)| horizontal(here, at(x, 0.0, z)) < 0.3)
+            && visited.last() != Some(&i)
+        {
+            visited.push(i);
+        }
+    }
+    assert!(visited.len() >= 5, "{visited:?}");
+    for pair in visited.windows(2) {
+        assert_eq!(pair[1], (pair[0] + 1) % 4, "{visited:?}");
+    }
+    assert_eq!(visited[0], 0);
+}
+
+#[test]
+fn an_agent_walks_an_open_spline_back_and_forth() {
+    let mut world = floor_and_wall();
+    let points = [(10.0, 15.0), (16.0, 15.0), (22.0, 15.0)];
+    let route = spline(&mut world, &points, false);
+    let (agent, body) = agent_at(&mut world, at(10.0, 0.0, 15.0));
+    set(
+        &mut world,
+        agent,
+        "PatrolSpline",
+        Value::Instance(Some(route)),
+    );
+    let mut agents = Agents::default();
+    let mut visited = Vec::new();
+    for _ in 0..(4.0 * 60.0) as usize {
+        agents.step(&mut world, &Assets::default(), 1.0 / 60.0);
+        let here = feet(&world, body);
+        if let Some(i) = points
+            .iter()
+            .position(|&(x, z)| horizontal(here, at(x, 0.0, z)) < 0.3)
+            && visited.last() != Some(&i)
+        {
+            visited.push(i);
+        }
+    }
+    assert!(visited.starts_with(&[0, 1, 2, 1, 0]), "{visited:?}");
+}

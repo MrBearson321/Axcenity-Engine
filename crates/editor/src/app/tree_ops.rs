@@ -136,6 +136,20 @@ impl EditorApp {
             self.insert_agent(near.or(self.selected));
             return;
         }
+        if what == Insertable::Spline {
+            self.insert_spline();
+            return;
+        }
+        if what == Insertable::SplineFollower {
+            let spline = crate::splines::splines(&self.world).first().copied();
+            self.insert_named(
+                what,
+                near,
+                what.class().as_str(),
+                vec![("Spline", Value::Instance(spline))],
+            );
+            return;
+        }
         // A Health belongs to the Model the selection is, or is in.
         if what == Insertable::Health {
             let model = tree::model_of(&self.world, near.or(self.selected));

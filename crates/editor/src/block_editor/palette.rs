@@ -219,6 +219,20 @@ pub(super) fn palette(
                 sense: axcenity_blocks::SENSES[0].to_owned(),
                 body: Vec::new(),
             }),
+            B(BlockKind::Patrol {
+                agent: first(Filter::Agents),
+                spline: first(Filter::Splines),
+            }),
+            B(BlockKind::PlaceOnSpline {
+                target: part.clone(),
+                spline: first(Filter::Splines),
+                distance: number(0.0),
+            }),
+            B(BlockKind::WhenSplineReached {
+                follower: first(Filter::SplineFollowers),
+                which: axcenity_blocks::SPLINE_ENDS[0].to_owned(),
+                body: Vec::new(),
+            }),
             B(BlockKind::WhenSeatOccupied {
                 seat: first(Filter::Seats),
                 body: Vec::new(),
@@ -409,6 +423,14 @@ pub(super) fn palette(
                 origin: Box::new(vector(0.0, 10.0, 0.0)),
                 direction: Box::new(vector(0.0, -20.0, 0.0)),
                 ignore: part,
+            }),
+            R(Expression::SplinePosition {
+                spline: first(Filter::Splines),
+                t: Box::new(number(0.5)),
+            }),
+            R(Expression::SplineClosestDistance {
+                spline: first(Filter::Splines),
+                position: Box::new(vector(0.0, 0.0, 0.0)),
             }),
             R(Expression::IsA {
                 value: Box::new(Expression::TouchingPart),

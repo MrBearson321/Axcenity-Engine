@@ -9,7 +9,7 @@ Phase 51. A sequence is a timeline of tracks in an `assets/sequences/<name>.sequ
 | Field | What it is |
 |---|---|
 | `duration` | Seconds from start to end. |
-| `camera_cuts` | `{ id, time, camera }`: from `time` to the next cut, the view is the bound Camera's `Position`, `Orientation` and `FieldOfView`. An empty `camera` uses the sequence's own camera keys. Before the first cut the camera is the game's. |
+| `camera_cuts` | `{ id, time, camera }`: from `time` to the next cut, the view is the bound Camera's `Position`, `Orientation` and `FieldOfView`. Bound to a Spline (Phase 73), the camera rides it from its start at `time` to its end at the next cut (or the end), facing along it ([../architecture/splines.md](../architecture/splines.md)). An empty `camera` uses the sequence's own camera keys. Before the first cut the camera is the game's. |
 | `tracks` | Property tracks, the same shape as a clip's (keys, easings, Bezier handles, `sample_track`). `target` is a binding; the target `@Camera` holds the sequence's own camera keys (`Position`, `Orientation`, `FieldOfView`). A Model's `Position` and `Orientation` are its pivot, as in clips. |
 | `animations` | `{ id, start, end, target, clip, blend_in, blend_out }`: the clip (`*.anim.json`) plays from its start on the bound Animator, or the Animator inside the bound Instance, its weight rising over `blend_in` and falling over `blend_out` seconds. |
 | `audio` | `{ id, start, end, sound }`: the bound Sound plays from its start at `start` and stops at `end`. |

@@ -118,6 +118,17 @@ pub struct Agents {
     trees: BTreeMap<String, Option<Arc<BehaviorTree>>>,
     warnings: Vec<String>,
     sensed: Vec<Sensed>,
+    /// Each patrolling agent's place on its `PatrolSpline` (Phase 73).
+    patrols: BTreeMap<InstanceId, Patrol>,
+}
+
+/// Where an agent is on its patrol. Not saved.
+struct Patrol {
+    spline: InstanceId,
+    /// The point it's walking to.
+    index: usize,
+    /// On an open spline, true while it walks toward the last point.
+    forward: bool,
 }
 
 impl Agents {
@@ -135,6 +146,7 @@ impl Agents {
         self.walks.retain(|id, _| world.contains(*id));
         self.senses.retain(|id, _| world.contains(*id));
         self.runs.retain(|id, _| world.contains(*id));
+        self.patrols.retain(|id, _| world.contains(*id));
         let agents = agents(world);
         if agents.is_empty() {
             return;
@@ -143,7 +155,11 @@ impl Agents {
         if self.built.is_none() {
             return;
         }
-        // Trees decide first, from what the agents sensed last frame.
+        // Patrols pick the next point, then trees decide, from what the
+        // agents sensed last frame.
+        for &id in &agents {
+            self.patrol(world, id);
+        }
         let player_feet = axcenity_character::player_character(world)
             .and_then(|holder| feet_of(world, &axcenity_character::body_parts(world, holder)));
         for &id in &agents {
@@ -216,6 +232,94 @@ impl Agents {
         }
         if let Some(run) = self.runs.get_mut(&agent.id) {
             run.tick(world, agent, dt);
+        }
+    }
+
+    /// Points a patrolling agent's `Destination` at its PatrolSpline's
+    /// next point once it reached (or can't reach) the one it walked to.
+    fn patrol(&mut self, world: &mut World, id: InstanceId) {
+        let spline = world
+            .get(id)
+            .and_then(|agent| agent.property("PatrolSpline"))
+            .and_then(Value::as_instance)
+            .filter(|&spline| {
+                world
+                    .get(spline)
+                    .is_some_and(|i| i.class() == ClassName::Spline)
+            });
+        let Some(spline) = spline else {
+            self.patrols.remove(&id);
+            return;
+        };
+        let points = patrol_points(world, spline);
+        if points.is_empty() {
+            return;
+        }
+        let closed = world
+            .get(spline)
+            .and_then(|i| i.property("Closed"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let n = points.len();
+        let next = match self.patrols.get_mut(&id) {
+            Some(patrol) if patrol.spline == spline => {
+                patrol.index = patrol.index.min(n - 1);
+                let goal = points[patrol.index];
+                let status = world
+                    .get(id)
+                    .and_then(|agent| agent.property("Status"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let arrived = matches!(status, "Reached" | "Unreachable")
+                    && vector(world, id, "Destination") == Some(goal);
+                if !arrived {
+                    if vector(world, id, "Destination") != Some(goal) && status != "Moving" {
+                        // Something else sent it elsewhere and it got
+                        // there: it carries on with its patrol.
+                        Some(goal)
+                    } else {
+                        None
+                    }
+                } else if n == 1 {
+                    None
+                } else if closed {
+                    patrol.index = (patrol.index + 1) % n;
+                    Some(points[patrol.index])
+                } else {
+                    if patrol.index + 1 >= n {
+                        patrol.forward = false;
+                    } else if patrol.index == 0 {
+                        patrol.forward = true;
+                    }
+                    patrol.index = if patrol.forward {
+                        patrol.index + 1
+                    } else {
+                        patrol.index - 1
+                    };
+                    Some(points[patrol.index])
+                }
+            }
+            _ => {
+                // It starts at the point nearest it.
+                let feet = feet_of(world, &parts_of(world, id)).unwrap_or_default();
+                let index = (0..n)
+                    .min_by(|&a, &b| {
+                        horizontal(points[a], feet).total_cmp(&horizontal(points[b], feet))
+                    })
+                    .unwrap_or(0);
+                self.patrols.insert(
+                    id,
+                    Patrol {
+                        spline,
+                        index,
+                        forward: true,
+                    },
+                );
+                Some(points[index])
+            }
+        };
+        if let Some(point) = next {
+            let _ = world.set_property(id, "Destination", Value::Vector3(point));
         }
     }
 
@@ -364,6 +468,22 @@ pub(crate) fn body_box(world: &World, parts: &[InstanceId]) -> Option<(Vector3, 
 fn vector(world: &World, id: InstanceId, name: &str) -> Option<Vector3> {
     let value = world.get(id)?.property(name)?.as_vector3()?;
     crate::finite(value).then_some(value)
+}
+
+/// The SplinePoints of `spline`, in order.
+fn patrol_points(world: &World, spline: InstanceId) -> Vec<Vector3> {
+    world
+        .get(spline)
+        .map(|spline| spline.children().to_vec())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|id| {
+            let point = world.get(id)?;
+            (point.class() == ClassName::SplinePoint)
+                .then(|| point.property("Position").and_then(Value::as_vector3))
+                .flatten()
+        })
+        .collect()
 }
 
 fn set_status(world: &mut World, id: InstanceId, status: AgentStatus) {

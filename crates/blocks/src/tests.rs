@@ -55,6 +55,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenEventFired { .. }
         | BlockKind::WhenSoundEnded { .. }
         | BlockKind::WhenCutsceneFinished { .. }
+        | BlockKind::WhenSplineReached { .. }
         | BlockKind::WhenConnectionFails { .. }
         | BlockKind::WhenStateChanged { .. }
         | BlockKind::WhenAnimationEvent { .. }
@@ -147,9 +148,11 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::KickPlayer { .. } => 79,
         BlockKind::SendChatMessage { .. } => 80,
         BlockKind::ShowSystemMessage { .. } => 81,
+        BlockKind::PlaceOnSpline { .. } => 82,
+        BlockKind::Patrol { .. } => 83,
     })
 }
-const STATEMENT_COUNT: usize = 82;
+const STATEMENT_COUNT: usize = 84;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -582,6 +585,21 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
             "workspace.Intro:Play()",
         ),
         (
+            BlockKind::PlaceOnSpline {
+                target: "Cart".to_owned(),
+                spline: "Track".to_owned(),
+                distance: number(12.5),
+            },
+            "workspace.Cart:PivotTo(workspace.Track:GetCFrameAt(12.5))",
+        ),
+        (
+            BlockKind::Patrol {
+                agent: "Guard.NavigationAgent".to_owned(),
+                spline: "Route".to_owned(),
+            },
+            "workspace.Guard.NavigationAgent:Patrol(workspace.Route)",
+        ),
+        (
             BlockKind::SetToneMapping {
                 curve: "Filmic".to_owned(),
             },
@@ -917,6 +935,14 @@ fn translation_covers_every_event_block() {
             },
         ),
         block(92, BlockKind::WhenConnectionFails { body: quiet(93) }),
+        block(
+            96,
+            BlockKind::WhenSplineReached {
+                follower: "Lift.SplineFollower".to_owned(),
+                which: "End".to_owned(),
+                body: quiet(97),
+            },
+        ),
     ];
     let source = translate(&script(blocks)).unwrap().source;
     for lua in [
@@ -950,11 +976,13 @@ fn translation_covers_every_event_block() {
         "game.ReplicatedStorage.Scored.Event:Connect(function()",
         "local NetworkService = game:GetService(\"NetworkService\")",
         "NetworkService.ConnectionFailed:Connect(function(reason)",
+        "workspace.Lift.SplineFollower.Reached:Connect(function(which)",
+        "    if which == \"End\" then",
     ] {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 20, "{source}");
+    assert_eq!(source.matches("do return end").count(), 21, "{source}");
 }
 
 #[test]
@@ -1866,6 +1894,14 @@ fn every_block_script() -> BlockScript {
             },
         ),
         block(20, BlockKind::WhenConnectionFails { body: body() }),
+        block(
+            21,
+            BlockKind::WhenSplineReached {
+                follower: "Lift.SplineFollower".to_owned(),
+                which: "Start".to_owned(),
+                body: body(),
+            },
+        ),
     ];
     // New IDs all the way down, as the statements are copies.
     script(stacks.iter().map(Block::duplicate).collect())
@@ -2010,6 +2046,14 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
                 table: "weapons".to_owned(),
                 key: boxed(variable("a")),
             }),
+        },
+        Expression::SplinePosition {
+            spline: "Track".to_owned(),
+            t: boxed(number(0.5)),
+        },
+        Expression::SplineClosestDistance {
+            spline: "Track".to_owned(),
+            position: boxed(variable("a")),
         },
         Expression::DataValue {
             column: "Fire Rate".to_owned(),

@@ -171,6 +171,10 @@ pub(crate) fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Va
     if let Some(value) = crate::attachment::computed(lua, id, key)? {
         return Ok(value);
     }
+    // Worked out from the spline's points (see `spline`).
+    if let Some(value) = crate::spline::computed(lua, id, key)? {
+        return Ok(value);
+    }
     // Worked out from the part's shape and material (see `physical`).
     if let Some(value) = crate::physical::computed(lua, id, key)? {
         return Ok(value);

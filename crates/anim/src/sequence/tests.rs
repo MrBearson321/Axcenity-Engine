@@ -343,3 +343,45 @@ fn the_example_sequence_and_walk_clip_are_canonical() {
         .replace("\r\n", "\n");
     assert_eq!(ClipFile::from_json(&clip).unwrap().to_json(), clip);
 }
+
+#[test]
+fn a_camera_cut_bound_to_a_spline_rides_it_from_the_cut_to_the_next() {
+    let mut world = World::new();
+    let rail = world.create(ClassName::Spline).unwrap();
+    world.set_name(rail, "Rail").unwrap();
+    world.set_parent(rail, Some(world.workspace())).unwrap();
+    for x in [0.0, 20.0] {
+        let point = world.create(ClassName::SplinePoint).unwrap();
+        world.set_parent(point, Some(rail)).unwrap();
+        world
+            .set_property(point, "Position", Value::Vector3(Vector3::new(x, 5.0, 0.0)))
+            .unwrap();
+    }
+    let mut file = SequenceFile::new(10.0);
+    file.camera_cuts = vec![
+        CameraCut {
+            id: "ride".into(),
+            time: 2.0,
+            camera: "Workspace/Rail".into(),
+        },
+        CameraCut {
+            id: "own".into(),
+            time: 6.0,
+            camera: String::new(),
+        },
+    ];
+    let mut run = SequenceRun::new(file).unwrap();
+    // From 2 to 6 it rides the 20 studs: halfway along at 4.
+    let shot = |run: &mut SequenceRun, world: &mut World, time| {
+        run.apply(world, time).camera.expect("a shot")
+    };
+    let start = shot(&mut run, &mut world, 2.0);
+    assert!((start.position.x - 0.0).abs() < 1e-3);
+    let middle = shot(&mut run, &mut world, 4.0);
+    assert!((middle.position.x - 10.0).abs() < 1e-2, "{middle:?}");
+    assert_eq!(middle.position.y, 5.0);
+    // Facing +X, along the rail.
+    assert!((middle.orientation.y + 90.0).abs() < 1e-2, "{middle:?}");
+    let end = shot(&mut run, &mut world, 5.999);
+    assert!((end.position.x - 20.0).abs() < 0.05, "{end:?}");
+}

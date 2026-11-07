@@ -1838,6 +1838,8 @@ mod seat_tests;
 #[cfg(test)]
 mod spawn_tests;
 #[cfg(test)]
+mod spline_tests;
+#[cfg(test)]
 mod template_tests;
 #[cfg(test)]
 mod tool_tests;

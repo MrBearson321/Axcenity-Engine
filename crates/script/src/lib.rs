@@ -89,6 +89,7 @@ mod seat;
 mod sequence;
 mod sides;
 mod spec;
+mod spline;
 mod task;
 mod tool;
 mod tree;
@@ -262,6 +263,8 @@ pub struct ScriptRuntime {
     level_loads: Vec<String>,
     /// Sequences played on either side (Phase 51).
     sequences: sequence::SharedSequences,
+    /// SplineFollowers moving their parts (Phase 73), on the server.
+    followers: spline::Followers,
     /// The default audio settings UI and volume sliders (Phase 52).
     volume_sliders: audio_settings::VolumeSliders,
     /// No player plays on this device (a dedicated server, Phase 63).
@@ -341,6 +344,7 @@ impl ScriptRuntime {
             levels,
             level_loads: Vec::new(),
             sequences,
+            followers: spline::Followers::default(),
             ownership,
             chat,
             joined: Vec::new(),
@@ -1191,6 +1195,13 @@ impl ScriptRuntime {
             self.context(side).step(world, messages, seconds);
             self.collect(side);
             self.fire_changes(world);
+        }
+        // SplineFollowers move on, after scripts that change them; a
+        // device following a server sees the server's.
+        if !self.client_only {
+            for (id, event, args) in self.followers.step(world, seconds) {
+                self.fire_instance_event(world, id, event, &args);
+            }
         }
         // Then Sequences move on, after scripts that play them.
         let assets = self
@@ -2100,6 +2111,8 @@ mod prompt_tests;
 mod query_tests;
 #[cfg(test)]
 mod seat_tests;
+#[cfg(test)]
+mod spline_tests;
 #[cfg(test)]
 mod tool_tests;
 #[cfg(test)]

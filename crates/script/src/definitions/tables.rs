@@ -2682,6 +2682,42 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Spline,
+        Function {
+            name: "GetPositionAt",
+            doc: "The point `t` of the way along the curve by distance: 0 is its first point, 1 its end (its first point again when Closed), 0.5 halfway along. Errors if it has no SplinePoint.",
+            params: &[("t", "number")],
+            returns: "Vector3",
+        },
+    ),
+    (
+        ClassName::Spline,
+        Function {
+            name: "GetCFrameAt",
+            doc: "Where the curve is `distance` studs along it, facing the way it goes (upright, never rolled). A distance past an end is wrapped round a Closed spline and held at the end of an open one. Errors if it has no SplinePoint.",
+            params: &[("distance", "number")],
+            returns: "CFrame",
+        },
+    ),
+    (
+        ClassName::Spline,
+        Function {
+            name: "GetClosestDistance",
+            doc: "How far along the curve its point nearest `position` is, in studs: pass it to GetCFrameAt. Errors if it has no SplinePoint.",
+            params: &[("position", "Vector3")],
+            returns: "number",
+        },
+    ),
+    (
+        ClassName::NavigationAgent,
+        Function {
+            name: "Patrol",
+            doc: "Sets PatrolSpline: the agent walks `spline`'s points in order from now on (nil stops).",
+            params: &[("spline", "Spline?")],
+            returns: "()",
+        },
+    ),
+    (
         ClassName::AnimationTrack,
         Function {
             name: "Play",
@@ -3258,6 +3294,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "Length",
             ty: "number",
             doc: "Its file's duration in seconds (read-only; 0 if the file can't be read).",
+        },
+    ),
+    (
+        ClassName::Spline,
+        Field {
+            name: "Length",
+            ty: "number",
+            doc: "How long its curve is, in studs (read-only; 0 with fewer than two points).",
         },
     ),
     (

@@ -255,6 +255,14 @@ pub enum ClassName {
     /// cuts, property keys, clips, sounds, events, fades, letterbox,
     /// subtitles and levels, from `Play` until `Completed`.
     Sequence,
+    /// A curve through its SplinePoint children (Phase 73), for movers,
+    /// patrols and cameras to follow. Drawn in the editor only.
+    Spline,
+    /// One point a Spline passes through, and how the curve bends there.
+    SplinePoint,
+    /// Moves the Part or Model it's parented to along a Spline at `Speed`
+    /// (Phase 73): moving platforms, trains and gondolas.
+    SplineFollower,
     /// A landscape: a heightfield (kept beside the Instance, see
     /// [`TerrainData`](crate::TerrainData)) shaded by its TerrainLayers.
     Terrain,
@@ -386,7 +394,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 122] = [
+    pub const ALL: [ClassName; 125] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -465,6 +473,9 @@ impl ClassName {
         ClassName::Animation,
         ClassName::AnimationTrack,
         ClassName::Sequence,
+        ClassName::Spline,
+        ClassName::SplinePoint,
+        ClassName::SplineFollower,
         ClassName::Terrain,
         ClassName::TerrainLayer,
         ClassName::ThirdPersonController,
@@ -595,6 +606,9 @@ impl ClassName {
             ClassName::Animation => "Animation",
             ClassName::AnimationTrack => "AnimationTrack",
             ClassName::Sequence => "Sequence",
+            ClassName::Spline => "Spline",
+            ClassName::SplinePoint => "SplinePoint",
+            ClassName::SplineFollower => "SplineFollower",
             ClassName::Terrain => "Terrain",
             ClassName::TerrainLayer => "TerrainLayer",
             ClassName::ThirdPersonController => "ThirdPersonController",
@@ -1655,6 +1669,45 @@ impl ClassName {
                 // input while it plays.
                 ("LockPlayerInput", Value::Bool(true)),
             ],
+            ClassName::Spline => vec![
+                // On, the curve goes from the last point back to the first.
+                ("Closed", Value::Bool(false)),
+            ],
+            ClassName::SplinePoint => vec![
+                // Where the curve passes, in the world.
+                ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                // Auto bends smoothly through it, Linear heads straight for
+                // its neighbours, Free uses InTangent and OutTangent.
+                (
+                    "TangentMode",
+                    Value::EnumItem(EnumItem {
+                        enum_name: "SplineTangentMode".to_owned(),
+                        item: "Auto".to_owned(),
+                    }),
+                ),
+                // From the point to its handles, in studs (Free only).
+                ("InTangent", Value::Vector3(Vector3::new(-2.0, 0.0, 0.0))),
+                ("OutTangent", Value::Vector3(Vector3::new(2.0, 0.0, 0.0))),
+            ],
+            ClassName::SplineFollower => vec![
+                // The Spline it follows.
+                ("Spline", Value::Instance(None)),
+                // Studs a second along the curve.
+                ("Speed", Value::Number(8.0)),
+                // Loop starts again (round a Closed spline), PingPong turns
+                // back at each end, Once stops at the end.
+                (
+                    "Mode",
+                    Value::EnumItem(EnumItem {
+                        enum_name: "SplineFollowMode".to_owned(),
+                        item: "PingPong".to_owned(),
+                    }),
+                ),
+                // On, the part turns to face along the curve.
+                ("FaceAlong", Value::Bool(false)),
+                // Off, it stops where it is.
+                ("Enabled", Value::Bool(true)),
+            ],
             ClassName::Sound => vec![
                 ("SoundId", Value::String(String::new())),
                 ("Volume", Value::Number(1.0)),
@@ -2082,6 +2135,10 @@ impl ClassName {
                 // during Play, deciding where it walks. Empty runs none, and
                 // scripts set Destination themselves.
                 ("BehaviorTree", Value::String(String::new())),
+                // A Spline whose points it walks in order during Play (Phase
+                // 73): round again on a Closed one, back and forth on an
+                // open one. `agent:Patrol(spline)` sets it.
+                ("PatrolSpline", Value::Instance(None)),
             ],
             ClassName::Checkpoint => vec![
                 // Where a restored character stands: the middle of its feet.
@@ -2526,6 +2583,8 @@ impl ClassName {
             | ClassName::Terrain
             | ClassName::TerrainLayer
             | ClassName::Checkpoint
+            | ClassName::Spline
+            | ClassName::SplinePoint
             | ClassName::Camera
             | ClassName::Attachment
             | ClassName::VehicleWheel
@@ -2615,6 +2674,9 @@ impl ClassName {
             // `Completed` once when it reaches its end (or is skipped there);
             // `EventReached` with an event track's name as it passes.
             ClassName::Sequence => &["Completed", "EventReached"],
+            // Fires with "End" or "Start" when it reaches an end of its
+            // spline (and comes round to the start of a Closed one).
+            ClassName::SplineFollower => &["Reached"],
             // Fire on both parts when two parts start and stop touching.
             ClassName::Part
             | ClassName::MeshPart

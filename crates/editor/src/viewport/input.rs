@@ -141,6 +141,93 @@ impl Viewport {
             .flatten()
     }
 
+    /// A press on a Spline's curve or on a point of `editing`, and the
+    /// drag of a point after it. Returns what to do, whether the left
+    /// button belongs to the Spline this frame (so nothing else takes it),
+    /// and whether a point's drag was let go.
+    pub(super) fn spline_input(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        screen: &Screen,
+        world: &World,
+        editing: Option<InstanceId>,
+    ) -> (Option<SplineAction>, bool, bool) {
+        let (pressed, down, pointer, origin, alt) = ui.input(|input| {
+            (
+                input.pointer.primary_pressed(),
+                input.pointer.primary_down(),
+                input.pointer.latest_pos(),
+                input.pointer.press_origin(),
+                input.modifiers.alt,
+            )
+        });
+        if let Some(drag) = self.spline_drag.as_mut() {
+            if down {
+                let moved = match (pointer, origin) {
+                    (Some(pointer), Some(origin)) => pointer.distance(origin) > 3.0,
+                    _ => false,
+                };
+                let hit = pointer.filter(|_| moved).and_then(|pointer| {
+                    let ray = screen.ray(pointer);
+                    axcenity_scene::pick_hit(world, ray, None).map(|hit| ray.at(hit.distance))
+                });
+                if let Some(at) = hit {
+                    drag.at = Some(at);
+                    if !drag.add {
+                        let point = drag.point;
+                        return (Some(SplineAction::Move { point, to: at }), true, false);
+                    }
+                }
+                return (None, true, false);
+            }
+            let drag = *drag;
+            self.spline_drag = None;
+            let added = match (drag.add, drag.at) {
+                (true, Some(at)) => Some(SplineAction::Add {
+                    after: drag.point,
+                    at,
+                }),
+                _ => None,
+            };
+            return (added, true, true);
+        }
+        if self.spline_press {
+            // Pressed on a curve: held until it's let go.
+            if !down {
+                self.spline_press = false;
+            }
+            return (None, true, false);
+        }
+        if !pressed || !response.contains_pointer() {
+            return (None, false, false);
+        }
+        let Some(pointer) = pointer else {
+            return (None, false, false);
+        };
+        if let Some(editing) = editing
+            && let Some(point) = crate::splines::hit_point(screen, world, editing, pointer)
+        {
+            self.spline_drag = Some(SplineDrag {
+                point,
+                add: alt,
+                at: None,
+            });
+            return (Some(SplineAction::Pick(point)), true, false);
+        }
+        // Alt+left-drag anywhere else orbits the camera.
+        if alt {
+            return (None, false, false);
+        }
+        match crate::splines::hit_curve(screen, world, pointer) {
+            Some(spline) => {
+                self.spline_press = true;
+                (Some(SplineAction::Edit(spline)), true, false)
+            }
+            None => (None, false, false),
+        }
+    }
+
     /// Where an asset dragged from another panel would land, if one is
     /// being dragged and the mouse is over the viewport.
     pub(super) fn drop_target(
@@ -533,7 +620,10 @@ impl Viewport {
         }
         if looking {
             self.camera.look(motion.x, motion.y);
-        } else if alt && response.dragged_by(egui::PointerButton::Primary) {
+        } else if alt
+            && self.spline_drag.is_none()
+            && response.dragged_by(egui::PointerButton::Primary)
+        {
             self.camera.orbit(motion.x, motion.y);
         } else if response.dragged_by(egui::PointerButton::Middle) {
             self.camera.pan(drag.x, drag.y, view_height);

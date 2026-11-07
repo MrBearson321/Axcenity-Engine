@@ -61,6 +61,7 @@ mod side_warnings;
 mod snapping;
 #[cfg(test)]
 mod snapshot;
+mod splines;
 mod start;
 mod style_panel;
 mod surface;

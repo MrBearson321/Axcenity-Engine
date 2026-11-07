@@ -2229,9 +2229,9 @@ Each has a pause menu, a settings menu with rebindable input, and a working save
 
 ### Acceptance criteria
 
-- [ ] A platform on a `SplineFollower` with `PingPong` carries a standing character smoothly, in Play and in multiplayer.
-- [ ] `GetCFrameAt(Length / 2)` lands on the curve's midpoint, checked by a test on a known curve.
-- [ ] An NPC patrols a closed spline with no script, and a Sequencer camera rides one.
+- [x] A platform on a `SplineFollower` with `PingPong` carries a standing character smoothly, in Play and in multiplayer.
+- [x] `GetCFrameAt(Length / 2)` lands on the curve's midpoint, checked by a test on a known curve.
+- [x] An NPC patrols a closed spline with no script, and a Sequencer camera rides one.
 
 ---
 

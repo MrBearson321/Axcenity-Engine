@@ -536,10 +536,12 @@ pub enum EnumType {
     HumanoidStateType,
     ReverbType,
     Precipitation,
+    SplineTangentMode,
+    SplineFollowMode,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 34] = [
+    pub const ALL: [EnumType; 36] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -574,6 +576,8 @@ impl EnumType {
         EnumType::HumanoidStateType,
         EnumType::ReverbType,
         EnumType::Precipitation,
+        EnumType::SplineTangentMode,
+        EnumType::SplineFollowMode,
     ];
 
     pub fn name(self) -> &'static str {
@@ -612,6 +616,8 @@ impl EnumType {
             EnumType::HumanoidStateType => "HumanoidStateType",
             EnumType::ReverbType => "ReverbType",
             EnumType::Precipitation => "Precipitation",
+            EnumType::SplineTangentMode => "SplineTangentMode",
+            EnumType::SplineFollowMode => "SplineFollowMode",
         }
     }
 
@@ -658,6 +664,10 @@ impl EnumType {
             EnumType::ReverbType => axcenity_audio::REVERB_TYPES.to_vec(),
             // What a Weather lets fall (graphics Phase 27).
             EnumType::Precipitation => vec!["None", "Rain", "Snow"],
+            // How a SplinePoint's handles are made (Phase 73).
+            EnumType::SplineTangentMode => axcenity_core::spline::TangentMode::NAMES.to_vec(),
+            // What a SplineFollower does at the ends of its spline.
+            EnumType::SplineFollowMode => vec!["Loop", "PingPong", "Once"],
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -793,7 +803,9 @@ impl LuaEnumItem {
             | EnumType::ProximityPromptExclusivity
             | EnumType::HumanoidStateType
             | EnumType::ReverbType
-            | EnumType::Precipitation => None,
+            | EnumType::Precipitation
+            | EnumType::SplineTangentMode
+            | EnumType::SplineFollowMode => None,
         }
     }
 }

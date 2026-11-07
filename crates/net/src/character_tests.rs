@@ -154,7 +154,12 @@ fn device(world: World, scripts: ScriptRuntime, network: Network) -> Device {
 /// `axcenity-server` hosting the arena in memory, and `players` devices
 /// joined to it, with a little time for each to get their character.
 fn game(players: usize, latency: Duration) -> (Device, Vec<Device>) {
-    let mut world = arena();
+    game_in(arena, players, latency)
+}
+
+/// [`game`] in the world `make` makes, on every device.
+fn game_in(make: fn() -> World, players: usize, latency: Duration) -> (Device, Vec<Device>) {
+    let mut world = make();
     let mut scripts = ScriptRuntime::new();
     scripts.set_dedicated();
     let mut network = Network::new(info()).with_discovery_port(47933);
@@ -171,7 +176,7 @@ fn game(players: usize, latency: Duration) -> (Device, Vec<Device>) {
             Some(client) => client,
             None => server.network.connect_loopback().unwrap(),
         };
-        let mut world = arena();
+        let mut world = make();
         let mut scripts = ScriptRuntime::new();
         scripts.set_user_id(500.0 + n as f64);
         let mut network = Network::new(info());
@@ -390,4 +395,138 @@ fn a_car_owned_by_one_player_steers_at_once_for_them_and_the_others_see_it_drive
             "smooth: {seen:?}"
         );
     }
+}
+
+/// A floor, and the SpawnLocation players spawn on as a lift: a
+/// SplineFollower, off to start with, carries it 40 studs toward -Z and up
+/// 4, and back, at 30 studs a second, nearly twice a character's WalkSpeed
+/// (Phase 73).
+fn lift_arena() -> World {
+    let mut world = World::new();
+    let set = |world: &mut World, id: InstanceId, name: &str, value: Value| {
+        world.set_property(id, name, value).unwrap();
+    };
+    let floor = world.create(ClassName::Part).unwrap();
+    world.set_parent(floor, Some(world.workspace())).unwrap();
+    set(&mut world, floor, "Anchored", Value::Bool(true));
+    set(
+        &mut world,
+        floor,
+        "Position",
+        Value::Vector3(Vector3::new(0.0, -0.5, 0.0)),
+    );
+    set(
+        &mut world,
+        floor,
+        "Size",
+        Value::Vector3(Vector3::new(200.0, 1.0, 200.0)),
+    );
+    let spline = world.create(ClassName::Spline).unwrap();
+    world.set_name(spline, "Track").unwrap();
+    world.set_parent(spline, Some(world.workspace())).unwrap();
+    for (y, z) in [(0.5, 0.0), (2.5, -20.0), (4.5, -40.0)] {
+        let point = world.create(ClassName::SplinePoint).unwrap();
+        world.set_parent(point, Some(spline)).unwrap();
+        set(
+            &mut world,
+            point,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, y, z)),
+        );
+    }
+    let lift = world.create(ClassName::SpawnLocation).unwrap();
+    world.set_name(lift, "Lift").unwrap();
+    world.set_parent(lift, Some(world.workspace())).unwrap();
+    set(&mut world, lift, "Anchored", Value::Bool(true));
+    set(
+        &mut world,
+        lift,
+        "Position",
+        Value::Vector3(Vector3::new(0.0, 0.5, 0.0)),
+    );
+    set(
+        &mut world,
+        lift,
+        "Size",
+        Value::Vector3(Vector3::new(10.0, 1.0, 10.0)),
+    );
+    let follower = world.create(ClassName::SplineFollower).unwrap();
+    world.set_parent(follower, Some(lift)).unwrap();
+    set(
+        &mut world,
+        follower,
+        "Spline",
+        Value::Instance(Some(spline)),
+    );
+    set(&mut world, follower, "Speed", Value::Number(30.0));
+    // Off until the players stand on it.
+    set(&mut world, follower, "Enabled", Value::Bool(false));
+    world
+}
+
+#[test]
+fn a_ping_pong_lift_carries_a_joined_players_character_smoothly_without_corrections() {
+    let (mut server, mut players) = game_in(lift_arena, 1, Duration::from_millis(50));
+    let player = players[0].scripts.local_player().unwrap();
+    let lift = |device: &Device| {
+        let lift = device
+            .world
+            .find_first_child(device.world.workspace(), "Lift")
+            .unwrap();
+        position(&device.world, lift).unwrap()
+    };
+    // The server starts the lift once they stand on it.
+    let follower = server
+        .world
+        .descendants(server.world.workspace())
+        .into_iter()
+        .find(|&id| server.world.get(id).unwrap().class() == ClassName::SplineFollower)
+        .unwrap();
+    server
+        .world
+        .set_property(follower, "Enabled", Value::Bool(true))
+        .unwrap();
+    // There and back is about 81 studs: under three seconds at 30 a second.
+    let mut last = players[0].character_at(player).expect("they spawned");
+    let mut lowest: f32 = f32::INFINITY;
+    let mut highest: f32 = f32::NEG_INFINITY;
+    for frame in 0..240 {
+        frames(&mut server, &mut players, 1, &[]);
+        let shown = lift(&players[0]);
+        let body = players[0].character_at(player).unwrap();
+        // On their device it stands on the lift as it's shown there,
+        // never moving further in a frame than the lift can.
+        assert!(
+            (body.x - shown.x).abs() < 4.5 && (body.z - shown.z).abs() < 4.5,
+            "{frame}: off the lift: {body:?} {shown:?}"
+        );
+        assert!(body.y > shown.y, "{frame}: {body:?} {shown:?}");
+        let step =
+            ((body.x - last.x).powi(2) + (body.y - last.y).powi(2) + (body.z - last.z).powi(2))
+                .sqrt();
+        assert!(step < 30.0 / 60.0 * 1.1 + 0.02, "{frame}: jumped {step}");
+        last = body;
+        // And the server, which takes where the device says, has it on
+        // the lift too.
+        let on_server = server.character_at(player).unwrap();
+        let real = lift(&server);
+        assert!(
+            (on_server.z - real.z).abs() < 6.0,
+            "{frame}: the server has it off the lift: {on_server:?} {real:?}"
+        );
+        lowest = lowest.min(shown.z);
+        highest = highest.max(shown.z);
+    }
+    assert!(
+        lowest < -39.0 && highest > -1.0,
+        "it went there and back: {lowest} {highest}"
+    );
+    assert!(
+        !players[0]
+            .log
+            .iter()
+            .any(|line| line.contains("moved your character back")),
+        "a carried player isn't corrected: {:?}",
+        players[0].log
+    );
 }

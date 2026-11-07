@@ -12,6 +12,10 @@
 //! motion, like any part. What fails is left where the server had it, and
 //! the device is told where that is ([`Message::Correction`]); so is a
 //! device whose character a server Script moved.
+//!
+//! A character standing on a part a SplineFollower moves rides it on its
+//! device (Phase 73), so the check takes off as far as that part went
+//! since the last update before measuring the character's own movement.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -143,6 +147,8 @@ pub struct CharacterCheck {
     pub(crate) correct: bool,
     /// The seat the device last said its character sits in.
     seat: Option<Option<u64>>,
+    /// Where each part a SplineFollower moves was at the last update.
+    carriers: BTreeMap<InstanceId, Vector3>,
 }
 
 impl CharacterCheck {
@@ -254,14 +260,54 @@ impl CharacterCheck {
         let launch = (2.0 * GRAVITY * jump_height).sqrt();
         self.across = (self.across + speed * TOLERANCE * dt).min(speed * TOLERANCE * BURST + SLACK);
         self.rise = (self.rise + launch * TOLERANCE * dt).min(jump_height * 1.5 + SLACK);
-        let across = horizontal(was, to);
-        let up = f64::from((to.y - was.y).max(0.0));
+        // What it stands on carried it this far; the rest is its own.
+        let (carried_across, carried_up) = self.carried(world, was);
+        let across = (horizontal(was, to) - carried_across * TOLERANCE).max(0.0);
+        let up = (f64::from((to.y - was.y).max(0.0)) - carried_up * TOLERANCE).max(0.0);
         if across > self.across || up > self.rise {
             return false;
         }
         self.across -= across;
         self.rise -= up;
         true
+    }
+
+    /// How far across and up the SplineFollower-moved part under `at` (a
+    /// character's root, where the server had it) went since the last
+    /// update, and notes where every such part is now.
+    fn carried(&mut self, world: &World, at: Vector3) -> (f64, f64) {
+        let mut carried = (0.0, 0.0);
+        let mut now = BTreeMap::new();
+        for part in carriers(world) {
+            let Some(instance) = world.get(part) else {
+                continue;
+            };
+            let (Some(position), Some(size)) = (
+                instance.property("Position").and_then(Value::as_vector3),
+                instance.property("Size").and_then(Value::as_vector3),
+            ) else {
+                continue;
+            };
+            now.insert(part, position);
+            let Some(&before) = self.carriers.get(&part) else {
+                continue;
+            };
+            // Over it, where it was, with room for a turned part and a
+            // character's height above its top.
+            let reach = 0.5 * size.x.max(size.z) + 2.0;
+            let above = at.y - (before.y + 0.5 * size.y);
+            if (at.x - before.x).abs() <= reach
+                && (at.z - before.z).abs() <= reach
+                && (-1.0..=10.0).contains(&above)
+            {
+                let across = horizontal(before, position);
+                if across >= carried.0 {
+                    carried = (across, f64::from((position.y - before.y).max(0.0)));
+                }
+            }
+        }
+        self.carriers = now;
+        carried
     }
 
     /// The character sits in `seat` on the device: so it does on the
@@ -387,4 +433,27 @@ impl OwnedSender {
             seat: seat.map(InstanceId::to_bits),
         })
     }
+}
+
+/// The parts SplineFollowers move: a follower's part and the parts welded
+/// to it, or the parts in its Model.
+fn carriers(world: &World) -> Vec<InstanceId> {
+    let mut parts = Vec::new();
+    for id in world.descendants(world.workspace()) {
+        let Some(follower) = world.get(id) else {
+            continue;
+        };
+        if follower.class() != ClassName::SplineFollower {
+            continue;
+        }
+        let Some(target) = follower.parent() else {
+            continue;
+        };
+        parts.extend(
+            std::iter::once(target)
+                .chain(world.descendants(target))
+                .filter(|&part| world.get(part).is_some_and(|i| i.class().is_base_part())),
+        );
+    }
+    parts
 }

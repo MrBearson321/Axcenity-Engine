@@ -271,10 +271,43 @@ struct Body {
     radius: f32,
 }
 
+/// The part a character stands on and where that part was after the
+/// character's last step, so the character rides along when it moves
+/// (Phase 73: a platform on a SplineFollower, a tweened lift).
+#[derive(Clone, Copy, Debug)]
+struct Footing {
+    part: InstanceId,
+    position: Vector3,
+    /// Its turn round Y (its `Orientation.Y`), in degrees.
+    yaw: f32,
+}
+
+impl Footing {
+    fn of(world: &World, part: InstanceId) -> Option<Self> {
+        let instance = world.get(part)?;
+        let position = instance.property("Position").and_then(Value::as_vector3)?;
+        let yaw = instance
+            .property("Orientation")
+            .and_then(Value::as_vector3)
+            .map_or(0.0, |orientation| orientation.y);
+        finite(position).then_some(Self {
+            part,
+            position,
+            yaw,
+        })
+    }
+}
+
+/// A part that moves further than this between two steps has been put
+/// somewhere, not moved: what stood on it isn't carried there.
+const MAX_CARRY: f32 = 20.0;
+
 /// Steps every character controller. The player and the editor each own
 /// one for the game they are running.
 #[derive(Default)]
 pub struct Controllers {
+    /// What each grounded character stands on (Phase 73).
+    footings: BTreeMap<InstanceId, Footing>,
     orbits: BTreeMap<InstanceId, Orbit>,
     falls: BTreeMap<InstanceId, Fall>,
     crouches: BTreeMap<InstanceId, Crouched>,
@@ -388,6 +421,7 @@ impl Controllers {
         self.crouches.retain(|id, _| world.get(*id).is_some());
         self.built_in.retain(|id, _| world.get(*id).is_some());
         self.facing.retain(|id, _| world.get(*id).is_some());
+        self.footings.retain(|id, _| world.get(*id).is_some());
         let active = self.active_of(world);
         self.update_seats(world, assets, active, input.jump);
         // Controllers without input move once something asks them to,
@@ -470,6 +504,13 @@ impl Controllers {
         let Some(mut body) = Body::read(world, id) else {
             return;
         };
+        // Standing on something that moved since the last step, it rides
+        // along first.
+        if self.falls.get(&id).is_some_and(|fall| fall.grounded)
+            && let Some(footing) = self.footings.get(&id)
+        {
+            carry(world, &mut body, footing);
+        }
         let limits = Limits::read(world, id);
         let mut speed = speed_of(world, id, input.run);
         if self.crouches.contains_key(&id) {
@@ -501,6 +542,7 @@ impl Controllers {
             let rise = f32::from(u8::from(input.jump)) - f32::from(u8::from(input.crouch));
             body.shift(world, dx, rise * speed * dt, dz);
             self.falls.remove(&id);
+            self.footings.remove(&id);
             return;
         }
         let fall = self.falls.entry(id).or_default();
@@ -520,6 +562,15 @@ impl Controllers {
         if let Some(speed) = fall.landed.take() {
             self.landings.push((id, speed));
         }
+        let footing = if fall.grounded {
+            standing_on(world, assets, &body).and_then(|part| Footing::of(world, part))
+        } else {
+            None
+        };
+        match footing {
+            Some(footing) => self.footings.insert(id, footing),
+            None => self.footings.remove(&id),
+        };
     }
 
     /// Turns the character `id` drives about the middle of its box, so it
@@ -1383,6 +1434,41 @@ fn fly(
             }
         }
     }
+}
+
+/// The anchored part right under the middle of the body's feet, if any:
+/// what a script, a tween or a SplineFollower moves. A part physics moves
+/// isn't ridden: the character, held still for physics, would press into
+/// it as it follows it down, and push it further.
+fn standing_on(world: &World, assets: &Assets, body: &Body) -> Option<InstanceId> {
+    let origin = Vector3::new(body.pivot_x, body.feet_y + SKIN, body.pivot_z);
+    let direction = Vector3::new(0.0, -(4.0 * SKIN + 0.1), 0.0);
+    let part = solid_hit(world, assets, body, origin, direction)?.instance;
+    flag(world, part, "Anchored").then_some(part)
+}
+
+/// Moves the body as far as the part under it moved (and round it, as far
+/// as it turned) since `footing` was taken.
+fn carry(world: &mut World, body: &mut Body, footing: &Footing) {
+    let Some(now) = Footing::of(world, footing.part) else {
+        return;
+    };
+    let turn = (now.yaw - footing.yaw).to_radians();
+    let (sin, cos) = turn.sin_cos();
+    // Where the feet were from the part, turned with it.
+    let x = body.pivot_x - footing.position.x;
+    let y = body.feet_y - footing.position.y;
+    let z = body.pivot_z - footing.position.z;
+    let to = Vector3::new(
+        now.position.x + x * cos + z * sin,
+        now.position.y + y,
+        now.position.z - x * sin + z * cos,
+    );
+    let (dx, dy, dz) = (to.x - body.pivot_x, to.y - body.feet_y, to.z - body.pivot_z);
+    if (dx * dx + dy * dy + dz * dz).sqrt() > MAX_CARRY {
+        return;
+    }
+    body.shift(world, dx, dy, dz);
 }
 
 fn translate(world: &mut World, parts: &[InstanceId], dx: f32, dy: f32, dz: f32) {

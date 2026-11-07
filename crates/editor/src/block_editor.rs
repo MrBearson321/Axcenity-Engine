@@ -291,6 +291,9 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetDestination { .. }
         | BlockKind::SetVelocity { .. }
         | BlockKind::WhenAgentSenses { .. }
+        | BlockKind::Patrol { .. }
+        | BlockKind::PlaceOnSpline { .. }
+        | BlockKind::WhenSplineReached { .. }
         | BlockKind::WhenSeatOccupied { .. }
         | BlockKind::LeaveSeat { .. }
         | BlockKind::SetCameraType { .. }
@@ -362,7 +365,9 @@ fn reporter_category(expression: &Expression) -> Category {
         | Expression::KeyDown { .. }
         | Expression::Raycast { .. }
         | Expression::RaycastIgnoring { .. }
-        | Expression::IsA { .. } => Category::Sensing,
+        | Expression::IsA { .. }
+        | Expression::SplinePosition { .. }
+        | Expression::SplineClosestDistance { .. } => Category::Sensing,
         Expression::AnimatorBool { .. } | Expression::AnimatorNumber { .. } => Category::Animation,
         Expression::DataRow { .. } | Expression::DataValue { .. } => Category::More,
         Expression::Code { .. } => Category::Lua,
@@ -387,6 +392,8 @@ enum Filter {
     Sequences,
     /// NavigationAgents.
     Agents,
+    Splines,
+    SplineFollowers,
     Checkpoints,
     Seats,
     Prompts,
@@ -417,6 +424,8 @@ impl Filter {
             Filter::Animations => class == ClassName::Animation,
             Filter::Sequences => class == ClassName::Sequence,
             Filter::Agents => class == ClassName::NavigationAgent,
+            Filter::Splines => class == ClassName::Spline,
+            Filter::SplineFollowers => class == ClassName::SplineFollower,
             Filter::Checkpoints => class == ClassName::Checkpoint,
             Filter::Seats => class.is_seat(),
             Filter::Prompts => class == ClassName::ProximityPrompt,
@@ -459,6 +468,8 @@ impl Filter {
             Filter::Animations => "Model.Animation",
             Filter::Sequences => "Sequence",
             Filter::Agents => "Model.NavigationAgent",
+            Filter::Splines => "Spline",
+            Filter::SplineFollowers => "Part.SplineFollower",
             Filter::Checkpoints => "Checkpoint",
             Filter::Seats => "Seat",
             Filter::Prompts => "Part.ProximityPrompt",
@@ -932,6 +943,33 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("senses the player by"),
             Part::Choice(sense, &axcenity_blocks::SENSES),
         ])],
+        BlockKind::WhenSplineReached {
+            follower, which, ..
+        } => vec![Row(vec![
+            label("when"),
+            Object(follower, Filter::SplineFollowers),
+            label("reaches the"),
+            Part::Choice(which, &axcenity_blocks::SPLINE_ENDS),
+        ])],
+        BlockKind::Patrol { agent, spline } => vec![Row(vec![
+            label("patrol"),
+            Object(agent, Filter::Agents),
+            label("along"),
+            Object(spline, Filter::Splines),
+        ])],
+        BlockKind::PlaceOnSpline {
+            target,
+            spline,
+            distance,
+        } => vec![Row(vec![
+            label("put"),
+            Object(target, Filter::Any),
+            label("on"),
+            Object(spline, Filter::Splines),
+            label("at"),
+            Slot(distance, SlotKind::Number),
+            label("studs"),
+        ])],
         BlockKind::WhenPromptTriggered { prompt, .. } => vec![Row(vec![
             label("when prompt"),
             Object(prompt, Filter::Prompts),
@@ -1342,6 +1380,18 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
                 Object(animator, Filter::Animators),
             ]
         }
+        Expression::SplinePosition { spline, t } => vec![
+            label("point"),
+            Slot(t, SlotKind::Number),
+            label("of the way along"),
+            Object(spline, Filter::Splines),
+        ],
+        Expression::SplineClosestDistance { spline, position } => vec![
+            label("distance along"),
+            Object(spline, Filter::Splines),
+            label("nearest"),
+            Slot(position, SlotKind::Vector),
+        ],
         Expression::DataRow { table, key } => vec![
             label("row"),
             Slot(key, SlotKind::Text),

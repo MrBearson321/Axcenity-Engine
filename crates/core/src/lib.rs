@@ -17,6 +17,7 @@ pub mod csg;
 mod enums;
 pub mod input;
 pub mod prefab;
+pub mod spline;
 mod strings;
 mod terrain;
 pub mod tool;

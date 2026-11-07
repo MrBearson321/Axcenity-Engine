@@ -29,6 +29,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
+use axcenity_core::spline::SplineCurve;
 use axcenity_core::{ClassName, Color3, InstanceId, UDim2, Value, Vector3, World};
 use serde::{Deserialize, Serialize};
 
@@ -343,6 +344,15 @@ impl SequenceFile {
         self.camera_cuts.iter().rfind(|cut| cut.time <= time)
     }
 
+    /// When the cut in charge at `time` gives way: the next cut's time, or
+    /// the end.
+    pub fn cut_end(&self, time: f64) -> f64 {
+        self.camera_cuts
+            .iter()
+            .find(|cut| cut.time > time)
+            .map_or(self.duration, |cut| cut.time)
+    }
+
     /// Whether anything is drawn in the overlay.
     fn has_ui(&self) -> bool {
         !(self.fades.is_empty() && self.letterbox.is_empty() && self.subtitles.is_empty())
@@ -632,10 +642,28 @@ impl SequenceRun {
                 },
             });
         }
-        let Some(camera) = resolve_binding(world, &cut.camera).and_then(|id| world.get(id)) else {
+        let bound = resolve_binding(world, &cut.camera);
+        let Some(camera) = bound.and_then(|id| world.get(id)) else {
             self.missing.insert(cut.camera.clone());
             return None;
         };
+        // A Spline (Phase 73): the camera rides it from its start at the
+        // cut to its end when the cut gives way, facing along it.
+        if camera.class() == ClassName::Spline {
+            let curve = SplineCurve::of(world, bound?)?;
+            let span = self.file.cut_end(time) - cut.time;
+            let share = if span > 0.0 {
+                ((time - cut.time) / span).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            let distance = share as f32 * curve.length();
+            return Some(Shot {
+                position: curve.position_at_distance(distance),
+                orientation: curve.orientation_at_distance(distance),
+                field_of_view: DEFAULT_FIELD_OF_VIEW,
+            });
+        }
         let vector = |name| camera.property(name).and_then(Value::as_vector3);
         Some(Shot {
             position: vector("Position")?,

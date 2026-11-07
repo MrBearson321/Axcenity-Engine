@@ -55,6 +55,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::WhenStateChanged { .. } => ("When State Changes", &["Animator"]),
         BlockKind::WhenAnimationEvent { .. } => ("When Animation Event", &["Animator", "Event"]),
         BlockKind::WhenAgentSenses { .. } => ("When Agent Senses Player", &["Agent", "Sense"]),
+        BlockKind::WhenSplineReached { .. } => ("When Spline End Reached", &["Follower", "End"]),
         BlockKind::WhenSeatOccupied { .. } => ("When Someone Sits", &["Seat"]),
         BlockKind::WhenPromptTriggered { .. } => ("When Prompt Triggered", &["Prompt"]),
         BlockKind::WhenPartClicked { .. } => ("When Part Clicked", &["Click Detector"]),
@@ -111,6 +112,8 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::PlayAnimatorState { .. } => ("Play State", &["State", "Animator"]),
         BlockKind::PlayAnimation { .. } => ("Play Animation", &["Animation", "Animator"]),
         BlockKind::PlayCutscene { .. } => ("Play Cutscene", &["Sequence"]),
+        BlockKind::Patrol { .. } => ("Patrol", &["Agent", "Spline"]),
+        BlockKind::PlaceOnSpline { .. } => ("Put On Spline", &["Object", "Spline", "Distance"]),
         BlockKind::Tween { .. } => (
             "Tween",
             &[
@@ -182,6 +185,10 @@ pub(super) fn value_names(expression: &Expression) -> (String, &'static [&'stati
         Expression::AnimatorBool { .. } => ("Get Bool", &["Parameter", "Animator"]),
         Expression::AnimatorNumber { .. } => ("Get Number", &["Parameter", "Animator"]),
         Expression::DataRow { .. } => ("Get Row", &["Key", "Table"]),
+        Expression::SplinePosition { .. } => ("Point Along Spline", &["T", "Spline"]),
+        Expression::SplineClosestDistance { .. } => {
+            ("Distance Along Spline", &["Spline", "Position"])
+        }
         Expression::DataValue { .. } => ("Get Column", &["Column", "Row"]),
         Expression::Code { .. } => ("Lua", &["Code"]),
         Expression::Number { .. } => ("Number", &[]),

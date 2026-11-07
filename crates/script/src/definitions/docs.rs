@@ -2988,6 +2988,61 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The behavior tree the agent runs during Play: a .behaviortree.json file in the project, made in the Behavior Tree tab. Every frame, before the agent walks, the tree decides where it goes (it can test SeesPlayer and HearsPlayer, set Destination, chase the player character and wait), so it may overwrite a Destination a script set. Empty runs none, and scripts set Destination themselves. A file that isn't a behavior tree, or has problems, runs nothing and Output says why once.",
     ),
     (
+        ClassName::NavigationAgent,
+        "PatrolSpline",
+        "A Spline whose points the agent walks to in order during Play, with no script: round again from the last to the first on a Closed spline, back and forth on an open one. It walks the navigation mesh between points, so it goes round walls; a point it can't reach is skipped. nil patrols nothing. `agent:Patrol(spline)` sets it.",
+    ),
+    (
+        ClassName::Spline,
+        "Closed",
+        "If true, the curve goes on from the last SplinePoint back to the first, as a loop.",
+    ),
+    (
+        ClassName::SplinePoint,
+        "Position",
+        "Where the curve passes, in the world. Its place among the Spline's children is its place along the curve.",
+    ),
+    (
+        ClassName::SplinePoint,
+        "TangentMode",
+        "How the curve bends here: `Enum.SplineTangentMode.Auto` (the default) passes through smoothly, from where its neighbours are; `Linear` heads straight for its neighbours (two Linear points are joined by a straight line); `Free` uses InTangent and OutTangent.",
+    ),
+    (
+        ClassName::SplinePoint,
+        "InTangent",
+        "With TangentMode Free: from the point to the handle the curve arrives along, in studs.",
+    ),
+    (
+        ClassName::SplinePoint,
+        "OutTangent",
+        "With TangentMode Free: from the point to the handle the curve leaves along, in studs. Longer handles bend the curve further their way.",
+    ),
+    (
+        ClassName::SplineFollower,
+        "Spline",
+        "The Spline it moves its parent along. nil moves nothing.",
+    ),
+    (
+        ClassName::SplineFollower,
+        "Speed",
+        "Studs a second along the curve, the same speed however its points are spaced.",
+    ),
+    (
+        ClassName::SplineFollower,
+        "Mode",
+        "What it does at the ends: `Enum.SplineFollowMode.Loop` goes on from the start again (round a Closed spline), `PingPong` (the default) turns back at each end, and `Once` stops at the end.",
+    ),
+    (
+        ClassName::SplineFollower,
+        "FaceAlong",
+        "If true, its parent turns to face the way it goes along the curve, upright, as a train does. If false (the default), it keeps the way it was turned.",
+    ),
+    (
+        ClassName::SplineFollower,
+        "Enabled",
+        "If false, it stops where it is; true carries on from there.",
+    ),
+    (
         ClassName::IntValue,
         "Value",
         "The whole number it holds; others are rounded. 0 by default.",
@@ -4494,6 +4549,11 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires when the Primary action is let go after Activated, or the Tool leaves the hand first.",
     ),
     (
+        ClassName::SplineFollower,
+        "Reached",
+        "Fires as it gets to an end of its spline, with \"End\" or \"Start\": a Loop as it comes round to the start again, a PingPong as it turns back, and a Once as it stops.",
+    ),
+    (
         ClassName::NavigationAgent,
         "PlayerSensed",
         "Fires when the agent starts seeing or hearing the player character. The handler gets the sense: \"Sight\" or \"Hearing\".",
@@ -4855,6 +4915,15 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Sequence => {
             "Plays a cutscene: a `*.sequence.json` file made in the editor's Sequencer tab, with camera cuts, keyed properties, clips on Animators, Sounds, events, fades, letterbox bars, subtitles from the string table and levels added for a while. Play, Pause and Stop it; EventReached fires as it passes each event and Completed once at its end. With Skippable, the Menu action jumps it to its end; with LockPlayerInput, the player can't move or use the game's input while it plays."
+        }
+        ClassName::Spline => {
+            "A curve through its SplinePoint children, in order (and back to the first when Closed), for SplineFollowers to move parts along, NavigationAgents to patrol and the Sequencer's camera to ride. Measure it with Length, GetPositionAt, GetCFrameAt and GetClosestDistance. Drawn in the editor, never in the game: click it with Select to edit its points."
+        }
+        ClassName::SplinePoint => {
+            "One point of the Spline it's in: where the curve passes (Position), and how it bends there (TangentMode, InTangent and OutTangent)."
+        }
+        ClassName::SplineFollower => {
+            "Moves the Part (with the parts welded to it) or the Model it's parented to along its Spline at Speed during Play: moving platforms, trains and gondolas. It starts at the point of the curve nearest where its parent is, and Loops, PingPongs or stops Once at the end, firing Reached. Characters standing on what it moves ride along."
         }
         ClassName::Terrain => {
             "A landscape: a heightfield shaped in the editor's Terrain Studio, drawn with its TerrainLayers and colliding as its ground. Position is the middle of its footprint at the bottom of its height range; Size is its width, height range and length."

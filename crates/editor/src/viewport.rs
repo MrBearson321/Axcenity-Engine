@@ -30,6 +30,10 @@
 //! under the mouse, and nothing is selected or dragged. The camera works
 //! as always (right-drag, Alt+left-drag, the wheel, WASD).
 //!
+//! While editing, Splines are drawn as their curves; clicking one edits its
+//! points (see `splines.rs`): drag a point along the surfaces under the
+//! mouse, or Alt-drag one to add a point after it.
+//!
 //! During Play there's no tool: the camera and selecting still work, but
 //! nothing can be dragged. View > Overlays can draw collider wireframes,
 //! recent script raycasts, Size boxes and spatial-sound markers on top;
@@ -191,6 +195,8 @@ pub struct ViewportOutput {
     pub terrain: Option<TerrainPointer>,
     /// With the Constraint tool on: the part surface clicked, if any.
     pub surface: Option<SurfacePick>,
+    /// A Spline's curve or point clicked, or a point dragged or added.
+    pub spline: Option<SplineAction>,
     /// The mouse over the Scene View for the editor's plugins
     /// (`plugin:GetMouse()`), while any run and the game doesn't.
     pub plugin_mouse: Option<axcenity_plugins::MouseInput>,
@@ -228,6 +234,29 @@ pub struct TerrainPointer {
     pub modifiers: egui::Modifiers,
     /// Seconds since the last frame.
     pub seconds: f32,
+}
+
+/// What the mouse did to a Spline while editing (Phase 73).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SplineAction {
+    /// Its curve was clicked: select it and edit its points.
+    Edit(InstanceId),
+    /// A point of the Spline being edited was pressed: select it.
+    Pick(InstanceId),
+    /// The point is dragged to `to`, on the surface under the mouse.
+    Move { point: InstanceId, to: Vec3 },
+    /// An Alt-drag from `after` was let go at `at`: add a point there.
+    Add { after: InstanceId, at: Vec3 },
+}
+
+/// A Spline point held with the left button.
+#[derive(Clone, Copy, Debug)]
+struct SplineDrag {
+    point: InstanceId,
+    /// Alt was held as it went down: the drag adds a point.
+    add: bool,
+    /// Where the surface under the mouse is, once it has moved.
+    at: Option<Vec3>,
 }
 
 /// A point clicked on a part's surface, for the Constraint tool.
@@ -329,6 +358,9 @@ pub struct ViewportScene<'a> {
     /// surfaces instead of selecting or dragging. Holds the first surface
     /// once it's picked, to mark it.
     pub constraint_pick: Option<Option<Vec3>>,
+    /// The Spline whose points are being edited: the one selected, or the
+    /// one a selected SplinePoint is in.
+    pub spline_editing: Option<InstanceId>,
     /// While plugins run (outside Play): whether one has the left button
     /// (`plugin:Activate(true)`), which then neither selects nor drags.
     pub plugin_mouse: Option<bool>,
@@ -610,6 +642,11 @@ pub struct Viewport {
     frozen_culling: Option<axcenity_render::Camera>,
     /// The camera swinging round after a click on the view cube.
     swing: Option<view_cube::Swing>,
+    /// A Spline point being dragged.
+    spline_drag: Option<SplineDrag>,
+    /// The left button went down on a Spline's curve and is held, so it
+    /// neither selects nor drags anything else.
+    spline_press: bool,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -652,6 +689,8 @@ impl Viewport {
             target: None,
             speed_changed_at: None,
             drag: None,
+            spline_drag: None,
+            spline_press: false,
             particles: Particles::new(),
             terrain_stroke: false,
             plugin_press: false,
@@ -855,6 +894,7 @@ impl Viewport {
             poses,
             terrain_brush,
             constraint_pick,
+            spline_editing,
             plugin_mouse,
             play_camera,
             graphics,
@@ -1072,6 +1112,16 @@ impl Viewport {
         if cube_hit.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
+        // Splines take a press on their curve or points while editing.
+        let (spline, spline_taken, spline_released) =
+            if editing && brush.is_none() && picking.is_none() && !plugin_button {
+                self.spline_input(ui, &response, &screen, world, spline_editing)
+            } else {
+                self.spline_drag = None;
+                self.spline_press = false;
+                (None, false, false)
+            };
+        let drag_tool = if spline_taken { None } else { drag_tool };
         let drag = self.drag_input(
             ui,
             &response,
@@ -1100,6 +1150,7 @@ impl Viewport {
                 || brush.is_some()
                 || picking.is_some()
                 || plugin_button
+                || spline_taken
                 || cube_hit.is_some() =>
             {
                 None
@@ -1264,6 +1315,20 @@ impl Viewport {
             selection,
             overlays.constraints,
         );
+        if tool.is_some() {
+            let adding = self
+                .spline_drag
+                .filter(|drag| drag.add)
+                .and_then(|drag| Some((drag.point, drag.at?)));
+            crate::splines::paint(
+                &ui.painter_at(rect),
+                &screen,
+                world,
+                spline_editing,
+                selection,
+                adding,
+            );
+        }
         if overlays.any() {
             paint_debug_overlays(
                 &ui.painter_at(rect),
@@ -1392,10 +1457,11 @@ impl Viewport {
             widget_values,
             drag: drag.edit,
             ui_drag: drag.ui_edit,
-            drag_released: drag.released,
+            drag_released: drag.released || spline_released,
             drop,
             terrain,
             surface,
+            spline,
             plugin_mouse,
             render: Some(render),
             shader_errors,

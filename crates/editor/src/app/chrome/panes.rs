@@ -865,6 +865,7 @@ impl EditorApp {
             Some(session) if self.overlays.agent_paths => session.agent_paths(),
             _ => Vec::new(),
         };
+        let spline_editing = self.spline_editing();
         let mut output = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| match render_state {
@@ -917,6 +918,7 @@ impl EditorApp {
                                 .constraint_tool
                                 .as_ref()
                                 .map(|tool| tool.first.map(|first| first.point)),
+                            spline_editing,
                             plugin_mouse,
                             play_camera: match sequence.and_then(|p| p.camera) {
                                 Some(shot) => Some(crate::viewport::PlayCamera {

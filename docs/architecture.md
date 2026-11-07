@@ -9,6 +9,7 @@ Map only. Open the one file that matches the change.
 - Frame order: [architecture/frame-loop.md](architecture/frame-loop.md)
 - Physics: [architecture/physics.md](architecture/physics.md)
 - Navigation mesh: [architecture/navigation.md](architecture/navigation.md)
+- Splines, SplineFollowers and riding moving parts: [architecture/splines.md](architecture/splines.md)
 - Play mode: [architecture/play-mode.md](architecture/play-mode.md)
 - Platforms and file access: [architecture/portability.md](architecture/portability.md)
 

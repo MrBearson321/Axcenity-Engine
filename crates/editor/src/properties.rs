@@ -1833,6 +1833,9 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         "ReverbType" => axcenity_audio::REVERB_TYPES.to_vec(),
         // What a Weather lets fall (graphics Phase 27).
         "Precipitation" => vec!["None", "Rain", "Snow"],
+        // A SplinePoint's handles and a SplineFollower's ends (Phase 73).
+        "SplineTangentMode" => axcenity_core::spline::TangentMode::NAMES.to_vec(),
+        "SplineFollowMode" => vec!["Loop", "PingPong", "Once"],
         _ => {
             ui.label(format!("{}.{}", item.enum_name, item.item));
             return None;

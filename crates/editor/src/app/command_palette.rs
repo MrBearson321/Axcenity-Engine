@@ -243,6 +243,7 @@ fn ribbon_insertables() -> Vec<(&'static str, Vec<Insertable>)> {
                 &Insertable::HEALTH,
                 &Insertable::TOOLS,
                 &Insertable::AGENTS,
+                &Insertable::SPLINES,
                 &Insertable::INTERACTION,
                 &Insertable::SEATS,
                 &Insertable::SPAWNING,

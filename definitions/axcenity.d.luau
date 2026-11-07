@@ -1076,6 +1076,28 @@ declare extern type EnumPrecipitationItems with
 	Snow: EnumPrecipitation
 end
 
+--- One choice of `Enum.SplineTangentMode`.
+declare extern type EnumSplineTangentMode extends EnumItem with
+end
+
+--- The choices of `Enum.SplineTangentMode`.
+declare extern type EnumSplineTangentModeItems with
+	Auto: EnumSplineTangentMode
+	Linear: EnumSplineTangentMode
+	Free: EnumSplineTangentMode
+end
+
+--- One choice of `Enum.SplineFollowMode`.
+declare extern type EnumSplineFollowMode extends EnumItem with
+end
+
+--- The choices of `Enum.SplineFollowMode`.
+declare extern type EnumSplineFollowModeItems with
+	Loop: EnumSplineFollowMode
+	PingPong: EnumSplineFollowMode
+	Once: EnumSplineFollowMode
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -1112,6 +1134,8 @@ declare extern type EnumLibrary with
 	HumanoidStateType: EnumHumanoidStateTypeItems
 	ReverbType: EnumReverbTypeItems
 	Precipitation: EnumPrecipitationItems
+	SplineTangentMode: EnumSplineTangentModeItems
+	SplineFollowMode: EnumSplineFollowModeItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -3783,6 +3807,51 @@ declare extern type Sequence extends Instance with
 	function Stop(self): ()
 end
 
+--- A curve through its SplinePoint children, in order (and back to the first when Closed), for SplineFollowers to move parts along, NavigationAgents to patrol and the Sequencer's camera to ride. Measure it with Length, GetPositionAt, GetCFrameAt and GetClosestDistance. Drawn in the editor, never in the game: click it with Select to edit its points.
+declare extern type Spline extends Instance with
+	--- If true, the curve goes on from the last SplinePoint back to the first, as a loop.
+	Closed: boolean
+	--- How long its curve is, in studs (read-only; 0 with fewer than two points).
+	Length: number
+	[string]: any
+	--- The point `t` of the way along the curve by distance: 0 is its first point, 1 its end (its first point again when Closed), 0.5 halfway along. Errors if it has no SplinePoint.
+	function GetPositionAt(self, t: number): Vector3
+	--- Where the curve is `distance` studs along it, facing the way it goes (upright, never rolled). A distance past an end is wrapped round a Closed spline and held at the end of an open one. Errors if it has no SplinePoint.
+	function GetCFrameAt(self, distance: number): CFrame
+	--- How far along the curve its point nearest `position` is, in studs: pass it to GetCFrameAt. Errors if it has no SplinePoint.
+	function GetClosestDistance(self, position: Vector3): number
+end
+
+--- One point of the Spline it's in: where the curve passes (Position), and how it bends there (TangentMode, InTangent and OutTangent).
+declare extern type SplinePoint extends Instance with
+	--- Where the curve passes, in the world. Its place among the Spline's children is its place along the curve.
+	Position: Vector3
+	--- How the curve bends here: `Enum.SplineTangentMode.Auto` (the default) passes through smoothly, from where its neighbours are; `Linear` heads straight for its neighbours (two Linear points are joined by a straight line); `Free` uses InTangent and OutTangent.
+	TangentMode: EnumSplineTangentMode | "Auto" | "Linear" | "Free"
+	--- With TangentMode Free: from the point to the handle the curve arrives along, in studs.
+	InTangent: Vector3
+	--- With TangentMode Free: from the point to the handle the curve leaves along, in studs. Longer handles bend the curve further their way.
+	OutTangent: Vector3
+	[string]: any
+end
+
+--- Moves the Part (with the parts welded to it) or the Model it's parented to along its Spline at Speed during Play: moving platforms, trains and gondolas. It starts at the point of the curve nearest where its parent is, and Loops, PingPongs or stops Once at the end, firing Reached. Characters standing on what it moves ride along.
+declare extern type SplineFollower extends Instance with
+	--- The Spline it moves its parent along. nil moves nothing.
+	Spline: Instance?
+	--- Studs a second along the curve, the same speed however its points are spaced.
+	Speed: number
+	--- What it does at the ends: `Enum.SplineFollowMode.Loop` goes on from the start again (round a Closed spline), `PingPong` (the default) turns back at each end, and `Once` stops at the end.
+	Mode: EnumSplineFollowMode | "Loop" | "PingPong" | "Once"
+	--- If true, its parent turns to face the way it goes along the curve, upright, as a train does. If false (the default), it keeps the way it was turned.
+	FaceAlong: boolean
+	--- If false, it stops where it is; true carries on from there.
+	Enabled: boolean
+	--- Fires as it gets to an end of its spline, with "End" or "Start": a Loop as it comes round to the start again, a PingPong as it turns back, and a Once as it stops.
+	Reached: Signal
+	[string]: any
+end
+
 --- A landscape: a heightfield shaped in the editor's Terrain Studio, drawn with its TerrainLayers and colliding as its ground. Position is the middle of its footprint at the bottom of its height range; Size is its width, height range and length.
 declare extern type Terrain extends Instance with
 	--- The middle of the terrain's bottom: its lowest possible ground.
@@ -3969,9 +4038,13 @@ declare extern type NavigationAgent extends Instance with
 	HearsPlayer: boolean
 	--- The behavior tree the agent runs during Play: a .behaviortree.json file in the project, made in the Behavior Tree tab. Every frame, before the agent walks, the tree decides where it goes (it can test SeesPlayer and HearsPlayer, set Destination, chase the player character and wait), so it may overwrite a Destination a script set. Empty runs none, and scripts set Destination themselves. A file that isn't a behavior tree, or has problems, runs nothing and Output says why once.
 	BehaviorTree: string
+	--- A Spline whose points the agent walks to in order during Play, with no script: round again from the last to the first on a Closed spline, back and forth on an open one. It walks the navigation mesh between points, so it goes round walls; a point it can't reach is skipped. nil patrols nothing. `agent:Patrol(spline)` sets it.
+	PatrolSpline: Instance?
 	--- Fires when the agent starts seeing or hearing the player character. The handler gets the sense: "Sight" or "Hearing".
 	PlayerSensed: Signal
 	[string]: any
+	--- Sets PatrolSpline: the agent walks `spline`'s points in order from now on (nil stops).
+	function Patrol(self, spline: Spline?): ()
 end
 
 --- A place in the world to come back to. `SaveService:SetCheckpoint(checkpoint)` makes it the active one and captures the player data and world state there; `SaveService:RestoreCheckpoint()` puts them back and stands the player character at its Position. A save slot keeps the active checkpoint.
@@ -4815,7 +4888,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Spline") -> Spline) & ((className: "SplinePoint") -> SplinePoint) & ((className: "SplineFollower") -> SplineFollower) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

@@ -13,6 +13,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Fractures, the `mesh_edit` crate, or plane cutting | [architecture/fracture.md](architecture/fracture.md) |
 | Union, Negate, Intersect, Separate, `UnionOperation`, `CollisionFidelity` | [architecture/solid-modeling.md](architecture/solid-modeling.md) |
 | The navigation mesh, agents, or behavior trees | [architecture/navigation.md](architecture/navigation.md) |
+| Splines, SplinePoints, SplineFollowers, riding moving parts, patrols, the Spline camera cut | [architecture/splines.md](architecture/splines.md) |
 | Play and Stop | [architecture/play-mode.md](architecture/play-mode.md) |
 | The F9 Developer Console, `ConsoleService`, the player's log files and crash message | [developer-console.md](developer-console.md) |
 | Save slots, checkpoints, `SaveService` | [architecture/saves.md](architecture/saves.md) |

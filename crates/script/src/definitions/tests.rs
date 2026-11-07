@@ -332,6 +332,11 @@ fn described_fields_and_methods_exist() {
         (ClassName::Team, "Instance.new('Team')"),
         (ClassName::Animation, "Instance.new('Animation')"),
         (ClassName::Sequence, "Instance.new('Sequence')"),
+        (ClassName::Spline, "Instance.new('Spline')"),
+        (
+            ClassName::NavigationAgent,
+            "Instance.new('NavigationAgent')",
+        ),
         (
             ClassName::AnimationTrack,
             "Instance.new('Animator'):LoadAnimation(Instance.new('Animation'))",

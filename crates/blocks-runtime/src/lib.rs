@@ -305,6 +305,13 @@ pub enum BlockKind {
         sense: String,
         body: Vec<Block>,
     },
+    /// When a SplineFollower gets to an end of its spline (`Reached`),
+    /// `which` being one of [`SPLINE_ENDS`] (Phase 73).
+    WhenSplineReached {
+        follower: String,
+        which: String,
+        body: Vec<Block>,
+    },
     /// When a character sits on a Seat: its `Occupant` changes to a
     /// controller (not to nil).
     WhenSeatOccupied {
@@ -695,6 +702,19 @@ pub enum BlockKind {
     PlayCutscene {
         sequence: String,
     },
+    /// Puts an object `distance` studs along a Spline, facing along it
+    /// (`target:PivotTo(spline:GetCFrameAt(distance))`, Phase 73).
+    PlaceOnSpline {
+        target: String,
+        spline: String,
+        distance: Expression,
+    },
+    /// Has a NavigationAgent walk a Spline's points in order
+    /// (`agent:Patrol(spline)`).
+    Patrol {
+        agent: String,
+        spline: String,
+    },
 
     // Tweens: a property moving smoothly (`TweenService`).
     /// Moves one property of an object to `value` over `seconds`, eased by
@@ -856,6 +876,9 @@ pub const IS_A_CLASSES: [&str; 16] = [
 /// The senses a NavigationAgent's `PlayerSensed` names.
 pub const SENSES: [&str; 2] = ["Sight", "Hearing"];
 
+/// The ends a SplineFollower's `Reached` names.
+pub const SPLINE_ENDS: [&str; 2] = ["End", "Start"];
+
 impl BlockKind {
     pub fn shape(&self) -> BlockShape {
         if self.is_event() {
@@ -886,6 +909,7 @@ impl BlockKind {
                 | BlockKind::WhenStateChanged { .. }
                 | BlockKind::WhenAnimationEvent { .. }
                 | BlockKind::WhenAgentSenses { .. }
+                | BlockKind::WhenSplineReached { .. }
                 | BlockKind::WhenSeatOccupied { .. }
                 | BlockKind::WhenPromptTriggered { .. }
                 | BlockKind::WhenPartClicked { .. }
@@ -930,6 +954,7 @@ impl BlockKind {
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::WhenAgentSenses { body, .. }
+            | BlockKind::WhenSplineReached { body, .. }
             | BlockKind::WhenSeatOccupied { body, .. }
             | BlockKind::WhenPromptTriggered { body, .. }
             | BlockKind::WhenPartClicked { body, .. }
@@ -970,6 +995,7 @@ impl BlockKind {
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::WhenAgentSenses { body, .. }
+            | BlockKind::WhenSplineReached { body, .. }
             | BlockKind::WhenSeatOccupied { body, .. }
             | BlockKind::WhenPromptTriggered { body, .. }
             | BlockKind::WhenPartClicked { body, .. }
@@ -1028,6 +1054,7 @@ impl BlockKind {
             | BlockKind::ShowSystemMessage { text: e }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
+            | BlockKind::PlaceOnSpline { distance: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
             | BlockKind::SetAnimatorNumber { value: e, .. }
             | BlockKind::SetVariable { value: e, .. }
@@ -1158,6 +1185,7 @@ impl BlockKind {
             | BlockKind::ShowSystemMessage { text: e }
             | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
+            | BlockKind::PlaceOnSpline { distance: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
             | BlockKind::SetAnimatorNumber { value: e, .. }
             | BlockKind::SetVariable { value: e, .. }
@@ -1330,6 +1358,18 @@ pub enum Expression {
         table: String,
         key: Box<Expression>,
     },
+    /// The point `t` of the way along a Spline (`spline:GetPositionAt(t)`,
+    /// Phase 73).
+    SplinePosition {
+        spline: String,
+        t: Box<Expression>,
+    },
+    /// How far along a Spline its point nearest `position` is
+    /// (`spline:GetClosestDistance(position)`).
+    SplineClosestDistance {
+        spline: String,
+        position: Box<Expression>,
+    },
     /// A row's value in one column: `row.Damage`.
     DataValue {
         column: String,
@@ -1396,6 +1436,10 @@ impl Expression {
             | Expression::Not { value }
             | Expression::IsA { value, .. }
             | Expression::DataRow { key: value, .. }
+            | Expression::SplinePosition { t: value, .. }
+            | Expression::SplineClosestDistance {
+                position: value, ..
+            }
             | Expression::DataValue { row: value, .. } => vec![value],
             _ => Vec::new(),
         }
@@ -1420,6 +1464,10 @@ impl Expression {
             | Expression::Not { value }
             | Expression::IsA { value, .. }
             | Expression::DataRow { key: value, .. }
+            | Expression::SplinePosition { t: value, .. }
+            | Expression::SplineClosestDistance {
+                position: value, ..
+            }
             | Expression::DataValue { row: value, .. } => vec![value],
             _ => Vec::new(),
         }

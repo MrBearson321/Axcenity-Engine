@@ -81,6 +81,10 @@ pub enum Insertable {
     Animation,
     /// Plays a cutscene sequence (Phase 51), in the Workspace.
     Sequence,
+    /// A Spline with two points in front of the camera (Phase 73).
+    Spline,
+    /// A SplineFollower in the selected part, following the first Spline.
+    SplineFollower,
     /// A ragdoll for the selected skinned MeshPart; Build in its Properties
     /// makes its bodies and joints.
     Ragdoll,
@@ -270,6 +274,8 @@ impl Insertable {
         Insertable::VehicleSeat,
         Insertable::VehicleWheel,
     ];
+    /// Splines, and the mover that carries a part along one (Phase 73).
+    pub const SPLINES: [Insertable; 2] = [Insertable::Spline, Insertable::SplineFollower];
     /// Camera viewpoints, placed where the editor's camera is.
     pub const CAMERAS: [Insertable; 1] = [Insertable::Camera];
     /// Points on parts, for constraints and effects.
@@ -360,6 +366,8 @@ impl Insertable {
             Insertable::Fracture => "Fracture",
             Insertable::Animation => "Animation",
             Insertable::Sequence => "Sequence",
+            Insertable::Spline => "Spline",
+            Insertable::SplineFollower => "Spline Follower",
             Insertable::ThirdPersonController => "Third Person",
             Insertable::FirstPersonController => "First Person",
             Insertable::NavigationAgent => "Agent",
@@ -433,6 +441,8 @@ impl Insertable {
             Insertable::Fracture => ClassName::Fracture,
             Insertable::Animation => ClassName::Animation,
             Insertable::Sequence => ClassName::Sequence,
+            Insertable::Spline => ClassName::Spline,
+            Insertable::SplineFollower => ClassName::SplineFollower,
             Insertable::ThirdPersonController => ClassName::ThirdPersonController,
             Insertable::FirstPersonController => ClassName::FirstPersonController,
             Insertable::NavigationAgent => ClassName::NavigationAgent,
@@ -977,6 +987,10 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                 what,
                 Insertable::Attachment | Insertable::VehicleWheel | Insertable::ClickDetector
             ) && is_part
+                && is_saved(world, id))
+            // A SplineFollower moves the part or Model it's in.
+            || (what == Insertable::SplineFollower
+                && (is_part || is_group)
                 && is_saved(world, id))
             // A prompt shows over its part or Attachment.
             || (what == Insertable::ProximityPrompt

@@ -55,6 +55,7 @@ mod settings;
 
 mod sky;
 mod solid;
+mod splines;
 mod tags;
 mod terrain;
 mod texture_set;
@@ -1225,6 +1226,10 @@ impl EditorApp {
             self.constraint_surface(pick);
             ctx.request_repaint();
         }
+        if let Some(action) = output.spline {
+            self.spline_action(action);
+            ctx.request_repaint();
+        }
         if let Some(mouse) = output.plugin_mouse {
             self.plugin_mouse(mouse);
         }
@@ -1421,6 +1426,8 @@ mod plugin_tests;
 mod posing_tests;
 #[cfg(test)]
 mod prefab_tests;
+#[cfg(test)]
+mod spline_tests;
 #[cfg(test)]
 mod template_tests;
 
