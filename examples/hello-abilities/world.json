@@ -1,0 +1,139 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Position": [0, -0.5, 0],
+          "Size": [80, 1, 80],
+          "Color": [0.35, 0.37, 0.4],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Part",
+        "name": "StunPad",
+        "properties": {
+          "Position": [8, 0.1, 0],
+          "Size": [6, 0.2, 6],
+          "Color": [0.95, 0.8, 0.2],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Character",
+        "attributes": { "Mana": 100, "MaxMana": 100 },
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Position": [0, 2.5, 0],
+              "Size": [2, 5, 1],
+              "Color": [0.2, 0.55, 0.9]
+            }
+          },
+          {
+            "class": "ThirdPersonController",
+            "name": "ThirdPersonController"
+          },
+          {
+            "class": "Health",
+            "name": "Health",
+            "properties": { "MaxHealth": 100, "Health": 60, "RegenRate": 0 }
+          },
+          {
+            "class": "Ability",
+            "name": "Fireball",
+            "properties": {
+              "Cooldown": 3,
+              "CostAttribute": "Mana",
+              "CostAmount": 20,
+              "ActivationKey": "Fireball",
+              "BlockedByTags": "Stunned"
+            },
+            "attributes": { "Damage": 15 }
+          },
+          {
+            "class": "Ability",
+            "name": "Heal",
+            "properties": {
+              "Cooldown": 8,
+              "CostAttribute": "Mana",
+              "CostAmount": 30,
+              "ActivationKey": "Heal",
+              "BlockedByTags": "Stunned",
+              "Duration": 5,
+              "GrantsTags": "Healing"
+            }
+          }
+        ]
+      },
+      {
+        "class": "Model",
+        "name": "Dummy",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Position": [0, 2.5, -14],
+              "Size": [3, 5, 2],
+              "Color": [0.75, 0.3, 0.25],
+              "Anchored": true
+            }
+          },
+          {
+            "class": "Health",
+            "name": "Health",
+            "properties": { "RegenRate": 0 }
+          }
+        ]
+      }
+    ]
+  },
+  "replicated_storage": {
+    "children": [
+      {
+        "class": "Folder",
+        "name": "Effects",
+        "children": [
+          {
+            "class": "Effect",
+            "name": "Poison",
+            "properties": {
+              "Attribute": "Health",
+              "Amount": -2,
+              "Duration": 10,
+              "Period": 1,
+              "MaxStacks": 3,
+              "GrantsTags": "Poisoned"
+            }
+          },
+          {
+            "class": "Effect",
+            "name": "Regeneration",
+            "properties": {
+              "Attribute": "Health",
+              "Amount": 5,
+              "Duration": 5,
+              "Period": 1
+            }
+          },
+          {
+            "class": "Effect",
+            "name": "Stun",
+            "properties": {
+              "Attribute": "",
+              "Duration": 2,
+              "GrantsTags": "Stunned"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -885,12 +885,26 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         doc: "The project's data tables (`assets/data/*.data.json`, made in the Data Table tab), from `game:GetService(\"DataService\")`. Scripts read them; they can't change them.",
         fields: &[],
         operators: &[],
-        methods: &[Function {
-            name: "GetTable",
-            doc: "The table named `name`: `\"weapons\"` is `assets/data/weapons.data.json`. A table that isn't there, or can't be read, is an error saying why.",
-            params: &[("name", "string")],
-            returns: "DataTable",
-        }],
+        methods: &[
+            Function {
+                name: "GetTable",
+                doc: "The table named `name`: `\"weapons\"` is `assets/data/weapons.data.json`. A table that isn't there, or can't be read, is an error saying why.",
+                params: &[("name", "string")],
+                returns: "DataTable",
+            },
+            Function {
+                name: "CreateAbility",
+                doc: "A new Ability (with no Parent) made from the row `key` of the table `name`, named `key`: each column named after an Ability property (Cooldown, CostAttribute, CostAmount, ActivationKey, BlockedByTags, GrantsTags, Duration, Icon) sets it, and the other columns become its attributes.",
+                params: &[("name", "string"), ("key", "string")],
+                returns: "Ability",
+            },
+            Function {
+                name: "CreateEffect",
+                doc: "A new Effect (with no Parent) made from the row `key` of the table `name`, named `key`: each column named after an Effect property (Attribute, Operation, Amount, Duration, Period, MaxStacks, GrantsTags) sets it, and the other columns become its attributes.",
+                params: &[("name", "string"), ("key", "string")],
+                returns: "Effect",
+            },
+        ],
     },
     ValueType {
         class: "ConsoleService",
@@ -2032,6 +2046,42 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
             doc: "Replaces the part with its pieces before the next physics step, flying away from `point` (the part's middle if nil) at up to `force` ÷ the part's mass studs a second: that much for the nearest pieces, half for the farthest. Fires Shattered. Does nothing until Generate has made the pieces.",
             params: &[("point", "Vector3?"), ("force", "number?")],
             returns: "()",
+        },
+    ),
+    (
+        ClassName::Ability,
+        Function {
+            name: "CanActivate",
+            doc: "Whether it can activate now, and if not, why: it's cooling down, it's active, its holder has one of its BlockedByTags, or hasn't CostAmount of its CostAttribute.",
+            params: &[],
+            returns: "(boolean, string?)",
+        },
+    ),
+    (
+        ClassName::Ability,
+        Function {
+            name: "Activate",
+            doc: "From a Script: activates it if it can (spends the cost, starts the cooldown, fires Activated) and returns whether it did. From a LocalScript: asks the server, which checks again, and returns whether it asked; the ability bar's sweep starts at once.",
+            params: &[],
+            returns: "boolean",
+        },
+    ),
+    (
+        ClassName::Ability,
+        Function {
+            name: "Cancel",
+            doc: "Scripts only: ends it early if it's active, taking off its GrantsTags and firing Ended with true. The cooldown carries on.",
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Model,
+        Function {
+            name: "ApplyEffect",
+            doc: "Scripts only: puts a copy of the Effect `effect` on this Model and returns it, or adds a stack to the copy already here (up to its MaxStacks) and starts its Duration over. An instant Effect changes at once and returns nil.",
+            params: &[("effect", "Effect")],
+            returns: "Effect?",
         },
     ),
     (

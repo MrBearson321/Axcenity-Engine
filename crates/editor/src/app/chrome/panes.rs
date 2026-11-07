@@ -904,6 +904,11 @@ impl EditorApp {
                                 .as_ref()
                                 .and_then(|play| play.loading_screen()),
                             hotbar: self.play.as_ref().and_then(|play| play.hotbar()),
+                            ability_bar: self
+                                .play
+                                .as_ref()
+                                .map(|play| play.ability_bar())
+                                .unwrap_or_default(),
                             leaderboard: self.play.as_ref().is_some_and(|play| play.leaderboard()),
                             chat: self
                                 .play

@@ -323,6 +323,8 @@ pub struct ViewportScene<'a> {
     /// The player character's Inventory during Play, whose hotbar is drawn
     /// over the game UI.
     pub hotbar: Option<InstanceId>,
+    /// The player's Abilities during Play (Phase 76), for the ability bar.
+    pub ability_bar: Vec<axcenity_core::ability::AbilitySlot>,
     /// Whether the default leaderboard is drawn during Play (Tab hides it).
     pub leaderboard: bool,
     /// The chat window during Play (Phase 67): its lines, and the line
@@ -879,6 +881,7 @@ impl Viewport {
             focused_text,
             loading_screen,
             hotbar,
+            ability_bar,
             leaderboard,
             chat,
             prompts,
@@ -1237,6 +1240,13 @@ impl Viewport {
                 height,
             ));
         }
+        draw_list.ui.extend(axcenity_ui::ability_bar_items(
+            world,
+            &ability_bar,
+            stylesheets,
+            width,
+            height,
+        ));
         if leaderboard {
             draw_list.ui.extend(axcenity_ui::leaderboard_items(
                 world,

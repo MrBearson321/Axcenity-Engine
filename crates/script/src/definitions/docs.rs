@@ -3093,6 +3093,101 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "With TangentMode Free: from the point to the handle the curve leaves along, in studs. Longer handles bend the curve further their way.",
     ),
     (
+        ClassName::Ability,
+        "Cooldown",
+        "Seconds after it activates before it can activate again.",
+    ),
+    (
+        ClassName::Ability,
+        "CostAttribute",
+        "The number attribute activating spends, such as `\"Mana\"`, of its holder: the Model or Player it's in, or that Player's character or that character's Player. Empty costs nothing.",
+    ),
+    (
+        ClassName::Ability,
+        "CostAmount",
+        "How much of CostAttribute activating spends. It can't activate while its holder has less.",
+    ),
+    (
+        ClassName::Ability,
+        "ActivationKey",
+        "The input map action, such as `\"Ability1\"`, that activates it for the player whose character or Player holds it. The ability bar shows it. Empty: only scripts activate it.",
+    ),
+    (
+        ClassName::Ability,
+        "BlockedByTags",
+        "Tags, separated by commas, such as `\"Stunned, Silenced\"`: while its holder has any of them, it can't activate.",
+    ),
+    (
+        ClassName::Ability,
+        "GrantsTags",
+        "Tags, separated by commas, its holder's character has while it's active (for its Duration).",
+    ),
+    (
+        ClassName::Ability,
+        "Duration",
+        "Seconds it stays active after activating, giving its GrantsTags, before Ended fires. 0 ends at once.",
+    ),
+    (
+        ClassName::Ability,
+        "Icon",
+        "The picture the ability bar shows for it, such as `\"assets/textures/fireball.png\"`. Empty shows its Name.",
+    ),
+    (
+        ClassName::Ability,
+        "CooldownLeft",
+        "Read-only: seconds until it can activate again. 0 when it's ready.",
+    ),
+    (
+        ClassName::Ability,
+        "Active",
+        "Read-only: true from activating until Ended, for an Ability with a Duration.",
+    ),
+    (
+        ClassName::Effect,
+        "Attribute",
+        "What it changes on the Model it's in: a property of its Health (`Health`, `MaxHealth`, `RegenRate`), of its character controller, as the Humanoid's (`WalkSpeed`, `JumpHeight`), or else the Model's number attribute of this name.",
+    ),
+    (
+        ClassName::Effect,
+        "Operation",
+        "`Enum.EffectOperation.Add` adds Amount (a negative Amount on Health is damage); `Multiply` multiplies by it. Each stack does it again.",
+    ),
+    (
+        ClassName::Effect,
+        "Amount",
+        "How much it adds, or what it multiplies by.",
+    ),
+    (
+        ClassName::Effect,
+        "Duration",
+        "Seconds it lasts. 0 is instant: it changes once and is gone. Below 0 it lasts until it's removed.",
+    ),
+    (
+        ClassName::Effect,
+        "Period",
+        "With a Duration: above 0, it changes again every Period seconds, for good (poison, a heal over time). 0 changes once for as long as it lasts, and removing it undoes that.",
+    ),
+    (
+        ClassName::Effect,
+        "MaxStacks",
+        "How many times applying it to a Model that has it already adds to it. Applying it again also starts its Duration over.",
+    ),
+    (
+        ClassName::Effect,
+        "GrantsTags",
+        "Tags, separated by commas, its Model has while it's active.",
+    ),
+    (
+        ClassName::Effect,
+        "Stacks",
+        "Read-only: how many times it's applied.",
+    ),
+    (
+        ClassName::Effect,
+        "TimeLeft",
+        "Read-only: the seconds it has left.",
+    ),
+    (
         ClassName::SplineFollower,
         "Spline",
         "The Spline it moves its parent along. nil moves nothing.",
@@ -4704,6 +4799,21 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires when the Primary action is let go after Activated, or the Tool leaves the hand first.",
     ),
     (
+        ClassName::Ability,
+        "Activated",
+        "Fires on the server and its players' devices as it activates, with the Player who asked (nil when a Script activated it). Do what it does here, such as the damage.",
+    ),
+    (
+        ClassName::Ability,
+        "Ended",
+        "Fires as it stops being active, with true when Cancel ended it early. An Ability with no Duration ends as it activates.",
+    ),
+    (
+        ClassName::Ability,
+        "CooldownChanged",
+        "Fires as its cooldown starts, with Cooldown, and as it ends, with 0.",
+    ),
+    (
         ClassName::SplineFollower,
         "Reached",
         "Fires as it gets to an end of its spline, with \"End\" or \"Start\": a Loop as it comes round to the start again, a PingPong as it turns back, and a Once as it stops.",
@@ -5076,6 +5186,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::SplinePoint => {
             "One point of the Spline it's in: where the curve passes (Position), and how it bends there (TangentMode, InTangent and OutTangent)."
+        }
+        ClassName::Ability => {
+            "Something a character can do, in its Model or its Player: a Fireball, a dash, a heal. Activating it (its ActivationKey, or Activate) spends CostAmount of its holder's CostAttribute and starts its Cooldown, unless its holder has one of BlockedByTags; while active it gives GrantsTags. It only activates on the server, which checks again whatever a player's device says. The ability bar shows the player's abilities with their cooldowns."
+        }
+        ClassName::Effect => {
+            "A change to the Model it's in: to an attribute, or a Health or Humanoid property. It's instant, lasts Duration seconds, or repeats every Period (poison, a heal over time); it adds or multiplies, stacks to MaxStacks, and gives GrantsTags while active. Removing it undoes a lasting change. Keep templates out of Models (in ReplicatedStorage, ServerStorage or an Ability) and put copies on with `model:ApplyEffect(effect)`."
         }
         ClassName::SplineFollower => {
             "Moves the Part (with the parts welded to it) or the Model it's parented to along its Spline at Speed during Play: moving platforms, trains and gondolas. It starts at the point of the curve nearest where its parent is, and Loops, PingPongs or stops Once at the end, firing Reached. Characters standing on what it moves ride along."

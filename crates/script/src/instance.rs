@@ -315,6 +315,12 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
                 "{key} is read-only: it's where the constraint's attachments are now"
             )))
         }
+        key if class.is_some_and(|class| crate::ability::read_only(class, key).is_some()) => {
+            let class = class.expect("checked above");
+            Err(mlua::Error::runtime(
+                crate::ability::read_only(class, key).expect("checked above"),
+            ))
+        }
         "Health" if class == Some(ClassName::Health) => crate::health::set(lua, id, value),
         key if class == Some(ClassName::Sequence) && crate::sequence::is_field(key) => {
             crate::sequence::set(lua, id, key, value)

@@ -42,6 +42,7 @@
 //! - [`ScriptRuntime::start_spec`] runs a game test's spec file for the
 //!   `testing` crate's runner (see `spec`).
 
+mod ability;
 mod api;
 mod attachment;
 pub mod audio_settings;
@@ -115,6 +116,7 @@ use mlua::Lua;
 
 use crate::context::Context;
 
+pub use ability::{AbilityEvent, Blocked, tag_list};
 pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, GameCamera};
 pub use chat::ChatLine;
 pub use console_service::{ConsoleCommandInfo, ConsoleRun, split_command};
@@ -230,6 +232,8 @@ pub struct ScriptRuntime {
     shatters: Vec<Shatter>,
     /// Every Health's regeneration wait, and their events waiting to fire.
     health: health::Healths,
+    /// Abilities' and Effects' state (Phase 76), which both sides share.
+    abilities: ability::SharedAbilities,
     /// The ProximityPrompts showing and their holds (Phase 44).
     prompts: prompt::Prompts,
     /// What the mouse points at and presses, for ClickDetectors.
@@ -328,6 +332,9 @@ impl ScriptRuntime {
         let chat = chat::SharedChat::default();
         server.lua.set_app_data(chat.clone());
         client.lua.set_app_data(chat.clone());
+        let abilities = ability::SharedAbilities::default();
+        server.lua.set_app_data(abilities.clone());
+        client.lua.set_app_data(abilities.clone());
         Self {
             server,
             client,
@@ -337,6 +344,7 @@ impl ScriptRuntime {
             particle_emits: Vec::new(),
             shatters: Vec::new(),
             health: health::Healths::default(),
+            abilities,
             prompts: prompt::Prompts::default(),
             clicks: click::Clicks::default(),
             tools: tool::Tools::default(),
@@ -805,6 +813,19 @@ impl ScriptRuntime {
     /// in the next [`step`](Self::step), as this device's own do.
     pub fn receive_remote_messages(&mut self, messages: Vec<Message>) {
         for message in messages {
+            if message.kind == MessageKind::Activate {
+                if message.to == Side::Server && !self.client_only {
+                    self.abilities
+                        .0
+                        .borrow_mut()
+                        .requests
+                        .push(ability::Request {
+                            ability: message.remote,
+                            player: message.player,
+                        });
+                }
+                continue;
+            }
             self.transport.send(message);
         }
     }
@@ -1468,8 +1489,128 @@ impl ScriptRuntime {
         let events = self.health.step(world, &assets, seconds);
         self.health.pending.extend(events);
         self.fire_changes(world);
+        // Then Abilities' cooldowns and Effects (Phase 76).
+        self.abilities.0.borrow_mut().step(world, seconds);
+        self.fire_changes(world);
         health::bind_bars(world);
         self.fire_changes(world);
+    }
+
+    /// Frame step 1, after [`step_tools`](Self::step_tools) (Phase 76),
+    /// on every device: the player's Abilities whose `ActivationKey` was
+    /// just pressed ask to activate. The server (this device's, or the one
+    /// it follows) checks again; a following device starts the cooldown
+    /// sweep at once. This device's server then serves the requests that
+    /// came in.
+    pub fn step_abilities(&mut self, world: &mut World, seconds: f64) {
+        self.fire_changes(world);
+        let input = self.client.prompt_input();
+        let player = self.client.local_player();
+        let locked = self.input_locked(world);
+        {
+            let mut abilities = self.abilities.0.borrow_mut();
+            abilities.step_predicted(seconds);
+            let mine =
+                player.map_or_else(Vec::new, |player| ability::player_abilities(world, player));
+            let pressed = if locked {
+                Vec::new()
+            } else {
+                abilities.pressed(world, &mine, &input.map, &input.game)
+            };
+            for ability in pressed {
+                let Some(player) = player else { break };
+                if self.client_only {
+                    if ability::can_activate(world, ability).is_ok() {
+                        abilities.predict(world, ability);
+                        self.outgoing.push(Message {
+                            to: Side::Server,
+                            remote: ability,
+                            player,
+                            kind: MessageKind::Activate,
+                            args: Vec::new(),
+                        });
+                    }
+                } else {
+                    abilities
+                        .requests
+                        .push(ability::Request { ability, player });
+                }
+            }
+            if !self.client_only {
+                abilities.serve_requests(world);
+            }
+        }
+        self.fire_changes(world);
+    }
+
+    /// The local player's Abilities with an `ActivationKey`, for the
+    /// ability bar: each with the cooldown it shows (the server's, or the
+    /// one this device started at once).
+    pub fn ability_bar(&self, world: &World) -> Vec<axcenity_core::ability::AbilitySlot> {
+        let Some(player) = self.client.local_player() else {
+            return Vec::new();
+        };
+        let input = self.client.prompt_input();
+        let abilities = self.abilities.0.borrow();
+        ability::player_abilities(world, player)
+            .into_iter()
+            .filter_map(|id| {
+                let instance = world.get(id)?;
+                let action = instance.property("ActivationKey")?.as_str()?.trim();
+                if action.is_empty() {
+                    return None;
+                }
+                Some(axcenity_core::ability::AbilitySlot {
+                    ability: id,
+                    key: input
+                        .map
+                        .action(action)
+                        .map(|action| action.label(input.gamepad))
+                        .unwrap_or_default(),
+                    cooldown_left: abilities.shown_cooldown(world, id) as f32,
+                    cooldown: instance
+                        .property("Cooldown")
+                        .and_then(Value::as_number)
+                        .unwrap_or(0.0) as f32,
+                })
+            })
+            .collect()
+    }
+
+    /// Players' requests to activate Abilities that this server hasn't
+    /// served yet (Phase 76), for tests.
+    pub fn ability_requests(&self) -> Vec<(InstanceId, InstanceId)> {
+        self.abilities
+            .0
+            .borrow()
+            .requests
+            .iter()
+            .map(|request| (request.ability, request.player))
+            .collect()
+    }
+
+    /// Fires the Abilities' events, and Health's from Effects, on both
+    /// sides, for up to [`MAX_CHANGE_ROUNDS`] rounds of handlers that
+    /// cause more.
+    fn fire_ability_events(&mut self, world: &mut World) {
+        for _ in 0..MAX_CHANGE_ROUNDS {
+            let (events, health) = {
+                let mut abilities = self.abilities.0.borrow_mut();
+                (
+                    std::mem::take(&mut abilities.pending),
+                    std::mem::take(&mut abilities.health),
+                )
+            };
+            self.health.pending.extend(health);
+            if events.is_empty() {
+                return;
+            }
+            for side in [Side::Server, Side::Client] {
+                self.context(side).fire_ability_events(world, &events);
+                self.collect(side);
+                self.fire_change_rounds(world);
+            }
+        }
     }
 
     /// Fires the Health events scripts and the health step queued, on both
@@ -1689,6 +1830,7 @@ impl ScriptRuntime {
     /// that are now where scripts run start.
     pub fn fire_changes(&mut self, world: &mut World) {
         self.fire_change_rounds(world);
+        self.fire_ability_events(world);
         self.fire_health_events(world);
         self.fire_tool_events(world);
         self.fire_player_events(world);
@@ -1953,6 +2095,16 @@ impl ScriptRuntime {
             };
             if elsewhere {
                 self.outgoing.push(message);
+            } else if message.kind == MessageKind::Activate {
+                // For this device's server: the abilities step serves it.
+                self.abilities
+                    .0
+                    .borrow_mut()
+                    .requests
+                    .push(ability::Request {
+                        ability: message.remote,
+                        player: message.player,
+                    });
             } else {
                 self.transport.send(message);
             }
@@ -2103,6 +2255,8 @@ mod user_settings_tests;
 #[cfg(test)]
 mod cframe_tests;
 
+#[cfg(test)]
+mod ability_tests;
 #[cfg(test)]
 mod assembly_tests;
 #[cfg(test)]

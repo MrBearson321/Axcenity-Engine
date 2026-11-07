@@ -224,6 +224,12 @@ impl Session {
         self.scripts.player_inventory(&self.world)
     }
 
+    /// The player's Abilities and their cooldowns (Phase 76), for the
+    /// ability bar the viewport draws.
+    pub fn ability_bar(&self) -> Vec<axcenity_core::ability::AbilitySlot> {
+        self.scripts.ability_bar(&self.world)
+    }
+
     /// Whether the viewport draws the default leaderboard (Phase 47): Tab
     /// hides and shows it.
     pub fn leaderboard(&self) -> bool {
@@ -603,6 +609,8 @@ impl Session {
                 self.scripts.step_prompts(&mut self.world, seconds);
                 self.scripts.step_tools(&mut self.world);
             }
+            // Then Abilities' keys, on every device (Phase 76).
+            self.scripts.step_abilities(&mut self.world, seconds);
             self.forward_output(output);
             if self.scripts.pause().is_some() {
                 cost.scripts += lap();

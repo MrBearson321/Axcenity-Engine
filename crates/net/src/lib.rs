@@ -43,7 +43,7 @@ pub use wire::{WireArg, WireKind, WireMessage, WireValue};
 
 /// The network protocol's version: games on different ones can't play
 /// together, and the handshake says so. Raise it when a message changes.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 /// A chat message as sent on: trimmed, at most 200 characters, and not
 /// empty, whatever a modified client sends.
 pub(crate) fn chat_text(text: &str) -> Option<String> {
@@ -56,6 +56,8 @@ pub const DEFAULT_PORT: u16 = 47800;
 /// The UDP port hosts answer LAN searches on.
 pub const DISCOVERY_PORT: u16 = 47801;
 
+#[cfg(test)]
+mod ability_tests;
 #[cfg(test)]
 mod character_tests;
 #[cfg(test)]

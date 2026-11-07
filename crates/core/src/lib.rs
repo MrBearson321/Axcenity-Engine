@@ -9,6 +9,7 @@
 //! - [`prefab`] links placed copies to their prefab files and works out their overrides.
 //! - [`Value`] is a typed property value, such as a [`Vector3`] or [`Color3`].
 
+pub mod ability;
 mod animation;
 mod arena;
 mod class;

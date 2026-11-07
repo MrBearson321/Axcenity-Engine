@@ -7,13 +7,19 @@
 //! is what the next call sees. A row is a snapshot of one row, read by
 //! column name (`row.Damage`); a reference column gives the row it names.
 //! Writing to a table or a row is an error. Both sides have it.
+//!
+//! `CreateAbility(table, key)` and `CreateEffect(table, key)` (Phase 76)
+//! make an Ability or Effect from one row: named after its key, each
+//! column that names one of the class's properties sets it, and the other
+//! columns become attributes (`ability:GetAttribute("Damage")`).
 
 use std::sync::Arc;
 
 use axcenity_assets::{Assets, Cell, ColumnType, DataTable};
-use axcenity_core::{Color3, Vector3};
+use axcenity_core::{ClassName, Color3, EnumItem, InstanceId, Vector3, World};
 use mlua::{IntoLua, Lua, MetaMethod, UserData, UserDataMethods, Value};
 
+use crate::instance::{LuaInstance, world_mut};
 use crate::types::{LuaColor3, LuaVector3};
 
 /// The DataService, as scripts see it.
@@ -57,6 +63,12 @@ impl UserData for LuaDataService {
             // Read now, so a wrong name errors here and not at the first Get.
             table(lua, &name)?;
             Ok(LuaDataTable { name })
+        });
+        methods.add_method("CreateAbility", |lua, _, (name, key): (String, String)| {
+            create_from_row(lua, ClassName::Ability, &name, &key)
+        });
+        methods.add_method("CreateEffect", |lua, _, (name, key): (String, String)| {
+            create_from_row(lua, ClassName::Effect, &name, &key)
         });
         methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("DataService"));
     }
@@ -105,6 +117,88 @@ impl UserData for LuaDataTable {
         methods.add_meta_method(MetaMethod::ToString, |_, this, ()| {
             Ok(format!("DataTable {}", this.name))
         });
+    }
+}
+
+/// A cell as a property or attribute value: `current` (the property's
+/// default, if it's one) says which kind, and an enum property takes the
+/// option's name.
+fn cell_value(cell: &Cell, current: Option<&axcenity_core::Value>) -> Option<axcenity_core::Value> {
+    use axcenity_core::Value as V;
+    let value = match cell {
+        Cell::Number(n) => V::Number(*n),
+        Cell::Integer(n) => V::Number(*n as f64),
+        Cell::Text(text) => match current {
+            Some(V::EnumItem(item)) => V::EnumItem(EnumItem {
+                enum_name: item.enum_name.clone(),
+                item: text.clone(),
+            }),
+            _ => V::String(text.clone()),
+        },
+        Cell::Bool(b) => V::Bool(*b),
+        Cell::Vector3([x, y, z]) => V::Vector3(Vector3::new(*x as f32, *y as f32, *z as f32)),
+        Cell::Color3([r, g, b]) => V::Color3(Color3 {
+            r: *r as f32,
+            g: *g as f32,
+            b: *b as f32,
+        }),
+    };
+    match current {
+        Some(current) if current.kind() != value.kind() => None,
+        _ => Some(value),
+    }
+}
+
+/// Makes a `class` from the row `key` of the table `name`, with no parent.
+fn create_from_row(
+    lua: &Lua,
+    class: ClassName,
+    name: &str,
+    key: &str,
+) -> mlua::Result<LuaInstance> {
+    let call = format!("Create{class}(\"{name}\", \"{key}\")");
+    let table = table(lua, name)?;
+    let row = table.row(key).ok_or_else(|| {
+        mlua::Error::runtime(format!("{call}: the table \"{name}\" has no row \"{key}\""))
+    })?;
+    let mut world = world_mut(lua)?;
+    let id = world
+        .create(class)
+        .map_err(|err| mlua::Error::runtime(format!("{call}: {err}")))?;
+    let _ = world.set_name(id, key);
+    for column in &table.columns {
+        let cell = row.cell(column);
+        set_from_cell(&mut world, id, &column.name, &cell).map_err(|why| {
+            mlua::Error::runtime(format!("{call}: column \"{}\" {why}", column.name))
+        })?;
+    }
+    Ok(LuaInstance(id))
+}
+
+fn set_from_cell(
+    world: &mut World,
+    id: InstanceId,
+    column: &str,
+    cell: &Cell,
+) -> Result<(), String> {
+    let current = world
+        .get(id)
+        .and_then(|instance| instance.property(column))
+        .cloned();
+    match current {
+        Some(current) => {
+            let value = cell_value(cell, Some(&current))
+                .ok_or_else(|| format!("doesn't hold a {}", current.kind()))?;
+            world
+                .set_property(id, column, value)
+                .map_err(|err| err.to_string())
+        }
+        None => {
+            let value = cell_value(cell, None).expect("any cell is some value");
+            world
+                .set_attribute(id, column, Some(value))
+                .map_err(|err| err.to_string())
+        }
     }
 }
 

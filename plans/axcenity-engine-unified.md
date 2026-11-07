@@ -2311,9 +2311,9 @@ Removing an Effect undoes its change. `Model:ApplyEffect(effect)` clones one ont
 
 ### Acceptance criteria
 
-- [ ] A Fireball ability costs 20 Mana, has a 3-second cooldown, and can't activate while the player has the `Stunned` tag, with no script beyond the damage.
-- [ ] A 10-second Poison effect does damage every second, stacks to 3, and leaves Health unaffected once removed.
-- [ ] In multiplayer, a modified client can't skip a cooldown.
+- [x] A Fireball ability costs 20 Mana, has a 3-second cooldown, and can't activate while the player has the `Stunned` tag, with no script beyond the damage.
+- [x] A 10-second Poison effect does damage every second, stacks to 3, and leaves Health unaffected once removed.
+- [x] In multiplayer, a modified client can't skip a cooldown.
 
 ---
 

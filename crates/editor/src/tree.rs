@@ -114,6 +114,10 @@ pub enum Insertable {
     Health,
     /// A see-through part that damages every Health inside it.
     DamageZone,
+    /// Something the selected character can do (Phase 76).
+    Ability,
+    /// A change to the selected Model's attribute or Health (Phase 76).
+    Effect,
     /// A part characters sit on.
     Seat,
     /// A prompt on the selected part or Attachment, held to do something.
@@ -271,7 +275,12 @@ impl Insertable {
     /// Checkpoints, which a game returns the player character to.
     pub const CHECKPOINTS: [Insertable; 1] = [Insertable::Checkpoint];
     /// Health, and the zones that take it away.
-    pub const HEALTH: [Insertable; 2] = [Insertable::Health, Insertable::DamageZone];
+    pub const HEALTH: [Insertable; 4] = [
+        Insertable::Health,
+        Insertable::DamageZone,
+        Insertable::Ability,
+        Insertable::Effect,
+    ];
     /// Seats, which a character that touches them sits on.
     pub const SEATS: [Insertable; 1] = [Insertable::Seat];
     /// What the player uses things with: a prompt to hold a key at, and a
@@ -400,6 +409,8 @@ impl Insertable {
             Insertable::Checkpoint => "Checkpoint",
             Insertable::Health => "Health",
             Insertable::DamageZone => "Damage Zone",
+            Insertable::Ability => "Ability",
+            Insertable::Effect => "Effect",
             Insertable::Seat => "Seat",
             Insertable::ProximityPrompt => "Prompt",
             Insertable::ClickDetector => "Click Detector",
@@ -479,6 +490,8 @@ impl Insertable {
             Insertable::Checkpoint => ClassName::Checkpoint,
             Insertable::Health => ClassName::Health,
             Insertable::DamageZone => ClassName::DamageZone,
+            Insertable::Ability => ClassName::Ability,
+            Insertable::Effect => ClassName::Effect,
             Insertable::Seat => ClassName::Seat,
             Insertable::ProximityPrompt => ClassName::ProximityPrompt,
             Insertable::ClickDetector => ClassName::ClickDetector,

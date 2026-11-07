@@ -358,6 +358,18 @@ pub enum ClassName {
     /// of its own but `BreakJointsOnDeath` and `RagdollOnDeath`. Fires
     /// `MoveToFinished`, `StateChanged` and `Died`.
     Humanoid,
+    /// Something a character can do (Phase 76), under its Model or its
+    /// Player: `Activate` (or its input map `ActivationKey`) spends `Cost`
+    /// of an attribute and starts its `Cooldown`, unless the holder has one
+    /// of its `BlockedByTags`. While active it gives the holder its
+    /// `GrantsTags`. Fires `Activated`, `Ended` and `CooldownChanged`.
+    Ability,
+    /// A change to an attribute, or a Health or Humanoid property, of the
+    /// Model it's in (Phase 76): at once, for `Duration` seconds, or every
+    /// `Period` seconds. It adds or multiplies, stacks to `MaxStacks`, and
+    /// gives its `GrantsTags` while active. Removing it undoes a lasting
+    /// change.
+    Effect,
     /// Keeps the Health of the Model it's in from losing any (Phase 47).
     /// A SpawnLocation puts one on each character it spawns, for its
     /// `Duration`.
@@ -410,7 +422,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 129] = [
+    pub const ALL: [ClassName; 131] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -513,6 +525,8 @@ impl ClassName {
         ClassName::Tool,
         ClassName::Inventory,
         ClassName::Humanoid,
+        ClassName::Ability,
+        ClassName::Effect,
         ClassName::ForceField,
         ClassName::Teams,
         ClassName::Team,
@@ -650,6 +664,8 @@ impl ClassName {
             ClassName::Tool => "Tool",
             ClassName::Inventory => "Inventory",
             ClassName::Humanoid => "Humanoid",
+            ClassName::Ability => "Ability",
+            ClassName::Effect => "Effect",
             ClassName::ForceField => "ForceField",
             ClassName::WeldConstraint => "WeldConstraint",
             ClassName::HingeConstraint => "HingeConstraint",
@@ -1753,6 +1769,68 @@ impl ClassName {
                 // On, characters walking through it stay bare.
                 ("IgnoreCharacters", Value::Bool(true)),
             ],
+            ClassName::Ability => vec![
+                // Seconds after activating before it can activate again.
+                ("Cooldown", Value::Number(1.0)),
+                // What activating spends: `CostAmount` of the holder's
+                // number attribute `CostAttribute` (such as Mana 20). An
+                // empty name costs nothing.
+                ("CostAttribute", Value::String(String::new())),
+                ("CostAmount", Value::Number(0.0)),
+                // The input map action that activates it for the player
+                // whose character (or Player) holds it. Empty: scripts only.
+                ("ActivationKey", Value::String(String::new())),
+                // Tags, separated by commas, that stop it activating while
+                // its holder has any of them (such as "Stunned").
+                ("BlockedByTags", Value::String(String::new())),
+                // Tags, separated by commas, its holder has while it's
+                // active.
+                ("GrantsTags", Value::String(String::new())),
+                // Seconds it stays active after activating, before `Ended`.
+                // 0 ends at once.
+                ("Duration", Value::Number(0.0)),
+                // The picture the ability bar shows for it. Empty shows
+                // its Name.
+                ("Icon", Value::String(String::new())),
+                // Read-only: seconds of cooldown left, and whether it's
+                // active.
+                ("CooldownLeft", Value::Number(0.0)),
+                ("Active", Value::Bool(false)),
+            ],
+            ClassName::Effect => vec![
+                // What it changes on the Model it's in: a Health property
+                // (Health, MaxHealth), a Humanoid property (WalkSpeed,
+                // JumpHeight) or the Model's number attribute of this name.
+                ("Attribute", Value::String("Health".to_owned())),
+                // Add adds Amount (a negative Amount takes away; on Health
+                // it's damage), Multiply multiplies by it. Each stack does
+                // it again.
+                (
+                    "Operation",
+                    Value::EnumItem(EnumItem {
+                        enum_name: "EffectOperation".to_owned(),
+                        item: "Add".to_owned(),
+                    }),
+                ),
+                ("Amount", Value::Number(0.0)),
+                // Seconds it lasts. 0 is instant: it changes once and is
+                // gone. Below 0 lasts until it's removed.
+                ("Duration", Value::Number(0.0)),
+                // Above 0 (with a Duration), it changes again every Period
+                // seconds, for good (poison, a heal over time). 0 changes
+                // once for as long as it lasts, undone when it's removed.
+                ("Period", Value::Number(0.0)),
+                // How many times applying it again adds to it. Applying it
+                // again also starts its Duration over.
+                ("MaxStacks", Value::Number(1.0)),
+                // Tags, separated by commas, the Model has while it's
+                // active.
+                ("GrantsTags", Value::String(String::new())),
+                // Read-only: how many times it's applied, and the seconds
+                // it has left.
+                ("Stacks", Value::Number(1.0)),
+                ("TimeLeft", Value::Number(0.0)),
+            ],
             ClassName::SplineFollower => vec![
                 // The Spline it follows.
                 ("Spline", Value::Instance(None)),
@@ -2656,6 +2734,7 @@ impl ClassName {
             | ClassName::BindableFunction
             | ClassName::Model
             | ClassName::Inventory
+            | ClassName::Effect
             | ClassName::Folder
             | ClassName::SurfaceAppearance
             | ClassName::ScreenGui
@@ -2749,6 +2828,11 @@ impl ClassName {
             // In and out of the hand, and the Primary action pressed and
             // let go while it's in the hand.
             ClassName::Tool => &["Equipped", "Unequipped", "Activated", "Deactivated"],
+            // `Activated` with the Player who activated it (nil for a
+            // Script), `Ended` with whether it was cancelled, and
+            // `CooldownChanged` with the seconds left, as a cooldown starts
+            // and ends.
+            ClassName::Ability => &["Activated", "Ended", "CooldownChanged"],
             // Fires with "Sight" or "Hearing" when it starts seeing or
             // hearing the player character.
             ClassName::NavigationAgent => &["PlayerSensed"],

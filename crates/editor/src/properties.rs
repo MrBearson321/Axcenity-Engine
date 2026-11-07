@@ -1886,6 +1886,8 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         // A SplinePoint's handles and a SplineFollower's ends (Phase 73).
         "SplineTangentMode" => axcenity_core::spline::TangentMode::NAMES.to_vec(),
         "SplineFollowMode" => vec!["Loop", "PingPong", "Once"],
+        // How an Effect changes what it changes (Phase 76).
+        "EffectOperation" => vec!["Add", "Multiply"],
         // A Decal's face (Phase 75).
         "NormalId" => vec!["Right", "Top", "Back", "Left", "Bottom", "Front"],
         _ => {

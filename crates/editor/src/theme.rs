@@ -738,6 +738,8 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::UnionOperation => icons::UNITE,
         ClassName::NegateOperation => icons::SUBTRACT,
         ClassName::Health => icons::HEART,
+        ClassName::Ability => icons::LIGHTNING,
+        ClassName::Effect => icons::FLASK,
         ClassName::ProximityPrompt => icons::HAND_TAP,
         ClassName::ClickDetector => icons::CURSOR_CLICK,
         ClassName::Tool => icons::SWORD,

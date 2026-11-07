@@ -69,6 +69,7 @@ Phase 66 (`ownership.rs` in `net`, `ownership.rs` in `script`).
 RemoteEvents and RemoteFunctions use the same `Message`s as on one device. The runtime keeps a message for another device (to a Player who joined from elsewhere, or from a replica to the server) in `take_remote_messages`; `Network::send` sends it as `Remote` (`wire::WireMessage`: Instances as network IDs, Lua strings as bytes). The receiver hands it to `receive_remote_messages`, and it fires in the next frame's script step.
 
 - `FireClient`, `FireAllClients` (every Player, wherever they play) and `InvokeClient` reach players on other devices; `FireServer` and `InvokeServer` reach the server.
+- Ability activations (Phase 76) ride the same path as `MessageKind::Activate` naming the Ability; the host accepts one only for an Ability, and the server serves it only for the player who holds it, checking cost, cooldown and tags itself ([../scripting/api-abilities.md](../scripting/api-abilities.md)). Protocol 7.
 - The host takes a message from player *n* as theirs: its Player is the connection's, never what the message says. It must name a RemoteEvent or RemoteFunction outside the server-only services, or it's dropped. An Instance argument a player can't see (server-only, or the device's own) arrives as nil, both ways.
 
 ## Hosting and joining

@@ -23,7 +23,7 @@ use crate::ownership::{
 use crate::replicate::{LevelState, Replicator, Update, apply, replicated_parts};
 use crate::session::{Host, HostSettings, Join, SessionEvent};
 use crate::transport::{Client, Conditions, LinkStats, Server};
-use crate::wire::WireMessage;
+use crate::wire::{WireKind, WireMessage};
 use crate::{DEFAULT_PORT, DISCOVERY_PORT};
 
 /// Netcode takes this many connections beyond `MaxPlayers`, so a player
@@ -905,12 +905,17 @@ impl Network {
             };
             let remote = InstanceId::from_bits(message.remote);
             let reachable = |id: InstanceId| world.contains(id) && !world.is_server_only(id);
-            let is_remote = world.get(remote).is_some_and(|instance| {
-                matches!(
-                    instance.class(),
-                    ClassName::RemoteEvent | ClassName::RemoteFunction
-                )
-            });
+            // An activation names an Ability (Phase 76); the server checks
+            // it's theirs, its cost, cooldown and tags.
+            let is_remote = world
+                .get(remote)
+                .is_some_and(|instance| match message.kind {
+                    WireKind::Activate => instance.class() == ClassName::Ability,
+                    _ => matches!(
+                        instance.class(),
+                        ClassName::RemoteEvent | ClassName::RemoteFunction
+                    ),
+                });
             if !is_remote || !reachable(remote) {
                 log::info!("dropped a message from player {from} for no remote it can reach");
                 return;

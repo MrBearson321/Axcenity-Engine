@@ -180,6 +180,7 @@ impl TestGame {
         self.scripts.input_events(&mut self.world, &events);
         self.scripts.step_prompts(&mut self.world, seconds);
         self.scripts.step_tools(&mut self.world);
+        self.scripts.step_abilities(&mut self.world, seconds);
 
         // 2. Tweens, waiting scripts (the spec too), then `Stepped`.
         self.scripts.step(&mut self.world, seconds);

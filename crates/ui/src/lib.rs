@@ -7,6 +7,7 @@
 
 mod style;
 
+mod ability_bar;
 mod accessibility;
 mod chat;
 mod console;
@@ -24,6 +25,7 @@ mod transition;
 mod turn;
 mod widget;
 
+pub use ability_bar::ability_bar_items;
 pub use chat::{CHAT_SHOWN, chat_enabled, chat_items};
 pub use console::{
     BUILT_INS, BuiltIn, CONSOLE_LOG_LINES, ConsoleKey, ConsoleStats, ConsoleTab, DevConsole,

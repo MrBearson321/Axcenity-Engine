@@ -332,6 +332,10 @@ end
 declare extern type DataService with
 	--- The table named `name`: `"weapons"` is `assets/data/weapons.data.json`. A table that isn't there, or can't be read, is an error saying why.
 	function GetTable(self, name: string): DataTable
+	--- A new Ability (with no Parent) made from the row `key` of the table `name`, named `key`: each column named after an Ability property (Cooldown, CostAttribute, CostAmount, ActivationKey, BlockedByTags, GrantsTags, Duration, Icon) sets it, and the other columns become its attributes.
+	function CreateAbility(self, name: string, key: string): Ability
+	--- A new Effect (with no Parent) made from the row `key` of the table `name`, named `key`: each column named after an Effect property (Attribute, Operation, Amount, Duration, Period, MaxStacks, GrantsTags) sets it, and the other columns become its attributes.
+	function CreateEffect(self, name: string, key: string): Effect
 end
 
 --- The game's own commands for the Developer Console (F9), from `game:GetService("ConsoleService")`. A LocalScript's commands run on that device, a Script's on the server.
@@ -1098,6 +1102,16 @@ declare extern type EnumSplineFollowModeItems with
 	Once: EnumSplineFollowMode
 end
 
+--- One choice of `Enum.EffectOperation`.
+declare extern type EnumEffectOperation extends EnumItem with
+end
+
+--- The choices of `Enum.EffectOperation`.
+declare extern type EnumEffectOperationItems with
+	Add: EnumEffectOperation
+	Multiply: EnumEffectOperation
+end
+
 --- One choice of `Enum.NormalId`.
 declare extern type EnumNormalId extends EnumItem with
 end
@@ -1150,6 +1164,7 @@ declare extern type EnumLibrary with
 	Precipitation: EnumPrecipitationItems
 	SplineTangentMode: EnumSplineTangentModeItems
 	SplineFollowMode: EnumSplineFollowModeItems
+	EffectOperation: EnumEffectOperationItems
 	NormalId: EnumNormalIdItems
 end
 
@@ -2391,6 +2406,8 @@ end
 --- Groups the parts of one thing, such as a car or a house.
 declare extern type Model extends Instance with
 	[string]: any
+	--- Scripts only: puts a copy of the Effect `effect` on this Model and returns it, or adds a stack to the copy already here (up to its MaxStacks) and starts its Duration over. An instant Effect changes at once and returns nil.
+	function ApplyEffect(self, effect: Effect): Effect?
 	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
@@ -4384,6 +4401,8 @@ declare extern type Tool extends Instance with
 	--- Fires when the Primary action is let go after Activated, or the Tool leaves the hand first.
 	Deactivated: Signal
 	[string]: any
+	--- Scripts only: puts a copy of the Effect `effect` on this Model and returns it, or adds a stack to the copy already here (up to its MaxStacks) and starts its Duration over. An instant Effect changes at once and returns nil.
+	function ApplyEffect(self, effect: Effect): Effect?
 	--- Takes it out of its Inventory (and the hand) and puts its Handle on the ground in front of the character, in the Workspace. The character picks it up again once it has stepped off it and touches it. Returns false if it's not carried or CanBeDropped is off.
 	function Drop(self): boolean
 	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
@@ -4464,6 +4483,66 @@ declare extern type Humanoid extends Instance with
 	function GetState(self): EnumItem
 	--- Asks for a state: Running stands it up (off a Seat, out of PlatformStand, its Ragdolls off), Jumping jumps, Ragdoll turns its Ragdolls on, and Dead sets its Health to 0. The others follow the character and are an error.
 	function ChangeState(self, state: EnumItem): ()
+end
+
+--- Something a character can do, in its Model or its Player: a Fireball, a dash, a heal. Activating it (its ActivationKey, or Activate) spends CostAmount of its holder's CostAttribute and starts its Cooldown, unless its holder has one of BlockedByTags; while active it gives GrantsTags. It only activates on the server, which checks again whatever a player's device says. The ability bar shows the player's abilities with their cooldowns.
+declare extern type Ability extends Instance with
+	--- Seconds after it activates before it can activate again.
+	Cooldown: number
+	--- The number attribute activating spends, such as `"Mana"`, of its holder: the Model or Player it's in, or that Player's character or that character's Player. Empty costs nothing.
+	CostAttribute: string
+	--- How much of CostAttribute activating spends. It can't activate while its holder has less.
+	CostAmount: number
+	--- The input map action, such as `"Ability1"`, that activates it for the player whose character or Player holds it. The ability bar shows it. Empty: only scripts activate it.
+	ActivationKey: string
+	--- Tags, separated by commas, such as `"Stunned, Silenced"`: while its holder has any of them, it can't activate.
+	BlockedByTags: string
+	--- Tags, separated by commas, its holder's character has while it's active (for its Duration).
+	GrantsTags: string
+	--- Seconds it stays active after activating, giving its GrantsTags, before Ended fires. 0 ends at once.
+	Duration: number
+	--- The picture the ability bar shows for it, such as `"assets/textures/fireball.png"`. Empty shows its Name.
+	Icon: string
+	--- Read-only: seconds until it can activate again. 0 when it's ready.
+	CooldownLeft: number
+	--- Read-only: true from activating until Ended, for an Ability with a Duration.
+	Active: boolean
+	--- Fires on the server and its players' devices as it activates, with the Player who asked (nil when a Script activated it). Do what it does here, such as the damage.
+	Activated: Signal
+	--- Fires as it stops being active, with true when Cancel ended it early. An Ability with no Duration ends as it activates.
+	Ended: Signal
+	--- Fires as its cooldown starts, with Cooldown, and as it ends, with 0.
+	CooldownChanged: Signal
+	[string]: any
+	--- Whether it can activate now, and if not, why: it's cooling down, it's active, its holder has one of its BlockedByTags, or hasn't CostAmount of its CostAttribute.
+	function CanActivate(self): (boolean, string?)
+	--- From a Script: activates it if it can (spends the cost, starts the cooldown, fires Activated) and returns whether it did. From a LocalScript: asks the server, which checks again, and returns whether it asked; the ability bar's sweep starts at once.
+	function Activate(self): boolean
+	--- Scripts only: ends it early if it's active, taking off its GrantsTags and firing Ended with true. The cooldown carries on.
+	function Cancel(self): ()
+end
+
+--- A change to the Model it's in: to an attribute, or a Health or Humanoid property. It's instant, lasts Duration seconds, or repeats every Period (poison, a heal over time); it adds or multiplies, stacks to MaxStacks, and gives GrantsTags while active. Removing it undoes a lasting change. Keep templates out of Models (in ReplicatedStorage, ServerStorage or an Ability) and put copies on with `model:ApplyEffect(effect)`.
+declare extern type Effect extends Instance with
+	--- What it changes on the Model it's in: a property of its Health (`Health`, `MaxHealth`, `RegenRate`), of its character controller, as the Humanoid's (`WalkSpeed`, `JumpHeight`), or else the Model's number attribute of this name.
+	Attribute: string
+	--- `Enum.EffectOperation.Add` adds Amount (a negative Amount on Health is damage); `Multiply` multiplies by it. Each stack does it again.
+	Operation: EnumEffectOperation | "Add" | "Multiply"
+	--- How much it adds, or what it multiplies by.
+	Amount: number
+	--- Seconds it lasts. 0 is instant: it changes once and is gone. Below 0 it lasts until it's removed.
+	Duration: number
+	--- With a Duration: above 0, it changes again every Period seconds, for good (poison, a heal over time). 0 changes once for as long as it lasts, and removing it undoes that.
+	Period: number
+	--- How many times applying it to a Model that has it already adds to it. Applying it again also starts its Duration over.
+	MaxStacks: number
+	--- Tags, separated by commas, its Model has while it's active.
+	GrantsTags: string
+	--- Read-only: how many times it's applied.
+	Stacks: number
+	--- Read-only: the seconds it has left.
+	TimeLeft: number
+	[string]: any
 end
 
 --- Keeps the Health of the Model it's in from losing any: TakeDamage, DamageZones and falls do nothing. A SpawnLocation puts one in each character it spawns, for its Duration seconds.
@@ -4987,7 +5066,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Spline") -> Spline) & ((className: "SplinePoint") -> SplinePoint) & ((className: "SplineFollower") -> SplineFollower) & ((className: "SplineMesh") -> SplineMesh) & ((className: "SplineScatter") -> SplineScatter) & ((className: "Decal") -> Decal) & ((className: "ProjectedDecal") -> ProjectedDecal) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "RectLight") -> RectLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "Weather") -> Weather) & ((className: "OutlineEffect") -> OutlineEffect) & ((className: "ColorCorrectionEffect") -> ColorCorrectionEffect) & ((className: "DepthOfFieldEffect") -> DepthOfFieldEffect) & ((className: "VignetteEffect") -> VignetteEffect) & ((className: "FilmGrainEffect") -> FilmGrainEffect) & ((className: "ChromaticAberrationEffect") -> ChromaticAberrationEffect) & ((className: "SharpenEffect") -> SharpenEffect) & ((className: "MotionBlurEffect") -> MotionBlurEffect) & ((className: "GraphicsVolume") -> GraphicsVolume) & ((className: "ExposureEffect") -> ExposureEffect) & ((className: "FogEffect") -> FogEffect) & ((className: "BloomEffect") -> BloomEffect) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Spline") -> Spline) & ((className: "SplinePoint") -> SplinePoint) & ((className: "SplineFollower") -> SplineFollower) & ((className: "SplineMesh") -> SplineMesh) & ((className: "SplineScatter") -> SplineScatter) & ((className: "Decal") -> Decal) & ((className: "ProjectedDecal") -> ProjectedDecal) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "Ability") -> Ability) & ((className: "Effect") -> Effect) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

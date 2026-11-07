@@ -315,6 +315,7 @@ fn described_fields_and_methods_exist() {
         (ClassName::RopeConstraint, "Instance.new('RopeConstraint')"),
         (ClassName::RodConstraint, "Instance.new('RodConstraint')"),
         (ClassName::Health, "Instance.new('Health')"),
+        (ClassName::Ability, "Instance.new('Ability')"),
         (ClassName::Inventory, "Instance.new('Inventory')"),
         (ClassName::Tool, "Instance.new('Tool')"),
         // Its fields are its Model's pieces'.

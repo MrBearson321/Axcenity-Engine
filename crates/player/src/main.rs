@@ -1481,6 +1481,9 @@ impl ApplicationHandler for App {
                         .step_prompts(&mut self.world, f64::from(seconds));
                     self.scripts.step_tools(&mut self.world);
                 }
+                //    Then Abilities' keys, on every device (Phase 76).
+                self.scripts
+                    .step_abilities(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
 
                 watch.lap("Input");
@@ -1654,6 +1657,15 @@ impl ApplicationHandler for App {
                         size.height,
                     ));
                 }
+                // The ability bar (Phase 76), with its cooldown sweeps.
+                let abilities = self.scripts.ability_bar(&self.world);
+                draw_list.ui.extend(axcenity_ui::ability_bar_items(
+                    &self.world,
+                    &abilities,
+                    &self.stylesheets,
+                    size.width,
+                    size.height,
+                ));
                 // The leaderboard (each Player's `leaderstats`), unless Tab
                 // hid it.
                 if self.scripts.leaderboard_shown() {

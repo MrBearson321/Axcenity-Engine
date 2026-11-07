@@ -174,6 +174,18 @@ pub(super) fn insert_hint(what: Insertable) -> String {
              Scripts call TakeDamage and Heal, and it fires Died once at 0. Turn on FallDamage \
              to hurt it when it lands hard."
         }
+        Insertable::Ability => {
+            "Insert an Ability into the selected character's Model: something it can do. Set \
+             its Cooldown, its cost (CostAttribute and CostAmount, such as Mana 20), the input \
+             action that activates it and the tags that block it; a Script on its Activated \
+             does the rest. The ability bar shows it during Play."
+        }
+        Insertable::Effect => {
+            "Insert an Effect: a change to an attribute, Health or Humanoid property of the \
+             Model it's in, at once, for a Duration or every Period. Keep it in \
+             ReplicatedStorage or ServerStorage as a template and put copies on with \
+             model:ApplyEffect(effect)."
+        }
         Insertable::DamageZone => {
             "Insert a Damage Zone: a see-through part that takes DamagePerSecond from every \
              Health whose Model is inside it during Play."

@@ -1,0 +1,21 @@
+{
+  "actions": [
+    { "name": "Move", "axis": true, "inputs": ["W,A,S,D", "Up,Left,Down,Right", "Thumbstick1"] },
+    { "name": "Look", "axis": true, "inputs": ["MouseMovement", "Thumbstick2"] },
+    { "name": "Jump", "inputs": ["Space", "ButtonA"] },
+    { "name": "Run", "inputs": ["LeftShift", "ButtonL3"] },
+    { "name": "Crouch", "inputs": ["C", "ButtonB"] },
+    { "name": "Interact", "inputs": ["E", "ButtonX"] },
+    { "name": "Primary", "inputs": ["MouseButton1", "ButtonR2"] },
+    { "name": "Secondary", "inputs": ["MouseButton2", "ButtonL2"] },
+    { "name": "Drop", "inputs": ["Backspace", "ButtonY"] },
+    { "name": "Menu", "inputs": ["Escape", "ButtonStart"] },
+    { "name": "Fireball", "inputs": ["Q", "ButtonR1"] },
+    { "name": "Heal", "inputs": ["R", "ButtonL1"] },
+    { "name": "UINavigate", "axis": true, "inputs": ["Up,Left,Down,Right", "DPadUp,DPadLeft,DPadDown,DPadRight", "Thumbstick1"] },
+    { "name": "UIConfirm", "inputs": ["Return", "ButtonA"] },
+    { "name": "UIBack", "inputs": ["Escape", "ButtonB"] },
+    { "name": "UINext", "inputs": ["Tab"] },
+    { "name": "UIPrevious", "inputs": [] }
+  ]
+}

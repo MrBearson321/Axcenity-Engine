@@ -233,8 +233,15 @@ impl WireArg {
 #[serde(tag = "type")]
 pub enum WireKind {
     Event,
-    Invoke { call: u64 },
-    Reply { call: u64, error: Option<String> },
+    Invoke {
+        call: u64,
+    },
+    Reply {
+        call: u64,
+        error: Option<String>,
+    },
+    /// A player asking the server to activate an Ability (Phase 76).
+    Activate,
 }
 
 /// A RemoteEvent firing, or a RemoteFunction's question or answer, between
@@ -261,6 +268,7 @@ impl WireMessage {
                     call: *call,
                     error: error.clone(),
                 },
+                MessageKind::Activate => WireKind::Activate,
             },
             args: message
                 .args
@@ -288,6 +296,7 @@ impl WireMessage {
                     call: *call,
                     error: error.clone(),
                 },
+                WireKind::Activate => MessageKind::Activate,
             },
             args: self.args.iter().map(|arg| arg.to_remote(allowed)).collect(),
         }

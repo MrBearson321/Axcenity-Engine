@@ -82,6 +82,9 @@ pub enum MessageKind {
     /// The answer to call `call`: the values in `args`, or the error
     /// `OnServerInvoke` raised (`path:line: message`).
     Reply { call: u64, error: Option<String> },
+    /// A player asking the server to activate the Ability `remote`
+    /// (Phase 76). The runtime takes it before scripts see messages.
+    Activate,
 }
 
 impl RemoteValue {
@@ -152,6 +155,7 @@ pub fn deliver(lua: &Lua, messages: Vec<Message>) {
             MessageKind::Event => deliver_one(lua, &message),
             MessageKind::Invoke { call } => serve(lua, &message, call),
             MessageKind::Reply { call, ref error } => answer(lua, &message, call, error.clone()),
+            MessageKind::Activate => Ok(()),
         };
         if let Err(err) = result {
             push_error(lua, &err);
