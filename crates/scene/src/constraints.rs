@@ -82,6 +82,7 @@ pub(crate) fn draw_items(world: &World, constraint: &Instance) -> Vec<DrawItem> 
             cull_distance: 0.0,
             skin: None,
             sway: None,
+            decal_role: Default::default(),
         })
         .collect()
 }

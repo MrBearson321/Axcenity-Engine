@@ -31,9 +31,16 @@ impl Game {
     /// hello-tools from a copy, with its save slots in a folder of the
     /// test's own.
     fn start(test: &str) -> Self {
-        let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-tools");
+        Self::start_in("hello-tools", test)
+    }
+
+    /// The example `name` from a copy, as [`Game::start`] does hello-tools.
+    fn start_in(name: &str, test: &str) -> Self {
+        let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(name);
         let folder = std::env::temp_dir().join(format!(
-            "axcenity-player-tools-{test}-{}",
+            "axcenity-player-{name}-{test}-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&folder);
@@ -366,4 +373,59 @@ fn snapshot(game: &Game, path: &Path) {
         .unwrap()
         .write_image_data(&pixels)
         .unwrap();
+}
+
+/// Phase 75: hello-decals' Blaster fired 500 times leaves a bullet hole
+/// where each shot hits the target, and the Workspace keeps no more than
+/// its MaxSpawnedDecals of them, the newest.
+#[test]
+fn five_hundred_bullet_holes_from_the_blaster_stay_under_the_cap() {
+    let mut game = Game::start_in("hello-decals", "holes");
+    game.frames(5);
+    let holes = |game: &Game| -> Vec<InstanceId> {
+        let workspace = game.world.workspace();
+        game.world
+            .get(workspace)
+            .unwrap()
+            .children()
+            .iter()
+            .copied()
+            .filter(|&id| game.world.get(id).unwrap().name() == "SpawnedDecal")
+            .collect()
+    };
+    // The script's six in the target at the start.
+    assert_eq!(holes(&game).len(), 6);
+    game.tap(KeyCode::One);
+    let blaster = game.find(&["Character", "Inventory", "Blaster"]);
+    assert!(equipped(&game.world, game.inventory()) == Some(blaster));
+    let target = game.find(&["Target"]);
+    let target_z = game.position(target).z;
+    let mut newest = Vec::new();
+    for shot in 0..500 {
+        game.click();
+        if shot >= 494 {
+            newest.push(*holes(&game).last().unwrap());
+        }
+    }
+    let kept = holes(&game);
+    assert_eq!(kept.len(), 200, "MaxSpawnedDecals");
+    assert!(
+        newest.iter().all(|hole| kept.contains(hole)),
+        "the newest stay"
+    );
+    // Each lies on the target's front, facing out of it.
+    for &hole in &kept {
+        let position = game.position(hole);
+        assert!((position.z - (target_z + 0.5)).abs() < 0.05, "{position:?}");
+        let look = axcenity_scene::rotation_from_orientation(
+            game.world
+                .get(hole)
+                .unwrap()
+                .property("Orientation")
+                .and_then(Value::as_vector3)
+                .unwrap(),
+        ) * axcenity_render::glam::Vec3::NEG_Z;
+        assert!(look.z > 0.99, "{look}");
+    }
+    assert!(game.printed().is_empty(), "no script errors");
 }

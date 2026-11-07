@@ -10,6 +10,7 @@ use std::sync::Arc;
 use glam::camera::rh;
 use glam::{Mat3, Mat4, Vec2, Vec3};
 
+use crate::DecalRole;
 use crate::draw_list::{
     Camera, ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shading, Shadows,
     Skin, TextureSource,
@@ -684,9 +685,13 @@ pub(super) fn plan_draws(
     // Water is drawn with the see-through items, before them (see
     // renderer/water.rs).
     let water = |index: usize| draws[index].item.material.water.is_some();
+    // A Part's Decal is blended by its texture's alpha even when solid.
+    let decal = |index: usize| draws[index].item.decal_role == DecalRole::Decal;
     let (mut transparent, mut opaque): (Vec<usize>, Vec<usize>) = (0..draws.len())
         .filter(|&index| draws[index].item.material.opacity > 0.0)
-        .partition(|&index| draws[index].item.material.opacity < 1.0 || water(index));
+        .partition(|&index| {
+            draws[index].item.material.opacity < 1.0 || water(index) || decal(index)
+        });
 
     let sidedness = |draw: &Draw| {
         (
@@ -1030,9 +1035,20 @@ pub(super) fn instance_raw(item: &DrawItem) -> Option<InstanceRaw> {
             item.uv_tile,
         ],
         skin: [0, 0],
-        sway: match item.sway {
-            Some(sway) if !sway.is_still() => [sway.base, 1.0 / sway.height, sway.strength, 0.0],
-            _ => [0.0; 4],
+        sway: {
+            let mut sway = match item.sway {
+                Some(sway) if !sway.is_still() => {
+                    [sway.base, 1.0 / sway.height, sway.strength, 0.0]
+                }
+                _ => [0.0; 4],
+            };
+            // `ROLE_CHARACTER` and `ROLE_DECAL` in shader.wgsl.
+            sway[3] = match item.decal_role {
+                DecalRole::Surface => 0.0,
+                DecalRole::Character => 1.0,
+                DecalRole::Decal => 2.0,
+            };
+            sway
         },
     })
 }

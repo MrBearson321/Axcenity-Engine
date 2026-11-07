@@ -538,10 +538,11 @@ pub enum EnumType {
     Precipitation,
     SplineTangentMode,
     SplineFollowMode,
+    NormalId,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 36] = [
+    pub const ALL: [EnumType; 37] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -578,6 +579,7 @@ impl EnumType {
         EnumType::Precipitation,
         EnumType::SplineTangentMode,
         EnumType::SplineFollowMode,
+        EnumType::NormalId,
     ];
 
     pub fn name(self) -> &'static str {
@@ -618,6 +620,7 @@ impl EnumType {
             EnumType::Precipitation => "Precipitation",
             EnumType::SplineTangentMode => "SplineTangentMode",
             EnumType::SplineFollowMode => "SplineFollowMode",
+            EnumType::NormalId => "NormalId",
         }
     }
 
@@ -668,6 +671,8 @@ impl EnumType {
             EnumType::SplineTangentMode => axcenity_core::spline::TangentMode::NAMES.to_vec(),
             // What a SplineFollower does at the ends of its spline.
             EnumType::SplineFollowMode => vec!["Loop", "PingPong", "Once"],
+            // A part's face: a Decal's `Face` (Phase 75).
+            EnumType::NormalId => vec!["Right", "Top", "Back", "Left", "Bottom", "Front"],
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -805,7 +810,8 @@ impl LuaEnumItem {
             | EnumType::ReverbType
             | EnumType::Precipitation
             | EnumType::SplineTangentMode
-            | EnumType::SplineFollowMode => None,
+            | EnumType::SplineFollowMode
+            | EnumType::NormalId => None,
         }
     }
 }

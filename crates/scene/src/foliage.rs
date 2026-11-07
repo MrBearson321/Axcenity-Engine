@@ -459,6 +459,7 @@ fn piece_item(piece: &Piece, instance: Mat4) -> DrawItem {
         cull_distance: 0.0,
         skin: None,
         sway: None,
+        decal_role: Default::default(),
     }
 }
 

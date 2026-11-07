@@ -1180,6 +1180,81 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Workspace,
+        "MaxSpawnedDecals",
+        "The most decals `workspace:SpawnDecal` keeps at once on each side: 200 by default. Past it, the oldest goes first.",
+    ),
+    (
+        ClassName::Decal,
+        "Texture",
+        "The picture, a project path such as \"assets/textures/logo.png\". Its alpha is its shape. Empty shows a plain square.",
+    ),
+    (
+        ClassName::Decal,
+        "Face",
+        "The face of its part it's on: `Enum.NormalId.Front` (the default, -Z), `Back`, `Left`, `Right`, `Top` or `Bottom`.",
+    ),
+    (
+        ClassName::Decal,
+        "Color3",
+        "Tints the picture: white shows it as it is.",
+    ),
+    (
+        ClassName::Decal,
+        "Transparency",
+        "0 shows the picture as it is, 1 hides it.",
+    ),
+    (
+        ClassName::Decal,
+        "StudsPerTileU",
+        "Studs one copy of the picture covers across the face; it repeats to fill it. 0 (the default) stretches one copy across.",
+    ),
+    (
+        ClassName::Decal,
+        "StudsPerTileV",
+        "Studs one copy of the picture covers down the face; it repeats to fill it. 0 (the default) stretches one copy down.",
+    ),
+    (
+        ClassName::ProjectedDecal,
+        "Texture",
+        "The picture, a project path such as \"assets/textures/hole.png\". Its alpha is its shape. Empty shows a plain square.",
+    ),
+    (
+        ClassName::ProjectedDecal,
+        "Color3",
+        "Tints the picture: white shows it as it is.",
+    ),
+    (
+        ClassName::ProjectedDecal,
+        "Transparency",
+        "0 shows the picture as it is, 1 hides it. `SpawnDecal`'s decals fade by raising it.",
+    ),
+    (
+        ClassName::ProjectedDecal,
+        "Position",
+        "The middle of its box, in studs.",
+    ),
+    (
+        ClassName::ProjectedDecal,
+        "Orientation",
+        "Its turn in degrees (Z, then X, then Y). The picture faces the box's front, -Z (its CFrame's LookVector); the default, 90 around X, faces up, so it lies on the ground below.",
+    ),
+    (
+        ClassName::ProjectedDecal,
+        "Size",
+        "The picture's width and height, then how deep the box reaches (half in front of its middle, half behind): only surfaces inside the box are painted.",
+    ),
+    (
+        ClassName::ProjectedDecal,
+        "FadeAngle",
+        "Degrees a surface may turn away from the picture's facing before the decal is gone from it: 75 by default. It fades over the second half of that turn, so the sides of what's in the box aren't smeared.",
+    ),
+    (
+        ClassName::ProjectedDecal,
+        "IgnoreCharacters",
+        "On (the default), characters walking through the box stay bare: it paints only the world around them.",
+    ),
+    (
+        ClassName::Workspace,
         "GlobalWind",
         "The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag, pushes unanchored parts with WindAffected, carries Lighting's Clouds along (its level part), and blows the Weather's rain and snow.",
     ),
@@ -5010,6 +5085,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::SplineScatter => {
             "Inside a Spline: places the models Models names along the curve every Spacing studs, or inside a Closed spline at Density, each turned, scaled and moved at random from Seed and stood on the surface below (none where it's steeper than MaxSlope). What it places is made again whenever the spline or its settings change and when the game starts; it's its children, but never saved (Bake in the editor keeps it)."
+        }
+        ClassName::Decal => {
+            "Inside a part: a picture (Texture) on one of its faces (Face), tinted by Color3 and faded by Transparency. It's stretched across the face, or repeated every StudsPerTileU by StudsPerTileV studs. It shows at every graphics quality."
+        }
+        ClassName::ProjectedDecal => {
+            "A box that lays its picture (Texture) onto whatever solid surfaces are inside it, following their shape: bullet holes, puddles, road markings and dirt. The picture faces the box's front (its CFrame's LookVector, -Z), and fades from surfaces turned away from it past half of FadeAngle. With IgnoreCharacters on, characters walking through it stay bare. It isn't drawn at the Low graphics quality, and higher qualities draw more of them, further away. workspace:SpawnDecal places ones that fade out."
         }
         ClassName::Terrain => {
             "A landscape: a heightfield shaped in the editor's Terrain Studio, drawn with its TerrainLayers and colliding as its ground. Position is the middle of its footprint at the bottom of its height range; Size is its width, height range and length."

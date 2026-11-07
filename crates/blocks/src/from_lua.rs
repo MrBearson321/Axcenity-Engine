@@ -1042,6 +1042,28 @@ impl<'a> Converter<'a> {
                 }
                 None
             }
+            // workspace:SpawnDecal(texture,
+            //     CFrame.lookAt(Vector3.new(), facing) + position, size, seconds)
+            ExprKind::Method(object, method, args)
+                if method == "SpawnDecal"
+                    && matches!(&object.kind, ExprKind::Name(name) if name == "workspace")
+                    && let [texture, placed, size, seconds] = args.as_slice()
+                    && let ExprKind::Binary("+", turn, position) = &placed.kind
+                    && let ExprKind::Call(look_at, look_args) = &turn.kind
+                    && self.is_field(look_at, "CFrame", "lookAt")
+                    && let [origin, facing] = look_args.as_slice()
+                    && let ExprKind::Call(new, no_args) = &origin.kind
+                    && self.is_field(new, "Vector3", "new")
+                    && no_args.is_empty() =>
+            {
+                Some(BlockKind::SpawnDecal {
+                    texture: self.expression(texture, scope),
+                    position: self.expression(position, scope),
+                    facing: self.expression(facing, scope),
+                    size: self.expression(size, scope),
+                    seconds: self.expression(seconds, scope),
+                })
+            }
             // workspace.CurrentCamera:Shake(intensity, seconds)
             ExprKind::Method(object, method, args)
                 if method == "Shake"

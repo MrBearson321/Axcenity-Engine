@@ -272,6 +272,7 @@ impl TerrainCache {
                     cull_distance: 0.0,
                     skin: None,
                     sway: None,
+                    decal_role: Default::default(),
                 });
             }
         }

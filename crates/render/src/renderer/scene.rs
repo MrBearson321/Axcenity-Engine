@@ -208,6 +208,8 @@ impl ScenePipeline {
             terrain::TerrainPass::new(&device, &frame_layout, texture_bytes.clone(), samples);
         terrain.set_skipped_levels(graphics.texture_quality.skipped_levels());
         let sprites = sprites::SpritePass::new(&device, &white_texture.srgb, samples);
+        let decal_pass =
+            decals::DecalPass::new(&device, &frame_layout, &white_texture.srgb, samples);
         let post = PostPasses::new(&device, color_format);
         let occlusion =
             OcclusionPasses::new(&device, [&frame_layout, &material_layout, &skinning.layout]);
@@ -272,12 +274,14 @@ impl ScenePipeline {
             outline_pipeline,
             edge_pipeline,
             edges: false,
+            decals: false,
             depth_of_field: false,
             motion_blur: false,
             temporal,
             history: Default::default(),
             surface_shaders: Default::default(),
             sprites,
+            decal_pass,
             post,
             frame_targets,
             occlusion,
@@ -397,6 +401,7 @@ impl ScenePipeline {
         self.materials.clear();
         self.textures.clear();
         self.sprites.forget(|_| false);
+        self.decal_pass.forget(|_| false);
     }
 
     /// Uses `settings` from the next frame (see [`Self::set_graphics`]).
@@ -452,6 +457,7 @@ impl ScenePipeline {
                 samples,
             );
             self.sprites.set_samples(&self.device, samples);
+            self.decal_pass.set_samples(&self.device, samples);
             self.surface_shaders.clear_pipelines();
         }
         self.fit_targets();
@@ -459,6 +465,7 @@ impl ScenePipeline {
             self.materials.clear();
             self.textures.clear();
             self.sprites.forget(|_| false);
+            self.decal_pass.forget(|_| false);
             self.terrain
                 .set_skipped_levels(self.graphics.texture_quality.skipped_levels());
         }
@@ -478,7 +485,7 @@ impl ScenePipeline {
         let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
         let used = targets_used(
             &self.graphics,
-            self.edges,
+            self.edges || self.decals,
             self.depth_of_field,
             self.motion_blur,
         );
@@ -527,6 +534,15 @@ impl ScenePipeline {
         // with the motion targets.
         let depth_of_field = lens::wants_depth_of_field(&list.lens);
         let motion_blur = temporal::wants_motion_blur(&list.lens);
+        // So do projected decals, while the settings draw any.
+        let decals = !list.decals.is_empty() && self.graphics.decals.count > 0;
+        if self.decals != decals {
+            self.decals = decals;
+            self.fit_targets();
+            // The frame bindings hand decal.wgsl the prepass's depth only
+            // while it's read.
+            self.bind_frame();
+        }
         if self.edges != list.edges.is_some()
             || self.depth_of_field != depth_of_field
             || self.motion_blur != motion_blur
@@ -890,6 +906,26 @@ impl ScenePipeline {
                 },
             )
         };
+        let (decal_draws, decals_left_out) = {
+            let textures = &self.textures;
+            let normals = self
+                .frame_targets
+                .occlusion
+                .as_ref()
+                .map(|targets| &targets.normal_view);
+            self.decal_pass.prepare(
+                (&self.device, &self.queue),
+                list,
+                (self.graphics.decals, &camera_view),
+                normals,
+                |key| {
+                    textures
+                        .get(&key)
+                        .and_then(|cached| cached.gpu.as_ref())
+                        .map(|gpu| &gpu.srgb)
+                },
+            )
+        };
         // GPU particles, where compute shaders run.
         if list.particle_emitters.is_empty() || !self.capabilities.compute_shaders {
             self.gpu_particles = None;
@@ -983,6 +1019,8 @@ impl ScenePipeline {
             items_culled: culled + past_cull_distance,
             shadow_casters_culled: casters_by_view.iter().map(|(_, culled)| culled).sum(),
             sprites_culled,
+            decals_drawn: list.decals.len() as u32 - decals_left_out,
+            decals_left_out,
             lod_items,
             ..FrameCounts::default()
         };
@@ -1200,6 +1238,9 @@ impl ScenePipeline {
             draw_batches(&mut pass, solid);
             pass.set_pipeline(&self.sky_pipeline);
             pass.draw(0..3, 0..1);
+            // Projected decals over the solid scene (the sky's pixels are
+            // left alone by the prepass's depth).
+            self.decal_pass.draw(&mut pass, &decal_draws);
             // Screen-space outlines over the solid scene and the sky.
             if let Some(prepass) = edges {
                 pass.set_pipeline(&self.edge_pipeline);
@@ -1231,7 +1272,7 @@ impl ScenePipeline {
             self.sprites.draw(&mut pass, &sprite_draws, &emitter_draws);
         }
         (counts.items_drawn, counts.batches) = drawn;
-        counts.draw_calls += motion_draws;
+        counts.draw_calls += motion_draws + decal_draws.len() as u32;
         // The light the volumetric fog scattered in front of what was drawn.
         if let (Some(fog), Some(occlusion)) = (&self.volumetric_fog, &self.frame_targets.occlusion)
         {
@@ -1457,7 +1498,7 @@ impl ScenePipeline {
             .filter(|_| self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off)
             .map_or(&self.no_occlusion_view, |targets| &targets.blurred_view);
         let prepass_depth = prepass
-            .filter(|_| self.graphics.contact_shadows)
+            .filter(|_| self.graphics.contact_shadows || self.decals)
             .map_or(&self.no_prepass_depth_view, |targets| &targets.depth_view);
         let (environment, sky_image) = self.environment.views();
         let probes = self.probes.view();
@@ -1637,6 +1678,8 @@ impl ScenePipeline {
             shadow_casters_drawn: counts.shadow_casters_drawn,
             shadow_casters_culled: counts.shadow_casters_culled,
             sprites_culled: counts.sprites_culled,
+            decals_drawn: counts.decals_drawn,
+            decals_left_out: counts.decals_left_out,
             lod_items: counts.lod_items,
             surface_shaders,
             broken_shaders,
@@ -1925,7 +1968,12 @@ impl ScenePipeline {
         }
         let emitter_textures = list.particle_emitters.iter().map(|e| &e.look.texture);
         let sprite_textures = list.sprites.iter().map(|s| &s.texture);
-        for source in sprite_textures.chain(emitter_textures).flatten() {
+        let decal_textures = list.decals.iter().map(|d| &d.texture);
+        for source in sprite_textures
+            .chain(emitter_textures)
+            .chain(decal_textures)
+            .flatten()
+        {
             self.note_texture(source.as_ref(), frame, false);
         }
         let replaced = self.fit_texture_budget(list);
@@ -1937,6 +1985,7 @@ impl ScenePipeline {
                     .any(|texture| replaced.contains(texture))
             });
             self.sprites.forget(|key| !replaced.contains(&key));
+            self.decal_pass.forget(|key| !replaced.contains(&key));
         }
         for item in &list.items {
             if item.material.terrain.is_some() {
@@ -2084,6 +2133,8 @@ impl ScenePipeline {
         self.ui_image_groups
             .retain(|key, _| self.full_textures.contains_key(key));
         self.sprites.forget(|key| self.textures.contains_key(&key));
+        self.decal_pass
+            .forget(|key| self.textures.contains_key(&key));
         self.materials.retain(|_, cached| recent(cached.last_drawn));
         self.terrain.forget(frame);
         self.surface_shaders.forget(frame);

@@ -796,6 +796,8 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::SplineFollower => icons::TRAIN,
         ClassName::SplineMesh => icons::ROAD_HORIZON,
         ClassName::SplineScatter => icons::TREE_EVERGREEN,
+        ClassName::Decal => icons::STICKER,
+        ClassName::ProjectedDecal => icons::PROJECTOR_SCREEN,
         ClassName::Terrain => icons::MOUNTAINS,
         ClassName::TerrainLayer => icons::STACK,
         ClassName::ThirdPersonController => icons::PERSON_SIMPLE_WALK,

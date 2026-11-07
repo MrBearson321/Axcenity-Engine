@@ -82,6 +82,10 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::SetCameraType { .. } => ("Set Camera Type", &["Camera Type"]),
         BlockKind::PointCameraAt { .. } => ("Point Camera At", &["Position"]),
         BlockKind::ShakeCamera { .. } => ("Shake Camera", &["Intensity", "Seconds"]),
+        BlockKind::SpawnDecal { .. } => (
+            "Spawn Decal",
+            &["Texture", "Position", "Facing", "Size", "Seconds"],
+        ),
         BlockKind::MoveForward { .. } => ("Move Forward", &["Part", "Distance"]),
         BlockKind::TurnTo { .. } => ("Turn To", &["Part", "Orientation"]),
         BlockKind::TurnBy { .. } => ("Turn By", &["Part", "Rotation"]),

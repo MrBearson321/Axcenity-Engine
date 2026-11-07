@@ -77,11 +77,15 @@ struct Measured {
 }
 
 /// Draws the frames `frame` builds, and prints each step's CPU time, the
-/// GPU's frame and pass times, and the last frame's counts.
-fn run(name: &str, mut frame: impl FnMut(&mut Steps) -> DrawList) {
+/// GPU's frame and pass times, and the last frame's counts. Returns the
+/// last frame's counts and the GPU's frame time (where it can be timed).
+fn run(
+    name: &str,
+    mut frame: impl FnMut(&mut Steps) -> DrawList,
+) -> Option<(RenderStats, Option<Duration>)> {
     let Some((device, queue)) = bench_gpu() else {
         eprintln!("skipped {name}: no graphics adapter on this machine");
-        return;
+        return None;
     };
     let mut renderer = TextureRenderer::new(&device, &queue, SIZE.0, SIZE.1);
     renderer.set_graphics(&GraphicsSettings::preset(Quality::High));
@@ -149,7 +153,7 @@ fn run(name: &str, mut frame: impl FnMut(&mut Steps) -> DrawList) {
             "  GPU times: not available on this adapter
 "
         );
-        return;
+        return Some((stats, None));
     }
     let frame_time = best(&|frame| frame.stats.gpu_time);
     println!(
@@ -163,6 +167,7 @@ fn run(name: &str, mut frame: impl FnMut(&mut Steps) -> DrawList) {
         }
     }
     println!();
+    Some((stats, frame_time))
 }
 
 fn millis(time: Duration) -> String {
@@ -573,4 +578,81 @@ fn particles(out: f32, gpu: bool) {
         list
     });
     println!("  particles out: {}\n", particles.count());
+}
+
+/// Phase 75: 500 bullet holes spawned by `workspace:SpawnDecal` on the
+/// graphics reference scene (hello-graphics), all kept (its cap raised),
+/// against the same view without them. The holes must stay within a 60
+/// frames a second budget on the GPU (where it can be timed).
+#[test]
+#[ignore = "benchmark: run with --release -- --ignored bench_"]
+fn bench_500_bullet_holes_in_the_graphics_reference_scene() {
+    let (mut world, mut scripts, folder) = start_example_in("hello-graphics");
+    let workspace = world.workspace();
+    world
+        .set_property(workspace, "MaxSpawnedDecals", Value::Number(1000.0))
+        .unwrap();
+    let assets = Assets::new(&folder);
+    let eye = Vec3::new(12.0, 8.0, 16.0);
+    let view = camera(eye, Vec3::ZERO);
+    let mut cache = TerrainCache::new();
+    let mut draw_list = |world: &World, steps: &mut Steps| {
+        steps.time("build_draw_list", || {
+            axcenity_scene::build_draw_list_posed(
+                world,
+                &assets,
+                view,
+                &axcenity_anim::Poses::new(),
+                &mut cache,
+            )
+        })
+    };
+    let without = run("graphics reference scene", |steps| draw_list(&world, steps));
+
+    // A grid of shots from the camera into the scene.
+    let script = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(script, Some(world.server_script_service()))
+        .unwrap();
+    scripts.start_script(
+        &mut world,
+        script,
+        "scripts/holes.server.lua",
+        r#"
+local eye = Vector3.new(12, 8, 16)
+local spawned = 0
+for i = 0, 24 do
+    for j = 0, 19 do
+        local aim = Vector3.new(-9 + i * 0.75, -1, -8 + j * 0.8)
+        local hit = workspace:Raycast(eye, (aim - eye).Unit * 300)
+        if hit then
+            workspace:SpawnDecal("", CFrame.lookAt(hit.Position, hit.Position + hit.Normal),
+                0.6, 600)
+            spawned += 1
+        end
+    end
+end
+print(spawned)
+"#,
+    );
+    let printed: Vec<String> = scripts.take_output().into_iter().map(|l| l.text).collect();
+    assert_eq!(printed, ["500"], "every shot hits something");
+    let with = run("graphics reference scene, 500 bullet holes", |steps| {
+        draw_list(&world, steps)
+    });
+    let (Some((_, before)), Some((stats, after))) = (without, with) else {
+        return;
+    };
+    assert_eq!(stats.decals_drawn, 500);
+    if let (Some(before), Some(after)) = (before, after) {
+        println!(
+            "500 bullet holes add {} on the GPU",
+            millis(after.saturating_sub(before))
+        );
+        assert!(
+            after < Duration::from_micros(16_667),
+            "{} is over a 60 fps frame",
+            millis(after)
+        );
+    }
 }

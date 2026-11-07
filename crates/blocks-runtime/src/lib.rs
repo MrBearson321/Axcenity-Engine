@@ -610,6 +610,16 @@ pub enum BlockKind {
         intensity: Expression,
         seconds: Expression,
     },
+    /// Places a decal that fades out after `seconds`
+    /// (`workspace:SpawnDecal`): the picture `texture` laid on what's at
+    /// `position`, facing `facing` (a surface's normal), `size` studs.
+    SpawnDecal {
+        texture: Expression,
+        position: Expression,
+        facing: Expression,
+        size: Expression,
+        seconds: Expression,
+    },
 
     // Localization: `LocalizationService`.
     /// Sets the language bound UI text shows (`LocalizationService.Language`).
@@ -1074,6 +1084,13 @@ impl BlockKind {
             BlockKind::KickPlayer { player, reason } => vec![player, reason],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
+            BlockKind::SpawnDecal {
+                texture,
+                position,
+                facing,
+                size,
+                seconds,
+            } => vec![texture, position, facing, size, seconds],
             BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],
             _ => Vec::new(),
         }
@@ -1205,6 +1222,13 @@ impl BlockKind {
             BlockKind::KickPlayer { player, reason } => vec![player, reason],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
+            BlockKind::SpawnDecal {
+                texture,
+                position,
+                facing,
+                size,
+                seconds,
+            } => vec![texture, position, facing, size, seconds],
             BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],
             _ => Vec::new(),
         }

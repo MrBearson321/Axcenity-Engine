@@ -55,6 +55,11 @@ pub struct DrawList {
     /// like sprites just before [`DrawList::sprites`]. Only drawn where
     /// [`crate::Capabilities::compute_shaders`] holds.
     pub particle_emitters: Vec<ParticleEmitter>,
+    /// Boxes that project pictures onto the solid surfaces inside them
+    /// (`ProjectedDecal`s), drawn over solid items before see-through ones.
+    /// The graphics settings' quality limits how many and how far
+    /// ([`crate::EffectiveGraphics::decals`]), and Low draws none.
+    pub decals: Vec<crate::Decal>,
     /// Screen-space UI, drawn after the 3D scene.
     pub ui: Vec<UiDrawItem>,
     /// The project's own fonts, which UI text can name besides the built-in
@@ -1141,6 +1146,9 @@ pub struct DrawItem {
     /// How the item sways in [`DrawList::wind`] (plants), or `None` to keep
     /// it still. Its shadow sways with it.
     pub sway: Option<Sway>,
+    /// How it meets decals: a surface they land on, a character's, or a
+    /// decal itself (see [`crate::DecalRole`]).
+    pub decal_role: crate::DecalRole,
 }
 
 /// How a plant bends in the wind. Its corners move by their height above

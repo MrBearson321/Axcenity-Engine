@@ -60,6 +60,7 @@ mod csg;
 mod data;
 mod debris;
 mod debugger;
+mod decals;
 mod definitions;
 mod edit;
 mod errors;
@@ -2110,6 +2111,8 @@ mod collection_tests;
 mod console_service_tests;
 #[cfg(test)]
 mod data_tests;
+#[cfg(test)]
+mod decal_tests;
 #[cfg(test)]
 mod devices_tests;
 #[cfg(test)]

@@ -58,6 +58,15 @@ pub(super) const TERRAIN_SHADER: &str = concat!(
     include_str!("../lighting.wgsl"),
     include_str!("../terrain.wgsl")
 );
+/// Projected decals' shader: the sky's colors, the fog and the shared
+/// lighting (for the frame's bindings), then `decal.wgsl`.
+pub(super) const DECAL_SHADER: &str = concat!(
+    include_str!("../sky.wgsl"),
+    include_str!("../fog.wgsl"),
+    include_str!("../clouds.wgsl"),
+    include_str!("../lighting.wgsl"),
+    include_str!("../decal.wgsl")
+);
 /// The sprites' shader: the fog, then `sprite.wgsl`.
 pub(super) const SPRITE_SHADER: &str =
     concat!(include_str!("../fog.wgsl"), include_str!("../sprite.wgsl"));

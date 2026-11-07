@@ -52,6 +52,7 @@ mod clouds;
 mod culling;
 #[cfg(feature = "debug-views")]
 mod debug_views;
+mod decals;
 mod environment;
 mod fog;
 mod gpu;
@@ -176,6 +177,10 @@ pub struct RenderStats {
     pub shadow_casters_culled: u32,
     /// Sprites (particles) outside the camera's view.
     pub sprites_culled: u32,
+    /// Projected decals drawn, and those left out: outside the view, past
+    /// the graphics settings' count or distance, or all of them at Low.
+    pub decals_drawn: u32,
+    pub decals_left_out: u32,
     /// Items in the camera's view whose mesh has levels of detail, by the
     /// level they're drawn at: 0 is the mesh itself, then its simpler
     /// copies. An item cross-fading between two counts at the one coming in.

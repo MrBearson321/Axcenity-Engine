@@ -64,6 +64,15 @@ pub(super) fn insert_hint(what: Insertable) -> String {
             "Insert a Reverb Zone: while the camera is inside it, spatial Sounds take on its \
              reverb."
         }
+        Insertable::Decal => {
+            "Insert a Decal into the selected part: a picture on one of its faces (Face). \
+             Pick its Texture, and set StudsPerTileU and StudsPerTileV to repeat it."
+        }
+        Insertable::ProjectedDecal => {
+            "Insert a Projected Decal at the camera's focus point: a box that lays its picture \
+             on whatever is inside it, following its shape, for puddles, road markings and dirt. \
+             Characters walking through stay bare (IgnoreCharacters)."
+        }
         Insertable::ParticleEmitter => {
             "Insert a ParticleEmitter into the selected part. With no part selected it stands \
              on its own at the camera's focus point, shown as an icon you can drag."

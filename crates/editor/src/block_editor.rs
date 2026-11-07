@@ -313,7 +313,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetLanguage { .. }
         | BlockKind::SetGraphicsQuality { .. }
         | BlockKind::SetGraphicsOption { .. }
-        | BlockKind::SetGraphicsNumber { .. } => Category::Looks,
+        | BlockKind::SetGraphicsNumber { .. }
+        | BlockKind::SpawnDecal { .. } => Category::Looks,
         BlockKind::PlaySound { .. }
         | BlockKind::StopSound { .. }
         | BlockKind::PauseSound { .. }
@@ -1226,6 +1227,29 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Slot(seconds, SlotKind::Number),
             label("seconds"),
         ])],
+        BlockKind::SpawnDecal {
+            texture,
+            position,
+            facing,
+            size,
+            seconds,
+        } => vec![
+            Row(vec![
+                label("spawn decal"),
+                Slot(texture, SlotKind::Text),
+                label("at"),
+                Slot(position, SlotKind::Vector),
+                label("facing"),
+                Slot(facing, SlotKind::Vector),
+            ]),
+            Row(vec![
+                label("size"),
+                Slot(size, SlotKind::Number),
+                label("fading after"),
+                Slot(seconds, SlotKind::Number),
+                label("seconds"),
+            ]),
+        ],
         BlockKind::SetToneMapping { curve } => vec![Row(vec![
             label("set tone mapping to"),
             Part::Choice(curve, &axcenity_blocks::TONE_MAPPINGS),

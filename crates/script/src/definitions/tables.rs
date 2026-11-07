@@ -2547,6 +2547,20 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Workspace,
+        Function {
+            name: "SpawnDecal",
+            doc: "Places a ProjectedDecal of the picture `texture` (a project path, such as \"assets/textures/hole.png\") at `cframe`, facing its LookVector, `size` studs (a Vector3: width, height, depth; or a number for a cube), and returns it. It fades out over the last second of `lifetime` seconds (10 if left out) and is then destroyed. Past the Workspace's MaxSpawnedDecals, the oldest goes first. For bullet holes: `workspace:SpawnDecal(\"assets/textures/hole.png\", CFrame.lookAt(hit.Position, hit.Position + hit.Normal), 0.5, 20)`.",
+            params: &[
+                ("texture", "string"),
+                ("cframe", "CFrame"),
+                ("size", "Vector3 | number"),
+                ("lifetime?", "number"),
+            ],
+            returns: "Instance",
+        },
+    ),
+    (
         ClassName::Sound,
         Function {
             name: "Play",

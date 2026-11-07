@@ -438,7 +438,8 @@ fn screen_occlusion(pixel: vec2<f32>) -> f32 {
 }
 
 // What the depth and normal prepass writes for a surface facing `normal`
-// (world space): that direction in view space.
+// (world space): that direction in view space, and 1 (a character's items
+// write 0.5 there, for projected decals; the sky stays 0).
 fn prepass_normal(normal: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(normalize((frame.view * vec4<f32>(normal, 0.0)).xyz), 1.0);
 }

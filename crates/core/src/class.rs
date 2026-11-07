@@ -270,6 +270,15 @@ pub enum ClassName {
     /// Places models along the Spline it's in, or inside a closed one
     /// (Phase 74), from a seed. Made from the spline, never saved.
     SplineScatter,
+    /// Inside a part: a picture on one of its faces (`Face`), tinted by
+    /// `Color3`, stretched across the face or repeated every
+    /// `StudsPerTileU` by `StudsPerTileV` studs (Phase 75).
+    Decal,
+    /// A box (`Position`, `Orientation`, `Size`) that lays its picture onto
+    /// whatever solid surfaces are inside it, facing its front (-Z, a
+    /// CFrame's LookVector), for bullet holes, puddles, road markings and
+    /// dirt (Phase 75). `Workspace:SpawnDecal` places ones that fade out.
+    ProjectedDecal,
     /// A landscape: a heightfield (kept beside the Instance, see
     /// [`TerrainData`](crate::TerrainData)) shaded by its TerrainLayers.
     Terrain,
@@ -401,7 +410,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 127] = [
+    pub const ALL: [ClassName; 129] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -485,6 +494,8 @@ impl ClassName {
         ClassName::SplineFollower,
         ClassName::SplineMesh,
         ClassName::SplineScatter,
+        ClassName::Decal,
+        ClassName::ProjectedDecal,
         ClassName::Terrain,
         ClassName::TerrainLayer,
         ClassName::ThirdPersonController,
@@ -618,6 +629,8 @@ impl ClassName {
             ClassName::Spline => "Spline",
             ClassName::SplinePoint => "SplinePoint",
             ClassName::SplineFollower => "SplineFollower",
+            ClassName::Decal => "Decal",
+            ClassName::ProjectedDecal => "ProjectedDecal",
             ClassName::SplineMesh => "SplineMesh",
             ClassName::SplineScatter => "SplineScatter",
             ClassName::Terrain => "Terrain",
@@ -1024,6 +1037,9 @@ impl ClassName {
                 // studs a second squared (Roblox's default; physics'
                 // `GRAVITY`).
                 ("Gravity", Value::Number(196.2)),
+                // The most decals `SpawnDecal` keeps at once: past it, the
+                // oldest goes first.
+                ("MaxSpawnedDecals", Value::Number(200.0)),
             ],
             ClassName::Lighting => vec![
                 ("ShadowsEnabled", Value::Bool(true)),
@@ -1699,6 +1715,43 @@ impl ClassName {
                 // From the point to its handles, in studs (Free only).
                 ("InTangent", Value::Vector3(Vector3::new(-2.0, 0.0, 0.0))),
                 ("OutTangent", Value::Vector3(Vector3::new(2.0, 0.0, 0.0))),
+            ],
+            ClassName::Decal => vec![
+                // The picture, such as "assets/textures/logo.png". Its
+                // alpha is its shape.
+                ("Texture", Value::String(String::new())),
+                // The face of its part it's on.
+                (
+                    "Face",
+                    Value::EnumItem(EnumItem {
+                        enum_name: "NormalId".to_owned(),
+                        item: "Front".to_owned(),
+                    }),
+                ),
+                // Tints the picture.
+                ("Color3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                // 0 shows the picture as it is, 1 hides it.
+                ("Transparency", Value::Number(0.0)),
+                // Studs one copy of the picture covers across and down the
+                // face; 0 stretches one copy across it.
+                ("StudsPerTileU", Value::Number(0.0)),
+                ("StudsPerTileV", Value::Number(0.0)),
+            ],
+            ClassName::ProjectedDecal => vec![
+                ("Texture", Value::String(String::new())),
+                ("Color3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                ("Transparency", Value::Number(0.0)),
+                ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                // Facing up: the picture lies on the ground below it.
+                ("Orientation", Value::Vector3(Vector3::new(90.0, 0.0, 0.0))),
+                // Width and height of the picture, then how deep it reaches
+                // (half in front of the middle, half behind).
+                ("Size", Value::Vector3(Vector3::new(4.0, 4.0, 2.0))),
+                // Degrees a surface may turn away from the picture before
+                // it's gone from it; it fades over the second half.
+                ("FadeAngle", Value::Number(75.0)),
+                // On, characters walking through it stay bare.
+                ("IgnoreCharacters", Value::Bool(true)),
             ],
             ClassName::SplineFollower => vec![
                 // The Spline it follows.
@@ -2634,6 +2687,8 @@ impl ClassName {
             | ClassName::SplinePoint
             | ClassName::SplineMesh
             | ClassName::SplineScatter
+            | ClassName::Decal
+            | ClassName::ProjectedDecal
             | ClassName::Camera
             | ClassName::Attachment
             | ClassName::VehicleWheel

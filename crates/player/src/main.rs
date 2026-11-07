@@ -1824,6 +1824,8 @@ mod destruction_tests;
 mod physics_tests;
 
 #[cfg(test)]
+mod decal_tests;
+#[cfg(test)]
 mod health_tests;
 #[cfg(test)]
 mod humanoid_tests;

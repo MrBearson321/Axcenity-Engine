@@ -180,9 +180,20 @@ struct InstanceIn {
     @location(11) surface: vec4<f32>,
     // Where the item's skin's joints start, and how many (0: not animated).
     @location(14) skin: vec2<u32>,
-    // How it sways in the wind (see `swayed`).
+    // How it sways in the wind (see `swayed`); w is its decal role
+    // (`ROLE_CHARACTER`, `ROLE_DECAL`, else 0).
     @location(15) sway: vec4<f32>,
 }
+
+// `DrawItem::decal_role` (renderer/lighting.rs's `instance_raw`): a
+// character's item, which projected decals that ignore characters leave
+// bare, and a Part's Decal, drawn a hair toward the camera.
+const ROLE_CHARACTER: f32 = 1.0;
+const ROLE_DECAL: f32 = 2.0;
+// How far toward the camera a Decal's depth is moved, in clip-space depth
+// (0 to 1): many times the depth's rounding, so it always wins over the
+// face it lies on, yet far less than anything placed in front of it.
+const DECAL_DEPTH_BIAS: f32 = 1e-6;
 
 struct VertexOut {
     // Invariant, so the prepass and the moving items' motion pass
@@ -196,11 +207,17 @@ struct VertexOut {
     @location(5) uv: vec2<f32>,
     @location(6) tangent: vec4<f32>,
     @location(7) @interpolate(flat) fade: f32,
+    // Its decal role (`ROLE_CHARACTER`, `ROLE_DECAL`, else 0).
+    @location(8) @interpolate(flat) role: f32,
 }
 
 @vertex
 fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
-    return item_vertex(vertex, instance);
+    var out = item_vertex(vertex, instance);
+    if out.role == ROLE_DECAL {
+        out.clip_position.z -= DECAL_DEPTH_BIAS * out.clip_position.w;
+    }
+    return out;
 }
 
 // A corner of an item, posed, swayed and placed (`vs_main`'s work, shared
@@ -220,6 +237,7 @@ fn item_vertex(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     out.base_color = instance.base_color;
     out.emissive = instance.emissive_fade.xyz;
     out.fade = instance.emissive_fade.w;
+    out.role = instance.sway.w;
     out.surface = instance.surface.xyz;
     let tile = instance.surface.w;
     var uv = vertex.uv;
@@ -552,7 +570,12 @@ fn fs_prepass(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0)
     if shaded.opacity < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
         discard;
     }
-    return prepass_normal(normalize(in.normal) * facing);
+    var normal = prepass_normal(normalize(in.normal) * facing);
+    // A character's pixels are marked for projected decals (decal.wgsl).
+    if in.role == ROLE_CHARACTER {
+        normal.w = 0.5;
+    }
+    return normal;
 }
 
 // Motion vectors for items that moved since last frame (renderer/temporal.rs):

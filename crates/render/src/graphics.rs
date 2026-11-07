@@ -35,6 +35,30 @@ impl Quality {
     }
 }
 
+/// How many projected decals are drawn, nearest the camera first, and how
+/// far from it: they follow the quality preset, and Low draws none.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DecalLimits {
+    pub count: u32,
+    /// Studs from the camera past which a decal isn't drawn, fading out
+    /// over the last tenth.
+    pub distance: f32,
+}
+
+impl Quality {
+    /// The projected decals this preset draws: none at Low, then 128
+    /// within 150 studs, 512 within 300, and 1024 within 600 at Ultra.
+    pub fn decal_limits(self) -> DecalLimits {
+        let (count, distance) = match self {
+            Quality::Low => (0, 0.0),
+            Quality::Medium => (128, 150.0),
+            Quality::High => (512, 300.0),
+            Quality::Ultra => (1024, 600.0),
+        };
+        DecalLimits { count, distance }
+    }
+}
+
 /// How much detail the sun's shadow map has: its size and how many
 /// cascades cover the view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -813,6 +837,8 @@ impl GraphicsSettings {
             // Like depth of field: full-screen passes over the prepass's
             // depth and the motion it finds.
             motion_blur: self.motion_blur(),
+            // Every GPU can draw them: boxes read against the prepass.
+            decals: self.quality.decal_limits(),
             notes,
         }
     }
@@ -931,6 +957,9 @@ pub struct EffectiveGraphics {
     pub sharpen: bool,
     /// Motion blur's samples (needs the prepass's depth and motion vectors).
     pub motion_blur: MotionBlurQuality,
+    /// The projected decals drawn (they need the prepass's depth and
+    /// normals while any are drawn).
+    pub decals: DecalLimits,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }

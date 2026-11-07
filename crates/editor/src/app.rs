@@ -1440,6 +1440,8 @@ mod spline_tests;
 mod template_tests;
 
 #[cfg(test)]
+mod decal_tests;
+#[cfg(test)]
 mod level_tests;
 #[cfg(test)]
 mod model_studio_tests;

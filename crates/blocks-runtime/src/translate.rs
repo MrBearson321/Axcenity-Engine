@@ -767,6 +767,21 @@ impl Writer {
                     "workspace.CurrentCamera:Shake({intensity}, {seconds})"
                 ));
             }
+            BlockKind::SpawnDecal {
+                texture,
+                position,
+                facing,
+                size,
+                seconds,
+            } => {
+                let texture = self.expression(texture)?;
+                let position = self.operand(position)?;
+                let facing = self.expression(facing)?;
+                let (size, seconds) = (self.expression(size)?, self.expression(seconds)?);
+                self.line(format!(
+                    "workspace:SpawnDecal({texture}, CFrame.lookAt(Vector3.new(), {facing}) + {position}, {size}, {seconds})"
+                ));
+            }
             BlockKind::SetToneMapping { curve } => {
                 let curve = choice(curve, &TONE_MAPPINGS, "a tone mapping")?;
                 self.line(format!("Lighting.ToneMapping = Enum.ToneMapping.{curve}"));

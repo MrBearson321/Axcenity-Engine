@@ -745,6 +745,9 @@ pub(super) struct ScenePipeline {
     /// Whether the last draw list asked for screen-space outlines, which
     /// keep the prepass's targets alive.
     pub(super) edges: bool,
+    /// Whether the last draw list had projected decals the graphics
+    /// settings draw, which keep the prepass's targets alive too.
+    pub(super) decals: bool,
     /// Whether the last draw list asked for depth of field, which (while
     /// its setting allows it) keeps the prepass's targets and its own alive.
     pub(super) depth_of_field: bool,
@@ -759,6 +762,7 @@ pub(super) struct ScenePipeline {
     pub(super) surface_shaders: surface_shaders::SurfaceShaders,
     /// Camera-facing pictures, such as particles.
     pub(super) sprites: sprites::SpritePass,
+    pub(super) decal_pass: decals::DecalPass,
     pub(super) post: PostPasses,
     /// The scene's targets, remade when the scene's size, the
     /// anti-aliasing or the ambient occlusion changes.
@@ -937,6 +941,8 @@ pub(super) struct FrameCounts {
     pub(super) shadow_casters_drawn: u32,
     pub(super) shadow_casters_culled: u32,
     pub(super) sprites_culled: u32,
+    pub(super) decals_drawn: u32,
+    pub(super) decals_left_out: u32,
     /// Items in view with levels of detail, by level.
     pub(super) lod_items: [u32; crate::LOD_LEVELS],
 }

@@ -3,7 +3,8 @@ use super::*;
 /// A block or reporter in the palette.
 #[derive(Clone, Debug)]
 pub(super) enum PaletteItem {
-    Block(BlockKind),
+    /// Boxed: a block is far bigger than a reporter.
+    Block(Box<BlockKind>),
     Reporter(Expression),
     /// The "Make a Variable" button.
     NewVariable,
@@ -58,201 +59,211 @@ pub(super) fn palette(
         .first()
         .cloned()
         .unwrap_or_else(|| "score".to_owned());
-    use PaletteItem::{Block as B, Reporter as R};
+    use PaletteItem::Reporter as R;
+    let block = |kind| PaletteItem::Block(Box::new(kind));
     let mut items = match category {
         Category::Events => vec![
-            B(BlockKind::WhenStarted { body: Vec::new() }),
-            B(BlockKind::WhenTouched {
+            block(BlockKind::WhenStarted { body: Vec::new() }),
+            block(BlockKind::WhenTouched {
                 part: part.clone(),
                 body: Vec::new(),
             }),
-            B(BlockKind::WhenKeyPressed {
+            block(BlockKind::WhenKeyPressed {
                 key: "Space".to_owned(),
                 body: Vec::new(),
             }),
-            B(BlockKind::WhenPromptTriggered {
+            block(BlockKind::WhenPromptTriggered {
                 prompt: first(Filter::Prompts),
                 body: Vec::new(),
             }),
-            B(BlockKind::WhenPartClicked {
+            block(BlockKind::WhenPartClicked {
                 detector: first(Filter::ClickDetectors),
                 body: Vec::new(),
             }),
-            B(BlockKind::WhenCommandRun {
+            block(BlockKind::WhenCommandRun {
                 command: text("heal"),
                 help: text("Heals the player"),
                 body: Vec::new(),
             }),
-            B(BlockKind::WhenClicked {
+            block(BlockKind::WhenClicked {
                 button: first(Filter::Buttons),
                 body: Vec::new(),
             }),
-            B(BlockKind::WhenMouseEnters {
+            block(BlockKind::WhenMouseEnters {
                 element: first(Filter::Gui),
                 body: Vec::new(),
             }),
-            B(BlockKind::WhenMouseLeaves {
+            block(BlockKind::WhenMouseLeaves {
                 element: first(Filter::Gui),
                 body: Vec::new(),
             }),
-            B(BlockKind::WhenValueChanged {
+            block(BlockKind::WhenValueChanged {
                 widget: first(Filter::Widgets),
                 body: Vec::new(),
             }),
-            B(BlockKind::EveryFrame { body: Vec::new() }),
-            B(BlockKind::BeforePhysics { body: Vec::new() }),
-            B(BlockKind::BeforeRender { body: Vec::new() }),
-            B(BlockKind::WhenEventFired {
+            block(BlockKind::EveryFrame { body: Vec::new() }),
+            block(BlockKind::BeforePhysics { body: Vec::new() }),
+            block(BlockKind::BeforeRender { body: Vec::new() }),
+            block(BlockKind::WhenEventFired {
                 event: bindable.clone(),
                 body: Vec::new(),
             }),
-            B(BlockKind::FireEvent {
+            block(BlockKind::FireEvent {
                 event: bindable.clone(),
             }),
-            B(BlockKind::WhenSoundEnded {
+            block(BlockKind::WhenSoundEnded {
                 sound: sound.clone(),
                 body: Vec::new(),
             }),
         ],
         Category::Control => vec![
-            B(BlockKind::Wait {
+            block(BlockKind::Wait {
                 seconds: number(1.0),
             }),
-            B(BlockKind::Repeat {
+            block(BlockKind::Repeat {
                 count: number(10.0),
                 body: Vec::new(),
             }),
-            B(BlockKind::Forever { body: Vec::new() }),
-            B(BlockKind::If {
+            block(BlockKind::Forever { body: Vec::new() }),
+            block(BlockKind::If {
                 condition: condition(),
                 body: Vec::new(),
             }),
-            B(BlockKind::IfElse {
+            block(BlockKind::IfElse {
                 condition: condition(),
                 then_body: Vec::new(),
                 else_body: Vec::new(),
             }),
-            B(BlockKind::WaitUntil {
+            block(BlockKind::WaitUntil {
                 condition: condition(),
             }),
-            B(BlockKind::RepeatUntil {
+            block(BlockKind::RepeatUntil {
                 condition: condition(),
                 body: Vec::new(),
             }),
-            B(BlockKind::StopScript),
-            B(BlockKind::ForEachChild {
+            block(BlockKind::StopScript),
+            block(BlockKind::ForEachChild {
                 target: String::new(),
                 variable: "child".to_owned(),
                 body: Vec::new(),
             }),
-            B(BlockKind::ForEachPartInRadius {
+            block(BlockKind::ForEachPartInRadius {
                 center: vector(0.0, 0.0, 0.0),
                 radius: number(10.0),
                 variable: "part".to_owned(),
                 body: Vec::new(),
             }),
-            B(BlockKind::ForEachPartTouching {
+            block(BlockKind::ForEachPartTouching {
                 target: part.clone(),
                 variable: "part".to_owned(),
                 body: Vec::new(),
             }),
-            B(BlockKind::WaitForChild {
+            block(BlockKind::WaitForChild {
                 target: String::new(),
                 name: NameKind::Child.example().to_owned(),
             }),
-            B(BlockKind::DestroyAfter {
+            block(BlockKind::DestroyAfter {
                 target: part.clone(),
                 seconds: number(2.0),
             }),
         ],
         Category::Motion => vec![
-            B(BlockKind::MoveTo {
+            block(BlockKind::MoveTo {
                 target: part.clone(),
                 position: vector(0.0, 5.0, 0.0),
             }),
-            B(BlockKind::MoveBy {
+            block(BlockKind::MoveBy {
                 target: part.clone(),
                 offset: vector(0.0, 1.0, 0.0),
             }),
-            B(BlockKind::MoveForward {
+            block(BlockKind::MoveForward {
                 target: part.clone(),
                 distance: number(5.0),
             }),
-            B(BlockKind::LookAt {
+            block(BlockKind::LookAt {
                 target: part.clone(),
                 position: vector(0.0, 0.0, 0.0),
             }),
-            B(BlockKind::TurnTo {
+            block(BlockKind::TurnTo {
                 target: part.clone(),
                 orientation: vector(0.0, 0.0, 0.0),
             }),
-            B(BlockKind::TurnBy {
+            block(BlockKind::TurnBy {
                 target: part.clone(),
                 rotation: vector(0.0, 15.0, 0.0),
             }),
-            B(BlockKind::SetAnchored {
+            block(BlockKind::SetAnchored {
                 target: part.clone(),
                 anchored: Expression::Boolean { value: true },
             }),
-            B(BlockKind::PushWithForce {
+            block(BlockKind::PushWithForce {
                 target: part.clone(),
                 force: vector(0.0, 50.0, 0.0),
             }),
-            B(BlockKind::SetPartVelocity {
+            block(BlockKind::SetPartVelocity {
                 target: part.clone(),
                 velocity: vector(0.0, 20.0, 0.0),
             }),
-            B(BlockKind::SetFriction {
+            block(BlockKind::SetFriction {
                 target: part.clone(),
                 friction: number(0.1),
             }),
-            B(BlockKind::SetDestination {
+            block(BlockKind::SetDestination {
                 agent: first(Filter::Agents),
                 position: vector(10.0, 0.0, 0.0),
             }),
-            B(BlockKind::SetVelocity {
+            block(BlockKind::SetVelocity {
                 agent: first(Filter::Agents),
                 velocity: vector(0.0, 0.0, 0.0),
             }),
-            B(BlockKind::WhenAgentSenses {
+            block(BlockKind::WhenAgentSenses {
                 agent: first(Filter::Agents),
                 sense: axcenity_blocks::SENSES[0].to_owned(),
                 body: Vec::new(),
             }),
-            B(BlockKind::Patrol {
+            block(BlockKind::Patrol {
                 agent: first(Filter::Agents),
                 spline: first(Filter::Splines),
             }),
-            B(BlockKind::PlaceOnSpline {
+            block(BlockKind::PlaceOnSpline {
                 target: part.clone(),
                 spline: first(Filter::Splines),
                 distance: number(0.0),
             }),
-            B(BlockKind::WhenSplineReached {
+            block(BlockKind::WhenSplineReached {
                 follower: first(Filter::SplineFollowers),
                 which: axcenity_blocks::SPLINE_ENDS[0].to_owned(),
                 body: Vec::new(),
             }),
-            B(BlockKind::WhenSeatOccupied {
+            block(BlockKind::WhenSeatOccupied {
                 seat: first(Filter::Seats),
                 body: Vec::new(),
             }),
-            B(BlockKind::LeaveSeat {
+            block(BlockKind::LeaveSeat {
                 controller: first(Filter::Controllers),
             }),
-            B(BlockKind::SetCameraType {
+            block(BlockKind::SetCameraType {
                 camera_type: axcenity_blocks::CAMERA_TYPES[0].to_owned(),
             }),
-            B(BlockKind::PointCameraAt {
+            block(BlockKind::PointCameraAt {
                 position: vector(0.0, 0.0, 0.0),
             }),
-            B(BlockKind::ShakeCamera {
+            block(BlockKind::ShakeCamera {
                 intensity: number(1.0),
                 seconds: number(0.5),
             }),
         ],
         Category::Looks => vec![
-            B(BlockKind::SetColor {
+            block(BlockKind::SpawnDecal {
+                texture: Expression::Text {
+                    value: "assets/textures/hole.png".to_owned(),
+                },
+                position: vector(0.0, 0.0, 0.0),
+                facing: vector(0.0, 1.0, 0.0),
+                size: number(1.0),
+                seconds: number(10.0),
+            }),
+            block(BlockKind::SetColor {
                 target: part.clone(),
                 color: Expression::Color3 {
                     r: 1.0,
@@ -260,71 +271,71 @@ pub(super) fn palette(
                     b: 0.3,
                 },
             }),
-            B(BlockKind::SetText {
+            block(BlockKind::SetText {
                 target: first(Filter::Texts),
                 text: text("Hello!"),
             }),
-            B(BlockKind::Show {
+            block(BlockKind::Show {
                 target: first(Filter::Gui),
             }),
-            B(BlockKind::Hide {
+            block(BlockKind::Hide {
                 target: first(Filter::Gui),
             }),
-            B(BlockKind::ShowPage {
+            block(BlockKind::ShowPage {
                 layout: first(Filter::PageLayouts),
                 page: text("Home"),
             }),
-            B(BlockKind::ScrollTo {
+            block(BlockKind::ScrollTo {
                 target: first(Filter::ScrollingFrames),
                 x: number(0.0),
                 y: number(0.0),
             }),
-            B(BlockKind::SetValue {
+            block(BlockKind::SetValue {
                 target: first(Filter::Widgets),
                 value: number(50.0),
             }),
-            B(BlockKind::SetProperty {
+            block(BlockKind::SetProperty {
                 target: part.clone(),
                 property: "Size".to_owned(),
                 value: vector(4.0, 1.0, 2.0),
             }),
-            B(BlockKind::SetLanguage {
+            block(BlockKind::SetLanguage {
                 language: text("English"),
             }),
-            B(BlockKind::SetToneMapping {
+            block(BlockKind::SetToneMapping {
                 curve: "Neutral".to_owned(),
             }),
-            B(BlockKind::SetClockTime { time: number(18.0) }),
-            B(BlockKind::SetAtmosphere {
+            block(BlockKind::SetClockTime { time: number(18.0) }),
+            block(BlockKind::SetAtmosphere {
                 property: "Haze".to_owned(),
                 value: number(2.0),
             }),
-            B(BlockKind::SetGraphicsQuality {
+            block(BlockKind::SetGraphicsQuality {
                 quality: "High".to_owned(),
             }),
-            B(BlockKind::SetGraphicsOption {
+            block(BlockKind::SetGraphicsOption {
                 setting: "ShadowQuality".to_owned(),
                 choice: "High".to_owned(),
             }),
-            B(BlockKind::SetGraphicsNumber {
+            block(BlockKind::SetGraphicsNumber {
                 setting: "RenderScale".to_owned(),
                 value: number(1.0),
             }),
         ],
         Category::Sound => vec![
-            B(BlockKind::PlaySound {
+            block(BlockKind::PlaySound {
                 target: sound.clone(),
             }),
-            B(BlockKind::StopSound {
+            block(BlockKind::StopSound {
                 target: sound.clone(),
             }),
-            B(BlockKind::PauseSound {
+            block(BlockKind::PauseSound {
                 target: sound.clone(),
             }),
-            B(BlockKind::ResumeSound {
+            block(BlockKind::ResumeSound {
                 target: sound.clone(),
             }),
-            B(BlockKind::SetVolume {
+            block(BlockKind::SetVolume {
                 target: sound,
                 volume: number(0.5),
             }),
@@ -395,11 +406,11 @@ pub(super) fn palette(
                     .iter()
                     .map(|name| R(Expression::Variable { name: name.clone() })),
             );
-            items.push(B(BlockKind::SetVariable {
+            items.push(block(BlockKind::SetVariable {
                 name: variable.clone(),
                 value: number(0.0),
             }));
-            items.push(B(BlockKind::ChangeVariable {
+            items.push(block(BlockKind::ChangeVariable {
                 name: variable,
                 by: number(1.0),
             }));
@@ -447,44 +458,44 @@ pub(super) fn palette(
                     .map_or_else(|| kind.example().to_owned(), |(_, name)| name.clone())
             };
             vec![
-                B(BlockKind::SetAnimatorTrigger {
+                block(BlockKind::SetAnimatorTrigger {
                     animator: animator.clone(),
                     parameter: name(NameKind::Trigger),
                 }),
-                B(BlockKind::SetAnimatorBool {
+                block(BlockKind::SetAnimatorBool {
                     animator: animator.clone(),
                     parameter: name(NameKind::Bool),
                     value: Expression::Boolean { value: true },
                 }),
-                B(BlockKind::SetAnimatorNumber {
+                block(BlockKind::SetAnimatorNumber {
                     animator: animator.clone(),
                     parameter: name(NameKind::Number),
                     value: number(1.0),
                 }),
-                B(BlockKind::ResetAnimatorTrigger {
+                block(BlockKind::ResetAnimatorTrigger {
                     animator: animator.clone(),
                     parameter: name(NameKind::Trigger),
                 }),
-                B(BlockKind::PlayAnimatorState {
+                block(BlockKind::PlayAnimatorState {
                     animator: animator.clone(),
                     state: name(NameKind::State),
                 }),
-                B(BlockKind::PlayAnimation {
+                block(BlockKind::PlayAnimation {
                     animator: animator.clone(),
                     animation: first(Filter::Animations),
                 }),
-                B(BlockKind::PlayCutscene {
+                block(BlockKind::PlayCutscene {
                     sequence: first(Filter::Sequences),
                 }),
-                B(BlockKind::WhenCutsceneFinished {
+                block(BlockKind::WhenCutsceneFinished {
                     sequence: first(Filter::Sequences),
                     body: Vec::new(),
                 }),
-                B(BlockKind::WhenStateChanged {
+                block(BlockKind::WhenStateChanged {
                     animator: animator.clone(),
                     body: Vec::new(),
                 }),
-                B(BlockKind::WhenAnimationEvent {
+                block(BlockKind::WhenAnimationEvent {
                     animator: animator.clone(),
                     event: name(NameKind::Event),
                     body: Vec::new(),
@@ -506,7 +517,7 @@ pub(super) fn palette(
         Category::Tweens => {
             let gui = first(Filter::Gui);
             vec![
-                B(BlockKind::Tween {
+                block(BlockKind::Tween {
                     target: part.clone(),
                     property: "Position".to_owned(),
                     value: vector(0.0, 10.0, 0.0),
@@ -514,77 +525,77 @@ pub(super) fn palette(
                     style: "Quad".to_owned(),
                     direction: "Out".to_owned(),
                 }),
-                B(BlockKind::SlideIn {
+                block(BlockKind::SlideIn {
                     target: gui.clone(),
                     from: "Left".to_owned(),
                     seconds: number(0.5),
                 }),
-                B(BlockKind::FadeIn {
+                block(BlockKind::FadeIn {
                     target: gui.clone(),
                     seconds: number(0.5),
                 }),
-                B(BlockKind::FadeOut {
+                block(BlockKind::FadeOut {
                     target: gui,
                     seconds: number(0.5),
                 }),
             ]
         }
         Category::More => vec![
-            B(BlockKind::Print {
+            block(BlockKind::Print {
                 value: text("Hello!"),
             }),
-            B(BlockKind::Destroy {
+            block(BlockKind::Destroy {
                 target: first(Filter::Parts),
             }),
-            B(BlockKind::CloneInto {
+            block(BlockKind::CloneInto {
                 target: first(Filter::Parts),
                 parent: String::new(),
             }),
-            B(BlockKind::SaveSlot { slot: number(1.0) }),
-            B(BlockKind::LoadSlot { slot: number(1.0) }),
-            B(BlockKind::SetCheckpoint {
+            block(BlockKind::SaveSlot { slot: number(1.0) }),
+            block(BlockKind::LoadSlot { slot: number(1.0) }),
+            block(BlockKind::SetCheckpoint {
                 checkpoint: first(Filter::Checkpoints),
             }),
-            B(BlockKind::RestoreCheckpoint),
-            B(BlockKind::LoadLevel {
+            block(BlockKind::RestoreCheckpoint),
+            block(BlockKind::LoadLevel {
                 level: text("Castle"),
                 spawn: text("Gate"),
             }),
-            B(BlockKind::AddLevel {
+            block(BlockKind::AddLevel {
                 level: text("Dungeon"),
             }),
-            B(BlockKind::RemoveLevel {
+            block(BlockKind::RemoveLevel {
                 level: text("Dungeon"),
             }),
-            B(BlockKind::HostGame {
+            block(BlockKind::HostGame {
                 port: number(47800.0),
             }),
-            B(BlockKind::JoinGame {
+            block(BlockKind::JoinGame {
                 address: text("192.168.1.20:47800"),
             }),
-            B(BlockKind::LeaveGame),
-            B(BlockKind::SetNetworkOwner {
+            block(BlockKind::LeaveGame),
+            block(BlockKind::SetNetworkOwner {
                 target: part.clone(),
                 owner: Expression::Variable {
                     name: "player".to_owned(),
                 },
             }),
-            B(BlockKind::SetNetworkOwnershipAuto {
+            block(BlockKind::SetNetworkOwnershipAuto {
                 target: part.clone(),
             }),
-            B(BlockKind::SendChatMessage {
+            block(BlockKind::SendChatMessage {
                 text: text("Hello"),
             }),
-            B(BlockKind::ShowSystemMessage {
+            block(BlockKind::ShowSystemMessage {
                 text: text("Round over"),
             }),
-            B(BlockKind::KickPlayer {
+            block(BlockKind::KickPlayer {
                 player: Expression::Variable {
                     name: "player".to_owned(),
                 },
                 reason: text("Cheating"),
             }),
-            B(BlockKind::WhenConnectionFails { body: Vec::new() }),
+            block(BlockKind::WhenConnectionFails { body: Vec::new() }),
             R(Expression::DataValue {
                 column: storage_name(NameKind::Column),
                 row: Box::new(Expression::DataRow {
@@ -677,7 +688,7 @@ pub(super) fn show_palette(
                             }
                             PaletteItem::Block(kind) => {
                                 if let Some(drag) =
-                                    palette_block(ui, kind, context, variables, background)
+                                    palette_block(ui, *kind, context, variables, background)
                                 {
                                     started = Some(drag);
                                 }

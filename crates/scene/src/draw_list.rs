@@ -14,8 +14,8 @@ use axcenity_assets::{
 use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, Value, World};
 use axcenity_render::glam::{Mat4, Quat, Vec3};
 use axcenity_render::{
-    AmbientLight, Camera, Channel, ChannelMap, Clouds, Cone, DrawItem, DrawList, Fog, Light,
-    Material, MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage, RectArea,
+    AmbientLight, Camera, Channel, ChannelMap, Clouds, Cone, DecalRole, DrawItem, DrawList, Fog,
+    Light, Material, MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage, RectArea,
     ReflectionProbe, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, TextureMaps, TextureSource,
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
@@ -449,6 +449,8 @@ pub fn build_draw_list_posed(
     let mut lights = Vec::new();
     let mut reflection_probes = Vec::new();
     let mut light_probe_volumes = Vec::new();
+    let mut decals = Vec::new();
+    let mut characters = crate::decals::Characters::default();
     for (id, instance) in world
         .descendants(world.workspace())
         .into_iter()
@@ -457,7 +459,19 @@ pub fn build_draw_list_posed(
         .filter(|&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(|id| Some((id, world.get(id)?)))
     {
+        let first_item = items.len();
         match instance.class() {
+            ClassName::Decal => {
+                let part = instance.parent().and_then(|parent| world.get(parent));
+                items.extend(
+                    part.and_then(|part| {
+                        crate::decals::face_decal_item(id, instance, part, assets)
+                    }),
+                );
+            }
+            ClassName::ProjectedDecal => {
+                decals.extend(crate::decals::projected_decal(instance, assets));
+            }
             class if class.has_model() => {
                 let posed = poses.get(&id);
                 mesh_part_draw_items(world, id, instance, assets, posed, &mut items)
@@ -497,6 +511,16 @@ pub fn build_draw_list_posed(
                 }
             }
         }
+        // A character's parts are marked, so projected decals that ignore
+        // characters leave them bare.
+        if items.len() > first_item
+            && instance.class().is_base_part()
+            && characters.contains(world, id)
+        {
+            for item in &mut items[first_item..] {
+                item.decal_role = DecalRole::Character;
+            }
+        }
     }
 
     terrain.draw_all(world, assets, &camera, &mut items);
@@ -519,6 +543,7 @@ pub fn build_draw_list_posed(
         items,
         sprites: Vec::new(),
         particle_emitters: Vec::new(),
+        decals,
         ui: Vec::new(),
         fonts: assets
             .fonts()
@@ -824,6 +849,7 @@ fn part_draw_item(
         cull_distance: 0.0,
         skin: None,
         sway,
+        decal_role: Default::default(),
     })
 }
 
@@ -1016,6 +1042,7 @@ fn mesh_part_draw_items(
             cull_distance: 0.0,
             skin: None,
             sway: None,
+            decal_role: Default::default(),
         });
         return;
     };
@@ -1063,6 +1090,7 @@ fn mesh_part_draw_items(
             cull_distance: 0.0,
             skin: skin.clone(),
             sway,
+            decal_role: Default::default(),
         });
     }
     for item in &mut items[first..] {
@@ -1167,6 +1195,7 @@ pub(crate) fn push_model(model: &Arc<Model>, transform: Mat4, id: u64, items: &m
             cull_distance: 0.0,
             skin: None,
             sway: None,
+            decal_role: Default::default(),
         });
     }
 }

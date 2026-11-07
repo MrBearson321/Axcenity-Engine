@@ -499,7 +499,7 @@ pub(super) fn duplicate_node(script: &mut BlockScript, node: &NodeRef) -> Option
 pub(super) fn add_node(script: &mut BlockScript, item: &PaletteItem) -> Option<NodeRef> {
     match item {
         PaletteItem::Block(kind) => {
-            let block = Block::new(kind.clone());
+            let block = Block::new(BlockKind::clone(kind));
             let id = block.id;
             if kind.is_event() {
                 script.blocks.push(block);

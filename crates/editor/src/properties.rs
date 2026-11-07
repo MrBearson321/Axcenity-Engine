@@ -89,7 +89,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 31] = [
+const GROUPS: [(&str, &[&str]); 34] = [
     (
         "Appearance",
         &[
@@ -126,6 +126,22 @@ const GROUPS: [(&str, &[&str]); 31] = [
         ],
     ),
     ("Wind", &["GlobalWind"]),
+    // The Workspace's cap on `SpawnDecal`'s decals (Phase 75).
+    ("Decals", &["MaxSpawnedDecals"]),
+    // A Decal's or ProjectedDecal's picture, and a ProjectedDecal's box.
+    (
+        "Decal",
+        &[
+            "Texture",
+            "Face",
+            "Color3",
+            "StudsPerTileU",
+            "StudsPerTileV",
+            "FadeAngle",
+            "IgnoreCharacters",
+        ],
+    ),
+    ("Box", &["Position", "Orientation", "Size"]),
     (
         "Part",
         &["Shape", "MeshId", "Position", "Orientation", "Size"],
@@ -445,6 +461,11 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
                 ClassName::SurfaceAppearance | ClassName::TerrainLayer
             ),
             "Terrain" => instance.class() == ClassName::Terrain,
+            "Decal" => matches!(
+                instance.class(),
+                ClassName::Decal | ClassName::ProjectedDecal
+            ),
+            "Box" => instance.class() == ClassName::ProjectedDecal,
             "Tiling" => matches!(
                 instance.class(),
                 ClassName::Part | ClassName::TerrainLayer | ClassName::SurfaceAppearance
@@ -1865,6 +1886,8 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         // A SplinePoint's handles and a SplineFollower's ends (Phase 73).
         "SplineTangentMode" => axcenity_core::spline::TangentMode::NAMES.to_vec(),
         "SplineFollowMode" => vec!["Loop", "PingPong", "Once"],
+        // A Decal's face (Phase 75).
+        "NormalId" => vec!["Right", "Top", "Back", "Left", "Bottom", "Front"],
         _ => {
             ui.label(format!("{}.{}", item.enum_name, item.item));
             return None;
@@ -2035,13 +2058,14 @@ mod tests {
     }
 
     #[test]
-    fn the_workspace_shows_only_its_gravity_and_wind_and_other_services_nothing() {
+    fn the_workspace_shows_only_its_gravity_wind_and_decal_cap_and_other_services_nothing() {
         let world = World::new();
         let workspace = world.get(world.workspace()).unwrap();
         let sections = sections(workspace);
-        assert_eq!(titles(&sections), ["Physics", "Wind"]);
+        assert_eq!(titles(&sections), ["Physics", "Wind", "Decals"]);
         assert_eq!(sections[0].properties[0].0, "Gravity");
         assert_eq!(sections[1].properties[0].0, "GlobalWind");
+        assert_eq!(sections[2].properties[0].0, "MaxSpawnedDecals");
         let storage = world.get(world.replicated_storage()).unwrap();
         assert!(super::sections(storage).is_empty());
     }
@@ -2249,5 +2273,31 @@ mod prefab_override_tests {
         let (used, room) = fit.unwrap();
         assert!(used.width() <= room.width() + 0.5);
         assert_eq!(edit, None);
+    }
+}
+
+#[cfg(test)]
+mod decal_section_tests {
+    use super::*;
+
+    fn titles(instance: &Instance) -> Vec<&'static str> {
+        sections(instance)
+            .iter()
+            .map(|section| section.title)
+            .collect()
+    }
+
+    /// Phase 75: a Decal's and a ProjectedDecal's picture settings are one
+    /// section, and a ProjectedDecal's box another; nothing is left over.
+    #[test]
+    fn decals_show_their_picture_and_box_sections() {
+        let mut world = World::new();
+        let decal = world.create(ClassName::Decal).unwrap();
+        let projected = world.create(ClassName::ProjectedDecal).unwrap();
+        assert_eq!(titles(world.get(decal).unwrap()), ["Appearance", "Decal"]);
+        assert_eq!(
+            titles(world.get(projected).unwrap()),
+            ["Appearance", "Decal", "Box"]
+        );
     }
 }

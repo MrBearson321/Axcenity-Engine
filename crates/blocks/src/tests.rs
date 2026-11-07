@@ -150,9 +150,10 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::ShowSystemMessage { .. } => 81,
         BlockKind::PlaceOnSpline { .. } => 82,
         BlockKind::Patrol { .. } => 83,
+        BlockKind::SpawnDecal { .. } => 84,
     })
 }
-const STATEMENT_COUNT: usize = 84;
+const STATEMENT_COUNT: usize = 85;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -764,6 +765,28 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 seconds: number(2.0),
             },
             "Debris:AddItem(workspace.Spark, 2)",
+        ),
+        (
+            BlockKind::SpawnDecal {
+                texture: text("assets/textures/hole.png"),
+                position: Expression::Math {
+                    op: MathOp::Add,
+                    left: boxed(variable("hit")),
+                    right: boxed(Expression::Vector3 {
+                        x: 0.0,
+                        y: 1.0,
+                        z: 0.0,
+                    }),
+                },
+                facing: Expression::Vector3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+                size: number(0.5),
+                seconds: number(20.0),
+            },
+            "workspace:SpawnDecal(\"assets/textures/hole.png\", CFrame.lookAt(Vector3.new(), Vector3.new(0, 1, 0)) + (hit + Vector3.new(0, 1, 0)), 0.5, 20)",
         ),
         (
             BlockKind::FireEvent {
@@ -2958,4 +2981,67 @@ fn query_blocks_list_the_parts_in_a_zone_and_raycast_past_the_shooter() {
         ["Coin", "Zone", "Coin", "Wall", "Shooter"],
         "{source}"
     );
+}
+
+/// The Spawn Decal block places a decal on what's at its position, facing
+/// the way given, which fades and goes after its seconds (Phase 75).
+#[test]
+fn the_spawn_decal_block_places_a_decal_that_goes_after_its_seconds() {
+    let up = || Expression::Vector3 {
+        x: 0.0,
+        y: 1.0,
+        z: 0.0,
+    };
+    let source = translate(&script(vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![block(
+                2,
+                BlockKind::SpawnDecal {
+                    texture: text("assets/textures/hole.png"),
+                    position: Expression::Vector3 {
+                        x: 2.0,
+                        y: 0.0,
+                        z: 3.0,
+                    },
+                    facing: up(),
+                    size: number(0.5),
+                    seconds: number(2.0),
+                },
+            )],
+        },
+    )]))
+    .unwrap()
+    .source;
+    let mut world = World::new();
+    let lua = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(lua, Some(world.server_script_service()))
+        .unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, lua, "scripts/Holes.server.blocks.json", &source);
+    let decal = world
+        .descendants(world.workspace())
+        .into_iter()
+        .find(|&id| world.get(id).unwrap().class() == ClassName::ProjectedDecal)
+        .expect("a decal");
+    let property = |world: &World, name| world.get(decal).unwrap().property(name).cloned();
+    assert_eq!(
+        property(&world, "Position"),
+        Some(Value::Vector3(Vector3::new(2.0, 0.0, 3.0)))
+    );
+    assert_eq!(
+        property(&world, "Size"),
+        Some(Value::Vector3(Vector3::new(0.5, 0.5, 0.5)))
+    );
+    // Facing up: turned 90 degrees around X.
+    let Some(Value::Vector3(orientation)) = property(&world, "Orientation") else {
+        panic!("an orientation");
+    };
+    assert!((orientation.x - 90.0).abs() < 1e-3, "{orientation:?}");
+    assert!(runtime.take_output().is_empty());
+    for _ in 0..3 {
+        runtime.step(&mut world, 1.0);
+    }
+    assert!(!world.contains(decal), "gone after 2 seconds");
 }

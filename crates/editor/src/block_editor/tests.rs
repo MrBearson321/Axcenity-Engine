@@ -16,7 +16,7 @@ fn server_palettes_leave_out_client_only_blocks() {
     let client: Vec<_> = palette(Category::Events, true, &[], &[])
         .into_iter()
         .filter_map(|item| match item {
-            PaletteItem::Block(kind) => Some(kind),
+            PaletteItem::Block(kind) => Some(*kind),
             _ => None,
         })
         .collect();
@@ -40,7 +40,7 @@ fn palette_blocks_name_the_first_object_of_their_kind() {
     let sound = palette(Category::Sound, false, &objects, &[]);
     assert!(matches!(
         &sound[0],
-        PaletteItem::Block(BlockKind::PlaySound { target }) if target == "Floor.Chime"
+        PaletteItem::Block(kind) if matches!(&**kind, BlockKind::PlaySound { target } if target == "Floor.Chime")
     ));
 }
 
@@ -118,8 +118,8 @@ pub(super) fn sample_script(objects: &[ObjectInfo]) -> BlockScript {
     for category in Category::ALL {
         for item in palette(category, true, objects, &["score".to_owned()]) {
             match item {
-                PaletteItem::Block(kind) if kind.is_event() => events.push(Block::new(kind)),
-                PaletteItem::Block(kind) => statements.push(Block::new(kind)),
+                PaletteItem::Block(kind) if kind.is_event() => events.push(Block::new(*kind)),
+                PaletteItem::Block(kind) => statements.push(Block::new(*kind)),
                 PaletteItem::Reporter(expression) => reporters.push(expression),
                 PaletteItem::NewVariable => {}
             }

@@ -77,6 +77,7 @@ fn square_at(distance: f32, id: u64) -> DrawList {
         cull_distance: 0.0,
         skin: None,
         sway: None,
+        decal_role: Default::default(),
     }]);
     list.shadows.enabled = false;
     list.sun.intensity = 0.0;

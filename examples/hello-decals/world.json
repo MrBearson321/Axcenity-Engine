@@ -1,0 +1,268 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "properties": {
+      "MaxSpawnedDecals": 200
+    },
+    "children": [
+      {
+        "class": "Terrain",
+        "name": "Terrain",
+        "properties": {
+          "DataFolder": "assets/terrain/Hill",
+          "Position": [
+            0,
+            -8.0,
+            0
+          ],
+          "Size": [
+            128.0,
+            24.0,
+            128.0
+          ]
+        },
+        "children": [
+          {
+            "class": "TerrainLayer",
+            "name": "Grass",
+            "properties": {
+              "Color": [
+                0.3,
+                0.42,
+                0.24
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "class": "ProjectedDecal",
+        "name": "RoadMarking",
+        "properties": {
+          "Texture": "assets/textures/dashes.png",
+          "Position": [
+            -6,
+            2,
+            -2
+          ],
+          "Orientation": [
+            90,
+            90,
+            0
+          ],
+          "Size": [
+            1.2,
+            26,
+            12
+          ],
+          "FadeAngle": 80
+        }
+      },
+      {
+        "class": "ProjectedDecal",
+        "name": "Puddle",
+        "properties": {
+          "Texture": "assets/textures/puddle.png",
+          "Position": [
+            6,
+            0,
+            5
+          ],
+          "Size": [
+            6,
+            5,
+            4
+          ],
+          "Transparency": 0.1
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Sign",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            -12,
+            3,
+            4
+          ],
+          "Size": [
+            6,
+            4,
+            0.4
+          ],
+          "Color": [
+            0.25,
+            0.3,
+            0.35
+          ]
+        },
+        "children": [
+          {
+            "class": "Decal",
+            "name": "Arrow",
+            "properties": {
+              "Texture": "assets/textures/arrow.png",
+              "Face": "NormalId.Back"
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "SignPost",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            -12,
+            0.5,
+            4.3
+          ],
+          "Size": [
+            0.4,
+            3,
+            0.4
+          ],
+          "Color": [
+            0.4,
+            0.4,
+            0.42
+          ]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Crate",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            7,
+            1,
+            -2
+          ],
+          "Size": [
+            2,
+            2,
+            2
+          ],
+          "Color": [
+            0.55,
+            0.4,
+            0.25
+          ]
+        },
+        "children": [
+          {
+            "class": "Decal",
+            "name": "Stencil",
+            "properties": {
+              "Texture": "assets/textures/dashes.png",
+              "Face": "NormalId.Top",
+              "Color3": [
+                0.95,
+                0.4,
+                0.2
+              ],
+              "StudsPerTileU": 0.5
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Target",
+        "properties": {
+          "Anchored": true,
+          "Position": [
+            0,
+            3,
+            -12
+          ],
+          "Size": [
+            16,
+            6,
+            1
+          ],
+          "Color": [
+            0.75,
+            0.75,
+            0.72
+          ]
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Character",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Anchored": false,
+              "Position": [
+                0,
+                4.0,
+                8
+              ],
+              "Size": [
+                2,
+                5,
+                1
+              ],
+              "Color": [
+                0.2,
+                0.55,
+                0.9
+              ]
+            }
+          },
+          {
+            "class": "ThirdPersonController",
+            "name": "ThirdPersonController"
+          },
+          {
+            "class": "Inventory",
+            "name": "Inventory",
+            "properties": {
+              "Capacity": 1
+            },
+            "children": [
+              {
+                "class": "Tool",
+                "name": "Blaster",
+                "properties": {
+                  "ToolTip": "Click to fire"
+                },
+                "children": [
+                  {
+                    "class": "Part",
+                    "name": "Handle",
+                    "properties": {
+                      "Anchored": false,
+                      "Position": [
+                        0,
+                        0.2,
+                        0
+                      ],
+                      "Size": [
+                        0.4,
+                        0.6,
+                        1.6
+                      ],
+                      "Color": [
+                        0.15,
+                        0.15,
+                        0.18
+                      ],
+                      "Material": "Metal"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

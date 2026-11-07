@@ -131,6 +131,10 @@ impl Context {
                 .expect("creating the solid modeling methods only fails when out of memory"),
         );
         methods.extend(
+            crate::decals::methods(&lua)
+                .expect("creating Workspace:SpawnDecal only fails when out of memory"),
+        );
+        methods.extend(
             crate::seat::methods(&lua)
                 .expect("creating Seat methods only fails when out of memory"),
         );
@@ -380,6 +384,7 @@ impl Context {
             scheduler::step(&self.lua, seconds);
             crate::csg::step(&self.lua);
             debris::step(&self.lua);
+            crate::decals::step(&self.lua);
         });
     }
 

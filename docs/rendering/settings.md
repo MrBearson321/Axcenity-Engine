@@ -33,6 +33,7 @@ Where a Lighting value is also a cost, the world's value is a request and the se
 | Depth of field (samples per pixel) | Off | Low (16) | High (32) | High |
 | Vignette, film grain, chromatic aberration, sharpen (each its own switch) | off | on | on | on |
 | Motion blur (samples per pixel) | Off | Low (8) | High (16) | High |
+| Projected decals (follow the preset; no override) | none | 128 within 150 studs | 512 within 300 | 1024 within 600 |
 
 High is the look worlds were made with. `automatic` (Lua's `Enum.GraphicsQuality.Automatic`) means the quality follows the machine: `GraphicsSettings::automatic(&Capabilities)` is High, or Low on a software adapter (`DeviceType::Cpu`), with no overrides. It's what a machine starts with (`default_for`), saved as `"automatic": true`, and picked again for the machine on each start (`player::graphics::fit_machine`).
 
@@ -62,4 +63,5 @@ High is the look worlds were made with. `automatic` (Lua's `Enum.GraphicsQuality
 - Reflection quality and real-time GI: [sky.md](sky.md).
 - Volumetric fog: [fog.md](fog.md).
 - Cloud quality: [clouds.md](clouds.md).
+- Projected decals: [decals.md](decals.md).
 - Depth of field and the other lens effects: [post.md](post.md).

@@ -13,6 +13,7 @@ mod clouds;
 mod color_grading;
 #[cfg(feature = "debug-views")]
 mod debug_views;
+mod decals;
 mod environment_maps;
 mod fog;
 mod frustum_culling;
@@ -145,6 +146,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
         edges: None,
         grading: None,
         lens: crate::LensEffects::default(),
+        decals: Vec::new(),
     }
 }
 
@@ -163,6 +165,7 @@ fn item(shape: Shape, position: Vec3, opacity: f32) -> DrawItem {
         cull_distance: 0.0,
         skin: None,
         sway: None,
+        decal_role: Default::default(),
     }
 }
 
@@ -480,6 +483,7 @@ fn big_block() -> DrawItem {
         cull_distance: 0.0,
         skin: None,
         sway: None,
+        decal_role: Default::default(),
     }
 }
 
@@ -999,6 +1003,7 @@ fn texture_renderer_draws_the_sky_and_a_part_into_a_texture() {
         cull_distance: 0.0,
         skin: None,
         sway: None,
+        decal_role: Default::default(),
     });
     renderer.resize(64, 64);
     assert_eq!(renderer.size(), (64, 64));
@@ -1101,6 +1106,7 @@ fn texture_renderer_draws_a_mesh_with_texture_maps() {
         cull_distance: 0.0,
         skin: None,
         sway: None,
+        decal_role: Default::default(),
     });
     let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
     renderer.render(&list).unwrap();
@@ -1200,6 +1206,7 @@ fn terrain_chunks_show_the_layer_their_weights_pick() {
             cull_distance: 0.0,
             skin: None,
             sway: None,
+            decal_role: Default::default(),
         }]);
         // Looking straight down at it, in sunlight.
         list.camera.look_at = Vec3::new(0.0, -1.0, -0.001);
@@ -1654,6 +1661,7 @@ fn one_of_everything() -> (DrawList, Vec<Probe>) {
         cull_distance: 0.0,
         skin: None,
         sway: None,
+        decal_role: Default::default(),
     };
     let mut list = list_of(vec![solid, see_through, cut_out, ground]);
     list.sky = Sky::default();
@@ -1966,6 +1974,7 @@ fn a_double_sided_square_shows_its_back_lit_like_its_front() {
             cull_distance: 0.0,
             skin: None,
             sway: None,
+            decal_role: Default::default(),
         };
         let mut list = list_of(vec![square]);
         // Lit from behind the camera.

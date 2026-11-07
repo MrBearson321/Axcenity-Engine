@@ -2276,9 +2276,9 @@ Each has a pause menu, a settings menu with rebindable input, and a working save
 
 ### Acceptance criteria
 
-- [ ] A road-marking ProjectedDecal sits on curved terrain with no gaps or z-fighting.
-- [ ] 500 bullet-hole decals spawned from a Tool stay under the cap and within the frame budget in the graphics reference scene.
-- [ ] Decals save, reload, and show the same in editor Play and an exported game.
+- [x] A road-marking ProjectedDecal sits on curved terrain with no gaps or z-fighting.
+- [x] 500 bullet-hole decals spawned from a Tool stay under the cap and within the frame budget in the graphics reference scene.
+- [x] Decals save, reload, and show the same in editor Play and an exported game.
 
 ---
 

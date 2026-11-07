@@ -25,6 +25,7 @@ Each prints its last frame's counts (items drawn, batches, draw calls, triangles
 | `bench_terrain_with_foliage` | A 2,048-stud terrain of 1,025² samples with hills, two layers and 20,000 plants (grass, flowers, bushes, trees) |
 | `bench_20_animated_characters` | 20 copies of hello-animation's Noodle (about 200 triangles each), each with an Animator, posed every frame |
 | `bench_20_walking_characters` | 20 copies of hello-character's walking character (about 76,000 triangles and 8 primitives each), each with an Animator, posed every frame (added in graphics Phase 14) |
+| `bench_500_bullet_holes_in_the_graphics_reference_scene` | hello-graphics from (12, 8, 16), drawn without decals, then with 500 bullet holes spawned by `workspace:SpawnDecal` from a grid of raycasts (its cap raised to keep them all); fails if the GPU frame with them is over 16.7 ms (added in Phase 75, see [decals.md](decals.md)) |
 | `bench_2000_mesh_parts_behind_a_wall` | The 2,000 helmets in view but hidden behind an 80-stud wall the camera stands 40 studs from, then the same view with no helmets (added in graphics Phase 15, for occlusion culling) |
 
 ## Baseline
@@ -185,3 +186,16 @@ View > View Mode in the editor (`editor/src/viewport/view_mode.rs`) shows the vi
 A debug view draws after the frame's own passes, over the finished picture and under the UI, at the output's size, with its own depth target and the camera's view (without TAA's jitter). Each batch is drawn again with its material, posed and swayed as in the scene, reading its corners from the mesh's buffers ("vertex pulling"). See-through items draw as solid. Terrain chunks show their shape and normals with the plain white material, and a material's own surface shader is left out: its maps and values show as the standard material reads them. Sprites and the sky aren't drawn.
 
 The debug views are built only with `render`'s `debug-views` feature, which the editor turns on, and the player too since Phase 71 for its Developer Console's `wireframe` (`Renderer::set_debug_view`). With the feature, mesh buffers can also be read as storage buffers. While the lit view is shown, nothing is kept for the debug views: their pipelines, depth target and uniforms are freed when the mode goes back to Lit.
+
+## Decals (Phase 75)
+
+`bench_500_bullet_holes_in_the_graphics_reference_scene`, on the machine above (AMD Radeon RX 9070 XT, Vulkan), at 1280 × 720 on High. hello-graphics already keeps the prepass at High (ambient occlusion), so the holes add only their own pass. Times are milliseconds.
+
+| | Without decals | 500 bullet holes |
+|---|---|---|
+| Decals drawn | 0 | 500 (one draw call) |
+| GPU frame | 0.640 | 0.734 |
+| GPU scene pass (decals are drawn in it) | 0.416 | 0.515 |
+| GPU depth prepass | 0.028 | 0.028 |
+
+So 500 projected decals cost about 0.1 ms of GPU time, well inside a 60 frames a second budget (16.7 ms). Games keep at most `MaxSpawnedDecals` (200 by default) from `workspace:SpawnDecal`, and the quality preset draws at most 512 at High.

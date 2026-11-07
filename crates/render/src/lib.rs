@@ -7,6 +7,7 @@
 //! on a GPU device someone else set up (the editor's viewport).
 
 mod atmosphere;
+mod decal;
 mod draw_list;
 mod fonts;
 mod graphics;
@@ -16,6 +17,7 @@ mod tone_mapping;
 mod water;
 
 pub use atmosphere::Atmosphere;
+pub use decal::{Decal, DecalRole, decal_quad};
 pub use draw_list::{
     AmbientLight, Camera, Channel, ChannelMap, Clouds, ColorGrading, ColorLookup, Cone,
     DepthOfField, DrawItem, DrawList, Edges, FilmGrain, Fog, LensEffects, Light, LightProbeGrid,
@@ -29,7 +31,7 @@ pub use draw_list::{
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{
-    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DecalLimits, DepthOfFieldQuality,
     EffectiveGraphics, EnvironmentMapSize, GraphicsSettings, MotionBlurQuality, POINT_SHADOW_FACES,
     PointShadowMapSize, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowMapSize,
     ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality,

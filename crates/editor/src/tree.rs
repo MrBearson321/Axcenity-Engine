@@ -77,6 +77,11 @@ pub enum Insertable {
     FogEffect,
     BloomEffect,
     ParticleEmitter,
+    /// A picture on a face of the selected part (Phase 75).
+    Decal,
+    /// A box that lays a picture on what's inside it, at the camera's
+    /// focus point, lying on the ground (Phase 75).
+    ProjectedDecal,
     Animator,
     Animation,
     /// Plays a cutscene sequence (Phase 51), in the Workspace.
@@ -238,8 +243,13 @@ impl Insertable {
         Insertable::FogEffect,
         Insertable::BloomEffect,
     ];
-    /// Effects give off particles from the part they are inside.
-    pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
+    /// Effects: particles from the part they are inside, a picture on
+    /// one of its faces, and one laid on whatever is in a box.
+    pub const EFFECTS: [Insertable; 3] = [
+        Insertable::ParticleEmitter,
+        Insertable::Decal,
+        Insertable::ProjectedDecal,
+    ];
     /// Animators (skeletal) and Animations (property clips).
     /// Ragdolls go in a skinned MeshPart too.
     /// A Sequence plays a cutscene, from the Workspace.
@@ -355,6 +365,8 @@ impl Insertable {
             Insertable::SpotLight => "SpotLight",
             Insertable::RectLight => "RectLight",
             Insertable::ReflectionProbe => "Reflection Probe",
+            Insertable::Decal => "Decal",
+            Insertable::ProjectedDecal => "Projected Decal",
             Insertable::LightProbeVolume => "Light Probes",
             Insertable::Atmosphere => "Atmosphere",
             Insertable::Clouds => "Clouds",
@@ -450,6 +462,8 @@ impl Insertable {
             Insertable::FogEffect => ClassName::FogEffect,
             Insertable::BloomEffect => ClassName::BloomEffect,
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
+            Insertable::Decal => ClassName::Decal,
+            Insertable::ProjectedDecal => ClassName::ProjectedDecal,
             Insertable::Animator => ClassName::Animator,
             Insertable::Ragdoll => ClassName::Ragdoll,
             Insertable::Fracture => ClassName::Fracture,
@@ -613,6 +627,9 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
                 Value::Vector3(Vector3::new(position.x, position.y + 2.0, position.z)),
             ),
         ],
+        // Lying on the ground at the focus point, reaching a stud above
+        // and below it.
+        Insertable::ProjectedDecal => vec![("Position", Value::Vector3(position))],
         // A pad with its bottom on the ground.
         Insertable::SpawnLocation => vec![(
             "Position",
@@ -1001,7 +1018,10 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             || (matches!(what, Insertable::Value(_)) && is_saved(world, id))
             || (matches!(
                 what,
-                Insertable::Attachment | Insertable::VehicleWheel | Insertable::ClickDetector
+                Insertable::Attachment
+                    | Insertable::VehicleWheel
+                    | Insertable::ClickDetector
+                    | Insertable::Decal
             ) && is_part
                 && is_saved(world, id))
             // A SplineFollower moves the part or Model it's in.
