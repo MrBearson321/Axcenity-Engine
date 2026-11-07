@@ -794,6 +794,8 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Spline => icons::BEZIER_CURVE,
         ClassName::SplinePoint => icons::DOT_OUTLINE,
         ClassName::SplineFollower => icons::TRAIN,
+        ClassName::SplineMesh => icons::ROAD_HORIZON,
+        ClassName::SplineScatter => icons::TREE_EVERGREEN,
         ClassName::Terrain => icons::MOUNTAINS,
         ClassName::TerrainLayer => icons::STACK,
         ClassName::ThirdPersonController => icons::PERSON_SIMPLE_WALK,
@@ -936,7 +938,9 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::Camera
         | ClassName::Spline
         | ClassName::SplinePoint
-        | ClassName::SplineFollower => pick((90, 200, 160), (20, 130, 100)),
+        | ClassName::SplineFollower
+        | ClassName::SplineMesh
+        | ClassName::SplineScatter => pick((90, 200, 160), (20, 130, 100)),
         class
             if class == ClassName::Attachment
                 || class == ClassName::WeldConstraint

@@ -55,6 +55,7 @@ mod settings;
 
 mod sky;
 mod solid;
+mod spline_content;
 mod splines;
 mod tags;
 mod terrain;
@@ -80,7 +81,7 @@ use eframe::egui;
 
 use crate::angular;
 use crate::animation::{AnimationStudio, StudioAction};
-use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction};
+use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction, Picking};
 use crate::asset_check::AssetCheck;
 use crate::autocomplete;
 use crate::behavior_tree::BehaviorTreeStudio;
@@ -176,6 +177,9 @@ pub struct EditorApp {
     /// The open project's models, loaded as MeshParts are drawn, and shared
     /// with Play's physics. Has none when no project is open.
     assets: Assets,
+    /// What the edit world's SplineMeshes and SplineScatters made (Phase
+    /// 74), made again as their splines change (`generate_frame`).
+    generators: axcenity_procedural::Generators,
     /// The Instance shown in Properties and given handles. The last of [`selection`](Self::selection).
     selected: Option<InstanceId>,
     /// Every selected Instance, in the order they were added. The viewport and
@@ -661,6 +665,7 @@ impl EditorApp {
             world,
             project: None,
             assets: Assets::default(),
+            generators: Default::default(),
             selected: None,
             selection: Vec::new(),
             version_history: Default::default(),
@@ -1029,6 +1034,7 @@ impl EditorApp {
             self.settings.open = !self.settings.open;
         }
         self.terrain_frame(ctx);
+        self.generate_frame();
         self.palette_frame(ctx);
         self.shortcuts(ctx);
         // Set again if the Model Studio is drawn under the mouse this frame;
@@ -1426,6 +1432,8 @@ mod plugin_tests;
 mod posing_tests;
 #[cfg(test)]
 mod prefab_tests;
+#[cfg(test)]
+mod spline_content_tests;
 #[cfg(test)]
 mod spline_tests;
 #[cfg(test)]

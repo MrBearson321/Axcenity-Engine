@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use axcenity_assets::{Assets, MODELS_FOLDER, safe_file_name, unique_file_name};
+use axcenity_assets::{Assets, MODELS_FOLDER, Model, safe_file_name, unique_file_name};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use glam::{EulerRot, Quat, Vec3};
 
@@ -271,6 +271,57 @@ pub fn save_union(
     });
     let path = format!("{MODELS_FOLDER}/{file}");
     std::fs::write(project.join(&path), combined.glb())
+        .map_err(|err| format!("Could not write `{path}`: {err}"))?;
+    assets.forget(&path);
+    Ok(path)
+}
+
+/// Writes `models` (each fitted as a loaded model is) as one `.glb` in
+/// `assets/models/<name>.<kind>.glb` (numbered if that's taken), one
+/// object each named `Piece1`, `Piece2`, … at its own size in studs, so
+/// `<path>#PieceN` loads model N again as it was. Returns the path. Bake
+/// (Phase 74) keeps a SplineMesh's bent pieces this way.
+pub fn save_pieces(
+    project: &Path,
+    assets: &Assets,
+    name: &str,
+    kind: &str,
+    models: &[&Model],
+) -> Result<String, String> {
+    let folder = project.join(MODELS_FOLDER);
+    std::fs::create_dir_all(&folder)
+        .map_err(|err| format!("Could not make the folder `{MODELS_FOLDER}`: {err}"))?;
+    // The pieces share one list of looks: equal ones once.
+    let mut materials: Vec<GlbMaterial> = Vec::new();
+    let meshes: Vec<Mesh> = models
+        .iter()
+        .map(|model| {
+            let index_of: Vec<u32> = model_materials(model, &folder)
+                .into_iter()
+                .map(|material| {
+                    let found = materials.iter().position(|seen| *seen == material);
+                    found.unwrap_or_else(|| {
+                        materials.push(material);
+                        materials.len() - 1
+                    }) as u32
+                })
+                .collect();
+            let mut mesh = Mesh::from_model(model);
+            for triangle in &mut mesh.triangles {
+                if let Surface::Outer(index) = triangle.surface {
+                    triangle.surface = Surface::Outer(index_of[index as usize]);
+                }
+            }
+            mesh
+        })
+        .collect();
+    let stem = safe_file_name(name).unwrap_or_else(|| "Pieces".to_owned());
+    let file = unique_file_name(&format!("{stem}.{kind}.glb"), |file| {
+        folder.join(file).exists()
+    });
+    let path = format!("{MODELS_FOLDER}/{file}");
+    let bytes = write_glb(&meshes, &materials, &crate::glb::plain_material());
+    std::fs::write(project.join(&path), bytes)
         .map_err(|err| format!("Could not write `{path}`: {err}"))?;
     assets.forget(&path);
     Ok(path)

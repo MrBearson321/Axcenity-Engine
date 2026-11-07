@@ -538,7 +538,9 @@ impl Viewport {
             part: ui_scene
                 .hit(pointer)
                 .or_else(|| light_at(lights, pointer))
-                .or_else(|| axcenity_scene::pick(world, screen.ray(pointer))),
+                .or_else(|| axcenity_scene::pick(world, screen.ray(pointer)))
+                // A road's piece or a scattered tree selects what made it.
+                .map(|id| axcenity_core::spline::generator_of(world, id).unwrap_or(id)),
             modifiers: ui.input(|input| input.modifiers),
             keep_group: false,
         })

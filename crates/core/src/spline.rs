@@ -419,6 +419,32 @@ pub fn facing(direction: Vector3) -> Vector3 {
     Vector3::new(pitch + 0.0, yaw + 0.0, 0.0)
 }
 
+/// A SplineMesh or SplineScatter (Phase 74): its children are what it made
+/// from its spline, made again whenever that changes, and never saved,
+/// sent to other devices or kept in a save slot.
+pub fn is_generator(class: ClassName) -> bool {
+    matches!(class, ClassName::SplineMesh | ClassName::SplineScatter)
+}
+
+/// The SplineMesh or SplineScatter that made `id`, if it's inside one.
+pub fn generator_of(world: &World, id: InstanceId) -> Option<InstanceId> {
+    let mut at = world.get(id)?.parent();
+    while let Some(current) = at {
+        let instance = world.get(current)?;
+        if is_generator(instance.class()) {
+            return Some(current);
+        }
+        at = instance.parent();
+    }
+    None
+}
+
+/// True when `id` was made by a SplineMesh or SplineScatter (see
+/// [`is_generator`]).
+pub fn is_generated(world: &World, id: InstanceId) -> bool {
+    generator_of(world, id).is_some()
+}
+
 fn add(a: Vector3, b: Vector3) -> Vector3 {
     Vector3::new(a.x + b.x, a.y + b.y, a.z + b.z)
 }
@@ -597,5 +623,22 @@ mod tests {
         assert_eq!(curve.length(), 0.0);
         assert_eq!(curve.position_at(0.7), Vector3::new(1.0, 2.0, 3.0));
         assert!(SplineCurve::new(&[], false).is_none());
+    }
+
+    #[test]
+    fn what_a_spline_mesh_or_scatter_holds_is_generated() {
+        let mut world = World::new();
+        let spline = world.create(ClassName::Spline).unwrap();
+        world.set_parent(spline, Some(world.workspace())).unwrap();
+        let scatter = world.create(ClassName::SplineScatter).unwrap();
+        world.set_parent(scatter, Some(spline)).unwrap();
+        let tree = world.create(ClassName::MeshPart).unwrap();
+        world.set_parent(tree, Some(scatter)).unwrap();
+        assert_eq!(generator_of(&world, tree), Some(scatter));
+        assert!(is_generated(&world, tree));
+        assert!(!is_generated(&world, scatter));
+        assert!(!is_generated(&world, spline));
+        // The curve's points are only the SplinePoints.
+        assert!(SplineCurve::of(&world, spline).is_none());
     }
 }

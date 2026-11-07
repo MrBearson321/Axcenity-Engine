@@ -263,6 +263,13 @@ pub enum ClassName {
     /// Moves the Part or Model it's parented to along a Spline at `Speed`
     /// (Phase 73): moving platforms, trains and gondolas.
     SplineFollower,
+    /// Bends a model along the Spline it's in, repeated to fill its length
+    /// (Phase 74): roads, pipes, fences and rails. Its pieces are made
+    /// from the spline whenever it changes, never saved.
+    SplineMesh,
+    /// Places models along the Spline it's in, or inside a closed one
+    /// (Phase 74), from a seed. Made from the spline, never saved.
+    SplineScatter,
     /// A landscape: a heightfield (kept beside the Instance, see
     /// [`TerrainData`](crate::TerrainData)) shaded by its TerrainLayers.
     Terrain,
@@ -394,7 +401,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 125] = [
+    pub const ALL: [ClassName; 127] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -476,6 +483,8 @@ impl ClassName {
         ClassName::Spline,
         ClassName::SplinePoint,
         ClassName::SplineFollower,
+        ClassName::SplineMesh,
+        ClassName::SplineScatter,
         ClassName::Terrain,
         ClassName::TerrainLayer,
         ClassName::ThirdPersonController,
@@ -609,6 +618,8 @@ impl ClassName {
             ClassName::Spline => "Spline",
             ClassName::SplinePoint => "SplinePoint",
             ClassName::SplineFollower => "SplineFollower",
+            ClassName::SplineMesh => "SplineMesh",
+            ClassName::SplineScatter => "SplineScatter",
             ClassName::Terrain => "Terrain",
             ClassName::TerrainLayer => "TerrainLayer",
             ClassName::ThirdPersonController => "ThirdPersonController",
@@ -1708,6 +1719,42 @@ impl ClassName {
                 // Off, it stops where it is.
                 ("Enabled", Value::Bool(true)),
             ],
+            ClassName::SplineMesh => vec![
+                // The model bent along the spline, such as
+                // "assets/models/road.glb". Its length runs along Z.
+                ("MeshId", Value::String(String::new())),
+                // A material file drawn in place of the model's materials.
+                ("MaterialVariant", Value::String(String::new())),
+                // One piece, in studs: width (X), height (Y) and length (Z).
+                // Pieces stretch a little so a whole number fill the curve.
+                ("Size", Value::Vector3(Vector3::new(8.0, 1.0, 8.0))),
+                ("CanCollide", Value::Bool(true)),
+                ("CastShadow", Value::Bool(true)),
+            ],
+            ClassName::SplineScatter => vec![
+                // The model files it places, separated by `;`. Click models
+                // in the Assets panel while it's selected to add them.
+                ("Models", Value::String(String::new())),
+                // The same seed gives the same layout.
+                ("Seed", Value::Number(1.0)),
+                // Studs between models along the curve.
+                ("Spacing", Value::Number(8.0)),
+                // On, it fills the inside of a Closed spline at Density.
+                ("FillInside", Value::Bool(false)),
+                // Models per 100 square studs, inside.
+                ("Density", Value::Number(1.0)),
+                // Each is turned round its up a random number of degrees
+                // between these, scaled between these, and moved up to
+                // Offset studs to either side of the curve.
+                ("RotationRange", Value::Vector2(Vector2::new(0.0, 360.0))),
+                ("ScaleRange", Value::Vector2(Vector2::new(1.0, 1.0))),
+                ("Offset", Value::Number(0.0)),
+                // On, each stands up from the surface below it; off, upright.
+                ("AlignToSurface", Value::Bool(true)),
+                // Surfaces steeper than this, in degrees, get none.
+                ("MaxSlope", Value::Number(35.0)),
+                ("CanCollide", Value::Bool(true)),
+            ],
             ClassName::Sound => vec![
                 ("SoundId", Value::String(String::new())),
                 ("Volume", Value::Number(1.0)),
@@ -2585,6 +2632,8 @@ impl ClassName {
             | ClassName::Checkpoint
             | ClassName::Spline
             | ClassName::SplinePoint
+            | ClassName::SplineMesh
+            | ClassName::SplineScatter
             | ClassName::Camera
             | ClassName::Attachment
             | ClassName::VehicleWheel

@@ -58,6 +58,12 @@ pub enum Edit {
     BuildRagdoll,
     /// Cuts the selected Fracture's part into its pieces and saves them.
     GenerateFracture,
+    /// Turns what the selected SplineMesh or SplineScatter made into
+    /// ordinary Instances (Phase 74).
+    BakeSpline,
+    /// Flattens the Terrain under the selected Spline (or the one the
+    /// selection is in), road-wide (Phase 74).
+    FlattenTerrainAlong,
     /// Opens the selected MeshPart's model in the Model Studio.
     OpenInModelStudio,
     /// During Play, pins (true) or unpins a value edited during Play, so
@@ -629,6 +635,29 @@ pub fn show(
                     .clicked()
             {
                 edit = Some(Edit::GenerateFracture);
+            }
+            let generator = axcenity_core::spline::is_generator(instance.class());
+            if !playing
+                && generator
+                && ui
+                    .button(theme::with_icon(icons::PACKAGE, "Bake"))
+                    .on_hover_text(
+                        "Keep what it made as ordinary Instances, in a Model beside the Spline, and remove it. A SplineMesh's bent pieces are saved as <name>.spline.glb.",
+                    )
+                    .clicked()
+            {
+                edit = Some(Edit::BakeSpline);
+            }
+            if !playing
+                && (generator || instance.class() == ClassName::Spline)
+                && ui
+                    .button(theme::with_icon(icons::MOUNTAINS, "Flatten Terrain Along"))
+                    .on_hover_text(
+                        "Flatten a strip of the Terrain under the spline to the curve's height, as wide as its Spline Mesh's road and a stud more each side (8 studs without one). One undo step.",
+                    )
+                    .clicked()
+            {
+                edit = Some(Edit::FlattenTerrainAlong);
             }
             let has_mesh = instance
                 .property("MeshId")

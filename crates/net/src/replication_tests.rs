@@ -508,3 +508,33 @@ fn every_kind_of_value_crosses_the_wire_unchanged() {
         assert_eq!(back.to_value(), Some(value), "{text}");
     }
 }
+
+#[test]
+fn what_a_spline_scatter_made_isnt_sent_but_the_scatter_is() {
+    let mut world = World::new();
+    let spline = world.create(ClassName::Spline).unwrap();
+    world.set_parent(spline, Some(world.workspace())).unwrap();
+    let scatter = world.create(ClassName::SplineScatter).unwrap();
+    world.set_parent(scatter, Some(spline)).unwrap();
+    let tree = world.create(ClassName::MeshPart).unwrap();
+    world.set_parent(tree, Some(scatter)).unwrap();
+    let mut replicator = crate::replicate::Replicator::default();
+    let created = |update: &crate::replicate::Update| -> Vec<u64> {
+        update
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                crate::replicate::Op::Create(instance) => Some(instance.id),
+                _ => None,
+            })
+            .collect()
+    };
+    let frame = replicator.frame(&world);
+    let snapshot = replicator.snapshot(&world);
+    for update in [&frame, &snapshot] {
+        let ids = created(update);
+        assert!(ids.contains(&scatter.to_bits()) && ids.contains(&spline.to_bits()));
+        assert!(!ids.contains(&tree.to_bits()), "each device makes its own");
+    }
+    assert!(!crate::replicate::replicated_parts(&world).contains(&tree));
+}

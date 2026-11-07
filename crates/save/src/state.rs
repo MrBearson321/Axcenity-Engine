@@ -255,6 +255,10 @@ pub(crate) fn snapshot_with_ids(world: &World) -> (WorldState, Vec<InstanceId>) 
                     .collect(),
                 tags: instance.tags().to_vec(),
             });
+            // What a SplineMesh or SplineScatter made is made again.
+            if axcenity_core::spline::is_generator(instance.class()) {
+                continue;
+            }
             for &child in instance.children().iter().rev() {
                 stack.push((child, SavedParent::Index(index)));
             }

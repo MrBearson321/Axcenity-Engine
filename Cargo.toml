@@ -24,6 +24,7 @@ axcenity-nav = { path = "crates/nav" }
 axcenity-net = { path = "crates/net" }
 axcenity-physics = { path = "crates/physics" }
 axcenity-plugins = { path = "crates/plugins" }
+axcenity-procedural = { path = "crates/procedural" }
 axcenity-project = { path = "crates/project" }
 axcenity-render = { path = "crates/render" }
 axcenity-save = { path = "crates/save" }

@@ -1,0 +1,6 @@
+# `procedural`
+
+- Phase 74: what a SplineMesh (`bend.rs`: a model bent along the curve, repeated to fill it) and a SplineScatter (`scatter.rs`, standing on `surface.rs`'s probe) make from their Spline, kept up to date by `Generators::update` (`lib.rs`), and Flatten Terrain Along (`flatten.rs`). Behavior: `docs/architecture/splines.md`.
+- Results are the generator's children, never saved, sent or kept in slots (`core::spline::is_generator`); their bent models are `:runtime/spline<N>.glb` in `Assets`, forgotten when replaced.
+- Deterministic: the same spline, settings and seed give the same layout. Use `rng.rs` (per spot, from the seed and the spot's number), never `rand`, and never iterate a `HashMap` into output.
+- Depends on `core`, `assets` and `terrain` only, so the server and the player share it (physics only in tests).

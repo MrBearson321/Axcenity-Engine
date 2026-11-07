@@ -942,3 +942,21 @@ fn group_volumes_and_the_master_volume_persist_in_a_slot() {
     assert!(world.contains(master));
     let _ = fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_slot_keeps_a_spline_scatters_settings_but_not_what_it_made() {
+    let mut world = World::new();
+    let spline = world.create(ClassName::Spline).unwrap();
+    world.set_parent(spline, Some(world.workspace())).unwrap();
+    let scatter = world.create(ClassName::SplineScatter).unwrap();
+    world.set_parent(scatter, Some(spline)).unwrap();
+    world
+        .set_property(scatter, "Seed", Value::Number(5.0))
+        .unwrap();
+    let tree = world.create(ClassName::MeshPart).unwrap();
+    world.set_parent(tree, Some(scatter)).unwrap();
+    let saved = state::snapshot(&world);
+    let classes: Vec<&str> = saved.instances.iter().map(|i| i.class.as_str()).collect();
+    assert_eq!(classes, ["Spline", "SplineScatter"]);
+    assert!(saved.instances[1].properties.contains_key("Seed"));
+}

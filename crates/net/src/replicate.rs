@@ -170,7 +170,14 @@ fn replicated(world: &World) -> (Vec<InstanceId>, Vec<InstanceId>) {
                 continue;
             }
             inside.push(child);
-            inside.extend(world.descendants(child));
+            // Each device makes what SplineMeshes and SplineScatters make
+            // itself (Phase 74).
+            inside.extend(
+                world
+                    .descendants(child)
+                    .into_iter()
+                    .filter(|&id| !axcenity_core::spline::is_generated(world, id)),
+            );
         }
     }
     (services, inside)

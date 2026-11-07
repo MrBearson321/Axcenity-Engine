@@ -74,18 +74,31 @@ impl EditorApp {
         let can_save = assets::any_prefab(&self.world, &self.selection_roots());
         let picking_foliage =
             self.terrain.tool == Some(crate::terrain_studio::TerrainTool::Foliage);
+        // A selected SplineMesh or SplineScatter takes the models clicked.
+        let spline_models = self.spline_models_picking();
         let action = {
-            let foliage = picking_foliage.then_some(&self.terrain.foliage_source);
+            let picking = if picking_foliage {
+                Some(Picking::Foliage(self.terrain.foliage_source.clone()))
+            } else {
+                spline_models.map(|(_, models)| Picking::SplineModels(models))
+            };
             self.asset_browser
-                .show(ui, !self.playing(), can_save, foliage)
+                .show(ui, !self.playing(), can_save, picking.as_ref())
         };
         match action {
             Some(BrowserAction::Place(entry)) => self.drop_asset(&entry, None),
-            Some(BrowserAction::Foliage(entry)) => {
+            Some(BrowserAction::Pick(entry)) if picking_foliage => {
                 if let Some(source) = entry.foliage_source()
                     && self.use_global_asset(&entry.path)
                 {
                     self.terrain.foliage_source = source;
+                }
+            }
+            Some(BrowserAction::Pick(entry)) => {
+                if let Some((generator, _)) = self.spline_models_picking()
+                    && self.use_global_asset(&entry.path)
+                {
+                    self.pick_spline_model(generator, &entry.path);
                 }
             }
             Some(BrowserAction::Import { image_folder }) => self.import_with_dialog(image_folder),

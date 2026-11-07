@@ -265,6 +265,9 @@ pub struct ScriptRuntime {
     sequences: sequence::SharedSequences,
     /// SplineFollowers moving their parts (Phase 73), on the server.
     followers: spline::Followers,
+    /// What SplineMeshes and SplineScatters make (Phase 74), on every
+    /// device: it isn't sent.
+    generators: axcenity_procedural::Generators,
     /// The default audio settings UI and volume sliders (Phase 52).
     volume_sliders: audio_settings::VolumeSliders,
     /// No player plays on this device (a dedicated server, Phase 63).
@@ -345,6 +348,7 @@ impl ScriptRuntime {
             level_loads: Vec::new(),
             sequences,
             followers: spline::Followers::default(),
+            generators: axcenity_procedural::Generators::default(),
             ownership,
             chat,
             joined: Vec::new(),
@@ -1190,6 +1194,23 @@ impl ScriptRuntime {
         }
         // A game with no LocalScripts still has its player.
         self.join(world);
+        let assets = self
+            .client
+            .lua
+            .app_data_ref::<Assets>()
+            .map(|assets| assets.clone())
+            .unwrap_or_default();
+        // SplineMeshes and SplineScatters make their pieces again where a
+        // spline changed (all of them the first frame), before scripts run.
+        for problem in self.generators.update(world, &assets) {
+            self.output.push(OutputLine {
+                kind: OutputKind::Warning,
+                text: problem,
+                trace: Vec::new(),
+                side: None,
+            });
+        }
+        self.fire_changes(world);
         for side in [Side::Server, Side::Client] {
             let messages = self.transport.receive(side);
             self.context(side).step(world, messages, seconds);
@@ -1204,12 +1225,6 @@ impl ScriptRuntime {
             }
         }
         // Then Sequences move on, after scripts that play them.
-        let assets = self
-            .client
-            .lua
-            .app_data_ref::<Assets>()
-            .map(|assets| assets.clone())
-            .unwrap_or_default();
         let stepped = {
             let mut camera = self.client_camera();
             self.sequences

@@ -167,6 +167,14 @@ impl EditorApp {
                 self.generate_fracture(id);
                 return;
             }
+            Edit::BakeSpline => {
+                self.bake_spline(id);
+                return;
+            }
+            Edit::FlattenTerrainAlong => {
+                self.flatten_terrain_along(id);
+                return;
+            }
             Edit::OpenInModelStudio => {
                 let mesh_id = self
                     .world
@@ -1050,6 +1058,8 @@ impl EditorApp {
                 self.write_package_files(&restored.blobs);
             }
             self.forget_selection_outside_tree();
+            // A spline put back makes its road or scatter again at once.
+            self.generate_frame();
         }
     }
     pub(super) fn redo(&mut self) {
@@ -1076,6 +1086,7 @@ impl EditorApp {
                 self.write_package_files(&restored.blobs);
             }
             self.forget_selection_outside_tree();
+            self.generate_frame();
         }
     }
 
@@ -1238,6 +1249,8 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::RevertOverride(_)
         | Edit::ApplyOverride(_)
         | Edit::GenerateFracture
+        | Edit::BakeSpline
+        | Edit::FlattenTerrainAlong
         | Edit::OpenInModelStudio
         | Edit::PreviewSound(_)
         | Edit::Keep(..)

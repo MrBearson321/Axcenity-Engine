@@ -2254,9 +2254,9 @@ Each has a pause menu, a settings menu with rebindable input, and a working save
 
 ### Acceptance criteria
 
-- [ ] A road built from one straight segment mesh follows a curving spline with no gaps, and a car drives on it.
-- [ ] Moving a spline point regenerates its scatter, and the same seed gives the same layout after reopening.
-- [ ] Scatter adds nothing to `world.json` but its settings, until Bake.
+- [x] A road built from one straight segment mesh follows a curving spline with no gaps, and a car drives on it.
+- [x] Moving a spline point regenerates its scatter, and the same seed gives the same layout after reopening.
+- [x] Scatter adds nothing to `world.json` but its settings, until Bake.
 
 ---
 

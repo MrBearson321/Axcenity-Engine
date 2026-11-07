@@ -1,0 +1,459 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Grass",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.28,
+            0.45,
+            0.22
+          ],
+          "Position": [
+            0,
+            -0.5,
+            -40
+          ],
+          "Size": [
+            320,
+            1,
+            320
+          ]
+        }
+      },
+      {
+        "class": "Spline",
+        "name": "Road",
+        "properties": {
+          "Closed": false
+        },
+        "children": [
+          {
+            "class": "SplinePoint",
+            "name": "Point1",
+            "properties": {
+              "Position": [
+                0,
+                0,
+                60
+              ]
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point2",
+            "properties": {
+              "Position": [
+                0,
+                0,
+                10
+              ]
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point3",
+            "properties": {
+              "Position": [
+                24,
+                0,
+                -34
+              ]
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point4",
+            "properties": {
+              "Position": [
+                70,
+                0,
+                -50
+              ]
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point5",
+            "properties": {
+              "Position": [
+                110,
+                0,
+                -86
+              ]
+            }
+          },
+          {
+            "class": "SplineMesh",
+            "name": "Asphalt",
+            "properties": {
+              "MeshId": "assets/models/road.glb",
+              "Size": [
+                12,
+                1.05,
+                8
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Spline",
+        "name": "Treeline",
+        "properties": {
+          "Closed": false
+        },
+        "children": [
+          {
+            "class": "SplinePoint",
+            "name": "Point1",
+            "properties": {
+              "Position": [
+                -14,
+                0,
+                60
+              ]
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point2",
+            "properties": {
+              "Position": [
+                -14,
+                0,
+                0
+              ]
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point3",
+            "properties": {
+              "Position": [
+                -4,
+                0,
+                -40
+              ]
+            }
+          },
+          {
+            "class": "SplineScatter",
+            "name": "Trees",
+            "properties": {
+              "Models": "assets/models/tree.glb",
+              "Spacing": 10,
+              "Offset": 2,
+              "ScaleRange": [
+                0.8,
+                1.3
+              ],
+              "Seed": 3
+            }
+          }
+        ]
+      },
+      {
+        "class": "Spline",
+        "name": "Grove",
+        "properties": {
+          "Closed": true
+        },
+        "children": [
+          {
+            "class": "SplinePoint",
+            "name": "Point1",
+            "properties": {
+              "Position": [
+                -90,
+                0,
+                -40
+              ]
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point2",
+            "properties": {
+              "Position": [
+                -40,
+                0,
+                -50
+              ]
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point3",
+            "properties": {
+              "Position": [
+                -30,
+                0,
+                -110
+              ]
+            }
+          },
+          {
+            "class": "SplinePoint",
+            "name": "Point4",
+            "properties": {
+              "Position": [
+                -80,
+                0,
+                -120
+              ]
+            }
+          },
+          {
+            "class": "SplineScatter",
+            "name": "Woods",
+            "properties": {
+              "Models": "assets/models/tree.glb; assets/models/rock.glb",
+              "FillInside": true,
+              "Density": 1.5,
+              "ScaleRange": [
+                0.7,
+                1.4
+              ],
+              "Seed": 11
+            }
+          }
+        ]
+      },
+      {
+        "class": "Model",
+        "name": "AutoCar",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Chassis",
+            "properties": {
+              "Size": [
+                6,
+                1,
+                10
+              ],
+              "Position": [
+                0,
+                3.6,
+                50
+              ],
+              "Color": [
+                0.85,
+                0.3,
+                0.12
+              ]
+            },
+            "children": [
+              {
+                "class": "WeldConstraint",
+                "name": "SeatWeld",
+                "properties": {
+                  "Part0": [
+                    "Workspace",
+                    "AutoCar",
+                    "Chassis"
+                  ],
+                  "Part1": [
+                    "Workspace",
+                    "AutoCar",
+                    "DriverSeat"
+                  ]
+                }
+              },
+              {
+                "class": "VehicleWheel",
+                "name": "FrontLeft",
+                "properties": {
+                  "Position": [
+                    -3.5,
+                    -1,
+                    -3.5
+                  ],
+                  "Steers": true,
+                  "WheelPart": [
+                    "Workspace",
+                    "AutoCar",
+                    "FrontLeftWheel"
+                  ]
+                }
+              },
+              {
+                "class": "VehicleWheel",
+                "name": "FrontRight",
+                "properties": {
+                  "Position": [
+                    3.5,
+                    -1,
+                    -3.5
+                  ],
+                  "Steers": true,
+                  "WheelPart": [
+                    "Workspace",
+                    "AutoCar",
+                    "FrontRightWheel"
+                  ]
+                }
+              },
+              {
+                "class": "VehicleWheel",
+                "name": "BackLeft",
+                "properties": {
+                  "Position": [
+                    -3.5,
+                    -1,
+                    3.5
+                  ],
+                  "Steers": false,
+                  "WheelPart": [
+                    "Workspace",
+                    "AutoCar",
+                    "BackLeftWheel"
+                  ]
+                }
+              },
+              {
+                "class": "VehicleWheel",
+                "name": "BackRight",
+                "properties": {
+                  "Position": [
+                    3.5,
+                    -1,
+                    3.5
+                  ],
+                  "Steers": false,
+                  "WheelPart": [
+                    "Workspace",
+                    "AutoCar",
+                    "BackRightWheel"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "class": "VehicleSeat",
+            "name": "DriverSeat",
+            "properties": {
+              "Size": [
+                2,
+                1,
+                2
+              ],
+              "Position": [
+                -2,
+                4.6,
+                51
+              ],
+              "Color": [
+                0.2,
+                0.2,
+                0.22
+              ],
+              "MaxSpeed": 24
+            }
+          },
+          {
+            "class": "Part",
+            "name": "FrontLeftWheel",
+            "properties": {
+              "Shape": "Cylinder",
+              "Size": [
+                0.8,
+                2,
+                2
+              ],
+              "Position": [
+                -3.5,
+                2.6,
+                46.5
+              ],
+              "Color": [
+                0.1,
+                0.1,
+                0.1
+              ],
+              "Anchored": true,
+              "CanCollide": false
+            }
+          },
+          {
+            "class": "Part",
+            "name": "FrontRightWheel",
+            "properties": {
+              "Shape": "Cylinder",
+              "Size": [
+                0.8,
+                2,
+                2
+              ],
+              "Position": [
+                3.5,
+                2.6,
+                46.5
+              ],
+              "Color": [
+                0.1,
+                0.1,
+                0.1
+              ],
+              "Anchored": true,
+              "CanCollide": false
+            }
+          },
+          {
+            "class": "Part",
+            "name": "BackLeftWheel",
+            "properties": {
+              "Shape": "Cylinder",
+              "Size": [
+                0.8,
+                2,
+                2
+              ],
+              "Position": [
+                -3.5,
+                2.6,
+                53.5
+              ],
+              "Color": [
+                0.1,
+                0.1,
+                0.1
+              ],
+              "Anchored": true,
+              "CanCollide": false
+            }
+          },
+          {
+            "class": "Part",
+            "name": "BackRightWheel",
+            "properties": {
+              "Shape": "Cylinder",
+              "Size": [
+                0.8,
+                2,
+                2
+              ],
+              "Position": [
+                3.5,
+                2.6,
+                53.5
+              ],
+              "Color": [
+                0.1,
+                0.1,
+                0.1
+              ],
+              "Anchored": true,
+              "CanCollide": false
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

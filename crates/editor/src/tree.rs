@@ -85,6 +85,12 @@ pub enum Insertable {
     Spline,
     /// A SplineFollower in the selected part, following the first Spline.
     SplineFollower,
+    /// A SplineMesh in the selected Spline (or a new one), bending a model
+    /// along it (Phase 74).
+    SplineMesh,
+    /// A SplineScatter in the selected Spline (or a new one), placing
+    /// models along it (Phase 74).
+    SplineScatter,
     /// A ragdoll for the selected skinned MeshPart; Build in its Properties
     /// makes its bodies and joints.
     Ragdoll,
@@ -274,8 +280,14 @@ impl Insertable {
         Insertable::VehicleSeat,
         Insertable::VehicleWheel,
     ];
-    /// Splines, and the mover that carries a part along one (Phase 73).
-    pub const SPLINES: [Insertable; 2] = [Insertable::Spline, Insertable::SplineFollower];
+    /// Splines, the mover that carries a part along one (Phase 73), and
+    /// what bends models along one or scatters them (Phase 74).
+    pub const SPLINES: [Insertable; 4] = [
+        Insertable::Spline,
+        Insertable::SplineFollower,
+        Insertable::SplineMesh,
+        Insertable::SplineScatter,
+    ];
     /// Camera viewpoints, placed where the editor's camera is.
     pub const CAMERAS: [Insertable; 1] = [Insertable::Camera];
     /// Points on parts, for constraints and effects.
@@ -368,6 +380,8 @@ impl Insertable {
             Insertable::Sequence => "Sequence",
             Insertable::Spline => "Spline",
             Insertable::SplineFollower => "Spline Follower",
+            Insertable::SplineMesh => "Spline Mesh",
+            Insertable::SplineScatter => "Spline Scatter",
             Insertable::ThirdPersonController => "Third Person",
             Insertable::FirstPersonController => "First Person",
             Insertable::NavigationAgent => "Agent",
@@ -443,6 +457,8 @@ impl Insertable {
             Insertable::Sequence => ClassName::Sequence,
             Insertable::Spline => ClassName::Spline,
             Insertable::SplineFollower => ClassName::SplineFollower,
+            Insertable::SplineMesh => ClassName::SplineMesh,
+            Insertable::SplineScatter => ClassName::SplineScatter,
             Insertable::ThirdPersonController => ClassName::ThirdPersonController,
             Insertable::FirstPersonController => ClassName::FirstPersonController,
             Insertable::NavigationAgent => ClassName::NavigationAgent,
@@ -991,6 +1007,12 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             // A SplineFollower moves the part or Model it's in.
             || (what == Insertable::SplineFollower
                 && (is_part || is_group)
+                && is_saved(world, id))
+            // A SplineMesh or SplineScatter follows the Spline it's in.
+            || (matches!(what, Insertable::SplineMesh | Insertable::SplineScatter)
+                && world
+                    .get(id)
+                    .is_some_and(|instance| instance.class() == ClassName::Spline)
                 && is_saved(world, id))
             // A prompt shows over its part or Attachment.
             || (what == Insertable::ProximityPrompt

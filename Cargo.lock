@@ -644,6 +644,7 @@ dependencies = [
  "axcenity-net",
  "axcenity-physics",
  "axcenity-plugins",
+ "axcenity-procedural",
  "axcenity-project",
  "axcenity-render",
  "axcenity-save",
@@ -771,6 +772,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axcenity-procedural"
+version = "0.1.0"
+dependencies = [
+ "axcenity-assets",
+ "axcenity-core",
+ "axcenity-terrain",
+ "axcenity-workspace-hack",
+ "glam 0.34.1",
+]
+
+[[package]]
 name = "axcenity-project"
 version = "0.1.0"
 dependencies = [
@@ -838,6 +850,7 @@ dependencies = [
  "axcenity-mesh-edit",
  "axcenity-nav",
  "axcenity-physics",
+ "axcenity-procedural",
  "axcenity-render",
  "axcenity-save",
  "axcenity-workspace-hack",

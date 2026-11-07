@@ -3043,6 +3043,86 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If false, it stops where it is; true carries on from there.",
     ),
     (
+        ClassName::SplineMesh,
+        "MeshId",
+        "The model bent along the Spline it's in, such as \"assets/models/road.glb\": a straight piece whose length runs along its Z. Empty makes nothing.",
+    ),
+    (
+        ClassName::SplineMesh,
+        "MaterialVariant",
+        "A material file its pieces are drawn with in place of the model's materials. Empty for the model's own.",
+    ),
+    (
+        ClassName::SplineMesh,
+        "Size",
+        "One piece in studs: its width (X), height (Y, up from the curve) and length (Z, along it). A whole number of pieces fills the curve, each stretched a little to fit. (8, 1, 8) by default.",
+    ),
+    (
+        ClassName::SplineMesh,
+        "CanCollide",
+        "If true (the default), its pieces collide as their bent shapes, so cars drive and characters walk on a road.",
+    ),
+    (
+        ClassName::SplineMesh,
+        "CastShadow",
+        "If true (the default), its pieces cast shadows.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "Models",
+        "The model files it places, separated by `;`, such as \"assets/models/tree.glb; assets/models/rock.glb\". Each spot picks one. In the editor, click models in the Assets panel while it's selected to add or take them out.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "Seed",
+        "Which random layout it makes: the same seed, spline and settings give the same layout every time. 1 by default.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "Spacing",
+        "Studs between models along the curve (at least 0.5). 8 by default.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "FillInside",
+        "If true, it fills the inside of a Closed spline at Density instead of placing models along the curve. False by default.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "Density",
+        "Models per 100 square studs inside a Closed spline, with FillInside. 1 by default.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "RotationRange",
+        "Each model is turned round its up by a random number of degrees between X and Y. (0, 360) by default.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "ScaleRange",
+        "Each model is its own size times a random number between X and Y. (1, 1) by default.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "Offset",
+        "Each model along the curve is moved up to this many studs to one side or the other at random. 0 by default.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "AlignToSurface",
+        "If true (the default), each model stands out from the surface below it, tilted with the ground; if false, upright.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "MaxSlope",
+        "Ground steeper than this many degrees gets no model. 35 by default.",
+    ),
+    (
+        ClassName::SplineScatter,
+        "CanCollide",
+        "If true (the default), the models it places collide.",
+    ),
+    (
         ClassName::IntValue,
         "Value",
         "The whole number it holds; others are rounded. 0 by default.",
@@ -4924,6 +5004,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::SplineFollower => {
             "Moves the Part (with the parts welded to it) or the Model it's parented to along its Spline at Speed during Play: moving platforms, trains and gondolas. It starts at the point of the curve nearest where its parent is, and Loops, PingPongs or stops Once at the end, firing Reached. Characters standing on what it moves ride along."
+        }
+        ClassName::SplineMesh => {
+            "Inside a Spline: bends the model MeshId names along the curve, repeated to fill it with no gaps, for roads, pipes, fences and rails. Its pieces are anchored MeshParts that collide as their bent shapes, made again whenever the spline or its settings change and when the game starts; they're its children, but never saved (Bake in the editor keeps them)."
+        }
+        ClassName::SplineScatter => {
+            "Inside a Spline: places the models Models names along the curve every Spacing studs, or inside a Closed spline at Density, each turned, scaled and moved at random from Seed and stood on the surface below (none where it's steeper than MaxSlope). What it places is made again whenever the spline or its settings change and when the game starts; it's its children, but never saved (Bake in the editor keeps it)."
         }
         ClassName::Terrain => {
             "A landscape: a heightfield shaped in the editor's Terrain Studio, drawn with its TerrainLayers and colliding as its ground. Position is the middle of its footprint at the bottom of its height range; Size is its width, height range and length."

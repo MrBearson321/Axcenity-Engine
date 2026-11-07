@@ -140,6 +140,10 @@ impl EditorApp {
             self.insert_spline();
             return;
         }
+        if matches!(what, Insertable::SplineMesh | Insertable::SplineScatter) {
+            self.insert_spline_generator(what, near.or(self.selected));
+            return;
+        }
         if what == Insertable::SplineFollower {
             let spline = crate::splines::splines(&self.world).first().copied();
             self.insert_named(

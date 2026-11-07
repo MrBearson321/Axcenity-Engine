@@ -293,8 +293,10 @@ impl Explorer {
         };
         let expanded = self.expanded.contains(&id);
         // A UnionOperation's parts are kept inside it for Separate, out of
-        // sight (Phase 50).
-        let union = instance.class() == ClassName::UnionOperation;
+        // sight (Phase 50), and what a SplineMesh or SplineScatter makes is
+        // made again from its settings (Phase 74).
+        let union = instance.class() == ClassName::UnionOperation
+            || axcenity_core::spline::is_generator(instance.class());
         rows.push(Row {
             id,
             name: instance.name().to_string(),

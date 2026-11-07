@@ -1834,6 +1834,8 @@ mod prompt_tests;
 #[cfg(test)]
 mod ragdoll_tests;
 #[cfg(test)]
+mod road_tests;
+#[cfg(test)]
 mod seat_tests;
 #[cfg(test)]
 mod spawn_tests;

@@ -228,6 +228,44 @@ impl AssetEntry {
     }
 }
 
+/// What a click on a tile picks, instead of selecting it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Picking {
+    /// The Terrain Studio's foliage brush, while the Foliage tool is on: a
+    /// prop or a model.
+    Foliage(FoliageSource),
+    /// The models the selected SplineMesh or SplineScatter uses (Phase
+    /// 74): a click on a model uses it (or, for a scatter, takes it out).
+    SplineModels(Vec<String>),
+}
+
+impl Picking {
+    /// Whether a click on `entry` picks it.
+    fn takes(&self, entry: &AssetEntry) -> bool {
+        match self {
+            Picking::Foliage(_) => matches!(entry.kind, AssetKind::Prop | AssetKind::Model),
+            Picking::SplineModels(_) => entry.kind == AssetKind::Model,
+        }
+    }
+
+    /// Whether `entry` is what's picked now, to highlight it.
+    fn has(&self, entry: &AssetEntry) -> bool {
+        match self {
+            Picking::Foliage(source) => foliage_matches(source, entry),
+            Picking::SplineModels(models) => {
+                entry.kind == AssetKind::Model && models.contains(&entry.path)
+            }
+        }
+    }
+
+    fn hover(&self) -> &'static str {
+        match self {
+            Picking::Foliage(_) => "Click to paint this as foliage.",
+            Picking::SplineModels(_) => "Click to use this model along the selected spline.",
+        }
+    }
+}
+
 fn foliage_matches(source: &FoliageSource, entry: &AssetEntry) -> bool {
     match (source, entry.kind) {
         (FoliageSource::Prop(prop), AssetKind::Prop) => prop.label() == entry.path,
@@ -336,8 +374,9 @@ impl Category {
 pub enum BrowserAction {
     /// Place this at the camera's focus point (a double-click).
     Place(AssetEntry),
-    /// Use this as the Terrain Studio's foliage brush (a click while Foliage is on).
-    Foliage(AssetEntry),
+    /// A click while [`Picking`]: use this as the Terrain Studio's foliage
+    /// brush, or along the selected SplineMesh or SplineScatter.
+    Pick(AssetEntry),
     /// Copy files into the project; images go in this folder.
     Import { image_folder: &'static str },
     /// Save the selection as a prefab.
@@ -634,15 +673,14 @@ impl AssetBrowser {
     }
 
     /// Draws the panel. `can_edit` is false during Play, and `can_save` is
-    /// true when something that can be a prefab is selected. `foliage` is
-    /// the Terrain Studio's current item while the Foliage tool is on: a
-    /// click on a prop or model then picks it to paint.
+    /// true when something that can be a prefab is selected. With
+    /// `picking`, a click on a prop or model picks it ([`Picking`]).
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         can_edit: bool,
         can_save: bool,
-        foliage: Option<&FoliageSource>,
+        picking: Option<&Picking>,
     ) -> Option<BrowserAction> {
         let mut action = None;
         self.thumbnails.poll(ui.ctx());
@@ -814,9 +852,9 @@ impl AssetBrowser {
                                 }
                             };
                             let (place, pick, menu) =
-                                self.item(ui, &entry, can_edit, list, foliage);
+                                self.item(ui, &entry, can_edit, list, picking);
                             if pick {
-                                action = Some(BrowserAction::Foliage(entry.clone()));
+                                action = Some(BrowserAction::Pick(entry.clone()));
                             } else if place {
                                 action = Some(BrowserAction::Place(entry.clone()));
                             }
@@ -1231,14 +1269,14 @@ impl AssetBrowser {
     }
 
     /// Draws one asset: a tile, or a row of the list when `list`. The first
-    /// bool is a double-click (place); the second is a foliage pick.
+    /// bool is a double-click (place); the second is a pick ([`Picking`]).
     fn item(
         &mut self,
         ui: &mut egui::Ui,
         entry: &AssetEntry,
         can_edit: bool,
         list: bool,
-        foliage: Option<&FoliageSource>,
+        picking: Option<&Picking>,
     ) -> (bool, bool, Option<ItemMenu>) {
         let size = if list {
             egui::vec2(ui.available_width(), LIST_ROW)
@@ -1247,11 +1285,11 @@ impl AssetBrowser {
         };
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         let id = response.id;
-        let foliage_kind = matches!(entry.kind, AssetKind::Prop | AssetKind::Model);
-        let selected = foliage.is_some_and(|source| foliage_matches(source, entry));
+        let takes = picking.filter(|picking| picking.takes(entry));
+        let selected = picking.is_some_and(|picking| picking.has(entry));
         let global = self.is_global(&entry.path);
-        let mut hover = if foliage.is_some() && foliage_kind {
-            format!("{}\nClick to paint this as foliage.", entry.path)
+        let mut hover = if let Some(picking) = takes {
+            format!("{}\n{}", entry.path, picking.hover())
         } else {
             match entry.prop() {
                 Some(prop) => format!("{}\n{}", prop.hover, entry.kind.hover()),
@@ -1508,7 +1546,7 @@ impl AssetBrowser {
                 }
             });
         }
-        let pick = can_edit && foliage.is_some() && foliage_kind && response.clicked();
+        let pick = can_edit && takes.is_some() && response.clicked();
         let place = can_edit && !pick && response.double_clicked();
         if response.clicked() && !pick {
             let modifiers = ui.input(|input| input.modifiers);

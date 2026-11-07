@@ -1,0 +1,19 @@
+[package]
+name = "axcenity-procedural"
+description = "Axcenity procedural content along splines: SplineMesh pieces bent along a curve, SplineScatter layouts, and flattening terrain under a spline."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# Plain algorithms over `core`'s Instances and `assets`' models, with no UI
+# or GPU types, so the editor, the player, the server and tests share them.
+[dependencies]
+axcenity-assets.workspace = true
+axcenity-core.workspace = true
+axcenity-terrain.workspace = true
+glam.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true

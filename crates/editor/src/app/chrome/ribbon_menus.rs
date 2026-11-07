@@ -235,6 +235,16 @@ pub(super) fn insert_hint(what: Insertable) -> String {
              it along its Spline at Speed, there and back by default. Characters standing on \
              it ride along."
         }
+        Insertable::SplineMesh => {
+            "Insert a Spline Mesh into the selected Spline (or a new one): it bends a model \
+             along the curve, repeated to fill it, for roads, pipes, fences and rails. Click a \
+             model in the Assets panel while it's selected to use it."
+        }
+        Insertable::SplineScatter => {
+            "Insert a Spline Scatter into the selected Spline (or a new one): it places models \
+             along the curve, or inside a closed one, from a seed. Click models in the Assets \
+             panel while it's selected to add them."
+        }
         Insertable::Checkpoint => {
             "Insert a Checkpoint on top of the selected part: a place \
              SaveService:RestoreCheckpoint (or the \"go back to checkpoint\" block) puts the \

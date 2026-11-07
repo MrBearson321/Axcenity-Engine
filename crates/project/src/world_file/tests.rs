@@ -39,6 +39,44 @@ fn prefabs_round_trip_and_a_bad_one_adds_nothing() {
 }
 
 #[test]
+fn a_spline_scatter_and_mesh_save_their_settings_but_not_what_they_made() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let spline = world.create(ClassName::Spline).unwrap();
+    world.set_parent(spline, Some(workspace)).unwrap();
+    let point = world.create(ClassName::SplinePoint).unwrap();
+    world.set_parent(point, Some(spline)).unwrap();
+    let mut made = Vec::new();
+    for class in [ClassName::SplineScatter, ClassName::SplineMesh] {
+        let generator = world.create(class).unwrap();
+        world.set_parent(generator, Some(spline)).unwrap();
+        let result = world.create(ClassName::MeshPart).unwrap();
+        world.set_name(result, "Made").unwrap();
+        world.set_parent(result, Some(generator)).unwrap();
+        made.push(generator);
+    }
+    world
+        .set_property(made[0], "Seed", Value::Number(42.0))
+        .unwrap();
+    let text = write_world(&world);
+    assert!(text.contains("\"SplineScatter\"") && text.contains("\"Seed\": 42"));
+    assert!(text.contains("\"SplineMesh\""));
+    assert!(
+        !text.contains("MeshPart") && !text.contains("Made"),
+        "{text}"
+    );
+    let back = parse_world(&text).unwrap();
+    let spline = back.find_first_child(back.workspace(), "Spline").unwrap();
+    let generators = back.get(spline).unwrap().children().to_vec();
+    assert_eq!(generators.len(), 3);
+    assert!(
+        generators[1..]
+            .iter()
+            .all(|&id| back.get(id).unwrap().children().is_empty())
+    );
+}
+
+#[test]
 fn empty_world() {
     let world = parse_world(r#"{ "format_version": 1 }"#).unwrap();
     assert!(world.get(world.workspace()).unwrap().children().is_empty());

@@ -829,10 +829,15 @@ pub fn write_workspace_only(world: &World) -> String {
 }
 
 /// The children of `id` that go in the world file. Scripts are saved as
-/// their own `.lua` files, Players only exist while the game runs, and a
-/// service inside another (StarterPlayerScripts) is always there.
+/// their own `.lua` files, Players only exist while the game runs, a
+/// service inside another (StarterPlayerScripts) is always there, and what
+/// a SplineMesh or SplineScatter made is made again from its settings
+/// (Phase 74).
 fn saved_children(world: &World, id: InstanceId) -> Vec<InstanceId> {
     world.get(id).map_or_else(Vec::new, |instance| {
+        if axcenity_core::spline::is_generator(instance.class()) {
+            return Vec::new();
+        }
         instance
             .children()
             .iter()

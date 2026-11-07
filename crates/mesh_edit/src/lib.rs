@@ -104,7 +104,7 @@ pub use rig::{ArmBone, Armature, Skin};
 pub use sculpt::{Sculpt, subdivide, voxel_remesh};
 pub use select::{SelectMode, Selection, edge_loop, face_loop};
 pub use sidecar::sidecar_path;
-pub use solid::{Combined, Solid, combine, combine_parts, save_union, solid_of};
+pub use solid::{Combined, Solid, combine, combine_parts, save_pieces, save_union, solid_of};
 pub use uv::{
     AlignAxis, Projection, Stretch, average_island_scale, overlapping_islands, pack_islands,
     project, smart_project, stretch, unwrap, uv_islands,

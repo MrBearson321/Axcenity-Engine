@@ -1,0 +1,89 @@
+//! Flatten Terrain Along: a strip of terrain under a spline brought to the
+//! curve's height, for a road to lie on.
+
+use axcenity_core::spline::SplineCurve;
+use axcenity_core::{SampleRect, TerrainData};
+use axcenity_terrain::Placement;
+use glam::{Vec2, Vec3};
+
+use crate::v3;
+
+/// Puts every sample of `data` within `width / 2` studs of `curve` (seen
+/// from above) at the height of the curve's nearest point. Returns how many
+/// samples it set.
+pub fn flatten_along(
+    data: &mut TerrainData,
+    placement: &Placement,
+    curve: &SplineCurve,
+    width: f32,
+) -> usize {
+    let cell = placement.cell_size(data).min_element().max(1e-3);
+    let line: Vec<Vec3> = curve
+        .polyline((cell / 2.0).max(0.25))
+        .into_iter()
+        .map(v3)
+        .collect();
+    let reach = (width / 2.0).max(0.0);
+    let (min, max) = line
+        .iter()
+        .fold((Vec2::INFINITY, Vec2::NEG_INFINITY), |(min, max), p| {
+            let p = Vec2::new(p.x, p.z);
+            (min.min(p), max.max(p))
+        });
+    let (size_x, size_z) = data.size();
+    let low = placement
+        .to_grid(data, min.x - reach, min.y - reach)
+        .floor();
+    let high = placement.to_grid(data, max.x + reach, max.y + reach).ceil();
+    let clamp_x = |v: f32| (v.max(0.0) as usize).min(size_x);
+    let clamp_z = |v: f32| (v.max(0.0) as usize).min(size_z);
+    let rect = SampleRect::new(
+        clamp_x(low.x),
+        clamp_z(low.y),
+        clamp_x(high.x + 1.0),
+        clamp_z(high.y + 1.0),
+    );
+    if rect.is_empty() || line.is_empty() {
+        return 0;
+    }
+    // Worked out first, so the heights aren't borrowed while reading.
+    let mut set = Vec::new();
+    for z in rect.z0..rect.z1 {
+        for x in rect.x0..rect.x1 {
+            let at = placement.to_world_xz(data, Vec2::new(x as f32, z as f32));
+            if let Some((away, y)) = nearest(&line, at)
+                && away <= reach
+            {
+                set.push((z * size_x + x, placement.height_of(y)));
+            }
+        }
+    }
+    let heights = data.heights_mut_in(rect);
+    for &(index, height) in &set {
+        heights[index] = height;
+    }
+    data.clamp_heights_in(rect);
+    set.len()
+}
+
+/// How far `at` is from the line seen from above, and the line's height at
+/// its nearest point.
+fn nearest(line: &[Vec3], at: Vec2) -> Option<(f32, f32)> {
+    if line.len() == 1 {
+        let p = line[0];
+        return Some((Vec2::new(p.x, p.z).distance(at), p.y));
+    }
+    line.windows(2)
+        .map(|pair| {
+            let (a, b) = (pair[0], pair[1]);
+            let (fa, fb) = (Vec2::new(a.x, a.z), Vec2::new(b.x, b.z));
+            let along = fb - fa;
+            let t = if along.length_squared() > 1e-12 {
+                ((at - fa).dot(along) / along.length_squared()).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            ((fa + along * t).distance(at), a.y + (b.y - a.y) * t)
+        })
+        .min_by(|x, y| x.0.total_cmp(&y.0))
+}
