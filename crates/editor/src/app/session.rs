@@ -99,7 +99,8 @@ impl EditorApp {
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 let loading = self.loading.as_ref().expect("only drawn while loading");
-                loading.show(ui, ui.max_rect())
+                let mark = self.brand.as_ref().map(|brand| brand.mark());
+                loading.show(ui, ui.max_rect(), mark)
             })
             .inner;
         if cancel {
@@ -129,11 +130,14 @@ impl EditorApp {
             .as_ref()
             .map_or("", |project| project.name.as_str());
         let shown = self.cover_shown;
+        let mark = self.brand.as_ref().map(|brand| brand.mark());
         egui::Area::new(egui::Id::new("finishing load"))
             .order(egui::Order::Foreground)
             .fixed_pos(rect.min)
             .constrain(false)
-            .show(ctx, |ui| loading::show_finishing(ui, rect, name, shown));
+            .show(ctx, |ui| {
+                loading::show_finishing(ui, rect, name, shown, mark)
+            });
         ctx.request_repaint();
     }
     fn open_failed(&mut self, folder: &Path, err: &str) {

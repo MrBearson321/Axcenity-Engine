@@ -66,8 +66,9 @@ impl Reference {
         let palette = theme::palette(ui.ctx());
         ui.label(
             RichText::new("API Reference")
-                .family(theme::heading_family())
+                .family(theme::display_family())
                 .size(type_scale::DISPLAY)
+                .extra_letter_spacing(theme::DISPLAY_TRACKING)
                 .color(palette.text_strong),
         );
         ui.label(
@@ -334,8 +335,9 @@ fn entry_page(
     });
     ui.label(
         RichText::new(entry.qualified_name())
-            .family(theme::heading_family())
+            .family(theme::display_family())
             .size(type_scale::DISPLAY)
+            .extra_letter_spacing(theme::DISPLAY_TRACKING)
             .color(palette.text_strong),
     );
     ui.add_space(10.0);

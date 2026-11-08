@@ -7,6 +7,7 @@ The editor's fonts, built into it with `include_bytes!` (see `crates/editor/src/
 | `Inter-Regular.ttf` | The editor's UI text | SIL Open Font License 1.1 (`Inter-OFL.txt`) |
 | `Inter-Medium.ttf` | Tabs, buttons and labels that lead a group | SIL Open Font License 1.1 (`Inter-OFL.txt`) |
 | `Inter-SemiBold.ttf` | Headings and titles | SIL Open Font License 1.1 (`Inter-OFL.txt`) |
+| `PlusJakartaSans-Bold.ttf` | The editor's page and dialog titles and wordmark | SIL Open Font License 1.1 (`PlusJakartaSans-OFL.txt`) |
 | `Montserrat-Regular.ttf` | Game UI text (player and the editor's viewport) | SIL Open Font License 1.1 (`Montserrat-OFL.txt`) |
 | `Montserrat-SemiBold.ttf` | Game UI headings | SIL Open Font License 1.1 (`Montserrat-OFL.txt`) |
 | `JetBrainsMono-Regular.ttf` | Code, and the Output panel; game UI `monospace` | SIL Open Font License 1.1 (`JetBrainsMono-OFL.txt`) |
@@ -30,6 +31,8 @@ The game UI fonts added for the UI Designer come from [Google Fonts](https://git
 Sources: [Inter](https://github.com/rsms/inter) 4.1 (`extras/ttf` in the release zip), [Montserrat](https://github.com/JulietaUla/Montserrat) (`fonts/ttf`) and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) (`fonts/ttf`). The game UI bold and italic files come from the same places, and Poppins's and the `-Italic-Variable` files from Google Fonts (`ofl/<name>/`, the variable italics renamed from `<Name>-Italic[wght].ttf`). The game UI's Inter files aren't subset: the editor doesn't load them.
 
 The Inter files are subset to drop its private-use characters (U+E000–U+F8FF), because Phosphor's icons use the same code points and Inter comes first in the editor's font list: with them, some icons drew as Inter's glyphs. Everything else is kept. To update Inter, run `pyftsubset Inter-<Weight>.ttf --unicodes="U+0000-DFFF,U+F900-10FFFF" --layout-features='*' --name-IDs='*' --name-languages='*' --glyph-names --notdef-outline --hinting` (fontTools) on each weight; a test (`icons_come_from_phosphor_not_the_text_font`) catches a missed step.
+
+`PlusJakartaSans-Bold.ttf` is built from google/fonts commit `8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5` (`ofl/plusjakartasans/PlusJakartaSans[wght].ttf`): `fonttools varLib.instancer <file> wght=700 --update-name-table`, then the same `pyftsubset` command as Inter.
 
 These are the static (one weight per file) fonts, not the variable ones: egui only draws a variable font's default weight.
 

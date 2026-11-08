@@ -1,6 +1,7 @@
 //! The editor's design system: semantic colour tokens ([`Palette`]) for the
 //! dark and light themes, a choice of accent colours, the type scale (Inter
-//! for the UI, JetBrains Mono for code, Phosphor for icons), spacing for two
+//! for the UI, Plus Jakarta Sans for page and dialog titles, JetBrains Mono
+//! for code and micro-labels, Phosphor for icons), spacing for two
 //! densities, motion, and an icon and colour for each class of Instance.
 //!
 //! Everything the editor draws takes its colours from [`palette`] or from
@@ -31,7 +32,7 @@ pub use egui_phosphor::regular as icons;
 /// than size, so most of the UI is [`BODY`](type_scale::BODY).
 pub mod type_scale {
     /// Page titles on the start screen.
-    pub const DISPLAY: f32 = 22.0;
+    pub const DISPLAY: f32 = 26.0;
     /// Dialog titles and section headings.
     pub const HEADING: f32 = 15.0;
     /// Labels, buttons and panel text.
@@ -177,6 +178,9 @@ pub struct Appearance {
     pub code_font_size: f32,
     /// How big the whole interface is drawn (egui's zoom factor).
     pub ui_scale: f32,
+    /// Draws continuously while the window has focus, so a variable refresh
+    /// rate display never drops out of its rate when the editor goes idle.
+    pub hold_refresh: bool,
 }
 
 impl Default for Appearance {
@@ -188,6 +192,7 @@ impl Default for Appearance {
             reduce_motion: false,
             code_font_size: 13.0,
             ui_scale: 1.0,
+            hold_refresh: false,
         }
     }
 }
@@ -364,6 +369,12 @@ pub fn medium_family() -> FontFamily {
     FontFamily::Name("medium".into())
 }
 
+/// The font family of page and dialog titles and the wordmark (Plus Jakarta
+/// Sans Bold). Pair it with [`DISPLAY_TRACKING`] at display sizes.
+pub fn display_family() -> FontFamily {
+    FontFamily::Name("display".into())
+}
+
 /// The font family that draws [`filled_icons`] solid.
 pub fn filled() -> FontFamily {
     FontFamily::Name("filled icons".into())
@@ -394,7 +405,7 @@ pub fn apply(ctx: &egui::Context, appearance: &Appearance) {
     }
 }
 
-/// Inter and JetBrains Mono first, with Phosphor after each for icons,
+/// Inter, Plus Jakarta Sans and JetBrains Mono first, with Phosphor after each for icons,
 /// then egui's own fonts for anything they don't have (such as ⌫).
 fn fonts() -> egui::FontDefinitions {
     // `static` font files are built into the program, like the window icon.
@@ -412,6 +423,12 @@ fn fonts() -> egui::FontDefinitions {
         (
             "Inter SemiBold",
             font(include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf")),
+        ),
+        (
+            "Plus Jakarta Sans",
+            font(include_bytes!(
+                "../../../assets/fonts/PlusJakartaSans-Bold.ttf"
+            )),
         ),
         (
             "JetBrains Mono",
@@ -449,6 +466,9 @@ fn fonts() -> egui::FontDefinitions {
     fonts
         .families
         .insert(medium_family(), family("Inter Medium"));
+    fonts
+        .families
+        .insert(display_family(), family("Plus Jakarta Sans"));
     // Every family needs a font with `◻` or `?` in it, which egui draws
     // for characters no font has; without one it warns at startup.
     fonts.families.insert(filled(), family("Phosphor Fill"));
@@ -508,6 +528,71 @@ fn set_sizes(style: &mut egui::Style, appearance: &Appearance) {
 
 /// How long micro-interactions take (hover, press, fades), in seconds.
 pub const MOTION_SECONDS: f32 = 0.16;
+
+/// Letter spacing of display-size titles, in points: tight, as big type wants.
+pub const DISPLAY_TRACKING: f32 = -0.55;
+/// Letter spacing of dialog and settings titles, in points.
+pub const TITLE_TRACKING: f32 = -0.25;
+/// Letter spacing of uppercase mono micro-labels, in points.
+pub const MICRO_TRACKING: f32 = 1.45;
+
+/// Timing curves for entrances, as CSS `cubic-bezier` control points.
+pub mod curve {
+    /// Quick to arrive, gentle to settle: pages and cards.
+    pub const SETTLE: (f32, f32, f32, f32) = (0.2, 0.8, 0.2, 1.0);
+    /// Slow at both ends: the logo's cut-in and wipe.
+    pub const CUT: (f32, f32, f32, f32) = (0.65, 0.0, 0.35, 1.0);
+    /// The loader's sweep across the mark.
+    pub const SWEEP: (f32, f32, f32, f32) = (0.4, 0.0, 0.2, 1.0);
+}
+
+/// `t` (0 to 1) along a CSS-style timing curve. The curve is a function of
+/// its x, so x is found by bisection and y read there.
+pub fn bezier((x1, y1, x2, y2): (f32, f32, f32, f32), t: f32) -> f32 {
+    if t <= 0.0 {
+        return 0.0;
+    }
+    if t >= 1.0 {
+        return 1.0;
+    }
+    let at = |a: f32, b: f32, u: f32| {
+        let v = 1.0 - u;
+        3.0 * v * v * u * a + 3.0 * v * u * u * b + u * u * u
+    };
+    let (mut low, mut high) = (0.0_f32, 1.0_f32);
+    for _ in 0..24 {
+        let middle = (low + high) / 2.0;
+        if at(x1, x2, middle) < t {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    at(y1, y2, (low + high) / 2.0)
+}
+
+/// How far an entrance that began at `started` (egui's clock) has got, from
+/// 0 to 1, after waiting `delay` seconds. 1 at once with Reduce motion on,
+/// so everything shows at rest. Only ever runs after something happened:
+/// an animation on a timer would wake an idle window at uneven intervals,
+/// which variable refresh rate displays show as flicker.
+pub fn arrival(
+    ctx: &egui::Context,
+    started: f64,
+    delay: f32,
+    seconds: f32,
+    timing: (f32, f32, f32, f32),
+) -> f32 {
+    if ctx.style().animation_time <= 0.0 {
+        return 1.0;
+    }
+    let elapsed = (ctx.input(|input| input.time) - started) as f32 - delay;
+    if elapsed >= seconds {
+        return 1.0;
+    }
+    ctx.request_repaint();
+    bezier(timing, elapsed.max(0.0) / seconds)
+}
 
 /// egui's visuals for one theme, from its palette.
 fn visuals(p: &Palette) -> egui::Visuals {
@@ -1001,6 +1086,7 @@ mod tests {
                     FontFamily::Monospace,
                     heading_family(),
                     medium_family(),
+                    display_family(),
                     filled(),
                 ] {
                     assert!(
@@ -1053,6 +1139,7 @@ mod tests {
                             .x
                     };
                     assert_eq!(width(FontFamily::Proportional), width(filled()), "{icon:?}");
+                    assert_eq!(width(display_family()), width(filled()), "{icon:?}");
                 }
             });
         });
@@ -1106,6 +1193,7 @@ mod tests {
             reduce_motion: true,
             code_font_size: 15.0,
             ui_scale: 1.25,
+            hold_refresh: true,
         };
         assert_eq!(Appearance::from_text(&appearance.to_text()), appearance);
         assert_eq!(Appearance::from_text("not json"), Appearance::default());
@@ -1113,6 +1201,50 @@ mod tests {
         assert_eq!(odd.code_font_size, 20.0);
         assert_eq!(odd.ui_scale, 1.0);
         assert_eq!(odd.accent, Accent::Blue);
+    }
+
+    #[test]
+    fn timing_curves_start_end_and_only_rise() {
+        for timing in [curve::SETTLE, curve::CUT, curve::SWEEP] {
+            assert_eq!(bezier(timing, 0.0), 0.0);
+            assert_eq!(bezier(timing, 1.0), 1.0);
+            let mut last = 0.0;
+            for step in 1..100 {
+                let y = bezier(timing, step as f32 / 100.0);
+                assert!(y >= last - 0.001, "{timing:?} at {step}");
+                last = y;
+            }
+        }
+        // SETTLE is most of the way there early on.
+        assert!(bezier(curve::SETTLE, 0.3) > 0.7);
+    }
+
+    #[test]
+    fn entrances_finish_and_reduced_motion_skips_them() {
+        let ctx = test_context();
+        let at = |time: f64, ctx: &egui::Context| {
+            let mut got = 0.0;
+            let input = egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                got = arrival(ctx, 1.0, 0.1, 0.5, curve::SETTLE);
+            });
+            got
+        };
+        assert_eq!(at(1.0, &ctx), 0.0, "still waiting out the delay");
+        let middle = at(1.3, &ctx);
+        assert!(middle > 0.0 && middle < 1.0, "{middle}");
+        assert_eq!(at(1.7, &ctx), 1.0);
+        apply(
+            &ctx,
+            &Appearance {
+                reduce_motion: true,
+                ..Appearance::default()
+            },
+        );
+        assert_eq!(at(1.0, &ctx), 1.0);
     }
 
     #[test]

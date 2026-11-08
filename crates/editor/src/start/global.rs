@@ -107,8 +107,9 @@ impl GlobalPage {
             ui.vertical(|ui| {
                 ui.label(
                     RichText::new("Global Assets")
-                        .family(theme::heading_family())
+                        .family(theme::display_family())
                         .size(type_scale::DISPLAY)
+                        .extra_letter_spacing(theme::DISPLAY_TRACKING)
                         .color(palette.text_strong),
                 );
                 ui.add(

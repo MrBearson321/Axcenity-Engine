@@ -1,0 +1,42 @@
+{
+  "assetId": "Grass001",
+  "link": "https://ambientcg.com/a/Grass001",
+  "maps": [
+    {
+      "channel": "Red",
+      "flipGreen": false,
+      "invert": false,
+      "path": "assets/textures/Grass001/Grass001_2K-JPG_AmbientOcclusion.jpg",
+      "slot": "Occlusion"
+    },
+    {
+      "channel": "Red",
+      "flipGreen": false,
+      "invert": false,
+      "path": "assets/textures/Grass001/Grass001_2K-JPG_Color.jpg",
+      "slot": "Color"
+    },
+    {
+      "channel": "Red",
+      "flipGreen": false,
+      "invert": false,
+      "path": "assets/textures/Grass001/Grass001_2K-JPG_Displacement.jpg",
+      "slot": "Height"
+    },
+    {
+      "channel": "Red",
+      "flipGreen": false,
+      "invert": false,
+      "path": "assets/textures/Grass001/Grass001_2K-JPG_NormalGL.jpg",
+      "slot": "Normal"
+    },
+    {
+      "channel": "Red",
+      "flipGreen": false,
+      "invert": false,
+      "path": "assets/textures/Grass001/Grass001_2K-JPG_Roughness.jpg",
+      "slot": "Roughness"
+    }
+  ],
+  "source": "ambientcg"
+}

@@ -275,8 +275,9 @@ pub(super) fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
     let palette = theme::palette(ui.ctx());
     ui.label(
         egui::RichText::new(title)
-            .family(theme::heading_family())
+            .family(theme::display_family())
             .size(type_scale::HEADING + 2.0)
+            .extra_letter_spacing(theme::TITLE_TRACKING)
             .color(palette.text_strong),
     );
     ui.label(egui::RichText::new(subtitle).color(palette.text_secondary));
@@ -955,6 +956,17 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         egui::RichText::new(
             "Turns off hover fades, popup and window fades, smooth scrolling and the theme \
              crossfade. The viewport camera is never animated by the interface.",
+        )
+        .color(palette.text_secondary),
+    );
+    ui.add_space(16.0);
+    widgets::section_label(ui, "Display");
+    ui.checkbox(&mut appearance.hold_refresh, "Hold the refresh rate steady");
+    ui.label(
+        egui::RichText::new(
+            "For OLED and VA monitors using FreeSync or G-Sync that flicker while the editor \
+             is in a window. Keeps drawing while the editor has focus instead of stopping \
+             when it's idle, which uses more of the graphics card.",
         )
         .color(palette.text_secondary),
     );

@@ -1,0 +1,42 @@
+{
+  "assetId": "PavingStones152",
+  "link": "https://ambientcg.com/a/PavingStones152",
+  "maps": [
+    {
+      "channel": "Red",
+      "flipGreen": false,
+      "invert": false,
+      "path": "assets/textures/PavingStones152/PavingStones152_4K-JPG_AmbientOcclusion.jpg",
+      "slot": "Occlusion"
+    },
+    {
+      "channel": "Red",
+      "flipGreen": false,
+      "invert": false,
+      "path": "assets/textures/PavingStones152/PavingStones152_4K-JPG_Color.jpg",
+      "slot": "Color"
+    },
+    {
+      "channel": "Red",
+      "flipGreen": false,
+      "invert": false,
+      "path": "assets/textures/PavingStones152/PavingStones152_4K-JPG_Displacement.jpg",
+      "slot": "Height"
+    },
+    {
+      "channel": "Red",
+      "flipGreen": false,
+      "invert": false,
+      "path": "assets/textures/PavingStones152/PavingStones152_4K-JPG_NormalGL.jpg",
+      "slot": "Normal"
+    },
+    {
+      "channel": "Red",
+      "flipGreen": false,
+      "invert": false,
+      "path": "assets/textures/PavingStones152/PavingStones152_4K-JPG_Roughness.jpg",
+      "slot": "Roughness"
+    }
+  ],
+  "source": "ambientcg"
+}

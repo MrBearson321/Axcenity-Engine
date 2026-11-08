@@ -31,6 +31,8 @@ use eframe::egui::{self, Align2, FontId, Rect, Sense, vec2};
 use crate::theme::{self, type_scale};
 use crate::widgets::{self, Role};
 
+/// How long the logo loader's band takes to cross the mark, in seconds.
+const SWEEP_SECONDS: f32 = 1.3;
 /// How long a load runs before its screen shows, in seconds: one that's
 /// done sooner needs no screen.
 pub const GRACE: f32 = 0.3;
@@ -146,7 +148,7 @@ impl Loading {
 
     /// Draws the loading screen over `rect`, or only its background for the
     /// first [`GRACE`] seconds. Returns true when Cancel was clicked.
-    pub fn show(&self, ui: &mut egui::Ui, rect: Rect) -> bool {
+    pub fn show(&self, ui: &mut egui::Ui, rect: Rect, mark: Option<&egui::TextureHandle>) -> bool {
         let elapsed = self.started.elapsed().as_secs_f32();
         if elapsed < GRACE {
             paint_blank(ui, rect);
@@ -155,7 +157,7 @@ impl Loading {
             return false;
         }
         let status = self.status();
-        paint(ui, rect, &self.name, &status, Some(elapsed))
+        paint(ui, rect, &self.name, &status, Some(elapsed), mark)
     }
 }
 
@@ -168,7 +170,13 @@ impl Drop for Loading {
 /// The screen held for a frame after the project opens, while its scene is
 /// sent to the graphics card. After a load too quick to show its screen,
 /// only the background, so nothing flashes up.
-pub fn show_finishing(ui: &mut egui::Ui, rect: Rect, name: &str, shown: bool) {
+pub fn show_finishing(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    name: &str,
+    shown: bool,
+    mark: Option<&egui::TextureHandle>,
+) {
     if !shown {
         paint_blank(ui, rect);
         return;
@@ -177,7 +185,7 @@ pub fn show_finishing(ui: &mut egui::Ui, rect: Rect, name: &str, shown: bool) {
         doing: "Preparing the scene".to_owned(),
         ..Status::default()
     };
-    paint(ui, rect, name, &status, None);
+    paint(ui, rect, name, &status, None, mark);
 }
 
 /// The screen's background alone, covering what's under it.
@@ -302,8 +310,19 @@ fn fill(count: Option<(usize, usize)>) -> Option<f32> {
 /// (with its percentage when there's a count), the last files read, and the
 /// time taken with Cancel. `elapsed` is `None` once loading is done (no
 /// Cancel then).
-fn paint(ui: &mut egui::Ui, rect: Rect, name: &str, status: &Status, elapsed: Option<f32>) -> bool {
+fn paint(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    name: &str,
+    status: &Status,
+    elapsed: Option<f32>,
+    mark: Option<&egui::TextureHandle>,
+) -> bool {
     let palette = theme::palette(ui.ctx());
+    // Every frame, whatever the load is doing: progress reports come at the
+    // pace files are read, and that uneven pace flickers on variable
+    // refresh rate displays.
+    ui.ctx().request_repaint();
     // Covers what's under it, so nothing there can be clicked.
     ui.allocate_rect(rect, Sense::click());
     let painter = ui.painter_at(rect);
@@ -312,18 +331,34 @@ fn paint(ui: &mut egui::Ui, rect: Rect, name: &str, status: &Status, elapsed: Op
     let width = (rect.width() - 64.0).clamp(240.0, 420.0);
     let left = rect.center().x - width * 0.5;
     let mut y = rect.center().y - 90.0;
-    painter.text(
-        egui::pos2(left, y),
-        Align2::LEFT_TOP,
-        "Opening",
-        FontId::proportional(type_scale::CAPTION),
-        palette.text_muted,
+    if let Some(mark) = mark {
+        let side = Rect::from_min_size(egui::pos2(left, y - 56.0), vec2(40.0, 40.0));
+        if ui.ctx().style().animation_time > 0.0 {
+            let time = ui.input(|input| input.time) as f32;
+            let position = theme::bezier(theme::curve::SWEEP, (time / SWEEP_SECONDS).fract());
+            widgets::paint_mark_sweep(
+                &painter,
+                side,
+                mark,
+                (palette.text_muted, palette.text_strong),
+                position,
+            );
+        } else {
+            widgets::paint_mark(&painter, side, mark, palette.text_secondary);
+        }
+    }
+    let opening = egui::WidgetText::from(widgets::micro("Opening", palette.text_weak)).into_galley(
+        ui,
+        None,
+        f32::INFINITY,
+        egui::TextStyle::Body,
     );
+    painter.galley(egui::pos2(left, y), opening, palette.text_weak);
     y += 18.0;
     let title = widgets::elided(
         ui,
         name.to_owned(),
-        FontId::new(type_scale::DISPLAY, theme::heading_family()),
+        FontId::new(type_scale::DISPLAY, theme::display_family()),
         palette.text_strong,
         width,
         1,
@@ -394,9 +429,6 @@ fn paint(ui: &mut egui::Ui, rect: Rect, name: &str, status: &Status, elapsed: Op
             if end > start {
                 let slider = Rect::from_x_y_ranges(start..=end, bar.y_range());
                 painter.rect_filled(slider, 2, palette.accent);
-            }
-            if moving {
-                ui.ctx().request_repaint();
             }
         }
     }
@@ -499,7 +531,15 @@ mod tests {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    paint(ui, ui.max_rect(), "Castle Siege", &status, Some(12.4));
+                    let brand = crate::start::Brand::load(ui.ctx());
+                    paint(
+                        ui,
+                        ui.max_rect(),
+                        "Castle Siege",
+                        &status,
+                        Some(12.4),
+                        Some(brand.mark()),
+                    );
                 });
         };
         match std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {

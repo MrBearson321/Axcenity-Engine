@@ -9,8 +9,9 @@ pub(super) fn dialog_title(
 ) {
     ui.label(
         RichText::new(title)
-            .family(theme::heading_family())
+            .family(theme::display_family())
             .size(type_scale::HEADING + 1.0)
+            .extra_letter_spacing(theme::TITLE_TRACKING)
             .color(palette.text_strong),
     );
     if let Some(subtitle) = subtitle {

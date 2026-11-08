@@ -22,8 +22,9 @@ pub(super) fn page_header(
                 } else {
                     "Projects"
                 })
-                .family(theme::heading_family())
+                .family(theme::display_family())
                 .size(type_scale::DISPLAY)
+                .extra_letter_spacing(theme::DISPLAY_TRACKING)
                 .color(palette.text_strong),
             );
             ui.label(
@@ -82,6 +83,7 @@ pub(super) fn card_frame(
         ),
         egui::StrokeKind::Inside,
     );
+    widgets::spotlight(ui, rect, response.id, hover);
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect.expand(2.0),
@@ -264,6 +266,7 @@ pub(super) fn project_card(
             palette.text_strong.gamma_multiply(0.04 * hover),
         );
     }
+    widgets::spotlight(ui, picture, response.id, hover);
     if response.has_focus() {
         ui.painter().rect_stroke(
             picture.expand(2.0),

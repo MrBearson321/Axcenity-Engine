@@ -149,6 +149,9 @@ const FINISHING_FRAMES: u64 = 2;
 /// After the last input, frames keep coming at the display's rate for this
 /// long (see [`EditorApp::keep_frames_steady`]).
 const STEADY_FRAME_SECONDS: f64 = 1.0;
+/// A frame this long after the last one, when none was asked for, means
+/// something woke an idle editor (see [`EditorApp::keep_frames_steady`]).
+const WAKE_GAP_SECONDS: f64 = 0.2;
 /// Ctrl+S, or Cmd+S on macOS (`COMMAND` picks the right one).
 const SAVE_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
@@ -243,8 +246,10 @@ pub struct EditorApp {
     ui_drag_baselines: HashMap<String, String>,
     /// The window title last sent to the window, to send it again only when it changes.
     shown_title: String,
-    /// When the last input came (egui's clock), for steady frame pacing.
-    last_input_at: Option<f64>,
+    /// When the last input or wake-up came (egui's clock), for steady frame pacing.
+    last_active_at: Option<f64>,
+    /// When the last frame was drawn, and whether it asked for another.
+    frame_pace: Option<(f64, bool)>,
     /// The parts the viewport drag under way has moved, for Join Surfaces.
     dragged_parts: Vec<InstanceId>,
     /// The game, while Play is on. `world` stays as it was before Play.
@@ -752,7 +757,8 @@ impl EditorApp {
             viewport: Viewport::new(),
             ui_drag_baselines: HashMap::new(),
             shown_title: String::new(),
-            last_input_at: None,
+            last_active_at: None,
+            frame_pace: None,
             dragged_parts: Vec::new(),
             play: None,
             play_settings: PlaySettings::default(),
@@ -1021,19 +1027,29 @@ impl EditorApp {
     /// does: a flicker. Windows puts windowed apps on VRR too. So after any
     /// input, keep drawing for [`STEADY_FRAME_SECONDS`]: the rate holds
     /// steady while someone works, and an idle editor still draws nothing.
+    ///
+    /// A frame nobody here asked for after a gap (a file changed, a
+    /// background job finished) is the same lone frame, so it counts as
+    /// input. With Hold the refresh rate steady on, a focused window never
+    /// goes idle at all, for panels that react to the rate dropping too.
     fn keep_frames_steady(&mut self, ctx: &egui::Context) {
-        let (now, input) = ctx.input(|input| {
+        let (now, input, focused) = ctx.input(|input| {
             let active =
                 !input.events.is_empty() || input.pointer.any_down() || !input.keys_down.is_empty();
-            (input.time, active)
+            (input.time, active, input.viewport().focused == Some(true))
         });
-        if input {
-            self.last_input_at = Some(now);
+        let woke = self
+            .frame_pace
+            .is_some_and(|(at, asked)| !asked && now - at > WAKE_GAP_SECONDS);
+        if input || woke {
+            self.last_active_at = Some(now);
         }
-        if self
-            .last_input_at
+        let steady = self
+            .last_active_at
             .is_some_and(|at| now - at < STEADY_FRAME_SECONDS)
-        {
+            || (self.appearance.hold_refresh && focused);
+        self.frame_pace = Some((now, steady));
+        if steady {
             ctx.request_repaint();
         }
     }

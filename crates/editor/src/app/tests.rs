@@ -1936,4 +1936,37 @@ fn frames_keep_coming_for_a_second_after_input_then_stop() {
     // egui settles the pointer's velocity on a frame of its own.
     frame(2.2, Vec::new());
     assert!(!frame(2.3, Vec::new()), "idle again");
+    // Something other than input wakes it (a file changed, a job finished):
+    // that frame isn't left alone either.
+    assert!(frame(5.0, Vec::new()), "a wake-up draws steadily too");
+    assert!(frame(5.9, Vec::new()));
+    frame(6.1, Vec::new());
+    assert!(!frame(6.2, Vec::new()), "idle again after the wake-up");
+}
+
+#[test]
+fn holding_the_refresh_rate_draws_only_while_the_window_has_focus() {
+    let mut app = EditorApp::new(None);
+    app.appearance.hold_refresh = true;
+    let ctx = egui::Context::default();
+    let mut frame = |time: f64, focused: bool| {
+        let mut input = egui::RawInput {
+            time: Some(time),
+            ..Default::default()
+        };
+        input
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .focused = Some(focused);
+        let _ = ctx.run(input, |ctx| app.keep_frames_steady(ctx));
+        ctx.has_requested_repaint()
+    };
+    frame(0.0, true);
+    frame(0.1, true);
+    assert!(frame(100.0, true), "a focused window never goes idle");
+    assert!(frame(100.1, true));
+    frame(200.0, false);
+    frame(200.05, false);
+    assert!(!frame(200.1, false), "in the background it does");
 }

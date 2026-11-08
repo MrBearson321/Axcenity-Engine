@@ -84,8 +84,9 @@ pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Opti
                         RichText::new(question.title)
                             .font(FontId::new(
                                 type_scale::HEADING + 1.0,
-                                theme::heading_family(),
+                                theme::display_family(),
                             ))
+                            .extra_letter_spacing(theme::TITLE_TRACKING)
                             .color(palette.text_strong),
                     );
                     ui.add_space(2.0);

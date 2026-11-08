@@ -221,8 +221,10 @@ impl Toasts {
             bottom -= area.response.rect.height() + 8.0;
         }
         // Keep drawing until the last one has gone.
+        // At the display's rate, not a fixed 60: a change of rate partway
+        // through flickers on variable refresh rate displays.
         if !self.toasts.is_empty() || self.busy.is_some() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            ctx.request_repaint();
         }
         click
     }

@@ -109,8 +109,9 @@ fn learn_list(ui: &mut egui::Ui) -> Option<usize> {
     let palette = theme::palette(ui.ctx());
     ui.label(
         RichText::new("Learn")
-            .family(theme::heading_family())
+            .family(theme::display_family())
             .size(type_scale::DISPLAY)
+            .extra_letter_spacing(theme::DISPLAY_TRACKING)
             .color(palette.text_strong),
     );
     ui.label(
@@ -250,8 +251,9 @@ fn tutorial_page(
     ui.add(
         egui::Label::new(
             RichText::new(tutorial.title)
-                .family(theme::heading_family())
+                .family(theme::display_family())
                 .size(type_scale::DISPLAY)
+                .extra_letter_spacing(theme::DISPLAY_TRACKING)
                 .color(palette.text_strong),
         )
         .wrap(),

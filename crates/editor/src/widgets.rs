@@ -197,16 +197,77 @@ pub fn segmented_at<T: Copy + PartialEq>(
     (changed, rects)
 }
 
+/// `text` as a micro-label: uppercase, tracked-out JetBrains Mono.
+pub fn micro(text: &str, color: Color32) -> RichText {
+    RichText::new(text.to_uppercase())
+        .family(egui::FontFamily::Monospace)
+        .size(type_scale::CAPTION)
+        .extra_letter_spacing(theme::MICRO_TRACKING)
+        .color(color)
+}
+
 /// A quiet label that leads a group of controls, like "APPEARANCE".
 pub fn section_label(ui: &mut egui::Ui, text: &str) {
     let palette = theme::palette(ui.ctx());
-    ui.label(
-        RichText::new(text.to_uppercase())
-            .family(theme::medium_family())
-            .size(type_scale::CAPTION)
-            .extra_letter_spacing(0.6)
-            .color(palette.text_weak),
-    );
+    ui.label(micro(text, palette.text_weak));
+}
+
+/// A faint grid of dots over `rect`, behind a page's content. One mesh
+/// rather than a shape per dot, because a large window has thousands.
+pub fn dot_grid(painter: &egui::Painter, rect: Rect, color: Color32) {
+    const STEP: f32 = 24.0;
+    const DOT: f32 = 1.5;
+    let mut mesh = egui::Mesh::default();
+    let mut y = rect.top() + STEP / 2.0;
+    while y < rect.bottom() {
+        let mut x = rect.left() + STEP / 2.0;
+        while x < rect.right() {
+            mesh.add_colored_rect(
+                Rect::from_center_size(egui::pos2(x, y), vec2(DOT, DOT)),
+                color,
+            );
+            x += STEP;
+        }
+        y += STEP;
+    }
+    painter.add(mesh);
+}
+
+/// A soft pool of light under the pointer, inside `rect`, `strength` from 0
+/// to 1 (a hover's fade). Off with Reduce motion. The last position is kept
+/// so the pool fades where it was when the pointer leaves.
+pub fn spotlight(ui: &egui::Ui, rect: Rect, id: egui::Id, strength: f32) {
+    const RADIUS: f32 = 170.0;
+    const SEGMENTS: u32 = 40;
+    if strength <= 0.0 || ui.ctx().style().animation_time <= 0.0 {
+        return;
+    }
+    let id = id.with("spotlight");
+    let ctx = ui.ctx();
+    if ui.rect_contains_pointer(rect)
+        && let Some(pointer) = ctx.pointer_latest_pos()
+    {
+        ctx.data_mut(|data| data.insert_temp(id, pointer));
+    }
+    let Some(center) = ctx.data(|data| data.get_temp::<egui::Pos2>(id)) else {
+        return;
+    };
+    let palette = theme::palette(ctx);
+    let alpha = if palette.dark { 0.09 } else { 0.06 };
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(center, palette.text_strong.gamma_multiply(alpha * strength));
+    for segment in 0..=SEGMENTS {
+        let angle = segment as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+        mesh.colored_vertex(
+            center + RADIUS * egui::Vec2::angled(angle),
+            Color32::TRANSPARENT,
+        );
+    }
+    for segment in 0..SEGMENTS {
+        mesh.add_triangle(0, segment + 1, segment + 2);
+    }
+    // Shrunk so the pool stays inside a card's rounded corners.
+    ui.painter().with_clip_rect(rect.shrink(2.0)).add(mesh);
 }
 
 /// An item in a sidebar: an icon and a title, highlighted while it's the
@@ -401,12 +462,109 @@ pub fn paint_mark(
     );
 }
 
-/// The mark and the name "Axcenity", in the theme's colours.
-pub fn wordmark(ui: &mut egui::Ui, mark: &egui::TextureHandle, size: f32) -> egui::Response {
+/// The square `rect`'s picture of the mark.
+fn mark_square(rect: Rect) -> Rect {
+    let side = rect.width().min(rect.height());
+    Rect::from_center_size(rect.center(), vec2(side, side))
+}
+
+/// The mark cutting in diagonally from its top-left corner, `t` from 0 to 1.
+pub fn paint_mark_cut(
+    painter: &egui::Painter,
+    rect: Rect,
+    texture: &egui::TextureHandle,
+    color: Color32,
+    t: f32,
+) {
+    if t >= 1.0 {
+        paint_mark(painter, rect, texture, color);
+        return;
+    }
+    if t <= 0.0 {
+        return;
+    }
+    // The edge is the line x + y = reach, in the picture's 0 to 1 square.
+    let reach = t * 2.0;
+    let corners: Vec<(f32, f32)> = if reach <= 1.0 {
+        vec![(0.0, 0.0), (reach, 0.0), (0.0, reach)]
+    } else {
+        vec![
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (1.0, reach - 1.0),
+            (reach - 1.0, 1.0),
+            (0.0, 1.0),
+        ]
+    };
+    let dest = mark_square(rect);
+    let mut mesh = egui::Mesh::with_texture(texture.id());
+    for (u, v) in &corners {
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: dest.min + vec2(u * dest.width(), v * dest.height()),
+            uv: egui::pos2(*u, *v),
+            color,
+        });
+    }
+    for i in 1..corners.len() as u32 - 1 {
+        mesh.add_triangle(0, i, i + 1);
+    }
+    painter.add(mesh);
+}
+
+/// The logo loader: the mark in `base` with a band of `band` crossing it
+/// from left to right, `position` from 0 (not arrived) to 1 (gone past).
+pub fn paint_mark_sweep(
+    painter: &egui::Painter,
+    rect: Rect,
+    texture: &egui::TextureHandle,
+    (base, band): (Color32, Color32),
+    position: f32,
+) {
+    const STRIPS: u32 = 28;
+    // The band is 30% of a gradient three times the mark's width, so it is
+    // off the mark at both ends. The band leans a little, top ahead.
+    let color = |u: f32, lean: f32| {
+        let along = (1.0 - position) * 2.0 / 3.0 + (u + lean) / 3.0;
+        theme::mix(
+            base,
+            band,
+            (1.0 - (along - 0.5).abs() / 0.15).clamp(0.0, 1.0),
+        )
+    };
+    let dest = mark_square(rect);
+    let mut mesh = egui::Mesh::with_texture(texture.id());
+    for strip in 0..=STRIPS {
+        let u = strip as f32 / STRIPS as f32;
+        let x = dest.left() + u * dest.width();
+        for (v, y, lean) in [(0.0, dest.top(), 0.09), (1.0, dest.bottom(), -0.09)] {
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: egui::pos2(x, y),
+                uv: egui::pos2(u, v),
+                color: color(u, lean),
+            });
+        }
+    }
+    for strip in 0..STRIPS {
+        let i = strip * 2;
+        mesh.add_triangle(i, i + 1, i + 2);
+        mesh.add_triangle(i + 1, i + 2, i + 3);
+    }
+    painter.add(mesh);
+}
+
+/// The mark and the name "Axcenity", in the theme's colours. The mark cuts
+/// in (`cut`, 0 to 1) and the name wipes in from the left (`wipe`, 0 to 1).
+pub fn wordmark(
+    ui: &mut egui::Ui,
+    mark: &egui::TextureHandle,
+    size: f32,
+    cut: f32,
+    wipe: f32,
+) -> egui::Response {
     let palette = theme::palette(ui.ctx());
     let galley = ui.painter().layout_no_wrap(
         "Axcenity".to_owned(),
-        FontId::new(size, theme::heading_family()),
+        FontId::new(size, theme::display_family()),
         palette.text_strong,
     );
     let mark_side = size * 1.25;
@@ -418,17 +576,18 @@ pub fn wordmark(ui: &mut egui::Ui, mark: &egui::TextureHandle, size: f32) -> egu
         ),
         Sense::hover(),
     );
-    paint_mark(
+    paint_mark_cut(
         ui.painter(),
         Rect::from_min_size(rect.left_top(), vec2(mark_side, mark_side)),
         mark,
         palette.text_strong,
+        cut,
     );
-    ui.painter().galley(
-        egui::pos2(
-            rect.left() + mark_side + gap,
-            rect.center().y - galley.size().y / 2.0,
-        ),
+    let name_left = rect.left() + mark_side + gap;
+    let mut wiped = rect;
+    wiped.set_right(name_left + galley.size().x * wipe);
+    ui.painter().with_clip_rect(wiped).galley(
+        egui::pos2(name_left, rect.center().y - galley.size().y / 2.0),
         galley,
         palette.text_strong,
     );
@@ -438,6 +597,57 @@ pub fn wordmark(ui: &mut egui::Ui, mark: &egui::TextureHandle, size: f32) -> egu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_logo_entrances_the_dots_and_the_spotlight_draw() {
+        let pointer = egui::pos2(340.0, 200.0);
+        let mut draw = |ctx: &egui::Context| {
+            let brand = crate::start::Brand::load(ctx);
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let palette = theme::palette(ui.ctx());
+                let (top, ink) = (ui.max_rect().top() + 20.0, palette.text_strong);
+                dot_grid(ui.painter(), ui.max_rect(), ink.gamma_multiply(0.04));
+                let at = |index: usize, y: f32| {
+                    Rect::from_min_size(
+                        egui::pos2(20.0 + index as f32 * 100.0, y),
+                        vec2(80.0, 80.0),
+                    )
+                };
+                for (index, t) in [0.25, 0.5, 0.75, 1.0].into_iter().enumerate() {
+                    paint_mark_cut(ui.painter(), at(index, top), brand.mark(), ink, t);
+                }
+                for (index, position) in [0.3, 0.5, 0.7, 0.0].into_iter().enumerate() {
+                    let colors = (palette.text_muted, ink);
+                    paint_mark_sweep(
+                        ui.painter(),
+                        at(index, top + 100.0),
+                        brand.mark(),
+                        colors,
+                        position,
+                    );
+                }
+                spotlight(
+                    ui,
+                    Rect::from_center_size(pointer, vec2(220.0, 120.0)),
+                    egui::Id::new("card"),
+                    1.0,
+                );
+            });
+        };
+        let moved = vec![egui::Event::PointerMoved(pointer)];
+        match std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from) {
+            Some(folder) => crate::snapshot::snapshot(
+                &folder.join("logo-entrances.png"),
+                vec2(460.0, 280.0),
+                vec![moved, Vec::new()],
+                &mut draw,
+            ),
+            None => {
+                let ctx = theme::test_context();
+                let _ = ctx.run(Default::default(), &mut draw);
+            }
+        }
+    }
 
     #[test]
     fn a_segmented_control_switches_on_click_and_reports_the_change() {

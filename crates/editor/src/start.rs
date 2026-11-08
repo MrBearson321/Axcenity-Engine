@@ -50,6 +50,13 @@ const CARD_RADIUS: u8 = 8;
 /// The page's margin around its content, and the widest the content gets.
 const PAGE_MARGIN: f32 = 40.0;
 const MAX_PAGE_WIDTH: f32 = 1160.0;
+/// How far a page rises as it arrives, how long that takes, and the gap
+/// between one project card's fade and the next. Cards past
+/// [`STAGGERED_CARDS`] fade with the last of them.
+const PAGE_RISE: f32 = 12.0;
+const PAGE_SECONDS: f32 = 0.34;
+const CARD_STAGGER: f32 = 0.04;
+const STAGGERED_CARDS: usize = 12;
 
 /// The logo, for the header, start screen and About box. Both are
 /// white on a transparent background, so a tint draws them in any colour
@@ -233,6 +240,10 @@ pub struct StartScreen {
     global: GlobalPage,
     learn: Learn,
     reference: Reference,
+    /// The page last shown and when it arrived, for its entrance.
+    arrived: Option<(Page, f64)>,
+    /// When the start screen was first drawn, for the logo's entrance.
+    intro: Option<f64>,
 }
 
 impl StartScreen {
@@ -317,13 +328,27 @@ impl StartScreen {
         if self.sidebar(ui, sidebar, projects.len(), brand) {
             action = Some(StartAction::Settings);
         }
+        let palette = theme::palette(&ctx);
+        let dot = if palette.dark { 0.04 } else { 0.07 };
+        widgets::dot_grid(
+            &ui.painter_at(page),
+            page,
+            palette.text_strong.gamma_multiply(dot),
+        );
+        let now = ctx.input(|input| input.time);
+        if self.arrived.is_none_or(|(shown, _)| shown != self.page) {
+            self.arrived = Some((self.page, now));
+        }
+        let arrived_at = self.arrived.map_or(now, |(_, at)| at);
+        let arrival = theme::arrival(&ctx, arrived_at, 0.0, PAGE_SECONDS, theme::curve::SETTLE);
         let mut content = ui.new_child(egui::UiBuilder::new().max_rect(page));
         content.set_clip_rect(page);
+        content.multiply_opacity(arrival);
         egui::ScrollArea::vertical()
             .id_salt("start page")
             .auto_shrink(false)
             .show(&mut content, |ui| {
-                ui.add_space(PAGE_MARGIN - 4.0);
+                ui.add_space(PAGE_MARGIN - 4.0 + (1.0 - arrival) * PAGE_RISE);
                 let width = (ui.available_width() - 2.0 * PAGE_MARGIN).min(MAX_PAGE_WIDTH);
                 let margin = (ui.available_width() - width) / 2.0;
                 ui.horizontal(|ui| {
@@ -368,9 +393,13 @@ impl StartScreen {
         );
         let inner = rect.shrink2(vec2(12.0, 18.0));
         let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+        let ctx = ui.ctx().clone();
+        let intro = *self.intro.get_or_insert(ctx.input(|input| input.time));
+        let cut = theme::arrival(&ctx, intro, 0.1, 1.0, theme::curve::CUT);
+        let wipe = theme::arrival(&ctx, intro, 0.3, 0.7, theme::curve::CUT);
         bar.horizontal(|ui| {
             ui.add_space(6.0);
-            widgets::wordmark(ui, brand.mark(), 15.0);
+            widgets::wordmark(ui, brand.mark(), 15.0, cut, wipe);
         });
         bar.add_space(22.0);
         bar.spacing_mut().item_spacing.y = 2.0;
@@ -563,12 +592,18 @@ impl StartScreen {
                 let card_width = (width - CARD_SPACING * (columns - 1.0)) / columns;
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(CARD_SPACING, CARD_SPACING + 4.0);
-                    for link in &shown {
+                    let arrived_at = self.arrived.map_or(0.0, |(_, at)| at);
+                    for (index, link) in shown.iter().enumerate() {
                         let thumbnail = self.thumbnail(ctx, &link.folder);
                         let edited = self.edited(&link.folder).map(|time| ago(time, now));
-                        if let Some(picked) =
+                        let delay = index.min(STAGGERED_CARDS) as f32 * CARD_STAGGER;
+                        let fade =
+                            theme::arrival(ctx, arrived_at, delay, 0.5, theme::curve::SETTLE);
+                        let card = ui.scope(|ui| {
+                            ui.multiply_opacity(fade);
                             project_card(ui, link, thumbnail.as_ref(), edited, card_width)
-                        {
+                        });
+                        if let Some(picked) = card.inner {
                             chosen = Some((link.clone(), picked));
                         }
                     }
