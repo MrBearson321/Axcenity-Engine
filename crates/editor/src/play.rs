@@ -230,6 +230,17 @@ impl Session {
         self.scripts.ability_bar(&self.world)
     }
 
+    /// The active quests (Phase 77), for the quest tracker the viewport
+    /// draws.
+    pub fn quest_tracker(&self) -> Vec<axcenity_core::dialogue::QuestView> {
+        self.scripts.quest_tracker(&self.world)
+    }
+
+    /// What the dialogue box shows while a dialogue runs (Phase 77).
+    pub fn dialogue_view(&self) -> Option<axcenity_core::dialogue::DialogueView> {
+        self.scripts.dialogue_view(&self.world)
+    }
+
     /// Whether the viewport draws the default leaderboard (Phase 47): Tab
     /// hides and shows it.
     pub fn leaderboard(&self) -> bool {
@@ -536,7 +547,7 @@ impl Session {
             let following = self.network.is_following();
             // A Sequence that locks input leaves the character still, and
             // the server view takes none.
-            let motion = if self.scripts.input_locked(&self.world) || self.observing {
+            let motion = if self.scripts.movement_locked(&self.world) || self.observing {
                 MoveInput::default()
             } else {
                 motion

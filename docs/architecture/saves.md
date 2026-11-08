@@ -21,6 +21,8 @@ Save slots, player data, settings and checkpoints (unified plan Phase 17), and s
 
 Blocks (in **More**): "save game to slot *n*", "load game from slot *n*", "set checkpoint to *checkpoint*" and "go back to checkpoint", which become `SaveService:SaveSlot(n)`, `:LoadSlot(n)`, `:SetCheckpoint(workspace.Path)` and `:RestoreCheckpoint()`, with `local SaveService = game:GetService("SaveService")` at the top.
 
+Quests (Phase 77) keep their state as player data (`Quest/<key>`, `Quest/<key>/<objective>`), so slots and checkpoints keep it with no more work ([../scripting/api-dialogue.md](../scripting/api-dialogue.md)).
+
 ## Checkpoint
 
 A `Checkpoint` Instance has one property, `Position`: where a restored character's feet go. It has no shape and doesn't collide. The ribbon's Effects group (beside Third Person, First Person and Agent) and Explorer Insert ▸ have **Checkpoint**, which puts it on top of the selected part, in the Workspace or the selected Model or Folder. Making one active is up to scripts (for example when the character comes near a pad, as `examples/hello-saves` does).

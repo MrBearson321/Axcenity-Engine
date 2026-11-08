@@ -338,6 +338,46 @@ declare extern type DataService with
 	function CreateEffect(self, name: string, key: string): Effect
 end
 
+--- Dialogues (`assets/dialogue/*.dialogue.json`, made in the Dialogue tab), from `game:GetService("DialogueService")`. One runs at a time, for the local player: the dialogue box shows its lines and choices, and the character stands still. A ProximityPrompt with a `Dialogue` starts one with no script. Both sides share it.
+declare extern type DialogueService with
+	--- True while a dialogue runs.
+	Active: boolean
+	--- Runs the dialogue at the project path `dialogue`, said by `speaker` (a Model; its Name is the speaker's when a Line has none), waits until it ends, and returns the name of the End it reached (`""` for none). An error if another dialogue is running or this one can't run.
+	function Start(self, dialogue: string, speaker: Instance?): string
+	--- Goes on from the line shown, as the player pressing Interact does; with choices showing, picks the highlighted one.
+	function Advance(self): ()
+	--- Picks the choice shown `index` (from 1). An error with no choices showing.
+	function Choose(self, index: number): ()
+	--- Ends the running dialogue at once; Start returns `""`.
+	function Stop(self): ()
+	--- What the dialogue box shows, in the player's language: `{ Speaker, Text, Choices, Selected }`, or nil with no dialogue running.
+	function GetLine(self): { Speaker: string, Text: string, Choices: { string }, Selected: number }?
+end
+
+--- Quests, from `game:GetService("QuestService")`: rows of the data table `quests` (Title, Description), with objectives from `quest_objectives` (Quest, Kind: Count, Reach or Talk, Target, Count, Text). Their state is the player's data, so save slots keep it. The quest tracker shows the active ones. Both sides share it.
+declare extern type QuestService with
+	--- Fires with the quest's key when it starts: `function(quest) ... end`.
+	QuestStarted: Signal
+	--- Fires as an objective moves on: `function(quest, objective, progress) ... end`.
+	QuestProgressed: Signal
+	--- Fires with the quest's key when it completes: `function(quest) ... end`.
+	QuestCompleted: Signal
+	--- Starts the quest `quest` (its key in `quests`). Returns false when it's active or done already.
+	function Start(self, quest: string): boolean
+	--- Adds `amount` (1 if left out) to every active quest's Count objectives whose Target is `target`, up to their Count. A quest whose objectives are all done completes.
+	function Progress(self, target: string, amount: number?): ()
+	--- Completes the quest, whatever its objectives say. Returns false when it was done already.
+	function Complete(self, quest: string): boolean
+	--- `"NotStarted"`, `"Active"` or `"Completed"`.
+	function GetState(self, quest: string): string
+	--- The keys of the active quests.
+	function GetActive(self): { string }
+	--- The quest's objectives in order, each `{ Key, Kind, Target, Text, Count, Progress, Done }` (Text in the player's language).
+	function GetObjectives(self, quest: string): { { Key: string, Kind: string, Target: string, Text: string, Count: number, Progress: number, Done: boolean } }
+	--- The quest's Title, in the player's language.
+	function GetTitle(self, quest: string): string
+end
+
 --- The game's own commands for the Developer Console (F9), from `game:GetService("ConsoleService")`. A LocalScript's commands run on that device, a Script's on the server.
 declare extern type ConsoleService with
 	--- On the server: the `UserId`s of the players who may run its commands from another device, such as `{123}`. The device that hosts, or plays offline, always may.
@@ -1316,7 +1356,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"ConsoleService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"DialogueService"`, `"QuestService"`, `"ConsoleService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 
@@ -4344,6 +4384,8 @@ declare extern type ProximityPrompt extends Instance with
 	Enabled: boolean
 	--- `Enum.ProximityPromptExclusivity`: OnePerButton shows the nearest prompt for each action, OneGlobally the nearest of all, and AlwaysShow shows this one whenever it's in reach.
 	Exclusivity: EnumProximityPromptExclusivity | "OnePerButton" | "OneGlobally" | "AlwaysShow"
+	--- A dialogue file (`assets/dialogue/Farmer.dialogue.json`) it starts when triggered, with no script, said by the Model it's in. Empty starts none.
+	Dialogue: string
 	--- Fires with the Player when the action is pressed on a showing prompt (HoldDuration 0) or held for HoldDuration. Once per press: hold on and it doesn't fire again.
 	Triggered: Signal
 	--- Fires with the Player when the action that triggered it is let go, or the prompt hides.

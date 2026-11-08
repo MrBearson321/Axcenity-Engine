@@ -1169,6 +1169,11 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
             ),
             (data.is::<crate::save::LuaSaveService>(), "SaveService"),
             (data.is::<crate::data::LuaDataService>(), "DataService"),
+            (
+                data.is::<crate::dialogue::LuaDialogueService>(),
+                "DialogueService",
+            ),
+            (data.is::<crate::quest::LuaQuestService>(), "QuestService"),
             (data.is::<crate::data::LuaDataTable>(), "DataTable"),
             (data.is::<crate::data::LuaDataRow>(), "DataRow"),
             (data.is::<crate::tween::LuaTween>(), "Tween"),

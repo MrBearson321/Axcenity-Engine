@@ -63,6 +63,7 @@ mod debris;
 mod debugger;
 mod decals;
 mod definitions;
+pub mod dialogue;
 mod edit;
 mod errors;
 mod events;
@@ -81,6 +82,7 @@ mod physical;
 mod players;
 mod prompt;
 mod query;
+pub mod quest;
 mod random;
 mod remote;
 mod run_service;
@@ -234,6 +236,10 @@ pub struct ScriptRuntime {
     health: health::Healths,
     /// Abilities' and Effects' state (Phase 76), which both sides share.
     abilities: ability::SharedAbilities,
+    /// The dialogue running (Phase 77), which both sides share.
+    dialogues: dialogue::SharedDialogues,
+    /// QuestService's events waiting to fire (Phase 77), shared too.
+    quests: quest::SharedQuests,
     /// The ProximityPrompts showing and their holds (Phase 44).
     prompts: prompt::Prompts,
     /// What the mouse points at and presses, for ClickDetectors.
@@ -335,6 +341,12 @@ impl ScriptRuntime {
         let abilities = ability::SharedAbilities::default();
         server.lua.set_app_data(abilities.clone());
         client.lua.set_app_data(abilities.clone());
+        let dialogues = dialogue::SharedDialogues::default();
+        server.lua.set_app_data(dialogues.clone());
+        client.lua.set_app_data(dialogues.clone());
+        let quests = quest::SharedQuests::default();
+        server.lua.set_app_data(quests.clone());
+        client.lua.set_app_data(quests.clone());
         Self {
             server,
             client,
@@ -345,6 +357,8 @@ impl ScriptRuntime {
             shatters: Vec::new(),
             health: health::Healths::default(),
             abilities,
+            dialogues,
+            quests,
             prompts: prompt::Prompts::default(),
             clicks: click::Clicks::default(),
             tools: tool::Tools::default(),
@@ -1393,11 +1407,19 @@ impl ScriptRuntime {
     pub fn step_prompts(&mut self, world: &mut World, seconds: f64) {
         self.fire_changes(world);
         let input = self.client.prompt_input();
+        // While a dialogue runs (Phase 77) the keys are its, and prompts
+        // neither show nor trigger.
+        if self.dialogue_active() {
+            self.step_dialogue_input(world, &input);
+            self.step_quests(world);
+            return;
+        }
         let ray = self.client.mouse_ray(input.mouse);
         let camera = ray.map(|ray| cframe::to_vec3(ray.origin));
         let assets = self.server.assets();
         let mut fired = self.prompts.step(world, &assets, &input, camera, seconds);
         fired.extend(self.clicks.step(world, &assets, &input, ray));
+        self.step_quests(world);
         if fired.is_empty() {
             return;
         }
@@ -1407,6 +1429,154 @@ impl ScriptRuntime {
             self.context(side).fire_prompt_events(world, &fired, player);
             self.collect(side);
             self.fire_changes(world);
+        }
+        // A triggered prompt with a Dialogue starts it, with no script.
+        for fired in fired.iter().filter(|fired| fired.event == "Triggered") {
+            let path = world
+                .get(fired.instance)
+                .and_then(|prompt| prompt.property("Dialogue"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            if path.is_empty() || self.dialogue_active() {
+                continue;
+            }
+            let speaker = dialogue::speaker_of(world, fired.instance);
+            let side = self.dialogue_side();
+            let lua = &self.context(side).lua;
+            let started = with_world(lua, world, || {
+                let player = dialogue::player_of(lua);
+                dialogue::start(lua, &path, speaker, player, None)
+            });
+            if let Err(err) = started {
+                self.output.push(OutputLine {
+                    kind: OutputKind::Error,
+                    text: errors::error_message(&err),
+                    trace: Vec::new(),
+                    side: None,
+                });
+            }
+            // The press that triggered it doesn't also go on.
+            self.dialogues
+                .0
+                .borrow_mut()
+                .presses(&input.map, &input.game);
+            self.collect(side);
+            self.fire_changes(world);
+        }
+    }
+
+    /// Which side runs dialogues started from prompts and keys: the
+    /// server's, unless this device only follows one.
+    fn dialogue_side(&self) -> Side {
+        if self.client_only {
+            Side::Client
+        } else {
+            Side::Server
+        }
+    }
+
+    /// Whether a dialogue is running (Phase 77): hosts draw its box, and
+    /// the character stands still.
+    pub fn dialogue_active(&self) -> bool {
+        self.dialogues.0.borrow().active()
+    }
+
+    /// Whether the player character should stand still: a Sequence locks
+    /// input, or a dialogue runs.
+    pub fn movement_locked(&self, world: &World) -> bool {
+        self.input_locked(world) || self.dialogue_active()
+    }
+
+    /// What the dialogue box shows, in the player's language.
+    pub fn dialogue_view(&self, world: &World) -> Option<axcenity_core::dialogue::DialogueView> {
+        dialogue::view(&self.dialogues.0.borrow(), world)
+    }
+
+    /// The active quests, for the quest tracker, in the player's language.
+    pub fn quest_tracker(&self, world: &World) -> Vec<axcenity_core::dialogue::QuestView> {
+        let assets = self.server.assets();
+        let mut saves = self.saves.0.borrow_mut();
+        let mut quests = self.quests.0.borrow_mut();
+        quest::QuestContext {
+            saves: &mut saves,
+            assets: &assets,
+            events: &mut quests.events,
+        }
+        .tracker(world)
+    }
+
+    /// Reach objectives the player character has got to.
+    fn step_quests(&mut self, world: &mut World) {
+        let assets = self.server.assets();
+        {
+            let mut saves = self.saves.0.borrow_mut();
+            let mut quests = self.quests.0.borrow_mut();
+            quest::QuestContext {
+                saves: &mut saves,
+                assets: &assets,
+                events: &mut quests.events,
+            }
+            .step(world);
+        }
+        self.fire_changes(world);
+    }
+
+    /// The player's keys for the running dialogue: go on, move between
+    /// choices, or pick one by number.
+    fn step_dialogue_input(&mut self, world: &mut World, input: &input::PromptInput) {
+        let (presses, choices) = {
+            let mut dialogues = self.dialogues.0.borrow_mut();
+            let presses = dialogues.presses(&input.map, &input.game);
+            let choices = dialogues.showing_choices();
+            if choices {
+                dialogues.move_selection(presses.step);
+            }
+            (presses, choices)
+        };
+        let side = self.dialogue_side();
+        let result = {
+            let lua = &self.context(side).lua;
+            match presses.number {
+                Some(number) if choices => with_world(lua, world, || dialogue::choose(lua, number)),
+                _ if presses.confirm => with_world(lua, world, || dialogue::advance(lua)),
+                _ => Ok(()),
+            }
+        };
+        // A number with no choice of it does nothing.
+        if let Err(err) = result
+            && presses.number.is_none()
+        {
+            self.output.push(OutputLine {
+                kind: OutputKind::Error,
+                text: errors::error_message(&err),
+                trace: Vec::new(),
+                side: None,
+            });
+        }
+        self.collect(side);
+        self.fire_changes(world);
+    }
+
+    /// Fires QuestService's events on both sides, then lets the scripts
+    /// waiting on finished dialogues go on.
+    fn fire_quest_events(&mut self, world: &mut World) {
+        for _ in 0..MAX_CHANGE_ROUNDS {
+            let events = std::mem::take(&mut self.quests.0.borrow_mut().events);
+            let finished = std::mem::take(&mut self.dialogues.0.borrow_mut().finished);
+            if events.is_empty() && finished.is_empty() {
+                return;
+            }
+            for side in [Side::Server, Side::Client] {
+                self.context(side).fire_quest_events(world, &events);
+                let lua = &self.context(side).lua;
+                with_world(lua, world, || {
+                    dialogue::resume_finished(lua, side, &finished);
+                });
+                self.collect(side);
+                self.fire_change_rounds(world);
+            }
         }
     }
 
@@ -1469,6 +1639,9 @@ impl ScriptRuntime {
 
     /// The ProximityPrompts showing, as of [`step_prompts`](Self::step_prompts).
     pub fn shown_prompts(&self) -> &[ShownPrompt] {
+        if self.dialogue_active() {
+            return &[];
+        }
         self.prompts.shown()
     }
 
@@ -1835,6 +2008,7 @@ impl ScriptRuntime {
         self.fire_tool_events(world);
         self.fire_player_events(world);
         self.fire_level_events(world);
+        self.fire_quest_events(world);
         self.stop_destroyed_scripts(world);
         self.start_clones(world);
     }
@@ -2269,6 +2443,8 @@ mod data_tests;
 mod decal_tests;
 #[cfg(test)]
 mod devices_tests;
+#[cfg(test)]
+mod dialogue_tests;
 #[cfg(test)]
 mod health_tests;
 #[cfg(test)]

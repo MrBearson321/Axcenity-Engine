@@ -12,6 +12,7 @@ mod accessibility;
 mod chat;
 mod console;
 mod css;
+mod dialogue_box;
 mod gamepad;
 mod hotbar;
 mod interact;
@@ -33,6 +34,7 @@ pub use console::{
     fps_items, is_command_word, line_items, looks_like_command, stats_lines,
 };
 pub use css::*;
+pub use dialogue_box::{dialogue_box_items, quest_tracker_items};
 pub use gamepad::{GamepadButton, Gamepads, NavRepeat, PadNavigation, nav_key, pad_key};
 pub use hotbar::hotbar_items;
 use interact::interactable;

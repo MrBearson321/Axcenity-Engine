@@ -136,7 +136,7 @@ impl TestGame {
         // 1. Input: the controllers, then Humanoids, players, agents, then
         //    the input for LocalScripts, ProximityPrompts and Tools.
         let map = self.scripts.input_map();
-        let motion = if self.scripts.input_locked(&self.world) {
+        let motion = if self.scripts.movement_locked(&self.world) {
             MoveInput::default()
         } else {
             MoveInput::from_actions(&map, &self.input, [0.0, 0.0], 0.0, seconds as f32)

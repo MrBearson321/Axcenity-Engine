@@ -55,6 +55,7 @@ impl EditorApp {
             || self.tabs.any_unsaved()
             || self.ui_graphs_unsaved()
             || self.behavior.unsaved()
+            || self.dialogues.unsaved()
             || self.data_tables.unsaved()
             || self.materials.unsaved()
             || self.project.as_ref().is_some_and(|project| {
@@ -1038,6 +1039,9 @@ impl EditorApp {
         if self.behavior.has_pointer() && !self.playing() && self.behavior.undo() {
             return;
         }
+        if self.dialogues.has_pointer() && !self.playing() && self.dialogues.undo() {
+            return;
+        }
         // Tables are edited during Play too, so their undo works then.
         if self.data_tables.has_pointer() && self.data_tables.undo() {
             self.hand_over_tables();
@@ -1067,6 +1071,9 @@ impl EditorApp {
             return;
         }
         if self.behavior.has_pointer() && !self.playing() && self.behavior.redo() {
+            return;
+        }
+        if self.dialogues.has_pointer() && !self.playing() && self.dialogues.redo() {
             return;
         }
         if self.data_tables.has_pointer() && self.data_tables.redo() {

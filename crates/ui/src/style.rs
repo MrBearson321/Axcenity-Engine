@@ -212,6 +212,27 @@ struct SimpleSelector {
     /// A part of the element (`::thumb`): only the last part of a selector
     /// has one.
     element: Option<PseudoElement>,
+    /// A type name for one of the engine's own widgets that isn't an
+    /// Instance, such as `DialogueBox` (Phase 77). Styled by itself: see
+    /// [`resolve_widget_styles`].
+    widget: Option<Widget>,
+}
+
+/// The engine's own widgets that CSS styles by a type name of their own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Widget {
+    DialogueBox,
+    QuestTracker,
+}
+
+impl Widget {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "DialogueBox" => Some(Widget::DialogueBox),
+            "QuestTracker" => Some(Widget::QuestTracker),
+            _ => None,
+        }
+    }
 }
 
 /// Parses the supported stylesheet subset. Unsupported declarations are
@@ -358,6 +379,42 @@ pub(crate) fn resolve_part_styles(
     let winners = winning_declarations(stylesheets, |selector| {
         selector_matches_part(world, owner, selector, plain, Some(part))
     });
+    for (name, winner) in winners {
+        let target = if name.starts_with("--") {
+            &mut resolved.variables
+        } else {
+            &mut resolved.values
+        };
+        target.insert(name.to_owned(), winner.declaration.value.clone());
+    }
+    resolved
+}
+
+/// The styles of one of the engine's own widgets, or a part of it: rules
+/// that are only its type name (`DialogueBox`, `DialogueBox::option`),
+/// with `:focus` matching when `focus` is (the chosen option). Classes,
+/// ids and descendant selectors don't apply to it.
+pub(crate) fn resolve_widget_styles(
+    stylesheets: &[Stylesheet],
+    widget: Widget,
+    part: Option<PseudoElement>,
+    focus: bool,
+) -> ResolvedStyles {
+    let winners = winning_declarations(stylesheets, |selector| {
+        let [only] = selector.parts.as_slice() else {
+            return false;
+        };
+        only.widget == Some(widget)
+            && only.element == part
+            && only.id.is_none()
+            && only.classes.is_empty()
+            && !only.hovered
+            && !only.active
+            && !only.disabled
+            && !only.checked
+            && (!only.focus || focus)
+    });
+    let mut resolved = ResolvedStyles::default();
     for (name, winner) in winners {
         let target = if name.starts_with("--") {
             &mut resolved.variables
@@ -698,6 +755,7 @@ fn simple_matches(
         return false;
     };
     if selector.tooltip
+        || selector.widget.is_some()
         || selector
             .class
             .is_some_and(|class| class != instance.class())
@@ -798,7 +856,10 @@ fn parse_selector(selector: &str) -> Option<Selector> {
                     while cursor < raw.len() && is_identifier(bytes[cursor]) {
                         cursor += 1;
                     }
-                    if cursor < raw.len() || part.element.is_some() {
+                    // It ends the selector, but a widget's part may have
+                    // a pseudo-class after it (`DialogueBox::option:focus`).
+                    let widget_state = part.widget.is_some() && bytes.get(cursor) == Some(&b':');
+                    if (cursor < raw.len() && !widget_state) || part.element.is_some() {
                         return None;
                     }
                     part.element = Some(match &raw[start..cursor] {
@@ -861,6 +922,11 @@ fn parse_selector(selector: &str) -> Option<Selector> {
                             return None;
                         }
                         part.tooltip = true;
+                        specificity.2 += 1;
+                    } else if let Some(widget) = Widget::from_name(name) {
+                        if part.widget.replace(widget).is_some() || part.class.is_some() {
+                            return None;
+                        }
                         specificity.2 += 1;
                     } else if name != "*" {
                         let class = ClassName::from_name(name)?;

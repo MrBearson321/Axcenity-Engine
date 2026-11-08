@@ -15,6 +15,7 @@ mod arena;
 mod class;
 mod collision_groups;
 pub mod csg;
+pub mod dialogue;
 mod enums;
 pub mod input;
 pub mod prefab;

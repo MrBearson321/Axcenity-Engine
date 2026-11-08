@@ -673,6 +673,37 @@ impl Context {
         });
     }
 
+    /// Fires QuestService's `QuestStarted(quest)`, `QuestProgressed(quest,
+    /// objective, progress)` and `QuestCompleted(quest)` (Phase 77).
+    pub fn fire_quest_events(&self, world: &mut World, quest_events: &[crate::quest::QuestEvent]) {
+        if quest_events.is_empty() {
+            return;
+        }
+        with_world(&self.lua, world, || {
+            let owner = events::Owner::QuestService;
+            for event in quest_events {
+                match event {
+                    crate::quest::QuestEvent::Started(quest) => {
+                        events::fire(&self.lua, owner, "QuestStarted", quest.clone());
+                    }
+                    crate::quest::QuestEvent::Progressed {
+                        quest,
+                        objective,
+                        progress,
+                    } => events::fire(
+                        &self.lua,
+                        owner,
+                        "QuestProgressed",
+                        (quest.clone(), objective.clone(), *progress),
+                    ),
+                    crate::quest::QuestEvent::Completed(quest) => {
+                        events::fire(&self.lua, owner, "QuestCompleted", quest.clone());
+                    }
+                }
+            }
+        });
+    }
+
     /// Fires `NetworkService.ConnectionFailed` with why (Phase 63).
     pub fn fire_connection_failed(&self, world: &mut World, reason: &str) {
         with_world(&self.lua, world, || {

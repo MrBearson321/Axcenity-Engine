@@ -34,6 +34,7 @@ mod constraint_tool;
 mod controls_ui;
 mod data_tables;
 mod dev_console;
+mod dialogues;
 mod edits;
 mod engine;
 mod files;
@@ -90,6 +91,7 @@ use crate::build_tools::{self, BuildSettings, PanelScene, ToolAction};
 use crate::console::Console;
 use crate::data_table::DataTableStudio;
 use crate::dialog;
+use crate::dialogue_editor::DialogueStudio;
 use crate::explorer::{self, Action, Explorer};
 use crate::gizmo::{Modes, Pose, Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
@@ -344,6 +346,8 @@ pub struct EditorApp {
     animation: AnimationStudio,
     /// The Behavior Tree tab and the trees open in it.
     behavior: BehaviorTreeStudio,
+    /// The Dialogue tab and the dialogues open in it (Phase 77).
+    dialogues: DialogueStudio,
     /// The Data Table tab.
     data_tables: DataTableStudio,
     /// The Material tab.
@@ -457,6 +461,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Mixer => self.app.mixer_pane(ui),
             Pane::AssetCheck => self.app.asset_check_pane(ui),
             Pane::BehaviorTree => self.app.behavior_tree_pane(ui),
+            Pane::Dialogue => self.app.dialogue_pane(ui),
             Pane::DataTable => self.app.data_table_pane(ui),
             Pane::Material => self.app.material_pane(ui, self.render_state),
             Pane::Tags => self.app.tags_pane(ui),
@@ -741,6 +746,7 @@ impl EditorApp {
             asset_browser: AssetBrowser::default(),
             animation: AnimationStudio::default(),
             behavior: BehaviorTreeStudio::default(),
+            dialogues: DialogueStudio::default(),
             data_tables: DataTableStudio::default(),
             materials: Default::default(),
             sequencer: Default::default(),
@@ -1400,6 +1406,8 @@ mod constraint_tests;
 mod data_table_tests;
 #[cfg(test)]
 mod dev_console_tests;
+#[cfg(test)]
+mod dialogue_tests;
 #[cfg(test)]
 mod find_tests;
 #[cfg(test)]

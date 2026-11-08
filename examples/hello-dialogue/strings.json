@@ -1,0 +1,48 @@
+{
+  "languages": [
+    "English",
+    "Español"
+  ],
+  "entries": {
+    "farmer.name": {
+      "English": "Farmer",
+      "Español": "Granjero"
+    },
+    "farmer.hello": {
+      "English": "Could you pick me five apples?",
+      "Español": "¿Me recoges cinco manzanas?"
+    },
+    "farmer.yes": {
+      "English": "Of course!",
+      "Español": "¡Claro!"
+    },
+    "farmer.no": {
+      "English": "Not now.",
+      "Español": "Ahora no."
+    },
+    "farmer.go": {
+      "English": "They're in the field behind you.",
+      "Español": "Están en el campo, detrás de ti."
+    },
+    "farmer.bye": {
+      "English": "Maybe later, then.",
+      "Español": "Quizá luego, entonces."
+    },
+    "farmer.waiting": {
+      "English": "Five apples, please!",
+      "Español": "¡Cinco manzanas, por favor!"
+    },
+    "farmer.thanks": {
+      "English": "Thank you! Pie tonight.",
+      "Español": "¡Gracias! Esta noche, tarta."
+    },
+    "quest.apples": {
+      "English": "Apples for the Farmer",
+      "Español": "Manzanas para el granjero"
+    },
+    "quest.apples.pick": {
+      "English": "Pick apples",
+      "Español": "Recoge manzanas"
+    }
+  }
+}

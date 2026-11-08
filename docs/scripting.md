@@ -15,6 +15,7 @@ Map only. Luau and block scripts (shown as blocks or as a graph) share one runti
 - Tool, Inventory and the hotbar: [scripting/api-character.md](scripting/api-character.md)
 - Humanoid (MoveTo, states, dying) and Insert ▸ Character: [scripting/api-character.md](scripting/api-character.md)
 - Ability, Effect, `Model:ApplyEffect`, the ability bar: [scripting/api-abilities.md](scripting/api-abilities.md)
+- DialogueService, QuestService, `.dialogue.json` files, the dialogue box and quest tracker, the Dialogue tab: [scripting/api-dialogue.md](scripting/api-dialogue.md)
 - Players, SpawnLocations, Teams, respawning and the leaderboard: [scripting/api-character.md](scripting/api-character.md)
 - NavigationAgent (Destination, Velocity, Status, sight and hearing, PlayerSensed): [architecture/navigation.md](architecture/navigation.md)
 - TweenService, TweenInfo and Tweens: [scripting/api-tween.md](scripting/api-tween.md)

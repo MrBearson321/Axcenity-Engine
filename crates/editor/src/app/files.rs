@@ -211,6 +211,7 @@ impl EditorApp {
         let world_unsaved = !self.history.is_saved();
         let graphs_unsaved = self.ui_graphs_unsaved()
             || self.behavior.unsaved()
+            || self.dialogues.unsaved()
             || self.data_tables.unsaved()
             || self.materials.unsaved();
         let save_world =
@@ -234,6 +235,7 @@ impl EditorApp {
         // After the world, so a graph's LocalScript is made against what's saved.
         if !self.save_ui_graphs(&mut saved)
             || !self.save_behavior_trees(&mut saved)
+            || !self.save_dialogues(&mut saved)
             || !self.save_data_tables(&mut saved)
             || !self.save_materials(&mut saved)
         {

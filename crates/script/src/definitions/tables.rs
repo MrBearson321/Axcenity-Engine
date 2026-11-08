@@ -907,6 +907,114 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         ],
     },
     ValueType {
+        class: "DialogueService",
+        doc: "Dialogues (`assets/dialogue/*.dialogue.json`, made in the Dialogue tab), from `game:GetService(\"DialogueService\")`. One runs at a time, for the local player: the dialogue box shows its lines and choices, and the character stands still. A ProximityPrompt with a `Dialogue` starts one with no script. Both sides share it.",
+        fields: &[Field {
+            name: "Active",
+            ty: "boolean",
+            doc: "True while a dialogue runs.",
+        }],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "Start",
+                doc: "Runs the dialogue at the project path `dialogue`, said by `speaker` (a Model; its Name is the speaker's when a Line has none), waits until it ends, and returns the name of the End it reached (`\"\"` for none). An error if another dialogue is running or this one can't run.",
+                params: &[("dialogue", "string"), ("speaker", "Instance?")],
+                returns: "string",
+            },
+            Function {
+                name: "Advance",
+                doc: "Goes on from the line shown, as the player pressing Interact does; with choices showing, picks the highlighted one.",
+                params: &[],
+                returns: "()",
+            },
+            Function {
+                name: "Choose",
+                doc: "Picks the choice shown `index` (from 1). An error with no choices showing.",
+                params: &[("index", "number")],
+                returns: "()",
+            },
+            Function {
+                name: "Stop",
+                doc: "Ends the running dialogue at once; Start returns `\"\"`.",
+                params: &[],
+                returns: "()",
+            },
+            Function {
+                name: "GetLine",
+                doc: "What the dialogue box shows, in the player's language: `{ Speaker, Text, Choices, Selected }`, or nil with no dialogue running.",
+                params: &[],
+                returns: "{ Speaker: string, Text: string, Choices: { string }, Selected: number }?",
+            },
+        ],
+    },
+    ValueType {
+        class: "QuestService",
+        doc: "Quests, from `game:GetService(\"QuestService\")`: rows of the data table `quests` (Title, Description), with objectives from `quest_objectives` (Quest, Kind: Count, Reach or Talk, Target, Count, Text). Their state is the player's data, so save slots keep it. The quest tracker shows the active ones. Both sides share it.",
+        fields: &[
+            Field {
+                name: "QuestStarted",
+                ty: "Signal",
+                doc: "Fires with the quest's key when it starts: `function(quest) ... end`.",
+            },
+            Field {
+                name: "QuestProgressed",
+                ty: "Signal",
+                doc: "Fires as an objective moves on: `function(quest, objective, progress) ... end`.",
+            },
+            Field {
+                name: "QuestCompleted",
+                ty: "Signal",
+                doc: "Fires with the quest's key when it completes: `function(quest) ... end`.",
+            },
+        ],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "Start",
+                doc: "Starts the quest `quest` (its key in `quests`). Returns false when it's active or done already.",
+                params: &[("quest", "string")],
+                returns: "boolean",
+            },
+            Function {
+                name: "Progress",
+                doc: "Adds `amount` (1 if left out) to every active quest's Count objectives whose Target is `target`, up to their Count. A quest whose objectives are all done completes.",
+                params: &[("target", "string"), ("amount", "number?")],
+                returns: "()",
+            },
+            Function {
+                name: "Complete",
+                doc: "Completes the quest, whatever its objectives say. Returns false when it was done already.",
+                params: &[("quest", "string")],
+                returns: "boolean",
+            },
+            Function {
+                name: "GetState",
+                doc: "`\"NotStarted\"`, `\"Active\"` or `\"Completed\"`.",
+                params: &[("quest", "string")],
+                returns: "string",
+            },
+            Function {
+                name: "GetActive",
+                doc: "The keys of the active quests.",
+                params: &[],
+                returns: "{ string }",
+            },
+            Function {
+                name: "GetObjectives",
+                doc: "The quest's objectives in order, each `{ Key, Kind, Target, Text, Count, Progress, Done }` (Text in the player's language).",
+                params: &[("quest", "string")],
+                returns: "{ { Key: string, Kind: string, Target: string, Text: string, Count: number, Progress: number, Done: boolean } }",
+            },
+            Function {
+                name: "GetTitle",
+                doc: "The quest's Title, in the player's language.",
+                params: &[("quest", "string")],
+                returns: "string",
+            },
+        ],
+    },
+    ValueType {
         class: "ConsoleService",
         doc: "The game's own commands for the Developer Console (F9), from `game:GetService(\"ConsoleService\")`. A LocalScript's commands run on that device, a Script's on the server.",
         fields: &[Field {
@@ -2439,7 +2547,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"NetworkService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"ConsoleService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"NetworkService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"DialogueService\"`, `\"QuestService\"`, `\"ConsoleService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },

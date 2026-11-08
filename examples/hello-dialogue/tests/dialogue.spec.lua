@@ -1,0 +1,96 @@
+-- Game tests for the Farmer's dialogue and the apple quest: run them from
+-- the editor's Tests panel, or with
+-- `cargo run -p axcenity-testing -- examples/hello-dialogue`.
+local DialogueService = game:GetService("DialogueService")
+local QuestService = game:GetService("QuestService")
+local SaveService = game:GetService("SaveService")
+local LocalizationService = game:GetService("LocalizationService")
+
+-- Walks the character up to the apple called `name`, so it's picked.
+local function pick(name)
+	local apple = Test.find("Workspace.Apples." .. name)
+	local body = Test.find("Workspace.Character.Body")
+	body.Position = Vector3.new(apple.Position.X - 2, 2.5, apple.Position.Z)
+	Test.step(0.1)
+end
+
+describe("The Farmer", function()
+	it("gives the apple quest through his prompt, with no script", function()
+		expect(QuestService:GetState("apples")).toBe("NotStarted")
+		Test.press("Interact")
+		Test.step()
+		local line = DialogueService:GetLine()
+		expect(line.Speaker).toBe("Farmer")
+		expect(line.Text).toBe("Could you pick me five apples?")
+		expect(line.Choices[1]).toBe("Of course!")
+		expect(line.Choices[2]).toBe("Not now.")
+		-- Down to "Not now." and back up, then take the quest.
+		Test.press("Down")
+		Test.step()
+		expect(DialogueService:GetLine().Selected).toBe(2)
+		Test.press("Up")
+		Test.step()
+		Test.press("Return")
+		Test.step()
+		expect(DialogueService:GetLine().Text).toBe("They're in the field behind you.")
+		expect(QuestService:GetState("apples")).toBe("Active")
+		Test.press("Interact")
+		Test.step()
+		expect(DialogueService.Active).toBe(false)
+	end)
+
+	it("says goodbye when the quest is turned down", function()
+		Test.press("Interact")
+		Test.step()
+		Test.press("Two")
+		Test.step()
+		expect(DialogueService:GetLine().Text).toBe("Maybe later, then.")
+		Test.press("Interact")
+		Test.step()
+		expect(QuestService:GetState("apples")).toBe("NotStarted")
+	end)
+
+	it("speaks Spanish once the language changes", function()
+		Test.press("Interact")
+		Test.step()
+		expect(DialogueService:GetLine().Text).toBe("Could you pick me five apples?")
+		LocalizationService.Language = "Español"
+		local line = DialogueService:GetLine()
+		expect(line.Speaker).toBe("Granjero")
+		expect(line.Text).toBe("¿Me recoges cinco manzanas?")
+		expect(line.Choices[1]).toBe("¡Claro!")
+	end)
+end)
+
+describe("The apple quest", function()
+	beforeEach(function()
+		QuestService:Start("apples")
+	end)
+
+	it("completes after five apples, and a save slot keeps how many were picked", function()
+		for i = 1, 3 do
+			pick("Apple" .. i)
+		end
+		expect(QuestService:GetObjectives("apples")[1].Progress).toBe(3)
+		SaveService:SaveSlot(1)
+		pick("Apple4")
+		pick("Apple5")
+		expect(QuestService:GetState("apples")).toBe("Completed")
+
+		-- Loading the slot puts the quest back at three apples.
+		SaveService:LoadSlot(1)
+		expect(QuestService:GetState("apples")).toBe("Active")
+		expect(QuestService:GetObjectives("apples")[1].Progress).toBe(3)
+		expect(Test.find("Workspace.Apples.Apple4")).toBeTruthy()
+		pick("Apple4")
+		pick("Apple5")
+		expect(QuestService:GetState("apples")).toBe("Completed")
+	end)
+
+	it("makes the Farmer thank you once it's done", function()
+		QuestService:Complete("apples")
+		Test.press("Interact")
+		Test.step()
+		expect(DialogueService:GetLine().Text).toBe("Thank you! Pie tonight.")
+	end)
+end)

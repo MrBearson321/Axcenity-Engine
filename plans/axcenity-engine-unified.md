@@ -2338,9 +2338,9 @@ Removing an Effect undoes its change. `Model:ApplyEffect(effect)` clones one ont
 
 ### Acceptance criteria
 
-- [ ] An NPC with a ProximityPrompt runs a branching dialogue that gives a quest, with no script.
-- [ ] Collecting 5 items completes the quest, and the progress survives saving and loading.
-- [ ] Switching language changes the dialogue text.
+- [x] An NPC with a ProximityPrompt runs a branching dialogue that gives a quest, with no script.
+- [x] Collecting 5 items completes the quest, and the progress survives saving and loading.
+- [x] Switching language changes the dialogue text.
 
 ---
 

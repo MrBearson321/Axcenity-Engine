@@ -49,6 +49,9 @@ pub enum Pane {
     /// A NavigationAgent's behavior tree in the graph editor
     /// (`behavior_tree.rs`). Starts closed; opening a tree opens it.
     BehaviorTree,
+    /// A `.dialogue.json` in the graph editor (`dialogue_editor.rs`, Phase
+    /// 77). Starts closed; opening a dialogue opens it.
+    Dialogue,
     /// A data table as a grid (`data_table.rs`). Starts closed; opening a
     /// table opens it.
     DataTable,
@@ -81,7 +84,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 19] = [
+    pub const CLOSABLE: [Pane; 20] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -93,6 +96,7 @@ impl Pane {
         Pane::Mixer,
         Pane::AssetCheck,
         Pane::BehaviorTree,
+        Pane::Dialogue,
         Pane::DataTable,
         Pane::Material,
         Pane::Tags,
@@ -117,6 +121,7 @@ impl Pane {
             Pane::Mixer => "Mixer",
             Pane::AssetCheck => "Asset Check",
             Pane::BehaviorTree => "Behavior Tree",
+            Pane::Dialogue => "Dialogue",
             Pane::DataTable => "Data Table",
             Pane::Material => "Material",
             Pane::Tags => "Tags",
@@ -144,6 +149,7 @@ impl Pane {
             Pane::Mixer => icons::FADERS,
             Pane::AssetCheck => icons::LIST,
             Pane::BehaviorTree => icons::BRAIN,
+            Pane::Dialogue => icons::CHAT_CIRCLE_TEXT,
             Pane::DataTable => icons::TABLE,
             Pane::Material => icons::SPHERE,
             Pane::Tags => icons::TAG,
@@ -221,6 +227,7 @@ impl Layout {
             Pane::Animation
             | Pane::UiDesigner
             | Pane::BehaviorTree
+            | Pane::Dialogue
             | Pane::DataTable
             | Pane::Material
             | Pane::Sequencer
@@ -482,6 +489,7 @@ mod tests {
                 pane,
                 Pane::AssetCheck
                     | Pane::BehaviorTree
+                    | Pane::Dialogue
                     | Pane::DataTable
                     | Pane::Material
                     | Pane::Tags

@@ -36,6 +36,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Drawing, materials, lights, or animation playback | [rendering.md](rendering.md), then one file |
 | Project files, export, licenses, or GitHub releases | [project-and-export.md](project-and-export.md), then one file |
 | Data tables, the Data Table tab, or `DataService` | [project/data-tables.md](project/data-tables.md) |
+| Dialogues, quests, `DialogueService`, `QuestService`, the Dialogue tab | [scripting/api-dialogue.md](scripting/api-dialogue.md) |
 | New Project's genre templates (`templates/`) | [project/templates.md](project/templates.md) |
 | Game tests (`tests/*.spec.lua`), the Tests panel, `axcenity-test` | [project/game-tests.md](project/game-tests.md) |
 | Editor plugins (`plugins/`, the plugin API, the Plugins panel) | [editor/plugins.md](editor/plugins.md) |

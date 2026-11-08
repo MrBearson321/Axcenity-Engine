@@ -1,0 +1,42 @@
+{
+  "columns": [
+    {
+      "name": "Quest",
+      "type": "reference",
+      "table": "quests"
+    },
+    {
+      "name": "Kind",
+      "type": "enum",
+      "options": [
+        "Count",
+        "Reach",
+        "Talk"
+      ]
+    },
+    {
+      "name": "Target",
+      "type": "string"
+    },
+    {
+      "name": "Count",
+      "type": "integer"
+    },
+    {
+      "name": "Text",
+      "type": "string"
+    }
+  ],
+  "rows": [
+    {
+      "key": "pick",
+      "cells": {
+        "Quest": "apples",
+        "Kind": "Count",
+        "Target": "Apple",
+        "Count": 5,
+        "Text": "quest.apples.pick"
+      }
+    }
+  ]
+}

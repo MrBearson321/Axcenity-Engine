@@ -2430,6 +2430,9 @@ impl ClassName {
                         item: "OnePerButton".to_owned(),
                     }),
                 ),
+                // A `.dialogue.json` file it starts when triggered, with no
+                // script (Phase 77). Empty: none.
+                ("Dialogue", Value::String(String::new())),
             ],
             ClassName::ClickDetector => vec![
                 // Studs from the player character (or the camera, with no

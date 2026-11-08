@@ -43,6 +43,8 @@ pub enum Owner {
     LevelService,
     /// `NetworkService.ConnectionFailed` (Phase 63).
     NetworkService,
+    /// `QuestService`'s quest events (Phase 77).
+    QuestService,
 }
 
 /// Which event of its owner.
@@ -177,7 +179,8 @@ impl Connections {
             | Owner::RunService
             | Owner::CollectionService
             | Owner::LevelService
-            | Owner::NetworkService => true,
+            | Owner::NetworkService
+            | Owner::QuestService => true,
         });
     }
 }

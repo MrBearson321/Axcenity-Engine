@@ -206,6 +206,13 @@ pub trait NodeLibrary {
     fn spec(&self, kind: &str) -> Option<&NodeSpec> {
         self.specs().iter().find(|spec| spec.kind == kind)
     }
+
+    /// Whether exec wires may loop back to an earlier node. A dialogue's
+    /// may (a choice that goes back to ask again); code made from a graph
+    /// can't.
+    fn exec_loops(&self) -> bool {
+        false
+    }
 }
 
 /// A node in a graph.
@@ -416,7 +423,7 @@ impl NodeGraph {
         // wire, would close a loop.
         let exec = from_type == PinType::Exec;
         let loops = if exec {
-            self.reaches(library, to.node, from.node, true)
+            !library.exec_loops() && self.reaches(library, to.node, from.node, true)
         } else {
             self.reaches(library, from.node, to.node, false)
         };

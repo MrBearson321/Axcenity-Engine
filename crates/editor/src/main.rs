@@ -24,6 +24,7 @@ mod constraints;
 mod css_syntax;
 mod data_table;
 mod dialog;
+mod dialogue_editor;
 mod explorer;
 mod find_in_scripts;
 mod game_tests;

@@ -552,6 +552,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                             let _ = app.asset_check.show(ui, app.project.is_some(), true);
                         }
                         Pane::BehaviorTree => app.behavior_tree_pane(ui),
+                        Pane::Dialogue => app.dialogue_pane(ui),
                         Pane::DataTable => app.data_table_pane(ui),
                         Pane::Material => app.material_pane(ui, None),
                         Pane::Tags => app.tags_pane(ui),

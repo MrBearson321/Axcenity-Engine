@@ -909,6 +909,12 @@ impl EditorApp {
                                 .as_ref()
                                 .map(|play| play.ability_bar())
                                 .unwrap_or_default(),
+                            quests: self
+                                .play
+                                .as_ref()
+                                .map(|play| play.quest_tracker())
+                                .unwrap_or_default(),
+                            dialogue: self.play.as_ref().and_then(|play| play.dialogue_view()),
                             leaderboard: self.play.as_ref().is_some_and(|play| play.leaderboard()),
                             chat: self
                                 .play

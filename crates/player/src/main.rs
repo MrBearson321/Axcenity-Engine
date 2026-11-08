@@ -764,7 +764,7 @@ impl App {
         self.zoom = 0.0;
         if self.text_focus.is_some()
             || self.chat_typing.is_some()
-            || self.scripts.input_locked(&self.world)
+            || self.scripts.movement_locked(&self.world)
         {
             return MoveInput::default();
         }
@@ -1666,6 +1666,24 @@ impl ApplicationHandler for App {
                     size.width,
                     size.height,
                 ));
+                // The quest tracker and the dialogue box (Phase 77).
+                let quests = self.scripts.quest_tracker(&self.world);
+                draw_list.ui.extend(axcenity_ui::quest_tracker_items(
+                    &self.world,
+                    &quests,
+                    &self.stylesheets,
+                    size.width,
+                    size.height,
+                ));
+                if let Some(dialogue) = self.scripts.dialogue_view(&self.world) {
+                    draw_list.ui.extend(axcenity_ui::dialogue_box_items(
+                        &self.world,
+                        &dialogue,
+                        &self.stylesheets,
+                        size.width,
+                        size.height,
+                    ));
+                }
                 // The leaderboard (each Player's `leaderstats`), unless Tab
                 // hid it.
                 if self.scripts.leaderboard_shown() {

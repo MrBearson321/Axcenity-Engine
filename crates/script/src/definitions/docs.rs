@@ -2848,6 +2848,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "`Enum.ProximityPromptExclusivity`: OnePerButton shows the nearest prompt for each action, OneGlobally the nearest of all, and AlwaysShow shows this one whenever it's in reach.",
     ),
     (
+        ClassName::ProximityPrompt,
+        "Dialogue",
+        "A dialogue file (`assets/dialogue/Farmer.dialogue.json`) it starts when triggered, with no script, said by the Model it's in. Empty starts none.",
+    ),
+    (
         ClassName::ClickDetector,
         "MaxActivationDistance",
         "Studs from the middle of the player character (or the camera, with no character) to the point clicked. Farther clicks, and pointing from farther, do nothing.",

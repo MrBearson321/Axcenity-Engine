@@ -1,0 +1,267 @@
+{
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "kind": "start",
+      "position": [40, 200],
+      "values": {}
+    },
+    {
+      "id": 2,
+      "kind": "quest_check",
+      "position": [200, 200],
+      "values": {
+        "Quest": "apples",
+        "State": "Completed"
+      }
+    },
+    {
+      "id": 3,
+      "kind": "line",
+      "position": [460, 60],
+      "values": {
+        "Speaker": "farmer.name",
+        "Text": "farmer.thanks",
+        "Audio": "",
+        "Animation": ""
+      }
+    },
+    {
+      "id": 4,
+      "kind": "end",
+      "position": [760, 60],
+      "values": {
+        "Ending": "thanked"
+      }
+    },
+    {
+      "id": 5,
+      "kind": "quest_check",
+      "position": [460, 220],
+      "values": {
+        "Quest": "apples",
+        "State": "Active"
+      }
+    },
+    {
+      "id": 6,
+      "kind": "line",
+      "position": [720, 180],
+      "values": {
+        "Speaker": "farmer.name",
+        "Text": "farmer.waiting",
+        "Audio": "",
+        "Animation": ""
+      }
+    },
+    {
+      "id": 7,
+      "kind": "end",
+      "position": [1000, 180],
+      "values": {
+        "Ending": "waiting"
+      }
+    },
+    {
+      "id": 8,
+      "kind": "line",
+      "position": [720, 340],
+      "values": {
+        "Speaker": "farmer.name",
+        "Text": "farmer.hello",
+        "Audio": "",
+        "Animation": ""
+      }
+    },
+    {
+      "id": 9,
+      "kind": "choice",
+      "position": [1000, 340],
+      "values": {
+        "Option 1": "farmer.yes",
+        "Option 2": "farmer.no",
+        "Option 3": "",
+        "Option 4": ""
+      }
+    },
+    {
+      "id": 10,
+      "kind": "start_quest",
+      "position": [1260, 300],
+      "values": {
+        "Quest": "apples"
+      }
+    },
+    {
+      "id": 11,
+      "kind": "line",
+      "position": [1480, 300],
+      "values": {
+        "Speaker": "farmer.name",
+        "Text": "farmer.go",
+        "Audio": "",
+        "Animation": ""
+      }
+    },
+    {
+      "id": 12,
+      "kind": "end",
+      "position": [1760, 300],
+      "values": {
+        "Ending": "accepted"
+      }
+    },
+    {
+      "id": 13,
+      "kind": "line",
+      "position": [1260, 460],
+      "values": {
+        "Speaker": "farmer.name",
+        "Text": "farmer.bye",
+        "Audio": "",
+        "Animation": ""
+      }
+    },
+    {
+      "id": 14,
+      "kind": "end",
+      "position": [1540, 460],
+      "values": {
+        "Ending": "declined"
+      }
+    }
+  ],
+  "wires": [
+    {
+      "from": {
+        "node": 1,
+        "pin": ""
+      },
+      "to": {
+        "node": 2,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 2,
+        "pin": "True"
+      },
+      "to": {
+        "node": 3,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 3,
+        "pin": ""
+      },
+      "to": {
+        "node": 4,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 2,
+        "pin": "False"
+      },
+      "to": {
+        "node": 5,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 5,
+        "pin": "True"
+      },
+      "to": {
+        "node": 6,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 6,
+        "pin": ""
+      },
+      "to": {
+        "node": 7,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 5,
+        "pin": "False"
+      },
+      "to": {
+        "node": 8,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 8,
+        "pin": ""
+      },
+      "to": {
+        "node": 9,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 9,
+        "pin": "1"
+      },
+      "to": {
+        "node": 10,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 10,
+        "pin": ""
+      },
+      "to": {
+        "node": 11,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 11,
+        "pin": ""
+      },
+      "to": {
+        "node": 12,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 9,
+        "pin": "2"
+      },
+      "to": {
+        "node": 13,
+        "pin": ""
+      }
+    },
+    {
+      "from": {
+        "node": 13,
+        "pin": ""
+      },
+      "to": {
+        "node": 14,
+        "pin": ""
+      }
+    }
+  ]
+}

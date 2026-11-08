@@ -431,6 +431,8 @@ fn described_fields_and_methods_exist() {
         ("Debris", "game:GetService('Debris')"),
         ("HttpService", "game:GetService('HttpService')"),
         ("DataService", "game:GetService('DataService')"),
+        ("DialogueService", "game:GetService('DialogueService')"),
+        ("QuestService", "game:GetService('QuestService')"),
         ("ConsoleService", "game:GetService('ConsoleService')"),
         (
             "DataTable",

@@ -325,6 +325,10 @@ pub struct ViewportScene<'a> {
     pub hotbar: Option<InstanceId>,
     /// The player's Abilities during Play (Phase 76), for the ability bar.
     pub ability_bar: Vec<axcenity_core::ability::AbilitySlot>,
+    /// The active quests during Play (Phase 77), for the quest tracker.
+    pub quests: Vec<axcenity_core::dialogue::QuestView>,
+    /// The dialogue box during Play, while a dialogue runs (Phase 77).
+    pub dialogue: Option<axcenity_core::dialogue::DialogueView>,
     /// Whether the default leaderboard is drawn during Play (Tab hides it).
     pub leaderboard: bool,
     /// The chat window during Play (Phase 67): its lines, and the line
@@ -882,6 +886,8 @@ impl Viewport {
             loading_screen,
             hotbar,
             ability_bar,
+            quests,
+            dialogue,
             leaderboard,
             chat,
             prompts,
@@ -1247,6 +1253,22 @@ impl Viewport {
             width,
             height,
         ));
+        draw_list.ui.extend(axcenity_ui::quest_tracker_items(
+            world,
+            &quests,
+            stylesheets,
+            width,
+            height,
+        ));
+        if let Some(dialogue) = &dialogue {
+            draw_list.ui.extend(axcenity_ui::dialogue_box_items(
+                world,
+                dialogue,
+                stylesheets,
+                width,
+                height,
+            ));
+        }
         if leaderboard {
             draw_list.ui.extend(axcenity_ui::leaderboard_items(
                 world,

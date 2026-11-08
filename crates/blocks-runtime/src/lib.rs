@@ -21,6 +21,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
 pub mod behavior_tree;
+pub mod dialogue;
 pub mod node_graph;
 mod translate;
 pub mod ui_graph;

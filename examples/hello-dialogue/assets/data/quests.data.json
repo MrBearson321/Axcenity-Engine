@@ -1,0 +1,21 @@
+{
+  "columns": [
+    {
+      "name": "Title",
+      "type": "string"
+    },
+    {
+      "name": "Description",
+      "type": "string"
+    }
+  ],
+  "rows": [
+    {
+      "key": "apples",
+      "cells": {
+        "Title": "quest.apples",
+        "Description": "The Farmer wants five apples from the field."
+      }
+    }
+  ]
+}
