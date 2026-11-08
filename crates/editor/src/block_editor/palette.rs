@@ -606,6 +606,20 @@ pub(super) fn palette(
                 reason: text("Cheating"),
             }),
             block(BlockKind::WhenConnectionFails { body: Vec::new() }),
+            block(BlockKind::RequestStreamAround {
+                player: Expression::Variable {
+                    name: "player".to_owned(),
+                },
+                position: Expression::Vector3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 500.0,
+                },
+            }),
+            block(BlockKind::WhenStreamedIn {
+                target: part.clone(),
+                body: Vec::new(),
+            }),
             R(Expression::DataValue {
                 column: storage_name(NameKind::Column),
                 row: Box::new(Expression::DataRow {

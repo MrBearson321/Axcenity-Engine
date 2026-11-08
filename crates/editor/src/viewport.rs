@@ -349,6 +349,9 @@ pub struct ViewportScene<'a> {
     pub overlays: OverlayToggles,
     /// What the viewport shows: lit, or a debug view (View > View Mode).
     pub view_mode: ViewMode,
+    /// Whether this is the game during Play: world streaming and its
+    /// radius only apply then (Phase 80).
+    pub playing: bool,
     /// Recent `workspace:Raycast` calls during Play, for the raycast overlay.
     pub debug_rays: &'a [DebugRay],
     /// The navigation mesh, for its overlay.
@@ -901,6 +904,7 @@ impl Viewport {
             nav_mesh,
             agent_paths,
             poses,
+            playing: game_playing,
             terrain_brush,
             constraint_pick,
             spline_editing,
@@ -1231,6 +1235,17 @@ impl Viewport {
         }
         let still = axcenity_scene::Poses::new();
         let poses = poses.unwrap_or(&still);
+        if game_playing {
+            self.terrain
+                .streaming
+                .step(world, camera.position, f64::from(seconds));
+        } else if self.terrain.streaming.settings().is_some() {
+            // Editing shows everything, whatever Play streamed.
+            self.terrain.streaming = axcenity_scene::Streaming::default();
+        }
+        target
+            .renderer
+            .set_background_uploads(self.terrain.streaming.settings().is_some());
         let render_started = Instant::now();
         let mut draw_list =
             axcenity_scene::build_draw_list_posed(world, assets, camera, poses, &mut self.terrain);
@@ -1379,6 +1394,9 @@ impl Viewport {
         }
         if overlays.agent_paths {
             paint_agent_paths(&ui.painter_at(rect), &screen, agent_paths);
+        }
+        if game_playing && let Some(settings) = self.terrain.streaming.settings() {
+            paint_streaming_radius(&ui.painter_at(rect), &screen, settings, eye);
         }
         if let Some(frozen) = self.frozen_culling {
             paint_culling(

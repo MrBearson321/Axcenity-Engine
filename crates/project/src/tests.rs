@@ -913,3 +913,52 @@ fn built_games_and_the_game_ui_have_no_plugin_files() {
     assert!(!built.join(PLUGINS_FOLDER).exists());
     fs::remove_dir_all(built).unwrap();
 }
+
+/// World streaming's settings (Phase 80) are saved with the world, and a
+/// world from before them has streaming off.
+#[test]
+fn streaming_settings_save_with_the_world_and_old_worlds_have_it_off() {
+    let old = parse_world(r#"{"format_version": 1}"#).unwrap();
+    assert_eq!(axcenity_core::streaming::Settings::of(&old), None);
+
+    let mut world = World::new();
+    assert!(!write_world(&world).contains("Streaming"));
+    let workspace = world.workspace();
+    world
+        .set_property(workspace, "StreamingEnabled", Value::Bool(true))
+        .unwrap();
+    world
+        .set_property(workspace, "StreamingTargetRadius", Value::Number(500.0))
+        .unwrap();
+    let model = world.create(ClassName::Model).unwrap();
+    world
+        .set_property(
+            model,
+            "ModelStreamingMode",
+            axcenity_core::streaming::streaming_mode("Persistent"),
+        )
+        .unwrap();
+    world.set_parent(model, Some(workspace)).unwrap();
+
+    let text = write_world(&world);
+    let back = parse_world(&text).unwrap();
+    let settings = axcenity_core::streaming::Settings::of(&back).unwrap();
+    assert_eq!(settings.target_radius, 500.0);
+    let model = back.get(back.workspace()).unwrap().children()[0];
+    assert_eq!(
+        back.get(model).unwrap().property("ModelStreamingMode"),
+        Some(&axcenity_core::streaming::streaming_mode("Persistent"))
+    );
+}
+
+#[test]
+fn hello_streaming_example_loads_with_streaming_on() {
+    let project = load(&examples_folder().join("hello-streaming")).unwrap();
+    assert!(
+        project.problems.is_empty() && project.world_loaded,
+        "{:?}",
+        project.problems
+    );
+    let settings = axcenity_core::streaming::Settings::of(&project.world).unwrap();
+    assert_eq!(settings.target_radius, 400.0);
+}

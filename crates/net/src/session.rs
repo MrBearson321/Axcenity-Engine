@@ -55,6 +55,14 @@ pub enum SessionEvent {
     ChatLine { player: u64, text: String },
     /// Player `from` typed a console command for the server (on the host).
     Console { from: u32, line: String },
+    /// Player `from` asked for what's around `position` (on the host).
+    StreamAround {
+        from: u32,
+        request: u64,
+        position: [f32; 3],
+    },
+    /// The server sent what's around a place this device asked for.
+    StreamedAround(u64),
 }
 
 /// What a host is.
@@ -184,6 +192,13 @@ impl Host {
                         from: peer.id,
                         line,
                     }),
+                    Some(Message::StreamAround { request, position }) => {
+                        events.push(SessionEvent::StreamAround {
+                            from: peer.id,
+                            request,
+                            position,
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -435,7 +450,15 @@ impl Join {
                 Some(Message::ChatLine { player, text }) => {
                     events.push(SessionEvent::ChatLine { player, text });
                 }
-                Some(Message::Hello { .. } | Message::Chat { .. } | Message::Console { .. })
+                Some(Message::StreamedAround { request }) => {
+                    events.push(SessionEvent::StreamedAround(request));
+                }
+                Some(
+                    Message::Hello { .. }
+                    | Message::Chat { .. }
+                    | Message::Console { .. }
+                    | Message::StreamAround { .. },
+                )
                 | None => {}
             }
         }

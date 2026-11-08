@@ -76,6 +76,7 @@ mod terrain;
 pub(crate) mod text;
 mod texture_budget;
 mod ui_pass;
+mod uploads;
 mod water;
 
 #[cfg(test)]
@@ -292,6 +293,19 @@ impl Renderer {
         self.scene.set_graphics(settings);
     }
 
+    /// While on (world streaming, Phase 80), meshes and color textures not
+    /// yet on the GPU are uploaded on a thread of their own, and appear a
+    /// few frames later, instead of stalling the frame that first draws
+    /// them. Off by default.
+    pub fn set_background_uploads(&mut self, on: bool) {
+        self.scene.set_background_uploads(on);
+    }
+
+    /// How many background uploads are still on their way.
+    pub fn pending_uploads(&self) -> usize {
+        self.scene.pending_uploads()
+    }
+
     /// The graphics values in use, and why any were lowered.
     pub fn graphics(&self) -> &EffectiveGraphics {
         &self.scene.graphics
@@ -421,6 +435,16 @@ impl TextureRenderer {
     /// Uses `settings` from the next frame (see [`GraphicsSettings::effective`]).
     pub fn set_graphics(&mut self, settings: &GraphicsSettings) {
         self.scene.set_graphics(settings);
+    }
+
+    /// See [`Renderer::set_background_uploads`].
+    pub fn set_background_uploads(&mut self, on: bool) {
+        self.scene.set_background_uploads(on);
+    }
+
+    /// See [`Renderer::pending_uploads`].
+    pub fn pending_uploads(&self) -> usize {
+        self.scene.pending_uploads()
     }
 
     /// For the editor's culling overlay: while `camera` is set, items and

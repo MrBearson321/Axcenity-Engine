@@ -39,6 +39,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
     match kind {
         BlockKind::WhenStarted { .. } => ("When Game Starts", &[]),
         BlockKind::WhenTouched { .. } => ("When Touched", &["Part"]),
+        BlockKind::WhenStreamedIn { .. } => ("When Streamed In", &["Object"]),
         BlockKind::WhenKeyPressed { .. } => ("When Key Pressed", &["Key"]),
         BlockKind::WhenClicked { .. } => ("When Clicked", &["Button"]),
         BlockKind::WhenMouseEnters { .. } => ("When Mouse Enters", &["Element"]),
@@ -157,6 +158,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::SetNetworkOwner { .. } => ("Set Network Owner", &["Owner", "Part"]),
         BlockKind::SetNetworkOwnershipAuto { .. } => ("Network Ownership Auto", &["Part"]),
         BlockKind::KickPlayer { .. } => ("Kick Player", &["Player", "Reason"]),
+        BlockKind::RequestStreamAround { .. } => ("Load Around Player", &["Player", "Position"]),
         BlockKind::SendChatMessage { .. } => ("Send Chat Message", &["Text"]),
         BlockKind::ShowSystemMessage { .. } => ("Show System Message", &["Text"]),
         BlockKind::WhenConnectionFails { .. } => ("When Connection Fails", &[]),
@@ -190,6 +192,7 @@ pub(super) fn value_names(expression: &Expression) -> (String, &'static [&'stati
         Expression::PartUnderMouse => ("Part Under Mouse", &[]),
         Expression::KeyDown { .. } => ("Is Key Down", &["Key"]),
         Expression::IsA { .. } => ("Is A", &["Object", "Class"]),
+        Expression::IsStreamedIn { .. } => ("Is Streamed In", &["Object"]),
         Expression::AnimatorBool { .. } => ("Get Bool", &["Parameter", "Animator"]),
         Expression::AnimatorNumber { .. } => ("Get Number", &["Parameter", "Animator"]),
         Expression::AnimatorLayerWeight { .. } => ("Layer Weight", &["Layer", "Animator"]),

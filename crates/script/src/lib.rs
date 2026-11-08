@@ -862,6 +862,34 @@ impl ScriptRuntime {
         requests
     }
 
+    /// Streaming (Phase 80), on a device following a server: `gone` is
+    /// off this device now (`StreamingState` reads StreamedOut), and each
+    /// of `arrived` that had gone fires `StreamedIn`.
+    pub fn note_streaming(
+        &mut self,
+        world: &mut World,
+        gone: &[InstanceId],
+        arrived: &[InstanceId],
+    ) {
+        self.fire_changes(world);
+        self.context(Side::Client)
+            .note_streaming(world, gone, arrived);
+        self.collect(Side::Client);
+        self.fire_change_rounds(world);
+    }
+
+    /// A `RequestStreamAroundAsync`'s region is ready (or was all here):
+    /// the script that asked carries on.
+    pub fn finish_stream_around(&mut self, world: &mut World, request: u64) {
+        self.fire_changes(world);
+        for side in [Side::Server, Side::Client] {
+            self.context(side).finish_stream_around(world, request);
+            self.collect(side);
+            self.fire_change_rounds(world);
+        }
+        self.fire_changes(world);
+    }
+
     /// The host's answer to `FindLanGames`: every script waiting in it
     /// carries on with `games`, Scripts first.
     pub fn finish_lan_search(&mut self, world: &mut World, games: &[LanGame]) {

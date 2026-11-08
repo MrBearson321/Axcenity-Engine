@@ -2,6 +2,7 @@
 
 - Shared bridge from `core::World` to `render::DrawList`, plus camera and picking. Draw-list rules: `docs/rendering/pipeline.md`.
 - Keep picking consistent with rendered placement (MeshParts pick by their box), and preserve the shared orientation convention (degrees, YXZ).
+- `streaming.rs` (Phase 80): what's in range of the host's camera, in `TerrainCache::streaming` (hosts call `step`); drawing leaves out the rest and terrain chunks build on a thread (`docs/architecture/streaming.md`).
 - Joint constraints with `Visible` on are drawn from built-in cylinders and spheres in `constraints.rs` (coil, rope, axle).
 - `Particles` is host-owned state (player, editor viewport), never stored in the world; hosts call `set_gpu` (compute shaders) and `draw`, and big emitters move on the GPU (`render::ParticleEmitter`, keep their motion matching `particles.wgsl`); see `docs/rendering/particles.md`. So are `Poses` (from `anim::Animators`), drawn by `build_draw_list_posed`.
 - Depend only on `core`, `assets`, `render`, `terrain` and `ui` (UI layout into the draw list); input/window handling belongs to `player` or `editor`.

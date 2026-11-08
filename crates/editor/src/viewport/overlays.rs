@@ -328,6 +328,36 @@ pub(super) fn paint_terrain_brush(
     }
 }
 
+/// During Play with streaming on (Phase 80): the two radii around the
+/// camera, laid flat at its feet: what's always loaded, and how far
+/// things load.
+pub(super) fn paint_streaming_radius(
+    painter: &egui::Painter,
+    screen: &Screen,
+    settings: &axcenity_core::streaming::Settings,
+    eye: Vec3,
+) {
+    const SEGMENTS: usize = 96;
+    let at = |radius: f32, turn: usize| {
+        let angle = turn as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+        eye + Vec3::new(angle.cos() * radius, -2.0, angle.sin() * radius)
+    };
+    for (radius, color) in [
+        (settings.min_radius, egui::Color32::from_rgb(110, 220, 120)),
+        (
+            settings.target_radius,
+            egui::Color32::from_rgb(90, 170, 255),
+        ),
+    ] {
+        let stroke = egui::Stroke::new(1.5_f32, color.gamma_multiply(0.8));
+        for turn in 0..SEGMENTS {
+            if let Some(line) = screen.line(at(radius, turn), at(radius, turn + 1)) {
+                painter.line_segment(line, stroke);
+            }
+        }
+    }
+}
+
 pub(super) fn paint_debug_overlays(
     painter: &egui::Painter,
     screen: &Screen,

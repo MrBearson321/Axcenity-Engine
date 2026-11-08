@@ -166,6 +166,17 @@ pub struct Physics {
     /// Parts held still as if anchored, whatever their `Anchored` says:
     /// another device moves them (Phase 66, network ownership).
     held: BTreeSet<InstanceId>,
+    /// While streaming (Phase 80): the points parts stay awake near, and
+    /// how near.
+    far_sleep: Option<(Vec<Vector3>, f32)>,
+    /// Bodies put to sleep for being far, to wake when they come near.
+    far_asleep: HashSet<RigidBodyHandle>,
+    /// What the last full sync was made from: the tree's structure and
+    /// the held parts (see `sync_changed_parts`).
+    synced: Option<(u64, BTreeSet<InstanceId>)>,
+    /// The Instances that decide how parts are put together (welds,
+    /// ragdolls, inventories), with their revisions at the last full sync.
+    watched: Vec<(InstanceId, u64)>,
 }
 
 /// How a body moved before a step: its velocities and center of mass.
@@ -210,6 +221,10 @@ struct Body {
     /// Extra colliders for colliding foliage, parented to a Terrain.
     foliage: Vec<ColliderHandle>,
     seen: PartState,
+    /// True if other parts share its body: a change to it rebuilds them.
+    welded: bool,
+    /// Its Instance's revision when `seen` was last compared with it.
+    revision: u64,
 }
 
 /// The properties of a part that physics cares about.
@@ -442,6 +457,54 @@ impl Physics {
             debris: Vec::new(),
             shattered: Vec::new(),
             held: BTreeSet::new(),
+            far_sleep: None,
+            far_asleep: HashSet::new(),
+            synced: None,
+            watched: Vec::new(),
+        }
+    }
+
+    /// World streaming (Phase 80): from the next step on, unanchored parts
+    /// further than `radius` studs from every point of `focuses` sleep, and
+    /// wake when one comes in range. Empty `focuses`: nothing is put to
+    /// sleep (a server nobody is on still steps). `None` turns it off.
+    pub fn set_far_sleep(&mut self, far: Option<(Vec<Vector3>, f32)>) {
+        self.far_sleep = far;
+        if self.far_sleep.is_none() {
+            for handle in std::mem::take(&mut self.far_asleep) {
+                if let Some(body) = self.rapier.bodies.get_mut(handle) {
+                    body.wake_up(true);
+                }
+            }
+        }
+    }
+
+    /// Puts far bodies to sleep and wakes those that came back in range.
+    fn sleep_far_bodies(&mut self) {
+        let Some((focuses, radius)) = &self.far_sleep else {
+            return;
+        };
+        if focuses.is_empty() {
+            return;
+        }
+        let radius_squared = radius * radius;
+        for (handle, body) in self.rapier.bodies.iter_mut() {
+            if !body.is_dynamic() {
+                continue;
+            }
+            let at = body.translation();
+            let near = focuses.iter().any(|focus| {
+                let (x, y, z) = (focus.x - at.x, focus.y - at.y, focus.z - at.z);
+                x * x + y * y + z * z <= radius_squared
+            });
+            if near {
+                if self.far_asleep.remove(&handle) {
+                    body.wake_up(true);
+                }
+            } else if !body.is_sleeping() {
+                body.sleep();
+                self.far_asleep.insert(handle);
+            }
         }
     }
 
@@ -457,6 +520,7 @@ impl Physics {
     /// `world` after each one. Returns how many steps ran.
     pub fn step(&mut self, world: &mut World, seconds: f64) -> u32 {
         self.sync_from_world(world);
+        self.sleep_far_bodies();
         let wind = global_wind(world);
         self.rapier.gravity = Vec3::new(0.0, -gravity(world), 0.0);
 
@@ -702,6 +766,10 @@ impl Physics {
     /// applies anything a script changed since the last step, and welds or
     /// unwelds assemblies.
     fn sync_from_world(&mut self, world: &World) {
+        if let Some((moved, changed)) = self.sync_changed_parts(world) {
+            self.finish_sync(world, moved, changed);
+            return;
+        }
         let (ragdolled, ragdoll_bodies) = ragdoll_parts(world);
         self.ragdoll_bodies = ragdoll_bodies;
         let current: BTreeMap<InstanceId, PartState> = world
@@ -799,6 +867,82 @@ impl Physics {
             }
         }
 
+        // What the next frame compares with (see `sync_changed_parts`).
+        for (id, part) in &mut self.parts {
+            part.revision = world.get(*id).map_or(0, axcenity_core::Instance::revision);
+        }
+        self.synced = Some((world.structure_version(), self.held.clone()));
+        self.watched = world
+            .descendants(world.root())
+            .into_iter()
+            .filter_map(|id| {
+                let instance = world.get(id)?;
+                matches!(
+                    instance.class(),
+                    ClassName::WeldConstraint | ClassName::Ragdoll | ClassName::Inventory
+                )
+                .then(|| (id, instance.revision()))
+            })
+            .collect();
+        self.finish_sync(world, moved, anything_changed);
+    }
+
+    /// The cheap way to catch up, when no part came or went and nothing
+    /// that puts parts together changed: only parts whose Instance changed
+    /// are read. `None` if the full sync has to run instead: with tens of
+    /// thousands of parts it's most of a frame, so it runs only when needed.
+    fn sync_changed_parts(&mut self, world: &World) -> Option<(HashSet<RigidBodyHandle>, bool)> {
+        let (structure, held) = self.synced.as_ref()?;
+        if *structure != world.structure_version() || *held != self.held {
+            return None;
+        }
+        for (id, revision) in &self.watched {
+            if world.get(*id)?.revision() != *revision {
+                return None;
+            }
+        }
+        let mut changed = Vec::new();
+        for (&id, part) in &mut self.parts {
+            let revision = world.get(id)?.revision();
+            // A model or a Terrain can change without its Instance doing so.
+            if part.revision == revision && matches!(part.seen.shape, Form::Primitive(_)) {
+                continue;
+            }
+            let mut state = PartState::read(world, id, &self.assets)?;
+            state.anchored |= self.held.contains(&id);
+            if state == part.seen {
+                part.revision = revision;
+            } else if part.welded {
+                return None;
+            } else {
+                changed.push((id, state, revision));
+            }
+        }
+        let mut moved = HashSet::new();
+        let anything_changed = !changed.is_empty();
+        for (id, state, revision) in changed {
+            let mut part = self.parts.remove(&id).expect("just found");
+            self.owners.remove(&part.collider);
+            for handle in &part.foliage {
+                self.owners.remove(handle);
+            }
+            self.apply_change(&mut part, state, false);
+            part.revision = revision;
+            moved.insert(part.body);
+            self.owners.insert(part.collider, id);
+            self.attach_foliage(id, &mut part);
+            self.parts.insert(id, part);
+        }
+        Some((moved, anything_changed))
+    }
+
+    /// The end of every sync: joints, movers, vehicles and waking.
+    fn finish_sync(
+        &mut self,
+        world: &World,
+        moved: HashSet<RigidBodyHandle>,
+        mut anything_changed: bool,
+    ) {
         // Joints go between the bodies just made, so they come after them.
         anything_changed |= joints::sync(world, &mut self.rapier, &self.parts, &mut self.joints);
         // Movers act on those bodies too, read again every frame since
@@ -927,6 +1071,8 @@ impl Physics {
                 root: is_root,
                 foliage: Vec::new(),
                 seen: state,
+                welded,
+                revision: 0,
             };
             self.attach_foliage(id, &mut part);
             self.parts.insert(id, part);

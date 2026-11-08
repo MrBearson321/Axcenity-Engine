@@ -2410,9 +2410,9 @@ It runs after the Animator and before drawing. It suits hands on a steering whee
 ### Acceptance criteria
 
 - [ ] A 4 × 4 km world with 50,000 parts plays on the reference machine within the frame budget, with streaming on.
-- [ ] Teleporting after `RequestStreamAroundAsync` lands on loaded ground.
-- [ ] A Persistent model is always there on every client, and scripts that check `StreamingState` don't error.
-- [ ] A project with streaming off plays exactly as before.
+- [x] Teleporting after `RequestStreamAroundAsync` lands on loaded ground.
+- [x] A Persistent model is always there on every client, and scripts that check `StreamingState` don't error.
+- [x] A project with streaming off plays exactly as before.
 
 ---
 

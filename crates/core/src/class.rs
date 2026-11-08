@@ -14,7 +14,7 @@ use crate::value::{CFrame, Color3, EnumItem, UDim2, Value, Vector2, Vector3};
 pub const DEFAULT_CLOCK_TIME: f64 = 10.2748873292782;
 pub const DEFAULT_LATITUDE: f64 = 14.0362434679265;
 
-pub const INSTANCE_EVENTS: [&str; 8] = [
+pub const INSTANCE_EVENTS: [&str; 9] = [
     "Changed",
     "ChildAdded",
     "ChildRemoved",
@@ -22,6 +22,7 @@ pub const INSTANCE_EVENTS: [&str; 8] = [
     "DescendantRemoving",
     "AncestryChanged",
     "Destroying",
+    "StreamedIn",
     // Fires with an attribute's name when `SetAttribute` changes it.
     "AttributeChanged",
 ];
@@ -998,9 +999,13 @@ impl ClassName {
             | ClassName::RemoteFunction
             | ClassName::BindableEvent
             | ClassName::BindableFunction
-            | ClassName::Model
             | ClassName::Folder
             | ClassName::AnimationTrack => Vec::new(),
+            // How it streams (Phase 80): Default, Atomic or Persistent.
+            ClassName::Model => vec![(
+                "ModelStreamingMode",
+                crate::streaming::streaming_mode("Default"),
+            )],
             // An IntValue's number is always whole (`World::set_property`
             // rounds it).
             ClassName::TextChatService => vec![
@@ -1066,6 +1071,20 @@ impl ClassName {
                 // The most decals `SpawnDecal` keeps at once: past it, the
                 // oldest goes first.
                 ("MaxSpawnedDecals", Value::Number(200.0)),
+                // World streaming (Phase 80). On, each device only has
+                // what's near it: the rest stays off it and off the GPU.
+                ("StreamingEnabled", Value::Bool(false)),
+                // Everything this near is always loaded.
+                (
+                    "StreamingMinRadius",
+                    Value::Number(crate::streaming::DEFAULT_MIN_RADIUS),
+                ),
+                // As far as things load, as the network and the machine
+                // allow; further than this they're unloaded again.
+                (
+                    "StreamingTargetRadius",
+                    Value::Number(crate::streaming::DEFAULT_TARGET_RADIUS),
+                ),
             ],
             ClassName::Lighting => vec![
                 ("ShadowsEnabled", Value::Bool(true)),

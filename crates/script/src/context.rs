@@ -260,6 +260,9 @@ impl Context {
         if let Some(mut jobs) = self.lua.app_data_mut::<crate::csg::CsgJobs>() {
             jobs.forget_script(script);
         }
+        if let Some(mut waits) = self.lua.app_data_mut::<crate::network::StreamWaits>() {
+            waits.forget_script(script);
+        }
         if let Some(mut searches) = self.lua.app_data_mut::<crate::network::LanSearches>() {
             searches.forget_script(script);
         }
@@ -375,9 +378,14 @@ impl Context {
             .app_data_mut::<tween::Tweens>()
             .map(|mut tweens| tweens.alive())
             .unwrap_or_default();
+        let streamed_out = self.lua.app_data_ref::<crate::network::StreamedOut>();
+        let is_out = |id| streamed_out.as_ref().is_some_and(|out| out.0.contains(&id));
         if let Some(mut connections) = self.lua.app_data_mut::<events::Connections>() {
-            connections.forget(|id| world.contains(id), &tweens);
+            // A handler on something streamed out is waiting for it to
+            // come back (Phase 80).
+            connections.forget(|id| world.contains(id) || is_out(id), &tweens);
         }
+        drop(streamed_out);
         if let Some(mut callbacks) = self.lua.app_data_mut::<bindable::Callbacks>() {
             callbacks.forget(|id| world.contains(id));
         }
@@ -721,6 +729,41 @@ impl Context {
     pub fn finish_lan_search(&self, world: &mut World, games: &[crate::network::LanGame]) {
         with_world(&self.lua, world, || {
             crate::network::finish_search(&self.lua, games);
+        });
+    }
+
+    /// Streaming (Phase 80): `gone` left this device (or was never sent
+    /// and is `StreamingState` StreamedOut), and `arrived` came back, which
+    /// fires `StreamedIn` on each that had gone.
+    pub fn note_streaming(&self, world: &mut World, gone: &[InstanceId], arrived: &[InstanceId]) {
+        if self
+            .lua
+            .app_data_ref::<crate::network::StreamedOut>()
+            .is_none()
+        {
+            self.lua
+                .set_app_data(crate::network::StreamedOut::default());
+        }
+        let mut back = Vec::new();
+        if let Some(mut out) = self.lua.app_data_mut::<crate::network::StreamedOut>() {
+            out.0.extend(gone.iter().copied());
+            for &id in arrived {
+                if out.0.remove(&id) {
+                    back.push(id);
+                }
+            }
+        }
+        with_world(&self.lua, world, || {
+            for id in back {
+                events::fire(&self.lua, events::Owner::Instance(id), "StreamedIn", ());
+            }
+        });
+    }
+
+    /// Resumes the script waiting on a `RequestStreamAroundAsync`.
+    pub fn finish_stream_around(&self, world: &mut World, request: u64) {
+        with_world(&self.lua, world, || {
+            crate::network::finish_stream_around(&self.lua, request);
         });
     }
 

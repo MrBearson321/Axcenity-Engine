@@ -870,3 +870,54 @@ fn a_tool_in_hand_is_held_still_and_one_put_away_is_out_of_the_world() {
         "it should have fallen"
     );
 }
+
+#[test]
+fn far_parts_sleep_while_streaming_and_wake_when_something_comes_near() {
+    use axcenity_core::{ClassName, Value, Vector3, World};
+
+    let mut world = World::new();
+    let block = |world: &mut World, x: f32| {
+        let part = world.create(ClassName::Part).unwrap();
+        world
+            .set_property(part, "Anchored", Value::Bool(false))
+            .unwrap();
+        world
+            .set_property(part, "Position", Value::Vector3(Vector3::new(x, 50.0, 0.0)))
+            .unwrap();
+        let workspace = world.workspace();
+        world.set_parent(part, Some(workspace)).unwrap();
+        part
+    };
+    let near = block(&mut world, 0.0);
+    let far = block(&mut world, 1000.0);
+    let height = |world: &World, part| {
+        world
+            .get(part)
+            .and_then(|p| p.property("Position"))
+            .and_then(|v| v.as_vector3())
+            .unwrap()
+            .y
+    };
+    let mut physics = Physics::new();
+    physics.set_far_sleep(Some((vec![Vector3::default()], 100.0)));
+    for _ in 0..30 {
+        physics.step(&mut world, 1.0 / 60.0);
+    }
+    assert!(height(&world, near) < 50.0, "the near part falls");
+    assert_eq!(height(&world, far), 50.0, "the far part sleeps");
+
+    // A focus comes near: it wakes and falls.
+    physics.set_far_sleep(Some((vec![Vector3::new(1000.0, 0.0, 0.0)], 100.0)));
+    for _ in 0..30 {
+        physics.step(&mut world, 1.0 / 60.0);
+    }
+    assert!(height(&world, far) < 50.0, "woken, it falls");
+
+    // With streaming off every part simulates, whatever is far.
+    physics.set_far_sleep(None);
+    let before = height(&world, near);
+    for _ in 0..10 {
+        physics.step(&mut world, 1.0 / 60.0);
+    }
+    assert!(height(&world, near) < before);
+}

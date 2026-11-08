@@ -918,6 +918,8 @@ pub(super) struct ScenePipeline {
     /// Bytes of textures and of meshes on the GPU.
     pub(super) texture_bytes: GpuBytes,
     pub(super) mesh_bytes: GpuBytes,
+    /// While streaming: the thread that uploads what comes into range.
+    pub(super) uploader: Option<super::uploads::Uploader>,
 }
 
 /// What a frame drew, for [`RenderStats`].

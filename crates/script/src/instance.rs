@@ -3,7 +3,7 @@
 //! Lua while scripts run (see `with_world` in `lib.rs`).
 
 use axcenity_audio::SoundAction;
-use axcenity_core::{ClassName, INSTANCE_EVENTS, InstanceId, Parameter, Value, World};
+use axcenity_core::{ClassName, EnumItem, INSTANCE_EVENTS, InstanceId, Parameter, Value, World};
 use mlua::{
     AppDataRef, AppDataRefMut, FromLua, Function, IntoLua, Lua, MetaMethod, UserData,
     UserDataMethods,
@@ -143,6 +143,22 @@ pub(crate) fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Va
         return crate::humanoid::get(lua, id, key);
     }
     let world = world(lua)?;
+    // Both work on something that's not on this device (Phase 80), so
+    // scripts can handle parts that aren't there.
+    if key == "StreamingState" {
+        let out = crate::network::is_streamed_out(lua, id, world.contains(id));
+        let item = if out { "StreamedOut" } else { "StreamedIn" };
+        return value_to_lua(
+            lua,
+            &Value::EnumItem(EnumItem {
+                enum_name: "StreamingState".to_owned(),
+                item: item.to_owned(),
+            }),
+        );
+    }
+    if key == "StreamedIn" {
+        return LuaSignal::named(Owner::Instance(id), "StreamedIn").into_lua(lua);
+    }
     let instance = world.get(id).ok_or_else(destroyed)?;
     match key {
         "Name" => return instance.name().into_lua(lua),
@@ -284,6 +300,7 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
                 .map_err(|err| mlua::Error::runtime(format!("can't set Parent: {err}")))
         }
         "ClassName" => Err(mlua::Error::runtime("ClassName can't be changed")),
+        "StreamingState" => Err(mlua::Error::runtime("StreamingState can't be changed")),
         "CFrame"
             if world(lua)?
                 .get(id)

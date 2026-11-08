@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
+use axcenity_core::streaming::Settings;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_script::{ConsoleRun, LanGame, NetworkRequest, ScriptRuntime, Side};
 
@@ -20,8 +21,9 @@ use crate::motion::{MOTION_BUDGET, Motion, MotionSender, Smoother};
 use crate::ownership::{
     CharacterCheck, OWNED_TAG, Owned, OwnedSender, character_of, character_parts,
 };
-use crate::replicate::{LevelState, Replicator, Update, apply, replicated_parts};
+use crate::replicate::{LevelState, Replicator, Update, apply};
 use crate::session::{Host, HostSettings, Join, SessionEvent};
+use crate::streaming::{PeerStream, Streams};
 use crate::transport::{Client, Conditions, LinkStats, Server};
 use crate::wire::{WireKind, WireMessage};
 use crate::{DEFAULT_PORT, DISCOVERY_PORT};
@@ -102,6 +104,18 @@ pub struct Network {
     /// Why the player on this device was kicked (`Player:Kick`), for the
     /// host to end the game with.
     kicked: Option<String>,
+    /// Hosting: what each player has of the world, while streaming is on
+    /// (Phase 80).
+    streams: Streams,
+    /// `RequestStreamAroundAsync` calls this host's own scripts made for
+    /// other players: each player's id and the request's number.
+    script_requests: BTreeSet<(u32, u64)>,
+    /// Requests whose regions have been sent, for the next receive to
+    /// answer (the scripts wait, and `send` can't resume them).
+    finished_requests: Vec<u64>,
+    /// `RequestStreamAroundAsync` calls for the player on this device, for
+    /// the host to load around (see [`take_viewer_requests`](Self::take_viewer_requests)).
+    viewer_requests: Vec<(u64, Vector3)>,
 }
 
 impl Network {
@@ -130,7 +144,33 @@ impl Network {
             owned_sender: OwnedSender::default(),
             running: false,
             kicked: None,
+            streams: Streams::default(),
+            script_requests: BTreeSet::new(),
+            finished_requests: Vec::new(),
+            viewer_requests: Vec::new(),
         }
+    }
+
+    /// `RequestStreamAroundAsync` calls for the player on this device,
+    /// each a request and where: the host loads around there, then calls
+    /// `ScriptRuntime::finish_stream_around`.
+    pub fn take_viewer_requests(&mut self) -> Vec<(u64, Vector3)> {
+        std::mem::take(&mut self.viewer_requests)
+    }
+
+    /// Hosting: where each joined player's character is, so physics stays
+    /// awake around them while streaming (Phase 80).
+    pub fn player_focuses(&self, world: &World) -> Vec<Vector3> {
+        self.players
+            .values()
+            .filter_map(|&player| character_position(world, player))
+            .collect()
+    }
+
+    /// What each joined player has, while streaming is on (tests and the
+    /// Profiler).
+    pub fn streams(&self) -> &Streams {
+        &self.streams
     }
 
     /// Why the player on this device was kicked, once: the host ends the
@@ -452,6 +492,9 @@ impl Network {
         self.motion.clear();
         self.sent_levels = None;
         self.smoother = Smoother::default();
+        self.streams.clear();
+        self.script_requests.clear();
+        self.finished_requests.clear();
         self.checks.clear();
         self.owned_by.clear();
         self.owned.clear();
@@ -499,6 +542,9 @@ impl Network {
         if scripts.is_client_only() && matches!(self.session, Session::Joined(_)) {
             self.smoother.step(world, self.seconds);
         }
+        for request in std::mem::take(&mut self.finished_requests) {
+            scripts.finish_stream_around(world, request);
+        }
         if let (Some(answerer), Session::Hosting(host)) = (&self.answerer, &self.session) {
             let settings = host.settings();
             answerer.answer(&HostInfo {
@@ -529,13 +575,52 @@ impl Network {
             Session::Offline => {}
             Session::Hosting(host) => {
                 let levels = level_state(scripts);
-                let mut update = self.replicator.frame(world);
+                // With nobody to send it to there's nothing to compare yet.
+                let mut update = if self.players.is_empty() {
+                    Update::default()
+                } else {
+                    self.replicator.frame(world)
+                };
                 update.time = self.clock;
                 if levels != self.sent_levels {
                     update.levels.clone_from(&levels);
                     self.sent_levels.clone_from(&levels);
                 }
-                if !update.is_empty() {
+                // Streaming (Phase 80): each player gets their share of
+                // this, and what's come into range and left it.
+                let settings = Settings::of(world);
+                let streaming = settings.is_some() || self.streams.is_active();
+                if streaming {
+                    let tick = self.streams.frame(world, self.seconds);
+                    for (&peer, &player) in &self.players {
+                        if self.need_snapshot.contains(&peer) {
+                            continue;
+                        }
+                        let character = character_position(world, player);
+                        let owned = self.owned_by.get(&peer).cloned().unwrap_or_default();
+                        let result = self.streams.for_peer(
+                            world,
+                            settings.as_ref(),
+                            peer,
+                            character,
+                            &owned,
+                            &update,
+                            tick,
+                            self.clock,
+                        );
+                        for mut update in result.updates {
+                            update.time = self.clock;
+                            host.send_to(peer, &Message::Update { update });
+                        }
+                        for request in result.answered {
+                            if self.script_requests.remove(&(peer, request)) {
+                                self.finished_requests.push(request);
+                            } else {
+                                host.send_to(peer, &Message::StreamedAround { request });
+                            }
+                        }
+                    }
+                } else if !update.is_empty() {
                     let message = Message::Update { update };
                     for &peer in self.players.keys() {
                         if !self.need_snapshot.contains(&peer) {
@@ -543,7 +628,11 @@ impl Network {
                         }
                     }
                 }
-                let parts = replicated_parts(world);
+                let parts = if streaming {
+                    Vec::new()
+                } else {
+                    self.replicator.parts(world)
+                };
                 // Who moves what (Phase 66): each player their character,
                 // and the assemblies the server gives them.
                 let owned = scripts.owned_parts(world);
@@ -570,7 +659,20 @@ impl Network {
                     let Some(&you) = self.players.get(&peer) else {
                         continue;
                     };
-                    let mut update = self.replicator.snapshot(world);
+                    let mut update = if let Some(settings) = &settings {
+                        let owned = self.owned_by.get(&peer).cloned().unwrap_or_default();
+                        let character = character_position(world, you);
+                        self.streams
+                            .start_peer(world, settings, peer, character, &owned);
+                        let streams = &self.streams;
+                        let mut update = self
+                            .replicator
+                            .snapshot_of(world, |id| streams.snapshot_has(peer, id));
+                        update.streamed_out = self.streams.out_of(peer);
+                        update
+                    } else {
+                        self.replicator.snapshot(world)
+                    };
                     update.time = self.clock;
                     update.levels.clone_from(&levels);
                     host.send_to(
@@ -580,8 +682,12 @@ impl Network {
                             update,
                         },
                     );
+                    let theirs = self
+                        .streams
+                        .of(peer)
+                        .map_or(parts.as_slice(), PeerStream::parts);
                     self.motion
-                        .insert(peer, MotionSender::new(world, &parts, self.motion_budget));
+                        .insert(peer, MotionSender::new(world, theirs, self.motion_budget));
                 }
                 // Then each player's share of the parts that moved.
                 for (&peer, sender) in &mut self.motion {
@@ -593,8 +699,16 @@ impl Network {
                     let mut theirs: BTreeSet<InstanceId> =
                         character_parts(world, player).into_iter().collect();
                     theirs.extend(self.owned_by.get(&peer).into_iter().flatten().copied());
-                    let (packets, settled) =
-                        sender.frame(world, &parts, focus, &theirs, self.seconds, self.clock);
+                    let (packets, settled) = sender.frame(
+                        world,
+                        self.streams
+                            .of(peer)
+                            .map_or(parts.as_slice(), PeerStream::parts),
+                        focus,
+                        &theirs,
+                        self.seconds,
+                        self.clock,
+                    );
                     if !settled.is_empty() {
                         let update = Update {
                             ops: settled,
@@ -665,6 +779,14 @@ impl Network {
                 self.disconnect(world, scripts);
                 Ok(())
             }
+            NetworkRequest::StreamAround {
+                player,
+                position,
+                request,
+            } => {
+                self.stream_around(world, scripts, player, position, request);
+                Ok(())
+            }
             NetworkRequest::FindLanGames => {
                 if self.search.is_none() {
                     match LanSearch::start(self.discovery_port, &self.game.name) {
@@ -712,6 +834,7 @@ impl Network {
             }
             SessionEvent::Left(id) => {
                 self.need_snapshot.remove(&id);
+                self.streams.remove(id);
                 if let Some(player) = self.players.remove(&id) {
                     if self.is_hosting() {
                         let name = world
@@ -739,6 +862,9 @@ impl Network {
                     let applied = apply(world, &update);
                     for id in applied.placed {
                         self.smoother.settle(id, update.time);
+                    }
+                    if !applied.streamed_out.is_empty() || !applied.streamed_in.is_empty() {
+                        scripts.note_streaming(world, &applied.streamed_out, &applied.streamed_in);
                     }
                     if let Some(levels) = &update.levels {
                         follow_levels(scripts, levels, true);
@@ -822,6 +948,19 @@ impl Network {
                         .push("The server moved your character back.".to_owned());
                 }
             }
+            SessionEvent::StreamAround {
+                from,
+                request,
+                position,
+            } => {
+                if self.players.contains_key(&from) {
+                    let [x, y, z] = position;
+                    self.stream_around_for_peer(world, from, Vector3::new(x, y, z), request, false);
+                }
+            }
+            SessionEvent::StreamedAround(request) => {
+                scripts.finish_stream_around(world, request);
+            }
             SessionEvent::Failed(reason) => {
                 self.session = Session::Offline;
                 self.remove_players(world, scripts);
@@ -844,7 +983,7 @@ impl Network {
         update: &Update,
     ) {
         let mut replica = world.empty_replica();
-        apply(&mut replica, update);
+        let applied = apply(&mut replica, update);
         self.smoother = Smoother::default();
         if let Some(levels) = &update.levels {
             follow_levels(scripts, levels, false);
@@ -864,6 +1003,7 @@ impl Network {
             }
         }
         scripts.become_client(world, replica, you);
+        scripts.note_streaming(world, &applied.streamed_out, &[]);
         let mut modules_first = Vec::new();
         for class in [ClassName::ModuleScript, ClassName::LocalScript] {
             for code in &self.client_scripts {
@@ -886,6 +1026,69 @@ impl Network {
             "Following the server's world ({} Instances).",
             update.ops.len()
         ));
+    }
+
+    /// A script's `RequestStreamAroundAsync` for `player`, once its host
+    /// has it: another device's player here, this device's player to the
+    /// server, or to the host's drawing for a player on this device.
+    fn stream_around(
+        &mut self,
+        world: &World,
+        scripts: &mut ScriptRuntime,
+        player: InstanceId,
+        position: Vector3,
+        request: u64,
+    ) {
+        if Settings::of(world).is_none() {
+            // Nothing streams: it's all here already.
+            self.finished_requests.push(request);
+            return;
+        }
+        if let Session::Joined(join) = &mut self.session {
+            if scripts.local_player() == Some(player) {
+                join.send(&Message::StreamAround {
+                    request,
+                    position: [position.x, position.y, position.z],
+                });
+            } else {
+                self.finished_requests.push(request);
+            }
+            return;
+        }
+        let peer = self
+            .players
+            .iter()
+            .find(|&(_, &p)| p == player)
+            .map(|(&peer, _)| peer);
+        match (peer, self.is_hosting()) {
+            (Some(peer), true) => {
+                self.stream_around_for_peer(world, peer, position, request, true);
+            }
+            _ => self.viewer_requests.push((request, position)),
+        }
+    }
+
+    fn stream_around_for_peer(
+        &mut self,
+        world: &World,
+        peer: u32,
+        position: Vector3,
+        request: u64,
+        from_script: bool,
+    ) {
+        if Settings::of(world).is_none() {
+            if from_script {
+                self.finished_requests.push(request);
+            } else if let Session::Hosting(host) = &mut self.session {
+                host.send_to(peer, &Message::StreamedAround { request });
+            }
+            return;
+        }
+        if from_script {
+            self.script_requests.insert((peer, request));
+        }
+        self.streams
+            .request_region(peer, position, request, self.clock);
     }
 
     /// A remote message arrived. On the host it's from player `from`, so

@@ -56,6 +56,8 @@ const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
 /// After a long pause (such as dragging the window), don't jump the camera
 /// by the whole pause; treat the frame as at most this long.
 const MAX_FRAME_SECONDS: f32 = 0.1;
+/// Longest a `RequestStreamAroundAsync` waits for its region to be on the GPU.
+const REGION_WAIT_SECONDS: f64 = 5.0;
 /// Touchpads scroll in pixels; this many is one mouse wheel notch.
 const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
@@ -584,6 +586,9 @@ struct App {
     particles: axcenity_scene::Particles,
     /// Terrains' chunk meshes and weights, kept between frames.
     terrain: axcenity_scene::TerrainCache,
+    /// `RequestStreamAroundAsync` calls waiting for their region: each
+    /// request, and how many seconds it may still wait (Phase 80).
+    region_waits: Vec<(u64, f64)>,
     /// Plays the Animators (state machines, AnimationTracks and played
     /// Animations), posing skeletons and setting keyed properties.
     animators: Animators,
@@ -688,6 +693,7 @@ impl App {
             agents: Agents::default(),
             particles: axcenity_scene::Particles::new(),
             terrain: axcenity_scene::TerrainCache::new(),
+            region_waits: Vec::new(),
             animators,
             assets,
             window: None,
@@ -812,6 +818,49 @@ impl App {
 
     fn shown_camera(&self) -> axcenity_render::Camera {
         self.shown_view().render_camera()
+    }
+
+    /// Far from the camera and every other player, physics sleeps while
+    /// streaming is on (Phase 80).
+    fn set_far_physics_sleep(&mut self) {
+        let far = axcenity_core::streaming::Settings::of(&self.world).map(|settings| {
+            let at = self.shown_camera().position;
+            let mut focuses = vec![axcenity_core::Vector3::new(at.x, at.y, at.z)];
+            focuses.extend(self.network.player_focuses(&self.world));
+            (focuses, settings.unload_radius())
+        });
+        self.physics.set_far_sleep(far);
+    }
+
+    /// World streaming on this screen (Phase 80): what's in range of the
+    /// camera, regions scripts asked for, and answering those once what's
+    /// around them is on the GPU.
+    fn step_streaming(&mut self, focus: Vec3, seconds: f64) {
+        self.terrain.streaming.step(&self.world, focus, seconds);
+        let on = self.terrain.streaming.settings().is_some();
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_background_uploads(on);
+        }
+        for (request, position) in self.network.take_viewer_requests() {
+            let at = Vec3::new(position.x, position.y, position.z);
+            self.terrain.streaming.hold_region(at);
+            self.region_waits.push((request, REGION_WAIT_SECONDS));
+        }
+        let uploads = self.renderer.as_ref().map_or(0, |r| r.pending_uploads());
+        let loaded = self.terrain.pending_chunks() == 0 && uploads == 0;
+        let mut waits = std::mem::take(&mut self.region_waits);
+        waits.retain_mut(|(request, left)| {
+            // A frame to ask for what it needs, then until it's all there.
+            *left -= seconds;
+            let ready = *left < REGION_WAIT_SECONDS - 2.0 * seconds && loaded;
+            if ready || *left <= 0.0 {
+                self.scripts.finish_stream_around(&mut self.world, *request);
+                false
+            } else {
+                true
+            }
+        });
+        self.region_waits = waits;
     }
 
     /// Frame step 1's camera, after the character controllers: the fly
@@ -1505,6 +1554,7 @@ impl ApplicationHandler for App {
                 // Parts another device moves are held still here.
                 let held = self.network.held_parts(&self.world, &self.scripts);
                 self.physics.set_held(held);
+                self.set_far_physics_sleep();
                 if !simulates && self.network.simulates_physics() {
                     // An assembly the server gave this device (a car it
                     // drives) is simulated here; the server does the rest.
@@ -1613,6 +1663,7 @@ impl ApplicationHandler for App {
                 let render_camera = self.shown_camera();
                 let heard = listener_of_view(self.shown_view());
                 self.audio.set_listener(heard);
+                self.step_streaming(render_camera.position, f64::from(seconds));
 
                 let (mut draw_list, ui_layout) =
                     axcenity_scene::build_draw_list_with_ui_interaction(

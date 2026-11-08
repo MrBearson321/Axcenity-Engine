@@ -292,6 +292,13 @@ impl Writer {
                 "NetworkService.ConnectionFailed:Connect(function(reason)".to_owned(),
                 body,
             ),
+            BlockKind::WhenStreamedIn {
+                target: instance,
+                body,
+            } => (
+                format!("{}.StreamedIn:Connect(function()", target(instance)?),
+                body,
+            ),
             BlockKind::WhenStateChanged { animator, body } => (
                 format!(
                     "{}.StateChanged:Connect(function(state, previous)",
@@ -744,6 +751,11 @@ impl Writer {
                 let reason = self.expression(reason)?;
                 self.line(format!("{player}:Kick({reason})"));
             }
+            BlockKind::RequestStreamAround { player, position } => {
+                let player = self.expression(player)?;
+                let position = self.expression(position)?;
+                self.line(format!("{player}:RequestStreamAroundAsync({position})"));
+            }
             BlockKind::SetLanguage { language } => {
                 let language = self.expression(language)?;
                 self.line(format!("LocalizationService.Language = {language}"));
@@ -1003,6 +1015,7 @@ impl Writer {
             BlockKind::Code { code } => self.code(code),
             BlockKind::WhenStarted { .. }
             | BlockKind::WhenTouched { .. }
+            | BlockKind::WhenStreamedIn { .. }
             | BlockKind::WhenKeyPressed { .. }
             | BlockKind::WhenClicked { .. }
             | BlockKind::WhenMouseEnters { .. }
@@ -1174,6 +1187,10 @@ impl Writer {
             Expression::AnimatorLayerWeight { animator, layer } => {
                 format!("{}:GetLayerWeight({})", target(animator)?, quote(layer))
             }
+            Expression::IsStreamedIn { value } => format!(
+                "{}.StreamingState == Enum.StreamingState.StreamedIn",
+                self.receiver(value)?
+            ),
             Expression::IsA { value, class } => {
                 format!("{}:IsA({})", self.receiver(value)?, quote(class))
             }

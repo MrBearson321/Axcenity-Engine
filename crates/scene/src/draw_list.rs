@@ -455,7 +455,9 @@ pub fn build_draw_list_posed(
         .descendants(world.workspace())
         .into_iter()
         // A Tool put away in an Inventory isn't drawn (Phase 45), nor are
-        // the parts kept inside a UnionOperation (Phase 50).
+        // the parts kept inside a UnionOperation (Phase 50), nor what
+        // streaming has unloaded (Phase 80).
+        .filter(|&id| !terrain.streaming.is_hidden(id))
         .filter(|&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(|id| Some((id, world.get(id)?)))
     {

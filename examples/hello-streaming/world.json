@@ -1,0 +1,31 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "properties": {
+      "StreamingEnabled": true,
+      "StreamingMinRadius": 64,
+      "StreamingTargetRadius": 400
+    },
+    "children": [
+      {
+        "class": "Part",
+        "name": "Ground",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.42, 0.62, 0.36],
+          "Position": [0, -1, 0],
+          "Size": [4200, 2, 4200]
+        }
+      },
+      {
+        "class": "SpawnLocation",
+        "name": "Spawn",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, 0.5, 0],
+          "Size": [12, 1, 12]
+        }
+      }
+    ]
+  }
+}

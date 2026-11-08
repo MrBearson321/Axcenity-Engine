@@ -95,6 +95,7 @@ fn corners(Bounds { min, max }: Bounds) -> [Vec3; 8] {
 }
 
 /// The bindings skinning adds to the scene's pipelines.
+#[derive(Clone)]
 pub(super) struct Skinning {
     /// Group 2: a mesh's corners' joints and weights.
     pub(super) layout: wgpu::BindGroupLayout,

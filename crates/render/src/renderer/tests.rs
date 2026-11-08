@@ -28,6 +28,7 @@ mod reflection_probes;
 mod shading;
 mod shadows;
 mod skinning;
+mod streaming;
 mod surface_shaders;
 mod temporal;
 mod texture_budget;

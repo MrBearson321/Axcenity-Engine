@@ -931,6 +931,7 @@ impl EditorApp {
                             view_cube: self.view_cube,
                             overlays: self.overlays,
                             view_mode: self.view_mode,
+                            playing: self.play.is_some(),
                             debug_rays: &debug_rays,
                             nav_mesh: self.nav_mesh.as_ref().map(|cache| &cache.mesh),
                             agent_paths: &agent_paths,

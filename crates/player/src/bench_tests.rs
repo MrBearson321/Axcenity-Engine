@@ -656,3 +656,90 @@ print(spawned)
         );
     }
 }
+
+/// World streaming's frame budget (Phase 80): 50,000 parts over 4 km as
+/// Models of 8, with streaming on, a character-sized camera in the middle
+/// and a joined player's server cost (network send) counted.
+#[test]
+#[ignore = "benchmark: run with --release -- --ignored bench_"]
+fn bench_50000_parts_streaming() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    world
+        .set_property(workspace, "StreamingEnabled", Value::Bool(true))
+        .unwrap();
+    world
+        .set_property(workspace, "StreamingTargetRadius", Value::Number(512.0))
+        .unwrap();
+    let mut random = Random(7);
+    let mut model = None;
+    let mut town = (0.0, 0.0);
+    for index in 0..50_000 {
+        // Each Model is a little group of parts in its own place.
+        if index % 8 == 0 {
+            let id = world.create(ClassName::Model).unwrap();
+            world.set_parent(id, Some(workspace)).unwrap();
+            model = Some(id);
+            town = (
+                random.next() * 4000.0 - 2000.0,
+                random.next() * 4000.0 - 2000.0,
+            );
+        }
+        let part = world.create(ClassName::Part).unwrap();
+        for (name, value) in [
+            ("Anchored", Value::Bool(true)),
+            (
+                "Position",
+                vector(
+                    town.0 + random.next() * 40.0,
+                    2.0,
+                    town.1 + random.next() * 40.0,
+                ),
+            ),
+            ("Size", vector(4.0, 4.0, 4.0)),
+        ] {
+            world.set_property(part, name, value).unwrap();
+        }
+        world.set_parent(part, model).unwrap();
+    }
+    let assets = Assets::default();
+    let mut physics = axcenity_physics::Physics::with_assets(assets.clone());
+    let mut terrain = axcenity_scene::TerrainCache::new();
+    let poses = axcenity_scene::Poses::new();
+    let camera = camera(Vec3::new(0.0, 8.0, 0.0), Vec3::new(30.0, 4.0, 30.0));
+    let mut replicator = axcenity_net::Replicator::default();
+    let mut streams = axcenity_net::streaming::Streams::default();
+    let settings = axcenity_core::streaming::Settings::of(&world).unwrap();
+    streams.start_peer(
+        &world,
+        &settings,
+        1,
+        Some(Vector3::default()),
+        &Default::default(),
+    );
+    run("bench_50000_parts_streaming", |steps| {
+        steps.time("physics.step", || {
+            physics.step(&mut world, 1.0 / 60.0);
+        });
+        steps.time("streaming.step", || {
+            terrain.streaming.step(&world, Vec3::ZERO, 1.0 / 60.0);
+        });
+        steps.time("network send", || {
+            let update = replicator.frame(&world);
+            let tick = streams.frame(&world, 1.0 / 60.0);
+            streams.for_peer(
+                &world,
+                Some(&settings),
+                1,
+                Some(Vector3::default()),
+                &Default::default(),
+                &update,
+                tick,
+                0.0,
+            );
+        });
+        steps.time("build_draw_list", || {
+            axcenity_scene::build_draw_list_posed(&world, &assets, camera, &poses, &mut terrain)
+        })
+    });
+}

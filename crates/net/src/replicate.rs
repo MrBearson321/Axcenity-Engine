@@ -19,12 +19,15 @@
 //! properties; each frame's update carries those that changed too, so a
 //! device animates what the server's scripts asked for.
 //!
+//! With streaming on (Phase 80), `streaming` passes each player only their
+//! share of an update, and what comes and goes as they move.
+//!
 //! A replica keeps the server's Instances at their own IDs (see
 //! `World::empty_replica`), so an ID means the same Instance on every
 //! computer. A player's own changes to their replica stay theirs: the
 //! server only overwrites what it changes itself.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use axcenity_core::{ClassName, InstanceId, LayerWeight, Parameter, Value, World};
 use serde::{Deserialize, Serialize};
@@ -99,6 +102,13 @@ pub struct Update {
     /// a snapshot), applied after the Instances.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub animators: Vec<WireAnimator>,
+    /// Streaming (Phase 80): units the player no longer has (each a loose
+    /// part or a Model), whose contents this update takes off their device.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub streamed_out: Vec<u64>,
+    /// Streaming: units whose contents this update brought.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub streamed_in: Vec<u64>,
 }
 
 /// What changed of an Animator's live state: parameters by name, and layer
@@ -198,12 +208,19 @@ pub struct LevelState {
 
 impl Update {
     pub fn is_empty(&self) -> bool {
-        self.ops.is_empty() && self.levels.is_none() && self.animators.is_empty()
+        self.ops.is_empty()
+            && self.levels.is_none()
+            && self.animators.is_empty()
+            && self.streamed_out.is_empty()
+            && self.streamed_in.is_empty()
     }
 }
 
 /// An Instance as it was last sent.
 struct Sent {
+    /// The Instance's revision when this was made: the same revision
+    /// means nothing below has changed.
+    revision: u64,
     name: String,
     parent: Option<InstanceId>,
     properties: Vec<(&'static str, Value)>,
@@ -217,6 +234,7 @@ impl Sent {
         let instance = world.get(id)?;
         let part = instance.class().is_base_part();
         Some(Sent {
+            revision: instance.revision(),
             name: instance.name().to_owned(),
             parent: instance.parent(),
             properties: instance
@@ -294,7 +312,7 @@ fn properties(instance: &axcenity_core::Instance) -> Vec<(String, WireValue)> {
         .collect()
 }
 
-fn create(world: &World, id: InstanceId) -> Option<Op> {
+pub(crate) fn create(world: &World, id: InstanceId) -> Option<Op> {
     let instance = world.get(id)?;
     Some(Op::Create(WireInstance {
         id: id.to_bits(),
@@ -315,8 +333,15 @@ fn create(world: &World, id: InstanceId) -> Option<Op> {
 /// last sent.
 #[derive(Default)]
 pub struct Replicator {
-    sent: BTreeMap<InstanceId, Sent>,
+    sent: HashMap<InstanceId, Sent>,
     animators: BTreeMap<InstanceId, SentAnimator>,
+    /// What's sent, as `replicated` lists it, for the tree as it was at
+    /// `structure` (the tree rarely changes, and walking it is most of the
+    /// cost in a big world).
+    services: Vec<InstanceId>,
+    inside: Vec<InstanceId>,
+    animator_ids: Vec<InstanceId>,
+    structure: Option<u64>,
 }
 
 /// The Animators players get that have live state.
@@ -336,6 +361,21 @@ impl Replicator {
     /// Everything players get, for one who just joined. Call it after
     /// [`frame`](Self::frame), so it matches what the others have.
     pub fn snapshot(&self, world: &World) -> Update {
+        self.snapshot_of(world, |_| true)
+    }
+
+    /// The BaseParts players get, as of the last [`frame`](Self::frame).
+    pub fn parts(&self, world: &World) -> Vec<InstanceId> {
+        self.inside
+            .iter()
+            .copied()
+            .filter(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
+            .collect()
+    }
+
+    /// A snapshot with only the Instances `keep` says (streaming: what
+    /// the player starts with).
+    pub fn snapshot_of(&self, world: &World, keep: impl Fn(InstanceId) -> bool) -> Update {
         let (services, inside) = replicated(world);
         let mut ops = Vec::new();
         for service in services {
@@ -347,9 +387,15 @@ impl Replicator {
                 }));
             }
         }
-        ops.extend(inside.iter().filter_map(|&id| create(world, id)));
+        ops.extend(
+            inside
+                .iter()
+                .filter(|&&id| keep(id))
+                .filter_map(|&id| create(world, id)),
+        );
         let animators = animators(world, &inside)
             .into_iter()
+            .filter(|(id, _)| keep(*id))
             .map(|(id, now)| now.changes(world, id, None))
             .filter(|wire| !wire.parameters.is_empty() || !wire.layers.is_empty())
             .collect();
@@ -363,9 +409,29 @@ impl Replicator {
     /// What changed since the last call, for the players who have the
     /// world as it was then.
     pub fn frame(&mut self, world: &World) -> Update {
-        let (services, inside) = replicated(world);
+        let structure = Some(world.structure_version());
+        let tree_changed = self.structure != structure;
+        if tree_changed {
+            self.structure = structure;
+            let (services, inside) = replicated(world);
+            self.animator_ids = inside
+                .iter()
+                .copied()
+                .filter(|&id| {
+                    world
+                        .get(id)
+                        .is_some_and(|i| i.class() == ClassName::Animator)
+                })
+                .collect();
+            self.services = services;
+            self.inside = inside;
+        }
         let mut wire_animators = Vec::new();
-        let now_animators = animators(world, &inside);
+        let now_animators: Vec<(InstanceId, SentAnimator)> = self
+            .animator_ids
+            .iter()
+            .filter_map(|&id| Some((id, SentAnimator::of(world, id)?)))
+            .collect();
         for (id, now) in &now_animators {
             let wire = now.changes(world, *id, self.animators.get(id));
             if !wire.parameters.is_empty() || !wire.layers.is_empty() {
@@ -375,8 +441,25 @@ impl Replicator {
         self.animators = now_animators.into_iter().collect();
         let mut ops = Vec::new();
         let mut seen = BTreeSet::new();
-        for id in services.into_iter().chain(inside) {
-            seen.insert(id);
+        let (services, inside) = (
+            std::mem::take(&mut self.services),
+            std::mem::take(&mut self.inside),
+        );
+        for &id in services.iter().chain(&inside) {
+            if tree_changed {
+                seen.insert(id);
+            }
+            let Some(instance) = world.get(id) else {
+                continue;
+            };
+            // Nothing about it changed: comparing would find nothing.
+            if self
+                .sent
+                .get(&id)
+                .is_some_and(|before| before.revision == instance.revision())
+            {
+                continue;
+            }
             let Some(now) = Sent::of(world, id) else {
                 continue;
             };
@@ -397,15 +480,20 @@ impl Replicator {
             }
             self.sent.insert(id, now);
         }
-        let gone: Vec<InstanceId> = self
-            .sent
-            .keys()
-            .copied()
-            .filter(|id| !seen.contains(id))
-            .collect();
-        for id in gone {
-            self.sent.remove(&id);
-            ops.push(Op::Destroy { id: id.to_bits() });
+        self.services = services;
+        self.inside = inside;
+        if tree_changed {
+            let mut gone: Vec<InstanceId> = self
+                .sent
+                .keys()
+                .copied()
+                .filter(|id| !seen.contains(id))
+                .collect();
+            gone.sort_unstable();
+            for id in gone {
+                self.sent.remove(&id);
+                ops.push(Op::Destroy { id: id.to_bits() });
+            }
         }
         Update {
             ops,
@@ -476,6 +564,11 @@ pub struct Applied {
     /// Parts given their exact place (made, or settled), so motion sent
     /// before it is stale.
     pub placed: Vec<InstanceId>,
+    /// Streaming (Phase 80): what was taken off this device, each Instance
+    /// (and the Models that stay, now empty), for `StreamingState`.
+    pub streamed_out: Vec<InstanceId>,
+    /// Streaming: the Models and parts that arrived, for `StreamedIn`.
+    pub streamed_in: Vec<InstanceId>,
 }
 
 /// Applies `update` to a replica. Instance properties are set last, so
@@ -567,6 +660,32 @@ pub fn apply(world: &mut World, update: &Update) -> Applied {
     }
     for (id, name, value) in references {
         let _ = world.set_property(id, &name, value);
+    }
+    for &root in &update.streamed_out {
+        let root = InstanceId::from_bits(root);
+        let Some(instance) = world.get(root) else {
+            continue;
+        };
+        applied.streamed_out.push(root);
+        let removed: Vec<InstanceId> = if instance.class().is_base_part() {
+            vec![root]
+        } else {
+            instance.children().to_vec()
+        };
+        for id in removed {
+            applied.streamed_out.extend(world.descendants(id));
+            if id != root {
+                applied.streamed_out.push(id);
+            }
+            let _ = world.destroy(id);
+        }
+    }
+    for &root in &update.streamed_in {
+        let root = InstanceId::from_bits(root);
+        if world.contains(root) {
+            applied.streamed_in.push(root);
+            applied.streamed_in.extend(world.descendants(root));
+        }
     }
     for wire in &update.animators {
         let Some(live) = world.animator_mut(InstanceId::from_bits(wire.id)) else {

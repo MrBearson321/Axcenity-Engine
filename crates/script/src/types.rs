@@ -540,10 +540,12 @@ pub enum EnumType {
     SplineFollowMode,
     EffectOperation,
     NormalId,
+    ModelStreamingMode,
+    StreamingState,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 38] = [
+    pub const ALL: [EnumType; 40] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -582,6 +584,8 @@ impl EnumType {
         EnumType::SplineFollowMode,
         EnumType::EffectOperation,
         EnumType::NormalId,
+        EnumType::ModelStreamingMode,
+        EnumType::StreamingState,
     ];
 
     pub fn name(self) -> &'static str {
@@ -624,6 +628,8 @@ impl EnumType {
             EnumType::SplineFollowMode => "SplineFollowMode",
             EnumType::EffectOperation => "EffectOperation",
             EnumType::NormalId => "NormalId",
+            EnumType::ModelStreamingMode => "ModelStreamingMode",
+            EnumType::StreamingState => "StreamingState",
         }
     }
 
@@ -678,6 +684,10 @@ impl EnumType {
             EnumType::EffectOperation => vec!["Add", "Multiply"],
             // A part's face: a Decal's `Face` (Phase 75).
             EnumType::NormalId => vec!["Right", "Top", "Back", "Left", "Bottom", "Front"],
+            // How a Model streams, and whether something is on this device
+            // (Phase 80).
+            EnumType::ModelStreamingMode => axcenity_core::streaming::STREAMING_MODES.to_vec(),
+            EnumType::StreamingState => vec!["StreamedIn", "StreamedOut"],
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -817,7 +827,9 @@ impl LuaEnumItem {
             | EnumType::SplineTangentMode
             | EnumType::SplineFollowMode
             | EnumType::EffectOperation
-            | EnumType::NormalId => None,
+            | EnumType::NormalId
+            | EnumType::ModelStreamingMode
+            | EnumType::StreamingState => None,
         }
     }
 }

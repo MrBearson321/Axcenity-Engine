@@ -1166,6 +1166,27 @@ declare extern type EnumNormalIdItems with
 	Front: EnumNormalId
 end
 
+--- One choice of `Enum.ModelStreamingMode`.
+declare extern type EnumModelStreamingMode extends EnumItem with
+end
+
+--- The choices of `Enum.ModelStreamingMode`.
+declare extern type EnumModelStreamingModeItems with
+	Default: EnumModelStreamingMode
+	Atomic: EnumModelStreamingMode
+	Persistent: EnumModelStreamingMode
+end
+
+--- One choice of `Enum.StreamingState`.
+declare extern type EnumStreamingState extends EnumItem with
+end
+
+--- The choices of `Enum.StreamingState`.
+declare extern type EnumStreamingStateItems with
+	StreamedIn: EnumStreamingState
+	StreamedOut: EnumStreamingState
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -1206,6 +1227,8 @@ declare extern type EnumLibrary with
 	SplineFollowMode: EnumSplineFollowModeItems
 	EffectOperation: EnumEffectOperationItems
 	NormalId: EnumNormalIdItems
+	ModelStreamingMode: EnumModelStreamingModeItems
+	StreamingState: EnumStreamingStateItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -1232,6 +1255,8 @@ declare extern type Instance with
 	ClassName: string
 	--- The Instance this one is inside, or nil. Setting it moves the Instance.
 	Parent: Instance?
+	--- Whether this Instance is on this device: Enum.StreamingState.StreamedIn, or StreamedOut for one world streaming took away (or a Model whose contents are away). Works on an Instance that isn't there, so it never errors. Read-only.
+	StreamingState: EnumItem
 	--- Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 	Changed: Signal
 	--- Fires when an Instance is put inside this one. The handler gets the child.
@@ -1246,6 +1271,8 @@ declare extern type Instance with
 	AncestryChanged: Signal
 	--- Fires once when `Destroy` is called on this Instance or one of its ancestors, while it can still be read.
 	Destroying: Signal
+	--- Fires on a device when world streaming brings this Instance back, or a Model's contents arrive. Connect to it on a Model that's still away, or a part kept from before it went.
+	StreamedIn: Signal
 	--- Fires when an attribute gets a different value or is removed. The handler gets the attribute's name.
 	AttributeChanged: Signal
 	[string]: any
@@ -1368,6 +1395,12 @@ declare extern type Workspace extends Instance with
 	Gravity: number
 	--- The most decals `workspace:SpawnDecal` keeps at once on each side: 200 by default. Past it, the oldest goes first.
 	MaxSpawnedDecals: number
+	--- On, each device only has what's near it (world streaming): joined players' devices are sent only what's within their radius, and the rest stays off the GPU. Off by default, so a project plays exactly as before.
+	StreamingEnabled: boolean
+	--- Everything nearer than this many studs is always loaded: 64 by default.
+	StreamingMinRadius: number
+	--- Things load out to this many studs, as the network and the machine allow, and unload a bit past it: 1024 by default. Never less than StreamingMinRadius.
+	StreamingTargetRadius: number
 	--- The camera the player sees through. LocalScripts only.
 	CurrentCamera: Camera
 	[string]: any
@@ -2441,12 +2474,16 @@ declare extern type Player extends Instance with
 	function GetMouse(self): Mouse
 	--- Scripts only (Phase 67): takes the player out of the game. Their device's NetworkService.ConnectionFailed fires with `reason` ("You were kicked from the game." without one), and PlayerRemoving fires here. Kicking the player on this device ends the game, with the reason. Scripts only.
 	function Kick(self, reason: string?): ()
+	--- Loads what's around `position` for this player and waits until it's there, before a teleport (world streaming, Phase 80). With streaming off it carries on at once. What's loaded stays for 10 seconds, so teleport soon after: `player:RequestStreamAroundAsync(spot) character:PivotTo(CFrame.new(spot))`.
+	function RequestStreamAroundAsync(self, position: Vector3): ()
 	--- Scripts only: gives the player a new character. The old one (if any) leaves the Workspace, fires CharacterRemoving and is destroyed; a copy of the StarterCharacter stands on one of the player's team's SpawnLocations (or a Neutral one), chosen at random, with a ForceField for its Duration, and CharacterAdded fires. With no SpawnLocation it stands at the origin and Output warns. Scripts only.
 	function LoadCharacter(self): ()
 end
 
 --- Groups the parts of one thing, such as a car or a house.
 declare extern type Model extends Instance with
+	--- How the Model streams. Default: a Model with no Models inside loads and unloads whole, and one with Models inside streams each piece on its own. Atomic: always whole, with the Models inside. Persistent: always on every device.
+	ModelStreamingMode: EnumModelStreamingMode | "Default" | "Atomic" | "Persistent"
 	[string]: any
 	--- Scripts only: puts a copy of the Effect `effect` on this Model and returns it, or adds a stack to the copy already here (up to its MaxStacks) and starts its Duration over. An instant Effect changes at once and returns nil.
 	function ApplyEffect(self, effect: Effect): Effect?

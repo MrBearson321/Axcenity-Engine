@@ -348,6 +348,7 @@ impl ScenePipeline {
             sampler,
             white_texture,
             plain_material,
+            uploader: None,
             custom_meshes: HashMap::new(),
             textures: HashMap::new(),
             full_textures: HashMap::new(),
@@ -1899,6 +1900,7 @@ impl ScenePipeline {
     /// texture budget before the materials using them are bound.
     pub(super) fn upload_new(&mut self, list: &DrawList, draws: &[Draw]) {
         let frame = self.frame;
+        let arrived = self.finish_background_uploads();
         for source in draws.iter().filter_map(Draw::source) {
             match self.custom_meshes.entry(source.key()) {
                 Entry::Occupied(mut cached) => {
@@ -1918,6 +1920,11 @@ impl ScenePipeline {
                     }
                 }
                 Entry::Vacant(slot) => {
+                    if let Some(uploader) = &mut self.uploader {
+                        // Not drawn until its thread is done with it.
+                        uploader.mesh(source);
+                        continue;
+                    }
                     slot.insert(Cached {
                         gpu: upload_custom_mesh(
                             &self.device,
@@ -1938,7 +1945,7 @@ impl ScenePipeline {
         for item in &list.items {
             if let Some(surface) = &item.material.terrain {
                 for weights in &surface.weights {
-                    self.note_texture(weights.as_ref(), frame, true);
+                    self.note_texture(weights, frame, true);
                 }
                 let weights = surface.weights.each_ref().map(|source| {
                     self.full_textures
@@ -1955,15 +1962,15 @@ impl ScenePipeline {
                 );
                 continue;
             }
-            for source in material_textures(item).iter().flatten() {
-                self.note_texture(source.as_ref(), frame, false);
+            for source in material_textures(item).into_iter().flatten() {
+                self.note_texture(source, frame, false);
             }
         }
         for item in &list.ui {
             if let UiDrawItem::Image(image) = item
                 && let Some(source) = &image.texture
             {
-                self.note_texture(source.as_ref(), frame, true);
+                self.note_texture(source, frame, true);
             }
         }
         let emitter_textures = list.particle_emitters.iter().map(|e| &e.look.texture);
@@ -1974,9 +1981,10 @@ impl ScenePipeline {
             .chain(decal_textures)
             .flatten()
         {
-            self.note_texture(source.as_ref(), frame, false);
+            self.note_texture(source, frame, false);
         }
-        let replaced = self.fit_texture_budget(list);
+        let mut replaced = self.fit_texture_budget(list);
+        replaced.extend(arrived);
         if !replaced.is_empty() {
             self.materials.retain(|key, _| {
                 !key.textures
@@ -2093,7 +2101,7 @@ impl ScenePipeline {
     /// Uploads `source` the first time, and marks it drawn this frame. A
     /// `full` texture (a UI image or terrain weights) keeps its full size;
     /// others are sized by the texture quality.
-    pub(super) fn note_texture(&mut self, source: &dyn TextureSource, frame: u64, full: bool) {
+    pub(super) fn note_texture(&mut self, source: &Arc<dyn TextureSource>, frame: u64, full: bool) {
         let (cache, skipped_levels) = if full {
             (&mut self.full_textures, 0)
         } else {
@@ -2105,19 +2113,77 @@ impl ScenePipeline {
         match cache.entry(source.key()) {
             Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
             Entry::Vacant(slot) => {
+                let sizing = (skipped_levels, self.capabilities.max_texture_size);
+                // Terrain weights and UI images are small: done right away.
+                if !full && let Some(uploader) = &mut self.uploader {
+                    uploader.texture(source, sizing);
+                    return;
+                }
                 slot.insert(Cached {
                     gpu: upload_texture(
                         &self.device,
                         &self.queue,
                         &self.texture_bytes,
-                        source,
-                        (skipped_levels, self.capabilities.max_texture_size),
+                        source.as_ref(),
+                        sizing,
                         0,
                     ),
                     last_drawn: frame,
                 });
             }
         }
+    }
+
+    /// See [`Renderer::set_background_uploads`](super::Renderer::set_background_uploads).
+    pub(super) fn set_background_uploads(&mut self, on: bool) {
+        if on && self.uploader.is_none() {
+            self.uploader = Some(super::uploads::Uploader::start(
+                self.device.clone(),
+                self.queue.clone(),
+                (self.mesh_bytes.clone(), self.texture_bytes.clone()),
+                self.skinning.clone(),
+            ));
+        } else if !on {
+            self.uploader = None;
+        }
+    }
+
+    /// How many background uploads are still on their way.
+    pub(super) fn pending_uploads(&self) -> usize {
+        self.uploader
+            .as_ref()
+            .map_or(0, |uploader| uploader.pending())
+    }
+
+    /// Takes in what the background uploads finished, and returns the keys
+    /// of the textures among them: materials that drew white for them are
+    /// made again.
+    fn finish_background_uploads(&mut self) -> Vec<u64> {
+        let Some(uploader) = &mut self.uploader else {
+            return Vec::new();
+        };
+        let (meshes, textures) = uploader.take_finished();
+        let frame = self.frame;
+        for (key, gpu) in meshes {
+            self.custom_meshes.insert(
+                key,
+                Cached {
+                    gpu,
+                    last_drawn: frame,
+                },
+            );
+        }
+        let arrived = textures.iter().map(|(key, _)| *key).collect();
+        for (key, gpu) in textures {
+            self.textures.insert(
+                key,
+                Cached {
+                    gpu,
+                    last_drawn: frame,
+                },
+            );
+        }
+        arrived
     }
 
     /// Frees the callers' meshes, textures and materials that haven't been

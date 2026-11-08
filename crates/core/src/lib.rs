@@ -20,6 +20,7 @@ mod enums;
 pub mod input;
 pub mod prefab;
 pub mod spline;
+pub mod streaming;
 mod strings;
 mod terrain;
 pub mod tool;

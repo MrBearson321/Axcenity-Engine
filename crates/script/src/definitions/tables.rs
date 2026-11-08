@@ -1667,6 +1667,11 @@ pub(super) const INSTANCE_FIELDS: &[Field] = &[
         ty: "Instance?",
         doc: "The Instance this one is inside, or nil. Setting it moves the Instance.",
     },
+    Field {
+        name: "StreamingState",
+        ty: "EnumItem",
+        doc: "Whether this Instance is on this device: Enum.StreamingState.StreamedIn, or StreamedOut for one world streaming took away (or a Model whose contents are away). Works on an Instance that isn't there, so it never errors. Read-only.",
+    },
 ];
 
 pub(super) const INSTANCE_METHODS: &[Function] = &[
@@ -1852,6 +1857,10 @@ pub(super) const INSTANCE_EVENT_DOCS: &[(&str, &str)] = &[
     (
         "Destroying",
         "Fires once when `Destroy` is called on this Instance or one of its ancestors, while it can still be read.",
+    ),
+    (
+        "StreamedIn",
+        "Fires on a device when world streaming brings this Instance back, or a Model's contents arrive. Connect to it on a Model that's still away, or a part kept from before it went.",
     ),
     (
         "AttributeChanged",
@@ -2333,6 +2342,15 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
             name: "Kick",
             doc: "Scripts only (Phase 67): takes the player out of the game. Their device's NetworkService.ConnectionFailed fires with `reason` (\"You were kicked from the game.\" without one), and PlayerRemoving fires here. Kicking the player on this device ends the game, with the reason.",
             params: &[("reason", "string?")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Player,
+        Function {
+            name: "RequestStreamAroundAsync",
+            doc: "Loads what's around `position` for this player and waits until it's there, before a teleport (world streaming, Phase 80). With streaming off it carries on at once. What's loaded stays for 10 seconds, so teleport soon after: `player:RequestStreamAroundAsync(spot) character:PivotTo(CFrame.new(spot))`.",
+            params: &[("position", "Vector3")],
             returns: "()",
         },
     ),

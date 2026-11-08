@@ -7,10 +7,15 @@
 //! its edits, see `core::TerrainData`), or all of them when the layers'
 //! rules change. A changed chunk mesh keeps its key and gets a new
 //! version, so the renderer rewrites its GPU copy in place.
+//!
+//! With world streaming on (Phase 80), chunks out of range are dropped
+//! and chunks that come back in range are built on a background thread,
+//! and drawn once they're ready.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
 
 use axcenity_assets::Assets;
 use axcenity_core::{
@@ -26,6 +31,7 @@ use axcenity_terrain::mesh::{self, ChunkMesh, LOD_LEVELS};
 use axcenity_terrain::{CHUNK_CELLS, Placement};
 
 use crate::draw_list::image_texture;
+use crate::streaming::Streaming;
 
 /// Chunks nearer the camera than this many studs are drawn at full detail;
 /// each doubling of the distance past it halves the detail.
@@ -52,6 +58,14 @@ pub struct TerrainCache {
     /// How terrains are shown.
     pub view: TerrainView,
     pub detail_distance: f32,
+    /// What's in range of the camera (Phase 80). The host calls its
+    /// `step` each frame; drawing leaves out what's hidden.
+    pub streaming: Streaming,
+    /// Builds chunks in the background while streaming, started the first
+    /// time one is needed.
+    chunk_worker: Option<ChunkWorker>,
+    /// Chunks being built, by terrain, chunk and level of detail.
+    pending: HashSet<ChunkId>,
 }
 
 impl Default for TerrainCache {
@@ -61,7 +75,85 @@ impl Default for TerrainCache {
             overrides: HashMap::new(),
             view: TerrainView::Shaded,
             detail_distance: DEFAULT_DETAIL_DISTANCE,
+            streaming: Streaming::default(),
+            chunk_worker: None,
+            pending: HashSet::new(),
         }
+    }
+}
+
+/// Which chunk mesh is being built.
+type ChunkId = (InstanceId, usize, usize, u32);
+
+/// A chunk's mesh and weights to build away from the frame.
+struct ChunkJob {
+    id: InstanceId,
+    uid: u64,
+    cx: usize,
+    cz: usize,
+    lod: u32,
+    version: u64,
+    weights_key: WeightsKey,
+    data: Arc<TerrainData>,
+    placement: Placement,
+    rules: MaterialRules,
+}
+
+/// What a [`ChunkJob`] made.
+struct ChunkDone {
+    id: InstanceId,
+    uid: u64,
+    cx: usize,
+    cz: usize,
+    lod: u32,
+    version: u64,
+    mesh: Arc<ChunkSource>,
+    weights_key: WeightsKey,
+    weights: [Arc<dyn TextureSource>; 2],
+}
+
+/// A background thread for chunks, which stops when this is dropped.
+struct ChunkWorker {
+    jobs: Sender<ChunkJob>,
+    done: Receiver<ChunkDone>,
+}
+
+impl ChunkWorker {
+    fn start() -> ChunkWorker {
+        let (jobs, inbox) = mpsc::channel::<ChunkJob>();
+        let (outbox, done) = mpsc::channel();
+        std::thread::spawn(move || {
+            while let Ok(job) = inbox.recv() {
+                let mesh = Arc::new(ChunkSource {
+                    key: chunk_key(job.id, job.cx, job.cz, job.lod),
+                    version: job.version,
+                    mesh: mesh::chunk_mesh(&job.data, &job.placement, job.cx, job.cz, job.lod),
+                });
+                let weights = weight_textures(
+                    &job.data,
+                    &job.placement,
+                    &job.rules,
+                    (job.cx, job.cz),
+                    job.id,
+                    job.weights_key,
+                );
+                let result = ChunkDone {
+                    id: job.id,
+                    uid: job.uid,
+                    cx: job.cx,
+                    cz: job.cz,
+                    lod: job.lod,
+                    version: job.version,
+                    mesh,
+                    weights_key: job.weights_key,
+                    weights,
+                };
+                if outbox.send(result).is_err() {
+                    return;
+                }
+            }
+        });
+        ChunkWorker { jobs, done }
     }
 }
 
@@ -122,6 +214,32 @@ impl TerrainCache {
     pub fn clear(&mut self) {
         self.terrains.clear();
         self.overrides.clear();
+        self.streaming = Streaming::default();
+        self.pending.clear();
+    }
+
+    /// How many chunks are still being built in the background.
+    pub fn pending_chunks(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Puts chunks the background thread finished where drawing finds them.
+    fn take_finished_chunks(&mut self) {
+        let Some(worker) = &self.chunk_worker else {
+            return;
+        };
+        while let Ok(done) = worker.done.try_recv() {
+            self.pending.remove(&(done.id, done.cx, done.cz, done.lod));
+            let Some(entry) = self.terrains.get_mut(&done.id) else {
+                continue;
+            };
+            if entry.uid != done.uid {
+                continue;
+            }
+            let chunk = entry.chunks.entry((done.cx, done.cz)).or_default();
+            chunk.meshes[done.lod as usize] = Some((done.version, done.mesh));
+            chunk.weights = Some((done.weights_key, done.weights));
+        }
     }
 
     /// The landscape drawn for the Terrain `id`: an override, or its own.
@@ -136,7 +254,8 @@ impl TerrainCache {
     /// of the first frame that draws it (such as on a loading screen).
     pub fn prepare(&mut self, world: &World, id: InstanceId, assets: &Assets, camera: &Camera) {
         if let Some(instance) = world.get(id) {
-            self.draw(world, id, instance, assets, camera, &mut Vec::new());
+            // On a loading screen the chunks are built right away.
+            self.draw(world, id, instance, assets, camera, &mut Vec::new(), false);
         }
     }
 
@@ -149,6 +268,8 @@ impl TerrainCache {
         camera: &Camera,
         items: &mut Vec<DrawItem>,
     ) {
+        self.take_finished_chunks();
+        let background = self.streaming.settings().is_some();
         let mut seen = HashSet::new();
         for id in world.descendants(world.workspace()) {
             let Some(instance) = world.get(id) else {
@@ -158,11 +279,12 @@ impl TerrainCache {
                 continue;
             }
             seen.insert(id);
-            self.draw(world, id, instance, assets, camera, items);
+            self.draw(world, id, instance, assets, camera, items, background);
         }
         self.terrains.retain(|id, _| seen.contains(id));
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw(
         &mut self,
         world: &World,
@@ -171,6 +293,7 @@ impl TerrainCache {
         assets: &Assets,
         camera: &Camera,
         items: &mut Vec<DrawItem>,
+        background: bool,
     ) {
         let Some(mut placement) = Placement::of(instance) else {
             return;
@@ -226,11 +349,69 @@ impl TerrainCache {
                     0.0,
                     CHUNK_CELLS as f32 * cell.y / 2.0,
                 );
+                // Streaming (Phase 80): out of range, a chunk goes off
+                // the CPU and (no longer drawn) the GPU.
+                if let Some((keep, build)) = self.streaming.chunk_in_range(center, half) {
+                    if !keep {
+                        entry.chunks.remove(&(cx, cz));
+                        continue;
+                    }
+                    if !build && !entry.chunks.contains_key(&(cx, cz)) {
+                        continue;
+                    }
+                }
                 let offset = (camera.position - center).abs() - half;
                 let distance = offset.max(Vec3::ZERO).length();
                 let lod = mesh::lod_for_distance(distance, self.detail_distance);
                 let chunk = entry.chunks.entry((cx, cz)).or_default();
                 let version = data.chunk_height_version(cx, cz);
+                let key = WeightsKey {
+                    heights: version,
+                    paint: data.chunk_paint_version(cx, cz),
+                    rules: rules_key,
+                };
+                // Streaming builds what's missing on a thread of its own,
+                // and until then draws what's there of this chunk (or
+                // nothing yet).
+                if background {
+                    let up_to_date = chunk.meshes[lod as usize]
+                        .as_ref()
+                        .is_some_and(|(built, _)| *built == version)
+                        && chunk
+                            .weights
+                            .as_ref()
+                            .is_some_and(|(built, _)| *built == key);
+                    let job = (id, cx, cz, lod);
+                    if !up_to_date && !self.pending.contains(&job) {
+                        let worker = self.chunk_worker.get_or_insert_with(ChunkWorker::start);
+                        let sent = worker.jobs.send(ChunkJob {
+                            id,
+                            uid: data.uid(),
+                            cx,
+                            cz,
+                            lod,
+                            version,
+                            weights_key: key,
+                            data: data.clone(),
+                            placement,
+                            rules: rules.clone(),
+                        });
+                        if sent.is_ok() {
+                            self.pending.insert(job);
+                        }
+                    }
+                    let best = chunk.meshes[lod as usize]
+                        .iter()
+                        .chain(chunk.meshes.iter().flatten())
+                        .find(|(built, _)| *built == version)
+                        .map(|(_, mesh)| mesh.clone());
+                    let (Some(mesh), Some((_, weights))) = (best, chunk.weights.as_ref()) else {
+                        continue;
+                    };
+                    let weights = weights.clone();
+                    items.push(chunk_item(mesh, weights, &layers, transform, casts_shadow));
+                    continue;
+                }
                 let mesh = match &chunk.meshes[lod as usize] {
                     Some((built, mesh)) if *built == version => mesh.clone(),
                     _ => {
@@ -243,11 +424,6 @@ impl TerrainCache {
                         mesh
                     }
                 };
-                let key = WeightsKey {
-                    heights: version,
-                    paint: data.chunk_paint_version(cx, cz),
-                    rules: rules_key,
-                };
                 let weights = match &chunk.weights {
                     Some((built, weights)) if *built == key => weights.clone(),
                     _ => {
@@ -256,27 +432,38 @@ impl TerrainCache {
                         weights
                     }
                 };
-                items.push(DrawItem {
-                    shape: Shape::Mesh(mesh),
-                    transform,
-                    material: Material {
-                        terrain: Some(TerrainSurface {
-                            layers: layers.clone(),
-                            weights,
-                        }),
-                        ..Material::default()
-                    },
-                    uv_tile: 0.0,
-                    casts_shadow,
-                    id: 0,
-                    cull_distance: 0.0,
-                    skin: None,
-                    sway: None,
-                    decal_role: Default::default(),
-                });
+                items.push(chunk_item(mesh, weights, &layers, transform, casts_shadow));
             }
         }
         crate::foliage::draw_terrain(id, &placement, &data, assets, items);
+    }
+}
+
+/// A chunk's draw item.
+fn chunk_item(
+    mesh: Arc<ChunkSource>,
+    weights: [Arc<dyn TextureSource>; 2],
+    layers: &Arc<TerrainLayers>,
+    transform: Mat4,
+    casts_shadow: bool,
+) -> DrawItem {
+    DrawItem {
+        shape: Shape::Mesh(mesh),
+        transform,
+        material: Material {
+            terrain: Some(TerrainSurface {
+                layers: layers.clone(),
+                weights,
+            }),
+            ..Material::default()
+        },
+        uv_tile: 0.0,
+        casts_shadow,
+        id: 0,
+        cull_distance: 0.0,
+        skin: None,
+        sway: None,
+        decal_role: Default::default(),
     }
 }
 

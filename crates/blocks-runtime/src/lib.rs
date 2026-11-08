@@ -227,6 +227,12 @@ pub enum BlockKind {
         part: String,
         body: Vec<Block>,
     },
+    /// World streaming brought `target` (or a Model's contents) back
+    /// (Phase 80).
+    WhenStreamedIn {
+        target: String,
+        body: Vec<Block>,
+    },
     /// Client only.
     WhenKeyPressed {
         key: String,
@@ -585,6 +591,12 @@ pub enum BlockKind {
         player: Expression,
         reason: Expression,
     },
+    /// Loads what's around `position` for `player` and waits for it:
+    /// `Player:RequestStreamAroundAsync` (Phase 80).
+    RequestStreamAround {
+        player: Expression,
+        position: Expression,
+    },
     /// Sends `text` to the chat as this device's player:
     /// `TextChatService:SendMessage` (LocalScripts, Phase 67).
     SendChatMessage {
@@ -913,6 +925,7 @@ impl BlockKind {
             self,
             BlockKind::WhenStarted { .. }
                 | BlockKind::WhenTouched { .. }
+                | BlockKind::WhenStreamedIn { .. }
                 | BlockKind::WhenKeyPressed { .. }
                 | BlockKind::WhenClicked { .. }
                 | BlockKind::WhenMouseEnters { .. }
@@ -958,6 +971,7 @@ impl BlockKind {
         match self {
             BlockKind::WhenStarted { body }
             | BlockKind::WhenTouched { body, .. }
+            | BlockKind::WhenStreamedIn { body, .. }
             | BlockKind::WhenKeyPressed { body, .. }
             | BlockKind::WhenClicked { body, .. }
             | BlockKind::WhenMouseEnters { body, .. }
@@ -998,6 +1012,7 @@ impl BlockKind {
     pub fn bodies_mut(&mut self) -> Vec<&mut Vec<Block>> {
         match self {
             BlockKind::WhenStarted { body }
+            | BlockKind::WhenStreamedIn { body, .. }
             | BlockKind::WhenTouched { body, .. }
             | BlockKind::WhenKeyPressed { body, .. }
             | BlockKind::WhenClicked { body, .. }
@@ -1091,6 +1106,7 @@ impl BlockKind {
             BlockKind::LoadLevel { level, spawn } => vec![level, spawn],
             BlockKind::WhenCommandRun { command, help, .. } => vec![command, help],
             BlockKind::KickPlayer { player, reason } => vec![player, reason],
+            BlockKind::RequestStreamAround { player, position } => vec![player, position],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
             BlockKind::SetAnimatorLayerWeight {
@@ -1231,6 +1247,7 @@ impl BlockKind {
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::LoadLevel { level, spawn } => vec![level, spawn],
             BlockKind::WhenCommandRun { command, help, .. } => vec![command, help],
+            BlockKind::RequestStreamAround { player, position } => vec![player, position],
             BlockKind::KickPlayer { player, reason } => vec![player, reason],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
@@ -1397,6 +1414,11 @@ pub enum Expression {
         value: Box<Expression>,
         class: String,
     },
+    /// Whether `value` is on this device:
+    /// `value.StreamingState == Enum.StreamingState.StreamedIn` (Phase 80).
+    IsStreamedIn {
+        value: Box<Expression>,
+    },
     /// A row of a data table, by its key:
     /// `DataService:GetTable("weapons"):Get(key)`. Nil when there's none.
     DataRow {
@@ -1437,6 +1459,7 @@ impl Expression {
             | Expression::KeyDown { .. }
             | Expression::AnimatorBool { .. }
             | Expression::IsA { .. }
+            | Expression::IsStreamedIn { .. }
             | Expression::Code { .. } => BlockShape::Boolean,
             _ => BlockShape::Value,
         }
@@ -1480,6 +1503,7 @@ impl Expression {
             Expression::Function { value, .. }
             | Expression::Not { value }
             | Expression::IsA { value, .. }
+            | Expression::IsStreamedIn { value }
             | Expression::DataRow { key: value, .. }
             | Expression::SplinePosition { t: value, .. }
             | Expression::SplineClosestDistance {
@@ -1507,6 +1531,7 @@ impl Expression {
             } => vec![origin, direction],
             Expression::Function { value, .. }
             | Expression::Not { value }
+            | Expression::IsStreamedIn { value }
             | Expression::IsA { value, .. }
             | Expression::DataRow { key: value, .. }
             | Expression::SplinePosition { t: value, .. }

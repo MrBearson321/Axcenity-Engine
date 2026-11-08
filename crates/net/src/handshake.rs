@@ -101,6 +101,17 @@ pub enum Message {
     Console {
         line: String,
     },
+    /// A player's `RequestStreamAroundAsync`: send what's around
+    /// `position` before the player's teleport (Phase 80).
+    StreamAround {
+        request: u64,
+        position: [f32; 3],
+    },
+    /// The answer to [`Message::StreamAround`]: what's around it has been
+    /// sent ahead of this message.
+    StreamedAround {
+        request: u64,
+    },
 }
 
 impl Message {

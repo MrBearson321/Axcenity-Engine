@@ -436,9 +436,11 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
         let ids = team_players(&*world(lua)?, this.0);
         list(lua, ids)
     })?;
+    let stream_around = crate::network::stream_around_function(lua)?;
     Ok(vec![
         (ClassName::Player, "LoadCharacter", load),
         (ClassName::Player, "Kick", kick),
+        (ClassName::Player, "RequestStreamAroundAsync", stream_around),
         (ClassName::Players, "GetPlayers", get_players),
         (ClassName::Team, "GetPlayers", team_get_players),
     ])

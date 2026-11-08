@@ -17,16 +17,22 @@
 //! [`ScriptRuntime::take_network_requests`](crate::ScriptRuntime::take_network_requests)
 //! and answers with `finish_lan_search` and `fire_connection_failed`.
 
-use axcenity_core::InstanceId;
-use mlua::{Function, Lua, MetaMethod, Table, Thread, UserData, UserDataFields, UserDataMethods};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use axcenity_core::{InstanceId, Vector3};
+use mlua::{
+    FromLua, Function, Lua, MetaMethod, Table, Thread, UserData, UserDataFields, UserDataMethods,
+};
 
 use crate::events::{LuaSignal, Owner};
+use crate::instance::LuaInstance;
 use crate::scheduler;
-use crate::types::type_name;
+use crate::types::{LuaVector3, type_name};
 use crate::{OutputKind, push_output};
 
 /// What a script asked of the network, for the host to do.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum NetworkRequest {
     /// `Host(port, password)`: `None` for the default port.
     Host {
@@ -43,6 +49,15 @@ pub enum NetworkRequest {
     /// `FindLanGames()`: a script waits for
     /// [`ScriptRuntime::finish_lan_search`](crate::ScriptRuntime::finish_lan_search).
     FindLanGames,
+    /// `Player:RequestStreamAroundAsync(position)` (Phase 80): a script
+    /// waits for
+    /// [`ScriptRuntime::finish_stream_around`](crate::ScriptRuntime::finish_stream_around)
+    /// with this `request`.
+    StreamAround {
+        player: InstanceId,
+        position: Vector3,
+        request: u64,
+    },
 }
 
 /// A game found on the local network, as `FindLanGames` lists it.
@@ -69,6 +84,103 @@ impl LanSearches {
     /// Forgets the searches `script` waits on, so the answer resumes nothing.
     pub fn forget_script(&mut self, script: InstanceId) {
         self.0.retain(|(_, owner)| *owner != Some(script));
+    }
+}
+
+/// Scripts paused in `RequestStreamAroundAsync`, by request number, each
+/// with the script it runs as.
+#[derive(Default)]
+pub(crate) struct StreamWaits(HashMap<u64, (Thread, Option<InstanceId>)>);
+
+impl StreamWaits {
+    pub fn forget_script(&mut self, script: InstanceId) {
+        self.0.retain(|_, (_, owner)| *owner != Some(script));
+    }
+}
+
+/// What this device doesn't have (streaming, Phase 80): the Instances
+/// taken off it, and the Models that stayed without their contents. They
+/// read `StreamingState` as StreamedOut, and handlers on them are kept.
+#[derive(Default)]
+pub(crate) struct StreamedOut(pub HashSet<InstanceId>);
+
+/// Whether `id` isn't on this device: streamed out, or destroyed.
+pub(crate) fn is_streamed_out(lua: &Lua, id: InstanceId, exists: bool) -> bool {
+    !exists
+        || lua
+            .app_data_ref::<StreamedOut>()
+            .is_some_and(|out| out.0.contains(&id))
+}
+
+/// Request numbers, unique in this process.
+static NEXT_STREAM_REQUEST: AtomicU64 = AtomicU64::new(1);
+
+/// Pauses the script until the host has loaded the region.
+const STREAM_AROUND: &str = r#"
+local running, yield, error, start = ...
+return function(player, position)
+    local thread, is_main = running()
+    if is_main then
+        error("RequestStreamAroundAsync can only pause a script", 2)
+    end
+    start(player, position, thread)
+    return yield()
+end
+"#;
+
+const STREAM_AROUND_KEY: &str = "axcenity.network.stream_around";
+
+/// The function behind `Player:RequestStreamAroundAsync`, made once.
+pub(crate) fn stream_around_function(lua: &Lua) -> mlua::Result<Function> {
+    if let Ok(function) = lua.named_registry_value::<Function>(STREAM_AROUND_KEY) {
+        return Ok(function);
+    }
+    let coroutine: Table = lua.globals().raw_get("coroutine")?;
+    let start = lua.create_function(
+        |lua, (player, position, thread): (LuaInstance, mlua::Value, Thread)| {
+            let position = LuaVector3::from_lua(position.clone(), lua).map_err(|_| {
+                mlua::Error::runtime(format!(
+                    "RequestStreamAroundAsync: the position must be a Vector3, not a {}",
+                    type_name(lua, &position)
+                ))
+            })?;
+            crate::debugger::waiting(lua, &thread);
+            let script = scheduler::running_script(lua);
+            let id = NEXT_STREAM_REQUEST.fetch_add(1, Ordering::Relaxed);
+            if lua.app_data_ref::<StreamWaits>().is_none() {
+                lua.set_app_data(StreamWaits::default());
+            }
+            if let Some(mut waits) = lua.app_data_mut::<StreamWaits>() {
+                waits.0.insert(id, (thread, script));
+            }
+            request(
+                lua,
+                NetworkRequest::StreamAround {
+                    player: player.0,
+                    position: position.0,
+                    request: id,
+                },
+            );
+            Ok(())
+        },
+    )?;
+    let function: Function = lua.load(STREAM_AROUND).set_name("=[engine]").call((
+        coroutine.raw_get::<Function>("running")?,
+        coroutine.raw_get::<Function>("yield")?,
+        lua.globals().raw_get::<Function>("error")?,
+        start,
+    ))?;
+    lua.set_named_registry_value(STREAM_AROUND_KEY, function.clone())?;
+    Ok(function)
+}
+
+/// Resumes the script waiting on `request`, if it's on this side.
+pub(crate) fn finish_stream_around(lua: &Lua, request: u64) {
+    let waiting = lua
+        .app_data_mut::<StreamWaits>()
+        .and_then(|mut waits| waits.0.remove(&request));
+    if let Some((thread, script)) = waiting {
+        scheduler::resume_as(lua, &thread, mlua::Value::Nil, script);
     }
 }
 

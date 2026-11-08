@@ -33,6 +33,7 @@ mod pick;
 mod preload;
 #[cfg(test)]
 mod reload_tests;
+mod streaming;
 mod terrain;
 mod time_of_day;
 mod weather;
@@ -55,5 +56,6 @@ pub use pick::{
     pick_hit_skipping, visible_box_edges,
 };
 pub use preload::{AssetFile, asset_files};
+pub use streaming::Streaming;
 pub use terrain::{DEFAULT_DETAIL_DISTANCE, TerrainCache, terrain_hit};
 pub use time_of_day::sun_direction;

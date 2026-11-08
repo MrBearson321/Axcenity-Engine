@@ -180,12 +180,21 @@ fn frame(
     seconds: f64,
 ) {
     network.receive(world, scripts, seconds);
+    // With no screen, a player here has nothing to load (Phase 80).
+    for (request, _) in network.take_viewer_requests() {
+        scripts.finish_stream_around(world, request);
+    }
     print_log(network);
     scripts.step_players(world, seconds);
     scripts.step(world, seconds);
     scripts.stepped(world, seconds);
     scripts.apply_shatters(world, physics);
     physics.set_held(network.held_parts(world, scripts));
+    // Far from every player, physics sleeps (Phase 80).
+    physics.set_far_sleep(
+        axcenity_core::streaming::Settings::of(world)
+            .map(|settings| (network.player_focuses(world), settings.unload_radius())),
+    );
     physics.step(world, seconds);
     let touches = physics.take_touches();
     scripts.fire_touched(world, &touches);

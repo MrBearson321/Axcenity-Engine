@@ -59,6 +59,9 @@ pub struct Instance {
     tags: Vec<String>,
     /// The prefab this Instance is a placed copy of (Phase 49).
     prefab: Option<Box<PrefabLink>>,
+    /// Goes up each time its name, parent, properties, attributes or tags
+    /// change (see [`Instance::revision`]).
+    revision: u64,
 }
 
 impl Instance {
@@ -72,7 +75,15 @@ impl Instance {
             attributes: BTreeMap::new(),
             tags: Vec::new(),
             prefab: None,
+            revision: 0,
         }
+    }
+
+    /// How many times this Instance has changed. The same number means
+    /// its name, parent, properties, attributes and tags are as they were,
+    /// so replication doesn't read them again (Phase 80).
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn class(&self) -> ClassName {
@@ -276,6 +287,9 @@ pub struct World {
     collision_groups: CollisionGroups,
     /// The player's master volume (see [`World::master_volume`]).
     master_volume: f64,
+    /// Goes up each time an Instance changes parent (see
+    /// [`World::structure_version`]).
+    structure_version: u64,
 }
 
 impl World {
@@ -352,6 +366,7 @@ impl World {
             ui_settings: UiSettings::default(),
             collision_groups: CollisionGroups::default(),
             master_volume: 1.0,
+            structure_version: 0,
         }
     }
 
@@ -409,10 +424,13 @@ impl World {
     }
 
     pub fn collision_groups_mut(&mut self) -> &mut CollisionGroups {
+        // Physics reads parts' groups along with the tree.
+        self.structure_version += 1;
         &mut self.collision_groups
     }
 
     pub fn set_collision_groups(&mut self, groups: CollisionGroups) {
+        self.structure_version += 1;
         self.collision_groups = groups;
     }
 
@@ -670,6 +688,13 @@ impl World {
         self.instances.contains(id.0)
     }
 
+    /// Goes up each time an Instance moves in or out of a parent, so a
+    /// reader that keeps a list of the tree's Instances can tell when it's
+    /// out of date (Phase 80).
+    pub fn structure_version(&self) -> u64 {
+        self.structure_version
+    }
+
     /// The number of Instances alive, including ones with no parent.
     pub fn len(&self) -> usize {
         self.instances.len()
@@ -783,7 +808,12 @@ impl World {
             parent.children.insert(index, id);
         }
         let new_parent = new_parent.map(|(parent, _)| parent);
-        self.instances.get_mut(id.0).expect("checked above").parent = new_parent;
+        let instance = self.instances.get_mut(id.0).expect("checked above");
+        instance.parent = new_parent;
+        instance.revision += 1;
+        if old_parent != new_parent {
+            self.structure_version += 1;
+        }
 
         // Moving among the same parent's children isn't a change of Parent.
         if old_parent != new_parent {
@@ -941,6 +971,7 @@ impl World {
         let name = name.into();
         if instance.name != name {
             instance.name = name;
+            instance.revision += 1;
             self.changed(Change::Property {
                 instance: id,
                 name: "Name",
@@ -1001,6 +1032,9 @@ impl World {
         // Read before `value` moves into the slot below.
         let material = value.as_material();
         *slot = value;
+        if !changed.is_empty() {
+            instance.revision += 1;
+        }
 
         if let Some(material) = material {
             let preset = material.preset();
@@ -1013,6 +1047,7 @@ impl World {
                 {
                     *slot = Value::Number(number);
                     changed.push(name);
+                    instance.revision += 1;
                 }
             }
         }
@@ -1049,6 +1084,7 @@ impl World {
             None => instance.attributes.remove(name).is_some(),
         };
         if changed {
+            instance.revision += 1;
             self.changed(Change::Attribute {
                 instance: id,
                 name: name.to_owned(),
@@ -1076,6 +1112,7 @@ impl World {
             return Ok(false);
         }
         instance.tags.push(tag.to_owned());
+        instance.revision += 1;
         self.changed(Change::Tag {
             instance: id,
             tag: tag.to_owned(),
@@ -1091,6 +1128,7 @@ impl World {
             return Ok(false);
         };
         instance.tags.remove(index);
+        instance.revision += 1;
         self.changed(Change::Tag {
             instance: id,
             tag: tag.to_owned(),

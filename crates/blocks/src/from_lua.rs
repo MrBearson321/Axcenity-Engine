@@ -85,6 +85,11 @@ fn enum_item(expr: &Expr, enum_name: &str, items: &[&str]) -> Option<String> {
     .then(|| item.clone())
 }
 
+/// Whether `expr` is `Enum.StreamingState.StreamedIn`.
+fn is_streamed_in_item(expr: &Expr) -> bool {
+    enum_item(expr, "StreamingState", &["StreamedIn"]).is_some()
+}
+
 fn variable_declaration(stat: &Stat) -> Option<String> {
     match &stat.kind {
         StatKind::Local { names, values }
@@ -432,6 +437,12 @@ impl<'a> Converter<'a> {
                     return None;
                 }
                 Some(Block::new(BlockKind::WhenTouched { part, body }))
+            }
+            "StreamedIn" => {
+                let target = self.target(object)?;
+                let function = self.handler(handler, 0)?;
+                let body = self.body(&function.body, Scope::default());
+                Some(Block::new(BlockKind::WhenStreamedIn { target, body }))
             }
             "Triggered" | "MouseClick" => {
                 let target = self.target(object)?;
@@ -1092,6 +1103,7 @@ impl<'a> Converter<'a> {
             // An Animator's parameters and states, named by a string.
             ExprKind::Method(object, method, args)
                 if method != "Kick"
+                    && method != "RequestStreamAroundAsync"
                     && matches!(args.first().map(|arg| &arg.kind), Some(ExprKind::Str(_))) =>
             {
                 let animator = self.target(object)?;
@@ -1207,6 +1219,15 @@ impl<'a> Converter<'a> {
                 Some(BlockKind::SetNetworkOwner {
                     target: self.target(object)?,
                     owner: self.expression(&args[0], scope),
+                })
+            }
+            // player:RequestStreamAroundAsync(Vector3.new(0, 0, 500))
+            ExprKind::Method(object, method, args)
+                if method == "RequestStreamAroundAsync" && args.len() == 1 =>
+            {
+                Some(BlockKind::RequestStreamAround {
+                    player: self.expression(object, scope),
+                    position: self.expression(&args[0], scope),
                 })
             }
             // player:Kick("Cheating")
@@ -1944,6 +1965,18 @@ impl<'a> Converter<'a> {
                 if self.variables.contains(name) || scope.child == Some(name.as_str()) =>
             {
                 Expression::Variable { name: name.clone() }
+            }
+            // thing.StreamingState == Enum.StreamingState.StreamedIn
+            ExprKind::Binary("==", left, right)
+                if matches!(&left.kind, ExprKind::Field(_, field) if field == "StreamingState")
+                    && is_streamed_in_item(right) =>
+            {
+                let ExprKind::Field(object, _) = &left.kind else {
+                    unreachable!("checked above");
+                };
+                Expression::IsStreamedIn {
+                    value: boxed(object),
+                }
             }
             ExprKind::Binary(op, left, right) => {
                 let math = match *op {

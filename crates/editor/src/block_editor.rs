@@ -355,6 +355,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetNetworkOwner { .. }
         | BlockKind::SetNetworkOwnershipAuto { .. }
         | BlockKind::KickPlayer { .. }
+        | BlockKind::RequestStreamAround { .. }
+        | BlockKind::WhenStreamedIn { .. }
         | BlockKind::SendChatMessage { .. }
         | BlockKind::ShowSystemMessage { .. } => Category::More,
         BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
@@ -372,6 +374,7 @@ fn reporter_category(expression: &Expression) -> Category {
         | Expression::Raycast { .. }
         | Expression::RaycastIgnoring { .. }
         | Expression::IsA { .. }
+        | Expression::IsStreamedIn { .. }
         | Expression::SplinePosition { .. }
         | Expression::SplineClosestDistance { .. } => Category::Sensing,
         Expression::AnimatorBool { .. }
@@ -1228,6 +1231,17 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("show system message"),
             Slot(text, SlotKind::Text),
         ])],
+        BlockKind::RequestStreamAround { player, position } => vec![Row(vec![
+            label("load around"),
+            Slot(position, SlotKind::Any),
+            label("for"),
+            Slot(player, SlotKind::Any),
+        ])],
+        BlockKind::WhenStreamedIn { target, .. } => vec![Row(vec![
+            label("when"),
+            Object(target, Filter::Parts),
+            label("streams in"),
+        ])],
         BlockKind::KickPlayer { player, reason } => vec![Row(vec![
             label("kick"),
             Slot(player, SlotKind::Any),
@@ -1403,6 +1417,9 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
         Expression::TouchingPart => vec![label("touching part")],
         Expression::PartUnderMouse => vec![label("part under mouse")],
         Expression::KeyDown { key } => vec![label("key"), Key(key), label("pressed?")],
+        Expression::IsStreamedIn { value } => {
+            vec![Slot(value, SlotKind::Any), label("is streamed in")]
+        }
         Expression::IsA { value, class } => vec![
             Slot(value, SlotKind::Any),
             label("is a"),

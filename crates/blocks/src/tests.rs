@@ -57,6 +57,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenCutsceneFinished { .. }
         | BlockKind::WhenSplineReached { .. }
         | BlockKind::WhenConnectionFails { .. }
+        | BlockKind::WhenStreamedIn { .. }
         | BlockKind::WhenStateChanged { .. }
         | BlockKind::WhenAnimationEvent { .. }
         | BlockKind::WhenAgentSenses { .. }
@@ -146,6 +147,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetNetworkOwner { .. } => 77,
         BlockKind::SetNetworkOwnershipAuto { .. } => 78,
         BlockKind::KickPlayer { .. } => 79,
+        BlockKind::RequestStreamAround { .. } => 86,
         BlockKind::SendChatMessage { .. } => 80,
         BlockKind::ShowSystemMessage { .. } => 81,
         BlockKind::PlaceOnSpline { .. } => 82,
@@ -154,7 +156,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetAnimatorLayerWeight { .. } => 85,
     })
 }
-const STATEMENT_COUNT: usize = 86;
+const STATEMENT_COUNT: usize = 87;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -295,6 +297,17 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 },
             },
             "score:Kick(\"Cheating\")",
+        ),
+        (
+            BlockKind::RequestStreamAround {
+                player: variable("score"),
+                position: Expression::Vector3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 500.0,
+                },
+            },
+            "score:RequestStreamAroundAsync(Vector3.new(0, 0, 500))",
         ),
         (
             BlockKind::SendChatMessage {
@@ -3058,4 +3071,53 @@ fn the_spawn_decal_block_places_a_decal_that_goes_after_its_seconds() {
         runtime.step(&mut world, 1.0);
     }
     assert!(!world.contains(decal), "gone after 2 seconds");
+}
+
+#[test]
+fn streaming_blocks_become_lua_and_come_back() {
+    use crate::{BlockKind, Expression};
+
+    let source = "\
+workspace.Castle.StreamedIn:Connect(function()
+    print(workspace.Castle.StreamingState == Enum.StreamingState.StreamedIn)
+end)
+workspace.Castle.Touched:Connect(function(otherPart)
+    local player = game.Players:GetPlayerFromCharacter(otherPart.Parent)
+    if player then
+        player:RequestStreamAroundAsync(Vector3.new(0, 0, 500))
+    end
+end)
+";
+    let script = crate::from_lua(source).expect("every line has a block");
+    let lua = translate(&script).unwrap().source;
+    assert!(lua.contains("StreamedIn:Connect"), "{lua}");
+    assert!(lua.contains("RequestStreamAroundAsync"), "{lua}");
+    assert!(
+        lua.contains("Enum.StreamingState.StreamedIn"),
+        "the check round trips: {lua}"
+    );
+    let mut stack = script.blocks.clone();
+    let mut kinds = Vec::new();
+    while let Some(block) = stack.pop() {
+        for body in block.kind.bodies() {
+            stack.extend(body.iter().cloned());
+        }
+        kinds.push(block.kind);
+    }
+    assert!(
+        kinds
+            .iter()
+            .any(|kind| matches!(kind, BlockKind::WhenStreamedIn { .. })),
+        "{kinds:?}"
+    );
+    assert!(
+        kinds.iter().any(|kind| matches!(
+            kind,
+            BlockKind::RequestStreamAround {
+                position: Expression::Vector3 { z, .. },
+                ..
+            } if *z == 500.0
+        )),
+        "{kinds:?}"
+    );
 }

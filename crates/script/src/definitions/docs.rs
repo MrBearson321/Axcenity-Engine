@@ -1184,6 +1184,26 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The most decals `workspace:SpawnDecal` keeps at once on each side: 200 by default. Past it, the oldest goes first.",
     ),
     (
+        ClassName::Workspace,
+        "StreamingEnabled",
+        "On, each device only has what's near it (world streaming): joined players' devices are sent only what's within their radius, and the rest stays off the GPU. Off by default, so a project plays exactly as before.",
+    ),
+    (
+        ClassName::Workspace,
+        "StreamingMinRadius",
+        "Everything nearer than this many studs is always loaded: 64 by default.",
+    ),
+    (
+        ClassName::Workspace,
+        "StreamingTargetRadius",
+        "Things load out to this many studs, as the network and the machine allow, and unload a bit past it: 1024 by default. Never less than StreamingMinRadius.",
+    ),
+    (
+        ClassName::Model,
+        "ModelStreamingMode",
+        "How the Model streams. Default: a Model with no Models inside loads and unloads whole, and one with Models inside streams each piece on its own. Atomic: always whole, with the Models inside. Persistent: always on every device.",
+    ),
+    (
         ClassName::Decal,
         "Texture",
         "The picture, a project path such as \"assets/textures/logo.png\". Its alpha is its shape. Empty shows a plain square.",

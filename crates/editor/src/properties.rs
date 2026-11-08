@@ -89,7 +89,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 34] = [
+const GROUPS: [(&str, &[&str]); 35] = [
     (
         "Appearance",
         &[
@@ -128,6 +128,16 @@ const GROUPS: [(&str, &[&str]); 34] = [
     ("Wind", &["GlobalWind"]),
     // The Workspace's cap on `SpawnDecal`'s decals (Phase 75).
     ("Decals", &["MaxSpawnedDecals"]),
+    // The Workspace's world streaming (Phase 80).
+    (
+        "Streaming",
+        &[
+            "StreamingEnabled",
+            "StreamingMinRadius",
+            "StreamingTargetRadius",
+            "ModelStreamingMode",
+        ],
+    ),
     // A Decal's or ProjectedDecal's picture, and a ProjectedDecal's box.
     (
         "Decal",
@@ -1888,6 +1898,8 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         "FracturePattern" => vec!["Uniform", "Impact"],
         // What a UnionOperation collides as (Phase 50).
         "CollisionFidelity" => vec!["Box", "Hull", "PreciseConvexDecomposition"],
+        // How a Model streams (Phase 80).
+        "ModelStreamingMode" => axcenity_core::streaming::STREAMING_MODES.to_vec(),
         // Which ProximityPrompts in reach show (Phase 44).
         "ProximityPromptExclusivity" => vec!["OnePerButton", "OneGlobally", "AlwaysShow"],
         // The room a ReverbZone sounds like (Phase 52).
@@ -2075,7 +2087,10 @@ mod tests {
         let world = World::new();
         let workspace = world.get(world.workspace()).unwrap();
         let sections = sections(workspace);
-        assert_eq!(titles(&sections), ["Physics", "Wind", "Decals"]);
+        assert_eq!(
+            titles(&sections),
+            ["Physics", "Wind", "Decals", "Streaming"]
+        );
         assert_eq!(sections[0].properties[0].0, "Gravity");
         assert_eq!(sections[1].properties[0].0, "GlobalWind");
         assert_eq!(sections[2].properties[0].0, "MaxSpawnedDecals");

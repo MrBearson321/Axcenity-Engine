@@ -533,6 +533,11 @@ impl Session {
                         self.scripts.finish_lan_search(&mut self.world, &[]);
                     }
                     NetworkRequest::Disconnect => {}
+                    // The viewport streams around the camera, and Play has
+                    // no other device to send a region to.
+                    NetworkRequest::StreamAround { request, .. } => {
+                        self.scripts.finish_stream_around(&mut self.world, request);
+                    }
                     NetworkRequest::Host { .. } | NetworkRequest::Join { .. } => {
                         self.scripts
                             .fire_connection_failed(&mut self.world, PLAY_IS_OFFLINE);
@@ -645,6 +650,15 @@ impl Session {
             // Parts another device moves are held still here.
             let held = self.network.held_parts(&self.world, &self.scripts);
             self.physics.set_held(held);
+            // Far from the camera and the other devices, physics sleeps
+            // (Phase 80).
+            let far = axcenity_core::streaming::Settings::of(&self.world).map(|settings| {
+                let at = camera.position;
+                let mut focuses = vec![axcenity_core::Vector3::new(at.x, at.y, at.z)];
+                focuses.extend(self.network.player_focuses(&self.world));
+                (focuses, settings.unload_radius())
+            });
+            self.physics.set_far_sleep(far);
             if !following {
                 self.characters.keep_kinematic(&mut self.world);
                 self.agents.keep_kinematic(&mut self.world);
