@@ -1174,6 +1174,21 @@ impl World {
             .find(|&id| self.get(id).is_some_and(|instance| instance.name == name))
     }
 
+    /// True if `id`, or anything it's inside, has `Locked` on.
+    pub fn is_locked(&self, id: InstanceId) -> bool {
+        let mut at = Some(id);
+        while let Some(here) = at {
+            let Some(instance) = self.get(here) else {
+                return false;
+            };
+            if instance.property("Locked") == Some(&Value::Bool(true)) {
+                return true;
+            }
+            at = instance.parent();
+        }
+        false
+    }
+
     /// Every Instance below `id`, parents before their children.
     /// Empty if `id` is stale.
     pub fn descendants(&self, id: InstanceId) -> Vec<InstanceId> {

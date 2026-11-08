@@ -67,7 +67,36 @@ impl EditorApp {
             Action::SaveMaterial(id) => self.save_material(id),
             Action::Prefab(action) => self.prefab_action(action),
             Action::KeepPlayChanges(_) => {}
+            Action::SetLocked(id, on) => self.set_locked(id, on),
         }
+    }
+    /// Turns `Locked` on or off for `id`, and for the rest of the selection
+    /// if `id` is in it, as one undo step.
+    fn set_locked(&mut self, id: InstanceId, on: bool) {
+        let ids = if self.selection.contains(&id) {
+            self.selection.clone()
+        } else {
+            vec![id]
+        };
+        let edits: Vec<(InstanceId, Vec<Edit>)> = ids
+            .into_iter()
+            .filter(|&id| {
+                self.world
+                    .get(id)
+                    .is_some_and(|instance| instance.class().can_lock())
+            })
+            .map(|id| (id, vec![Edit::Property("Locked", Value::Bool(on))]))
+            .collect();
+        let verb = if on { "Lock" } else { "Unlock" };
+        let label = match edits.as_slice() {
+            [(only, _)] => {
+                let name = self.world.get(*only).map_or("", |i| i.name());
+                format!("{verb} {name}")
+            }
+            many => format!("{verb} {} objects", many.len()),
+        };
+        self.change_many(Field::Property("Locked"), label, edits);
+        self.history.seal();
     }
     /// Where a new part goes: the camera's focus point, on the move grid
     /// when snapping is on, so new parts line up.
@@ -395,7 +424,12 @@ impl EditorApp {
             self.insert_named(what, gui, what.class().as_str(), Vec::new());
             return;
         }
-        self.insert_named(what, near, what.class().as_str(), Vec::new());
+        // Parts from the menus start as blueprints to build with.
+        let look = match what {
+            Insertable::Part(_) => vec![("BlueprintTexture", Value::Bool(true))],
+            _ => Vec::new(),
+        };
+        self.insert_named(what, near, what.class().as_str(), look);
     }
     /// Inserts a NavigationAgent into the Model or part `near` is (or is
     /// in), or into a new Model with a Body when there's none. Its

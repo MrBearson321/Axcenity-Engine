@@ -100,6 +100,24 @@ pub struct GridPlane {
     pub fade_distance: f32,
     /// The lines' linear color.
     pub color: [f32; 3],
+    /// How solid the lines are, as a multiple of the usual soft look.
+    pub strength: f32,
+    /// A place whose color the lines near it take on.
+    pub tint: Option<GridTint>,
+}
+
+/// A place on a [`GridPlane`] whose color nearby lines take on: a selected
+/// or glowing part standing on it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GridTint {
+    /// Its X and Z.
+    pub at: [f32; 2],
+    /// How far from it (studs) the lines are back to their own color.
+    pub radius: f32,
+    /// How much of its color the lines right by it take, 0 to 1.
+    pub amount: f32,
+    /// Its linear color.
+    pub color: [f32; 3],
 }
 
 /// A box of the world lit by a grid of probes baked inside it, in place of

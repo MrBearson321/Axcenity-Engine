@@ -1176,7 +1176,7 @@ fn brush_ui(
     responsive::form(ui, "studio paint brush", |ui| {
         if state.target == Target::Layer && state.map.is_color() {
             ui.label("Color");
-            ui.color_edit_button_srgb(&mut brush.color);
+            crate::color_palette::edit_srgb(ui, &mut brush.color);
         } else if state.target == Target::Layer {
             ui.label("Value");
             ui.add(egui::Slider::new(&mut brush.value, 0.0..=1.0));

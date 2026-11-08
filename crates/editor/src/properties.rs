@@ -96,6 +96,7 @@ const GROUPS: [(&str, &[&str]); 35] = [
             "Color",
             "Material",
             "MaterialVariant",
+            "BlueprintTexture",
             "Metalness",
             "Roughness",
             "Transparency",
@@ -107,6 +108,7 @@ const GROUPS: [(&str, &[&str]); 35] = [
     (
         "Behavior",
         &[
+            "Locked",
             "Anchored",
             "CanCollide",
             "CanTouch",
@@ -393,6 +395,7 @@ const GROUPS: [(&str, &[&str]); 35] = [
     (
         "Emitter",
         &[
+            "Locked",
             "Enabled",
             "ParticleType",
             "Texture",
@@ -705,6 +708,14 @@ pub fn show(
                 edit = Some(Edit::OpenInModelStudio);
             }
             ui.add_space(2.0);
+            // Only `Locked` itself can be changed on something locked.
+            let locked = !playing && world.is_locked(id);
+            if locked {
+                ui.weak(theme::with_icon(
+                    icons::LOCK,
+                    "Locked. Turn Locked off to change it.",
+                ));
+            }
             // Widgets remember things such as half-typed numbers by ID. Mixing in
             // the selection gives each Instance its own, so nothing typed for one
             // part turns up on the next one selected.
@@ -714,12 +725,14 @@ pub fn show(
                         edit = Some(Edit::Keep(Field::Name, keep));
                     }
                     let mut name = instance.name().to_string();
-                    if can_rename_here(instance) {
+                    if can_rename_here(instance) && !locked {
                         if ui.text_edit_singleline(&mut name).changed() {
                             edit = Some(Edit::Name(name));
                         }
                     } else {
-                        let hint = if instance.class().is_script() {
+                        let hint = if locked {
+                            "It's locked. Turn Locked off to rename it."
+                        } else if instance.class().is_script() {
                             "Rename a script in the Explorer (F2). That renames its file too."
                         } else {
                             "Services can't be renamed."
@@ -751,7 +764,8 @@ pub fn show(
                             } else if let Some(keep) = field_name_with_pin(ui, name, pin(field)) {
                                 edit = Some(Edit::Keep(field, keep));
                             }
-                            let made = match value {
+                            let enabled = !locked || name == "Locked";
+                            let made = ui.add_enabled_ui(enabled, |ui| match value {
                                 // Who sits there is up to the game, not the editor.
                                 Value::Instance(target)
                                     if name == "Occupant"
@@ -776,7 +790,8 @@ pub fn show(
                                     })
                                 }
                                 value => value_control(ui, name, value),
-                            };
+                            })
+                            .inner;
                             if made.is_some() {
                                 edit = made;
                             }
@@ -786,12 +801,14 @@ pub fn show(
                 }
                 // Services keep neither in the world file.
                 if !instance.class().is_service() {
-                    if let Some(made) = attributes_section(ui, instance) {
-                        edit = Some(made);
-                    }
-                    if let Some(made) = tags_section(ui, instance) {
-                        edit = Some(made);
-                    }
+                    ui.add_enabled_ui(!locked, |ui| {
+                        if let Some(made) = attributes_section(ui, instance) {
+                            edit = Some(made);
+                        }
+                        if let Some(made) = tags_section(ui, instance) {
+                            edit = Some(made);
+                        }
+                    });
                 }
                 if instance.class() == ClassName::ScreenGui
                     && instance
@@ -1929,28 +1946,18 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
     })
 }
 
-/// A color swatch that opens a color picker, with the 0–255 values beside it.
+/// A color swatch that opens the preset swatches, the saved palettes and a
+/// color picker, with the 0–255 values beside it.
 pub(crate) fn color_control(ui: &mut egui::Ui, color: Color3) -> Option<Color3> {
-    // `Color3` is sRGB, but egui's float color picker works in linear light,
-    // so convert there and back.
-    use egui::ecolor::{gamma_from_linear, linear_from_gamma};
-    let mut linear = [color.r, color.g, color.b].map(linear_from_gamma);
+    let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let mut bytes = [color.r, color.g, color.b].map(byte);
     let mut picked = None;
     ui.horizontal(|ui| {
-        let swatch = ui.color_edit_button_rgb(&mut linear);
-        // A thin outline, so white shows on a white panel and black on black.
-        ui.painter().rect_stroke(
-            swatch.rect,
-            2,
-            egui::Stroke::new(1.0_f32, theme::palette(ui.ctx()).border_strong),
-            egui::StrokeKind::Inside,
-        );
-        if swatch.changed() {
-            let [r, g, b] = linear.map(gamma_from_linear);
+        if crate::color_palette::edit_srgb(ui, &mut bytes).changed() {
+            let [r, g, b] = bytes.map(|channel| f32::from(channel) / 255.0);
             picked = Some(Color3::new(r, g, b));
         }
         let shown = picked.unwrap_or(color);
-        let byte = |channel: f32| (channel * 255.0).round() as u8;
         ui.weak(format!(
             "{}, {}, {}",
             byte(shown.r),
@@ -2010,12 +2017,14 @@ mod tests {
                 "Color",
                 "Material",
                 "MaterialVariant",
+                "BlueprintTexture",
                 "Metalness",
                 "Roughness",
                 "Transparency",
                 "EmissiveColor",
                 "Emission",
                 "CastShadow",
+                "Locked",
                 "Anchored",
                 "CanCollide",
                 "CanTouch",

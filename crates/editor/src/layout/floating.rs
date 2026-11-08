@@ -6,7 +6,7 @@
 //! new one that follows the mouse (`app/floating.rs` draws them all).
 
 use eframe::egui;
-use egui_dock::{DockState, NodeIndex, Surface, SurfaceIndex};
+use egui_dock::{DockState, Node, NodeIndex, Surface, SurfaceIndex};
 use serde::{Deserialize, Serialize};
 
 use super::{Layout, Pane};
@@ -49,6 +49,9 @@ pub struct FloatingWindow {
     pub following: Option<Following>,
     /// Bring it to the front on the next frame.
     pub focus: bool,
+    /// Where it is on the screen, in physical pixels, read each frame, for
+    /// dropping a tab onto it.
+    pub screen_rect: Option<egui::Rect>,
 }
 
 impl FloatingWindow {
@@ -68,6 +71,30 @@ impl FloatingWindow {
             .next()
             .and_then(|(_, leaf)| leaf.tabs().get(leaf.active.0).copied())
     }
+}
+
+/// Where a panel was docked in the main window, so Dock Back can put it
+/// there again.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Home {
+    /// It was a tab among others: back among `with`, at `index`.
+    Tab { with: Vec<Pane>, index: usize },
+    /// It had a place of its own beside the panel `anchor`.
+    Split {
+        anchor: Pane,
+        side: Side,
+        /// The share of the space the left or upper of the two had.
+        left_share: f32,
+    },
+}
+
+/// Which side of its anchor a panel goes on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Side {
+    Left,
+    Right,
+    Above,
+    Below,
 }
 
 /// How windows are written in the saved layout.
@@ -97,6 +124,7 @@ impl Layout {
             placed: opens_at,
             following,
             focus: true,
+            screen_rect: None,
         });
         self.next_window
     }
@@ -143,9 +171,139 @@ impl Layout {
             .retain(|window| window.dock.iter_all_tabs().next().is_some());
     }
 
+    /// Notes where every panel in the main window is docked, for Dock Back
+    /// ([`dock_window_in_main`](Self::dock_window_in_main)). Call before the
+    /// main dock is drawn: once a tab has been dragged out it's too late to
+    /// see where it was. A panel that's out keeps the home it had.
+    pub fn remember_homes(&mut self) {
+        let tree = self.dock.main_surface();
+        let mut found = Vec::new();
+        for (index, node) in tree.iter().enumerate() {
+            match node.tabs().unwrap_or_default() {
+                [] => {}
+                [pane] => {
+                    found.extend(split_home(tree, NodeIndex(index)).map(|home| (*pane, home)));
+                }
+                tabs => {
+                    for (index, pane) in tabs.iter().enumerate() {
+                        let with = tabs.iter().filter(|other| *other != pane).copied();
+                        let with = with.collect();
+                        found.push((*pane, Home::Tab { with, index }));
+                    }
+                }
+            }
+        }
+        self.homes.extend(found);
+    }
+
+    /// Docks `pane` (which is in no dock now) where it was, or where it
+    /// starts out if what it was beside has gone.
+    fn restore_home(&mut self, pane: Pane) {
+        match self.homes.get(&pane).cloned() {
+            Some(Home::Tab { with, index }) => {
+                let beside = with
+                    .iter()
+                    .find_map(|other| self.dock.find_main_surface_tab(other));
+                if let Some((node, _)) = beside
+                    && let Some(leaf) = self.dock.main_surface_mut()[node].get_leaf_mut()
+                {
+                    leaf.insert_tab(index.min(leaf.tabs.len()), pane);
+                    return;
+                }
+            }
+            Some(Home::Split {
+                anchor,
+                side,
+                left_share,
+            }) => {
+                if let Some((node, _)) = self.dock.find_main_surface_tab(&anchor) {
+                    let tree = self.dock.main_surface_mut();
+                    let share = left_share.clamp(0.05, 0.95);
+                    match side {
+                        Side::Left => tree.split_left(node, share, vec![pane]),
+                        Side::Right => tree.split_right(node, share, vec![pane]),
+                        Side::Above => tree.split_above(node, share, vec![pane]),
+                        Side::Below => tree.split_below(node, share, vec![pane]),
+                    };
+                    return;
+                }
+            }
+            None => {}
+        }
+        self.open(pane);
+    }
+
+    /// The other windows, with what each is called, to offer as somewhere
+    /// to move a tab. `current` is the window asking, if any.
+    pub fn other_windows(&self, current: Option<u64>) -> Vec<(u64, String)> {
+        self.windows
+            .iter()
+            .filter(|window| Some(window.id) != current)
+            .filter_map(|window| Some((window.id, window.front_pane()?.label().to_owned())))
+            .collect()
+    }
+
+    /// Moves `pane`, from wherever it is, in among the tabs of window `id`.
+    pub fn move_to_window(&mut self, pane: Pane, id: u64) {
+        let there = |window: &FloatingWindow| window.id == id;
+        if pane == Pane::Scene || !self.windows.iter().any(there) || !self.take_pane(pane) {
+            return;
+        }
+        self.drop_empty_windows();
+        if let Some(window) = self.windows.iter_mut().find(|window| there(window)) {
+            window.dock.push_to_first_leaf(pane);
+            window.focus = true;
+        } else {
+            // It was that window's only tab, and it's gone with it.
+            self.open(pane);
+        }
+    }
+
+    /// Moves every panel of window `from` in with the tabs of window `into`.
+    pub fn merge_windows(&mut self, from: u64, into: u64) {
+        let Some(index) = self.windows.iter().position(|window| window.id == from) else {
+            return;
+        };
+        if from == into || !self.windows.iter().any(|window| window.id == into) {
+            return;
+        }
+        let moved = self.windows.remove(index);
+        if let Some(window) = self.windows.iter_mut().find(|window| window.id == into) {
+            for pane in moved.panes() {
+                window.dock.push_to_first_leaf(pane);
+            }
+            window.focus = true;
+        }
+    }
+
+    /// The window a tab let go at `pointer` would join, leaving out the
+    /// window `moving` that's following the mouse.
+    fn window_under(&self, pointer: egui::Pos2, moving: u64) -> Option<u64> {
+        self.windows
+            .iter()
+            .filter(|window| window.id != moving)
+            .find(|window| {
+                window
+                    .screen_rect
+                    .is_some_and(|rect| rect.contains(pointer))
+            })
+            .map(|window| window.id)
+    }
+
+    /// True while a tab following the mouse is over window `id`, so letting
+    /// go would add it there.
+    pub fn is_drop_target(&self, id: u64) -> bool {
+        self.windows.iter().any(|window| {
+            window
+                .following
+                .is_some_and(|f| f.held && self.window_under(f.pointer, window.id) == Some(id))
+        })
+    }
+
     /// Puts `pane` in a window of its own at `opens_at`. The Scene stays in
     /// the main window, and so does a panel that isn't open.
     pub fn float(&mut self, pane: Pane, opens_at: Option<Placement>) -> Option<u64> {
+        self.remember_homes();
         if pane == Pane::Scene || !self.take_pane(pane) {
             return None;
         }
@@ -227,23 +385,38 @@ impl Layout {
         }
     }
 
-    /// Puts `pane` back in the main window, where it starts out.
+    /// Puts `pane` back in the main window, where it was docked.
     pub fn dock_in_main(&mut self, pane: Pane) {
         if self.take_pane(pane) {
             self.drop_empty_windows();
-            self.open(pane);
+            self.restore_home(pane);
         }
     }
 
-    /// Closes window `id`, putting its panels back in the main window, so
-    /// closing one never loses a panel.
+    /// Dock Back: takes window `id` away, putting each of its panels back
+    /// where it was docked.
     pub fn dock_window_in_main(&mut self, id: u64) {
         let Some(index) = self.windows.iter().position(|window| window.id == id) else {
             return;
         };
         let window = self.windows.remove(index);
         for pane in window.panes() {
-            self.open(pane);
+            self.restore_home(pane);
+        }
+    }
+
+    /// Closes window `id` and its panels; View > Panels opens them again.
+    /// Scripts and plugin tabs dock instead: a script may have unsaved
+    /// changes, and each has a tab only as long as it's open.
+    pub fn close_window(&mut self, id: u64) {
+        let Some(index) = self.windows.iter().position(|window| window.id == id) else {
+            return;
+        };
+        let window = self.windows.remove(index);
+        for pane in window.panes() {
+            if matches!(pane, Pane::Script(_) | Pane::Plugin(_)) {
+                self.restore_home(pane);
+            }
         }
     }
 
@@ -264,6 +437,12 @@ impl Layout {
         main: Option<egui::Rect>,
     ) {
         let mut dropped = Vec::new();
+        let mut joined = Vec::new();
+        let rects: Vec<(u64, egui::Rect)> = self
+            .windows
+            .iter()
+            .filter_map(|window| Some((window.id, window.screen_rect?)))
+            .collect();
         for window in &mut self.windows {
             let Some(follow) = window.following.as_mut().filter(|f| f.source == source) else {
                 continue;
@@ -273,13 +452,23 @@ impl Layout {
             }
             follow.held = held;
             if !held {
+                // Other windows are on top of the main one.
+                let target = rects
+                    .iter()
+                    .find(|(id, rect)| *id != window.id && rect.contains(follow.pointer))
+                    .map(|(id, _)| *id);
                 let over_main =
                     source.is_some() && main.is_some_and(|main| main.contains(follow.pointer));
                 window.following = None;
-                if over_main {
-                    dropped.push(window.id);
+                match target {
+                    Some(into) => joined.push((window.id, into)),
+                    None if over_main => dropped.push(window.id),
+                    None => {}
                 }
             }
+        }
+        for (from, into) in joined {
+            self.merge_windows(from, into);
         }
         for id in dropped {
             self.dock_window_in_main(id);
@@ -297,6 +486,31 @@ impl Layout {
             }
         }
     }
+}
+
+/// Where the lone tab at `node` sits: beside the first panel of what shares
+/// its parent. `None` if it fills the whole dock.
+fn split_home(tree: &egui_dock::Tree<Pane>, node: NodeIndex) -> Option<Home> {
+    let parent = node.parent()?;
+    let left = node.is_left();
+    let (side, left_share) = match &tree[parent] {
+        Node::Horizontal(split) => (if left { Side::Left } else { Side::Right }, split.fraction),
+        Node::Vertical(split) => (if left { Side::Above } else { Side::Below }, split.fraction),
+        _ => return None,
+    };
+    let mut at = if left { parent.right() } else { parent.left() };
+    let anchor = loop {
+        match tree.iter().nth(at.0)? {
+            Node::Leaf(leaf) => break *leaf.tabs.first()?,
+            Node::Horizontal(_) | Node::Vertical(_) => at = at.left(),
+            Node::Empty => return None,
+        }
+    };
+    Some(Home::Split {
+        anchor,
+        side,
+        left_share,
+    })
 }
 
 /// The panel being dragged by its tab in `dock`, drawn with the dock area
@@ -381,6 +595,158 @@ mod tests {
         assert!(layout.windows.is_empty());
         assert!(layout.dock.find_tab(&Pane::Properties).is_some());
         assert!(layout.dock.find_tab(&Pane::Profiler).is_some());
+    }
+
+    /// The tabs sharing the leaf `pane` is in, in order.
+    fn tabs_beside(layout: &Layout, pane: Pane) -> Vec<Pane> {
+        let (node, _) = layout.dock.find_main_surface_tab(&pane).unwrap();
+        layout.dock.main_surface()[node].tabs().unwrap().to_vec()
+    }
+
+    #[test]
+    fn dock_back_returns_a_tab_to_its_place_among_the_others() {
+        let mut layout = Layout::default();
+        let before = tabs_beside(&layout, Pane::Assets);
+        assert_eq!(before, [Pane::Console, Pane::Assets, Pane::Profiler]);
+        let id = layout.float(Pane::Assets, None).unwrap();
+        layout.dock_window_in_main(id);
+        assert!(layout.windows.is_empty());
+        assert_eq!(tabs_beside(&layout, Pane::Assets), before);
+    }
+
+    #[test]
+    fn dock_back_splits_a_panel_that_had_its_own_place_on_the_same_side() {
+        let mut layout = Layout::default();
+        // Explorer starts alone, above Properties.
+        let id = layout.float(Pane::Explorer, None).unwrap();
+        assert_eq!(
+            tabs_beside(&layout, Pane::Properties),
+            [Pane::Properties, Pane::Terrain]
+        );
+        layout.dock_window_in_main(id);
+        let (node, _) = layout.dock.find_main_surface_tab(&Pane::Explorer).unwrap();
+        assert!(node.is_left(), "above its anchor");
+        let parent = node.parent().unwrap();
+        assert!(matches!(
+            layout.dock.main_surface()[parent],
+            Node::Vertical(_)
+        ));
+        let (properties, _) = layout
+            .dock
+            .find_main_surface_tab(&Pane::Properties)
+            .unwrap();
+        assert_eq!(properties, parent.right());
+    }
+
+    #[test]
+    fn dock_back_keeps_the_size_the_panel_had() {
+        let mut layout = Layout::default();
+        let share = |layout: &Layout| {
+            let (node, _) = layout.dock.find_main_surface_tab(&Pane::Explorer).unwrap();
+            match &layout.dock.main_surface()[node.parent().unwrap()] {
+                Node::Vertical(split) | Node::Horizontal(split) => split.fraction,
+                _ => panic!("no split"),
+            }
+        };
+        let before = share(&layout);
+        let id = layout.float(Pane::Explorer, None).unwrap();
+        layout.dock_window_in_main(id);
+        assert!((share(&layout) - before).abs() < 1e-4);
+    }
+
+    #[test]
+    fn dock_back_falls_back_to_the_starting_place_when_its_neighbours_are_gone() {
+        let mut layout = Layout::default();
+        let id = layout.float(Pane::Assets, None).unwrap();
+        layout.toggle(Pane::Console);
+        layout.toggle(Pane::Profiler);
+        layout.dock_window_in_main(id);
+        assert!(layout.dock.find_tab(&Pane::Assets).is_some());
+    }
+
+    #[test]
+    fn homes_are_saved_with_the_layout() {
+        let mut layout = Layout::default();
+        let before = tabs_beside(&layout, Pane::Assets);
+        layout.float(Pane::Assets, None);
+        let mut loaded = Layout::from_text(&layout.to_text());
+        let id = loaded.windows[0].id;
+        loaded.dock_window_in_main(id);
+        assert_eq!(tabs_beside(&loaded, Pane::Assets), before);
+    }
+
+    #[test]
+    fn close_closes_panels_but_docks_scripts_so_nothing_unsaved_is_lost() {
+        let mut layout = Layout::default();
+        layout.sync_scripts(&[7], None, None);
+        let id = layout.float(Pane::Explorer, None).unwrap();
+        layout.move_to_window(Pane::Script(7), id);
+        layout.close_window(id);
+        assert!(layout.windows.is_empty());
+        assert!(!layout.is_open(Pane::Explorer));
+        assert!(layout.dock.find_tab(&Pane::Script(7)).is_some());
+    }
+
+    fn placed_at(layout: &mut Layout, id: u64, min: (f32, f32)) {
+        let window = layout.windows.iter_mut().find(|w| w.id == id).unwrap();
+        window.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(min.0, min.1),
+            egui::vec2(400.0, 400.0),
+        ));
+    }
+
+    #[test]
+    fn a_tab_let_go_over_another_window_joins_its_tabs() {
+        let mut layout = Layout::default();
+        let host = layout.float(Pane::Explorer, None).unwrap();
+        placed_at(&mut layout, host, (2000.0, 100.0));
+        let over_host = egui::pos2(2100.0, 200.0);
+        let moving = layout
+            .tear_off(Pane::Console, None, over_host, DEFAULT_SIZE)
+            .unwrap();
+        assert!(layout.is_drop_target(host));
+        assert!(!layout.is_drop_target(moving));
+        layout.update_following(None, Some(over_host), false, None);
+        assert_eq!(layout.windows.len(), 1, "the torn-off window has joined");
+        assert!(layout.windows[0].holds(Pane::Explorer));
+        assert!(layout.windows[0].holds(Pane::Console));
+        assert!(!layout.is_following());
+        assert!(!layout.is_drop_target(host));
+    }
+
+    #[test]
+    fn a_tab_let_go_over_a_window_on_top_of_the_main_one_joins_the_window() {
+        let mut layout = Layout::default();
+        let main = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 800.0));
+        let host = layout.float(Pane::Explorer, None).unwrap();
+        placed_at(&mut layout, host, (100.0, 100.0));
+        let source = layout.float(Pane::Properties, None).unwrap();
+        layout.move_to_window(Pane::Terrain, source);
+        let over_host = egui::pos2(200.0, 200.0);
+        layout
+            .tear_off(Pane::Terrain, Some(source), over_host, DEFAULT_SIZE)
+            .unwrap();
+        layout.update_following(Some(source), Some(over_host), false, Some(main));
+        let host_window = layout.windows.iter().find(|w| w.id == host).unwrap();
+        assert!(host_window.holds(Pane::Terrain));
+        assert!(layout.dock.find_tab(&Pane::Terrain).is_none());
+    }
+
+    #[test]
+    fn a_tab_moved_from_the_menu_joins_the_window_and_the_empty_one_closes() {
+        let mut layout = Layout::default();
+        let host = layout.float(Pane::Explorer, None).unwrap();
+        let other = layout.float(Pane::Console, None).unwrap();
+        assert_eq!(
+            layout.other_windows(Some(host)),
+            [(other, "Console".to_owned())]
+        );
+        layout.move_to_window(Pane::Console, host);
+        assert_eq!(layout.windows.len(), 1);
+        assert!(layout.windows[0].holds(Pane::Console));
+        // The Scene never leaves the main window.
+        layout.move_to_window(Pane::Scene, host);
+        assert!(layout.dock.find_tab(&Pane::Scene).is_some());
     }
 
     #[test]

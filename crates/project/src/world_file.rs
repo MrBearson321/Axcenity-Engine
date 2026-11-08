@@ -35,6 +35,9 @@
 //! (Phase 64) is saved like `replicated_storage`, and only when it has
 //! something in it.
 //!
+//! `Locked` and `BlueprintTexture` are only written when on, so a Folder
+//! that's never been locked still has no `properties` at all.
+//!
 //! Property values are plain JSON. Their meaning comes from the class: the
 //! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`,
 //! `[0, 120]` is a `Vector2`, `[0, 0, 1, 0]` is a `UDim2` (X scale, X offset, Y scale, Y offset), and
@@ -79,6 +82,8 @@ use serde_json::{Map, Value as Json};
 /// `world.json` and prefab files. The manifest version is separate: a project
 /// upgrade can leave these files unchanged.
 const WORLD_FORMAT_VERSION: u32 = 1;
+/// Editor-only switches that are off nearly everywhere.
+const WRITTEN_ONLY_WHEN_ON: [&str; 2] = ["Locked", "BlueprintTexture"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorldError {
@@ -929,6 +934,9 @@ fn write_instance(
     let properties: Vec<String> = instance
         .properties()
         .filter(|(name, value)| !defaults.iter().any(|(n, v)| n == name && v == *value))
+        .filter(|(name, value)| {
+            !(WRITTEN_ONLY_WHEN_ON.contains(name) && **value == Value::Bool(false))
+        })
         .map(|(name, value)| {
             let json = match value {
                 Value::Instance(target) => reference_json(world, *target, roots),

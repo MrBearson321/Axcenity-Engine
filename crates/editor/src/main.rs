@@ -18,6 +18,7 @@ mod autocomplete;
 mod behavior_tree;
 mod block_editor;
 mod build_tools;
+mod color_palette;
 mod command_palette;
 mod console;
 mod constraints;

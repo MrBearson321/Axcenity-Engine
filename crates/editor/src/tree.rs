@@ -1195,6 +1195,9 @@ pub fn check_editable(world: &World, id: InstanceId) -> Result<(), &'static str>
             "Only things in the Workspace and ReplicatedStorage are saved, so only those can be changed.",
         );
     }
+    if world.is_locked(id) {
+        return Err("It's locked. Right-click it in the Explorer to unlock it.");
+    }
     Ok(())
 }
 

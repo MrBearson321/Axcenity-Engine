@@ -197,6 +197,16 @@ impl EditorApp {
             theme::with_icon(icons::GRID_NINE, "Show the measuring grid"),
         )
         .on_hover_text("Lines and distances in studs on the baseplate, while editing.");
+        ui.add_enabled(
+            self.grid,
+            egui::Slider::new(
+                &mut self.grid_strength,
+                MIN_GRID_STRENGTH..=MAX_GRID_STRENGTH,
+            )
+            .text("Grid strength")
+            .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+        )
+        .on_hover_text("How solid the grid's lines are. Lower is easier on the eyes.");
         ui.checkbox(
             &mut self.view_cube,
             theme::with_icon(icons::CUBE_FOCUS, "Show the view cube"),

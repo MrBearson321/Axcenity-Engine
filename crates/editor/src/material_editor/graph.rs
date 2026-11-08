@@ -301,7 +301,7 @@ fn parameter_control(ui: &mut egui::Ui, value: &ParamValue) -> Option<ParamValue
         }
         ParamValue::Vector(numbers) if numbers.len() == 3 => {
             let mut bytes = [0, 1, 2].map(|i| (numbers[i].clamp(0.0, 1.0) * 255.0).round() as u8);
-            ui.color_edit_button_srgb(&mut bytes)
+            crate::color_palette::edit_srgb(ui, &mut bytes)
                 .changed()
                 .then(|| ParamValue::Vector(bytes.map(|byte| f32::from(byte) / 255.0).to_vec()))
         }

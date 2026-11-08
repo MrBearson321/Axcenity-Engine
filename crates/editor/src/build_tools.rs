@@ -33,39 +33,6 @@ use crate::angular::AngularSettings;
 use crate::gizmo::{Axis, Modes, MoveAxes, ResizeDirections, RotatePivot, Side, Snap, Tool};
 use crate::theme::{self, icons};
 
-/// F3X-style swatches, as sRGB bytes, in rows of 7.
-const PALETTE: [[u8; 3]; 28] = [
-    [248, 248, 248],
-    [205, 205, 205],
-    [163, 162, 165],
-    [99, 95, 98],
-    [27, 42, 53],
-    [17, 17, 17],
-    [215, 197, 154],
-    [196, 40, 28],
-    [255, 0, 0],
-    [218, 133, 65],
-    [245, 205, 48],
-    [255, 255, 0],
-    [160, 95, 53],
-    [124, 92, 70],
-    [75, 151, 75],
-    [0, 255, 0],
-    [39, 70, 45],
-    [161, 196, 140],
-    [234, 184, 146],
-    [105, 64, 40],
-    [204, 142, 105],
-    [13, 105, 172],
-    [0, 0, 255],
-    [110, 153, 202],
-    [0, 255, 255],
-    [4, 175, 236],
-    [107, 50, 124],
-    [255, 0, 191],
-];
-const SWATCH: f32 = 20.0;
-
 /// The building tools' own settings, kept while the editor runs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BuildSettings {
@@ -541,33 +508,13 @@ fn paint(
     actions: &mut Vec<ToolAction>,
 ) {
     let mut picked = None;
-    egui::Grid::new("paint swatches")
-        .spacing([3.0, 3.0])
-        .show(ui, |ui| {
-            for (i, rgb) in PALETTE.iter().enumerate() {
-                let color = egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
-                let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(SWATCH, SWATCH), egui::Sense::click());
-                let current = to_bytes(settings.paint_color) == *rgb;
-                let stroke = if current || response.hovered() {
-                    egui::Stroke::new(2.0_f32, ui.visuals().strong_text_color())
-                } else {
-                    egui::Stroke::new(1.0_f32, ui.visuals().weak_text_color())
-                };
-                ui.painter().rect_filled(rect, 3.0, color);
-                ui.painter()
-                    .rect_stroke(rect, 3.0, stroke, egui::StrokeKind::Inside);
-                if response.clicked() {
-                    picked = Some(from_bytes(*rgb));
-                }
-                if i % 7 == 6 {
-                    ui.end_row();
-                }
-            }
-        });
+    let mut chosen = to_bytes(settings.paint_color);
+    if crate::color_palette::swatches(ui, &mut chosen) {
+        picked = Some(from_bytes(chosen));
+    }
     ui.horizontal(|ui| {
         let mut bytes = to_bytes(settings.paint_color);
-        if ui.color_edit_button_srgb(&mut bytes).changed() {
+        if crate::color_palette::edit_srgb(ui, &mut bytes).changed() {
             picked = Some(from_bytes(bytes));
         }
         ui.label("Custom");
@@ -891,7 +838,7 @@ fn light(ui: &mut egui::Ui, scene: &PanelScene, class: ClassName, actions: &mut 
             if let Some(color) = light.property("Color").and_then(Value::as_color3) {
                 ui.label("Color");
                 let mut bytes = to_bytes(color);
-                if ui.color_edit_button_srgb(&mut bytes).changed() {
+                if crate::color_palette::edit_srgb(ui, &mut bytes).changed() {
                     set("Color", Value::Color3(from_bytes(bytes)));
                 }
                 ui.end_row();
@@ -978,7 +925,7 @@ fn glow(ui: &mut egui::Ui, scene: &PanelScene, actions: &mut Vec<ToolAction>) {
         .show(ui, |ui| {
             ui.label("Color");
             let mut bytes = to_bytes(color);
-            if ui.color_edit_button_srgb(&mut bytes).changed() {
+            if crate::color_palette::edit_srgb(ui, &mut bytes).changed() {
                 actions.push(ToolAction::Set {
                     property: "EmissiveColor",
                     value: Value::Color3(from_bytes(bytes)),
@@ -1140,7 +1087,7 @@ mod tests {
 
     #[test]
     fn colors_round_trip_through_bytes() {
-        for rgb in PALETTE {
+        for rgb in crate::color_palette::PRESETS {
             assert_eq!(to_bytes(from_bytes(rgb)), rgb);
         }
     }

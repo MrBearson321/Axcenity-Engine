@@ -90,8 +90,8 @@ fn a_property_changed_signal_fires_only_for_its_property_with_no_arguments() {
     assert!(
         output[2].ends_with(
             "Speed is not a property of Part; choose from Name, Parent, Anchored, \
-             AssemblyAngularVelocity, AssemblyLinearVelocity, CanCollide, CanQuery, CanTouch, \
-             CastShadow, CollisionGroup, Color, CustomPhysicalProperties, Emission, EmissiveColor, Massless, Material, MaterialVariant, \
+             AssemblyAngularVelocity, AssemblyLinearVelocity, BlueprintTexture, CanCollide, CanQuery, CanTouch, \
+             CastShadow, CollisionGroup, Color, CustomPhysicalProperties, Emission, EmissiveColor, Locked, Massless, Material, MaterialVariant, \
              Metalness, Orientation, Position, Roughness, Shape, Size, TileSize, Transparency, \
              WindAffected"
         ),

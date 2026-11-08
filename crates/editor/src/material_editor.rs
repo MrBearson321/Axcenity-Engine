@@ -1081,7 +1081,7 @@ fn color_row(
         let mut bytes = own
             .unwrap_or(base)
             .map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
-        if ui.color_edit_button_srgb(&mut bytes).changed() {
+        if crate::color_palette::edit_srgb(ui, &mut bytes).changed() {
             let color = bytes.map(|byte| f32::from(byte) / 255.0);
             changes.push((field, Box::new(move |file| set(file, Some(color)))));
         }

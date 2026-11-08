@@ -12,8 +12,12 @@ struct Grid {
     // x: its height, y: studs between lines, z: lines per heavy line,
     // w: how far from the camera it has faded out (0 never).
     params: vec4<f32>,
-    // Linear color of the lines.
+    // xyz: linear color of the lines, w: how solid they are, 1 the usual.
     color: vec4<f32>,
+    // A place the lines take the color of: x, z, how far it reaches, and
+    // how much of its color they take right by it (0 for no place at all).
+    tint_at: vec4<f32>,
+    tint_color: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> grid: Grid;
@@ -59,22 +63,29 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let dense = max(change.x, change.y);
 
     let minor_line = lines(in.xz / spacing, change / spacing, 1.0)
-        * readable(dense / spacing) * 0.32;
+        * readable(dense / spacing) * 0.16;
     let major_line = lines(in.xz / major, change / major, 1.6)
-        * (1.0 - smoothstep(0.2, 0.5, dense / major)) * 0.7;
+        * (1.0 - smoothstep(0.2, 0.5, dense / major)) * 0.34;
     var color = grid.color.rgb;
-    var alpha = max(minor_line, major_line);
+    var alpha = max(minor_line, major_line) * grid.color.w;
+
+    // Near a selected or glowing part the lines take on its color, and
+    // stand out a little more.
+    let near = (1.0 - smoothstep(0.0, grid.tint_at.z, length(in.xz - grid.tint_at.xy)))
+        * grid.tint_at.w;
+    color = mix(color, grid.tint_color.rgb, near);
+    alpha = min(alpha * (1.0 + near), 1.0);
 
     // The world's X axis in red and its Z axis in blue, as the handles are.
     let along_x = axis(in.xz.y, change.y, 2.2);
     let along_z = axis(in.xz.x, change.x, 2.2);
     if along_x > 0.0 {
         color = mix(color, vec3<f32>(0.8, 0.07, 0.07), along_x);
-        alpha = max(alpha, along_x * 0.9);
+        alpha = max(alpha, along_x * 0.5 * grid.color.w);
     }
     if along_z > 0.0 {
         color = mix(color, vec3<f32>(0.04, 0.2, 0.9), along_z);
-        alpha = max(alpha, along_z * 0.9);
+        alpha = max(alpha, along_z * 0.5 * grid.color.w);
     }
 
     if grid.params.w > 0.0 {

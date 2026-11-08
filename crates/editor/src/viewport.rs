@@ -349,6 +349,8 @@ pub struct ViewportScene<'a> {
     pub view_cube: bool,
     /// Whether the measuring grid is drawn while editing.
     pub grid: bool,
+    /// How solid its lines are, as a multiple of the usual soft look.
+    pub grid_strength: f32,
     /// Editor-only visual-debug overlays (View > Overlays).
     pub overlays: OverlayToggles,
     /// What the viewport shows: lit, or a debug view (View > View Mode).
@@ -544,6 +546,10 @@ fn gather(
     }
     let mut parts: Vec<(InstanceId, Pose)> = Vec::new();
     for id in ids {
+        // Selected in the Explorer, a locked thing still can't be changed.
+        if world.is_locked(id) {
+            continue;
+        }
         // A selected Attachment moves in the world, by its offset on its part.
         if let Some(pose) = crate::constraints::tool_pose(world, id) {
             parts.retain(|(seen, _)| *seen != id);
@@ -552,6 +558,9 @@ fn gather(
         }
         let inside = std::iter::once(id).chain(world.descendants(id));
         for part in inside {
+            if world.is_locked(part) {
+                continue;
+            }
             let pose = world
                 .get(part)
                 .and_then(Pose::of)
@@ -659,6 +668,7 @@ pub struct Viewport {
     swing: Option<view_cube::Swing>,
     /// The measuring grid's printed distances.
     grid_labels: grid::Labels,
+    grid_glow: grid::NearbyGlow,
     /// A Spline point being dragged.
     spline_drag: Option<SplineDrag>,
     /// The left button went down on a Spline's curve and is held, so it
@@ -723,6 +733,7 @@ impl Viewport {
             frozen_culling: None,
             swing: None,
             grid_labels: Default::default(),
+            grid_glow: Default::default(),
         }
     }
 
@@ -918,6 +929,7 @@ impl Viewport {
             light_cones,
             view_cube: show_cube,
             grid: show_grid,
+            grid_strength,
             overlays,
             view_mode,
             debug_rays,
@@ -1267,14 +1279,23 @@ impl Viewport {
             .renderer
             .set_background_uploads(self.terrain.streaming.settings().is_some());
         let render_started = Instant::now();
+        // Blueprint textures are for building by: the game never shows them.
+        assets.set_blueprint(
+            (!game_playing)
+                .then(crate::prototype::blueprint_image)
+                .flatten(),
+        );
         let mut draw_list =
             axcenity_scene::build_draw_list_posed(world, assets, camera, poses, &mut self.terrain);
         self.particles.draw(&mut draw_list, world, assets);
         self.particles.add_weather(&mut draw_list);
-        let grid_spec = (show_grid && !playing).then(|| grid::spec(world, snap.grid_step()));
-        draw_list.grid = grid_spec
-            .as_ref()
-            .map(|spec| grid::plane(spec, camera.position));
+        let grid_spec = (show_grid && !game_playing).then(|| grid::spec(world, snap.grid_step()));
+        draw_list.grid = grid_spec.as_ref().map(|spec| {
+            let now = ui.input(|input| input.time);
+            let glowing = self.grid_glow.update(world, camera.position, now);
+            let tint = grid::tint(world, selected, glowing);
+            grid::plane(spec, camera.position, grid_strength, tint)
+        });
         move_overlay::ghost_moving(&mut draw_list, &moving_parts(self.drag.as_ref(), world));
         draw_list.ui = ui_layout.draw_items.clone();
         if let Some(inventory) = hotbar {

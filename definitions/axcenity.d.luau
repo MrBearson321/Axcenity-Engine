@@ -1545,6 +1545,8 @@ declare extern type Part extends Instance with
 	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
+	--- If true, a plain Plastic part is drawn in a prototype grid texture while editing, to build by. It never shows in Play or in a built game.
+	BlueprintTexture: boolean
 	--- From 0 (not metal) to 1 (metal).
 	Metalness: number
 	--- From 0 (mirror-smooth) to 1 (matte).
@@ -1577,6 +1579,8 @@ declare extern type Part extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -1658,6 +1662,8 @@ declare extern type MeshPart extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -1743,6 +1749,8 @@ declare extern type UnionOperation extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -1806,6 +1814,8 @@ declare extern type NegateOperation extends Instance with
 	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
+	--- If true, a plain Plastic part is drawn in a prototype grid texture while editing, to build by. It never shows in Play or in a built game.
+	BlueprintTexture: boolean
 	--- From 0 (not metal) to 1 (metal).
 	Metalness: number
 	--- From 0 (mirror-smooth) to 1 (matte).
@@ -1838,6 +1848,8 @@ declare extern type NegateOperation extends Instance with
 	AssemblyLinearVelocity: Vector3
 	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
 	AssemblyAngularVelocity: Vector3
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -1901,6 +1913,8 @@ declare extern type Seat extends Instance with
 	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
+	--- If true, a plain Plastic part is drawn in a prototype grid texture while editing, to build by. It never shows in Play or in a built game.
+	BlueprintTexture: boolean
 	--- From 0 (not metal) to 1 (metal).
 	Metalness: number
 	--- From 0 (mirror-smooth) to 1 (matte).
@@ -1939,6 +1953,8 @@ declare extern type Seat extends Instance with
 	Disabled: boolean
 	--- An Attachment where a sitting character's feet go, or nil for the middle of the seat's top face.
 	SeatOffset: Instance?
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -2004,6 +2020,8 @@ declare extern type VehicleSeat extends Instance with
 	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
+	--- If true, a plain Plastic part is drawn in a prototype grid texture while editing, to build by. It never shows in Play or in a built game.
+	BlueprintTexture: boolean
 	--- From 0 (not metal) to 1 (metal).
 	Metalness: number
 	--- From 0 (mirror-smooth) to 1 (matte).
@@ -2056,6 +2074,8 @@ declare extern type VehicleSeat extends Instance with
 	Steer: number
 	--- If true, the wheels with Brakes on hold the car still. An empty seat with no Throttle holds the car the same way; otherwise a car with no Throttle coasts, slowing a little.
 	HandBrake: boolean
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -2121,6 +2141,8 @@ declare extern type DamageZone extends Instance with
 	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
+	--- If true, a plain Plastic part is drawn in a prototype grid texture while editing, to build by. It never shows in Play or in a built game.
+	BlueprintTexture: boolean
 	--- From 0 (not metal) to 1 (metal).
 	Metalness: number
 	--- From 0 (mirror-smooth) to 1 (matte).
@@ -2155,6 +2177,8 @@ declare extern type DamageZone extends Instance with
 	AssemblyAngularVelocity: Vector3
 	--- Health a second taken from every Health whose Model has a part inside the zone (once each, however many of its parts are in). The damage's source is the zone. 0 or less does nothing.
 	DamagePerSecond: number
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -2218,6 +2242,8 @@ declare extern type ReverbZone extends Instance with
 	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
+	--- If true, a plain Plastic part is drawn in a prototype grid texture while editing, to build by. It never shows in Play or in a built game.
+	BlueprintTexture: boolean
 	--- From 0 (not metal) to 1 (metal).
 	Metalness: number
 	--- From 0 (mirror-smooth) to 1 (matte).
@@ -2254,6 +2280,8 @@ declare extern type ReverbZone extends Instance with
 	ReverbType: EnumReverbType | "Room" | "StoneRoom" | "Hallway" | "Cave" | "ConcertHall" | "Arena" | "SewerPipe"
 	--- Seconds the reverb takes to blend in when the camera comes in, and out when it leaves. 1 by default.
 	FadeTime: number
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -2317,6 +2345,8 @@ declare extern type SpawnLocation extends Instance with
 	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
+	--- If true, a plain Plastic part is drawn in a prototype grid texture while editing, to build by. It never shows in Play or in a built game.
+	BlueprintTexture: boolean
 	--- From 0 (not metal) to 1 (metal).
 	Metalness: number
 	--- From 0 (mirror-smooth) to 1 (matte).
@@ -2357,6 +2387,8 @@ declare extern type SpawnLocation extends Instance with
 	TeamColor: Color3
 	--- Seconds a ForceField keeps a character spawned here from losing Health. 0 gives none.
 	Duration: number
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -2494,6 +2526,8 @@ end
 declare extern type Model extends Instance with
 	--- How the Model streams. Default: a Model with no Models inside loads and unloads whole, and one with Models inside streams each piece on its own. Atomic: always whole, with the Models inside. Persistent: always on every device.
 	ModelStreamingMode: EnumModelStreamingMode | "Default" | "Atomic" | "Persistent"
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	[string]: any
 	--- Scripts only: puts a copy of the Effect `effect` on this Model and returns it, or adds a stack to the copy already here (up to its MaxStacks) and starts its Duration over. An instant Effect changes at once and returns nil.
 	function ApplyEffect(self, effect: Effect): Effect?
@@ -2505,6 +2539,8 @@ end
 
 --- Groups Instances to keep the tree tidy. Has no effect on the game.
 declare extern type Folder extends Instance with
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	[string]: any
 end
 
@@ -3403,6 +3439,8 @@ declare extern type PointLight extends Instance with
 	Position: Vector3
 	--- How it's turned when it isn't inside a part, in degrees, as a part's Orientation. Inside a part it turns with the part.
 	Orientation: Vector3
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	[string]: any
 end
 
@@ -3426,6 +3464,8 @@ declare extern type SpotLight extends Instance with
 	Position: Vector3
 	--- How it's turned when it isn't inside a part, in degrees, as a part's Orientation. Inside a part it turns with the part.
 	Orientation: Vector3
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	[string]: any
 end
 
@@ -3451,6 +3491,8 @@ declare extern type RectLight extends Instance with
 	Position: Vector3
 	--- How it's turned when it isn't inside a part, in degrees, as a part's Orientation. Inside a part it turns with the part.
 	Orientation: Vector3
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	[string]: any
 end
 
@@ -3637,6 +3679,8 @@ declare extern type GraphicsVolume extends Instance with
 	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
+	--- If true, a plain Plastic part is drawn in a prototype grid texture while editing, to build by. It never shows in Play or in a built game.
+	BlueprintTexture: boolean
 	--- From 0 (not metal) to 1 (metal).
 	Metalness: number
 	--- From 0 (mirror-smooth) to 1 (matte).
@@ -3675,6 +3719,8 @@ declare extern type GraphicsVolume extends Instance with
 	BlendDistance: number
 	--- Where volumes overlap, the one with the higher Priority wins (0 by default). Equal ones follow Explorer order, the later winning.
 	Priority: number
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -3801,6 +3847,8 @@ declare extern type ParticleEmitter extends Instance with
 	Position: Vector3
 	--- How it's turned when it isn't inside a part, in degrees, as a part's Orientation. Inside a part it turns with the part.
 	Orientation: Vector3
+	--- If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.
+	Locked: boolean
 	[string]: any
 	--- Gives off this many particles at once (up to 1000), even while Enabled is false, such as a burst of sparks when something breaks.
 	function Emit(self, count: number): ()

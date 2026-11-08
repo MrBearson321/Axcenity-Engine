@@ -30,6 +30,65 @@ fn speed_label_shows_a_decimal_only_when_slow() {
     assert_eq!(speed_label(2.4), "Fly speed: 2.4 studs/s");
 }
 
+/// A part at the origin in the Workspace, and one above it.
+fn two_stacked_parts(world: &mut World) -> (InstanceId, InstanceId) {
+    let make = |world: &mut World, y: f32| {
+        let part = world.create(axcenity_core::ClassName::Part).unwrap();
+        world.set_parent(part, Some(world.workspace())).unwrap();
+        let at = axcenity_core::Vector3::new(0.0, y, 0.0);
+        world
+            .set_property(part, "Position", axcenity_core::Value::Vector3(at))
+            .unwrap();
+        part
+    };
+    (make(world, 0.0), make(world, 5.0))
+}
+
+#[test]
+fn a_click_goes_through_a_locked_part_to_what_is_behind_it() {
+    let mut world = World::new();
+    let (below, above) = two_stacked_parts(&mut world);
+    let down = axcenity_scene::Ray {
+        origin: Vec3::new(0.0, 20.0, 0.0),
+        direction: Vec3::NEG_Y,
+    };
+    assert_eq!(input::pick_unlocked(&world, down).unwrap().part, above);
+    world
+        .set_property(above, "Locked", axcenity_core::Value::Bool(true))
+        .unwrap();
+    assert_eq!(input::pick_unlocked(&world, down).unwrap().part, below);
+    world
+        .set_property(below, "Locked", axcenity_core::Value::Bool(true))
+        .unwrap();
+    assert!(input::pick_unlocked(&world, down).is_none());
+}
+
+#[test]
+fn the_tools_leave_locked_parts_and_what_is_in_a_locked_model_alone() {
+    let mut world = World::new();
+    let (free, locked) = two_stacked_parts(&mut world);
+    world
+        .set_property(locked, "Locked", axcenity_core::Value::Bool(true))
+        .unwrap();
+    let ids = |world: &World, selection: &[InstanceId]| -> Vec<InstanceId> {
+        selected_parts(world, selection, None)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect()
+    };
+    assert_eq!(ids(&world, &[free, locked]), [free]);
+
+    let model = world.create(axcenity_core::ClassName::Model).unwrap();
+    world.set_parent(model, Some(world.workspace())).unwrap();
+    world.set_parent(free, Some(model)).unwrap();
+    assert_eq!(ids(&world, &[model]), [free]);
+    world
+        .set_property(model, "Locked", axcenity_core::Value::Bool(true))
+        .unwrap();
+    assert!(ids(&world, &[model]).is_empty(), "inside a locked Model");
+    assert!(world.is_locked(free));
+}
+
 #[test]
 fn clicking_the_middle_of_the_view_picks_the_part_the_camera_faces() {
     let mut world = World::new();

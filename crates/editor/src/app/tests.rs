@@ -31,6 +31,51 @@ fn temp_project(name: &str, files: &[(&str, &str)]) -> PathBuf {
 }
 
 #[test]
+fn parts_from_the_menu_start_as_blueprints_and_other_inserts_do_not() {
+    let folder = copy_of_example("hello-touched", "blueprint-parts");
+    let mut app = EditorApp::new(Some(&folder));
+    let flag = |app: &EditorApp, id| {
+        app.world
+            .get(id)
+            .unwrap()
+            .property("BlueprintTexture")
+            .cloned()
+    };
+    let part = inserted(&mut app, Insertable::Part(PartType::Block), None);
+    assert_eq!(flag(&app, part), Some(Value::Bool(true)));
+    let seat = inserted(&mut app, Insertable::Seat, None);
+    assert_eq!(flag(&app, seat), Some(Value::Bool(false)));
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+#[test]
+fn locking_from_the_explorer_is_one_undo_step_and_stops_delete_until_unlocked() {
+    let folder = copy_of_example("hello-touched", "lock-part");
+    let mut app = EditorApp::new(Some(&folder));
+    let part = inserted(&mut app, Insertable::Part(PartType::Block), None);
+    app.history.seal();
+    app.act(Action::SetLocked(part, true));
+    assert!(app.world.is_locked(part));
+    assert_eq!(
+        tree::check_delete(&app.world, part),
+        Err("It's locked. Right-click it in the Explorer to unlock it.")
+    );
+    app.act(Action::Delete(part));
+    assert!(app.world.get(part).is_some(), "a locked part stays");
+    app.undo();
+    assert!(!app.world.is_locked(part), "undo unlocks it");
+    app.act(Action::SetLocked(part, true));
+    app.act(Action::SetLocked(part, false));
+    app.act(Action::Delete(part));
+    assert_eq!(
+        app.world.get(part).unwrap().parent(),
+        None,
+        "unlocked, it can go"
+    );
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+#[test]
 fn opens_the_milestone_1_demo_and_says_so_in_output() {
     let app = EditorApp::new(Some(&example("hello-touched")));
 

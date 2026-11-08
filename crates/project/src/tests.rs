@@ -256,7 +256,14 @@ fn every_template_makes_a_project_that_loads_cleanly() {
         let parts = project.world.descendants(project.world.workspace()).len();
         match template {
             Template::Empty => assert_eq!(parts, 0),
-            Template::Baseplate => assert_eq!(parts, 1),
+            Template::Baseplate => {
+                assert_eq!(parts, 1);
+                let plate = project
+                    .world
+                    .find_first_child(project.world.workspace(), "Baseplate")
+                    .unwrap();
+                assert!(project.world.is_locked(plate), "a new baseplate is locked");
+            }
             Template::Starter => {
                 assert!(parts > 3);
                 let script = &project.scripts[0];

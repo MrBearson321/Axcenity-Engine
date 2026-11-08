@@ -459,20 +459,16 @@ fn shift_turns_a_bone_a_quarter_as_fast_and_letting_go_does_not_jump() {
     .into_iter()
     .map(|t| t.rotation.angle_between(pose[top].rotation))
     .collect();
+    // Straight along the ring's edge the bone turns by how far round the
+    // mouse has gone.
+    let round = |points: f32| (points * gizmo::TURN_PER_POINT).atan();
     let normal = angles[0];
-    assert!(
-        (normal - 40.0 * gizmo::TURN_PER_POINT).abs() < 1e-3,
-        "{angles:?}"
-    );
-    assert!(
-        (angles[1] - normal * 1.25).abs() < 1e-3,
-        "a quarter: {angles:?}"
-    );
+    assert!((normal - round(40.0)).abs() < 1e-3, "{angles:?}");
+    let fine = normal + (round(80.0) - round(40.0)) * gizmo::FINE_TURN;
+    assert!((angles[1] - fine).abs() < 1e-3, "a quarter: {angles:?}");
     assert!((angles[2] - angles[1]).abs() < 1e-4, "no jump: {angles:?}");
-    assert!(
-        (angles[3] - normal * 2.25).abs() < 1e-3,
-        "full speed: {angles:?}"
-    );
+    let full = angles[2] + round(120.0) - round(80.0);
+    assert!((angles[3] - full).abs() < 1e-3, "full speed: {angles:?}");
 }
 
 #[test]

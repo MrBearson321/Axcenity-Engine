@@ -90,6 +90,7 @@ use crate::autocomplete;
 use crate::behavior_tree::BehaviorTreeStudio;
 use crate::block_editor;
 use crate::build_tools::{self, BuildSettings, PanelScene, ToolAction};
+use crate::color_palette;
 use crate::console::Console;
 use crate::data_table::DataTableStudio;
 use crate::dialog;
@@ -388,6 +389,12 @@ pub struct EditorApp {
     view_cube: bool,
     /// Whether the viewport shows the measuring grid (saved between runs).
     grid: bool,
+    /// How solid the grid's lines are, as a multiple of the usual soft look.
+    grid_strength: f32,
+    /// The user's saved color palettes, shared by every color control.
+    colors: color_palette::Handle,
+    /// A tab to move into another window, from its right-click menu.
+    pending_window_move: Option<(Pane, u64)>,
     /// View overlay toggles (colliders, raycasts, bounds, emitters, the
     /// navigation mesh). Saved between runs. The player never draws them.
     overlays: OverlayToggles,
@@ -536,6 +543,14 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             self.app.pending_main_dock = Some(*pane);
             ui.close();
         }
+        if *pane != Pane::Scene {
+            for (window, name) in self.app.layout.other_windows(self.floating) {
+                if ui.button(format!("Move to {name} Window")).clicked() {
+                    self.app.pending_window_move = Some((*pane, window));
+                    ui.close();
+                }
+            }
+        }
     }
     /// A script tab stays until the app closes its script, after asking
     /// about unsaved changes; then `Layout::sync_scripts` removes it.
@@ -607,6 +622,11 @@ const RIBBON_TABS_KEY: &str = "ribbon tabs";
 const LIGHT_CONES_KEY: &str = "light cones";
 const VIEW_CUBE_KEY: &str = "view cube";
 const GRID_KEY: &str = "grid";
+const GRID_STRENGTH_KEY: &str = "grid strength";
+const COLOR_PALETTES_KEY: &str = "color palettes";
+const DEFAULT_GRID_STRENGTH: f32 = 1.0;
+pub(crate) const MIN_GRID_STRENGTH: f32 = 0.25;
+pub(crate) const MAX_GRID_STRENGTH: f32 = 2.5;
 const OVERLAY_COLLIDERS_KEY: &str = "overlay colliders";
 const OVERLAY_RAYCASTS_KEY: &str = "overlay raycasts";
 const OVERLAY_BOUNDS_KEY: &str = "overlay bounds";
@@ -822,6 +842,9 @@ impl EditorApp {
             light_cones: false,
             view_cube: true,
             grid: true,
+            grid_strength: DEFAULT_GRID_STRENGTH,
+            colors: Default::default(),
+            pending_window_move: None,
             overlays: OverlayToggles::default(),
             view_mode: ViewMode::Lit,
             nav_mesh: None,
@@ -875,6 +898,15 @@ impl EditorApp {
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
             self.grid = storage.get_string(GRID_KEY).as_deref() != Some("off");
+            self.grid_strength = storage
+                .get_string(GRID_STRENGTH_KEY)
+                .and_then(|text| text.parse::<f32>().ok())
+                .map_or(DEFAULT_GRID_STRENGTH, |strength| {
+                    strength.clamp(MIN_GRID_STRENGTH, MAX_GRID_STRENGTH)
+                });
+            if let Some(text) = storage.get_string(COLOR_PALETTES_KEY) {
+                self.colors = color_palette::Handle::new(color_palette::Library::from_text(&text));
+            }
             self.overlays.colliders =
                 storage.get_string(OVERLAY_COLLIDERS_KEY).as_deref() == Some("on");
             self.overlays.raycasts =
@@ -970,6 +1002,8 @@ impl eframe::App for EditorApp {
         storage.set_string(VIEW_CUBE_KEY, cube.to_owned());
         let grid = if self.grid { "on" } else { "off" };
         storage.set_string(GRID_KEY, grid.to_owned());
+        storage.set_string(GRID_STRENGTH_KEY, self.grid_strength.to_string());
+        storage.set_string(COLOR_PALETTES_KEY, self.colors.get().to_text());
         let flag = |on| if on { "on" } else { "off" };
         storage.set_string(
             OVERLAY_COLLIDERS_KEY,
@@ -1058,6 +1092,7 @@ impl EditorApp {
     /// the dock (or the start screen), then windows and overlays. Separate
     /// from `update` so tests can draw it without a window.
     pub(crate) fn frame(&mut self, ctx: &egui::Context, render_state: Option<&RenderState>) {
+        color_palette::install(ctx, &self.colors);
         // The window's close button: stop it and ask first if there are
         // unsaved changes. `closing` lets the close through once allowed.
         if ctx.input(|input| input.viewport().close_requested()) && !self.closing && self.unsaved()
@@ -1268,6 +1303,7 @@ impl EditorApp {
                 self.tabs.take_focus(),
                 self.tabs.active_id(),
             );
+            self.layout.remember_homes();
             // Taken out while it's drawn, so the panels can borrow the app.
             let mut dock = std::mem::replace(&mut self.layout.dock, DockState::new(Vec::new()));
             dock.translations.tab_context_menu.eject_button = "Float in New Window".to_owned();

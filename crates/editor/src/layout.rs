@@ -13,6 +13,8 @@
 //! [`egui_dock`] does the docking. This module only says which panels exist,
 //! how they start out, and how the layout is saved between runs.
 
+use std::collections::HashMap;
+
 use eframe::egui;
 use egui_dock::{DockState, NodeIndex};
 use serde::{Deserialize, Serialize};
@@ -20,7 +22,10 @@ use serde::{Deserialize, Serialize};
 use crate::theme::{self, icons};
 
 pub mod floating;
-use floating::{FloatingWindow, SavedWindow};
+use floating::{FloatingWindow, Home, SavedWindow};
+
+/// How tall a dock's row of tabs is, in points.
+pub const TAB_BAR_HEIGHT: f32 = 30.0;
 
 /// One dockable panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -189,6 +194,8 @@ pub struct Layout {
     pub dock_generation: u64,
     /// The script tab used last, which new script tabs open beside.
     last_script: Option<u64>,
+    /// Where each panel was last docked in the main window.
+    homes: HashMap<Pane, Home>,
 }
 
 impl Default for Layout {
@@ -199,6 +206,7 @@ impl Default for Layout {
             next_window: 0,
             dock_generation: 0,
             last_script: None,
+            homes: HashMap::new(),
         }
     }
 }
@@ -369,6 +377,7 @@ impl Layout {
         self.dock = default_dock();
         self.windows.clear();
         self.last_script = None;
+        self.homes.clear();
     }
 
     /// The layout as text, for eframe's storage. Script tabs are left out:
@@ -378,6 +387,12 @@ impl Layout {
         serde_json::to_string(&SavedLayout {
             dock: self.dock.filter_tabs(keep),
             windows: self.saved_windows(keep),
+            homes: self
+                .homes
+                .iter()
+                .filter(|(pane, _)| keep(pane))
+                .map(|(pane, home)| (*pane, home.clone()))
+                .collect(),
         })
         .unwrap_or_default()
     }
@@ -400,6 +415,7 @@ impl Layout {
                     Some(SavedLayout {
                         dock,
                         windows: Vec::new(),
+                        homes: Vec::new(),
                     })
                 }
             })
@@ -424,6 +440,7 @@ impl Layout {
             for window in saved.windows {
                 layout.restore_window(window);
             }
+            layout.homes = saved.homes.into_iter().collect();
         }
         layout
     }
@@ -434,6 +451,9 @@ impl Layout {
 struct SavedLayout {
     dock: DockState<Pane>,
     windows: Vec<SavedWindow>,
+    /// A list, as a JSON object's keys could only be strings.
+    #[serde(default)]
+    homes: Vec<(Pane, Home)>,
 }
 
 /// Replaces null rectangle corners (`"x": null`, `"y": null`) in `json`
@@ -490,7 +510,7 @@ pub fn style(
     dock.main_surface_border_stroke = egui::Stroke::NONE;
 
     dock.tab_bar.bg_fill = palette.app_bg;
-    dock.tab_bar.height = 30.0;
+    dock.tab_bar.height = TAB_BAR_HEIGHT;
     dock.tab_bar.hline_color = palette.border;
     dock.tab_bar.corner_radius = egui::CornerRadius::ZERO;
 

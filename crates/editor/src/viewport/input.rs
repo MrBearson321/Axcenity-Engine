@@ -1,5 +1,19 @@
 use super::*;
 
+/// The nearest part along `ray` that isn't locked: a click or a drag goes
+/// straight through locked parts.
+pub(super) fn pick_unlocked(
+    world: &World,
+    ray: axcenity_scene::Ray,
+) -> Option<axcenity_scene::Hit> {
+    let locked: Vec<InstanceId> = world
+        .descendants(world.workspace())
+        .into_iter()
+        .filter(|&id| world.is_locked(id))
+        .collect();
+    axcenity_scene::pick_hit_skipping(world, ray, &locked)
+}
+
 impl Viewport {
     /// The mouse and left button over the terrain `brush` works on.
     pub(super) fn terrain_input(
@@ -385,7 +399,7 @@ impl Viewport {
             }
         } else if body_drag
             && let Some(origin) = press_origin
-            && let Some(id) = light_at(lights, origin)
+            && let Some(id) = light_at(lights, origin).filter(|id| !world.is_locked(*id))
             && let Some(pose) = free_pose(world, id)
         {
             // A light's icon is in front of the parts behind it.
@@ -413,7 +427,7 @@ impl Viewport {
             input.grabbed = Some(id);
         } else if body_drag
             && let Some(origin) = press_origin
-            && let Some(hit) = axcenity_scene::pick_hit(world, screen.ray(origin), None)
+            && let Some(hit) = pick_unlocked(world, screen.ray(origin))
             // Terrain is ground, not something to carry around.
             && world.get(hit.part).map(|i| i.class()) != Some(axcenity_core::ClassName::Terrain)
             && let Some(mut place) =
@@ -561,8 +575,8 @@ impl Viewport {
         Some(Clicked {
             part: ui_scene
                 .hit(pointer)
-                .or_else(|| light_at(lights, pointer))
-                .or_else(|| axcenity_scene::pick(world, screen.ray(pointer)))
+                .or_else(|| light_at(lights, pointer).filter(|id| !world.is_locked(*id)))
+                .or_else(|| pick_unlocked(world, screen.ray(pointer)).map(|hit| hit.part))
                 // A road's piece or a scattered tree selects what made it.
                 .map(|id| axcenity_core::spline::generator_of(world, id).unwrap_or(id)),
             modifiers: ui.input(|input| input.modifiers),

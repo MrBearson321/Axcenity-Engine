@@ -164,6 +164,7 @@ pub(super) const BASEPLATE_WORLD: &str = r#"{
         "name": "Baseplate",
         "properties": {
           "Anchored": true,
+          "Locked": true,
           "Position": [0, -0.5, 0],
           "Size": [40, 1, 40],
           "Color": [0.35, 0.37, 0.4]
@@ -188,6 +189,7 @@ pub(super) const STARTER_WORLD: &str = r#"{
         "name": "Baseplate",
         "properties": {
           "Anchored": true,
+          "Locked": true,
           "Position": [0, -0.5, 0],
           "Size": [60, 1, 60],
           "Color": [0.35, 0.37, 0.4]

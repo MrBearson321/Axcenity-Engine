@@ -123,6 +123,9 @@ pub enum Action {
     Rename(InstanceId, String),
     Duplicate(InstanceId),
     Delete(InstanceId),
+    /// Turn `Locked` on or off for it (and the rest of the selection, if
+    /// it's in one).
+    SetLocked(InstanceId, bool),
     /// `id` was dropped onto `parent`'s row, so it becomes `parent`'s last child.
     MoveInto {
         id: InstanceId,
@@ -469,6 +472,10 @@ impl Explorer {
                             ui.colored_label(ui.visuals().warn_fg_color, icons::WARNING)
                                 .on_hover_text(text);
                         }
+                        if world.is_locked(row.id) {
+                            ui.weak(icons::LOCK)
+                                .on_hover_text("Locked: the viewport can't select or change it.");
+                        }
                         if row.class.is_script() && label.double_clicked() {
                             output.open = Some(row.id);
                         }
@@ -688,6 +695,8 @@ enum RowCommand {
     Rename,
     Duplicate,
     Delete,
+    /// Turn `Locked` on or off.
+    SetLocked(bool),
 }
 
 impl RowCommand {
@@ -708,6 +717,7 @@ impl RowCommand {
             RowCommand::Prefab(action) => Some(Action::Prefab(action)),
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
             RowCommand::Delete => Some(Action::Delete(id)),
+            RowCommand::SetLocked(on) => Some(Action::SetLocked(id, on)),
         }
     }
 }
@@ -900,6 +910,29 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         .clicked()
     {
         chosen = Some(RowCommand::Rename);
+    }
+    if let Some(instance) = world.get(id).filter(|i| i.class().can_lock()) {
+        let locked = instance.property("Locked") == Some(&Value::Bool(true));
+        let (icon, label, hint) = if locked {
+            (
+                icons::LOCK_OPEN,
+                "Unlock",
+                "Let the viewport select and change it again.",
+            )
+        } else {
+            (
+                icons::LOCK,
+                "Lock",
+                "Stop the viewport selecting or changing it. It stays here in the Explorer.",
+            )
+        };
+        if ui
+            .button(theme::with_icon(icon, label))
+            .on_hover_text(hint)
+            .clicked()
+        {
+            chosen = Some(RowCommand::SetLocked(!locked));
+        }
     }
     let editable = tree::check_editable(world, id);
     let reason = editable.err().unwrap_or_default();

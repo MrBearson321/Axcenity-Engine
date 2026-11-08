@@ -3,6 +3,51 @@ use super::*;
 /// What each property means. A test checks every property in `core` is here.
 pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
+        ClassName::Part,
+        "Locked",
+        "If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.",
+    ),
+    (
+        ClassName::MeshPart,
+        "Locked",
+        "If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.",
+    ),
+    (
+        ClassName::Model,
+        "Locked",
+        "If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.",
+    ),
+    (
+        ClassName::Folder,
+        "Locked",
+        "If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.",
+    ),
+    (
+        ClassName::PointLight,
+        "Locked",
+        "If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.",
+    ),
+    (
+        ClassName::SpotLight,
+        "Locked",
+        "If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.",
+    ),
+    (
+        ClassName::RectLight,
+        "Locked",
+        "If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Locked",
+        "If true, the editor's viewport can't select or change it, and the building tools leave it alone. It has no effect in a running game.",
+    ),
+    (
+        ClassName::Part,
+        "BlueprintTexture",
+        "If true, a plain Plastic part is drawn in a prototype grid texture while editing, to build by. It never shows in Play or in a built game.",
+    ),
+    (
         ClassName::Frame,
         "Selectable",
         "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",

@@ -45,9 +45,9 @@ fn turn_around_z(app: &mut EditorApp, id: InstanceId, degrees: f32) {
     let grab = crate::gizmo::ring_point(&screen, frame, Axis::Z, 0.0);
     let handle = Handle::Rotate(Axis::Z);
     let mut drag = Drag::turn(handle, id, pose, &screen, grab).unwrap();
-    let points = degrees.to_radians() / crate::gizmo::TURN_PER_POINT;
     for step in 1..=3 {
-        let at = grab + drag.spin() * points * step as f32 / 3.0;
+        let turned = degrees.to_radians() * step as f32 / 3.0;
+        let at = crate::gizmo::ring_point(&screen, frame, Axis::Z, turned);
         let pointer = crate::gizmo::Pointer::on(&screen, at, false);
         let values = drag.update(pointer, &app.snap).unwrap();
         app.apply_drag(DragEdit {

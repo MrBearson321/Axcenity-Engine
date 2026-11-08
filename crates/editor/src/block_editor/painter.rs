@@ -1033,7 +1033,7 @@ impl<'a> BlockPainter<'a> {
                     let response = ui
                         .scope_builder(egui::UiBuilder::new().max_rect(swatch), |ui| {
                             ui.spacing_mut().interact_size = swatch.size();
-                            ui.color_edit_button_srgb(&mut srgb)
+                            crate::color_palette::edit_srgb(ui, &mut srgb)
                         })
                         .inner;
                     if response.changed() {

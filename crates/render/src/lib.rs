@@ -20,9 +20,9 @@ pub use atmosphere::Atmosphere;
 pub use decal::{Decal, DecalRole, decal_quad};
 pub use draw_list::{
     AmbientLight, Camera, Channel, ChannelMap, Clouds, ColorGrading, ColorLookup, Cone,
-    DepthOfField, DrawItem, DrawList, Edges, FilmGrain, Fog, GridPlane, LensEffects, Light,
-    LightProbeGrid, LightProbeVolume, MAX_PALETTE_COLORS, Material, MeshSource, NormalMap, Outline,
-    ParticleEmitter, ParticleLook, PointShadows, PostProcessing, ProbeImage, RectArea,
+    DepthOfField, DrawItem, DrawList, Edges, FilmGrain, Fog, GridPlane, GridTint, LensEffects,
+    Light, LightProbeGrid, LightProbeVolume, MAX_PALETTE_COLORS, Material, MeshSource, NormalMap,
+    Outline, ParticleEmitter, ParticleLook, PointShadows, PostProcessing, ProbeImage, RectArea,
     ReflectionProbe, SURFACE_PARAMETERS, Shading, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows,
     Sprite, Sun, Sway, TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextAlign,
     TextShadow, TextSpan, TextStroke, TextureMaps, TextureSource, Toon, UiBorderSide, UiClip,

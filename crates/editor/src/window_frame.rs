@@ -25,8 +25,8 @@ pub const LEFT_INSET: f32 = if NATIVE_BUTTONS { 76.0 } else { 0.0 };
 const BUTTON_WIDTH: f32 = 46.0;
 
 /// A panel window's strip, in points. macOS needs room for its traffic lights.
-const PANEL_STRIP_HEIGHT: f32 = if NATIVE_BUTTONS { 28.0 } else { 20.0 };
-const PANEL_CLOSE_WIDTH: f32 = 30.0;
+const PANEL_STRIP_HEIGHT: f32 = 28.0;
+const PANEL_BUTTON_WIDTH: f32 = 30.0;
 
 /// How far in from the window's edge a drag resizes it, in points.
 const GRIP: f32 = 5.0;
@@ -67,26 +67,89 @@ pub fn drag_region(ui: &mut egui::Ui, rect: Rect) {
     }
 }
 
-/// A panel window's only chrome: a slim strip that moves it, with a small
-/// close button. Its tabs, right below, say what's in it. Returns true when
-/// close was clicked. Call it before the panels are drawn.
-pub fn panel_strip(ctx: &egui::Context) -> bool {
-    let palette = theme::palette(ctx);
-    egui::TopBottomPanel::top("panel window strip")
-        .exact_height(PANEL_STRIP_HEIGHT)
-        .frame(egui::Frame::new().fill(palette.app_bg))
-        .show_separator_line(false)
-        .show(ctx, |ui| {
-            let bar = ui.max_rect();
-            drag_region(ui, bar);
-            if NATIVE_BUTTONS {
-                return false;
-            }
-            let close =
-                Rect::from_min_max(pos2(bar.right() - PANEL_CLOSE_WIDTH, bar.top()), bar.max);
-            button(ui, close, Glyph::Close, "Dock in Main Window").clicked()
-        })
-        .inner
+/// What a panel window's buttons asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanelAction {
+    /// Put its panels back where they were docked.
+    DockBack,
+    Close,
+}
+
+/// How tall the row holding a panel window's buttons is.
+const PANEL_ROW_HEIGHT: f32 = if NATIVE_BUTTONS {
+    PANEL_STRIP_HEIGHT
+} else {
+    crate::layout::TAB_BAR_HEIGHT
+};
+
+/// Lets a panel window be moved by its tab row (empty space there: its tabs
+/// stay on top and drag as tabs). On macOS, which keeps its traffic lights,
+/// it's a slim strip above the tabs instead. Call before the panels are drawn.
+pub fn panel_title_area(ctx: &egui::Context) {
+    if NATIVE_BUTTONS {
+        let palette = theme::palette(ctx);
+        egui::TopBottomPanel::top("panel window strip")
+            .exact_height(PANEL_STRIP_HEIGHT)
+            .frame(egui::Frame::new().fill(palette.app_bg))
+            .show_separator_line(false)
+            .show(ctx, |ui| {
+                let bar = ui.max_rect();
+                drag_region(ui, bar);
+            });
+        return;
+    }
+    let screen = ctx.screen_rect();
+    let row = Rect::from_min_size(screen.min, vec2(screen.width(), PANEL_ROW_HEIGHT));
+    let mut ui = egui::Ui::new(
+        ctx.clone(),
+        egui::Id::new("panel window title"),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(row),
+    );
+    drag_region(&mut ui, row);
+}
+
+/// A panel window's buttons, at the right end of its tab row: dock back,
+/// then close (macOS keeps its own close). Call after the panels are drawn
+/// and after [`edges`], so they stay clickable in the window's corner.
+pub fn panel_buttons(ctx: &egui::Context) -> Option<PanelAction> {
+    let screen = ctx.screen_rect();
+    let cell = |from_right: f32| {
+        Rect::from_min_size(
+            pos2(
+                screen.right() - PANEL_BUTTON_WIDTH * from_right,
+                screen.top(),
+            ),
+            vec2(PANEL_BUTTON_WIDTH, PANEL_ROW_HEIGHT),
+        )
+    };
+    let (dock, close) = if NATIVE_BUTTONS {
+        (cell(1.0), None)
+    } else {
+        (cell(2.0), Some(cell(1.0)))
+    };
+    let id = egui::Id::new("panel window buttons");
+    let layer = egui::LayerId::new(egui::Order::Foreground, id);
+    let mut ui = egui::Ui::new(
+        ctx.clone(),
+        id,
+        egui::UiBuilder::new().layer_id(layer).max_rect(screen),
+    );
+    // Over tabs that reach this far, so the buttons always read clearly.
+    let backing = close.map_or(dock, |close| dock.union(close));
+    ui.painter()
+        .rect_filled(backing, 0, theme::palette(ctx).app_bg);
+    let mut action = None;
+    if button(&mut ui, dock, Glyph::DockBack, "Dock Back").clicked() {
+        action = Some(PanelAction::DockBack);
+    }
+    if let Some(close) = close
+        && button(&mut ui, close, Glyph::Close, "Close").clicked()
+    {
+        action = Some(PanelAction::Close);
+    }
+    action
 }
 
 /// Width the window buttons take at the header's right.
@@ -135,6 +198,7 @@ enum Glyph {
     Maximize,
     Restore,
     Close,
+    DockBack,
 }
 
 /// One window button: a flat cell that fills on hover, with a thin
@@ -188,6 +252,15 @@ fn button(ui: &mut egui::Ui, rect: Rect, glyph: Glyph, tooltip: &str) -> egui::R
         Glyph::Close => {
             painter.line_segment([pos2(c.x - s, c.y - s), pos2(c.x + s, c.y + s)], stroke);
             painter.line_segment([pos2(c.x + s, c.y - s), pos2(c.x - s, c.y + s)], stroke);
+        }
+        Glyph::DockBack => {
+            painter.text(
+                c,
+                egui::Align2::CENTER_CENTER,
+                theme::icons::ARROW_SQUARE_IN,
+                egui::FontId::proportional(14.0),
+                ink,
+            );
         }
     }
     response.on_hover_text(tooltip)

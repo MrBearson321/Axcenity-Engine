@@ -11,7 +11,7 @@ use crate::layout::floating::{self, DEFAULT_SIZE, Placement};
 use crate::layout::{self, Layout, Pane};
 use crate::theme;
 use crate::viewport::ViewportOutput;
-use crate::window_frame;
+use crate::window_frame::{self, PanelAction};
 
 /// The main window's dock area.
 pub(super) fn main_area(generation: u64) -> egui::Id {
@@ -120,6 +120,7 @@ impl EditorApp {
         render_state: Option<&RenderState>,
         palette: &theme::Palette,
     ) {
+        self.take_pending_window_move();
         let ids: Vec<u64> = self.layout.windows.iter().map(|window| window.id).collect();
         for id in ids {
             self.floating_window(ctx, render_state, palette, id);
@@ -127,6 +128,15 @@ impl EditorApp {
         self.layout.forget_lost_follows();
         if self.layout.is_following() {
             ctx.request_repaint();
+        }
+    }
+
+    /// Carries out a tab's Move to Window from its right-click menu.
+    fn take_pending_window_move(&mut self) {
+        if let Some((pane, window)) = self.pending_window_move.take() {
+            self.layout.move_to_window(pane, window);
+            // A tab that moved out of a dock being drawn had its place there.
+            self.layout.dock_generation += 1;
         }
     }
 
@@ -143,6 +153,7 @@ impl EditorApp {
         let builder = self.builder_for(index);
         let viewport = viewport_of(id);
         let area = area_of(id, self.layout.dock_generation);
+        let drop_target = self.layout.is_drop_target(id);
         let window = &mut self.layout.windows[index];
         if std::mem::take(&mut window.focus) {
             ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::Focus);
@@ -165,7 +176,9 @@ impl EditorApp {
         let outcome = ctx.show_viewport_immediate(viewport, viewport_builder, |ctx, class| {
             // Its own chrome, unless it's drawn inside the main window.
             let own_window = class != egui::ViewportClass::Embedded;
-            let strip_closed = own_window && window_frame::panel_strip(ctx);
+            if own_window {
+                window_frame::panel_title_area(ctx);
+            }
             let style = layout::style(&ctx.style(), palette, ctx.pixels_per_point());
             let mut placeholder = ViewportOutput::default();
             let visuals = ctx.style().visuals.clone();
@@ -195,22 +208,37 @@ impl EditorApp {
             if ctx.input(|input| input.viewport().focused == Some(true)) {
                 self.shortcuts(ctx);
             }
+            let mut asked = None;
             if own_window {
                 window_frame::edges(ctx);
+                asked = window_frame::panel_buttons(ctx);
             }
-            let closed = strip_closed || ctx.input(|input| input.viewport().close_requested());
+            if drop_target {
+                paint_drop_outline(ctx, palette);
+            }
+            if ctx.input(|input| input.viewport().close_requested()) {
+                asked = Some(PanelAction::Close);
+            }
             // Read first: egui's Context mustn't be called inside `input`.
             let scale = ctx.pixels_per_point();
-            let placed = ctx.input(|input| {
+            let (placed, screen_rect) = ctx.input(|input| {
                 let viewport = input.viewport();
-                let outer = viewport.outer_rect?;
-                let inner = viewport.inner_rect?;
-                Some(Placement {
-                    x: outer.min.x * scale,
-                    y: outer.min.y * scale,
-                    width: inner.width(),
-                    height: inner.height(),
-                })
+                let placed = viewport
+                    .outer_rect
+                    .zip(viewport.inner_rect)
+                    .map(|(outer, inner)| Placement {
+                        x: outer.min.x * scale,
+                        y: outer.min.y * scale,
+                        width: inner.width(),
+                        height: inner.height(),
+                    });
+                let screen_rect = viewport.outer_rect.map(|outer| {
+                    egui::Rect::from_min_max(
+                        (outer.min.to_vec2() * scale).to_pos2(),
+                        (outer.max.to_vec2() * scale).to_pos2(),
+                    )
+                });
+                (placed, screen_rect)
             });
             if let Some(pointer) = following.filter(|follow| follow.held).map(|f| f.pointer) {
                 let target = Layout::follow_target(pointer);
@@ -219,9 +247,9 @@ impl EditorApp {
             }
             let mouse = mouse_report(ctx, area, &dock);
             self.layout.absorb_floating(&mut dock, mouse.screen);
-            (closed, placed, mouse)
+            (asked, placed, screen_rect, mouse)
         });
-        let (closed, placed, mouse) = outcome;
+        let (asked, placed, screen_rect, mouse) = outcome;
 
         let Some(index) = self.layout.windows.iter().position(|w| w.id == id) else {
             return;
@@ -230,6 +258,9 @@ impl EditorApp {
         window.dock = dock;
         if placed.is_some() {
             window.placed = placed;
+        }
+        if screen_rect.is_some() {
+            window.screen_rect = screen_rect;
         }
         if let (Some(pane), Some(screen)) = (mouse.torn, mouse.screen) {
             self.layout.tear_off(pane, Some(id), screen, DEFAULT_SIZE);
@@ -240,11 +271,26 @@ impl EditorApp {
         if let Some(pane) = self.pending_main_dock.take() {
             self.layout.dock_in_main(pane);
         }
+        self.take_pending_window_move();
         self.layout.drop_empty_windows();
-        if closed {
-            self.layout.dock_window_in_main(id);
+        match asked {
+            Some(PanelAction::DockBack) => self.layout.dock_window_in_main(id),
+            Some(PanelAction::Close) => self.layout.close_window(id),
+            None => {}
         }
     }
+}
+
+/// Outlines the window a tab would join if it were let go now.
+fn paint_drop_outline(ctx: &egui::Context, palette: &theme::Palette) {
+    let id = egui::Id::new("panel window drop outline");
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, id));
+    painter.rect_stroke(
+        ctx.screen_rect(),
+        0,
+        egui::Stroke::new(2.0_f32, palette.accent),
+        egui::StrokeKind::Inside,
+    );
 }
 
 /// The panel a dock's window is named after.
@@ -374,24 +420,16 @@ mod tests {
         assert_eq!(floating::dragged_tab(&ctx, next, &layout.dock), None);
     }
 
-    #[test]
-    fn a_panel_window_has_no_os_frame_and_its_strip_closes_it() {
-        let folder = copy_of_example("hello-touched", "panel-strip");
-        let mut app = EditorApp::new(Some(&folder));
-        app.layout.float(Pane::Explorer, None).unwrap();
-        if !cfg!(target_os = "macos") {
-            assert_eq!(app.builder_for(0).decorations, Some(false));
-        }
-        let _ = std::fs::remove_dir_all(folder);
-
+    /// Draws a window's buttons over a few frames of a click at `at`, and
+    /// says what they asked for.
+    fn clicked_panel_button(at: egui::Pos2) -> Option<PanelAction> {
         let ctx = crate::theme::test_context();
-        let close = egui::pos2(790.0, 10.0);
         let frames = [
-            vec![egui::Event::PointerMoved(close)],
-            vec![press(close, true)],
-            vec![press(close, false)],
+            vec![egui::Event::PointerMoved(at)],
+            vec![press(at, true)],
+            vec![press(at, false)],
         ];
-        let mut clicked = false;
+        let mut asked = None;
         for events in frames {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -402,10 +440,83 @@ mod tests {
                 ..Default::default()
             };
             let _ = ctx.run(input, |ctx| {
-                clicked |= window_frame::panel_strip(ctx);
+                asked = asked.or(window_frame::panel_buttons(ctx));
             });
         }
-        assert_eq!(clicked, !cfg!(target_os = "macos"));
+        asked
+    }
+
+    #[test]
+    fn a_panel_window_has_no_os_frame_and_its_tab_row_holds_close_and_dock_back() {
+        let folder = copy_of_example("hello-touched", "panel-strip");
+        let mut app = EditorApp::new(Some(&folder));
+        app.layout.float(Pane::Explorer, None).unwrap();
+        if !cfg!(target_os = "macos") {
+            assert_eq!(app.builder_for(0).decorations, Some(false));
+        }
+        let _ = std::fs::remove_dir_all(folder);
+
+        // In the tab row, not above it: the row is 30 points tall.
+        if cfg!(target_os = "macos") {
+            assert_eq!(
+                clicked_panel_button(egui::pos2(785.0, 12.0)),
+                Some(PanelAction::DockBack)
+            );
+        } else {
+            assert_eq!(
+                clicked_panel_button(egui::pos2(785.0, 25.0)),
+                Some(PanelAction::Close)
+            );
+            assert_eq!(
+                clicked_panel_button(egui::pos2(755.0, 25.0)),
+                Some(PanelAction::DockBack)
+            );
+        }
+        assert_eq!(clicked_panel_button(egui::pos2(400.0, 300.0)), None);
+    }
+
+    #[test]
+    fn dragging_the_empty_part_of_the_tab_row_moves_the_window_and_a_tab_still_drags() {
+        if cfg!(target_os = "macos") {
+            return; // It has a strip above the tabs instead.
+        }
+        let area = egui::Id::new("test area");
+        // One frame of the title area and the dock: did the window move?
+        let frame = |ctx: &egui::Context, dock: &mut DockState<Pane>, events| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let output = ctx.run(input, |ctx| {
+                window_frame::panel_title_area(ctx);
+                egui_dock::DockArea::new(dock)
+                    .id(area)
+                    .show(ctx, &mut NoPanels);
+            });
+            output
+                .viewport_output
+                .values()
+                .flat_map(|viewport| &viewport.commands)
+                .any(|command| *command == egui::ViewportCommand::StartDrag)
+        };
+        let moves_the_window = |grab: egui::Pos2| {
+            let ctx = egui::Context::default();
+            let mut dock = DockState::new(vec![Pane::Explorer, Pane::Console]);
+            let moved = |to| vec![egui::Event::PointerMoved(to)];
+            frame(&ctx, &mut dock, moved(grab));
+            frame(&ctx, &mut dock, vec![press(grab, true)]);
+            let mut asked = false;
+            for x in [20.0, 40.0] {
+                asked |= frame(&ctx, &mut dock, moved(grab + egui::vec2(x, 0.0)));
+            }
+            asked
+        };
+        assert!(moves_the_window(egui::pos2(600.0, 12.0)), "empty space");
+        assert!(!moves_the_window(egui::pos2(30.0, 12.0)), "a tab");
     }
 
     #[test]

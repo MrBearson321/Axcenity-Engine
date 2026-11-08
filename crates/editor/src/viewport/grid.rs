@@ -6,9 +6,9 @@
 //! prints the numbers. Numbers behind a part are left out, by a ray test
 //! worked out a few times a second rather than every frame.
 
-use axcenity_core::{InstanceId, Value, World};
-use axcenity_render::GridPlane;
+use axcenity_core::{Instance, InstanceId, Value, World};
 use axcenity_render::glam::Vec3;
+use axcenity_render::{GridPlane, GridTint};
 use axcenity_scene::Ray;
 use eframe::egui;
 
@@ -29,6 +29,23 @@ const OCCLUSION_SECONDS: f64 = 0.12;
 const HIDDEN_BY: f32 = 0.25;
 /// How far above the surface the lines sit, in studs.
 const LIFT: f32 = 0.002;
+/// A surface brighter than this (sRGB, weighted by how bright each channel
+/// looks) gets darker lines, and one dimmer gets lighter lines.
+const BRIGHT: f32 = 0.35;
+/// How far the lines go from the surface's color to white or black.
+const LINE_CONTRAST: f32 = 0.55;
+/// What's under the grid when the baseplate has no color to go by.
+const LIT_GROUND: [f32; 3] = [0.64, 0.64, 0.64];
+/// What's under a ground grid with no baseplate: the sky seen past it.
+const DARK_GROUND: [f32; 3] = [0.2, 0.2, 0.22];
+/// How far past a part's edge (studs) the lines take on its color.
+const TINT_REACH: f32 = 12.0;
+/// How much of a part's color the lines right by it take.
+const TINT_AMOUNT: f32 = 0.35;
+/// How much more of it they take when the part glows at full strength.
+const TINT_FROM_GLOW: f32 = 0.35;
+/// How far from the camera (studs) a glowing part still tints the grid.
+const GLOW_REACH: f32 = 80.0;
 
 /// Where the grid is and how it's divided.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,8 +56,8 @@ pub struct Spec {
     pub area: Option<(Vec3, Vec3)>,
     /// Studs between lines.
     pub spacing: f32,
-    /// Whether the surface under it is bright, wanting dark lines.
-    pub bright: bool,
+    /// What the surface under it looks like, in sRGB, glow included.
+    pub surface: [f32; 3],
 }
 
 impl Spec {
@@ -114,33 +131,134 @@ pub fn spec(world: &World, step: f32) -> Spec {
         let part = world.get(id)?;
         let at = part.property("Position")?.as_vector3()?;
         let size = part.property("Size")?.as_vector3()?;
-        let color = part.property("Color").and_then(Value::as_color3);
-        Some((at, size, color))
+        Some((at, size, shine(part).map(|(seen, _)| seen)))
     });
     match plate {
-        Some((at, size, color)) => {
+        Some((at, size, seen)) => {
             let top = at.y + size.y / 2.0;
             let half = Vec3::new(size.x / 2.0, 0.0, size.z / 2.0);
             let middle = Vec3::new(at.x, top, at.z);
-            let bright = color.is_none_or(|c| 0.3 * c.r + 0.6 * c.g + 0.1 * c.b > 0.35);
             Spec {
                 height: top,
                 area: Some((middle - half, middle + half)),
                 spacing,
-                bright,
+                surface: seen.unwrap_or(LIT_GROUND),
             }
         }
         None => Spec {
             height: 0.0,
             area: None,
             spacing,
-            bright: false,
+            surface: DARK_GROUND,
         },
     }
 }
 
-/// What `render` needs to draw the lines.
-pub fn plane(spec: &Spec, camera: Vec3) -> GridPlane {
+/// What a part shows, in sRGB, and how much it glows (0 to 1): its Color,
+/// going over to the color of its glow as that gets stronger.
+fn shine(part: &Instance) -> Option<([f32; 3], f32)> {
+    let color = part.property("Color").and_then(Value::as_color3)?;
+    let color = [color.r, color.g, color.b];
+    let emission = part
+        .property("Emission")
+        .and_then(Value::as_number)
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0) as f32;
+    let emitted = part
+        .property("EmissiveColor")
+        .and_then(Value::as_color3)
+        .map_or(color, |c| [c.r, c.g, c.b]);
+    if emission > 0.0 {
+        let seen = std::array::from_fn(|i| color[i] + (emitted[i] - color[i]) * emission);
+        return Some((seen, emission));
+    }
+    let neon = part
+        .property("Material")
+        .and_then(Value::as_material)
+        .is_some_and(|material| material.preset().glows);
+    Some((color, if neon { 1.0 } else { 0.0 }))
+}
+
+/// The lines' color for a surface that looks like `surface`, in linear
+/// light: the surface's own color moved partway to white or to black, so
+/// they're soft, and keep its hue.
+fn line_color(surface: [f32; 3]) -> [f32; 3] {
+    let [r, g, b] = surface;
+    let toward = if 0.3 * r + 0.6 * g + 0.1 * b > BRIGHT {
+        0.0
+    } else {
+        1.0
+    };
+    surface.map(|channel| to_linear(channel + (toward - channel) * LINE_CONTRAST))
+}
+
+fn to_linear(srgb: f32) -> f32 {
+    srgb.clamp(0.0, 1.0).powf(2.2)
+}
+
+/// The glowing part nearest the camera, worked out a few times a second.
+#[derive(Default)]
+pub struct NearbyGlow {
+    found: Option<InstanceId>,
+    worked_out_at: Option<f64>,
+}
+
+impl NearbyGlow {
+    /// The glowing part to tint the grid with, if one's in reach.
+    pub fn update(&mut self, world: &World, camera: Vec3, now: f64) -> Option<InstanceId> {
+        if self
+            .worked_out_at
+            .is_none_or(|at| now - at >= OCCLUSION_SECONDS)
+        {
+            self.found = nearest_glowing(world, camera);
+            self.worked_out_at = Some(now);
+        }
+        self.found.filter(|&id| world.get(id).is_some())
+    }
+}
+
+fn nearest_glowing(world: &World, camera: Vec3) -> Option<InstanceId> {
+    world
+        .descendants(world.workspace())
+        .into_iter()
+        .filter_map(|id| {
+            let part = world.get(id)?;
+            if shine(part)?.1 <= 0.0 {
+                return None;
+            }
+            let at = part.property("Position")?.as_vector3()?;
+            let distance = Vec3::new(at.x, at.y, at.z).distance(camera);
+            (distance <= GLOW_REACH).then_some((id, distance))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(id, _)| id)
+}
+
+/// How the lines near `selected`, or else near the part `glowing`, take on
+/// its color. A stronger glow tints more.
+pub fn tint(
+    world: &World,
+    selected: Option<InstanceId>,
+    glowing: Option<InstanceId>,
+) -> Option<GridTint> {
+    let lit = |id: InstanceId| {
+        let part = world.get(id)?;
+        let (seen, glow) = shine(part)?;
+        let at = part.property("Position")?.as_vector3()?;
+        let size = part.property("Size")?.as_vector3()?;
+        Some(GridTint {
+            at: [at.x, at.z],
+            radius: size.x.max(size.z) / 2.0 + TINT_REACH,
+            amount: TINT_AMOUNT + TINT_FROM_GLOW * glow,
+            color: seen.map(to_linear),
+        })
+    };
+    selected.and_then(lit).or_else(|| glowing.and_then(lit))
+}
+
+/// What `render` needs to draw the lines, `strength` times as solid as
+/// usual, tinted by `tint`.
+pub fn plane(spec: &Spec, camera: Vec3, strength: f32, tint: Option<GridTint>) -> GridPlane {
     let (min, max, fade_distance) = match spec.area {
         Some((min, max)) => ([min.x, min.z], [max.x, max.z], 0.0),
         None => (
@@ -156,11 +274,9 @@ pub fn plane(spec: &Spec, camera: Vec3) -> GridPlane {
         spacing: spec.spacing,
         major_every: MAJOR_EVERY,
         fade_distance,
-        color: if spec.bright {
-            [0.02, 0.02, 0.025]
-        } else {
-            [0.75, 0.75, 0.8]
-        },
+        color: line_color(spec.surface),
+        strength,
+        tint,
     }
 }
 
@@ -370,7 +486,7 @@ mod tests {
         assert_eq!(spec.height, 0.0);
         let (min, max) = spec.area.unwrap();
         assert_eq!((min.x, min.z, max.x, max.z), (-46.0, -36.0, 54.0, 24.0));
-        let drawn = plane(&spec, Vec3::ZERO);
+        let drawn = plane(&spec, Vec3::ZERO, 1.0, None);
         assert_eq!(drawn.min, [-46.0, -36.0]);
         assert_eq!(drawn.fade_distance, 0.0);
     }
@@ -389,7 +505,7 @@ mod tests {
             .unwrap();
         let found = spec(&world, 1.0);
         assert_eq!((found.area, found.height), (None, 0.0));
-        let drawn = plane(&found, Vec3::new(500.0, 20.0, 0.0));
+        let drawn = plane(&found, Vec3::new(500.0, 20.0, 0.0), 1.0, None);
         assert_eq!(drawn.min[0], 500.0 - GROUND_REACH);
         assert!(drawn.fade_distance > 0.0);
     }
@@ -431,19 +547,105 @@ mod tests {
         assert_eq!(super::spec(&world, 0.01).spacing, 1.0);
     }
 
+    fn lines_on(world: &World) -> [f32; 3] {
+        plane(&spec(world, 1.0), Vec3::ZERO, 1.0, None).color
+    }
+
     #[test]
-    fn a_dark_baseplate_gets_light_lines_and_a_bright_one_dark_lines() {
+    fn lines_are_a_soft_shift_of_the_surface_they_lie_on() {
         let mut world = World::new();
         let id = baseplate_at(&mut world, 0.0, 1.0);
-        let lines = |world: &World| plane(&spec(world, 1.0), Vec3::ZERO).color[0];
+        let color = |r, g, b| Value::Color3(Color3::new(r, g, b));
         world
-            .set_property(id, "Color", Value::Color3(Color3::new(1.0, 1.0, 1.0)))
+            .set_property(id, "Color", color(1.0, 1.0, 1.0))
             .unwrap();
-        assert!(lines(&world) < 0.2);
+        let on_white = lines_on(&world)[0];
+        assert!(on_white < 0.3, "darker than the plate: {on_white}");
+        assert!(on_white > 0.05, "but never black: {on_white}");
         world
-            .set_property(id, "Color", Value::Color3(Color3::new(0.1, 0.1, 0.1)))
+            .set_property(id, "Color", color(0.1, 0.1, 0.1))
             .unwrap();
-        assert!(lines(&world) > 0.5);
+        let on_dark = lines_on(&world)[0];
+        assert!(on_dark > 0.1, "lighter than the plate: {on_dark}");
+        assert!(on_dark < 0.5, "but never white: {on_dark}");
+        // A red plate gets reddish lines.
+        world
+            .set_property(id, "Color", color(0.8, 0.1, 0.1))
+            .unwrap();
+        let [r, g, _] = lines_on(&world);
+        assert!(r > g, "keeps the surface's hue: {r} {g}");
+    }
+
+    #[test]
+    fn a_glowing_baseplate_changes_its_lines() {
+        let mut world = World::new();
+        let id = baseplate_at(&mut world, 0.0, 1.0);
+        world
+            .set_property(id, "Color", Value::Color3(Color3::new(0.05, 0.05, 0.05)))
+            .unwrap();
+        let unlit = lines_on(&world);
+        world
+            .set_property(
+                id,
+                "EmissiveColor",
+                Value::Color3(Color3::new(0.0, 1.0, 0.0)),
+            )
+            .unwrap();
+        world
+            .set_property(id, "Emission", Value::Number(1.0))
+            .unwrap();
+        let lit = lines_on(&world);
+        assert!(lit[1] < unlit[1], "a bright green plate wants darker lines");
+        assert!(lit[1] > lit[0], "and they stay green: {lit:?}");
+    }
+
+    #[test]
+    fn lines_near_the_selected_part_take_its_color_and_a_glow_tints_more() {
+        let mut world = World::new();
+        let id = part(&mut world);
+        world
+            .set_property(id, "Color", Value::Color3(Color3::new(1.0, 0.0, 0.0)))
+            .unwrap();
+        world
+            .set_property(id, "Position", Value::Vector3(Vector3::new(3.0, 1.0, -2.0)))
+            .unwrap();
+        assert_eq!(tint(&world, None, None), None);
+        let plain = tint(&world, Some(id), None).unwrap();
+        assert_eq!(plain.at, [3.0, -2.0]);
+        assert!(plain.color[0] > 0.9 && plain.color[1] < 0.01);
+        world
+            .set_property(id, "Emission", Value::Number(1.0))
+            .unwrap();
+        world
+            .set_property(
+                id,
+                "EmissiveColor",
+                Value::Color3(Color3::new(0.0, 0.0, 1.0)),
+            )
+            .unwrap();
+        let glowing = tint(&world, Some(id), None).unwrap();
+        assert!(glowing.amount > plain.amount);
+        assert!(
+            glowing.color[2] > 0.9,
+            "the glow's color: {:?}",
+            glowing.color
+        );
+    }
+
+    #[test]
+    fn the_nearest_glowing_part_in_reach_tints_the_grid_when_nothing_is_selected() {
+        let mut world = World::new();
+        let dull = part(&mut world);
+        let glow = part(&mut world);
+        world
+            .set_property(glow, "Emission", Value::Number(1.0))
+            .unwrap();
+        let mut nearby = NearbyGlow::default();
+        assert_eq!(nearby.update(&world, Vec3::ZERO, 0.0), Some(glow));
+        let far = NearbyGlow::default().update(&world, Vec3::new(500.0, 0.0, 0.0), 0.0);
+        assert_eq!(far, None);
+        let tinted = tint(&world, Some(dull), Some(glow)).unwrap();
+        assert_eq!(tinted.amount, TINT_AMOUNT, "the selection comes first");
     }
 
     #[test]
@@ -452,7 +654,7 @@ mod tests {
             height: 2.0,
             area: Some((Vec3::new(-25.0, 2.0, -15.0), Vec3::new(25.0, 2.0, 15.0))),
             spacing: 1.0,
-            bright: true,
+            surface: LIT_GROUND,
         };
         let shown = labels(&spec, Vec3::new(1.0, 2.0, 2.0), 10.0);
         let row = |along_x| -> Vec<&str> {

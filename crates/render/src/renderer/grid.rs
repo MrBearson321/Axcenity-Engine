@@ -17,6 +17,8 @@ struct GridUniform {
     bounds: [f32; 4],
     params: [f32; 4],
     color: [f32; 4],
+    tint_at: [f32; 4],
+    tint_color: [f32; 4],
 }
 
 pub(super) struct GridPass {
@@ -133,6 +135,13 @@ impl GridPass {
         camera: [f32; 4],
         grid: &GridPlane,
     ) {
+        let (tint_at, tint_color) = match grid.tint {
+            Some(tint) => (
+                [tint.at[0], tint.at[1], tint.radius.max(0.001), tint.amount],
+                [tint.color[0], tint.color[1], tint.color[2], 1.0],
+            ),
+            None => ([0.0, 0.0, 1.0, 0.0], [0.0; 4]),
+        };
         let uniform = GridUniform {
             view_proj,
             camera,
@@ -143,7 +152,9 @@ impl GridPass {
                 grid.major_every.max(1.0),
                 grid.fade_distance,
             ],
-            color: [grid.color[0], grid.color[1], grid.color[2], 1.0],
+            color: [grid.color[0], grid.color[1], grid.color[2], grid.strength],
+            tint_at,
+            tint_color,
         };
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&uniform));
     }

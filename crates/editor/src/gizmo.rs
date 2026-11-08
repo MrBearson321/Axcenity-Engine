@@ -9,11 +9,13 @@
 //!   own axes. Dragging one moves that face of every part (along each
 //!   part's own axis), and the opposite face stays where it is, or with
 //!   Both directions both faces move.
-//! - **Rotate**: a ring around each axis. Dragging along one turns the
-//!   parts around it, through the pivot (see [`RotatePivot`]). The turn is
-//!   how far the mouse moves along the ring on screen, at a steady
-//!   [`TURN_PER_POINT`], so a ring seen nearly edge-on turns as steadily as
-//!   one facing the camera. Holding Shift turns at a quarter of the speed.
+//! - **Rotate**: a ring around each axis. Dragging one turns the parts
+//!   around it, through the pivot (see [`RotatePivot`]). A ring that faces
+//!   the camera follows the mouse round: the part turns as far as the mouse
+//!   has gone around the ring's middle, whatever path it took. A ring seen
+//!   nearly edge-on can't say where around it the mouse is, so it turns by
+//!   how far the mouse moves along it, at a steady [`TURN_PER_POINT`].
+//!   Holding Shift turns at a quarter of the speed.
 //! - **Transform**: all three at once, like Studio's: the rings, the Resize
 //!   balls, and Move arrows reaching out past the rings.
 //!
@@ -64,6 +66,14 @@ const PARALLEL: f32 = 1e-3;
 pub const TURN_PER_POINT: f32 = 1.0 / HANDLE_POINTS;
 /// Holding Shift turns at this much of the speed.
 pub const FINE_TURN: f32 = 0.25;
+/// A ring follows the mouse round when the camera looks along its axis by
+/// at least this much (the cosine of the angle between them): below it the
+/// ring is too thin an ellipse to say where around it the mouse is.
+const FOLLOW_MIN_FACING: f32 = 0.3;
+/// How far from a ring's middle the mouse must be, as a share of its
+/// radius, for its angle to count: right by the middle, a tiny movement
+/// would swing the angle right round.
+const FOLLOW_DEAD_ZONE: f32 = 0.12;
 /// With the Transform tool, how far the Move arrows reach, as a share of
 /// [`HANDLE_POINTS`]: they start at the rings and end out past them.
 const TRANSFORM_ARROW_REACH: f32 = 1.4;
@@ -683,6 +693,9 @@ pub struct Drag {
     spin: egui::Vec2,
     last_at: egui::Pos2,
     turned: f32,
+    /// Rotate only: set when the ring faces the camera enough to follow
+    /// the mouse round it.
+    follow: Option<Follow>,
     /// The other parts, for Surfaces and Collisions (see [`Drag::among`]).
     obstacles: Vec<Obstacle>,
     /// How far (studs) a part is pulled to line up with a face.
@@ -694,6 +707,15 @@ pub struct Drag {
     sites: Box<Sites>,
     /// A move's distance and markers, for drawing.
     report: Option<Box<DragReport>>,
+}
+
+/// A ring drag that follows the mouse round the ring.
+#[derive(Clone, Copy, Debug)]
+struct Follow {
+    /// Where around the ring the mouse was last frame, in radians.
+    last_angle: f32,
+    /// How close to the ring's middle (studs) is too close to count.
+    dead_zone: f32,
 }
 
 /// The mouse during a drag: the ray it points along, where it is in the
@@ -794,7 +816,11 @@ impl Drag {
             Handle::Rotate(axis) => Some((ring_spin(frame, axis, screen, at), at)),
             _ => None,
         };
-        Self::begin(handle, frame, parts, modes, screen.ray(at), spin)
+        let mut drag = Self::begin(handle, frame, parts, modes, screen.ray(at), spin)?;
+        if let Handle::Rotate(axis) = handle {
+            drag.follow = ring_follow(frame, axis, screen, at);
+        }
+        Some(drag)
     }
 
     fn begin(
@@ -823,6 +849,7 @@ impl Drag {
             spin,
             last_at,
             turned: 0.0,
+            follow: None,
             obstacles: Vec::new(),
             reach: 0.0,
             free_turn: 0.0,
@@ -1137,7 +1164,20 @@ impl Drag {
                 // Only this frame's move counts at this frame's speed, so
                 // pressing or letting go of Shift never makes the part jump.
                 let speed = if pointer.fine { FINE_TURN } else { 1.0 };
-                self.turned += (pointer.at - self.last_at).dot(self.spin) * TURN_PER_POINT * speed;
+                match &mut self.follow {
+                    Some(follow) => {
+                        // Off the ring's plane or by its middle, the part
+                        // holds still until the mouse is somewhere that counts.
+                        if let Some(angle) = ring_angle(frame, axis, ray, follow.dead_zone) {
+                            self.turned += shortest_turn(angle - follow.last_angle) * speed;
+                            follow.last_angle = angle;
+                        }
+                    }
+                    None => {
+                        self.turned +=
+                            (pointer.at - self.last_at).dot(self.spin) * TURN_PER_POINT * speed;
+                    }
+                }
                 self.last_at = pointer.at;
                 let mut radians = snap.degrees(self.turned.to_degrees()).to_radians();
                 let world_axis = frame.rotation * axis.vector();
@@ -1269,6 +1309,55 @@ pub fn ring_point(screen: &Screen, frame: Pose, axis: Axis, angle: f32) -> egui:
     let (across, up) = (frame.rotation * across, frame.rotation * up);
     let point = frame.position + (across * angle.cos() + up * angle.sin()) * length;
     screen.point(point).expect("in front of the camera")
+}
+
+/// Where around the ring for `axis` at `frame` the `ray` points, in radians
+/// from its first direction, positive the way the ring turns forward. `None`
+/// if the ray misses the ring's plane or lands within `dead_zone` studs of
+/// its middle.
+fn ring_angle(frame: Pose, axis: Axis, ray: Ray, dead_zone: f32) -> Option<f32> {
+    let normal = frame.rotation * axis.vector();
+    let toward = ray.direction.dot(normal);
+    if toward.abs() < PARALLEL {
+        return None;
+    }
+    let along = (frame.position - ray.origin).dot(normal) / toward;
+    if along <= 0.0 {
+        return None;
+    }
+    let out = ray.at(along) - frame.position;
+    let (across, up) = axis.ring_directions();
+    let (x, y) = (
+        out.dot(frame.rotation * across),
+        out.dot(frame.rotation * up),
+    );
+    (x * x + y * y >= dead_zone * dead_zone).then(|| y.atan2(x))
+}
+
+/// `angle` (radians) as the shortest way round: from -π to π.
+fn shortest_turn(angle: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    (angle + PI).rem_euclid(TAU) - PI
+}
+
+/// How a ring drag grabbed at `at` follows the mouse, or `None` when the
+/// ring is too near edge-on to.
+fn ring_follow(frame: Pose, axis: Axis, screen: &Screen, at: egui::Pos2) -> Option<Follow> {
+    let middle = screen.point(frame.position)?;
+    let facing = screen
+        .ray(middle)
+        .direction
+        .dot(frame.rotation * axis.vector());
+    if facing.abs() < FOLLOW_MIN_FACING {
+        return None;
+    }
+    let radius = screen.studs_per_point(frame.position) * HANDLE_POINTS;
+    let dead_zone = radius * FOLLOW_DEAD_ZONE;
+    let last_angle = ring_angle(frame, axis, screen.ray(at), dead_zone)?;
+    Some(Follow {
+        last_angle,
+        dead_zone,
+    })
 }
 
 /// The way on screen (one point long) that the ring for `axis` around

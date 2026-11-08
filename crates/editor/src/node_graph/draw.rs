@@ -348,7 +348,7 @@ fn field_control(
                 .unwrap_or([1.0; 3])
                 .map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-            if child.color_edit_button_srgb(&mut bytes).changed() {
+            if crate::color_palette::edit_srgb(&mut child, &mut bytes).changed() {
                 *value = super::numbers_text(&bytes.map(|byte| f32::from(byte) / 255.0));
             }
             return;

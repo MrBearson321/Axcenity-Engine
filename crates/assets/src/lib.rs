@@ -150,6 +150,9 @@ struct Shared {
     lookups: HashMap<String, Option<Arc<ColorLookup>>>,
     /// Every palette asked for so far, by its path, the same way.
     palettes: HashMap<String, Option<Arc<Palette>>>,
+    /// The image parts with `BlueprintTexture` on are drawn in, while the
+    /// editor is editing (see [`Assets::set_blueprint`]).
+    blueprint: Option<Arc<Image>>,
     /// Every material file asked for so far, by its path, put together
     /// with its bases. `None` means it couldn't be read.
     materials: HashMap<String, Option<material::Resolved>>,
@@ -207,6 +210,18 @@ impl Assets {
     /// The project folder, or `None` when no project is open.
     pub fn folder(&self) -> Option<PathBuf> {
         self.lock().folder.clone()
+    }
+
+    /// Sets the image `BlueprintTexture` parts are drawn in, or `None` to
+    /// draw them as they really are. Only the editor sets one, and only
+    /// while editing, so the image is never part of a project or a game.
+    pub fn set_blueprint(&self, image: Option<Arc<Image>>) {
+        self.lock().blueprint = image;
+    }
+
+    /// The image set by [`set_blueprint`](Self::set_blueprint).
+    pub fn blueprint(&self) -> Option<Arc<Image>> {
+        self.lock().blueprint.clone()
     }
 
     /// The model at `mesh_id` (a MeshPart's `MeshId`, such as

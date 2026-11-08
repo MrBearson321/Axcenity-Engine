@@ -6,8 +6,9 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::Path;
+use std::sync::{Arc, OnceLock};
 
-use axcenity_assets::{MapFile, MaterialFile, material_json};
+use axcenity_assets::{Image, MapFile, MaterialFile, material_json};
 use eframe::egui;
 
 /// The pack's color families, in the order the Material tool lists them.
@@ -96,6 +97,20 @@ pub fn install(folder: &Path, palette: usize, number: usize) -> io::Result<Strin
     let path = material_path(palette, number);
     write_new(&path, material_json(&material(palette, number)).as_bytes())?;
     Ok(path)
+}
+
+/// The image parts with `BlueprintTexture` on are drawn in while editing:
+/// the Dark family's grid, whose white lines take on the part's Color. It's
+/// built into the editor and never copied into a project.
+pub fn blueprint_image() -> Option<Arc<Image>> {
+    static IMAGE: OnceLock<Option<Arc<Image>>> = OnceLock::new();
+    IMAGE
+        .get_or_init(|| {
+            let rgba = image::load_from_memory(IMAGES[0][0]).ok()?.to_rgba8();
+            let (width, height) = rgba.dimensions();
+            Some(Arc::new(Image::new(width, height, rgba.into_raw())))
+        })
+        .clone()
 }
 
 /// The thumbnails decoded so far, kept in egui's memory.

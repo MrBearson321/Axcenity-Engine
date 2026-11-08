@@ -252,7 +252,7 @@ fn declaration_row(ui: &mut egui::Ui, declaration: &CssDeclaration) -> Option<St
                 byte(color.b),
                 byte(alpha),
             );
-            if ui.color_edit_button_srgba(&mut picked).changed() {
+            if crate::color_palette::edit_srgba(ui, &mut picked).changed() {
                 made = Some(css_color(picked));
             }
         }

@@ -27,6 +27,25 @@ pub(crate) fn variant_of(
     assets.material(path)
 }
 
+/// The image to draw `instance` in if it shows the editor's blueprint
+/// texture: it has `BlueprintTexture` on, no look of its own (Plastic, no
+/// material file), and the host set an image. Only the editor sets one.
+pub(crate) fn blueprint_of(
+    instance: &Instance,
+    assets: &Assets,
+) -> Option<std::sync::Arc<axcenity_assets::Image>> {
+    let on = instance.property("BlueprintTexture") == Some(&Value::Bool(true));
+    let plain = instance.property("Material") == Some(&Value::Material(PLAIN_MATERIAL))
+        && instance
+            .property("MaterialVariant")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty);
+    (on && plain).then(|| assets.blueprint()).flatten()
+}
+
+/// The Material that counts as a part having no look of its own.
+const PLAIN_MATERIAL: axcenity_core::Material = axcenity_core::Material::Plastic;
+
 /// `standard` as the renderer takes it, with its maps' textures from
 /// `assets`. A map whose texture isn't loaded (yet) is left out.
 pub(crate) fn variant_material(standard: &StandardMaterial, assets: &Assets) -> Material {
@@ -648,6 +667,65 @@ mod tests {
         assert_eq!(items[1].material.outline, None);
         assert_eq!(items[2].material.outline, None);
         let _ = std::fs::remove_dir_all(folder);
+    }
+
+    fn blueprint_on() -> (&'static str, Value) {
+        ("BlueprintTexture", Value::Bool(true))
+    }
+
+    fn blueprint_assets() -> Assets {
+        let assets = Assets::default();
+        let white = axcenity_assets::Image::new(1, 1, vec![255; 4]);
+        assets.set_blueprint(Some(std::sync::Arc::new(white)));
+        assets
+    }
+
+    #[test]
+    fn a_blueprint_part_is_drawn_in_the_grid_only_where_the_host_gives_one() {
+        let mut world = World::new();
+        part(&mut world, vec![blueprint_on()]);
+        let drawn = |assets: &Assets| {
+            items(&world, assets)[0]
+                .material
+                .base_color_texture
+                .is_some()
+        };
+        assert!(drawn(&blueprint_assets()), "the editor, while editing");
+        assert!(!drawn(&Assets::default()), "the player, or Play");
+    }
+
+    #[test]
+    fn a_blueprint_is_tinted_by_the_parts_color_and_keeps_its_glow() {
+        let mut world = World::new();
+        part(
+            &mut world,
+            vec![
+                blueprint_on(),
+                ("Color", Value::Color3(Color3::new(0.32, 0.16, 0.64))),
+                ("Emission", Value::Number(2.0)),
+                ("EmissiveColor", Value::Color3(Color3::new(1.0, 0.0, 0.0))),
+            ],
+        );
+        let material = items(&world, &blueprint_assets())[0].material.clone();
+        // The default grey counts as white, so the rest scale from there.
+        assert_eq!(material.base_color, [0.5, 0.25, 1.0]);
+        assert_eq!(material.emissive, [2.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_part_given_a_real_material_or_with_the_blueprint_off_shows_its_own_look() {
+        let mut world = World::new();
+        part(&mut world, vec![]);
+        part(
+            &mut world,
+            vec![
+                blueprint_on(),
+                ("Material", Value::Material(PartMaterial::Metal)),
+            ],
+        );
+        for item in items(&world, &blueprint_assets()) {
+            assert!(item.material.base_color_texture.is_none());
+        }
     }
 
     #[test]

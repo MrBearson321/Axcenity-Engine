@@ -44,6 +44,8 @@ fn grid() -> GridPlane {
         major_every: 10.0,
         fade_distance: 0.0,
         color: [0.0; 3],
+        strength: 1.0,
+        tint: None,
     }
 }
 

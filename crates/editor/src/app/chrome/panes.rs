@@ -930,6 +930,7 @@ impl EditorApp {
                             light_cones: self.light_cones,
                             view_cube: self.view_cube,
                             grid: self.grid,
+                            grid_strength: self.grid_strength,
                             overlays: self.overlays,
                             view_mode: self.view_mode,
                             playing: self.play.is_some(),

@@ -979,7 +979,21 @@ impl ClassName {
                 ("AccessibleName", Value::String(String::new())),
             ]);
         }
+        if self.can_lock() {
+            // On, the editor's viewport can't select or change it, and it
+            // and what's inside it are left alone by the building tools.
+            // It's still in the Explorer, which is how it's unlocked.
+            properties.push(("Locked", Value::Bool(false)));
+        }
         properties
+    }
+
+    /// Whether the editor can lock it: anything with a place in the world,
+    /// and the Models and Folders that hold such things.
+    pub fn can_lock(self) -> bool {
+        self.is_base_part()
+            || self.can_stand_free()
+            || matches!(self, ClassName::Model | ClassName::Folder)
     }
 
     fn own_properties(self) -> Vec<(&'static str, Value)> {
@@ -2022,6 +2036,10 @@ impl ClassName {
                     // "assets/materials/brick.material.json", drawn in place
                     // of Material (Color still tints it). Empty for none.
                     ("MaterialVariant", Value::String(String::new())),
+                    // On, a plain Plastic part is drawn in the prototype grid
+                    // texture while editing, as a reference to build by. It
+                    // never shows in Play or in a built game.
+                    ("BlueprintTexture", Value::Bool(false)),
                     ("Metalness", Value::Number(preset.metalness)),
                     ("Roughness", Value::Number(preset.roughness)),
                     // Off, the part casts no sun shadow (it's still shaded).
