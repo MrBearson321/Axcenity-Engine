@@ -49,8 +49,6 @@ pub struct FloatingWindow {
     pub following: Option<Following>,
     /// Bring it to the front on the next frame.
     pub focus: bool,
-    /// Which theme (dark or not) its OS title bar was last told to use.
-    pub dark_title_bar: Option<bool>,
 }
 
 impl FloatingWindow {
@@ -99,7 +97,6 @@ impl Layout {
             placed: opens_at,
             following,
             focus: true,
-            dark_title_bar: None,
         });
         self.next_window
     }

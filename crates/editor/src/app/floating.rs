@@ -11,6 +11,7 @@ use crate::layout::floating::{self, DEFAULT_SIZE, Placement};
 use crate::layout::{self, Layout, Pane};
 use crate::theme;
 use crate::viewport::ViewportOutput;
+use crate::window_frame;
 
 /// The main window's dock area.
 pub(super) fn main_area(generation: u64) -> egui::Id {
@@ -77,7 +78,7 @@ impl EditorApp {
 
     fn builder_for(&self, index: usize) -> egui::ViewportBuilder {
         let window = &self.layout.windows[index];
-        let mut builder = egui::ViewportBuilder::default()
+        let mut builder = window_frame::viewport(egui::ViewportBuilder::default())
             .with_title(window_title(self, window.front_pane()))
             .with_min_inner_size([200.0, 140.0])
             .with_inner_size(
@@ -146,15 +147,6 @@ impl EditorApp {
         if std::mem::take(&mut window.focus) {
             ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::Focus);
         }
-        if window.dark_title_bar != Some(palette.dark) {
-            window.dark_title_bar = Some(palette.dark);
-            let theme = if palette.dark {
-                egui::SystemTheme::Dark
-            } else {
-                egui::SystemTheme::Light
-            };
-            ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::SetTheme(theme));
-        }
         let following = window.following;
         let opens_at = window.opens_at.filter(|_| window.placed == window.opens_at);
         // Taken out while it's drawn, so the panels can borrow the app.
@@ -171,6 +163,9 @@ impl EditorApp {
             None => builder,
         };
         let outcome = ctx.show_viewport_immediate(viewport, viewport_builder, |ctx, class| {
+            // Its own chrome, unless it's drawn inside the main window.
+            let own_window = class != egui::ViewportClass::Embedded;
+            let strip_closed = own_window && window_frame::panel_strip(ctx);
             let style = layout::style(&ctx.style(), palette, ctx.pixels_per_point());
             let mut placeholder = ViewportOutput::default();
             let visuals = ctx.style().visuals.clone();
@@ -200,7 +195,10 @@ impl EditorApp {
             if ctx.input(|input| input.viewport().focused == Some(true)) {
                 self.shortcuts(ctx);
             }
-            let closed = ctx.input(|input| input.viewport().close_requested());
+            if own_window {
+                window_frame::edges(ctx);
+            }
+            let closed = strip_closed || ctx.input(|input| input.viewport().close_requested());
             // Read first: egui's Context mustn't be called inside `input`.
             let scale = ctx.pixels_per_point();
             let placed = ctx.input(|input| {
@@ -374,6 +372,40 @@ mod tests {
         }
         assert!(layout.windows[0].holds(Pane::Console));
         assert_eq!(floating::dragged_tab(&ctx, next, &layout.dock), None);
+    }
+
+    #[test]
+    fn a_panel_window_has_no_os_frame_and_its_strip_closes_it() {
+        let folder = copy_of_example("hello-touched", "panel-strip");
+        let mut app = EditorApp::new(Some(&folder));
+        app.layout.float(Pane::Explorer, None).unwrap();
+        if !cfg!(target_os = "macos") {
+            assert_eq!(app.builder_for(0).decorations, Some(false));
+        }
+        let _ = std::fs::remove_dir_all(folder);
+
+        let ctx = crate::theme::test_context();
+        let close = egui::pos2(790.0, 10.0);
+        let frames = [
+            vec![egui::Event::PointerMoved(close)],
+            vec![press(close, true)],
+            vec![press(close, false)],
+        ];
+        let mut clicked = false;
+        for events in frames {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                clicked |= window_frame::panel_strip(ctx);
+            });
+        }
+        assert_eq!(clicked, !cfg!(target_os = "macos"));
     }
 
     #[test]

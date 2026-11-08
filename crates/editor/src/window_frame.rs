@@ -24,6 +24,10 @@ pub const LEFT_INSET: f32 = if NATIVE_BUTTONS { 76.0 } else { 0.0 };
 
 const BUTTON_WIDTH: f32 = 46.0;
 
+/// A panel window's strip, in points. macOS needs room for its traffic lights.
+const PANEL_STRIP_HEIGHT: f32 = if NATIVE_BUTTONS { 28.0 } else { 20.0 };
+const PANEL_CLOSE_WIDTH: f32 = 30.0;
+
 /// How far in from the window's edge a drag resizes it, in points.
 const GRIP: f32 = 5.0;
 /// Corners grip a little further along each edge.
@@ -61,6 +65,28 @@ pub fn drag_region(ui: &mut egui::Ui, rect: Rect) {
     } else if response.drag_started_by(egui::PointerButton::Primary) {
         ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
     }
+}
+
+/// A panel window's only chrome: a slim strip that moves it, with a small
+/// close button. Its tabs, right below, say what's in it. Returns true when
+/// close was clicked. Call it before the panels are drawn.
+pub fn panel_strip(ctx: &egui::Context) -> bool {
+    let palette = theme::palette(ctx);
+    egui::TopBottomPanel::top("panel window strip")
+        .exact_height(PANEL_STRIP_HEIGHT)
+        .frame(egui::Frame::new().fill(palette.app_bg))
+        .show_separator_line(false)
+        .show(ctx, |ui| {
+            let bar = ui.max_rect();
+            drag_region(ui, bar);
+            if NATIVE_BUTTONS {
+                return false;
+            }
+            let close =
+                Rect::from_min_max(pos2(bar.right() - PANEL_CLOSE_WIDTH, bar.top()), bar.max);
+            button(ui, close, Glyph::Close, "Dock in Main Window").clicked()
+        })
+        .inner
 }
 
 /// Width the window buttons take at the header's right.
