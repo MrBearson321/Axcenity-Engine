@@ -837,3 +837,81 @@ fn with_snap_points_off_a_move_still_reports_its_distance_but_shows_no_markers()
     assert!((report.distance() - 4.0).abs() < 0.001);
     assert!(report.targets.is_empty());
 }
+
+fn a_block(size: f32) -> (World, InstanceId, Pose) {
+    let mut world = World::new();
+    let part = world.create(axcenity_core::ClassName::Part).unwrap();
+    let start = Pose {
+        position: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
+        size: Vec3::splat(size),
+    };
+    (world, part, start)
+}
+
+fn along_x(x: f32) -> Ray {
+    Ray {
+        origin: Vec3::new(x, 0.0, 20.0),
+        direction: Vec3::NEG_Z,
+    }
+}
+
+#[test]
+fn a_resize_reports_how_far_its_face_has_come_and_clicks_to_a_snap_point() {
+    let (mut world, part, start) = a_block(2.0);
+    let handle = Handle::Scale(Axis::X, Side::Plus);
+    let other = Obb {
+        center: Vec3::new(6.0, 0.0, 0.0),
+        axes: [Vec3::X, Vec3::Y, Vec3::Z],
+        half: Vec3::ONE,
+    };
+    let obstacles = vec![Obstacle {
+        id: world.create(axcenity_core::ClassName::Part).unwrap(),
+        obb: other,
+        solid: true,
+        visible: true,
+    }];
+    let mut drag = Drag::start(handle, part, start, along_x(1.0))
+        .unwrap()
+        .among(obstacles, 0.5);
+    let snap = Snap {
+        points: true,
+        ..NO_SNAP
+    };
+    // The face starts at x = 1. Pulled to 4.8, the other's face at 5 is near.
+    let parts = drag.update_all(along_x(4.8).into(), &snap).unwrap();
+    let Value::Vector3(size) = &parts[0].1[0].1 else {
+        panic!("a size");
+    };
+    assert!(
+        (size.x - 6.0).abs() < 0.001,
+        "the face reached x = 5: {}",
+        size.x
+    );
+    let report = drag.report().unwrap();
+    assert!(report.link.is_some() && report.is_moving());
+    let DragKind::Resize { pulled, outward } = report.kind else {
+        panic!("a resize");
+    };
+    assert!((pulled - 4.0).abs() < 0.001, "{pulled}");
+    assert_eq!(outward, Vec3::X);
+    assert_eq!(report.start, Vec3::X);
+}
+
+#[test]
+fn a_turn_reports_how_far_it_has_turned_and_shows_no_snap_points() {
+    let start = pose(Vec3::ZERO, Vec3::ONE);
+    let screen = screen_along_z(Vec3::ZERO, 0.0);
+    let handle = Handle::Rotate(Axis::Z);
+    let grab = ring_point(&screen, start, Axis::Z, 0.0);
+    let mut drag = Drag::turn(handle, some_part(), start, &screen, grab).unwrap();
+    turn_along(&mut drag, &screen, grab, points_for(90.0), &NO_SNAP);
+    let report = drag.report().unwrap();
+    assert!(report.is_moving() && !report.measures_studs());
+    let DragKind::Turn { pivot, radians, .. } = report.kind else {
+        panic!("a turn");
+    };
+    assert_eq!(pivot, Vec3::ZERO);
+    assert!((radians - std::f32::consts::FRAC_PI_2).abs() < 0.01);
+    assert!(report.targets.is_empty());
+}

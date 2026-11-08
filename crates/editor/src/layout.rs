@@ -185,6 +185,8 @@ pub struct Layout {
     pub windows: Vec<FloatingWindow>,
     /// The last [`FloatingWindow::id`] given out.
     next_window: u64,
+    /// Goes up when a tab is torn off mid-drag; part of every dock area's id.
+    pub dock_generation: u64,
     /// The script tab used last, which new script tabs open beside.
     last_script: Option<u64>,
 }
@@ -195,6 +197,7 @@ impl Default for Layout {
             dock: default_dock(),
             windows: Vec::new(),
             next_window: 0,
+            dock_generation: 0,
             last_script: None,
         }
     }

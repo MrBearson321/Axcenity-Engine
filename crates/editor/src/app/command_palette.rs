@@ -745,10 +745,7 @@ impl EditorApp {
             } else {
                 "Build"
             };
-            let key = match tool {
-                Tool::Select => Some(egui::Key::Escape.name().to_owned()),
-                _ => tool.key().map(|key| key.name().to_owned()),
-            };
+            let key = tool.key().map(|key| key.name().to_owned());
             add(
                 Command::Tool(tool),
                 &format!("{} Tool", tool.label()),

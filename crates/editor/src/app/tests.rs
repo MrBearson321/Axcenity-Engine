@@ -1499,25 +1499,27 @@ pub(super) fn press(app: &mut EditorApp, modifiers: egui::Modifiers, key: egui::
 }
 
 #[test]
-fn keys_1_to_4_pick_the_handle_tools_escape_selects_and_ctrl_z_and_ctrl_y_undo_and_redo() {
+fn keys_1_to_5_pick_the_tools_as_in_studio_and_ctrl_z_and_ctrl_y_undo_and_redo() {
     let mut app = EditorApp::new(Some(&example("hello-touched")));
     let command = egui::Modifiers::COMMAND;
     assert_eq!(app.tool, Tool::Select);
     for (key, tool) in [
-        (egui::Key::Num1, Tool::Move),
-        (egui::Key::Num2, Tool::Scale),
-        (egui::Key::Num3, Tool::Rotate),
-        (egui::Key::Num4, Tool::Transform),
+        (egui::Key::Num2, Tool::Move),
+        (egui::Key::Num3, Tool::Scale),
+        (egui::Key::Num4, Tool::Rotate),
+        (egui::Key::Num5, Tool::Transform),
+        (egui::Key::Num1, Tool::Select),
+        (egui::Key::Num2, Tool::Move),
         (egui::Key::Escape, Tool::Select),
     ] {
         press(&mut app, egui::Modifiers::NONE, key);
         assert_eq!(app.tool, tool);
     }
     // A tool's key again turns it off, like clicking its button again.
-    press(&mut app, egui::Modifiers::NONE, egui::Key::Num1);
-    press(&mut app, egui::Modifiers::NONE, egui::Key::Num1);
+    press(&mut app, egui::Modifiers::NONE, egui::Key::Num2);
+    press(&mut app, egui::Modifiers::NONE, egui::Key::Num2);
     assert_eq!(app.tool, Tool::Select);
-    // Ctrl with a number no longer picks a tool.
+    // Ctrl with a number doesn't pick a tool.
     press(&mut app, command, egui::Key::Num2);
     assert_eq!(app.tool, Tool::Select);
 

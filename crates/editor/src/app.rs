@@ -441,28 +441,8 @@ struct DockViewer<'a> {
     floating: Option<u64>,
 }
 
-impl egui_dock::TabViewer for DockViewer<'_> {
-    type Tab = Pane;
-
-    fn title(&mut self, pane: &mut Pane) -> egui::WidgetText {
-        match pane {
-            Pane::Script(id) => self.app.tabs.title(*id, &self.visuals),
-            Pane::Plugin(id) => egui::RichText::new(theme::with_icon(
-                icons::PUZZLE_PIECE,
-                &self.app.plugin_pane_title(*id),
-            ))
-            .family(theme::medium_family())
-            .size(theme::type_scale::BODY - 0.5)
-            .into(),
-            _ => pane.title(),
-        }
-    }
-
-    fn id(&mut self, pane: &mut Pane) -> egui::Id {
-        egui::Id::new(("dock pane", *pane))
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, pane: &mut Pane) {
+impl DockViewer<'_> {
+    fn draw_pane(&mut self, ui: &mut egui::Ui, pane: Pane) {
         match pane {
             Pane::Scene => *self.viewport = self.app.scene_pane(ui, self.render_state),
             Pane::Explorer => self.app.explorer_pane(ui),
@@ -485,9 +465,54 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Tests => self.app.tests_pane(ui),
             Pane::Plugins => self.app.plugins_pane(ui),
             Pane::ModelStudio => self.app.model_studio_pane(ui, self.render_state),
-            Pane::Script(id) => self.app.script_pane(ui, *id),
-            Pane::Plugin(id) => self.app.plugin_pane(ui, *id, self.render_state),
+            Pane::Script(id) => self.app.script_pane(ui, id),
+            Pane::Plugin(id) => self.app.plugin_pane(ui, id, self.render_state),
         }
+    }
+}
+
+/// Runs `add` in a `Ui` whose id depends only on `pane`, so scroll positions,
+/// open sections and the like stay with a panel wherever it's docked.
+fn in_panel_memory(ui: &mut egui::Ui, pane: Pane, add: impl FnOnce(&mut egui::Ui)) {
+    let rect = ui.available_rect_before_wrap();
+    let mut body = egui::Ui::new(
+        ui.ctx().clone(),
+        egui::Id::new(("panel body", pane)),
+        egui::UiBuilder::new()
+            .layer_id(ui.layer_id())
+            .max_rect(rect)
+            .layout(*ui.layout()),
+    );
+    body.set_clip_rect(ui.clip_rect());
+    body.set_style(ui.style().clone());
+    add(&mut body);
+    ui.advance_cursor_after_rect(rect);
+}
+
+impl egui_dock::TabViewer for DockViewer<'_> {
+    type Tab = Pane;
+
+    fn title(&mut self, pane: &mut Pane) -> egui::WidgetText {
+        match pane {
+            Pane::Script(id) => self.app.tabs.title(*id, &self.visuals),
+            Pane::Plugin(id) => egui::RichText::new(theme::with_icon(
+                icons::PUZZLE_PIECE,
+                &self.app.plugin_pane_title(*id),
+            ))
+            .family(theme::medium_family())
+            .size(theme::type_scale::BODY - 0.5)
+            .into(),
+            _ => pane.title(),
+        }
+    }
+
+    fn id(&mut self, pane: &mut Pane) -> egui::Id {
+        egui::Id::new(("dock pane", *pane))
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, pane: &mut Pane) {
+        let pane = *pane;
+        in_panel_memory(ui, pane, |ui| self.draw_pane(ui, pane));
     }
 
     fn is_closeable(&self, pane: &Pane) -> bool {
@@ -507,7 +532,6 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             ui.close();
         }
     }
-
     /// A script tab stays until the app closes its script, after asking
     /// about unsaved changes; then `Layout::sync_scripts` removes it.
     fn on_close(&mut self, pane: &mut Pane) -> egui_dock::tab_viewer::OnCloseResponse {
@@ -1232,7 +1256,7 @@ impl EditorApp {
             let mut dock = std::mem::replace(&mut self.layout.dock, DockState::new(Vec::new()));
             dock.translations.tab_context_menu.eject_button = "Float in New Window".to_owned();
             egui_dock::DockArea::new(&mut dock)
-                .id(floating::main_area())
+                .id(floating::main_area(self.layout.dock_generation))
                 .style(layout::style(
                     &ctx.style(),
                     &palette,

@@ -200,9 +200,27 @@ pub fn nearby(
     points
 }
 
-/// What a move has done so far, for drawing.
+/// Which tool a drag is using, and what only that tool knows.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum DragKind {
+    #[default]
+    Move,
+    /// A face pulled `pulled` studs along `outward` (one stud long).
+    Resize { pulled: f32, outward: Vec3 },
+    /// Turned `radians` around `axis` through `pivot`, measured from the
+    /// direction `from` (one stud long, square to the axis).
+    Turn {
+        pivot: Vec3,
+        axis: Vec3,
+        from: Vec3,
+        radians: f32,
+    },
+}
+
+/// What a drag has done so far, for drawing.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MoveReport {
+pub struct DragReport {
+    pub kind: DragKind,
     /// Where the part being dragged started.
     pub start: Vec3,
     /// How far it has come since.
@@ -215,7 +233,7 @@ pub struct MoveReport {
     pub reach: f32,
 }
 
-impl MoveReport {
+impl DragReport {
     /// The report for a move that has come `moved` from `start`, keeping
     /// the markers nearest the dragged box `last` (already moved).
     pub fn new(
@@ -224,14 +242,15 @@ impl MoveReport {
         last: Option<&Obb>,
         mut targets: Vec<SnapPoint>,
         link: Option<Vec3>,
-    ) -> MoveReport {
+    ) -> DragReport {
         let middle = last.map_or(start + moved, |obb| obb.center);
         targets.sort_by(|a, b| {
             a.at.distance_squared(middle)
                 .total_cmp(&b.at.distance_squared(middle))
         });
         targets.truncate(MOST_SHOWN);
-        MoveReport {
+        DragReport {
+            kind: DragKind::Move,
             start,
             moved,
             targets,
@@ -240,10 +259,19 @@ impl MoveReport {
         }
     }
 
-    /// True once the part has left where it started. Numbers and markers
+    /// True once the part has left how it started. Numbers and markers
     /// show only then.
     pub fn is_moving(&self) -> bool {
-        self.distance() >= SHOWN_FROM
+        match self.kind {
+            DragKind::Move => self.distance() >= SHOWN_FROM,
+            DragKind::Resize { pulled, .. } => pulled.abs() >= SHOWN_FROM,
+            DragKind::Turn { radians, .. } => radians.abs() >= SHOWN_FROM,
+        }
+    }
+
+    /// True for a change the grid's printed studs help to measure.
+    pub fn measures_studs(&self) -> bool {
+        self.is_moving() && !matches!(self.kind, DragKind::Turn { .. })
     }
 
     /// How far it's come, in studs.
@@ -394,7 +422,7 @@ mod tests {
             .map(|i| point(Vec3::new(i as f32, 0.0, 0.0)))
             .collect();
         let last = cube(Vec3::ZERO, 1.0);
-        let report = MoveReport::new(
+        let report = DragReport::new(
             Vec3::new(-3.0, 0.0, 0.0),
             Vec3::new(3.0, 0.0, 4.0),
             Some(&last),
@@ -403,7 +431,7 @@ mod tests {
         );
         assert_eq!(report.distance(), 5.0);
         assert!(report.is_moving());
-        assert!(!MoveReport::default().is_moving());
+        assert!(!DragReport::default().is_moving());
         assert_eq!(report.targets.len(), MOST_SHOWN);
         assert_eq!(report.targets[0].at, Vec3::ZERO);
     }

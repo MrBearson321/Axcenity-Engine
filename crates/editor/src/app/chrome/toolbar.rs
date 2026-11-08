@@ -98,10 +98,7 @@ impl EditorApp {
     /// The ribbon buttons for `tools`. Clicking one picks it.
     pub(super) fn tool_buttons(&mut self, ui: &mut egui::Ui, tools: &[Tool]) {
         for tool in tools {
-            let key = match tool {
-                Tool::Select => Some(egui::Key::Escape),
-                _ => tool.key(),
-            };
+            let key = tool.key();
             let hover = match key {
                 Some(key) if *tool == Tool::Select => format!("Select tool ({})", key.name()),
                 Some(key) => format!(

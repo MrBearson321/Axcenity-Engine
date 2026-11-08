@@ -220,7 +220,7 @@ impl EditorApp {
         // over the Model Studio, its own single keys and Enter are.
         let studio = self.model_studio.has_pointer();
         let animating = self.animation.wants_keys(ctx) || studio;
-        // The tools' single keys (1 to 4, F3X's letters) only while
+        // The tools' single keys (1 to 5, F3X's letters) only while
         // editing, so a game gets every key. Escape goes back to Select; it
         // isn't taken, so it still closes a menu or stops the Constraint tool.
         let tool_key = |input: &mut egui::InputState| {

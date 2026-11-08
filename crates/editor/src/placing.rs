@@ -22,7 +22,7 @@ use axcenity_render::glam::Vec3;
 use axcenity_scene::Ray;
 
 use crate::gizmo::{Pose, Snap};
-use crate::snapping::points::{self, Freedom, MoveReport, Sites};
+use crate::snapping::points::{self, DragReport, Freedom, Sites};
 use crate::snapping::{self, Obb, Obstacle};
 
 /// How close a surface's facing must be to an axis to count as flat or
@@ -50,7 +50,7 @@ pub struct PlaceDrag {
     /// The Attachments it can click to.
     pub sites: Box<Sites>,
     /// How far it has come and what it can click to, for drawing.
-    pub report: Option<Box<MoveReport>>,
+    pub report: Option<Box<DragReport>>,
 }
 
 impl PlaceDrag {
@@ -152,7 +152,7 @@ impl PlaceDrag {
             }
             None => Vec::new(),
         };
-        self.report = Some(Box::new(MoveReport::new(
+        self.report = Some(Box::new(DragReport::new(
             self.start,
             position - self.start,
             at.as_ref(),

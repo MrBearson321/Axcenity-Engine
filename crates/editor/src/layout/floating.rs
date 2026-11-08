@@ -183,6 +183,9 @@ impl Layout {
             height: size.y,
         };
         let id = self.float(pane, Some(opens_at))?;
+        // egui_dock remembers the drag by the tab's old place, and would look
+        // for it there until the button comes up: start its memory afresh.
+        self.dock_generation += 1;
         if let Some(window) = self.windows.last_mut() {
             window.following = Some(Following {
                 source,

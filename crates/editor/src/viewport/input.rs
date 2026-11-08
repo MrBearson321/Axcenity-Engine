@@ -407,6 +407,7 @@ impl Viewport {
                 start: pose.position,
                 grab_offset: pose.position - grabbed,
                 normal,
+                report: None,
             };
             self.drag = Some(Dragging::Icon(drag, others));
             input.grabbed = Some(id);
@@ -504,6 +505,13 @@ impl Viewport {
                     }
                     Dragging::Icon(drag, others) => drag.update(ray, &snap).map(|at| {
                         let moved = at - drag.start;
+                        drag.report = Some(Box::new(snapping::points::DragReport::new(
+                            drag.start,
+                            moved,
+                            None,
+                            Vec::new(),
+                            None,
+                        )));
                         let value = |at: Vec3| {
                             Value::Vector3(axcenity_core::Vector3::new(at.x, at.y, at.z))
                         };

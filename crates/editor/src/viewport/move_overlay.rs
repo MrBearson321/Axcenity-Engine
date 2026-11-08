@@ -1,16 +1,17 @@
-//! What's drawn over the viewport while parts move: a white guide line
-//! along the move, the snap points near it, and one number saying how many
-//! studs the part has come. None of it shows until the part has moved.
+//! What's drawn over the viewport while parts are moved, resized or turned:
+//! a white guide along the change, the snap points near it, and one number
+//! saying how far: studs moved, studs a face has been pulled, or degrees
+//! turned. None of it shows until something has changed.
 //!
-//! While a Move is under way the part also stays, solid, where it started,
-//! and is drawn see-through where it's going ([`ghost_moving`]).
+//! Meanwhile the part also stays, solid, as it started, and is drawn
+//! see-through as it's becoming ([`ghost_moving`]).
 
 use axcenity_render::DrawList;
-use axcenity_render::glam::{Mat4, Vec3};
+use axcenity_render::glam::{Mat4, Quat, Vec3};
 use eframe::egui::{self, Color32, Stroke, pos2, vec2};
 
 use crate::screen::Screen;
-use crate::snapping::points::{MoveReport, PointKind, SnapPoint};
+use crate::snapping::points::{DragKind, DragReport, PointKind, SnapPoint};
 
 const GUIDE_COLOR: Color32 = Color32::from_rgb(245, 245, 248);
 const TARGET_COLOR: Color32 = Color32::from_rgb(235, 235, 240);
@@ -25,6 +26,8 @@ const GUIDE_REACH: f32 = 4000.0;
 const NUMBER_GAP: f32 = 34.0;
 /// How solid the part is drawn where it's going.
 const GHOST_OPACITY: f32 = 0.4;
+/// The radius of a turn's arc, in points: the Rotate rings' own.
+const TURN_RADIUS: f32 = 90.0;
 
 fn marker(painter: &egui::Painter, at: egui::Pos2, kind: PointKind, color: Color32) {
     let outline = Stroke::new(1.0_f32, Color32::from_black_alpha(190));
@@ -103,28 +106,57 @@ fn paint_number(painter: &egui::Painter, rect: egui::Rect, anchor: egui::Pos2, t
     );
 }
 
-/// Draws `report` over the viewport, once the part has moved.
+/// Draws `report` over the viewport, once something has changed.
 pub(super) fn paint(
     painter: &egui::Painter,
     screen: &Screen,
     rect: egui::Rect,
-    report: &MoveReport,
+    report: &DragReport,
 ) {
     if !report.is_moving() {
         return;
     }
-    let way = report.moved.normalize_or_zero();
+    match report.kind {
+        DragKind::Move => {
+            let way = report.moved.normalize_or_zero();
+            paint_line(painter, screen, rect, report, way, studs(report.distance()));
+        }
+        DragKind::Resize { pulled, outward } => {
+            paint_line(painter, screen, rect, report, outward, studs(pulled));
+        }
+        DragKind::Turn {
+            pivot,
+            axis,
+            from,
+            radians,
+        } => paint_turn(painter, screen, rect, (pivot, axis, from), radians),
+    }
+}
+
+fn start_dot(painter: &egui::Painter, at: egui::Pos2) {
+    painter.circle(
+        at,
+        5.0,
+        Color32::WHITE,
+        Stroke::new(1.0_f32, Color32::from_black_alpha(160)),
+    );
+}
+
+/// A move or a resize: everything lies along the line through `way`.
+fn paint_line(
+    painter: &egui::Painter,
+    screen: &Screen,
+    rect: egui::Rect,
+    report: &DragReport,
+    way: Vec3,
+    number: String,
+) {
     let end = report.start + report.moved;
     if let Some(line) = screen.line(report.start - way * GUIDE_REACH, end + way * GUIDE_REACH) {
         painter.line_segment(line, Stroke::new(1.0_f32, GUIDE_COLOR));
     }
     if let Some(at) = screen.point(report.start - way * report.reach) {
-        painter.circle(
-            at,
-            5.0,
-            Color32::WHITE,
-            Stroke::new(1.0_f32, Color32::from_black_alpha(160)),
-        );
+        start_dot(painter, at);
     }
     markers(painter, screen, rect, &report.targets);
     let ring = report.link.unwrap_or(report.start + way * report.reach);
@@ -135,35 +167,66 @@ pub(super) fn paint(
         painter.circle_filled(at, 2.5, MIDDLE_COLOR);
     }
     let leading = end + way * report.reach;
-    if let (Some(face), Some(middle)) = (screen.point(leading), screen.point(end)) {
+    if let (Some(face), Some(ahead)) = (screen.point(leading), screen.point(leading + way)) {
         // Straight on, the part hides which way is ahead: go to the right.
-        let ahead = (face - middle).normalized();
+        let ahead = (ahead - face).normalized();
         let ahead = if ahead.is_finite() && ahead != egui::Vec2::ZERO {
             ahead
         } else {
             egui::Vec2::X
         };
-        paint_number(
-            painter,
-            rect,
-            face + ahead * NUMBER_GAP,
-            studs(report.distance()),
-        );
+        paint_number(painter, rect, face + ahead * NUMBER_GAP, number);
     }
 }
 
-/// While parts move: leaves each solid where it started and draws it
-/// see-through where it's going. `moves` is each part's place now and how
-/// far that is from where it started.
-pub(super) fn ghost_moving(list: &mut DrawList, moves: &[(Vec3, Vec3)]) {
+/// A turn: an arc the size of the Rotate rings, from where it began.
+fn paint_turn(
+    painter: &egui::Painter,
+    screen: &Screen,
+    rect: egui::Rect,
+    (pivot, axis, from): (Vec3, Vec3, Vec3),
+    radians: f32,
+) {
+    let radius = screen.studs_per_point(pivot) * TURN_RADIUS;
+    let sweep = radians.clamp(-std::f32::consts::TAU, std::f32::consts::TAU);
+    let on_arc = |angle: f32| pivot + Quat::from_axis_angle(axis, angle) * from * radius;
+    let steps = ((sweep.abs() / std::f32::consts::TAU * 96.0).ceil() as usize).max(2);
+    let arc: Vec<egui::Pos2> = (0..=steps)
+        .filter_map(|i| screen.point(on_arc(sweep * i as f32 / steps as f32)))
+        .collect();
+    painter.add(egui::Shape::line(arc, Stroke::new(2.0_f32, GUIDE_COLOR)));
+    for angle in [0.0, sweep] {
+        if let Some(spoke) = screen.line(pivot, on_arc(angle)) {
+            painter.line_segment(spoke, Stroke::new(1.0_f32, GUIDE_COLOR));
+        }
+    }
+    if let Some(at) = screen.point(on_arc(0.0)) {
+        start_dot(painter, at);
+    }
+    let middle = screen.point(pivot);
+    if let Some(at) = middle {
+        painter.circle_filled(at, 2.5, MIDDLE_COLOR);
+    }
+    if let Some(at) = screen.point(on_arc(sweep)) {
+        paint_ring(painter, at);
+        let outward = middle.map_or(egui::Vec2::X, |middle| (at - middle).normalized());
+        let number = format!("{}°", studs((radians.to_degrees() * 10.0).round() / 10.0));
+        paint_number(painter, rect, at + outward * NUMBER_GAP, number);
+    }
+}
+
+/// While parts change: leaves each solid as it started and draws it
+/// see-through as it is now. `moves` is each part's place now and what
+/// turns its transform now into the one it started with.
+pub(super) fn ghost_moving(list: &mut DrawList, moves: &[(Vec3, Mat4)]) {
     let mut starts = Vec::new();
     for item in &mut list.items {
         let at = item.transform.w_axis.truncate();
-        let Some((_, by)) = moves.iter().find(|(now, _)| now.distance(at) < 0.001) else {
+        let Some((_, back)) = moves.iter().find(|(now, _)| now.distance(at) < 0.001) else {
             continue;
         };
         let mut start = item.clone();
-        start.transform = Mat4::from_translation(-*by) * item.transform;
+        start.transform = *back * item.transform;
         start.id = 0;
         starts.push(start);
         item.material.opacity = item.material.opacity.min(GHOST_OPACITY);
@@ -190,7 +253,7 @@ mod tests {
     use axcenity_render::Camera;
     use axcenity_render::glam::Quat;
 
-    fn report() -> MoveReport {
+    fn report() -> DragReport {
         let obb = snapping::obb(Vec3::new(3.0, 1.0, 0.0), Vec3::splat(2.0), Quat::IDENTITY);
         let other = snapping::obb(Vec3::new(7.0, 1.0, 0.0), Vec3::splat(2.0), Quat::IDENTITY);
         let mut targets = other.snap_points();
@@ -198,7 +261,7 @@ mod tests {
             at: Vec3::new(5.5, 3.0, 0.0),
             kind: PointKind::Attachment,
         });
-        MoveReport::new(
+        DragReport::new(
             Vec3::new(-2.0, 1.0, 0.0),
             Vec3::new(5.0, 0.0, 0.0),
             Some(&obb),
@@ -215,7 +278,7 @@ mod tests {
         }
     }
 
-    fn draw(ctx: &egui::Context, report: &MoveReport) {
+    fn draw(ctx: &egui::Context, report: &DragReport) {
         egui::CentralPanel::default().show(ctx, |ui| {
             let rect = ui.max_rect();
             paint(ui.painter(), &Screen::new(camera(), rect), rect, report);
@@ -225,20 +288,20 @@ mod tests {
     #[test]
     fn numbers_and_snap_points_show_only_once_the_part_has_moved() {
         let ctx = crate::theme::test_context();
-        let count = |report: &MoveReport| {
+        let count = |report: &DragReport| {
             let output = ctx.run(Default::default(), |ctx| draw(ctx, report));
             output.shapes.len()
         };
         count(&report());
         let moving = count(&report());
-        let at_rest = MoveReport {
+        let at_rest = DragReport {
             moved: Vec3::ZERO,
             ..report()
         };
         let still = count(&at_rest);
         assert_eq!(
             still,
-            count(&MoveReport::default()),
+            count(&DragReport::default()),
             "nothing's drawn at rest"
         );
         assert!(moving > still + 25, "{moving} shapes against {still}");
@@ -256,10 +319,57 @@ mod tests {
     }
 
     #[test]
+    fn a_resize_and_a_turn_draw_only_once_they_have_changed_something() {
+        let ctx = crate::theme::test_context();
+        let count = |report: &DragReport| {
+            let output = ctx.run(Default::default(), |ctx| draw(ctx, report));
+            output.shapes.len()
+        };
+        let resize = |pulled| DragReport {
+            kind: DragKind::Resize {
+                pulled,
+                outward: Vec3::X,
+            },
+            start: Vec3::X,
+            moved: Vec3::X * pulled,
+            ..Default::default()
+        };
+        let turn = |radians| DragReport {
+            kind: DragKind::Turn {
+                pivot: Vec3::ZERO,
+                axis: Vec3::Y,
+                from: Vec3::X,
+                radians,
+            },
+            ..Default::default()
+        };
+        count(&resize(2.0));
+        let nothing = count(&DragReport::default());
+        assert_eq!(count(&resize(0.0)), nothing);
+        assert_eq!(count(&turn(0.0)), nothing);
+        assert!(count(&resize(2.0)) > nothing + 4);
+        assert!(count(&turn(1.0)) > nothing + 4);
+
+        if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            let folder = std::path::PathBuf::from(snapshots);
+            let shots = [("resize", resize(2.0)), ("turn", turn(1.0))];
+            for (name, report) in shots {
+                crate::snapshot::snapshot(
+                    &folder.join(format!("{name}-overlay.png")),
+                    egui::vec2(640.0, 400.0),
+                    vec![Vec::new(); 2],
+                    |ctx| draw(ctx, &report),
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_number_is_the_distance_in_studs_tidied() {
         assert_eq!(studs(Vec3::new(3.0, 0.0, -4.0).length()), "5");
         assert_eq!(studs(1.23456), "1.235");
         assert_eq!(studs(-0.0001), "0");
+        assert_eq!(studs(-2.0), "-2");
     }
 
     #[test]
@@ -280,7 +390,10 @@ mod tests {
         let mut list = axcenity_scene::build_draw_list(&world, &assets, camera());
         assert_eq!(list.items.len(), 1);
 
-        ghost_moving(&mut list, &[(now, Vec3::new(4.0, 0.0, 0.0))]);
+        ghost_moving(
+            &mut list,
+            &[(now, Mat4::from_translation(Vec3::new(-4.0, 0.0, 0.0)))],
+        );
 
         assert_eq!(list.items.len(), 2);
         let at = |i: usize| list.items[i].transform.w_axis.truncate();

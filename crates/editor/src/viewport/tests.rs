@@ -67,6 +67,7 @@ fn a_light_dragged_by_its_icon_follows_the_mouse_in_the_plane_it_started_in() {
         start: Vec3::new(0.0, 2.0, -10.0),
         grab_offset: Vec3::ZERO,
         normal: Vec3::NEG_Z,
+        report: None,
     };
     let ray = |toward: Vec3| axcenity_scene::Ray {
         origin: Vec3::ZERO,

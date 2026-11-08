@@ -13,12 +13,12 @@ use crate::theme;
 use crate::viewport::ViewportOutput;
 
 /// The main window's dock area.
-pub(super) fn main_area() -> egui::Id {
-    egui::Id::new("main dock area")
+pub(super) fn main_area(generation: u64) -> egui::Id {
+    egui::Id::new(("main dock area", generation))
 }
 
-fn area_of(id: u64) -> egui::Id {
-    egui::Id::new(("floating dock area", id))
+fn area_of(id: u64, generation: u64) -> egui::Id {
+    egui::Id::new(("floating dock area", id, generation))
 }
 
 fn viewport_of(id: u64) -> egui::ViewportId {
@@ -95,7 +95,7 @@ impl EditorApp {
     /// windows, and a tab dragged off the edge tears off.
     pub(super) fn after_main_dock(&mut self, ctx: &egui::Context) {
         let mut dock = std::mem::replace(&mut self.layout.dock, DockState::new(Vec::new()));
-        let report = mouse_report(ctx, main_area(), &dock);
+        let report = mouse_report(ctx, main_area(self.layout.dock_generation), &dock);
         self.layout.absorb_floating(&mut dock, report.screen);
         self.layout.dock = dock;
         if let (Some(pane), Some(screen)) = (report.torn, report.screen) {
@@ -141,7 +141,7 @@ impl EditorApp {
         };
         let builder = self.builder_for(index);
         let viewport = viewport_of(id);
-        let area = area_of(id);
+        let area = area_of(id, self.layout.dock_generation);
         let window = &mut self.layout.windows[index];
         if std::mem::take(&mut window.focus) {
             ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::Focus);
@@ -325,6 +325,55 @@ mod tests {
             pressed,
             modifiers: Default::default(),
         }
+    }
+
+    /// A dock of two tabs with the second being dragged over the panel, so
+    /// egui_dock has started its own drag and drop.
+    fn second_tab_dragged(area: egui::Id) -> (egui::Context, DockState<Pane>) {
+        let moved = |to| vec![egui::Event::PointerMoved(to)];
+        // Across the tab bar until the mouse is on the second tab.
+        for x in (40..500).step_by(15) {
+            let ctx = egui::Context::default();
+            let mut dock = DockState::new(vec![Pane::Scene, Pane::Console]);
+            let grab = egui::pos2(x as f32, 12.0);
+            frame_with(&ctx, &mut dock, area, moved(grab));
+            frame_with(&ctx, &mut dock, area, vec![press(grab, true)]);
+            for at in [egui::pos2(300.0, 250.0), egui::pos2(310.0, 260.0)] {
+                frame_with(&ctx, &mut dock, area, moved(at));
+            }
+            if floating::dragged_tab(&ctx, area, &dock) == Some(Pane::Console) {
+                return (ctx, dock);
+            }
+        }
+        panic!("the second tab couldn't be grabbed");
+    }
+
+    #[test]
+    fn tearing_off_a_tab_mid_drag_leaves_the_dock_it_came_from_drawing() {
+        let mut layout = Layout::default();
+        let first = main_area(layout.dock_generation);
+        let (ctx, dock) = second_tab_dragged(first);
+        layout.dock = dock;
+        let moved = |to| vec![egui::Event::PointerMoved(to)];
+        let out = frame_with(
+            &ctx,
+            &mut layout.dock,
+            first,
+            moved(egui::pos2(1400.0, 200.0)),
+        );
+        assert_eq!(out.torn, Some(Pane::Console));
+
+        layout
+            .tear_off(Pane::Console, None, egui::pos2(1400.0, 200.0), DEFAULT_SIZE)
+            .unwrap();
+
+        // Drawing it again used to panic with an index out of bounds.
+        let next = main_area(layout.dock_generation);
+        for at in [egui::pos2(300.0, 250.0), egui::pos2(320.0, 260.0)] {
+            frame_with(&ctx, &mut layout.dock, next, moved(at));
+        }
+        assert!(layout.windows[0].holds(Pane::Console));
+        assert_eq!(floating::dragged_tab(&ctx, next, &layout.dock), None);
     }
 
     #[test]

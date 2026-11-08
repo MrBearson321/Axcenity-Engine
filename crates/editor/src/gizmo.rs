@@ -35,7 +35,7 @@ use eframe::egui;
 
 use crate::properties::MIN_SIZE;
 use crate::screen::Screen;
-use crate::snapping::points::{self, Freedom, MoveReport, Sites};
+use crate::snapping::points::{self, DragKind, DragReport, Freedom, Sites, SnapPoint};
 use crate::snapping::{self, Obb, Obstacle};
 
 /// How long the Move arrows and how big the Rotate rings are, in points.
@@ -147,16 +147,16 @@ impl Tool {
     const _TOOLS_SPLIT: () = assert!(Self::TRANSFORM.len() + Self::BUILD.len() == Self::ALL.len());
 
     /// The single key that picks the tool, pressed on its own while
-    /// editing (not typing, not during Play): 1 to 4 for the tools with
-    /// handles, in the ribbon's order, and F3X's letters for the building
-    /// tools. Select is Escape (see `EditorApp::shortcuts`).
+    /// editing (not typing, not during Play): 1 to 5 for the tools with
+    /// handles, as in Studio, and F3X's letters for the building tools.
+    /// Escape goes back to Select too (see `EditorApp::shortcuts`).
     pub fn key(self) -> Option<egui::Key> {
         Some(match self {
-            Tool::Select => return None,
-            Tool::Move => egui::Key::Num1,
-            Tool::Scale => egui::Key::Num2,
-            Tool::Rotate => egui::Key::Num3,
-            Tool::Transform => egui::Key::Num4,
+            Tool::Select => egui::Key::Num1,
+            Tool::Move => egui::Key::Num2,
+            Tool::Scale => egui::Key::Num3,
+            Tool::Rotate => egui::Key::Num4,
+            Tool::Transform => egui::Key::Num5,
             Tool::Paint => egui::Key::V,
             Tool::Material => egui::Key::N,
             Tool::Anchor => egui::Key::M,
@@ -693,7 +693,7 @@ pub struct Drag {
     /// The Attachments around it, as snap points (see [`Drag::among`]).
     sites: Box<Sites>,
     /// A move's distance and markers, for drawing.
-    report: Option<Box<MoveReport>>,
+    report: Option<Box<DragReport>>,
 }
 
 /// The mouse during a drag: the ray it points along, where it is in the
@@ -846,17 +846,14 @@ impl Drag {
         self
     }
 
-    /// Each part being changed and where it started.
-    pub fn starts(&self) -> Vec<(InstanceId, Vec3)> {
-        self.parts
-            .iter()
-            .map(|(id, pose)| (*id, pose.position))
-            .collect()
+    /// Each part being changed and how it started.
+    pub fn starts(&self) -> &[(InstanceId, Pose)] {
+        &self.parts
     }
 
     /// How far a Move drag has come and what it can click to, once it's
     /// been updated.
-    pub fn report(&self) -> Option<&MoveReport> {
+    pub fn report(&self) -> Option<&DragReport> {
         self.report.as_deref()
     }
 
@@ -869,6 +866,80 @@ impl Drag {
         let around = points::nearby(&moved, &self.obstacles, &self.sites.others, self.reach);
         let link = points::nearest(&own, &around, Freedom::Along(direction), self.reach)?;
         Some((raw + link.shift.dot(direction), link.to))
+    }
+
+    /// Clicks the face of `last` being pulled `raw` studs to the nearest
+    /// snap point in reach. Gives the new pull and the point.
+    fn click_face_to_point(
+        &self,
+        last: Pose,
+        (axis, side): (Axis, Side),
+        raw: f32,
+    ) -> Option<(f32, Vec3)> {
+        let outward = last.rotation * axis.vector() * side.sign();
+        let grown = Obb::of(resize(last, axis, side, raw, self.modes));
+        let plane = grown.center.dot(outward) + grown.reach(outward);
+        let face: Vec<SnapPoint> = grown
+            .snap_points()
+            .into_iter()
+            .filter(|point| (point.at.dot(outward) - plane).abs() < 0.001)
+            .collect();
+        let around = points::nearby(&[grown], &self.obstacles, &self.sites.others, self.reach);
+        let link = points::nearest(&face, &around, Freedom::Along(outward), self.reach)?;
+        Some((raw + link.shift.dot(outward), link.to))
+    }
+
+    /// Notes how far a Resize drag has pulled its face.
+    fn note_resize(
+        &mut self,
+        (axis, side): (Axis, Side),
+        pulled: f32,
+        link: Option<Vec3>,
+        snap: &Snap,
+    ) {
+        let Some(&(_, last)) = self.parts.last() else {
+            return;
+        };
+        let outward = last.rotation * axis.vector() * side.sign();
+        let face = |pose: Pose| pose.position + outward * pose.size.dot(axis.vector()).abs() / 2.0;
+        let grown = resize(last, axis, side, pulled, self.modes);
+        let targets = if snap.points {
+            let radius = self.reach * MARKER_REACH;
+            points::nearby(
+                &[Obb::of(grown)],
+                &self.obstacles,
+                &self.sites.others,
+                radius,
+            )
+        } else {
+            Vec::new()
+        };
+        let (start, moved) = (face(last), face(grown) - face(last));
+        let mut report = DragReport::new(start, moved, None, targets, link);
+        report.kind = DragKind::Resize {
+            pulled: moved.dot(outward),
+            outward,
+        };
+        self.report = Some(Box::new(report));
+    }
+
+    /// Notes how far a Rotate drag has turned.
+    fn note_turn(&mut self, axis: Axis, radians: f32) {
+        let Some(&(_, last)) = self.parts.last() else {
+            return;
+        };
+        let (pivot, rotation) = match self.modes.pivot {
+            RotatePivot::Local => (last.position, last.rotation),
+            RotatePivot::Center | RotatePivot::Last => (self.frame.position, self.frame.rotation),
+        };
+        let mut report = DragReport::new(pivot, Vec3::ZERO, None, Vec::new(), None);
+        report.kind = DragKind::Turn {
+            pivot,
+            axis: rotation * axis.vector(),
+            from: rotation * axis.ring_directions().0,
+            radians,
+        };
+        self.report = Some(Box::new(report));
     }
 
     /// Notes how far a Move drag has come, with the markers to show.
@@ -885,7 +956,7 @@ impl Drag {
         } else {
             Vec::new()
         };
-        self.report = Some(Box::new(MoveReport::new(
+        self.report = Some(Box::new(DragReport::new(
             last.position,
             by,
             Some(&at),
@@ -992,6 +1063,7 @@ impl Drag {
                 let (origin, direction) = handle_line(self.handle, frame);
                 let raw = along_line(origin, direction, ray)? - self.grabbed;
                 let mut pulled = snap.studs(raw);
+                let mut link = None;
                 if snap.surfaces
                     && modes.directions == ResizeDirections::Normal
                     && let Some(&(_, last)) = self.parts.last()
@@ -1006,6 +1078,16 @@ impl Drag {
                     ) {
                         pulled = flush;
                     }
+                }
+                // A point beats a face: it's the more exact of the two.
+                if snap.points
+                    && modes.directions == ResizeDirections::Normal
+                    && let Some(&(_, last)) = self.parts.last()
+                    && let Some((clicked, point)) =
+                        self.click_face_to_point(last, (axis, side), raw)
+                {
+                    pulled = clicked;
+                    link = Some(point);
                 }
                 let resized = |pulled: f32| -> Vec<(InstanceId, Pose)> {
                     self.parts
@@ -1035,20 +1117,21 @@ impl Drag {
                             }
                         }
                         pulled = free;
+                        link = None;
                     }
                 }
-                Some(
-                    resized(pulled)
-                        .into_iter()
-                        .map(|(id, pose)| {
-                            let values = vec![
-                                ("Size", to_value(pose.size)),
-                                ("Position", to_value(pose.position)),
-                            ];
-                            (id, values)
-                        })
-                        .collect(),
-                )
+                let values: PartValues = resized(pulled)
+                    .into_iter()
+                    .map(|(id, pose)| {
+                        let values = vec![
+                            ("Size", to_value(pose.size)),
+                            ("Position", to_value(pose.position)),
+                        ];
+                        (id, values)
+                    })
+                    .collect();
+                self.note_resize((axis, side), pulled, link, snap);
+                Some(values)
             }
             Handle::Rotate(axis) => {
                 // Only this frame's move counts at this frame's speed, so
@@ -1118,6 +1201,7 @@ impl Drag {
                         (id, values)
                     })
                     .collect();
+                self.note_turn(axis, radians);
                 Some(values)
             }
         }

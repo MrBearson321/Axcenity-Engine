@@ -44,7 +44,7 @@ use std::time::Instant;
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, Instance, InstanceId, Value, World};
 use axcenity_render::TextureRenderer;
-use axcenity_render::glam::{Quat, Vec3};
+use axcenity_render::glam::{Mat4, Quat, Vec3};
 use axcenity_render::wgpu;
 use axcenity_scene::{FlyCamera, LightMarker, MarkerKind, MoveKeys, Particles, TerrainCache};
 use axcenity_script::DebugRay;
@@ -440,6 +440,8 @@ struct IconDrag {
     grab_offset: Vec3,
     /// The plane's normal: the way the camera looked when it was grabbed.
     normal: Vec3,
+    /// How far it has come, for drawing.
+    report: Option<Box<crate::snapping::points::DragReport>>,
 }
 
 impl IconDrag {
@@ -865,11 +867,12 @@ impl Viewport {
     }
 
     /// What the part being moved has done so far, while one is.
-    fn move_report(&self) -> Option<&crate::snapping::points::MoveReport> {
+    fn drag_report(&self) -> Option<&crate::snapping::points::DragReport> {
         match self.drag.as_ref()? {
             Dragging::Handle(drag) => drag.report(),
             Dragging::Body(place, _) => place.report.as_deref(),
-            Dragging::Ui(_) | Dragging::Icon(..) => None,
+            Dragging::Icon(drag, _) => drag.report.as_deref(),
+            Dragging::Ui(_) => None,
         }
     }
 
@@ -1439,7 +1442,7 @@ impl Viewport {
             }
         }
         gizmo::paint(&ui.painter_at(rect), &drag.shapes, drag.highlighted);
-        if let Some(report) = self.move_report() {
+        if let Some(report) = self.drag_report() {
             move_overlay::paint(&ui.painter_at(rect), &screen, rect, report);
         }
         if let (Some(brush), Some(point)) = (brush, terrain.and_then(|t| t.point)) {
@@ -1485,7 +1488,9 @@ impl Viewport {
             );
         }
         // Printed distances show only while a part is moving.
-        let moving = self.move_report().is_some_and(|report| report.is_moving());
+        let moving = self
+            .drag_report()
+            .is_some_and(|report| report.measures_studs());
         if let Some(spec) = grid_spec.as_ref().filter(|_| moving) {
             self.grid_labels.update(
                 world,
@@ -1631,22 +1636,39 @@ pub fn shader_time(ui: &egui::Ui, list: &axcenity_render::DrawList) -> f32 {
     ui.input(|input| input.time) as f32
 }
 
-/// While parts are being moved: where each is now and how far that is from
-/// where it started.
-fn moving_parts(drag: Option<&Dragging>, world: &World) -> Vec<(Vec3, Vec3)> {
-    let starts: Vec<(InstanceId, Vec3)> = match drag {
-        Some(Dragging::Handle(drag)) if matches!(drag.handle, Handle::Move(_)) => drag.starts(),
+/// How far a part must be from how it started to count as changed.
+const CHANGED: f32 = 0.0005;
+
+/// While parts are being moved, resized or turned: where each is now and
+/// what turns its transform now into the one it started with.
+fn moving_parts(drag: Option<&Dragging>, world: &World) -> Vec<(Vec3, Mat4)> {
+    let now_of = |id: InstanceId| Pose::of(world.get(id)?);
+    let starts: Vec<(InstanceId, Pose)> = match drag {
+        Some(Dragging::Handle(drag)) => drag.starts().to_vec(),
         Some(Dragging::Body(place, others)) => std::iter::once((place.part, place.start))
             .chain(others.iter().copied())
+            .filter_map(|(id, position)| {
+                Some((
+                    id,
+                    Pose {
+                        position,
+                        ..now_of(id)?
+                    },
+                ))
+            })
             .collect(),
         _ => return Vec::new(),
     };
+    let matrix =
+        |pose: Pose| Mat4::from_scale_rotation_translation(pose.size, pose.rotation, pose.position);
     starts
         .into_iter()
         .filter_map(|(id, start)| {
-            let now = Pose::of(world.get(id)?)?.position;
-            let by = now - start;
-            (by.length() >= 0.0005).then_some((now, by))
+            let now = now_of(id)?;
+            let changed = now.position.distance(start.position) >= CHANGED
+                || (now.size - start.size).length() >= CHANGED
+                || now.rotation.angle_between(start.rotation) >= CHANGED;
+            changed.then(|| (now.position, matrix(start) * matrix(now).inverse()))
         })
         .collect()
 }
