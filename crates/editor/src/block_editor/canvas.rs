@@ -136,6 +136,22 @@ pub(super) fn apply_action(script: &mut BlockScript, action: Action) {
                 stack.remove(index);
             }
         }
+        Action::AddInput(id) => {
+            if let Some(list) = script
+                .find_mut(id)
+                .and_then(|block| block.kind.input_list_mut())
+            {
+                list.push(Expression::Nil);
+            }
+        }
+        Action::RemoveInput(id) => {
+            if let Some(list) = script
+                .find_mut(id)
+                .and_then(|block| block.kind.input_list_mut())
+            {
+                list.pop();
+            }
+        }
         Action::Duplicate(id) => {
             if let Some(index) = script.blocks.iter().position(|block| block.id == id) {
                 let mut copy = script.blocks[index].duplicate();

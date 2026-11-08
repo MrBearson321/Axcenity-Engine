@@ -16,4 +16,7 @@ pub use lua::SyntaxError;
 mod tests;
 
 #[cfg(test)]
+mod luau_tests;
+
+#[cfg(test)]
 mod tween_tests;

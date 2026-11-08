@@ -28,6 +28,9 @@ pub(super) fn palette(
             )
     };
     let number = |value| Expression::Number { value };
+    let name = |name: &str| Expression::Name {
+        name: name.to_owned(),
+    };
     let text = |value: &str| Expression::Text {
         value: value.to_owned(),
     };
@@ -632,9 +635,122 @@ pub(super) fn palette(
                 key: Box::new(text("sword")),
             }),
         ],
-        // Grey blocks only come from code, so there are none to drag out.
-        Category::Lua => Vec::new(),
+        // Grey blocks only come from code, so there are none of those.
+        Category::Lua => vec![
+            block(BlockKind::Comment {
+                text: "-- A note".to_owned(),
+            }),
+            block(BlockKind::CallFunction {
+                function: name("print"),
+                args: vec![text("Hello")],
+            }),
+            block(BlockKind::CallMethod {
+                object: name("workspace"),
+                method: "GetChildren".to_owned(),
+                args: Vec::new(),
+            }),
+            R(Expression::Call {
+                function: Box::new(name("tostring")),
+                args: vec![number(1.0)],
+            }),
+            R(Expression::MethodCall {
+                object: Box::new(name("workspace")),
+                method: "WaitForChild".to_owned(),
+                args: vec![text("Part")],
+            }),
+            R(Expression::Index {
+                object: Box::new(name("list")),
+                key: Box::new(number(1.0)),
+            }),
+            R(Expression::Table {
+                fields: vec![TableField::Named {
+                    name: "name".to_owned(),
+                    value: number(1.0),
+                }],
+                multiline: false,
+            }),
+            R(Expression::Binary {
+                op: "..".to_owned(),
+                left: Box::new(text("a")),
+                right: Box::new(text("b")),
+            }),
+            R(Expression::Unary {
+                op: "#".to_owned(),
+                value: Box::new(name("list")),
+            }),
+        ],
     };
+    // The blocks for Luau itself come after each category's own.
+    match category {
+        Category::Events => items.extend([
+            block(BlockKind::RunScript { body: Vec::new() }),
+            block(BlockKind::OnSignal {
+                signal: name("workspace.ChildAdded"),
+                method: "Connect".to_owned(),
+                params: "child".to_owned(),
+                body: Vec::new(),
+            }),
+            block(BlockKind::Connect {
+                signal: name("workspace.ChildAdded"),
+                method: "Connect".to_owned(),
+                params: "child".to_owned(),
+                body: Vec::new(),
+            }),
+        ]),
+        Category::Control => items.extend([
+            block(BlockKind::DefineFunction {
+                name: "myFunction".to_owned(),
+                local: true,
+                params: "value".to_owned(),
+                generics: String::new(),
+                returns: String::new(),
+                attributes: String::new(),
+                body: Vec::new(),
+            }),
+            block(BlockKind::While {
+                condition: condition(),
+                body: Vec::new(),
+            }),
+            block(BlockKind::RepeatLoop {
+                body: Vec::new(),
+                condition: condition(),
+            }),
+            block(BlockKind::NumericFor {
+                variable: "i".to_owned(),
+                start: number(1.0),
+                stop: number(10.0),
+                step: None,
+                body: Vec::new(),
+            }),
+            block(BlockKind::GenericFor {
+                names: "key, value".to_owned(),
+                values: vec![name("list")],
+                body: Vec::new(),
+            }),
+            block(BlockKind::DoBlock { body: Vec::new() }),
+            block(BlockKind::Break),
+            block(BlockKind::Continue),
+            block(BlockKind::Return {
+                values: vec![name("value")],
+            }),
+        ]),
+        Category::Variables => items.extend([
+            block(BlockKind::Local {
+                names: "name".to_owned(),
+                values: vec![number(0.0)],
+            }),
+            block(BlockKind::Assign {
+                targets: vec![name("name")],
+                values: vec![number(0.0)],
+            }),
+            block(BlockKind::CompoundAssign {
+                target: name("name"),
+                op: "+".to_owned(),
+                value: number(1.0),
+            }),
+        ]),
+        _ => {}
+    }
     // Keyboard and button blocks only work on the player's side.
     if !client {
         items.retain(|item| match item {

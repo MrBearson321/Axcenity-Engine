@@ -7,7 +7,7 @@ fn block(id: u64, kind: BlockKind) -> Block {
     Block {
         id,
         kind,
-        position: None,
+        ..Block::new(BlockKind::StopScript)
     }
 }
 
@@ -222,7 +222,7 @@ fn typed_tweens_become_tween_blocks_and_other_tweens_stay_lua() {
     let typed = r#"local TweenService = game:GetService("TweenService")
 
 task.spawn(function()
-    TweenService:Create(workspace.Pad, TweenInfo.new(2), {Transparency = 1}):Play()
+    TweenService:Create(workspace.Pad, TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Transparency = 1}):Play()
     TweenService:Create(workspace.Pad, TweenInfo.new(2), {Transparency = 1, Color = Color3.new(1, 0, 0)}):Play()
     TweenService:Create(workspace.Pad, TweenInfo.new(1, Enum.EasingStyle.Quad), {Transparency = 1}):Play()
 end)
@@ -235,7 +235,7 @@ end)
     let BlockKind::WhenStarted { body } = &stack.kind else {
         panic!("{blocks:#?}");
     };
-    // `TweenInfo.new(2)` is Quad Out, so the block says so.
+    // Written out in full, as the block writes it, it's a tween block.
     assert_eq!(
         body[0].kind,
         BlockKind::Tween {
@@ -247,9 +247,10 @@ end)
             direction: "Out".to_owned(),
         }
     );
-    // Two goals, or a style without a direction, have no block.
-    assert!(matches!(&body[1].kind, BlockKind::Code { code } if code.contains("Color")));
-    assert_eq!(body.len(), 2, "{body:#?}");
+    // Two goals, or a style without a direction, are plain method calls.
+    assert!(matches!(&body[1].kind, BlockKind::CallMethod { method, .. } if method == "Play"));
+    assert!(matches!(&body[2].kind, BlockKind::CallMethod { method, .. } if method == "Play"));
+    assert_eq!(translate(&blocks).unwrap().source.lines().count(), 7);
 }
 
 #[test]

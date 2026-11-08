@@ -1,5 +1,9 @@
 use super::*;
 
+mod luau;
+
+pub use luau::{binary_priority, needs_brackets};
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Translation {
     pub source: String,
@@ -38,6 +42,12 @@ pub enum TranslateError {
     InvalidProperty(String),
     #[error("only event blocks can be at the top level, and events cannot be nested")]
     InvalidEventPlacement,
+    #[error("`{0}` isn't one of Luau's operators")]
+    InvalidOperator(String),
+    #[error("`{0}` isn't a name, or a name and fields such as `row.Binding.Text`")]
+    InvalidName(String),
+    #[error("an `if` value needs a condition and a value for each branch, then one more value")]
+    InvalidIfValue,
     #[error("\"touching part\" only works inside a \"when touched\" block")]
     TouchingPartOutsideTouched,
     #[error("`{value}` isn't {what}; choose from {choices}")]
@@ -52,11 +62,17 @@ pub enum TranslateError {
 /// don't run.
 pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
     let mut ids = HashSet::new();
-    let mut writer = Writer::default();
+    let mut writer = Writer {
+        tabs: script.tabs,
+        ..Default::default()
+    };
+    // Everywhere at once, as a function's blocks are written separately.
+    let mut every_id = HashSet::new();
     for block in &script.blocks {
         if !block.kind.is_event() {
             return Err(TranslateError::InvalidEventPlacement);
         }
+        note_ids(block, &mut every_id)?;
     }
 
     // Variables are the whole script's, as in Scratch, so they're declared
@@ -133,16 +149,24 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
         writer.line(format!("local {name} = 0"));
     }
 
+    let typed = |block: &Block| {
+        matches!(
+            block.kind,
+            BlockKind::RunScript { .. } | BlockKind::OnSignal { .. }
+        )
+    };
+    let mut previous: Option<&Block> = None;
     for block in &script.blocks {
         if matches!(block.kind, BlockKind::Unattached { .. }) {
-            // Still checked, so IDs stay unique across the canvas.
-            note_ids(block, &mut ids)?;
             continue;
         }
-        if !writer.lines.is_empty() {
+        // Stacks are apart, except where typed Lua wasn't.
+        let apart = block.spaced || !(typed(block) || previous.is_some_and(typed));
+        if apart && !writer.lines.is_empty() {
             writer.lines.push(String::new());
         }
         writer.write_event(block, &mut ids)?;
+        previous = Some(block);
     }
     let source = writer.lines.join("\n") + if writer.lines.is_empty() { "" } else { "\n" };
     Ok(Translation {
@@ -207,12 +231,81 @@ pub(super) struct Writer {
     pub(super) indent: usize,
     /// True inside "when touched", where `otherPart` exists.
     pub(super) in_touched: bool,
+    /// Indent with tabs rather than four spaces.
+    pub(super) tabs: bool,
+}
+
+/// Starts a block's ID in the text of a function, marking the line as that
+/// block's. A function is a value, so it's written before its line's place
+/// in the script is known; [`Writer::line`] turns the marks into line numbers.
+const LINE_MARK: char = '\u{1}';
+const LINE_MARK_END: char = '\u{2}';
+
+/// The Lua `block` is written as, on its own. For [`BlockKind::is_event`]
+/// blocks that's the whole event. `touched` says it's inside "when touched".
+pub fn block_lua(block: &Block, touched: bool) -> Result<String, TranslateError> {
+    let mut writer = Writer {
+        in_touched: touched,
+        ..Default::default()
+    };
+    let mut ids = HashSet::new();
+    if block.kind.is_event() {
+        writer.write_event(block, &mut ids)?;
+    } else {
+        writer.write_body(std::slice::from_ref(block), &mut ids)?;
+    }
+    Ok(writer.lines.join("\n"))
+}
+
+/// The Lua `expression` is written as, on its own.
+pub fn expression_lua(expression: &Expression, touched: bool) -> Result<String, TranslateError> {
+    let writer = Writer {
+        in_touched: touched,
+        ..Default::default()
+    };
+    let text = writer.expression(expression)?;
+    Ok(text
+        .split('\n')
+        .map(without_marks)
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
+/// A line of a function's text without its block marks.
+fn without_marks(line: &str) -> &str {
+    let mut rest = line;
+    while let Some(marked) = rest.strip_prefix(LINE_MARK) {
+        rest = marked
+            .split_once(LINE_MARK_END)
+            .map_or(marked, |(_, after)| after);
+    }
+    rest
 }
 
 impl Writer {
+    fn indent_unit(&self) -> &'static str {
+        if self.tabs { "\t" } else { "    " }
+    }
+
+    /// Adds `text` at this indent, a line at a time. It can be several
+    /// lines, if it has a function or a table of one field to a line in it.
     pub(super) fn line(&mut self, text: impl Into<String>) {
-        self.lines
-            .push(format!("{}{}", "    ".repeat(self.indent), text.into()));
+        let text = text.into();
+        let indent = self.indent_unit().repeat(self.indent);
+        for line in text.split('\n') {
+            let bare = without_marks(line);
+            let mut marks = &line[..line.len() - bare.len()];
+            while let Some(marked) = marks.strip_prefix(LINE_MARK) {
+                let Some((id, after)) = marked.split_once(LINE_MARK_END) else {
+                    break;
+                };
+                if let Ok(id) = id.parse() {
+                    self.block_lines.push((self.lines.len() + 1, id));
+                }
+                marks = after;
+            }
+            self.lines.push(format!("{indent}{bare}"));
+        }
     }
 
     /// Notes that `id`'s code starts on the next line.
@@ -390,6 +483,19 @@ impl Writer {
                 self.code(code);
                 return Ok(());
             }
+            BlockKind::RunScript { body } => {
+                self.write_body(body, ids)?;
+                return Ok(());
+            }
+            BlockKind::OnSignal {
+                signal,
+                method,
+                params,
+                body,
+            } => {
+                self.write_connect(signal, method, params, body, ids)?;
+                return Ok(());
+            }
             _ => return Err(TranslateError::InvalidEventPlacement),
         };
         self.line(opening);
@@ -428,12 +534,27 @@ impl Writer {
         body: &[Block],
         ids: &mut HashSet<u64>,
     ) -> Result<(), TranslateError> {
-        for block in body {
+        for (index, block) in body.iter().enumerate() {
             if block.kind.shape() != BlockShape::Statement {
                 return Err(TranslateError::InvalidEventPlacement);
             }
+            if let BlockKind::Comment { text } = &block.kind
+                && block.chained
+                && let Some(last) = self.lines.last_mut()
+            {
+                last.push(' ');
+                last.push_str(text);
+                continue;
+            }
+            if block.spaced && index > 0 {
+                self.lines.push(String::new());
+            }
+            let first_line = self.lines.len();
             self.tag(block.id, ids)?;
             self.write_statement(&block.kind, ids)?;
+            if index > 0 {
+                self.separate_from_previous(first_line);
+            }
         }
         Ok(())
     }
@@ -548,9 +669,10 @@ impl Writer {
                 let condition = self.expression(condition)?;
                 self.line(format!("if {condition} then"));
                 self.nested(then_body, ids)?;
-                if !else_body.is_empty() {
+                let otherwise = self.write_elseifs(else_body, ids)?;
+                if !otherwise.is_empty() {
                     self.line("else");
-                    self.nested(else_body, ids)?;
+                    self.nested(otherwise, ids)?;
                 }
                 self.line("end");
             }
@@ -580,7 +702,7 @@ impl Writer {
                 target: t,
                 distance,
             } => {
-                let (object, value) = (target(t)?, self.operand(distance)?);
+                let (object, value) = (target(t)?, self.operand(distance, "*", true)?);
                 self.line(format!(
                     "{object}.Position = {object}.Position + {object}.CFrame.LookVector * {value}"
                 ));
@@ -787,7 +909,7 @@ impl Writer {
                 seconds,
             } => {
                 let texture = self.expression(texture)?;
-                let position = self.operand(position)?;
+                let position = self.operand(position, "+", true)?;
                 let facing = self.expression(facing)?;
                 let (size, seconds) = (self.expression(size)?, self.expression(seconds)?);
                 self.line(format!(
@@ -1013,6 +1135,27 @@ impl Writer {
                 container(parent)?
             )),
             BlockKind::Code { code } => self.code(code),
+            BlockKind::Connect {
+                signal,
+                method,
+                params,
+                body,
+            } => self.write_connect(signal, method, params, body, ids)?,
+            BlockKind::Comment { .. }
+            | BlockKind::Local { .. }
+            | BlockKind::Assign { .. }
+            | BlockKind::CompoundAssign { .. }
+            | BlockKind::CallFunction { .. }
+            | BlockKind::CallMethod { .. }
+            | BlockKind::DefineFunction { .. }
+            | BlockKind::While { .. }
+            | BlockKind::RepeatLoop { .. }
+            | BlockKind::NumericFor { .. }
+            | BlockKind::GenericFor { .. }
+            | BlockKind::DoBlock { .. }
+            | BlockKind::Break
+            | BlockKind::Continue
+            | BlockKind::Return { .. } => self.write_luau(kind, ids)?,
             BlockKind::WhenStarted { .. }
             | BlockKind::WhenTouched { .. }
             | BlockKind::WhenStreamedIn { .. }
@@ -1037,30 +1180,36 @@ impl Writer {
             | BlockKind::WhenPartClicked { .. }
             | BlockKind::WhenCommandRun { .. }
             | BlockKind::Unattached { .. }
-            | BlockKind::TopCode { .. } => {
+            | BlockKind::TopCode { .. }
+            | BlockKind::RunScript { .. }
+            | BlockKind::OnSignal { .. } => {
                 return Err(TranslateError::InvalidEventPlacement);
             }
         }
         Ok(())
     }
 
-    /// An expression as one side of an operator. Reporters inside other
-    /// reporters are bracketed, so `(a + b) * c` means what the blocks show.
-    fn operand(&self, expression: &Expression) -> Result<String, TranslateError> {
+    /// An expression as one side of `op`, bracketed only if Luau would
+    /// read it differently without. `right` is the side.
+    pub(super) fn operand(
+        &self,
+        expression: &Expression,
+        op: &str,
+        right: bool,
+    ) -> Result<String, TranslateError> {
         let text = self.expression(expression)?;
-        Ok(match expression {
-            Expression::Math { .. }
-            | Expression::Join { .. }
-            | Expression::Compare { .. }
-            | Expression::Logic { .. }
-            | Expression::Not { .. } => format!("({text})"),
+        let parent = binary_priority(op).unwrap_or((luau::UNARY, luau::UNARY));
+        Ok(match expression_priority(expression) {
+            Some((child, unary)) if needs_brackets(child, unary, parent, right) => {
+                format!("({text})")
+            }
             _ => text,
         })
     }
 
     /// An expression before a `:` method call, which needs a name or a call
     /// there, so anything else is bracketed: `(a or b):IsA("Part")`.
-    fn receiver(&self, expression: &Expression) -> Result<String, TranslateError> {
+    pub(super) fn receiver(&self, expression: &Expression) -> Result<String, TranslateError> {
         let text = self.expression(expression)?;
         Ok(match expression {
             Expression::Variable { .. }
@@ -1074,13 +1223,18 @@ impl Writer {
             | Expression::Lerp { .. }
             | Expression::DataRow { .. }
             | Expression::SplinePosition { .. }
-            | Expression::DataValue { .. } => text,
+            | Expression::DataValue { .. }
+            | Expression::Name { .. }
+            | Expression::Field { .. }
+            | Expression::Index { .. }
+            | Expression::Call { .. }
+            | Expression::MethodCall { .. }
+            | Expression::Paren { .. } => text,
             _ => format!("({text})"),
         })
     }
 
     pub(super) fn expression(&self, expression: &Expression) -> Result<String, TranslateError> {
-        let inner = |expression: &Expression| self.operand(expression);
         let finite = |values: &[f64]| values.iter().all(|value| value.is_finite());
         Ok(match expression {
             Expression::Number { value } if value.is_finite() => number(*value),
@@ -1104,9 +1258,12 @@ impl Writer {
             Expression::Variable { name } => {
                 return Err(TranslateError::InvalidVariable(name.clone()));
             }
-            Expression::Math { op, left, right } => {
-                format!("{} {} {}", inner(left)?, op.lua(), inner(right)?)
-            }
+            Expression::Math { op, left, right } => format!(
+                "{} {} {}",
+                self.operand(left, op.lua(), false)?,
+                op.lua(),
+                self.operand(right, op.lua(), true)?
+            ),
             Expression::Function { function, value } => {
                 let value = self.expression(value)?;
                 match function {
@@ -1135,13 +1292,19 @@ impl Writer {
                 let (left, right) = (self.expression(left)?, self.expression(right)?);
                 format!("tostring({left}) .. tostring({right})")
             }
-            Expression::Compare { op, left, right } => {
-                format!("{} {} {}", inner(left)?, op.lua(), inner(right)?)
-            }
-            Expression::Logic { op, left, right } => {
-                format!("{} {} {}", inner(left)?, op.lua(), inner(right)?)
-            }
-            Expression::Not { value } => format!("not {}", inner(value)?),
+            Expression::Compare { op, left, right } => format!(
+                "{} {} {}",
+                self.operand(left, op.lua(), false)?,
+                op.lua(),
+                self.operand(right, op.lua(), true)?
+            ),
+            Expression::Logic { op, left, right } => format!(
+                "{} {} {}",
+                self.operand(left, op.lua(), false)?,
+                op.lua(),
+                self.operand(right, op.lua(), true)?
+            ),
+            Expression::Not { value } => format!("not {}", self.operand(value, "not", true)?),
             Expression::Property {
                 target: t,
                 property,
@@ -1216,8 +1379,30 @@ impl Writer {
             }
             // Bracketed already where it needs to be (see `from_lua`).
             Expression::Code { code } => code.clone(),
+            luau => self.luau_value(luau)?,
         })
     }
+}
+
+/// How tightly `expression` holds together if it's an operator, and whether
+/// it's written in front of its value (`not`, `-`, and negative numbers).
+fn expression_priority(expression: &Expression) -> Option<((u8, u8), bool)> {
+    let unary = Some(((luau::UNARY, luau::UNARY), true));
+    match expression {
+        Expression::Math { op, .. } => binary_priority(op.lua()).map(|p| (p, false)),
+        Expression::Compare { op, .. } => binary_priority(op.lua()).map(|p| (p, false)),
+        Expression::Logic { op, .. } => binary_priority(op.lua()).map(|p| (p, false)),
+        Expression::Binary { op, .. } => binary_priority(op).map(|p| (p, false)),
+        Expression::Join { .. } => binary_priority("..").map(|p| (p, false)),
+        Expression::Not { .. } | Expression::Unary { .. } => unary,
+        Expression::Number { value } if *value < 0.0 => unary,
+        _ => None,
+    }
+}
+
+/// A number as a block writes it, to tell it from one written another way.
+pub fn number_text(value: f64) -> String {
+    number(value)
 }
 
 /// A number as Lua writes it: whole numbers without a decimal point.

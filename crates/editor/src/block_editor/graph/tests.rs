@@ -140,6 +140,7 @@ fn value_wires_check_the_input_and_copy_a_node_that_is_already_wired() {
         blocks: vec![Block::new(BlockKind::WhenStarted {
             body: vec![branch, wait, other_wait],
         })],
+        tabs: false,
         graph: Graph {
             loose: vec![compare],
             nodes: BTreeMap::from([(compare_id.to_string(), [5.0, 6.0])]),
@@ -234,8 +235,8 @@ fn every_block_and_reporter_has_a_node_with_every_pin_named() {
             }
         }
         let named = match &body {
-            Body::Block(kind) => block_names(kind).1.len(),
-            Body::Value(value) => value_names(value).1.len(),
+            Body::Block(kind) => block_pin_names(kind).len(),
+            Body::Value(value) => value_pin_names(value).len(),
         };
         let items = layout
             .left
@@ -378,6 +379,7 @@ fn dragging_a_wire_from_an_event_to_a_node_wires_them() {
     let start_id = start.id;
     let mut script = BlockScript {
         blocks: vec![start, loose(vec![hello])],
+        tabs: false,
         graph: Graph {
             shown: true,
             nodes: BTreeMap::from([
@@ -520,6 +522,7 @@ fn a_wire_let_go_on_the_canvas_makes_a_node_wired_to_it() {
     let start_id = start.id;
     let mut script = BlockScript {
         blocks: vec![start],
+        tabs: false,
         graph: Graph {
             shown: true,
             nodes: BTreeMap::from([(start_id.to_string(), [40.0, 40.0])]),
@@ -535,4 +538,143 @@ fn a_wire_let_go_on_the_canvas_makes_a_node_wired_to_it() {
         "task.spawn(function()\n    task.wait(1)\nend)\n",
         "{script:#?}"
     );
+}
+
+/// Typed Luau of the kinds a real script is made of.
+const TYPED: &str = r#"local gui = workspace:WaitForChild("Controls")
+local waiting = nil
+
+for _, row in gui:GetChildren() do
+    row.Activated:Connect(function()
+        waiting = row
+    end)
+end
+
+task.delay(1, function()
+    print(waiting)
+end)
+
+local KEYS = {
+    [Enum.KeyCode.E] = true,
+}
+
+game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
+    if KEYS[input.KeyCode] and not processed then
+        gui.Enabled = not gui.Enabled
+    elseif waiting then
+        waiting = nil
+    end
+end)
+"#;
+
+/// The block whose kind `pick` finds.
+fn block_where(script: &BlockScript, pick: impl Fn(&BlockKind) -> bool) -> u64 {
+    let mut found = None;
+    script.for_each_block(&mut |block| {
+        if found.is_none() && pick(&block.kind) {
+            found = Some(block.id);
+        }
+    });
+    found.expect("no such block")
+}
+
+#[test]
+fn a_typed_script_is_a_graph_of_real_nodes_and_wires() {
+    let mut script = axcenity_blocks::from_lua(TYPED).unwrap();
+    assert_eq!(lua(&script), TYPED);
+
+    // Every node is wired to something that runs, and none is grey.
+    let mut titles = Vec::new();
+    let mut unnamed = Vec::new();
+    visit_nodes(&mut script, &mut |node, body, runs| {
+        assert!(runs, "{node:?}");
+        let (title, category, layout) = describe(&body, &[]);
+        assert_ne!(title, "Lua", "{node:?}");
+        assert!(!matches!(category, Category::Lua) || title != "Lua");
+        for item in &layout.left {
+            if let Item::Input { name, .. } | Item::Field { name, .. } = item
+                && name.is_empty()
+            {
+                unnamed.push(title.clone());
+            }
+        }
+        titles.push(title);
+    });
+    assert_eq!(unnamed, Vec::<String>::new());
+    for wanted in [
+        "Script Runs",
+        "Local gui",
+        "WaitForChild",
+        "For Each",
+        "Connect",
+        "On Signal",
+        "Branch",
+        "Make Table",
+    ] {
+        assert!(
+            titles.iter().any(|title| title == wanted),
+            "{wanted}: {titles:?}"
+        );
+    }
+
+    // A signal's handler and a function argument are exec wires.
+    let wires = wiring(&script);
+    let connect = block_where(&script, |kind| matches!(kind, BlockKind::Connect { .. }));
+    assert!(wires.targets.contains_key(&(connect, Out::Body(0))));
+    let delay = block_where(&script, |kind| {
+        matches!(kind, BlockKind::CallFunction { .. })
+    });
+    let kind = find_block(&script, delay).unwrap().kind.clone();
+    assert_eq!(
+        exec_outs(&kind),
+        vec![(Out::Body(0), "Function"), (Out::Then, "")]
+    );
+    assert!(wires.targets.contains_key(&(delay, Out::Body(0))));
+
+    // Each elseif is the False of the Branch before it.
+    let branch = block_where(&script, |kind| matches!(kind, BlockKind::IfElse { .. }));
+    assert!(wires.targets.contains_key(&(branch, Out::Body(1))));
+
+    // It draws.
+    let ctx = theme::test_context();
+    let _ = ctx.run(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let context = BlockContext {
+                key: "typed script",
+                client: true,
+                highlighted: None,
+                objects: &[],
+            };
+            let geometry = measure_all(ui, &mut script, &context, &[]);
+            assert!(geometry.len() >= titles.len());
+        });
+    });
+}
+
+#[test]
+fn rewiring_a_typed_script_rewrites_its_lua() {
+    let mut script = axcenity_blocks::from_lua(TYPED).unwrap();
+    let handler = block_where(&script, |kind| matches!(kind, BlockKind::OnSignal { .. }));
+    let delay = block_where(&script, |kind| {
+        matches!(kind, BlockKind::CallFunction { .. })
+    });
+
+    // Wiring the delayed call into the handler moves it and what follows it.
+    connect_exec(&mut script, handler, Out::Body(0), delay).unwrap();
+    let written = lua(&script);
+    let inside = written
+        .find("InputBegan:Connect(function(input, processed)\n    task.delay(1, function()")
+        .is_some();
+    assert!(inside, "{written}");
+
+    // The function in the call is still a place blocks run from.
+    let moved = find_block(&script, delay).unwrap();
+    assert_eq!(moved.kind.bodies().len(), 1);
+
+    // An input can be added to a call and taken off it again.
+    let before = lua(&script);
+    resize_inputs(&mut script, &NodeRef::Block(delay), true);
+    assert!(lua(&script).contains("end, nil)"), "{}", lua(&script));
+    resize_inputs(&mut script, &NodeRef::Block(delay), false);
+    assert_eq!(lua(&script), before);
 }

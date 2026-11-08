@@ -1,11 +1,14 @@
-//! Lua back to blocks, for switching a script from Code to Blocks.
+//! Lua to blocks, for switching a script from Code to Blocks or Graph.
 //!
-//! Code shaped like what [`crate::translate`] writes becomes the matching
-//! blocks, so switching to Code and back gives the same blocks. Anything
-//! else is kept, word for word, in grey Lua blocks ([`BlockKind::Code`],
-//! [`BlockKind::TopCode`] and [`Expression::Code`]), as MakeCode does with
-//! JavaScript it has no blocks for. So nothing is lost either way, and
-//! the blocks still run the same code.
+//! Each statement becomes the friendliest block that writes the same code:
+//! a block such as "move to" if it fits, or else the block for what it is in
+//! Luau (a local, a call, a loop, a function: see `BlockKind::RunScript`).
+//! Every choice is checked by writing the block back and comparing it with
+//! what was typed ([`lua::same_code`]). What no block can write stays word
+//! for word in a grey Lua block ([`BlockKind::Code`] and
+//! [`Expression::Code`]), and if the blocks as a whole still don't write the
+//! same code, the script stays one grey block ([`BlockKind::TopCode`]). So
+//! nothing is lost either way, and the blocks run the same code.
 
 use std::collections::BTreeSet;
 
@@ -13,8 +16,9 @@ use crate::lua::{self, Expr, ExprKind, FunctionBody, Stat, StatKind, SyntaxError
 use crate::{
     ATMOSPHERE_NUMBERS, Block, BlockKind, BlockScript, BlockShape, CAMERA_TYPES, Comparison,
     EASING_DIRECTIONS, EASING_STYLES, Expression, GRAPHICS_NUMBERS, GRAPHICS_OPTIONS,
-    GRAPHICS_QUALITIES, GRAPHICS_SWITCHES, LogicOp, MathFunction, MathOp, PRESET, TONE_MAPPINGS,
-    graphics_choices, translate,
+    GRAPHICS_QUALITIES, GRAPHICS_SWITCHES, LogicOp, MathFunction, MathOp, PRESET, SIGNAL_METHODS,
+    TONE_MAPPINGS, TableField, binary_priority, block_lua, expression_lua, graphics_choices,
+    needs_brackets, translate,
 };
 
 /// The services blocks get with `game:GetService`, which the translation
@@ -48,25 +52,50 @@ pub enum FromLuaError {
 /// Turns Lua into a block script that runs the same code.
 pub fn from_lua(source: &str) -> Result<BlockScript, FromLuaError> {
     let chunk = lua::parse(source).map_err(FromLuaError::Syntax)?;
+    let tabs = source.lines().any(|line| line.starts_with('\t'));
 
-    // Top-level `local name = 0` lines are the blocks' variables, and
-    // `local RunService = game:GetService("RunService")` their services:
-    // the translation writes those itself, but only for the ones blocks
-    // use, so a second pass keeps the declarations of the rest as code.
+    // `local name = 0` and `local RunService = game:GetService("RunService")`
+    // at the very top are the blocks' variables and services: the translation
+    // writes those itself, but only for the ones blocks use, so a second pass
+    // keeps the declarations of the rest as code.
     let mut variables = BTreeSet::new();
     let mut services = BTreeSet::new();
     for stat in &chunk {
         if let Some(name) = variable_declaration(stat) {
             variables.insert(name);
-        }
-        if let Some(name) = service_declaration(stat) {
+        } else if let Some(name) = service_declaration(stat) {
             services.insert(name);
+        } else {
+            break;
         }
     }
     let first = Converter::new(source, variables, services).chunk(&chunk);
     let (used_variables, used_services) = used_by(&first);
-    let converter = Converter::new(source, used_variables, used_services);
-    let script = converter.chunk(&chunk);
+    let attempts = [
+        Converter::new(source, used_variables, used_services),
+        Converter::new(source, BTreeSet::new(), BTreeSet::new()),
+    ];
+    for converter in attempts {
+        let mut script = converter.chunk(&chunk);
+        script.tabs = tabs;
+        let Ok(translation) = translate(&script) else {
+            continue;
+        };
+        if lua::same_code(source, &translation.source)
+            && lua::keeps_comments(source, &translation.source)
+        {
+            return Ok(script);
+        }
+    }
+
+    // Nothing fits, so the whole script is kept as it is.
+    let script = BlockScript {
+        blocks: vec![Block::new(BlockKind::TopCode {
+            code: source.trim_end().to_owned(),
+        })],
+        tabs,
+        ..Default::default()
+    };
     translate(&script).map_err(|err| FromLuaError::Translate(err.to_string()))?;
     Ok(script)
 }
@@ -94,6 +123,7 @@ fn variable_declaration(stat: &Stat) -> Option<String> {
     match &stat.kind {
         StatKind::Local { names, values }
             if names.len() == 1
+                && crate::valid_identifier(&names[0])
                 && values.len() == 1
                 && matches!(values[0].kind, ExprKind::Number(Some(value)) if value == 0.0) =>
         {
@@ -228,6 +258,23 @@ impl<'a> Converter<'a> {
         }
     }
 
+    /// Whether a string's source has an escape for a raw byte, which text
+    /// blocks can't hold: `\xFF` or `\200`.
+    fn has_byte_escape(&self, expr: &Expr) -> bool {
+        let text = self.source[expr.span.clone()].as_bytes();
+        let mut at = 0;
+        while at + 1 < text.len() {
+            if text[at] == b'\\' {
+                if text[at + 1] == b'x' || text[at + 1].is_ascii_digit() {
+                    return true;
+                }
+                at += 1;
+            }
+            at += 1;
+        }
+        false
+    }
+
     /// The Lua of `span`, with the lines after the first moved left as far
     /// as the first line's column, so it can be indented again.
     fn text(&self, span: std::ops::Range<usize>) -> String {
@@ -255,123 +302,121 @@ impl<'a> Converter<'a> {
 
     // ---- The top level ------------------------------------------------------
 
+    /// A declaration the translation writes itself.
+    fn declared(&self, stat: &Stat) -> bool {
+        variable_declaration(stat).is_some_and(|name| self.variables.contains(&name))
+            || service_declaration(stat).is_some_and(|name| self.services.contains(&name))
+    }
+
     fn chunk(&self, chunk: &[Stat]) -> BlockScript {
-        /// A top-level statement, sorted.
-        enum Item<'s> {
-            Event(Block),
-            /// A plain statement that is a block, for "when game starts".
-            Loose(Block, &'s Stat),
-            /// Lua with no block: it goes in a grey block, word for word.
-            Code(&'s Stat),
-            /// A declaration the translation writes itself. Grey blocks
-            /// don't reach over it, or it would be declared twice.
-            Declared,
-        }
-        let mut items = Vec::new();
-        for stat in chunk {
-            let declared = variable_declaration(stat)
-                .is_some_and(|name| self.variables.contains(&name))
-                || service_declaration(stat).is_some_and(|name| self.services.contains(&name));
-            items.push(if declared {
-                Item::Declared
-            } else if matches!(stat.kind, StatKind::Comment) {
-                Item::Code(stat)
-            } else if let Some(event) = self.event(stat) {
-                Item::Event(event)
-            } else if let Some(block) = self.top_statement(stat) {
-                Item::Loose(block, stat)
-            } else {
-                Item::Code(stat)
-            });
-        }
-
-        // Plain statements run when the script starts, before what comes
-        // after them. Blocks in "when game starts" run alongside the rest,
-        // so they only go in there if they can't wait or stop the script,
-        // or nothing comes after them. Otherwise they stay as Lua.
-        let mut index = 0;
-        while index < items.len() {
-            if !matches!(items[index], Item::Loose(..)) {
-                index += 1;
-                continue;
-            }
-            let end = (index..items.len())
-                .find(|&at| !matches!(items[at], Item::Loose(..)))
-                .unwrap_or(items.len());
-            let at_end = items[end..].iter().all(|item| match item {
-                Item::Code(stat) => matches!(stat.kind, StatKind::Comment),
-                Item::Declared => true,
-                _ => false,
-            });
-            let waits = items[index..end]
-                .iter()
-                .any(|item| matches!(item, Item::Loose(block, _) if may_wait(block)));
-            if waits && !at_end {
-                for item in &mut items[index..end] {
-                    if let Item::Loose(_, stat) = item {
-                        *item = Item::Code(stat);
-                    }
-                }
-            }
-            index = end;
-        }
-
+        let start = chunk.iter().take_while(|stat| self.declared(stat)).count();
         let mut blocks = Vec::new();
-        let mut code: Option<std::ops::Range<usize>> = None;
-        let mut started: Vec<Block> = Vec::new();
-        let flush = |code: &mut Option<std::ops::Range<usize>>,
-                     started: &mut Vec<Block>,
-                     blocks: &mut Vec<Block>| {
-            if let Some(span) = code.take() {
-                blocks.push(Block::new(BlockKind::TopCode {
-                    code: self.text(span),
-                }));
+        let mut previous_end = start.checked_sub(1).map(|last| chunk[last].span.end);
+        let mut run_start = start;
+        for (index, stat) in chunk.iter().enumerate().skip(start) {
+            let Some(mut event) = self.top_event(stat) else {
+                continue;
+            };
+            if run_start < index {
+                let run = self.run(&chunk[run_start..index], previous_end);
+                previous_end = Some(chunk[index - 1].span.end);
+                blocks.push(run);
             }
-            if !started.is_empty() {
-                let body = std::mem::take(started);
-                blocks.push(Block::new(BlockKind::WhenStarted { body }));
-            }
-        };
-        for item in items {
-            match item {
-                Item::Code(stat) => {
-                    if !started.is_empty() {
-                        flush(&mut code, &mut started, &mut blocks);
-                    }
-                    code = Some(match code {
-                        Some(span) => span.start..stat.span.end,
-                        None => stat.span.clone(),
-                    });
-                }
-                Item::Loose(block, _) => {
-                    if code.is_some() {
-                        flush(&mut code, &mut started, &mut blocks);
-                    }
-                    started.push(block);
-                }
-                Item::Event(block) => {
-                    flush(&mut code, &mut started, &mut blocks);
-                    blocks.push(block);
-                }
-                Item::Declared => flush(&mut code, &mut started, &mut blocks),
-            }
+            event.spaced = self.gap_before(previous_end, stat.span.start);
+            previous_end = Some(stat.span.end);
+            blocks.push(event);
+            run_start = index + 1;
         }
-        flush(&mut code, &mut started, &mut blocks);
+        if run_start < chunk.len() {
+            blocks.push(self.run(&chunk[run_start..], previous_end));
+        }
         BlockScript {
             blocks,
             ..Default::default()
         }
     }
 
-    /// A plain statement at the top level, if it becomes a real block (not
-    /// a grey one), and doesn't declare anything the rest of the script
-    /// could need.
-    fn top_statement(&self, stat: &Stat) -> Option<Block> {
-        if matches!(stat.kind, StatKind::Comment | StatKind::Local { .. }) {
-            return None;
+    /// Statements in a row at the top level, as a "script runs" stack.
+    fn run(&self, stats: &[Stat], previous_end: Option<usize>) -> Block {
+        let mut block = Block::new(BlockKind::RunScript {
+            body: self.body(stats, Scope::default()),
+        });
+        block.spaced = stats
+            .first()
+            .is_some_and(|stat| self.gap_before(previous_end, stat.span.start));
+        block
+    }
+
+    /// Whether a blank line is between what ended at `previous_end` and `at`.
+    fn gap_before(&self, previous_end: Option<usize>, at: usize) -> bool {
+        previous_end
+            .and_then(|end| self.source.get(end..at))
+            .is_some_and(|between| between.matches('\n').count() >= 2)
+    }
+
+    /// What `stat` is at the top level if it's a stack of its own: an event
+    /// block that writes the same code, or else a signal connection.
+    fn top_event(&self, stat: &Stat) -> Option<Block> {
+        if let Some(event) = self.event(stat)
+            && self.writes_statement(&event, stat, false)
+        {
+            return Some(event);
         }
-        let block = self.statement(stat, Scope::default());
-        (!matches!(block.kind, BlockKind::Code { .. })).then_some(block)
+        let (signal, method, params, body) = self.connection(stat, Scope::default())?;
+        let event = Block::new(BlockKind::OnSignal {
+            signal,
+            method,
+            params,
+            body,
+        });
+        self.writes_statement(&event, stat, false).then_some(event)
+    }
+
+    /// `signal:Connect(function(params) ... end)`, as its pieces.
+    fn connection(
+        &self,
+        stat: &Stat,
+        scope: Scope,
+    ) -> Option<(Expression, String, String, Vec<Block>)> {
+        let StatKind::Call(call) = &stat.kind else {
+            return None;
+        };
+        let ExprKind::Method(signal, method, args) = &call.kind else {
+            return None;
+        };
+        let [
+            Expr {
+                kind: ExprKind::Function(function),
+                ..
+            },
+        ] = args.as_slice()
+        else {
+            return None;
+        };
+        (SIGNAL_METHODS.contains(&method.as_str())
+            && function.generics.is_empty()
+            && function.returns.is_empty()
+            && function.attributes.is_empty())
+        .then(|| {
+            (
+                self.expression(signal, scope),
+                method.clone(),
+                function.written_params.clone(),
+                self.body(&function.body, scope),
+            )
+        })
+    }
+
+    /// Whether `block` writes the same code as `stat`.
+    fn writes_statement(&self, block: &Block, stat: &Stat, touched: bool) -> bool {
+        block_lua(block, touched)
+            .is_ok_and(|written| lua::same_code(&self.source[stat.span.clone()], &written))
+    }
+
+    /// Whether `value` writes the same code as `expr`.
+    fn writes_expression(&self, value: &Expression, expr: &Expr, touched: bool) -> bool {
+        expression_lua(value, touched)
+            .is_ok_and(|written| lua::same_code(&self.source[expr.span.clone()], &written))
     }
 
     /// An event handler, as its event block.
@@ -821,31 +866,21 @@ impl<'a> Converter<'a> {
         }
         let [
             Expr {
-                kind:
-                    ExprKind::Table {
-                        named,
-                        other: false,
-                        ..
-                    },
+                kind: ExprKind::Table(fields),
                 ..
             },
         ] = args.as_slice()
         else {
             return None;
         };
-        let [(field, list)] = named.as_slice() else {
+        let [lua::TableField::Named(field, list)] = fields.as_slice() else {
             return None;
         };
-        let ExprKind::Table {
-            named: inner,
-            list: items,
-            ..
-        } = &list.kind
-        else {
+        let ExprKind::Table(items) = &list.kind else {
             return None;
         };
-        match (field.as_str(), inner.as_slice(), items.as_slice()) {
-            ("FilterDescendantsInstances", [], [item]) => self.target(item),
+        match (field.as_str(), items.as_slice()) {
+            ("FilterDescendantsInstances", [lua::TableField::Item(item)]) => self.target(item),
             _ => None,
         }
     }
@@ -890,27 +925,55 @@ impl<'a> Converter<'a> {
 
     // ---- Statements ---------------------------------------------------------
 
-    /// The blocks for a body. Lua with no blocks for it, side by side,
-    /// goes into one grey block.
+    /// The blocks for a body, with its comments and blank lines kept.
     fn body(&self, stats: &[Stat], scope: Scope) -> Vec<Block> {
         let mut blocks: Vec<Block> = Vec::new();
-        let mut code: Option<std::ops::Range<usize>> = None;
-        for stat in stats {
-            let block = self.statement(stat, scope);
+        let mut previous_end: Option<usize> = None;
+        // Grey blocks already have the comments inside them.
+        let mut covered_to = 0;
+        let mut index = 0;
+        while index < stats.len() {
+            let stat = &stats[index];
+            index += 1;
+            match stat.kind {
+                StatKind::Empty => continue,
+                StatKind::Comment if stat.span.end <= covered_to => continue,
+                StatKind::Comment => {
+                    let mut text = self.text(stat.span.clone());
+                    let mut end = stat.span.end;
+                    // A comment over several lines is one block.
+                    while let Some(next) = stats.get(index)
+                        && matches!(next.kind, StatKind::Comment)
+                        && next.span.start >= covered_to
+                        && self
+                            .source
+                            .get(end..next.span.start)
+                            .is_some_and(|between| between.matches('\n').count() == 1)
+                    {
+                        text.push('\n');
+                        text.push_str(&self.text(next.span.clone()));
+                        end = next.span.end;
+                        index += 1;
+                    }
+                    let same_line = previous_end
+                        .and_then(|before| self.source.get(before..stat.span.start))
+                        .is_some_and(|between| !between.contains('\n'));
+                    let mut block = Block::new(BlockKind::Comment { text });
+                    block.spaced = self.gap_before(previous_end, stat.span.start);
+                    block.chained = same_line && !blocks.is_empty();
+                    previous_end = Some(end);
+                    blocks.push(block);
+                    continue;
+                }
+                _ => {}
+            }
+            let mut block = self.statement(stat, scope);
+            block.spaced = self.gap_before(previous_end, stat.span.start);
             if matches!(block.kind, BlockKind::Code { .. }) {
-                code = Some(match code {
-                    Some(span) => span.start..stat.span.end,
-                    None => stat.span.clone(),
-                });
-                continue;
+                covered_to = stat.span.end;
             }
-            if let Some(span) = code.take() {
-                blocks.push(self.code_block(span));
-            }
+            previous_end = Some(stat.span.end);
             blocks.push(block);
-        }
-        if let Some(span) = code {
-            blocks.push(self.code_block(span));
         }
         blocks
     }
@@ -921,10 +984,121 @@ impl<'a> Converter<'a> {
         })
     }
 
+    /// The block for a statement: a block made for it, else the one for
+    /// what it is in Luau, else grey Lua. Each has to write the same code.
     fn statement(&self, stat: &Stat, scope: Scope) -> Block {
-        self.try_statement(stat, scope)
-            .map(Block::new)
-            .unwrap_or_else(|| self.code_block(stat.span.clone()))
+        let touched = scope.touched.is_some();
+        for kind in [
+            self.try_statement(stat, scope),
+            self.luau_statement(stat, scope),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let block = Block::new(kind);
+            if self.writes_statement(&block, stat, touched) {
+                return block;
+            }
+        }
+        self.code_block(stat.span.clone())
+    }
+
+    /// The block for what a statement is in Luau.
+    fn luau_statement(&self, stat: &Stat, scope: Scope) -> Option<BlockKind> {
+        let define = |name: &str, local: bool, function: &FunctionBody| BlockKind::DefineFunction {
+            name: name.to_owned(),
+            local,
+            params: function.written_params.clone(),
+            generics: function.generics.clone(),
+            returns: function.returns.clone(),
+            attributes: function.attributes.clone(),
+            body: self.body(&function.body, scope),
+        };
+        Some(match &stat.kind {
+            StatKind::Local { names, values } => BlockKind::Local {
+                names: names.join(", "),
+                values: self.expressions(values, scope),
+            },
+            StatKind::Assign { targets, values } => BlockKind::Assign {
+                targets: self.expressions(targets, scope),
+                values: self.expressions(values, scope),
+            },
+            StatKind::CompoundAssign { target, op, value } => BlockKind::CompoundAssign {
+                target: self.expression(target, scope),
+                op: (*op).to_owned(),
+                value: self.expression(value, scope),
+            },
+            StatKind::Call(call) => {
+                if let Some((signal, method, params, body)) = self.connection(stat, scope) {
+                    return Some(BlockKind::Connect {
+                        signal,
+                        method,
+                        params,
+                        body,
+                    });
+                }
+                match &call.kind {
+                    ExprKind::Call(function, args) => BlockKind::CallFunction {
+                        function: self.expression(function, scope),
+                        args: self.expressions(args, scope),
+                    },
+                    ExprKind::Method(object, method, args) => BlockKind::CallMethod {
+                        object: self.expression(object, scope),
+                        method: method.clone(),
+                        args: self.expressions(args, scope),
+                    },
+                    _ => return None,
+                }
+            }
+            StatKind::While { condition, body } => BlockKind::While {
+                condition: self.expression(condition, scope),
+                body: self.body(body, scope),
+            },
+            StatKind::Repeat { body, condition } => BlockKind::RepeatLoop {
+                body: self.body(body, scope),
+                condition: self.expression(condition, scope),
+            },
+            StatKind::NumericFor {
+                variable,
+                start,
+                stop,
+                step,
+                body,
+            } => BlockKind::NumericFor {
+                variable: variable.clone(),
+                start: self.expression(start, scope),
+                stop: self.expression(stop, scope),
+                step: step.as_ref().map(|step| self.expression(step, scope)),
+                body: self.body(body, scope),
+            },
+            StatKind::GenericFor {
+                names,
+                values,
+                body,
+            } => BlockKind::GenericFor {
+                names: names.join(", "),
+                values: self.expressions(values, scope),
+                body: self.body(body, scope),
+            },
+            StatKind::Do(body) => BlockKind::DoBlock {
+                body: self.body(body, scope),
+            },
+            StatKind::Function { name, function } => define(name, false, function),
+            StatKind::LocalFunction { name, function } => define(name, true, function),
+            StatKind::Return(values) => BlockKind::Return {
+                values: self.expressions(values, scope),
+            },
+            StatKind::Break => BlockKind::Break,
+            StatKind::Continue => BlockKind::Continue,
+            _ => return None,
+        })
+    }
+
+    fn expressions(&self, exprs: &[Expr], scope: Scope) -> Vec<Expression> {
+        exprs
+            .iter()
+            .map(|expr| self.expression(expr, scope))
+            .collect()
     }
 
     fn try_statement(&self, stat: &Stat, scope: Scope) -> Option<BlockKind> {
@@ -1411,15 +1585,10 @@ impl<'a> Converter<'a> {
         let [object, info, goals] = args.as_slice() else {
             return None;
         };
-        let ExprKind::Table {
-            named,
-            other: false,
-            ..
-        } = &goals.kind
-        else {
+        let ExprKind::Table(fields) = &goals.kind else {
             return None;
         };
-        let [(property, value)] = named.as_slice() else {
+        let [lua::TableField::Named(property, value)] = fields.as_slice() else {
             return None;
         };
         Some((self.target(object)?, info, property.clone(), value))
@@ -1895,12 +2064,13 @@ impl<'a> Converter<'a> {
                 },
             });
         }
-        // elseif: an if inside the else.
-        let inner = self.if_chain(rest, otherwise, scope)?;
+        // elseif: an if inside the else, marked to be written as one.
+        let mut inner = Block::new(self.if_chain(rest, otherwise, scope)?);
+        inner.chained = true;
         Some(BlockKind::IfElse {
             condition,
             then_body,
-            else_body: vec![Block::new(inner)],
+            else_body: vec![inner],
         })
     }
 
@@ -1922,17 +2092,134 @@ impl<'a> Converter<'a> {
         // goes. So are `if` expressions, whose `else` part would take in
         // what follows, and casts.
         let code = match expr.kind {
-            ExprKind::Binary(..) | ExprKind::Unary(..) | ExprKind::IfElse | ExprKind::Cast => {
-                format!("({text})")
-            }
+            ExprKind::Binary(..)
+            | ExprKind::Unary(..)
+            | ExprKind::IfElse(..)
+            | ExprKind::Cast(..) => format!("({text})"),
             _ => text,
         };
         Expression::Code { code }
     }
 
+    /// The value for an expression: a reporter made for it, else what it is
+    /// in Luau, else grey Lua. Each has to write the same code.
     fn expression(&self, expr: &Expr, scope: Scope) -> Expression {
-        self.try_expression(expr, scope)
-            .unwrap_or_else(|| self.code_expression(expr))
+        let touched = scope.touched.is_some();
+        for value in [
+            self.try_expression(expr, scope),
+            self.luau_expression(expr, scope),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if self.writes_expression(&value, expr, touched) {
+                return value;
+            }
+        }
+        self.code_expression(expr)
+    }
+
+    /// One side of an operator. Brackets the writer puts back itself
+    /// aren't kept.
+    fn operand(&self, expr: &Expr, op: &str, right: bool, scope: Scope) -> Expression {
+        let parent = binary_priority(op).unwrap_or((UNARY, UNARY));
+        if let ExprKind::Paren(inner) = &expr.kind {
+            let child = match &inner.kind {
+                ExprKind::Binary(child, ..) => binary_priority(child).map(|p| (p, false)),
+                ExprKind::Unary(..) => Some(((UNARY, UNARY), true)),
+                _ => None,
+            };
+            if let Some((child, unary)) = child
+                && needs_brackets(child, unary, parent, right)
+            {
+                return self.expression(inner, scope);
+            }
+        }
+        self.expression(expr, scope)
+    }
+
+    /// The value for what an expression is in Luau.
+    fn luau_expression(&self, expr: &Expr, scope: Scope) -> Option<Expression> {
+        let boxed = |expr: &Expr| Box::new(self.expression(expr, scope));
+        if let Some(name) = path(expr) {
+            return Some(Expression::Name { name });
+        }
+        Some(match &expr.kind {
+            ExprKind::Nil => Expression::Nil,
+            ExprKind::Vararg => Expression::Vararg,
+            ExprKind::Field(object, name) => Expression::Field {
+                object: boxed(object),
+                name: name.clone(),
+            },
+            ExprKind::Index(object, key) => Expression::Index {
+                object: boxed(object),
+                key: boxed(key),
+            },
+            ExprKind::Call(function, args) => Expression::Call {
+                function: boxed(function),
+                args: self.expressions(args, scope),
+            },
+            ExprKind::Method(object, method, args) => Expression::MethodCall {
+                object: boxed(object),
+                method: method.clone(),
+                args: self.expressions(args, scope),
+            },
+            ExprKind::Function(function) if function.attributes.is_empty() => Expression::Closure {
+                params: function.written_params.clone(),
+                generics: function.generics.clone(),
+                returns: function.returns.clone(),
+                body: self.body(&function.body, scope),
+            },
+            ExprKind::Table(fields) => Expression::Table {
+                fields: fields
+                    .iter()
+                    .map(|field| match field {
+                        lua::TableField::Named(name, value) => TableField::Named {
+                            name: name.clone(),
+                            value: self.expression(value, scope),
+                        },
+                        lua::TableField::Keyed(key, value) => TableField::Keyed {
+                            key: self.expression(key, scope),
+                            value: self.expression(value, scope),
+                        },
+                        lua::TableField::Item(value) => TableField::Item {
+                            value: self.expression(value, scope),
+                        },
+                    })
+                    .collect(),
+                multiline: self.source[expr.span.clone()].contains('\n'),
+            },
+            ExprKind::Binary(op, left, right) => Expression::Binary {
+                op: (*op).to_owned(),
+                left: Box::new(self.operand(left, op, false, scope)),
+                right: Box::new(self.operand(right, op, true, scope)),
+            },
+            ExprKind::Unary(op, value) => Expression::Unary {
+                op: (*op).to_owned(),
+                value: Box::new(self.operand(value, op, true, scope)),
+            },
+            ExprKind::Paren(value) => Expression::Paren {
+                value: boxed(value),
+            },
+            ExprKind::Interpolated(parts, values) => Expression::Interpolated {
+                parts: parts.clone(),
+                values: self.expressions(values, scope),
+            },
+            ExprKind::IfElse(arms, otherwise) => {
+                let mut parts = Vec::with_capacity(arms.len() * 2 + 1);
+                for (condition, value) in arms {
+                    parts.push(self.expression(condition, scope));
+                    parts.push(self.expression(value, scope));
+                }
+                parts.push(self.expression(otherwise, scope));
+                Expression::IfValue { parts }
+            }
+            ExprKind::Cast(value, annotation) => Expression::Cast {
+                value: boxed(value),
+                annotation: annotation.clone(),
+            },
+            _ => return None,
+        })
     }
 
     fn number(&self, expr: &Expr) -> Option<f64> {
@@ -1949,15 +2236,18 @@ impl<'a> Converter<'a> {
     fn try_expression(&self, expr: &Expr, scope: Scope) -> Option<Expression> {
         let boxed = |expr: &Expr| Box::new(self.expression(expr, scope));
         if let Some(value) = self.number(expr) {
-            return Some(Expression::Number { value });
+            // A number written another way (`0xFF`, `1e3`) stays as written.
+            return (self.source[expr.span.clone()] == crate::number_text(value))
+                .then_some(Expression::Number { value });
         }
         Some(match &expr.kind {
+            // Escapes for raw bytes can't be held as text.
+            ExprKind::Str(_) if self.has_byte_escape(expr) => return None,
             ExprKind::Str(value) => Expression::Text {
                 value: value.clone(),
             },
             ExprKind::True => Expression::Boolean { value: true },
             ExprKind::False => Expression::Boolean { value: false },
-            ExprKind::Paren(inner) => return self.try_expression(inner, scope),
             ExprKind::Name(name) if scope.touched == Some(name.as_str()) => {
                 Expression::TouchingPart
             }
@@ -1997,51 +2287,62 @@ impl<'a> Converter<'a> {
                     ">=" => Some(Comparison::GreaterOrEqual),
                     _ => None,
                 };
+                let side =
+                    |expr: &Expr, right: bool| Box::new(self.operand(expr, op, right, scope));
                 if let Some(op) = math {
                     Expression::Math {
                         op,
-                        left: boxed(left),
-                        right: boxed(right),
+                        left: side(left, false),
+                        right: side(right, true),
                     }
                 } else if let Some(op) = compare {
                     Expression::Compare {
                         op,
-                        left: boxed(left),
-                        right: boxed(right),
+                        left: side(left, false),
+                        right: side(right, true),
                     }
                 } else if *op == "and" || *op == "or" {
+                    let (left, right) = (side(left, false), side(right, true));
+                    // `a or 5` isn't true or false, so it's not this block.
+                    if left.shape() != BlockShape::Boolean || right.shape() != BlockShape::Boolean {
+                        return None;
+                    }
                     let op = if *op == "and" {
                         LogicOp::And
                     } else {
                         LogicOp::Or
                     };
-                    Expression::Logic {
-                        op,
-                        left: Box::new(self.condition(left, scope)),
-                        right: Box::new(self.condition(right, scope)),
-                    }
+                    Expression::Logic { op, left, right }
                 } else if *op == ".." {
-                    // tostring(a) .. tostring(b), which the translation writes.
+                    // tostring(a) .. tostring(b), which the translation
+                    // writes. Anything else isn't this block.
                     let text = |expr: &Expr| match &expr.kind {
                         ExprKind::Call(function, args)
                             if matches!(&function.kind, ExprKind::Name(n) if n == "tostring")
                                 && args.len() == 1 =>
                         {
-                            boxed(&args[0])
+                            Some(boxed(&args[0]))
                         }
-                        _ => boxed(expr),
+                        _ => None,
                     };
-                    Expression::Join {
-                        left: text(left),
-                        right: text(right),
-                    }
+                    let (left, right) = (text(left), text(right));
+                    let (Some(left), Some(right)) = (left, right) else {
+                        return None;
+                    };
+                    Expression::Join { left, right }
                 } else {
                     return None;
                 }
             }
-            ExprKind::Unary("not", inner) => Expression::Not {
-                value: Box::new(self.condition(inner, scope)),
-            },
+            ExprKind::Unary("not", inner) => {
+                let value = self.operand(inner, "not", true, scope);
+                if value.shape() != BlockShape::Boolean {
+                    return None;
+                }
+                Expression::Not {
+                    value: Box::new(value),
+                }
+            }
             ExprKind::Call(function, args) => return self.call_expression(function, args, scope),
             ExprKind::Method(object, method, args) => {
                 if method == "Raycast"
@@ -2257,8 +2558,6 @@ impl<'a> Converter<'a> {
     }
 }
 
-/// Whether a block here can wait, or stop the script: then it can't be
-/// moved into "when game starts" without changing when things happen.
 /// The value of `local <wanted> = value`.
 fn local<'s>(stat: &'s Stat, wanted: &str) -> Option<&'s Expr> {
     match &stat.kind {
@@ -2270,39 +2569,23 @@ fn local<'s>(stat: &'s Stat, wanted: &str) -> Option<&'s Expr> {
     }
 }
 
-fn may_wait(block: &Block) -> bool {
-    let waits = matches!(
-        block.kind,
-        BlockKind::Wait { .. }
-            | BlockKind::WaitUntil { .. }
-            | BlockKind::WaitForChild { .. }
-            | BlockKind::Forever { .. }
-            | BlockKind::RepeatUntil { .. }
-            | BlockKind::StopScript
-            | BlockKind::Code { .. }
-    ) || block
-        .kind
-        .expressions()
-        .into_iter()
-        .any(has_code_expression);
-    waits
-        || block
-            .kind
-            .bodies()
-            .into_iter()
-            .any(|body| body.iter().any(may_wait))
+const UNARY: u8 = 12;
+
+/// `a`, or `a.b.c`: a name and any fields of it, as one dotted path.
+fn path(expr: &Expr) -> Option<String> {
+    match &expr.kind {
+        ExprKind::Name(name) => Some(name.clone()),
+        ExprKind::Field(object, name) => Some(format!("{}.{name}", path(object)?)),
+        _ => None,
+    }
 }
 
-fn has_code_expression(expression: &Expression) -> bool {
-    matches!(expression, Expression::Code { .. })
-        || expression.children().into_iter().any(has_code_expression)
-}
-
-/// Whether any grey block in `blocks` uses `name`.
+/// Whether any block in `blocks` uses the name `name`.
 fn code_mentions(blocks: &[Block], name: &str) -> bool {
     fn expression_mentions(expression: &Expression, name: &str) -> bool {
         match expression {
             Expression::Code { code } => lua::mentions(code, name),
+            Expression::Name { name: path } if path.split('.').next() == Some(name) => true,
             _ => expression
                 .children()
                 .into_iter()

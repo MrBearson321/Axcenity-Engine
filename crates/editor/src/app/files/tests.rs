@@ -75,8 +75,8 @@ fn scripts_switch_to_blocks_and_can_be_edited_saved_and_reloaded() {
         .iter_mut()
         .find(|document| document.path == path)
         .unwrap();
-    let BlockKind::WhenStarted { body } = &mut document.script.blocks[0].kind else {
-        panic!("new block scripts start with a WhenStarted event");
+    let BlockKind::RunScript { body } = &mut document.script.blocks[0].kind else {
+        panic!("a new script's code is a RunScript stack");
     };
     let play_sound = Block::new(BlockKind::PlaySound {
         target: "Chime".to_owned(),
@@ -131,7 +131,7 @@ fn scripts_switch_to_blocks_and_can_be_edited_saved_and_reloaded() {
     assert!(app.project.as_ref().unwrap().block_scripts.is_empty());
     assert!(!app.unsaved());
 
-    // Typed code with no blocks for it still switches, as grey blocks.
+    // Typed code that only Luau has blocks for switches as those blocks.
     app.tabs.get_mut(&code_path).unwrap().text = format!(
         "{code}local function twice(x)
 return x * 2
@@ -140,15 +140,12 @@ end
     );
     switch(&mut app, &code_path);
     let document = &app.project.as_ref().unwrap().block_scripts[0];
-    assert!(
-        document
-            .script
-            .blocks
-            .iter()
-            .any(|block| matches!(block.kind, BlockKind::TopCode { .. })),
-        "{:#?}",
-        document.script
-    );
+    let mut defines_it = false;
+    document.script.for_each_block(&mut |block| {
+        defines_it |=
+            matches!(&block.kind, BlockKind::DefineFunction { name, .. } if name == "twice");
+    });
+    assert!(defines_it, "{:#?}", document.script);
     assert_eq!(script(&app, "Script"), id);
 
     // Code with a mistake in it stays code.

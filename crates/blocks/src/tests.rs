@@ -17,6 +17,12 @@ fn boxed(expression: Expression) -> Box<Expression> {
     Box::new(expression)
 }
 
+fn name(name: &str) -> Expression {
+    Expression::Name {
+        name: name.to_owned(),
+    }
+}
+
 fn variable(name: &str) -> Expression {
     Expression::Variable {
         name: name.to_owned(),
@@ -27,7 +33,7 @@ fn block(id: u64, kind: BlockKind) -> Block {
     Block {
         id,
         kind,
-        position: None,
+        ..Block::new(BlockKind::StopScript)
     }
 }
 
@@ -66,7 +72,9 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenPartClicked { .. }
         | BlockKind::WhenCommandRun { .. }
         | BlockKind::Unattached { .. }
-        | BlockKind::TopCode { .. } => return None,
+        | BlockKind::TopCode { .. }
+        | BlockKind::RunScript { .. }
+        | BlockKind::OnSignal { .. } => return None,
         BlockKind::Wait { .. } => 0,
         BlockKind::WaitUntil { .. } => 1,
         BlockKind::Repeat { .. } => 2,
@@ -154,9 +162,25 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::Patrol { .. } => 83,
         BlockKind::SpawnDecal { .. } => 84,
         BlockKind::SetAnimatorLayerWeight { .. } => 85,
+        BlockKind::Connect { .. } => 87,
+        BlockKind::Comment { .. } => 88,
+        BlockKind::Local { .. } => 89,
+        BlockKind::Assign { .. } => 90,
+        BlockKind::CompoundAssign { .. } => 91,
+        BlockKind::CallFunction { .. } => 92,
+        BlockKind::CallMethod { .. } => 93,
+        BlockKind::DefineFunction { .. } => 94,
+        BlockKind::While { .. } => 95,
+        BlockKind::RepeatLoop { .. } => 96,
+        BlockKind::NumericFor { .. } => 97,
+        BlockKind::GenericFor { .. } => 98,
+        BlockKind::DoBlock { .. } => 99,
+        BlockKind::Break => 100,
+        BlockKind::Continue => 101,
+        BlockKind::Return { .. } => 102,
     })
 }
-const STATEMENT_COUNT: usize = 87;
+const STATEMENT_COUNT: usize = 103;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -817,6 +841,114 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
             },
             "game.ReplicatedStorage.Events.Scored:Fire()",
         ),
+        (
+            BlockKind::Connect {
+                signal: name("button.Activated"),
+                method: "Once".to_owned(),
+                params: "player".to_owned(),
+                body: Vec::new(),
+            },
+            "button.Activated:Once(function(player)\n    end)",
+        ),
+        (
+            BlockKind::Comment {
+                text: "-- A note".to_owned(),
+            },
+            "-- A note",
+        ),
+        (
+            BlockKind::Local {
+                names: "a, b".to_owned(),
+                values: vec![number(1.0), name("c")],
+            },
+            "local a, b = 1, c",
+        ),
+        (
+            BlockKind::Assign {
+                targets: vec![name("a.b")],
+                values: vec![Expression::Nil],
+            },
+            "a.b = nil",
+        ),
+        (
+            BlockKind::CompoundAssign {
+                target: name("a"),
+                op: "..".to_owned(),
+                value: text("!"),
+            },
+            "a ..= \"!\"",
+        ),
+        (
+            BlockKind::CallFunction {
+                function: name("table.insert"),
+                args: vec![name("list"), number(2.0)],
+            },
+            "table.insert(list, 2)",
+        ),
+        (
+            BlockKind::CallMethod {
+                object: name("gui"),
+                method: "WaitForChild".to_owned(),
+                args: vec![text("Panel")],
+            },
+            "gui:WaitForChild(\"Panel\")",
+        ),
+        (
+            BlockKind::DefineFunction {
+                name: "show".to_owned(),
+                local: true,
+                params: "row".to_owned(),
+                generics: String::new(),
+                returns: String::new(),
+                attributes: String::new(),
+                body: Vec::new(),
+            },
+            "local function show(row)\n    end",
+        ),
+        (
+            BlockKind::While {
+                condition: name("running"),
+                body: Vec::new(),
+            },
+            "while running do\n    end",
+        ),
+        (
+            BlockKind::RepeatLoop {
+                body: Vec::new(),
+                condition: name("done"),
+            },
+            "repeat\n    until done",
+        ),
+        (
+            BlockKind::NumericFor {
+                variable: "i".to_owned(),
+                start: number(1.0),
+                stop: number(9.0),
+                step: Some(number(2.0)),
+                body: Vec::new(),
+            },
+            "for i = 1, 9, 2 do\n    end",
+        ),
+        (
+            BlockKind::GenericFor {
+                names: "_, row".to_owned(),
+                values: vec![Expression::Call {
+                    function: boxed(name("ipairs")),
+                    args: vec![name("rows")],
+                }],
+                body: Vec::new(),
+            },
+            "for _, row in ipairs(rows) do\n    end",
+        ),
+        (BlockKind::DoBlock { body: Vec::new() }, "do\n    end"),
+        (BlockKind::Break, "break"),
+        (BlockKind::Continue, "continue"),
+        (
+            BlockKind::Return {
+                values: vec![name("x"), Expression::Vararg],
+            },
+            "return x, ...",
+        ),
     ]
 }
 
@@ -1115,7 +1247,7 @@ fn reporters_translate_with_brackets_where_the_blocks_nest() {
                     }),
                 }),
             },
-            "not ((a > 1) and UserInputService:IsKeyDown(Enum.KeyCode.W))",
+            "not (a > 1 and UserInputService:IsKeyDown(Enum.KeyCode.W))",
         ),
         (
             Expression::Property {
@@ -1805,7 +1937,16 @@ fn every_block_script() -> BlockScript {
     let mut body = || {
         every_statement()
             .into_iter()
-            .filter(|(kind, _)| !matches!(kind, BlockKind::Code { .. }))
+            // These end the Lua block they're in, so they can't go in a row.
+            .filter(|(kind, _)| {
+                !matches!(
+                    kind,
+                    BlockKind::Code { .. }
+                        | BlockKind::Break
+                        | BlockKind::Continue
+                        | BlockKind::Return { .. }
+                )
+            })
             .map(|(kind, _)| {
                 id += 1;
                 block(id, kind)
@@ -2161,7 +2302,7 @@ end)
                 BlockKind::CloneInto { .. },
                 BlockKind::ForEachChild { .. },
                 BlockKind::Print {
-                    value: Expression::Code { .. }
+                    value: Expression::MethodCall { .. }
                 },
                 BlockKind::Destroy { .. },
             ]
@@ -2254,7 +2395,7 @@ end)
 }
 
 #[test]
-fn typed_lua_becomes_blocks_and_keeps_what_has_none_as_lua() {
+fn typed_lua_becomes_blocks_in_the_order_it_was_typed() {
     let typed = "\
 local count = 0
 -- Doubles a number.
@@ -2273,35 +2414,35 @@ print(\"Hello world!\")
 ";
     let blocks = from_lua(typed).unwrap();
     let kinds: Vec<_> = blocks.blocks.iter().map(|block| &block.kind).collect();
+    // `hit` isn't the name "when touched" gives the part, so it's a signal.
     let [
-        BlockKind::TopCode { code },
-        BlockKind::WhenTouched { part, body },
-        BlockKind::WhenStarted { body: started },
+        BlockKind::RunScript { body: first },
+        BlockKind::OnSignal { params, body, .. },
+        BlockKind::RunScript { body: last },
     ] = kinds.as_slice()
     else {
         panic!("unexpected blocks: {kinds:#?}");
     };
     assert_eq!(
-        code,
-        "-- Doubles a number.\nlocal function double(x)\n    return x * 2\nend"
+        first[0].kind,
+        BlockKind::Comment {
+            text: "-- Doubles a number.".to_owned()
+        }
     );
-    assert_eq!(part, "Pad");
+    assert!(matches!(
+        &first[1].kind,
+        BlockKind::DefineFunction { name, local: true, params, .. } if name == "double" && params == "x"
+    ));
+    assert_eq!(params, "hit");
     assert!(matches!(&body[0].kind, BlockKind::ChangeVariable { name, .. } if name == "count"));
-    assert_eq!(
-        body[1].kind,
-        BlockKind::Code {
-            code: "for i = 1, 2 do\n    print(i)\nend".to_owned()
-        }
-    );
-    assert_eq!(
-        body[2].kind,
+    assert!(matches!(&body[1].kind, BlockKind::NumericFor { variable, .. } if variable == "i"));
+    assert!(matches!(
+        &body[2].kind,
         BlockKind::Print {
-            value: Expression::Code {
-                code: "double(count)".to_owned()
-            }
+            value: Expression::Call { .. }
         }
-    );
-    assert!(matches!(&started[0].kind, BlockKind::Print { .. }));
+    ));
+    assert!(matches!(&last[0].kind, BlockKind::Print { .. }));
 
     // And it still runs.
     let mut world = World::new();
@@ -2343,22 +2484,22 @@ print(label, double(count :: number), 0b101 + 1_000)
 ";
     let blocks = from_lua(typed).unwrap();
     let kinds: Vec<_> = blocks.blocks.iter().map(|block| &block.kind).collect();
-    let [
-        BlockKind::TopCode { code: first },
-        BlockKind::WhenStarted { body },
-        BlockKind::TopCode { code: last },
-    ] = kinds.as_slice()
-    else {
+    let [BlockKind::RunScript { body }] = kinds.as_slice() else {
         panic!("unexpected blocks: {kinds:#?}");
     };
-    assert!(first.starts_with("type Point = "), "{first}");
-    assert!(
-        matches!(&body[..], [Block { kind: BlockKind::ChangeVariable { name, .. }, .. }] if name == "count")
-    );
-    assert!(
-        last.contains("continue") && last.ends_with("1_000)"),
-        "{last}"
-    );
+    // A type definition does nothing when run, so it's the only grey block.
+    assert!(matches!(&body[0].kind, BlockKind::Code { code } if code.starts_with("type Point = ")));
+    assert!(matches!(
+        &body[1].kind,
+        BlockKind::DefineFunction { returns, params, .. } if returns == ": number" && params == "x: number"
+    ));
+    assert!(matches!(&body[2].kind, BlockKind::CompoundAssign { op, .. } if op == "+"));
+    assert!(matches!(&body[3].kind, BlockKind::NumericFor { .. }));
+    assert!(matches!(&body[4].kind, BlockKind::Local { names, .. } if names == "label: string"));
+    assert!(matches!(
+        &body[5].kind,
+        BlockKind::CallFunction { .. } | BlockKind::Print { .. }
+    ));
 
     // Switching again changes nothing more.
     let source = translate(&blocks).unwrap().source;
@@ -2387,28 +2528,29 @@ print(label, double(count :: number), 0b101 + 1_000)
         "{source}"
     );
 
-    // A handler with type annotations stays Lua, so they aren't lost.
+    // A handler with type annotations keeps them.
     let typed = "workspace.Pad.Touched:Connect(function(hit: BasePart)\n    print(hit)\nend)\n";
     let blocks = from_lua(typed).unwrap();
     assert!(
-        matches!(&blocks.blocks[..], [Block { kind: BlockKind::TopCode { code }, .. }] if code == typed.trim_end()),
+        matches!(&blocks.blocks[..], [Block { kind: BlockKind::OnSignal { params, .. }, .. }] if params == "hit: BasePart"),
         "{blocks:#?}"
     );
-    // `+=` on a part's Position is a "move by" block.
+    assert_eq!(translate(&blocks).unwrap().source, typed);
+    // `+=` keeps its own block: "move by" would write it another way.
     let blocks = from_lua(
         "workspace.Pad.Touched:Connect(function()\n    workspace.Pad.Position += Vector3.new(0, 1, 0)\nend)\n",
     )
     .unwrap();
     let [
         Block {
-            kind: BlockKind::WhenTouched { body, .. },
+            kind: BlockKind::OnSignal { body, .. },
             ..
         },
     ] = &blocks.blocks[..]
     else {
         panic!("{blocks:#?}");
     };
-    assert!(matches!(&body[0].kind, BlockKind::MoveBy { target, .. } if target == "Pad"));
+    assert!(matches!(&body[0].kind, BlockKind::CompoundAssign { op, .. } if op == "+"));
 }
 
 #[test]
@@ -2427,23 +2569,36 @@ fn lua_5_4_syntax_that_luau_lacks_is_a_syntax_error() {
 
 #[test]
 fn top_level_code_that_waits_stays_in_order() {
-    // Moving the wait into "when game starts" would connect the event
-    // before the wait is over.
+    // Statements stay where they were typed, with nothing around them, so
+    // the wait is over before the event is connected.
     let typed = "task.wait(2)\nworkspace.Pad.Touched:Connect(function()\nend)\n";
     let blocks = from_lua(typed).unwrap();
-    assert!(matches!(
-        &blocks.blocks[0].kind,
-        BlockKind::TopCode { code } if code == "task.wait(2)"
-    ));
-    // A new script's code becomes a "when game starts" block.
-    let blocks = from_lua("print(\"Hello world!\")\n").unwrap();
+    let [
+        Block {
+            kind: BlockKind::RunScript { body },
+            ..
+        },
+        Block {
+            kind: BlockKind::OnSignal { .. },
+            ..
+        },
+    ] = blocks.blocks.as_slice()
+    else {
+        panic!("{blocks:#?}");
+    };
+    assert!(matches!(body[0].kind, BlockKind::Wait { .. }));
+    assert_eq!(translate(&blocks).unwrap().source, typed);
+    // A new script's code is a "script runs" stack, and writes the same.
+    let typed = "print(\"Hello world!\")\n";
+    let blocks = from_lua(typed).unwrap();
     assert!(matches!(
         &blocks.blocks[..],
         [Block {
-            kind: BlockKind::WhenStarted { .. },
+            kind: BlockKind::RunScript { .. },
             ..
         }]
     ));
+    assert_eq!(translate(&blocks).unwrap().source, typed);
 }
 
 #[test]

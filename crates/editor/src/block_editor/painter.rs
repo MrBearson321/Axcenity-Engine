@@ -128,8 +128,27 @@ impl<'a> BlockPainter<'a> {
                 vec2(width + self.s(6.0), height)
             }
             Expression::Color3 { .. } => vec2(self.s(40.0), height),
+            Expression::Name { name } => self.typed_size(ui, name),
+            Expression::Nil => vec2(self.text_width(ui, "nil") + self.s(14.0), height),
+            Expression::Vararg => vec2(self.text_width(ui, "...") + self.s(14.0), height),
+            Expression::Closure { params, .. } => self.closure_size(ui, params),
             _ => vec2(self.s(30.0), height),
         }
+    }
+
+    /// The size of a box to type a name in.
+    pub(super) fn typed_size(&self, ui: &egui::Ui, text: &str) -> Vec2 {
+        vec2(
+            (self.text_width(ui, text) + self.s(14.0)).max(self.s(36.0)),
+            self.s(INPUT_HEIGHT),
+        )
+    }
+
+    fn closure_size(&self, ui: &egui::Ui, params: &str) -> Vec2 {
+        vec2(
+            self.text_width(ui, &closure_label(params)) + self.s(14.0),
+            self.s(INPUT_HEIGHT),
+        )
     }
 
     pub(super) fn axis_width(&self, ui: &egui::Ui, value: f64) -> f32 {
@@ -157,6 +176,7 @@ impl<'a> BlockPainter<'a> {
             Part::Function(function) => self.dropdown_size(ui, function.name()),
             Part::Choice(name, _) => self.dropdown_size(ui, name),
             Part::Code(code) => self.code_galley(ui, code).size() + vec2(self.s(12.0), self.s(8.0)),
+            Part::Text(text) | Part::Params(text) => self.typed_size(ui, text),
         }
     }
 
@@ -331,7 +351,7 @@ impl<'a> BlockPainter<'a> {
             });
         }
 
-        let grabbed = self.grab(&response, at, block_id);
+        let grabbed = self.grab(&response, at, block_id, false);
         Drawn {
             height: cap + size.y,
             width,
@@ -352,6 +372,7 @@ impl<'a> BlockPainter<'a> {
         let id = self.id.with(block.id);
         let block_id = block.id;
         let cap = block.kind.is_cap();
+        let grows = block.kind.input_list_mut().is_some();
         let highlighted = self.highlighted == Some(block_id);
         let objects = self.objects;
         let mut sections = sections(&mut block.kind, objects);
@@ -436,7 +457,7 @@ impl<'a> BlockPainter<'a> {
 
         let mut grabbed = None;
         for response in &responses {
-            if let Some(grab) = self.grab(response, at, block_id) {
+            if let Some(grab) = self.grab(response, at, block_id, grows) {
                 grabbed = Some(grab);
             }
         }
@@ -467,9 +488,20 @@ impl<'a> BlockPainter<'a> {
         response: &Option<egui::Response>,
         at: Pos2,
         block: u64,
+        grows: bool,
     ) -> Option<Vec2> {
         let response = response.as_ref()?;
         response.context_menu(|ui| {
+            if grows {
+                if ui.button("Add Input").clicked() {
+                    self.actions.push(Action::AddInput(block));
+                    ui.close();
+                }
+                if ui.button("Remove Last Input").clicked() {
+                    self.actions.push(Action::RemoveInput(block));
+                    ui.close();
+                }
+            }
             if ui
                 .button(theme::with_icon(icons::COPY, "Duplicate"))
                 .clicked()
@@ -604,6 +636,10 @@ impl<'a> BlockPainter<'a> {
                 self.slot(ui, expression, *kind, rect, part_id, address.child(slot));
                 slot += 1;
             } else {
+                // A function's parameters stand for its slot.
+                if matches!(part, Part::Params(_)) {
+                    slot += 1;
+                }
                 self.draw_field(ui, part, rect, part_id);
             }
             x += size.x + self.s(GAP);
@@ -751,6 +787,9 @@ impl<'a> BlockPainter<'a> {
                     });
                 }
             }
+            Part::Text(text) | Part::Params(text) => {
+                self.typed_box(ui, rect, part_id, text);
+            }
             Part::Code(code) => {
                 let galley = self.code_galley(ui, code);
                 self.painter.rect_filled(
@@ -793,6 +832,42 @@ impl<'a> BlockPainter<'a> {
                 }
             }
         }
+    }
+
+    /// A box to type a name or some Lua in, on a block.
+    pub(super) fn typed_box(
+        &self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        id: egui::Id,
+        text: &mut String,
+    ) -> Option<egui::Response> {
+        self.painter
+            .rect_filled(rect, radius(self.s(4.0)), Color32::from_black_alpha(45));
+        if self.interactive {
+            return Some(
+                ui.put(
+                    rect,
+                    egui::TextEdit::singleline(text)
+                        .id(id)
+                        .frame(false)
+                        .font(self.font())
+                        .text_color(Color32::WHITE)
+                        .horizontal_align(egui::Align::Center)
+                        .vertical_align(egui::Align::Center)
+                        .min_size(rect.size())
+                        .margin(egui::Margin::ZERO),
+                ),
+            );
+        }
+        self.painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            text.as_str(),
+            self.font(),
+            Color32::WHITE,
+        );
+        None
     }
 
     /// A menu's button on a block: darker than the block, with an arrow.
@@ -1050,6 +1125,39 @@ impl<'a> BlockPainter<'a> {
                     None
                 }
             }
+            Expression::Name { name } => self.typed_box(ui, rect, id, name),
+            Expression::Nil | Expression::Vararg => {
+                let word = if matches!(expression, Expression::Nil) {
+                    "nil"
+                } else {
+                    "..."
+                };
+                self.painter
+                    .rect_filled(rect, radius(self.s(4.0)), Color32::from_black_alpha(45));
+                self.painter.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    word,
+                    font,
+                    Color32::from_white_alpha(170),
+                );
+                self.interactive
+                    .then(|| ui.interact(rect, id, Sense::click()))
+            }
+            Expression::Closure { params, .. } => {
+                // Its blocks are in a mouth of the block it's in, or, if
+                // it's deep in another value, on the Graph view's node.
+                self.painter
+                    .rect_filled(rect, radius(self.s(4.0)), Color32::from_black_alpha(45));
+                self.painter.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    closure_label(params),
+                    font,
+                    Color32::WHITE,
+                );
+                None
+            }
             _ => None,
         };
         // Any value slot can hold any kind of value: right-click to choose.
@@ -1064,6 +1172,13 @@ impl<'a> BlockPainter<'a> {
                     ("True or false", SlotKind::Truth.empty()),
                     ("Vector3", SlotKind::Vector.empty()),
                     ("Color", SlotKind::Color.empty()),
+                    (
+                        "Name",
+                        Expression::Name {
+                            name: "name".to_owned(),
+                        },
+                    ),
+                    ("Nil", Expression::Nil),
                 ] {
                     if ui.button(name).clicked() {
                         *expression = value;
@@ -1270,4 +1385,9 @@ fn shown_path(path: &str, filter: Filter) -> &str {
     } else {
         path
     }
+}
+
+/// How a function in a value slot is shown.
+fn closure_label(params: &str) -> String {
+    format!("function({params})")
 }

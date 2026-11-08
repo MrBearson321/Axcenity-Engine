@@ -1,9 +1,9 @@
 //! A small Luau reader: tokens, then a syntax tree with each node's place in
-//! the source. [`crate::from_lua`] uses it to turn code back into blocks. It
-//! reads all of Luau (scripts run as Luau), but only keeps the detail the
-//! blocks need; everything else is kept as the source text it came from.
-//! Type annotations are read and skipped, and code that has them is kept as
-//! text, so they aren't lost.
+//! the source. [`crate::from_lua`] uses it to turn code into blocks. It reads
+//! all of Luau (scripts run as Luau) and keeps everything that changes what
+//! the code does. Types aren't understood, only kept as the text they were
+//! written as. [`same_code`] says whether two pieces of Lua are the same
+//! code, which is how `from_lua` checks its blocks write what was typed.
 
 use std::iter::Peekable;
 use std::ops::Range;
@@ -371,23 +371,25 @@ pub(crate) enum ExprKind {
     Call(Box<Expr>, Vec<Expr>),
     Method(Box<Expr>, String, Vec<Expr>),
     Function(FunctionBody),
-    /// A table constructor's `name = value` fields and list items, in
-    /// order. `other` is true when it has fields that aren't named
-    /// (`[k] = v` or list items).
-    Table {
-        named: Vec<(String, Expr)>,
-        list: Vec<Expr>,
-        other: bool,
-    },
+    /// A table constructor's fields, in order.
+    Table(Vec<TableField>),
     Binary(&'static str, Box<Expr>, Box<Expr>),
     Unary(&'static str, Box<Expr>),
     Paren(Box<Expr>),
-    /// `` `{a} and {b}!` ``.
-    Interpolated,
-    /// `if a then b else c`.
-    IfElse,
-    /// `value :: Type`.
-    Cast,
+    /// `` `{a} and {b}!` ``: the text around the values, as written (one
+    /// more piece than there are values), and the values.
+    Interpolated(Vec<String>, Vec<Expr>),
+    /// `if a then b elseif c then d else e`.
+    IfElse(Vec<(Expr, Expr)>, Box<Expr>),
+    /// `value :: Type`, with the type as written.
+    Cast(Box<Expr>, String),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum TableField {
+    Named(String, Expr),
+    Keyed(Expr, Expr),
+    Item(Expr),
 }
 
 #[derive(Clone, Debug)]
@@ -395,8 +397,16 @@ pub(crate) struct FunctionBody {
     pub params: Vec<String>,
     pub vararg: bool,
     /// Has type annotations or attributes (such as `@native`), which
-    /// the blocks can't hold.
+    /// the event blocks can't hold.
     pub annotated: bool,
+    /// The parameters as written, with their types: `a: number, ...`.
+    pub written_params: String,
+    /// `<T>`, as written, or empty.
+    pub generics: String,
+    /// `: number`, as written, or empty.
+    pub returns: String,
+    /// `@native`, as written, or empty.
+    pub attributes: String,
     pub body: Vec<Stat>,
 }
 
@@ -409,6 +419,11 @@ pub(crate) struct Stat {
 #[derive(Clone, Debug)]
 pub(crate) enum StatKind {
     Comment,
+    /// A `;` on its own, which does nothing.
+    Empty,
+    Break,
+    Continue,
+    /// Each name is as written, with its type if it has one.
     Local {
         names: Vec<String>,
         values: Vec<Expr>,
@@ -439,17 +454,28 @@ pub(crate) enum StatKind {
         step: Option<Expr>,
         body: Vec<Stat>,
     },
-    /// `for a, b in values do ... end`, without type annotations.
+    /// `for a, b in values do ... end`. Names are as written, with types.
     GenericFor {
         names: Vec<String>,
         values: Vec<Expr>,
         body: Vec<Stat>,
     },
+    Repeat {
+        body: Vec<Stat>,
+        condition: Expr,
+    },
+    /// `function a.b:c() ... end`, with the name as written.
+    Function {
+        name: String,
+        function: FunctionBody,
+    },
+    LocalFunction {
+        name: String,
+        function: FunctionBody,
+    },
     Do(Vec<Stat>),
     Return(Vec<Expr>),
-    /// Anything the blocks have no use for the inside of: `repeat`,
-    /// function statements, `break`, `continue`, `;`, type definitions,
-    /// and locals or `for`s with type annotations.
+    /// What has no effect the blocks could show: type definitions.
     Other,
 }
 
@@ -622,13 +648,17 @@ impl Parser<'_> {
     fn statement(&mut self) -> Result<Stat, SyntaxError> {
         let start = self.start();
         let kind = match self.peek().clone() {
-            Token::Symbol(";") | Token::Keyword("break") => {
+            Token::Symbol(";") => {
                 self.next();
-                StatKind::Other
+                StatKind::Empty
+            }
+            Token::Keyword("break") => {
+                self.next();
+                StatKind::Break
             }
             Token::Name(word) if word == "continue" && !self.continues_as_expression(1) => {
                 self.next();
-                StatKind::Other
+                StatKind::Continue
             }
             // `type Name = ...`, `type function name(...) ... end`, and either
             // after `export`.
@@ -649,11 +679,20 @@ impl Parser<'_> {
             // `@native function ...`
             Token::Symbol("@") => {
                 self.attributes()?;
+                let attributes = self.source[start..self.end()].to_owned();
                 if !self.check("function") && !self.check("local") {
                     return self.fail("expected a function after its attributes");
                 }
-                self.statement()?;
-                StatKind::Other
+                let mut stat = self.statement()?;
+                match &mut stat.kind {
+                    StatKind::Function { function, .. }
+                    | StatKind::LocalFunction { function, .. } => {
+                        function.attributes = attributes;
+                        function.annotated = true;
+                        stat.kind
+                    }
+                    _ => StatKind::Other,
+                }
             }
             Token::Keyword("do") => {
                 self.next();
@@ -671,10 +710,10 @@ impl Parser<'_> {
             }
             Token::Keyword("repeat") => {
                 self.next();
-                self.block()?;
+                let body = self.block()?;
                 self.expect("until")?;
-                self.expression()?;
-                StatKind::Other
+                let condition = self.expression()?;
+                StatKind::Repeat { body, condition }
             }
             Token::Keyword("if") => {
                 self.next();
@@ -701,8 +740,7 @@ impl Parser<'_> {
             }
             Token::Keyword("for") => {
                 self.next();
-                let first = self.name()?;
-                let typed = self.annotation()?;
+                let first = self.binding()?;
                 if self.accept("=") {
                     let start = self.expression()?;
                     self.expect(",")?;
@@ -715,42 +753,33 @@ impl Parser<'_> {
                     self.expect("do")?;
                     let body = self.block()?;
                     self.expect("end")?;
-                    if typed {
-                        StatKind::Other
-                    } else {
-                        StatKind::NumericFor {
-                            variable: first,
-                            start,
-                            stop,
-                            step,
-                            body,
-                        }
+                    StatKind::NumericFor {
+                        variable: first,
+                        start,
+                        stop,
+                        step,
+                        body,
                     }
                 } else {
                     let mut names = vec![first];
-                    let mut typed = typed;
                     while self.accept(",") {
-                        names.push(self.name()?);
-                        typed |= self.annotation()?;
+                        names.push(self.binding()?);
                     }
                     self.expect("in")?;
                     let values = self.expression_list()?;
                     self.expect("do")?;
                     let body = self.block()?;
                     self.expect("end")?;
-                    if typed {
-                        StatKind::Other
-                    } else {
-                        StatKind::GenericFor {
-                            names,
-                            values,
-                            body,
-                        }
+                    StatKind::GenericFor {
+                        names,
+                        values,
+                        body,
                     }
                 }
             }
             Token::Keyword("function") => {
                 self.next();
+                let name_start = self.start();
                 self.name()?;
                 while self.accept(".") {
                     self.name()?;
@@ -758,35 +787,27 @@ impl Parser<'_> {
                 if self.accept(":") {
                     self.name()?;
                 }
-                self.function_body()?;
-                StatKind::Other
+                let name = self.source[name_start..self.end()].to_owned();
+                let function = self.function_body()?;
+                StatKind::Function { name, function }
             }
             Token::Keyword("local") => {
                 self.next();
                 if self.accept("function") {
-                    self.name()?;
-                    self.function_body()?;
-                    StatKind::Other
+                    let name = self.name()?;
+                    let function = self.function_body()?;
+                    StatKind::LocalFunction { name, function }
                 } else {
-                    let mut names = Vec::new();
-                    let mut typed = false;
-                    loop {
-                        names.push(self.name()?);
-                        typed |= self.annotation()?;
-                        if !self.accept(",") {
-                            break;
-                        }
+                    let mut names = vec![self.binding()?];
+                    while self.accept(",") {
+                        names.push(self.binding()?);
                     }
                     let values = if self.accept("=") {
                         self.expression_list()?
                     } else {
                         Vec::new()
                     };
-                    if typed {
-                        StatKind::Other
-                    } else {
-                        StatKind::Local { names, values }
-                    }
+                    StatKind::Local { names, values }
                 }
             }
             _ => {
@@ -839,25 +860,40 @@ impl Parser<'_> {
         })
     }
 
+    /// A name and its `: Type` if it has one, as written.
+    fn binding(&mut self) -> Result<String, SyntaxError> {
+        let start = self.start();
+        self.name()?;
+        self.annotation()?;
+        Ok(self.source[start..self.end()].to_owned())
+    }
+
     /// From the parameters (or a generic `<T>` before them) to `end`.
     fn function_body(&mut self) -> Result<FunctionBody, SyntaxError> {
         let mut annotated = false;
+        let mut generics = String::new();
         if self.check("<") {
+            let start = self.start();
             self.skip_between("<", ">")?;
+            generics = self.source[start..self.end()].to_owned();
             annotated = true;
         }
         self.expect("(")?;
         let mut params = Vec::new();
+        let mut written = Vec::new();
         let mut vararg = false;
         if !self.check(")") {
             loop {
+                let start = self.start();
                 if self.accept("...") {
                     vararg = true;
                     annotated |= self.annotation()?;
+                    written.push(self.source[start..self.end()].to_owned());
                     break;
                 }
                 params.push(self.name()?);
                 annotated |= self.annotation()?;
+                written.push(self.source[start..self.end()].to_owned());
                 if !self.accept(",") {
                     break;
                 }
@@ -865,13 +901,24 @@ impl Parser<'_> {
         }
         self.expect(")")?;
         // The return type.
-        annotated |= self.annotation()?;
+        let start = self.start();
+        let typed = self.annotation()?;
+        annotated |= typed;
+        let returns = if typed {
+            self.source[start..self.end()].to_owned()
+        } else {
+            String::new()
+        };
         let body = self.block()?;
         self.expect("end")?;
         Ok(FunctionBody {
             params,
             vararg,
             annotated,
+            written_params: written.join(", "),
+            generics,
+            returns,
+            attributes: String::new(),
             body,
         })
     }
@@ -1056,9 +1103,11 @@ impl Parser<'_> {
         let start = self.start();
         let mut value = self.simple_value()?;
         while self.accept("::") {
+            let type_start = self.start();
             self.skip_type()?;
+            let written = self.source[type_start..self.end()].to_owned();
             value = Expr {
-                kind: ExprKind::Cast,
+                kind: ExprKind::Cast(Box::new(value), written),
                 span: start..self.end(),
             };
         }
@@ -1070,25 +1119,29 @@ impl Parser<'_> {
         let kind = match self.peek().clone() {
             Token::Keyword("if") => {
                 self.next();
-                self.expression()?;
+                let mut arms = Vec::new();
+                let condition = self.expression()?;
                 self.expect("then")?;
-                self.expression()?;
+                arms.push((condition, self.expression()?));
                 while self.accept("elseif") {
-                    self.expression()?;
+                    let condition = self.expression()?;
                     self.expect("then")?;
-                    self.expression()?;
+                    arms.push((condition, self.expression()?));
                 }
                 self.expect("else")?;
-                self.expression()?;
+                let otherwise = self.expression()?;
                 return Ok(Expr {
-                    kind: ExprKind::IfElse,
+                    kind: ExprKind::IfElse(arms, Box::new(otherwise)),
                     span: start..self.end(),
                 });
             }
             Token::InterpStart => {
+                let mut parts = vec![self.interpolated_text()];
                 self.next();
+                let mut values = Vec::new();
                 loop {
-                    self.expression()?;
+                    values.push(self.expression()?);
+                    parts.push(self.interpolated_text());
                     match self.peek() {
                         Token::InterpMiddle => {
                             self.next();
@@ -1101,15 +1154,17 @@ impl Parser<'_> {
                     }
                 }
                 return Ok(Expr {
-                    kind: ExprKind::Interpolated,
+                    kind: ExprKind::Interpolated(parts, values),
                     span: start..self.end(),
                 });
             }
             Token::Symbol("@") => {
                 self.attributes()?;
+                let attributes = self.source[start..self.end()].to_owned();
                 self.expect("function")?;
                 let mut body = self.function_body()?;
                 body.annotated = true;
+                body.attributes = attributes;
                 return Ok(Expr {
                     kind: ExprKind::Function(body),
                     span: start..self.end(),
@@ -1147,30 +1202,37 @@ impl Parser<'_> {
 
     fn table(&mut self) -> Result<ExprKind, SyntaxError> {
         self.expect("{")?;
-        let (mut named, mut list, mut other) = (Vec::new(), Vec::new(), false);
+        let mut fields = Vec::new();
         while !self.check("}") {
             if self.accept("[") {
-                self.expression()?;
+                let key = self.expression()?;
                 self.expect("]")?;
                 self.expect("=")?;
-                self.expression()?;
-                other = true;
+                fields.push(TableField::Keyed(key, self.expression()?));
             } else if let Token::Name(name) = self.peek().clone()
                 && self.peek_at(1) == &Token::Symbol("=")
             {
                 self.next();
                 self.next();
-                named.push((name, self.expression()?));
+                fields.push(TableField::Named(name, self.expression()?));
             } else {
-                list.push(self.expression()?);
-                other = true;
+                fields.push(TableField::Item(self.expression()?));
             }
             if !self.accept(",") && !self.accept(";") {
                 break;
             }
         }
         self.expect("}")?;
-        Ok(ExprKind::Table { named, list, other })
+        Ok(ExprKind::Table(fields))
+    }
+
+    /// The text of the interpolated string piece at the current token,
+    /// without the `` ` ``, `{` or `}` around it.
+    fn interpolated_text(&self) -> String {
+        let text = &self.source[self.tokens[self.at].span.clone()];
+        text.get(1..text.len().saturating_sub(1))
+            .unwrap_or_default()
+            .to_owned()
     }
 
     fn primary(&mut self) -> Result<Expr, SyntaxError> {
@@ -1260,6 +1322,71 @@ impl Parser<'_> {
             _ => self.fail("expected function arguments"),
         }
     }
+}
+
+/// The tokens of `source` that change what it does: not `;` between
+/// statements, or the last comma of a table.
+fn meaningful_tokens(source: &str) -> Option<Vec<Token>> {
+    let (tokens, _) = tokenize(source).ok()?;
+    let mut tables = 0_usize;
+    let mut kept: Vec<Token> = Vec::with_capacity(tokens.len());
+    for spanned in tokens {
+        match spanned.token {
+            Token::Symbol("{") => tables += 1,
+            Token::Symbol("}") => {
+                tables = tables.saturating_sub(1);
+                if kept.last() == Some(&Token::Symbol(",")) {
+                    kept.pop();
+                }
+            }
+            Token::Symbol(";") if tables == 0 => continue,
+            Token::Symbol(";") => {
+                kept.push(Token::Symbol(","));
+                continue;
+            }
+            _ => {}
+        }
+        kept.push(spanned.token);
+    }
+    Some(kept)
+}
+
+/// Whether two pieces of Lua are the same code, however they're laid out.
+pub(crate) fn same_code(first: &str, second: &str) -> bool {
+    match (meaningful_tokens(first), meaningful_tokens(second)) {
+        (Some(first), Some(second)) => first == second,
+        _ => false,
+    }
+}
+
+/// A comment's text, with each line's indent taken off.
+fn comment_text(source: &str, span: Range<usize>) -> String {
+    source[span]
+        .lines()
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Whether every comment in `source` is also in `written`.
+pub(crate) fn keeps_comments(source: &str, written: &str) -> bool {
+    let (Ok((_, comments)), Ok((_, kept))) = (tokenize(source), tokenize(written)) else {
+        return false;
+    };
+    let mut kept: Vec<String> = kept
+        .into_iter()
+        .map(|span| comment_text(written, span))
+        .collect();
+    comments.into_iter().all(|span| {
+        let text = comment_text(source, span);
+        match kept.iter().position(|comment| *comment == text) {
+            Some(found) => {
+                kept.swap_remove(found);
+                true
+            }
+            None => false,
+        }
+    })
 }
 
 /// Whether the Lua in `code` uses the name `name` anywhere (not counting

@@ -23,7 +23,7 @@ use std::collections::BTreeSet;
 
 use axcenity_blocks::{
     Block, BlockKind, BlockScript, BlockShape, Comparison, Expression, LogicOp, MathFunction,
-    MathOp, translate, valid_identifier,
+    MathOp, TableField, translate, valid_identifier,
 };
 use axcenity_core::{ClassName, KeyCode};
 use eframe::egui::{
@@ -268,7 +268,10 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WhenPromptTriggered { .. }
         | BlockKind::WhenPartClicked { .. }
         | BlockKind::WhenCommandRun { .. }
-        | BlockKind::Unattached { .. } => Category::Events,
+        | BlockKind::Unattached { .. }
+        | BlockKind::RunScript { .. }
+        | BlockKind::OnSignal { .. }
+        | BlockKind::Connect { .. } => Category::Events,
         BlockKind::Wait { .. }
         | BlockKind::WaitUntil { .. }
         | BlockKind::Repeat { .. }
@@ -281,7 +284,16 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::ForEachPartInRadius { .. }
         | BlockKind::ForEachPartTouching { .. }
         | BlockKind::WaitForChild { .. }
-        | BlockKind::DestroyAfter { .. } => Category::Control,
+        | BlockKind::DestroyAfter { .. }
+        | BlockKind::DefineFunction { .. }
+        | BlockKind::While { .. }
+        | BlockKind::RepeatLoop { .. }
+        | BlockKind::NumericFor { .. }
+        | BlockKind::GenericFor { .. }
+        | BlockKind::DoBlock { .. }
+        | BlockKind::Break
+        | BlockKind::Continue
+        | BlockKind::Return { .. } => Category::Control,
         BlockKind::MoveTo { .. }
         | BlockKind::MoveBy { .. }
         | BlockKind::LookAt { .. }
@@ -338,7 +350,11 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SlideIn { .. }
         | BlockKind::FadeIn { .. }
         | BlockKind::FadeOut { .. } => Category::Tweens,
-        BlockKind::SetVariable { .. } | BlockKind::ChangeVariable { .. } => Category::Variables,
+        BlockKind::SetVariable { .. }
+        | BlockKind::ChangeVariable { .. }
+        | BlockKind::Local { .. }
+        | BlockKind::Assign { .. }
+        | BlockKind::CompoundAssign { .. } => Category::Variables,
         BlockKind::Print { .. }
         | BlockKind::Destroy { .. }
         | BlockKind::CloneInto { .. }
@@ -359,7 +375,11 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WhenStreamedIn { .. }
         | BlockKind::SendChatMessage { .. }
         | BlockKind::ShowSystemMessage { .. } => Category::More,
-        BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
+        BlockKind::Code { .. }
+        | BlockKind::TopCode { .. }
+        | BlockKind::Comment { .. }
+        | BlockKind::CallFunction { .. }
+        | BlockKind::CallMethod { .. } => Category::Lua,
     }
 }
 
@@ -381,7 +401,13 @@ fn reporter_category(expression: &Expression) -> Category {
         | Expression::AnimatorNumber { .. }
         | Expression::AnimatorLayerWeight { .. } => Category::Animation,
         Expression::DataRow { .. } | Expression::DataValue { .. } => Category::More,
-        Expression::Code { .. } => Category::Lua,
+        Expression::Code { .. }
+        | Expression::Call { .. }
+        | Expression::MethodCall { .. }
+        | Expression::Field { .. }
+        | Expression::Index { .. }
+        | Expression::Table { .. }
+        | Expression::Cast { .. } => Category::Lua,
         _ => Category::Operators,
     }
 }
@@ -559,6 +585,11 @@ enum Part<'a> {
     Choice(&'a mut String, &'static [&'static str]),
     /// Lua kept word for word, in a grey block. Switch to Code to change it.
     Code(String),
+    /// A name or some Lua typed in: a method, parameters, a type.
+    Text(&'a mut String),
+    /// A function in a value slot: its parameters. Its blocks are a mouth,
+    /// so it's not a slot anything can be dropped into, but it counts as one.
+    Params(&'a mut String),
 }
 
 /// A row of a block, or the mouth of a C-shaped block (if, repeat, ...)
@@ -598,6 +629,213 @@ fn class_of(objects: &[ObjectInfo], path: &str) -> Option<ClassName> {
         .iter()
         .find(|object| object.path == path)
         .map(|object| object.class)
+}
+
+/// A value in a Luau block: a slot, or a function's parameters and a mouth
+/// for its blocks.
+fn push_value<'a>(
+    value: &'a mut Expression,
+    parts: &mut Vec<Part<'a>>,
+    mouths: &mut Vec<Section<'a>>,
+) {
+    match value {
+        Expression::Closure { params, body, .. } => {
+            parts.push(label("function"));
+            parts.push(Part::Params(params));
+            mouths.push(Section::Mouth(body));
+        }
+        value => parts.push(Part::Slot(value, SlotKind::Any)),
+    }
+}
+
+/// Values in a row, with commas between them.
+fn push_values<'a>(
+    values: &'a mut [Expression],
+    parts: &mut Vec<Part<'a>>,
+    mouths: &mut Vec<Section<'a>>,
+) {
+    for (index, value) in values.iter_mut().enumerate() {
+        if index > 0 {
+            parts.push(label(","));
+        }
+        push_value(value, parts, mouths);
+    }
+}
+
+/// A row, then the mouths of the functions in it.
+fn row_and_mouths<'a>(parts: Vec<Part<'a>>, mouths: Vec<Section<'a>>) -> Vec<Section<'a>> {
+    let mut sections = vec![Section::Row(parts)];
+    sections.extend(mouths);
+    sections
+}
+
+/// What a Luau block shows, top to bottom.
+fn luau_sections(kind: &mut BlockKind) -> Vec<Section<'_>> {
+    use Part::{Slot, Text};
+    use Section::{Mouth, Row};
+    let mut parts = Vec::new();
+    let mut mouths = Vec::new();
+    match kind {
+        BlockKind::RunScript { .. } => vec![Row(vec![label("when script runs")])],
+        BlockKind::OnSignal {
+            signal,
+            method,
+            params,
+            ..
+        } => vec![Row(vec![
+            label("when"),
+            Slot(signal, SlotKind::Any),
+            Part::Choice(method, &axcenity_blocks::SIGNAL_METHODS),
+            label("gives"),
+            Text(params),
+        ])],
+        BlockKind::Connect {
+            signal,
+            method,
+            params,
+            body,
+        } => vec![
+            Row(vec![
+                label("when"),
+                Slot(signal, SlotKind::Any),
+                Part::Choice(method, &axcenity_blocks::SIGNAL_METHODS),
+                label("gives"),
+                Text(params),
+            ]),
+            Mouth(body),
+        ],
+        BlockKind::Comment { text } if text.contains('\n') => {
+            vec![Row(vec![Part::Code(shown_code(text))])]
+        }
+        BlockKind::Comment { text } => vec![Row(vec![Text(text)])],
+        BlockKind::Local { names, values } => {
+            parts.push(label("local"));
+            parts.push(Text(names));
+            if !values.is_empty() {
+                parts.push(label("="));
+                push_values(values, &mut parts, &mut mouths);
+            }
+            row_and_mouths(parts, mouths)
+        }
+        BlockKind::Assign { targets, values } => {
+            for target in targets {
+                parts.push(Slot(target, SlotKind::Any));
+            }
+            parts.push(label("="));
+            push_values(values, &mut parts, &mut mouths);
+            row_and_mouths(parts, mouths)
+        }
+        BlockKind::CompoundAssign { target, op, value } => vec![Row(vec![
+            Slot(target, SlotKind::Any),
+            Part::Choice(op, &axcenity_blocks::LUA_COMPOUND_OPS),
+            label("="),
+            Slot(value, SlotKind::Any),
+        ])],
+        BlockKind::CallFunction { function, args } => {
+            parts.push(Slot(function, SlotKind::Any));
+            parts.push(label("("));
+            push_values(args, &mut parts, &mut mouths);
+            parts.push(label(")"));
+            row_and_mouths(parts, mouths)
+        }
+        BlockKind::CallMethod {
+            object,
+            method,
+            args,
+        } => {
+            parts.push(Slot(object, SlotKind::Any));
+            parts.push(label(":"));
+            parts.push(Text(method));
+            parts.push(label("("));
+            push_values(args, &mut parts, &mut mouths);
+            parts.push(label(")"));
+            row_and_mouths(parts, mouths)
+        }
+        BlockKind::DefineFunction {
+            name,
+            local,
+            params,
+            generics,
+            returns,
+            attributes,
+            body,
+        } => {
+            let mut row = Vec::new();
+            if !attributes.is_empty() {
+                row.push(label(attributes));
+            }
+            row.push(label(if *local { "local function" } else { "function" }));
+            row.push(Text(name));
+            if !generics.is_empty() {
+                row.push(label(generics));
+            }
+            row.push(label("("));
+            row.push(Text(params));
+            row.push(label(")"));
+            if !returns.is_empty() {
+                row.push(label(returns));
+            }
+            vec![Row(row), Mouth(body)]
+        }
+        BlockKind::While { condition, body } => vec![
+            Row(vec![
+                label("while"),
+                Slot(condition, SlotKind::Condition),
+                label("do"),
+            ]),
+            Mouth(body),
+        ],
+        BlockKind::RepeatLoop { body, condition } => vec![
+            Row(vec![label("repeat")]),
+            Mouth(body),
+            Row(vec![label("until"), Slot(condition, SlotKind::Condition)]),
+        ],
+        BlockKind::NumericFor {
+            variable,
+            start,
+            stop,
+            step,
+            body,
+        } => {
+            let mut row = vec![
+                label("for"),
+                Text(variable),
+                label("="),
+                Slot(start, SlotKind::Any),
+                label(","),
+                Slot(stop, SlotKind::Any),
+            ];
+            if let Some(step) = step {
+                row.push(label(","));
+                row.push(Slot(step, SlotKind::Any));
+            }
+            row.push(label("do"));
+            vec![Row(row), Mouth(body)]
+        }
+        BlockKind::GenericFor {
+            names,
+            values,
+            body,
+        } => {
+            parts.push(label("for"));
+            parts.push(Text(names));
+            parts.push(label("in"));
+            push_values(values, &mut parts, &mut mouths);
+            parts.push(label("do"));
+            let mut sections = vec![Row(parts), Mouth(body)];
+            sections.extend(mouths);
+            sections
+        }
+        BlockKind::DoBlock { body } => vec![Row(vec![label("do")]), Mouth(body)],
+        BlockKind::Break => vec![Row(vec![label("break")])],
+        BlockKind::Continue => vec![Row(vec![label("continue")])],
+        BlockKind::Return { values } => {
+            parts.push(label("return"));
+            push_values(values, &mut parts, &mut mouths);
+            row_and_mouths(parts, mouths)
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// What a block shows, top to bottom. An event block's own body isn't
@@ -1333,6 +1571,34 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
         BlockKind::Code { code } | BlockKind::TopCode { code } => {
             vec![Row(vec![label("Lua"), Part::Code(shown_code(code))])]
         }
+        BlockKind::RunScript { .. }
+        | BlockKind::OnSignal { .. }
+        | BlockKind::Connect { .. }
+        | BlockKind::Comment { .. }
+        | BlockKind::Local { .. }
+        | BlockKind::Assign { .. }
+        | BlockKind::CompoundAssign { .. }
+        | BlockKind::CallFunction { .. }
+        | BlockKind::CallMethod { .. }
+        | BlockKind::DefineFunction { .. }
+        | BlockKind::While { .. }
+        | BlockKind::RepeatLoop { .. }
+        | BlockKind::NumericFor { .. }
+        | BlockKind::GenericFor { .. }
+        | BlockKind::DoBlock { .. }
+        | BlockKind::Break
+        | BlockKind::Continue
+        | BlockKind::Return { .. } => luau_sections(kind),
+    }
+}
+
+/// Arguments in a row, with commas between them.
+fn push_slots<'a>(values: &'a mut [Expression], parts: &mut Vec<Part<'a>>) {
+    for (index, value) in values.iter_mut().enumerate() {
+        if index > 0 {
+            parts.push(label(","));
+        }
+        parts.push(Part::Slot(value, SlotKind::Any));
     }
 }
 
@@ -1481,12 +1747,118 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
             Slot(row, SlotKind::Any),
         ],
         Expression::Code { code } => vec![Part::Code(shown_code(code))],
+        Expression::Field { object, name } => {
+            vec![Slot(object, SlotKind::Any), label("."), Part::Text(name)]
+        }
+        Expression::Index { object, key } => vec![
+            Slot(object, SlotKind::Any),
+            label("["),
+            Slot(key, SlotKind::Any),
+            label("]"),
+        ],
+        Expression::Call { function, args } => {
+            let mut parts = vec![Slot(function, SlotKind::Any), label("(")];
+            push_slots(args, &mut parts);
+            parts.push(label(")"));
+            parts
+        }
+        Expression::MethodCall {
+            object,
+            method,
+            args,
+        } => {
+            let mut parts = vec![
+                Slot(object, SlotKind::Any),
+                label(":"),
+                Part::Text(method),
+                label("("),
+            ];
+            push_slots(args, &mut parts);
+            parts.push(label(")"));
+            parts
+        }
+        Expression::Table { fields, .. } => {
+            let mut parts = vec![label("{")];
+            for (index, field) in fields.iter_mut().enumerate() {
+                if index > 0 {
+                    parts.push(label(","));
+                }
+                match field {
+                    TableField::Named { name, value } => {
+                        parts.push(Part::Text(name));
+                        parts.push(label("="));
+                        parts.push(Slot(value, SlotKind::Any));
+                    }
+                    TableField::Keyed { key, value } => {
+                        parts.push(label("["));
+                        parts.push(Slot(key, SlotKind::Any));
+                        parts.push(label("] ="));
+                        parts.push(Slot(value, SlotKind::Any));
+                    }
+                    TableField::Item { value } => parts.push(Slot(value, SlotKind::Any)),
+                }
+            }
+            parts.push(label("}"));
+            parts
+        }
+        Expression::Binary { op, left, right } => vec![
+            Slot(left, SlotKind::Any),
+            Part::Choice(op, &axcenity_blocks::LUA_BINARY_OPS),
+            Slot(right, SlotKind::Any),
+        ],
+        Expression::Unary { op, value } => vec![
+            Part::Choice(op, &axcenity_blocks::LUA_UNARY_OPS),
+            Slot(value, SlotKind::Any),
+        ],
+        Expression::Paren { value } => {
+            vec![label("("), Slot(value, SlotKind::Any), label(")")]
+        }
+        Expression::Interpolated {
+            parts: texts,
+            values,
+        } => {
+            let mut parts = Vec::new();
+            let mut values = values.iter_mut();
+            for text in texts {
+                parts.push(Part::Text(text));
+                if let Some(value) = values.next() {
+                    parts.push(Slot(value, SlotKind::Any));
+                }
+            }
+            parts
+        }
+        Expression::IfValue { parts: values } => {
+            let count = values.len();
+            let mut parts = Vec::new();
+            for (index, value) in values.iter_mut().enumerate() {
+                parts.push(label(if index + 1 == count {
+                    "else"
+                } else if index == 0 {
+                    "if"
+                } else if index % 2 == 0 {
+                    "elseif"
+                } else {
+                    "then"
+                }));
+                parts.push(Slot(value, SlotKind::Any));
+            }
+            parts
+        }
+        Expression::Cast { value, annotation } => vec![
+            Slot(value, SlotKind::Any),
+            label("::"),
+            Part::Text(annotation),
+        ],
         // Values typed in aren't reporters, and are drawn as inputs.
         Expression::Number { .. }
         | Expression::Text { .. }
         | Expression::Boolean { .. }
         | Expression::Vector3 { .. }
-        | Expression::Color3 { .. } => Vec::new(),
+        | Expression::Color3 { .. }
+        | Expression::Nil
+        | Expression::Vararg
+        | Expression::Name { .. }
+        | Expression::Closure { .. } => Vec::new(),
     }
 }
 
@@ -1590,6 +1962,9 @@ impl Default for State {
 enum Action {
     Duplicate(u64),
     Delete(u64),
+    /// One more of a call's arguments, or a local's values.
+    AddInput(u64),
+    RemoveInput(u64),
 }
 
 /// Every variable the script uses, and those just made, sorted.

@@ -304,7 +304,7 @@ fn describe(body: &Body, objects: &[ObjectInfo]) -> (String, Category, Layout) {
         Body::Block(kind) => {
             let mut probe = (*kind).clone();
             let layout = block_layout(kind, &block_parts(&mut probe, objects));
-            (block_names(kind).0.to_owned(), block_category(kind), layout)
+            (block_title(kind), block_category(kind), layout)
         }
         Body::Value(expression) => {
             let mut probe = (*expression).clone();
@@ -460,6 +460,8 @@ enum Event {
     MoveStart(NodeRef),
     Move(Vec2),
     Duplicate(NodeRef),
+    /// One more input (true) or one fewer on a call's or a local's node.
+    Resize(NodeRef, bool),
     Delete(NodeRef),
 }
 
@@ -859,6 +861,11 @@ fn show_graph_canvas(
                 freeze(&mut script.graph, &places);
             }
             Event::Move(delta) => moved += delta,
+            Event::Resize(node, grow) => {
+                freeze(&mut script.graph, &places);
+                resize_inputs(script, &node, grow);
+                edited = true;
+            }
             Event::Duplicate(node) => {
                 freeze(&mut script.graph, &places);
                 duplicate_at(script, &node, &places);
@@ -1124,7 +1131,7 @@ fn draw_node(
     let z = drawer.z;
     let NodeDraw {
         node: which,
-        body,
+        mut body,
         geometry,
         rect,
         runs,
@@ -1135,6 +1142,10 @@ fn draw_node(
         objects,
     } = node;
     let id = egui::Id::new(("graph node", which.key())).with(drawer.id);
+    let grows = match &mut body {
+        Body::Block(kind) => kind.input_list_mut().is_some(),
+        Body::Value(value) => value.input_list_mut().is_some(),
+    };
 
     // The node itself: click to select, drag to move.
     if drawer.interactive {
@@ -1157,6 +1168,16 @@ fn draw_node(
             events.push(Event::Move(response.drag_delta()));
         }
         response.context_menu(|ui| {
+            if grows {
+                if ui.button("Add Input").clicked() {
+                    events.push(Event::Resize(which.clone(), true));
+                    ui.close();
+                }
+                if ui.button("Remove Last Input").clicked() {
+                    events.push(Event::Resize(which.clone(), false));
+                    ui.close();
+                }
+            }
             if ui
                 .button(theme::with_icon(icons::COPY, "Duplicate"))
                 .clicked()

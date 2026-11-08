@@ -73,6 +73,9 @@ pub struct BlockScript {
     /// shown as one, so other block scripts don't change.
     #[serde(default, skip_serializing_if = "Graph::is_empty")]
     pub graph: Graph,
+    /// Indent the Lua with tabs, as the typed script it came from was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tabs: bool,
 }
 
 /// The node-graph view of a block script (see `docs/scripting/graphs.md`).
@@ -188,6 +191,13 @@ pub struct Block {
     /// `None` lays it out below the stack before it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f32; 2]>,
+    /// A blank line goes before this block's Lua, as in the typed script.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spaced: bool,
+    /// Written joined to what's before it: an if as the `elseif` of the else
+    /// it's alone in, or a comment at the end of the last line.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub chained: bool,
 }
 
 impl Block {
@@ -196,6 +206,8 @@ impl Block {
             id: NEXT_BLOCK_ID.fetch_add(1, Ordering::Relaxed),
             kind,
             position: None,
+            spaced: false,
+            chained: false,
         }
     }
 
@@ -804,12 +816,130 @@ pub enum BlockKind {
         event: String,
     },
 
+    // Luau itself, which any typed script is made of (see
+    // `docs/scripting/blocks.md`). Names, parameters and types are text, as
+    // written, so `a: number, ...` is one parameter list.
+    /// The statements at the script's top level, in order: not an event,
+    /// and written without anything around them.
+    RunScript {
+        body: Vec<Block>,
+    },
+    /// `signal:Connect(function(params) ... end)` at the top level.
+    OnSignal {
+        signal: Expression,
+        method: String,
+        params: String,
+        body: Vec<Block>,
+    },
+    /// `signal:Connect(function(params) ... end)` among other blocks.
+    Connect {
+        signal: Expression,
+        method: String,
+        params: String,
+        body: Vec<Block>,
+    },
+    /// One or more `--` comments, as written.
+    Comment {
+        text: String,
+    },
+    /// `local names = values`.
+    Local {
+        names: String,
+        values: Vec<Expression>,
+    },
+    /// `targets = values`.
+    Assign {
+        targets: Vec<Expression>,
+        values: Vec<Expression>,
+    },
+    /// `target += value`; `op` is the operator without the `=`.
+    CompoundAssign {
+        target: Expression,
+        op: String,
+        value: Expression,
+    },
+    /// `function(args)` as a statement.
+    CallFunction {
+        function: Expression,
+        args: Vec<Expression>,
+    },
+    /// `object:method(args)` as a statement.
+    CallMethod {
+        object: Expression,
+        method: String,
+        args: Vec<Expression>,
+    },
+    /// `local function name(params) ... end`, or `function name(params) ...
+    /// end` with a name such as `a.b:c`.
+    DefineFunction {
+        name: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        local: bool,
+        params: String,
+        /// `<T>`, as written.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        generics: String,
+        /// `: number`, as written.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        returns: String,
+        /// `@native`, as written.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        attributes: String,
+        body: Vec<Block>,
+    },
+    /// `while condition do ... end`.
+    While {
+        condition: Expression,
+        body: Vec<Block>,
+    },
+    /// `repeat ... until condition`.
+    RepeatLoop {
+        body: Vec<Block>,
+        condition: Expression,
+    },
+    /// `for variable = start, stop, step do ... end`.
+    NumericFor {
+        variable: String,
+        start: Expression,
+        stop: Expression,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step: Option<Expression>,
+        body: Vec<Block>,
+    },
+    /// `for names in values do ... end`.
+    GenericFor {
+        names: String,
+        values: Vec<Expression>,
+        body: Vec<Block>,
+    },
+    /// `do ... end`.
+    DoBlock {
+        body: Vec<Block>,
+    },
+    Break,
+    Continue,
+    /// `return values`.
+    Return {
+        values: Vec<Expression>,
+    },
+
     /// Lua that has no blocks, kept word for word from a script switched
     /// from Code to Blocks.
     Code {
         code: String,
     },
 }
+
+/// The binary operators Luau has, which [`Expression::Binary`] can be.
+pub const LUA_BINARY_OPS: [&str; 16] = [
+    "+", "-", "*", "/", "//", "%", "^", "..", "==", "~=", "<", "<=", ">", ">=", "and", "or",
+];
+/// Luau's unary operators.
+pub const LUA_UNARY_OPS: [&str; 3] = ["not", "-", "#"];
+/// The operators a compound assignment can use.
+pub const LUA_COMPOUND_OPS: [&str; 8] = ["+", "-", "*", "/", "//", "%", "^", ".."];
+/// The ways to listen to a signal.
+pub const SIGNAL_METHODS: [&str; 3] = ["Connect", "Once", "ConnectParallel"];
 
 /// `Enum.EasingStyle`'s items, which the tween block offers.
 pub const EASING_STYLES: [&str; 7] = [
@@ -948,6 +1078,8 @@ impl BlockKind {
                 | BlockKind::WhenCommandRun { .. }
                 | BlockKind::Unattached { .. }
                 | BlockKind::TopCode { .. }
+                | BlockKind::RunScript { .. }
+                | BlockKind::OnSignal { .. }
         )
     }
 
@@ -966,9 +1098,11 @@ impl BlockKind {
         )
     }
 
-    /// The stacks of blocks inside this one, in order (an if/else's two).
+    /// The stacks of blocks inside this one, in order (an if/else's two),
+    /// then the functions written in its value slots: those directly in a
+    /// slot first, as they're the ones drawn as mouths on a block.
     pub fn bodies(&self) -> Vec<&Vec<Block>> {
-        match self {
+        let mut bodies = match self {
             BlockKind::WhenStarted { body }
             | BlockKind::WhenTouched { body, .. }
             | BlockKind::WhenStreamedIn { body, .. }
@@ -999,18 +1133,80 @@ impl BlockKind {
             | BlockKind::ForEachChild { body, .. }
             | BlockKind::ForEachPartInRadius { body, .. }
             | BlockKind::ForEachPartTouching { body, .. }
-            | BlockKind::If { body, .. } => vec![body],
+            | BlockKind::If { body, .. }
+            | BlockKind::RunScript { body }
+            | BlockKind::OnSignal { body, .. }
+            | BlockKind::Connect { body, .. }
+            | BlockKind::DefineFunction { body, .. }
+            | BlockKind::While { body, .. }
+            | BlockKind::RepeatLoop { body, .. }
+            | BlockKind::NumericFor { body, .. }
+            | BlockKind::GenericFor { body, .. }
+            | BlockKind::DoBlock { body } => vec![body],
             BlockKind::IfElse {
                 then_body,
                 else_body,
                 ..
             } => vec![then_body, else_body],
             _ => Vec::new(),
+        };
+        let slots = self.expressions();
+        bodies.extend(slots.iter().filter_map(|slot| match slot {
+            Expression::Closure { body, .. } => Some(body),
+            _ => None,
+        }));
+        for slot in slots {
+            if !matches!(slot, Expression::Closure { .. }) {
+                slot.closure_bodies(&mut bodies);
+            }
         }
+        bodies
     }
 
+    /// Like [`BlockKind::bodies`], for changing them.
     pub fn bodies_mut(&mut self) -> Vec<&mut Vec<Block>> {
-        match self {
+        // The slots of the kinds that also have stacks, which are separate
+        // fields of the variant, so both can be borrowed at once.
+        let (mut bodies, slots): (Vec<&mut Vec<Block>>, Vec<&mut Expression>) = match self {
+            BlockKind::Repeat { count: e, body }
+            | BlockKind::RepeatUntil { condition: e, body }
+            | BlockKind::If { condition: e, body }
+            | BlockKind::OnSignal {
+                signal: e, body, ..
+            }
+            | BlockKind::Connect {
+                signal: e, body, ..
+            }
+            | BlockKind::While { condition: e, body }
+            | BlockKind::RepeatLoop { condition: e, body } => (vec![body], vec![e]),
+            BlockKind::IfElse {
+                condition,
+                then_body,
+                else_body,
+            } => (vec![then_body, else_body], vec![condition]),
+            BlockKind::ForEachPartInRadius {
+                center,
+                radius,
+                body,
+                ..
+            } => (vec![body], vec![center, radius]),
+            BlockKind::WhenCommandRun {
+                command,
+                help,
+                body,
+            } => (vec![body], vec![command, help]),
+            BlockKind::NumericFor {
+                start,
+                stop,
+                step,
+                body,
+                ..
+            } => {
+                let mut slots = vec![start, stop];
+                slots.extend(step.as_mut());
+                (vec![body], slots)
+            }
+            BlockKind::GenericFor { values, body, .. } => (vec![body], values.iter_mut().collect()),
             BlockKind::WhenStarted { body }
             | BlockKind::WhenStreamedIn { body, .. }
             | BlockKind::WhenTouched { body, .. }
@@ -1033,22 +1229,27 @@ impl BlockKind {
             | BlockKind::WhenSeatOccupied { body, .. }
             | BlockKind::WhenPromptTriggered { body, .. }
             | BlockKind::WhenPartClicked { body, .. }
-            | BlockKind::WhenCommandRun { body, .. }
             | BlockKind::Unattached { body }
-            | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }
-            | BlockKind::RepeatUntil { body, .. }
             | BlockKind::ForEachChild { body, .. }
-            | BlockKind::ForEachPartInRadius { body, .. }
             | BlockKind::ForEachPartTouching { body, .. }
-            | BlockKind::If { body, .. } => vec![body],
-            BlockKind::IfElse {
-                then_body,
-                else_body,
-                ..
-            } => vec![then_body, else_body],
-            _ => Vec::new(),
+            | BlockKind::RunScript { body }
+            | BlockKind::DefineFunction { body, .. }
+            | BlockKind::DoBlock { body } => (vec![body], Vec::new()),
+            other => (Vec::new(), other.expressions_mut()),
+        };
+        let (direct, nested): (Vec<_>, Vec<_>) = slots
+            .into_iter()
+            .partition(|slot| matches!(slot, Expression::Closure { .. }));
+        for slot in direct {
+            if let Expression::Closure { body, .. } = slot {
+                bodies.push(body);
+            }
         }
+        for slot in nested {
+            slot.closure_bodies_mut(&mut bodies);
+        }
+        bodies
     }
 
     /// Like [`BlockKind::expressions`], for changing them.
@@ -1119,6 +1320,34 @@ impl BlockKind {
                 size,
                 seconds,
             } => vec![texture, position, facing, size, seconds],
+            BlockKind::Local { values, .. } | BlockKind::Return { values } => {
+                values.iter_mut().collect()
+            }
+            BlockKind::GenericFor { values, .. } => values.iter_mut().collect(),
+            BlockKind::Assign { targets, values } => {
+                targets.iter_mut().chain(values.iter_mut()).collect()
+            }
+            BlockKind::CompoundAssign { target, value, .. } => vec![target, value],
+            BlockKind::CallFunction {
+                function: first,
+                args,
+            }
+            | BlockKind::CallMethod {
+                object: first,
+                args,
+                ..
+            } => std::iter::once(first).chain(args.iter_mut()).collect(),
+            BlockKind::OnSignal { signal: e, .. }
+            | BlockKind::Connect { signal: e, .. }
+            | BlockKind::While { condition: e, .. }
+            | BlockKind::RepeatLoop { condition: e, .. } => vec![e],
+            BlockKind::NumericFor {
+                start, stop, step, ..
+            } => {
+                let mut slots = vec![start, stop];
+                slots.extend(step.as_mut());
+                slots
+            }
             BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],
             _ => Vec::new(),
         }
@@ -1190,7 +1419,28 @@ impl BlockKind {
     /// Blocks nothing can go after: they never finish ("forever") or end
     /// the script ("stop this script").
     pub fn is_cap(&self) -> bool {
-        matches!(self, BlockKind::Forever { .. } | BlockKind::StopScript)
+        matches!(
+            self,
+            BlockKind::Forever { .. }
+                | BlockKind::StopScript
+                | BlockKind::Break
+                | BlockKind::Continue
+                | BlockKind::Return { .. }
+        )
+    }
+
+    /// The list of inputs this block can have more or fewer of, if it has
+    /// one: a call's arguments, or a local's or a return's values.
+    pub fn input_list_mut(&mut self) -> Option<&mut Vec<Expression>> {
+        match self {
+            BlockKind::CallFunction { args: list, .. }
+            | BlockKind::CallMethod { args: list, .. }
+            | BlockKind::Local { values: list, .. }
+            | BlockKind::Assign { values: list, .. }
+            | BlockKind::Return { values: list }
+            | BlockKind::GenericFor { values: list, .. } => Some(list),
+            _ => None,
+        }
     }
 
     /// The value slots this block has, in the order they're shown.
@@ -1261,6 +1511,32 @@ impl BlockKind {
                 size,
                 seconds,
             } => vec![texture, position, facing, size, seconds],
+            BlockKind::Local { values, .. } | BlockKind::Return { values } => {
+                values.iter().collect()
+            }
+            BlockKind::GenericFor { values, .. } => values.iter().collect(),
+            BlockKind::Assign { targets, values } => targets.iter().chain(values.iter()).collect(),
+            BlockKind::CompoundAssign { target, value, .. } => vec![target, value],
+            BlockKind::CallFunction {
+                function: first,
+                args,
+            }
+            | BlockKind::CallMethod {
+                object: first,
+                args,
+                ..
+            } => std::iter::once(first).chain(args.iter()).collect(),
+            BlockKind::OnSignal { signal: e, .. }
+            | BlockKind::Connect { signal: e, .. }
+            | BlockKind::While { condition: e, .. }
+            | BlockKind::RepeatLoop { condition: e, .. } => vec![e],
+            BlockKind::NumericFor {
+                start, stop, step, ..
+            } => {
+                let mut slots = vec![start, stop];
+                slots.extend(step.as_ref());
+                slots
+            }
             BlockKind::ForEachPartInRadius { center, radius, .. } => vec![center, radius],
             _ => Vec::new(),
         }
@@ -1442,11 +1718,102 @@ pub enum Expression {
         column: String,
         row: Box<Expression>,
     },
+
+    // Luau's own values (see `BlockKind::RunScript`).
+    Nil,
+    /// `...`.
+    Vararg,
+    /// A name, or a name and fields: `waiting`, `row.Binding.Text`.
+    Name {
+        name: String,
+    },
+    /// `object.name`, for an object that isn't a plain name.
+    Field {
+        object: Box<Expression>,
+        name: String,
+    },
+    /// `object[key]`.
+    Index {
+        object: Box<Expression>,
+        key: Box<Expression>,
+    },
+    /// `function(args)`.
+    Call {
+        function: Box<Expression>,
+        args: Vec<Expression>,
+    },
+    /// `object:method(args)`.
+    MethodCall {
+        object: Box<Expression>,
+        method: String,
+        args: Vec<Expression>,
+    },
+    /// `function(params) ... end`. Its blocks are shown as a mouth of the
+    /// block it's in: see [`BlockKind::bodies`].
+    Closure {
+        params: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        generics: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        returns: String,
+        body: Vec<Block>,
+    },
+    /// `{ ... }`, on one line or one field to a line.
+    Table {
+        fields: Vec<TableField>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        multiline: bool,
+    },
+    /// An operator with no block of its own, or used on values the block
+    /// wouldn't take: `..`, `//`, `a or 5`.
+    Binary {
+        op: String,
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+    /// `-value`, `#value` or `not value`.
+    Unary {
+        op: String,
+        value: Box<Expression>,
+    },
+    /// `(value)`, kept where the brackets change what it means.
+    Paren {
+        value: Box<Expression>,
+    },
+    /// `` `{a} and {b}` ``: the text around the values, as written, which
+    /// is one more piece than there are values.
+    Interpolated {
+        parts: Vec<String>,
+        values: Vec<Expression>,
+    },
+    /// `if a then b elseif c then d else e`, as
+    /// `[a, b, c, d, e]`.
+    IfValue {
+        parts: Vec<Expression>,
+    },
+    /// `value :: Type`, with the type as written.
+    Cast {
+        value: Box<Expression>,
+        annotation: String,
+    },
+
     /// Lua that has no block, kept word for word from a script switched
     /// from Code to Blocks. Pointed, so it fits any slot.
     Code {
         code: String,
     },
+}
+
+/// One field of an [`Expression::Table`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TableField {
+    /// `name = value`.
+    Named { name: String, value: Expression },
+    /// `[key] = value`.
+    Keyed { key: Expression, value: Expression },
+    /// `value`.
+    Item { value: Expression },
 }
 
 impl Expression {
@@ -1461,7 +1828,58 @@ impl Expression {
             | Expression::IsA { .. }
             | Expression::IsStreamedIn { .. }
             | Expression::Code { .. } => BlockShape::Boolean,
+            // Any value can be a condition in Luau, so what can't be told
+            // apart from one fits a condition.
+            expression if expression.is_untyped() => BlockShape::Boolean,
             _ => BlockShape::Value,
+        }
+    }
+
+    /// A value that could be anything until the script runs.
+    pub fn is_untyped(&self) -> bool {
+        matches!(
+            self,
+            Expression::Nil
+                | Expression::Vararg
+                | Expression::Name { .. }
+                | Expression::Field { .. }
+                | Expression::Index { .. }
+                | Expression::Call { .. }
+                | Expression::MethodCall { .. }
+                | Expression::Binary { .. }
+                | Expression::Unary { .. }
+                | Expression::Paren { .. }
+                | Expression::IfValue { .. }
+                | Expression::Cast { .. }
+        )
+    }
+
+    /// Adds the bodies of the functions inside this value.
+    fn closure_bodies<'a>(&'a self, bodies: &mut Vec<&'a Vec<Block>>) {
+        if let Expression::Closure { body, .. } = self {
+            bodies.push(body);
+        }
+        for child in self.children() {
+            child.closure_bodies(bodies);
+        }
+    }
+
+    fn closure_bodies_mut<'a>(&'a mut self, bodies: &mut Vec<&'a mut Vec<Block>>) {
+        if let Expression::Closure { body, .. } = self {
+            bodies.push(body);
+            return;
+        }
+        for child in self.children_mut() {
+            child.closure_bodies_mut(bodies);
+        }
+    }
+
+    /// The list of inputs this value can have more or fewer of, if it has
+    /// one: a call's arguments.
+    pub fn input_list_mut(&mut self) -> Option<&mut Vec<Expression>> {
+        match self {
+            Expression::Call { args, .. } | Expression::MethodCall { args, .. } => Some(args),
+            _ => None,
         }
     }
 
@@ -1474,6 +1892,10 @@ impl Expression {
                 | Expression::Boolean { .. }
                 | Expression::Vector3 { .. }
                 | Expression::Color3 { .. }
+                | Expression::Nil
+                | Expression::Vararg
+                | Expression::Name { .. }
+                | Expression::Closure { .. }
         )
     }
 
@@ -1509,7 +1931,42 @@ impl Expression {
             | Expression::SplineClosestDistance {
                 position: value, ..
             }
-            | Expression::DataValue { row: value, .. } => vec![value],
+            | Expression::DataValue { row: value, .. }
+            | Expression::Field { object: value, .. }
+            | Expression::Unary { value, .. }
+            | Expression::Paren { value }
+            | Expression::Cast { value, .. } => vec![value],
+            Expression::Index { object, key } => vec![object, key],
+            Expression::Binary { left, right, .. } => vec![left, right],
+            Expression::Call {
+                function: first,
+                args,
+            }
+            | Expression::MethodCall {
+                object: first,
+                args,
+                ..
+            } => std::iter::once(first.as_mut())
+                .chain(args.iter_mut())
+                .collect(),
+            Expression::Table { fields, .. } => {
+                let mut slots = Vec::new();
+                for field in fields {
+                    match field {
+                        TableField::Named { value, .. } | TableField::Item { value } => {
+                            slots.push(value);
+                        }
+                        TableField::Keyed { key, value } => {
+                            slots.push(key);
+                            slots.push(value);
+                        }
+                    }
+                }
+                slots
+            }
+            Expression::Interpolated { values: list, .. } | Expression::IfValue { parts: list } => {
+                list.iter_mut().collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -1538,7 +1995,40 @@ impl Expression {
             | Expression::SplineClosestDistance {
                 position: value, ..
             }
-            | Expression::DataValue { row: value, .. } => vec![value],
+            | Expression::DataValue { row: value, .. }
+            | Expression::Field { object: value, .. }
+            | Expression::Unary { value, .. }
+            | Expression::Paren { value }
+            | Expression::Cast { value, .. } => vec![value],
+            Expression::Index { object, key } => vec![object, key],
+            Expression::Binary { left, right, .. } => vec![left, right],
+            Expression::Call {
+                function: first,
+                args,
+            }
+            | Expression::MethodCall {
+                object: first,
+                args,
+                ..
+            } => std::iter::once(first.as_ref()).chain(args.iter()).collect(),
+            Expression::Table { fields, .. } => {
+                let mut slots = Vec::new();
+                for field in fields {
+                    match field {
+                        TableField::Named { value, .. } | TableField::Item { value } => {
+                            slots.push(value);
+                        }
+                        TableField::Keyed { key, value } => {
+                            slots.push(key);
+                            slots.push(value);
+                        }
+                    }
+                }
+                slots
+            }
+            Expression::Interpolated { values: list, .. } | Expression::IfValue { parts: list } => {
+                list.iter().collect()
+            }
             _ => Vec::new(),
         }
     }

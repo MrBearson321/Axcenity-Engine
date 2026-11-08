@@ -106,6 +106,7 @@ pub(super) fn block_slots(kind: &BlockKind) -> Vec<SlotKind> {
         })
         .filter_map(|part| match part {
             Part::Slot(_, slot) => Some(slot),
+            Part::Params(_) => Some(SlotKind::Any),
             _ => None,
         })
         .collect()
@@ -118,9 +119,28 @@ pub(super) fn value_slots(expression: &Expression) -> Vec<SlotKind> {
         .into_iter()
         .filter_map(|part| match part {
             Part::Slot(_, slot) => Some(slot),
+            Part::Params(_) => Some(SlotKind::Any),
             _ => None,
         })
         .collect()
+}
+
+/// Adds an input to `node`, or takes its last one off, if it's a call or
+/// something else with a list of inputs.
+pub(super) fn resize_inputs(script: &mut BlockScript, node: &NodeRef, grow: bool) {
+    let list = match node {
+        NodeRef::Block(id) => script
+            .find_mut(*id)
+            .and_then(|block| block.kind.input_list_mut()),
+        NodeRef::Value(at) => value_mut(script, at).and_then(Expression::input_list_mut),
+    };
+    if let Some(list) = list {
+        if grow {
+            list.push(Expression::Nil);
+        } else {
+            list.pop();
+        }
+    }
 }
 
 /// What the slot `at` is in expects. `None` for a loose value node itself.
