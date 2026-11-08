@@ -318,6 +318,7 @@ impl EditorApp {
         }
 
         let source = translation.source;
+        let script = axcenity_blocks::refine(&script).unwrap_or(script);
         let was_dirty = old_script
             .as_ref()
             .is_some_and(|(current, saved)| current != saved);

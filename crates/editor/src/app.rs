@@ -251,6 +251,8 @@ pub struct EditorApp {
     last_active_at: Option<f64>,
     /// When the last frame was drawn, and whether it asked for another.
     frame_pace: Option<(f64, bool)>,
+    /// When the next steady frame is due to be presented (see [`EditorApp::pace_frame`]).
+    next_present: Option<Instant>,
     /// The parts the viewport drag under way has moved, for Join Surfaces.
     dragged_parts: Vec<InstanceId>,
     /// The game, while Play is on. `world` stays as it was before Play.
@@ -779,6 +781,7 @@ impl EditorApp {
             shown_title: String::new(),
             last_active_at: None,
             frame_pace: None,
+            next_present: None,
             dragged_parts: Vec::new(),
             play: None,
             play_settings: PlaySettings::default(),
@@ -978,6 +981,7 @@ impl eframe::App for EditorApp {
         // While dx serves the editor, through the newest code it patched in.
         let patched = self.rebuilds.patched_frames();
         hot_patch::call(patched, || self.frame(ctx, frame.wgpu_render_state()));
+        self.pace_frame();
         // Relaunching into a rebuilt editor saves the settings first.
         self.launch(ctx, frame);
         // Tests call `frame` without a window, so the window's resize edges
@@ -1053,6 +1057,36 @@ impl eframe::App for EditorApp {
     }
 }
 
+/// When to present the frame built at `now`, and when the one after it is
+/// due, on a grid `interval` apart that `scheduled` is the next point of.
+/// A frame that's late by less than an interval goes out at once and the
+/// grid holds; later than that, the grid restarts from now.
+fn next_present(
+    now: Instant,
+    scheduled: Option<Instant>,
+    interval: std::time::Duration,
+) -> (Instant, Instant) {
+    let due = match scheduled {
+        Some(at) if at >= now => at,
+        Some(at) if now.duration_since(at) < interval => at,
+        _ => now,
+    };
+    (due, due + interval)
+}
+
+/// Sleeps until `when`: the OS sleep for all but the last bit (it can
+/// overshoot by a millisecond or two), then spins for the rest.
+fn wait_until(when: Instant) {
+    const SPIN: std::time::Duration = std::time::Duration::from_millis(2);
+    let now = Instant::now();
+    if when > now + SPIN {
+        std::thread::sleep(when - now - SPIN);
+    }
+    while Instant::now() < when {
+        std::hint::spin_loop();
+    }
+}
+
 impl EditorApp {
     /// egui only draws when input comes, so small mouse movements give
     /// bursts of frames with gaps between them. On a variable refresh rate
@@ -1086,6 +1120,26 @@ impl EditorApp {
         if steady {
             ctx.request_repaint();
         }
+    }
+
+    /// Steady frames come as fast as each is ready, so their lengths still
+    /// vary with the work in them, and a variable refresh rate display
+    /// follows every one. So while frames are steady, each is held until
+    /// the next point on a fixed grid (`Appearance::steady_hz`) before it's
+    /// presented, which the display sees as one rate. A frame that misses
+    /// its point takes the next one, so the grid holds. Runs after the
+    /// frame is built, just before eframe presents it.
+    fn pace_frame(&mut self) {
+        let steady = self.frame_pace.is_some_and(|(_, steady)| steady);
+        if !steady || self.appearance.steady_hz == 0 {
+            self.next_present = None;
+            return;
+        }
+        let interval =
+            std::time::Duration::from_secs_f64(1.0 / f64::from(self.appearance.steady_hz));
+        let (due, next) = next_present(Instant::now(), self.next_present, interval);
+        self.next_present = Some(next);
+        wait_until(due);
     }
 
     /// One frame: game time during Play, then the menu bar, the ribbon and

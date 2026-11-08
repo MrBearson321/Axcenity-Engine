@@ -238,7 +238,7 @@ impl EditorApp {
                 .filter(|(code, _)| *code == source)
                 .map(|(_, blocks)| blocks.clone());
             let mut blocks = match remembered.map_or_else(|| from_lua(&source), Ok) {
-                Ok(blocks) => blocks,
+                Ok(blocks) => axcenity_blocks::refine(&blocks).unwrap_or(blocks),
                 Err(err) => {
                     self.output.error(format!(
                         "Can't show {name} as blocks: {err}. Fix the code first, then switch."

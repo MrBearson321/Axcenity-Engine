@@ -428,3 +428,29 @@ print(`total {total} doubled {doubled.value}`)
         .collect();
     assert_eq!(output, vec!["total 6 doubled 12"]);
 }
+
+#[test]
+fn a_block_script_saved_as_grey_lua_is_refined_into_blocks() {
+    // What switching the Controls script to Blocks gave before Luau itself
+    // had blocks: the whole script in one grey block.
+    let old = BlockScript {
+        blocks: vec![Block::new(BlockKind::TopCode {
+            code: CONTROLS.trim_end().to_owned(),
+        })],
+        graph: Graph {
+            shown: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let refined = refine(&old).expect("the grey block becomes blocks");
+    assert_eq!(lua_of(&refined), CONTROLS);
+    assert_eq!(grey_blocks(&refined), Vec::<String>::new());
+    assert!(refined.graph.shown, "the view is kept");
+    assert!(refined.tabs);
+
+    // Scripts with nothing grey, or whose grey Lua has no blocks, are left alone.
+    assert!(refine(&refined).is_none());
+    let typed = from_lua("type Point = { x: number }\n").unwrap();
+    assert!(refine(&typed).is_none());
+}

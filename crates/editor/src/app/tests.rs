@@ -2015,3 +2015,31 @@ fn holding_the_refresh_rate_draws_only_while_the_window_has_focus() {
     frame(200.05, false);
     assert!(!frame(200.1, false), "in the background it does");
 }
+
+#[test]
+fn steady_frames_are_presented_on_a_fixed_grid() {
+    use std::time::{Duration, Instant};
+    let interval = Duration::from_millis(10);
+    let start = Instant::now();
+    // The first frame goes straight out and sets the grid.
+    let (due, next) = next_present(start, None, interval);
+    assert_eq!(due, start);
+    assert_eq!(next, start + interval);
+    // A quick frame waits for its point.
+    let (due, next) = next_present(start + Duration::from_millis(3), Some(next), interval);
+    assert_eq!(due, start + interval);
+    assert_eq!(next, start + 2 * interval);
+    // One a little late goes out at once, and the grid holds.
+    let (due, next) = next_present(start + Duration::from_millis(24), Some(next), interval);
+    assert_eq!(due, start + 2 * interval);
+    assert_eq!(next, start + 3 * interval);
+    // One very late restarts the grid.
+    let late = start + Duration::from_millis(90);
+    let (due, next) = next_present(late, Some(next), interval);
+    assert_eq!(due, late);
+    assert_eq!(next, late + interval);
+    // Waiting lands at the point, not before.
+    let target = Instant::now() + Duration::from_millis(5);
+    wait_until(target);
+    assert!(Instant::now() >= target);
+}

@@ -9,7 +9,7 @@ pub use axcenity_blocks_runtime::*;
 mod from_lua;
 mod lua;
 
-pub use from_lua::{FromLuaError, from_lua};
+pub use from_lua::{FromLuaError, from_lua, refine};
 pub use lua::SyntaxError;
 
 #[cfg(test)]

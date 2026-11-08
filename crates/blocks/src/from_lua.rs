@@ -100,6 +100,52 @@ pub fn from_lua(source: &str) -> Result<BlockScript, FromLuaError> {
     Ok(script)
 }
 
+/// Whether `script` has grey Lua in it: a block or value with no block.
+fn has_grey(script: &BlockScript) -> usize {
+    fn grey_value(value: &Expression, count: &mut usize) {
+        if matches!(value, Expression::Code { .. }) {
+            *count += 1;
+        }
+        for child in value.children() {
+            grey_value(child, count);
+        }
+    }
+    let mut count = 0;
+    script.for_each_block(&mut |block| {
+        if matches!(
+            block.kind,
+            BlockKind::Code { .. } | BlockKind::TopCode { .. }
+        ) {
+            count += 1;
+        }
+        for value in block.kind.expressions() {
+            grey_value(value, &mut count);
+        }
+    });
+    count
+}
+
+/// Blocks with fewer grey Lua blocks that write the same code, if there
+/// are any: for block scripts saved before Luau itself had blocks, which
+/// kept whole scripts as grey Lua. The view and loose value nodes are
+/// kept; node positions aren't, as the blocks are new.
+pub fn refine(script: &BlockScript) -> Option<BlockScript> {
+    let grey = has_grey(script);
+    if grey == 0 {
+        return None;
+    }
+    let source = translate(script).ok()?.source;
+    crate::reserve_block_ids(script);
+    let mut refined = from_lua(&source).ok()?;
+    if has_grey(&refined) >= grey || translate(&refined).ok()?.source != source {
+        return None;
+    }
+    refined.graph.shown = script.graph.shown;
+    refined.graph.loose = script.graph.loose.clone();
+    refined.tabs = script.tabs || refined.tabs;
+    Some(refined)
+}
+
 /// The item name of `Enum.<enum_name>.<item>`, if it's one of `items`.
 fn enum_item(expr: &Expr, enum_name: &str, items: &[&str]) -> Option<String> {
     let ExprKind::Field(of, item) = &expr.kind else {

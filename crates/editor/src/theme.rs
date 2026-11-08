@@ -181,6 +181,10 @@ pub struct Appearance {
     /// Draws continuously while the window has focus, so a variable refresh
     /// rate display never drops out of its rate when the editor goes idle.
     pub hold_refresh: bool,
+    /// While frames are being kept steady, present them on a fixed grid of
+    /// this many a second, so a variable refresh rate display sees one
+    /// rate, not every frame's own length. 0 is the display's own rate.
+    pub steady_hz: u32,
 }
 
 impl Default for Appearance {
@@ -193,6 +197,7 @@ impl Default for Appearance {
             code_font_size: 13.0,
             ui_scale: 1.0,
             hold_refresh: false,
+            steady_hz: 60,
         }
     }
 }
@@ -200,6 +205,16 @@ impl Default for Appearance {
 impl Appearance {
     pub const CODE_FONT_SIZES: std::ops::RangeInclusive<f32> = 10.0..=20.0;
     pub const UI_SCALES: [f32; 5] = [0.9, 1.0, 1.1, 1.25, 1.5];
+    /// The steady frame rates to choose from; 0 is the display's own rate.
+    pub const STEADY_RATES: [u32; 4] = [0, 120, 60, 30];
+
+    pub fn steady_rate_name(hz: u32) -> String {
+        if hz == 0 {
+            "Display's rate".to_owned()
+        } else {
+            format!("{hz} a second")
+        }
+    }
 
     pub fn to_text(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
@@ -213,6 +228,9 @@ impl Appearance {
             .clamp(*Self::CODE_FONT_SIZES.start(), *Self::CODE_FONT_SIZES.end());
         if !Self::UI_SCALES.contains(&appearance.ui_scale) {
             appearance.ui_scale = 1.0;
+        }
+        if !Self::STEADY_RATES.contains(&appearance.steady_hz) {
+            appearance.steady_hz = 60;
         }
         appearance
     }
@@ -1194,6 +1212,7 @@ mod tests {
             code_font_size: 15.0,
             ui_scale: 1.25,
             hold_refresh: true,
+            steady_hz: 30,
         };
         assert_eq!(Appearance::from_text(&appearance.to_text()), appearance);
         assert_eq!(Appearance::from_text("not json"), Appearance::default());
@@ -1201,6 +1220,8 @@ mod tests {
         assert_eq!(odd.code_font_size, 20.0);
         assert_eq!(odd.ui_scale, 1.0);
         assert_eq!(odd.accent, Accent::Blue);
+        let odd = Appearance::from_text(r#"{"steady_hz": 7}"#);
+        assert_eq!(odd.steady_hz, 60);
     }
 
     #[test]

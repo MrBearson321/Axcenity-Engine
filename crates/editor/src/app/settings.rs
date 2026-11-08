@@ -971,12 +971,36 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
     );
     ui.add_space(16.0);
     widgets::section_label(ui, "Display");
+    ui.horizontal(|ui| {
+        ui.label("Steady frame rate");
+        egui::ComboBox::from_id_salt("steady frame rate")
+            .selected_text(Appearance::steady_rate_name(appearance.steady_hz))
+            .show_ui(ui, |ui| {
+                for hz in Appearance::STEADY_RATES {
+                    ui.selectable_value(
+                        &mut appearance.steady_hz,
+                        hz,
+                        Appearance::steady_rate_name(hz),
+                    );
+                }
+            });
+    });
+    ui.label(
+        egui::RichText::new(
+            "While you work, frames are shown at this fixed rate rather than as fast as each \
+             one is ready, so a FreeSync or G-Sync display holds one refresh rate. OLED and \
+             VA monitors flicker when the rate swings; if yours still does, pick a lower rate. \
+             The display's own rate has no limit.",
+        )
+        .color(palette.text_secondary),
+    );
+    ui.add_space(8.0);
     ui.checkbox(&mut appearance.hold_refresh, "Hold the refresh rate steady");
     ui.label(
         egui::RichText::new(
-            "For OLED and VA monitors using FreeSync or G-Sync that flicker while the editor \
-             is in a window. Keeps drawing while the editor has focus instead of stopping \
-             when it's idle, which uses more of the graphics card.",
+            "Keeps drawing at the steady frame rate while the editor has focus instead of \
+             stopping when it's idle, for displays that flicker as the rate drops. It uses \
+             more of the graphics card.",
         )
         .color(palette.text_secondary),
     );

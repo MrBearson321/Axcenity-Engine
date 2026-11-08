@@ -248,12 +248,16 @@ impl EditorApp {
         let block_scripts = project
             .block_scripts
             .into_iter()
-            .map(|file| BlockDocument {
-                instance: file.instance,
-                path: file.path,
-                script: file.script.clone(),
-                saved: file.script,
-                highlighted: None,
+            .map(|file| {
+                // Saved before Luau itself had blocks: give it them now.
+                let script = axcenity_blocks::refine(&file.script).unwrap_or(file.script);
+                BlockDocument {
+                    instance: file.instance,
+                    path: file.path,
+                    script: script.clone(),
+                    saved: script,
+                    highlighted: None,
+                }
             })
             .collect();
         let ui_graphs = ui_graphs::documents(&project.world, project.ui_graphs);
