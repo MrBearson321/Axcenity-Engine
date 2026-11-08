@@ -32,6 +32,7 @@ mod command_palette;
 mod commands;
 mod constraint_tool;
 mod controls_ui;
+mod custom_materials;
 mod data_tables;
 mod dev_console;
 mod dialogues;
@@ -39,6 +40,7 @@ mod edits;
 mod engine;
 mod files;
 mod find_in_scripts;
+mod floating;
 mod game_tests;
 mod input_settings;
 mod levels;
@@ -194,6 +196,15 @@ pub struct EditorApp {
     input_settings: input_settings::InputWindow,
     /// Model ▸ Build ▸ Collision Groups.
     collision_groups: collision_groups::CollisionGroupsWindow,
+    /// Where the main window is, in physical pixels, for dropping a panel
+    /// back onto it.
+    main_window_pixels: Option<egui::Rect>,
+    /// A panel to put back in the main window, from a tab's menu.
+    pending_main_dock: Option<Pane>,
+    /// The editor's icon, for panel windows' title bars and taskbar buttons.
+    window_icon: Option<std::sync::Arc<egui::IconData>>,
+    /// The New Custom Material window's form, while it's open.
+    custom_material: Option<custom_materials::CustomMaterialForm>,
     /// The command palette and Quick Open (Phase 70), Quick Open's rows
     /// while it's showing, Find in Scripts, and an asset's references.
     palette: crate::command_palette::Palette,
@@ -370,6 +381,8 @@ pub struct EditorApp {
     /// Whether the viewport shows the view cube (Test > View, View > View
     /// Cube). On unless turned off; saved between runs.
     view_cube: bool,
+    /// Whether the viewport shows the measuring grid (saved between runs).
+    grid: bool,
     /// View overlay toggles (colliders, raycasts, bounds, emitters, the
     /// navigation mesh). Saved between runs. The player never draws them.
     overlays: OverlayToggles,
@@ -424,6 +437,8 @@ struct DockViewer<'a> {
     /// For script tab titles, which use class colours.
     visuals: egui::Visuals,
     ctx: egui::Context,
+    /// The window these panels are in, unless it's the main one.
+    floating: Option<u64>,
 }
 
 impl egui_dock::TabViewer for DockViewer<'_> {
@@ -477,6 +492,20 @@ impl egui_dock::TabViewer for DockViewer<'_> {
 
     fn is_closeable(&self, pane: &Pane) -> bool {
         *pane != Pane::Scene
+    }
+
+    /// A tab's right-click menu: egui_dock's Float and Close, and a way home.
+    fn context_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        pane: &mut Pane,
+        _surface: egui_dock::SurfaceIndex,
+        _node: egui_dock::NodeIndex,
+    ) {
+        if self.floating.is_some() && ui.button("Dock in Main Window").clicked() {
+            self.app.pending_main_dock = Some(*pane);
+            ui.close();
+        }
     }
 
     /// A script tab stays until the app closes its script, after asking
@@ -548,6 +577,7 @@ const LAYOUT_KEY: &str = "panel layout";
 const RIBBON_TABS_KEY: &str = "ribbon tabs";
 const LIGHT_CONES_KEY: &str = "light cones";
 const VIEW_CUBE_KEY: &str = "view cube";
+const GRID_KEY: &str = "grid";
 const OVERLAY_COLLIDERS_KEY: &str = "overlay colliders";
 const OVERLAY_RAYCASTS_KEY: &str = "overlay raycasts";
 const OVERLAY_BOUNDS_KEY: &str = "overlay bounds";
@@ -676,6 +706,10 @@ impl EditorApp {
             version_history: Default::default(),
             input_settings: Default::default(),
             collision_groups: Default::default(),
+            main_window_pixels: None,
+            pending_main_dock: None,
+            window_icon: None,
+            custom_material: None,
             palette: Default::default(),
             quick_open: Vec::new(),
             find: Default::default(),
@@ -757,6 +791,7 @@ impl EditorApp {
             ribbon_tabs: RibbonTabs::default(),
             light_cones: false,
             view_cube: true,
+            grid: true,
             overlays: OverlayToggles::default(),
             view_mode: ViewMode::Lit,
             nav_mesh: None,
@@ -809,6 +844,7 @@ impl EditorApp {
             }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
+            self.grid = storage.get_string(GRID_KEY).as_deref() != Some("off");
             self.overlays.colliders =
                 storage.get_string(OVERLAY_COLLIDERS_KEY).as_deref() == Some("on");
             self.overlays.raycasts =
@@ -902,6 +938,8 @@ impl eframe::App for EditorApp {
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
         let cube = if self.view_cube { "on" } else { "off" };
         storage.set_string(VIEW_CUBE_KEY, cube.to_owned());
+        let grid = if self.grid { "on" } else { "off" };
+        storage.set_string(GRID_KEY, grid.to_owned());
         let flag = |on| if on { "on" } else { "off" };
         storage.set_string(
             OVERLAY_COLLIDERS_KEY,
@@ -1192,8 +1230,14 @@ impl EditorApp {
             );
             // Taken out while it's drawn, so the panels can borrow the app.
             let mut dock = std::mem::replace(&mut self.layout.dock, DockState::new(Vec::new()));
+            dock.translations.tab_context_menu.eject_button = "Float in New Window".to_owned();
             egui_dock::DockArea::new(&mut dock)
-                .style(layout::style(&ctx.style(), &palette))
+                .id(floating::main_area())
+                .style(layout::style(
+                    &ctx.style(),
+                    &palette,
+                    ctx.pixels_per_point(),
+                ))
                 .show_leaf_collapse_buttons(false)
                 .show_leaf_close_all_buttons(false)
                 .show(
@@ -1204,9 +1248,12 @@ impl EditorApp {
                         viewport: &mut output,
                         visuals: ctx.style().visuals.clone(),
                         ctx: ctx.clone(),
+                        floating: None,
                     },
                 );
             self.layout.dock = dock;
+            self.after_main_dock(ctx);
+            self.floating_windows(ctx, render_state, &palette);
             if let Some(command) = self.pending_command.take() {
                 self.run_console_command(&command);
                 // The panels were drawn before it ran.
@@ -1342,6 +1389,7 @@ impl EditorApp {
         }
         self.input_window(ctx);
         self.collision_groups_window(ctx);
+        self.custom_material_window(ctx);
         self.references_window(ctx);
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);

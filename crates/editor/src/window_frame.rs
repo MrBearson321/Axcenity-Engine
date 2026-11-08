@@ -187,7 +187,7 @@ pub fn edges(ctx: &egui::Context) {
     ui.painter().rect_stroke(
         screen,
         0,
-        Stroke::new(1.0_f32, palette.border),
+        Stroke::new(ctx.pixels_per_point().max(1.0).recip(), palette.border),
         StrokeKind::Inside,
     );
 

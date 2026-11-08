@@ -50,6 +50,7 @@ mod prefab_menu;
 mod profiler;
 mod properties;
 mod props;
+mod prototype;
 mod rebuild;
 mod relaunch;
 mod responsive;
@@ -170,6 +171,7 @@ fn main() -> eframe::Result {
             let ctx = &creation_context.egui_ctx;
             theme::install(ctx);
             let mut app = EditorApp::new(None);
+            app.set_window_icon(window_icon());
             app.load_settings(ctx, creation_context.storage);
             app.set_global_assets(global_assets::default_folder());
             app.set_plugin_data(plugins::default_folder());

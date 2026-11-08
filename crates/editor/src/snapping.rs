@@ -17,6 +17,8 @@ use axcenity_render::glam::Vec3;
 
 use crate::gizmo::Pose;
 
+pub mod points;
+
 /// How deep two boxes must go into each other to count as overlapping, in
 /// studs: parts left exactly flush, give or take rounding, don't.
 pub const PENETRATION: f32 = 0.01;

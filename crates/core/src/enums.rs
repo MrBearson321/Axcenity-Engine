@@ -51,6 +51,26 @@ impl PartType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Material {
     Plastic,
+    /// Plastic with a polished, glossier finish.
+    SmoothPlastic,
+    /// Light, with a lengthwise grain.
+    Wood,
+    /// Boards laid side by side, with seams between them.
+    WoodPlanks,
+    /// Polished stone with dark veins.
+    Marble,
+    /// Speckled, heavy stone.
+    Granite,
+    /// Rough grey blocks with pits in them.
+    Concrete,
+    /// Rough stone split into layers.
+    Slate,
+    /// Courses of bricks and mortar.
+    Brick,
+    /// A soft woven cloth that barely bounces.
+    Fabric,
+    /// Fine grains in soft ripples.
+    Sand,
     /// Dense.
     Metal,
     /// See-through.
@@ -78,8 +98,18 @@ pub struct MaterialPreset {
 }
 
 impl Material {
-    pub const ALL: [Material; 6] = [
+    pub const ALL: [Material; 16] = [
         Material::Plastic,
+        Material::SmoothPlastic,
+        Material::Wood,
+        Material::WoodPlanks,
+        Material::Marble,
+        Material::Granite,
+        Material::Concrete,
+        Material::Slate,
+        Material::Brick,
+        Material::Fabric,
+        Material::Sand,
         Material::Metal,
         Material::Glass,
         Material::Neon,
@@ -90,6 +120,16 @@ impl Material {
     pub fn as_str(self) -> &'static str {
         match self {
             Material::Plastic => "Plastic",
+            Material::SmoothPlastic => "SmoothPlastic",
+            Material::Wood => "Wood",
+            Material::WoodPlanks => "WoodPlanks",
+            Material::Marble => "Marble",
+            Material::Granite => "Granite",
+            Material::Concrete => "Concrete",
+            Material::Slate => "Slate",
+            Material::Brick => "Brick",
+            Material::Fabric => "Fabric",
+            Material::Sand => "Sand",
             Material::Metal => "Metal",
             Material::Glass => "Glass",
             Material::Neon => "Neon",
@@ -109,9 +149,17 @@ impl Material {
             opacity: 1.0,
             glows: false,
         };
+        let rough = |roughness| MaterialPreset { roughness, ..solid };
         // `..solid` copies every field not listed from `solid`.
         match self {
             Material::Plastic => solid,
+            Material::SmoothPlastic => rough(0.2),
+            Material::Wood | Material::WoodPlanks => rough(0.75),
+            Material::Marble => rough(0.25),
+            Material::Granite => rough(0.55),
+            Material::Concrete | Material::Brick => rough(0.95),
+            Material::Slate => rough(0.85),
+            Material::Fabric | Material::Sand => rough(1.0),
             Material::Metal => MaterialPreset {
                 metalness: 1.0,
                 roughness: 0.3,
@@ -146,6 +194,18 @@ impl Material {
     pub fn physical(self) -> PhysicalProperties {
         match self {
             Material::Plastic | Material::Glass | Material::Neon => PhysicalProperties::LEGACY,
+            Material::SmoothPlastic => PhysicalProperties::new(0.7, 0.2, 0.5, 1.0, 1.0),
+            Material::Wood | Material::WoodPlanks => {
+                PhysicalProperties::new(0.35, 0.48, 0.2, 1.0, 1.0)
+            }
+            Material::Marble => PhysicalProperties::new(2.56, 0.2, 0.17, 1.0, 1.0),
+            Material::Granite | Material::Slate => {
+                PhysicalProperties::new(2.69, 0.4, 0.2, 1.0, 1.0)
+            }
+            Material::Concrete => PhysicalProperties::new(2.4, 0.7, 0.2, 1.0, 1.0),
+            Material::Brick => PhysicalProperties::new(1.92, 0.8, 0.15, 1.0, 1.0),
+            Material::Fabric => PhysicalProperties::new(0.7, 0.35, 0.05, 1.0, 1.0),
+            Material::Sand => PhysicalProperties::new(1.6, 0.5, 0.05, 1.0, 1.0),
             Material::Metal => PhysicalProperties::new(7.85, 0.4, 0.25, 1.0, 1.0),
             // The heavier weight makes ice slippery against anything.
             Material::Ice => PhysicalProperties::new(0.92, 0.02, 0.15, 3.0, 1.0),

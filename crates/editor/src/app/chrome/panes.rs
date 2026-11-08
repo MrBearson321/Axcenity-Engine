@@ -929,6 +929,7 @@ impl EditorApp {
                             console: std::mem::take(&mut console),
                             light_cones: self.light_cones,
                             view_cube: self.view_cube,
+                            grid: self.grid,
                             overlays: self.overlays,
                             view_mode: self.view_mode,
                             playing: self.play.is_some(),

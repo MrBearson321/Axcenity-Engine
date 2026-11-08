@@ -548,8 +548,9 @@ fn visuals(p: &Palette) -> egui::Visuals {
     } else {
         shadow(6, 18, 24)
     };
-    v.window_corner_radius = CornerRadius::same(10);
-    v.menu_corner_radius = CornerRadius::same(8);
+    // Panels, windows and menus are square and flat.
+    v.window_corner_radius = CornerRadius::ZERO;
+    v.menu_corner_radius = CornerRadius::ZERO;
     v.collapsing_header_frame = false;
     v.indent_has_left_vline = false;
     v.striped = false;

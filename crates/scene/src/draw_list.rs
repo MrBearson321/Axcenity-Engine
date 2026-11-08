@@ -558,6 +558,7 @@ pub fn build_draw_list_posed(
         reflection_probes,
         light_probe_volumes,
         time: 0.0,
+        grid: None,
     }
 }
 
@@ -786,10 +787,7 @@ fn part_draw_item(
     let number = |name| instance.property(name).and_then(Value::as_number);
     let (shape, transform) = part_placement(instance)?;
     let color = instance.property("Color").and_then(Value::as_color3)?;
-    let preset = instance
-        .property("Material")
-        .and_then(Value::as_material)?
-        .preset();
+    let kind = instance.property("Material").and_then(Value::as_material)?;
     let appearance = instance.children().iter().find_map(|&id| {
         let child = world.get(id)?;
         (child.class() == ClassName::SurfaceAppearance).then_some(child)
@@ -816,7 +814,7 @@ fn part_draw_item(
             material.opacity *= visibility(instance);
             material
         }
-        (appearance, _) => preset_material(instance, appearance, assets, preset, color, glow)?,
+        (appearance, _) => preset_material(instance, appearance, assets, kind, color, glow)?,
     };
     let mut material = material;
     if negated {
@@ -861,11 +859,12 @@ fn preset_material(
     instance: &Instance,
     appearance: Option<&Instance>,
     assets: &Assets,
-    preset: axcenity_core::MaterialPreset,
+    kind: axcenity_core::Material,
     color: [f32; 3],
     glow: f32,
 ) -> Option<Material> {
     let number = |name| instance.property(name).and_then(Value::as_number);
+    let preset = kind.preset();
     let opacity = preset.opacity * visibility(instance);
     if opacity <= 0.0 {
         return None;
@@ -895,8 +894,13 @@ fn preset_material(
         opacity,
         ..Material::default()
     };
-    if let Some(appearance) = appearance {
-        overlay_appearance(&mut material, appearance, assets);
+    match appearance {
+        Some(appearance) => overlay_appearance(&mut material, appearance, assets),
+        None => {
+            if let Some(surface) = crate::surfaces::of(kind) {
+                surface.apply(&mut material);
+            }
+        }
     }
     Some(material)
 }

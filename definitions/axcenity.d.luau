@@ -642,6 +642,16 @@ end
 --- The choices of `Enum.Material`.
 declare extern type EnumMaterialItems with
 	Plastic: EnumMaterial
+	SmoothPlastic: EnumMaterial
+	Wood: EnumMaterial
+	WoodPlanks: EnumMaterial
+	Marble: EnumMaterial
+	Granite: EnumMaterial
+	Concrete: EnumMaterial
+	Slate: EnumMaterial
+	Brick: EnumMaterial
+	Fabric: EnumMaterial
+	Sand: EnumMaterial
 	Metal: EnumMaterial
 	Glass: EnumMaterial
 	Neon: EnumMaterial
@@ -1532,7 +1542,7 @@ declare extern type Part extends Instance with
 	--- The part's color.
 	Color: Color3
 	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
-	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
 	--- From 0 (not metal) to 1 (metal).
@@ -1793,7 +1803,7 @@ declare extern type NegateOperation extends Instance with
 	--- The part's color.
 	Color: Color3
 	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
-	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
 	--- From 0 (not metal) to 1 (metal).
@@ -1888,7 +1898,7 @@ declare extern type Seat extends Instance with
 	--- The part's color.
 	Color: Color3
 	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
-	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
 	--- From 0 (not metal) to 1 (metal).
@@ -1991,7 +2001,7 @@ declare extern type VehicleSeat extends Instance with
 	--- The part's color.
 	Color: Color3
 	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
-	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
 	--- From 0 (not metal) to 1 (metal).
@@ -2108,7 +2118,7 @@ declare extern type DamageZone extends Instance with
 	--- The part's color.
 	Color: Color3
 	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
-	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
 	--- From 0 (not metal) to 1 (metal).
@@ -2205,7 +2215,7 @@ declare extern type ReverbZone extends Instance with
 	--- The part's color.
 	Color: Color3
 	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
-	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
 	--- From 0 (not metal) to 1 (metal).
@@ -2304,7 +2314,7 @@ declare extern type SpawnLocation extends Instance with
 	--- The part's color.
 	Color: Color3
 	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
-	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
 	--- From 0 (not metal) to 1 (metal).
@@ -3624,7 +3634,7 @@ declare extern type GraphicsVolume extends Instance with
 	--- The part's color.
 	Color: Color3
 	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
-	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	Material: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
 	--- From 0 (not metal) to 1 (metal).
@@ -4389,7 +4399,7 @@ declare extern type Fracture extends Instance with
 	--- `Enum.FracturePattern.Uniform` makes pieces of about one size; `Impact` makes more, smaller pieces toward the part's middle, as where something struck it.
 	Pattern: EnumFracturePattern | "Uniform" | "Impact"
 	--- What the faces the cuts make inside the part look like, in the part's color.
-	InteriorMaterial: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	InteriorMaterial: EnumMaterial | "Plastic" | "SmoothPlastic" | "Wood" | "WoodPlanks" | "Marble" | "Granite" | "Concrete" | "Slate" | "Brick" | "Fabric" | "Sand" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- How fast, in studs a second, something must hit the part (the two closing at the point they touch) to shatter it. 0 or less: only `Shatter` breaks it.
 	Threshold: number
 	--- Seconds the pieces last once the part shatters. They fade out over the last second and are destroyed. 0 keeps them.

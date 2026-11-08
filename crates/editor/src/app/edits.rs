@@ -324,6 +324,13 @@ impl EditorApp {
         let parts = self.tool_parts();
         match action {
             ToolAction::Set { property, value } => self.set_on_parts(&parts, property, value),
+            ToolAction::UseBuiltIn(material) => self.use_built_in_material(&parts, material),
+            ToolAction::UsePrototype { palette, number } => {
+                self.use_prototype(parts, palette, number);
+            }
+            ToolAction::UseMaterial { path, name } => self.use_material(&path, &name, parts),
+            ToolAction::NewCustomMaterial => self.custom_material = Some(Default::default()),
+            ToolAction::LoadMaterial => self.load_material_dialog(parts),
             ToolAction::AddLight(class) => self.add_lights(&parts, class),
             ToolAction::RemoveLights(class) => {
                 let lights = build_tools::lights_in(&self.world, &parts, class);
@@ -573,9 +580,20 @@ impl EditorApp {
             return;
         }
         let parts = self.tool_parts();
+        let materials: Vec<String> = if self.tool == Tool::Material {
+            self.asset_browser
+                .entries()
+                .into_iter()
+                .filter(|entry| entry.kind == crate::asset_browser::AssetKind::Material)
+                .map(|entry| entry.path)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let scene = PanelScene {
             world: &self.world,
             parts: &parts,
+            materials: &materials,
         };
         let (tool, settings, modes, snap) =
             (self.tool, &mut self.build, &mut self.modes, &mut self.snap);
@@ -584,7 +602,7 @@ impl EditorApp {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style())
-                    .corner_radius(8)
+                    .corner_radius(0)
                     .inner_margin(egui::Margin::same(10))
                     .show(ui, |ui| {
                         ui.set_max_width(260.0);

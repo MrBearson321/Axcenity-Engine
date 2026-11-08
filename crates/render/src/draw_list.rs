@@ -77,6 +77,29 @@ pub struct DrawList {
     /// and the editor count from when they started), as an `f32` loses
     /// precision as it grows.
     pub time: f32,
+    /// The editor's measuring grid. `None` draws none, and costs nothing;
+    /// a built game never has one.
+    pub grid: Option<GridPlane>,
+}
+
+/// A flat rectangle of evenly spaced lines, hidden by what stands in front
+/// of it: the editor's measuring grid.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GridPlane {
+    /// The Y of the rectangle.
+    pub height: f32,
+    /// Its smallest X and Z.
+    pub min: [f32; 2],
+    /// Its largest X and Z.
+    pub max: [f32; 2],
+    /// Studs between lines.
+    pub spacing: f32,
+    /// How many lines to each heavier line.
+    pub major_every: f32,
+    /// How far from the camera the lines have faded out; 0 never.
+    pub fade_distance: f32,
+    /// The lines' linear color.
+    pub color: [f32; 3],
 }
 
 /// A box of the world lit by a grid of probes baked inside it, in place of

@@ -302,6 +302,7 @@ mod tests {
         surfaces: false,
         collisions: false,
         join: false,
+        points: false,
     };
 
     #[test]

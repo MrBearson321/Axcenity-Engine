@@ -72,6 +72,19 @@ pub struct BuildSettings {
     /// The Paint tool's color.
     pub paint_color: Color3,
     pub angular: AngularSettings,
+    /// Which of the Material tool's sections is showing.
+    pub material_section: MaterialSection,
+    /// Which color family of prototype textures is showing.
+    pub prototype_palette: usize,
+}
+
+/// The Material tool's sections.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MaterialSection {
+    #[default]
+    BuiltIn,
+    Prototype,
+    Custom,
 }
 
 impl Default for BuildSettings {
@@ -79,6 +92,8 @@ impl Default for BuildSettings {
         Self {
             paint_color: Color3::new(0.64, 0.64, 0.64),
             angular: AngularSettings::default(),
+            material_section: MaterialSection::default(),
+            prototype_palette: 0,
         }
     }
 }
@@ -109,6 +124,16 @@ pub enum ToolAction {
     Burst,
     /// Move every selected part by this much (the Transform panel's Position).
     MoveBy(Vector3),
+    /// Draw the parts in a built-in material, leaving any material file.
+    UseBuiltIn(Material),
+    /// Draw the parts in a prototype texture (see `prototype.rs`).
+    UsePrototype { palette: usize, number: usize },
+    /// Draw the parts in the project's material file at `path`.
+    UseMaterial { path: String, name: String },
+    /// Open the New Custom Material window.
+    NewCustomMaterial,
+    /// Bring in a material file from anywhere on the computer.
+    LoadMaterial,
 }
 
 /// What the panel shows: the world and the parts the tools act on.
@@ -116,6 +141,8 @@ pub struct PanelScene<'a> {
     pub world: &'a World,
     /// The parts, with the last selected one last.
     pub parts: &'a [InstanceId],
+    /// The project's material files' paths.
+    pub materials: &'a [String],
 }
 
 impl PanelScene<'_> {
@@ -219,7 +246,7 @@ pub fn panel(
             turn_step(ui, snap);
         }
         Tool::Paint => paint(ui, scene, settings, &mut actions),
-        Tool::Material => material(ui, scene, &mut actions),
+        Tool::Material => material(ui, scene, settings, &mut actions),
         Tool::Anchor => switch(
             ui,
             scene,
@@ -569,35 +596,186 @@ fn paint(
     ui.weak("Click a part to paint it.");
 }
 
-fn material(ui: &mut egui::Ui, scene: &PanelScene, actions: &mut Vec<ToolAction>) {
+/// A material's name for people: `SmoothPlastic` as "Smooth Plastic".
+fn material_label(material: Material) -> String {
+    let mut label = String::new();
+    for (i, letter) in material.as_str().char_indices() {
+        if i > 0 && letter.is_uppercase() {
+            label.push(' ');
+        }
+        label.push(letter);
+    }
+    label
+}
+
+/// How many thumbnails fit across the tool's panel.
+const PROTOTYPE_COLUMNS: usize = 5;
+const PROTOTYPE_TILE: f32 = 40.0;
+
+fn built_in_materials(
+    ui: &mut egui::Ui,
+    current: Option<Material>,
+    variant: &str,
+    actions: &mut Vec<ToolAction>,
+) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+        for material in Material::ALL {
+            // A material file hides the built-in material under it.
+            let picked = variant.is_empty() && current == Some(material);
+            if ui
+                .selectable_label(picked, material_label(material))
+                .clicked()
+            {
+                actions.push(ToolAction::UseBuiltIn(material));
+            }
+        }
+    });
+}
+
+fn prototype_materials(
+    ui: &mut egui::Ui,
+    settings: &mut BuildSettings,
+    variant: &str,
+    actions: &mut Vec<ToolAction>,
+) {
+    use crate::prototype;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+        for (i, name) in prototype::PALETTES.iter().enumerate() {
+            if ui
+                .selectable_label(settings.prototype_palette == i, *name)
+                .clicked()
+            {
+                settings.prototype_palette = i;
+            }
+        }
+    });
+    let palette = settings.prototype_palette;
+    let mut budget = 1;
+    egui::Grid::new("prototype textures")
+        .spacing([4.0, 4.0])
+        .show(ui, |ui| {
+            ui.spacing_mut().button_padding = egui::Vec2::splat(2.0);
+            for number in 1..=prototype::COUNT {
+                let picked = variant == prototype::material_path(palette, number);
+                let thumbnail = prototype::thumbnail(ui.ctx(), palette, number, &mut budget);
+                let size = egui::Vec2::splat(PROTOTYPE_TILE);
+                let response = match thumbnail {
+                    Some(id) => ui.add(
+                        egui::Button::image(egui::Image::new((id, size)))
+                            .selected(picked)
+                            .corner_radius(0),
+                    ),
+                    None => ui.add_sized(size, egui::Button::new(number.to_string())),
+                };
+                if response
+                    .on_hover_text(prototype::name(palette, number))
+                    .clicked()
+                {
+                    actions.push(ToolAction::UsePrototype { palette, number });
+                }
+                if number % PROTOTYPE_COLUMNS == 0 {
+                    ui.end_row();
+                }
+            }
+        });
+    ui.weak("Kenney's prototype textures (CC0).");
+}
+
+fn custom_materials(
+    ui: &mut egui::Ui,
+    scene: &PanelScene,
+    variant: &str,
+    actions: &mut Vec<ToolAction>,
+) {
+    ui.horizontal(|ui| {
+        if ui
+            .button("New…")
+            .on_hover_text("Make a material from albedo, normal and roughness images.")
+            .clicked()
+        {
+            actions.push(ToolAction::NewCustomMaterial);
+        }
+        if ui
+            .button("Load…")
+            .on_hover_text("Bring in a material file from anywhere on this computer.")
+            .clicked()
+        {
+            actions.push(ToolAction::LoadMaterial);
+        }
+    });
+    let customs = || {
+        scene
+            .materials
+            .iter()
+            .filter(|path| !path.contains("/prototype/"))
+    };
+    if customs().next().is_none() {
+        ui.weak("This project has no custom materials yet.");
+        return;
+    }
+    egui::ScrollArea::vertical()
+        .id_salt("custom materials")
+        .max_height(160.0)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            for path in customs() {
+                let name = crate::asset_browser::display_name(path);
+                if ui
+                    .selectable_label(path == variant, &name)
+                    .on_hover_text(path)
+                    .clicked()
+                {
+                    actions.push(ToolAction::UseMaterial {
+                        path: path.clone(),
+                        name,
+                    });
+                }
+            }
+        });
+}
+
+fn material(
+    ui: &mut egui::Ui,
+    scene: &PanelScene,
+    settings: &mut BuildSettings,
+    actions: &mut Vec<ToolAction>,
+) {
     if !needs_parts(ui, scene) {
         return;
     }
-    let current = scene
-        .last()
+    let last = scene.last();
+    let current = last
         .and_then(|part| part.property("Material"))
         .and_then(Value::as_material);
+    let variant = last
+        .and_then(|part| part.property("MaterialVariant"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    if current.is_some() {
+        ui.horizontal(|ui| {
+            for (section, name) in [
+                (MaterialSection::BuiltIn, "Built-in"),
+                (MaterialSection::Prototype, "Prototype"),
+                (MaterialSection::Custom, "Custom"),
+            ] {
+                ui.selectable_value(&mut settings.material_section, section, name);
+            }
+        });
+        ui.separator();
+        match settings.material_section {
+            MaterialSection::BuiltIn => built_in_materials(ui, current, &variant, actions),
+            MaterialSection::Prototype => prototype_materials(ui, settings, &variant, actions),
+            MaterialSection::Custom => custom_materials(ui, scene, &variant, actions),
+        }
+        ui.separator();
+    }
     egui::Grid::new("material tool")
         .num_columns(2)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
-            if current.is_some() {
-                ui.label("Material");
-                ui.horizontal(|ui| {
-                    for material in Material::ALL {
-                        if ui
-                            .selectable_label(current == Some(material), material.as_str())
-                            .clicked()
-                        {
-                            actions.push(ToolAction::Set {
-                                property: "Material",
-                                value: Value::Material(material),
-                            });
-                        }
-                    }
-                });
-                ui.end_row();
-            }
             for (property, label) in [
                 ("Transparency", "Transparency"),
                 ("Metalness", "Metalness"),
@@ -983,6 +1161,77 @@ mod tests {
     }
 
     #[test]
+    fn the_material_tool_lists_built_in_prototype_and_custom_materials_and_fits_its_panel() {
+        let mut world = World::new();
+        let part = world.create(ClassName::Part).unwrap();
+        let workspace = world.workspace();
+        world.set_parent(part, Some(workspace)).unwrap();
+        let materials = [
+            "assets/materials/Bricks.material.json".to_owned(),
+            "assets/materials/prototype/Dark 01.material.json".to_owned(),
+        ];
+        let draw = |ctx: &egui::Context, section| {
+            let mut settings = BuildSettings {
+                material_section: section,
+                ..Default::default()
+            };
+            let (mut modes, mut snap) = (Modes::default(), Snap::default());
+            egui::Area::new(egui::Id::new("panel"))
+                .fixed_pos(egui::pos2(10.0, 10.0))
+                .show(ctx, |ui| {
+                    ui.set_max_width(260.0);
+                    let scene = PanelScene {
+                        world: &world,
+                        parts: &[part],
+                        materials: &materials,
+                    };
+                    panel(
+                        ui,
+                        Tool::Material,
+                        &scene,
+                        &mut settings,
+                        &mut modes,
+                        &mut snap,
+                    );
+                })
+                .response
+                .rect
+        };
+        let ctx = crate::theme::test_context();
+        for section in [
+            MaterialSection::BuiltIn,
+            MaterialSection::Prototype,
+            MaterialSection::Custom,
+        ] {
+            let mut width = 0.0;
+            for _ in 0..3 {
+                let _ = ctx.run(Default::default(), |ctx| {
+                    width = draw(ctx, section).width();
+                });
+            }
+            assert!(width <= 262.0, "{section:?} is {width} wide");
+        }
+        if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            for (section, name) in [
+                (MaterialSection::BuiltIn, "built-in"),
+                (MaterialSection::Prototype, "prototype"),
+                (MaterialSection::Custom, "custom"),
+            ] {
+                let path =
+                    std::path::PathBuf::from(&snapshots).join(format!("material-tool-{name}.png"));
+                crate::snapshot::snapshot(
+                    &path,
+                    egui::vec2(300.0, 420.0),
+                    vec![Vec::new(); 20],
+                    |ctx| {
+                        draw(ctx, section);
+                    },
+                );
+            }
+        }
+    }
+
+    #[test]
     fn every_tool_panel_draws() {
         let mut world = World::new();
         let part = world.create(ClassName::Part).unwrap();
@@ -999,6 +1248,7 @@ mod tests {
                     let scene = PanelScene {
                         world: &world,
                         parts: &[part],
+                        materials: &[],
                     };
                     let actions = panel(ui, tool, &scene, &mut settings, &mut modes, &mut snap);
                     assert!(actions.is_empty());

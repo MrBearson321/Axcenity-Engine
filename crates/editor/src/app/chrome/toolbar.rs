@@ -225,6 +225,14 @@ impl EditorApp {
                              faces of parts near them.",
                         );
                         ui.checkbox(
+                            &mut snap.points,
+                            theme::with_icon(icons::CROSSHAIR, "Snap Points"),
+                        )
+                        .on_hover_text(
+                            "Show markers on the parts around a move, and click its corners, \
+                             edge and face middles and Attachments to theirs.",
+                        );
+                        ui.checkbox(
                             &mut snap.join,
                             theme::with_icon(icons::LINK_SIMPLE, "Join Surfaces"),
                         )
@@ -656,6 +664,17 @@ impl EditorApp {
                     .clicked()
                 {
                     self.view_cube = !self.view_cube;
+                }
+                let grid = RibbonButton::new(icons::GRID_NINE, "Grid").selected(self.grid);
+                if ui
+                    .add(grid)
+                    .on_hover_text(
+                        "Show or hide the measuring grid on the baseplate, with its distances \
+                         in studs.",
+                    )
+                    .clicked()
+                {
+                    self.grid = !self.grid;
                 }
                 let any = self.overlays.any() || self.light_cones;
                 let button = RibbonButton::new(icons::STACK_SIMPLE, "Overlays")

@@ -37,6 +37,7 @@ const NO_SNAP: Snap = Snap {
     surfaces: false,
     collisions: false,
     join: false,
+    points: false,
 };
 
 fn assert_near(a: Vec3, b: Vec3) {
@@ -759,4 +760,80 @@ fn with_collisions_a_turn_stops_where_it_meets_a_solid_part() {
         &snap,
     );
     assert_eq!(z(more.unwrap()), stopped);
+}
+
+#[test]
+fn with_snap_points_a_move_clicks_to_a_corner_near_it_and_reports_how_far_it_came() {
+    let mut world = World::new();
+    let part = world.create(axcenity_core::ClassName::Part).unwrap();
+    let start = Pose {
+        position: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
+        size: Vec3::splat(2.0),
+    };
+    let other = Obb {
+        center: Vec3::new(10.0, 0.0, 0.0),
+        axes: [Vec3::X, Vec3::Y, Vec3::Z],
+        half: Vec3::ONE,
+    };
+    let obstacles = vec![Obstacle {
+        id: world.create(axcenity_core::ClassName::Part).unwrap(),
+        obb: other,
+        solid: true,
+        visible: true,
+    }];
+    let ray = |x: f32| Ray {
+        origin: Vec3::new(x, 0.0, 20.0),
+        direction: Vec3::NEG_Z,
+    };
+    let mut drag = Drag::start(Handle::Move(Axis::X), part, start, ray(0.0))
+        .unwrap()
+        .among(obstacles, 0.5);
+    let snap = Snap {
+        points: true,
+        ..NO_SNAP
+    };
+
+    // The part's right face is 1 stud out, so 7.8 leaves it 0.2 from the
+    // other's left face middle at x = 9.
+    let parts = drag.update_all(ray(7.8).into(), &snap).unwrap();
+    let Value::Vector3(at) = &parts[0].1[0].1 else {
+        panic!("a position");
+    };
+    assert!(
+        (at.x - 8.0).abs() < 0.001,
+        "it clicked to x = 8, was {}",
+        at.x
+    );
+    let report = drag.report().unwrap();
+    assert!(report.link.is_some());
+    assert!((report.distance() - 8.0).abs() < 0.001);
+    assert_eq!(report.start, Vec3::ZERO);
+    assert!(!report.targets.is_empty());
+
+    // Too far from any point to click, it goes where the mouse is.
+    drag.update_all(ray(3.3).into(), &snap).unwrap();
+    let report = drag.report().unwrap();
+    assert!(report.link.is_none());
+    assert!((report.distance() - 3.3).abs() < 0.001);
+}
+
+#[test]
+fn with_snap_points_off_a_move_still_reports_its_distance_but_shows_no_markers() {
+    let mut world = World::new();
+    let part = world.create(axcenity_core::ClassName::Part).unwrap();
+    let start = Pose {
+        position: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
+        size: Vec3::splat(2.0),
+    };
+    let ray = |x: f32| Ray {
+        origin: Vec3::new(x, 0.0, 20.0),
+        direction: Vec3::NEG_Z,
+    };
+    let mut drag = Drag::start(Handle::Move(Axis::X), part, start, ray(0.0)).unwrap();
+    drag.update_all(ray(4.0).into(), &NO_SNAP).unwrap();
+    let report = drag.report().unwrap();
+    assert!((report.distance() - 4.0).abs() < 0.001);
+    assert!(report.targets.is_empty());
 }

@@ -34,6 +34,7 @@ mod preload;
 #[cfg(test)]
 mod reload_tests;
 mod streaming;
+mod surfaces;
 mod terrain;
 mod time_of_day;
 mod weather;

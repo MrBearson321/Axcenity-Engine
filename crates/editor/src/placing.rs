@@ -22,10 +22,13 @@ use axcenity_render::glam::Vec3;
 use axcenity_scene::Ray;
 
 use crate::gizmo::{Pose, Snap};
+use crate::snapping::points::{self, Freedom, MoveReport, Sites};
 use crate::snapping::{self, Obb, Obstacle};
 
 /// How close a surface's facing must be to an axis to count as flat or
 /// upright for snapping (about 2.5°).
+/// How far around a move markers show, as a multiple of the snap reach.
+const MARKER_REACH: f32 = 5.0;
 const AXIS_ALIGNED: f32 = 0.999;
 
 /// A part being dragged by its body.
@@ -44,6 +47,10 @@ pub struct PlaceDrag {
     pub reach: f32,
     /// Where it last fit, with Collisions on.
     last_free: Option<Vec3>,
+    /// The Attachments it can click to.
+    pub sites: Box<Sites>,
+    /// How far it has come and what it can click to, for drawing.
+    pub report: Option<Box<MoveReport>>,
 }
 
 impl PlaceDrag {
@@ -59,6 +66,8 @@ impl PlaceDrag {
             obstacles: Vec::new(),
             reach: 0.0,
             last_free: None,
+            sites: Box::default(),
+            report: None,
         })
     }
 
@@ -96,6 +105,20 @@ impl PlaceDrag {
                 }
             }
         }
+        let mut link = None;
+        if snap.points
+            && let Some(pose) = pose
+        {
+            let by = position - self.start;
+            let at = [Obb::of(Pose { position, ..pose })];
+            let own = points::own_points(&at, &self.sites.own, by);
+            let around = points::nearby(&at, &self.obstacles, &self.sites.others, self.reach);
+            if let Some(found) = points::nearest(&own, &around, Freedom::Across(normal), self.reach)
+            {
+                position += found.shift;
+                link = Some(found.to);
+            }
+        }
         if snap.collisions
             && let Some(pose) = pose
         {
@@ -106,13 +129,36 @@ impl PlaceDrag {
             let to = Obb::of(Pose { position, ..pose });
             if snapping::collides(&[from], &[to], &self.obstacles) {
                 position = self.last_free?;
+                link = None;
             } else {
                 self.last_free = Some(position);
             }
         }
+        self.note_move(position, pose, link, snap);
         Some(Value::Vector3(Vector3::new(
             position.x, position.y, position.z,
         )))
+    }
+}
+
+impl PlaceDrag {
+    /// Notes how far it's come, with the markers to show.
+    fn note_move(&mut self, position: Vec3, pose: Option<Pose>, link: Option<Vec3>, snap: &Snap) {
+        let at = pose.map(|pose| Obb::of(Pose { position, ..pose }));
+        let targets = match at.filter(|_| snap.points) {
+            Some(at) => {
+                let radius = self.reach * MARKER_REACH;
+                points::nearby(&[at], &self.obstacles, &self.sites.others, radius)
+            }
+            None => Vec::new(),
+        };
+        self.report = Some(Box::new(MoveReport::new(
+            self.start,
+            position - self.start,
+            at.as_ref(),
+            targets,
+            link,
+        )));
     }
 }
 
@@ -185,7 +231,50 @@ mod tests {
         surfaces: false,
         collisions: false,
         join: false,
+        points: false,
     };
+
+    #[test]
+    fn with_snap_points_a_body_drag_clicks_a_corner_to_a_nearby_corner_and_stays_on_the_floor() {
+        let (mut world, block) = scene();
+        let post = part(
+            &mut world,
+            Vec3::new(10.0, 2.0, 10.0),
+            Vec3::new(4.0, 4.0, 4.0),
+        );
+        let grabbed = Vec3::new(0.0, 0.0, 0.0);
+        let mut drag = PlaceDrag::start(&world, block, grabbed).unwrap();
+        drag.obstacles = snapping::obstacles(&world, &[block]);
+        drag.reach = 0.5;
+        let snap = Snap {
+            points: true,
+            ..NO_SNAP
+        };
+        let size = world
+            .get(block)
+            .unwrap()
+            .property("Size")
+            .unwrap()
+            .as_vector3()
+            .unwrap();
+        // Near where the block's corner meets the post's corner at (8, 8).
+        let (x, z) = (8.0 - size.x / 2.0 + 0.2, 8.0 - size.z / 2.0 - 0.1);
+        let value = drag.update(&world, straight_down(x, z), &snap);
+        let at = value.unwrap().as_vector3().unwrap();
+        assert!((at.x - (8.0 - size.x / 2.0)).abs() < 0.001, "x {}", at.x);
+        assert!((at.z - (8.0 - size.z / 2.0)).abs() < 0.001, "z {}", at.z);
+        assert!((at.y - size.y / 2.0).abs() < 0.001, "still on the floor");
+        let report = drag.report.as_ref().unwrap();
+        assert!(report.link.is_some());
+        assert!(
+            report
+                .targets
+                .iter()
+                .any(|p| p.at == Vec3::new(8.0, 0.0, 8.0))
+        );
+        assert!(report.distance() > 1.0);
+        let _ = post;
+    }
 
     fn assert_at(value: Option<Value>, expected: Vec3) {
         let v = value

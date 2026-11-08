@@ -589,11 +589,11 @@ fn enum_values_are_read_by_name() {
 fn unknown_enum_item_lists_the_choices() {
     let message = parse_err(
         r#"{ "format_version": 1, "workspace": { "children": [
-                { "class": "Part", "properties": { "Material": "Wood" } } ] } }"#,
+                { "class": "Part", "properties": { "Material": "Cardboard" } } ] } }"#,
     );
     assert_eq!(
         message,
-        r#"Workspace.Part.Material: expected one of: "Plastic", "Metal", "Glass", "Neon", "Ice", "Rubber""#
+        r#"Workspace.Part.Material: expected one of: "Plastic", "SmoothPlastic", "Wood", "WoodPlanks", "Marble", "Granite", "Concrete", "Slate", "Brick", "Fabric", "Sand", "Metal", "Glass", "Neon", "Ice", "Rubber""#
     );
 }
 

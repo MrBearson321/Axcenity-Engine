@@ -18,6 +18,7 @@ mod environment_maps;
 mod fog;
 mod frustum_culling;
 mod gpu_particles;
+mod grid;
 mod lens;
 mod level_of_detail;
 mod light_probe_volumes;
@@ -143,6 +144,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
         reflection_probes: Vec::new(),
         light_probe_volumes: Vec::new(),
         time: 0.0,
+        grid: None,
         wind: Vec3::ZERO,
         edges: None,
         grading: None,

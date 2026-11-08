@@ -208,6 +208,7 @@ impl ScenePipeline {
             terrain::TerrainPass::new(&device, &frame_layout, texture_bytes.clone(), samples);
         terrain.set_skipped_levels(graphics.texture_quality.skipped_levels());
         let sprites = sprites::SpritePass::new(&device, &white_texture.srgb, samples);
+        let grid_pass = grid::GridPass::new(&device, samples);
         let decal_pass =
             decals::DecalPass::new(&device, &frame_layout, &white_texture.srgb, samples);
         let post = PostPasses::new(&device, color_format);
@@ -282,6 +283,7 @@ impl ScenePipeline {
             surface_shaders: Default::default(),
             sprites,
             decal_pass,
+            grid_pass,
             post,
             frame_targets,
             occlusion,
@@ -459,6 +461,7 @@ impl ScenePipeline {
             );
             self.sprites.set_samples(&self.device, samples);
             self.decal_pass.set_samples(&self.device, samples);
+            self.grid_pass.set_samples(&self.device, samples);
             self.surface_shaders.clear_pipelines();
         }
         self.fit_targets();
@@ -1230,6 +1233,14 @@ impl ScenePipeline {
             .occlusion
             .as_ref()
             .filter(|_| list.edges.is_some());
+        if let Some(grid) = &list.grid {
+            self.grid_pass.prepare(
+                &self.queue,
+                frame_uniform.view_proj,
+                frame_uniform.camera_position,
+                grid,
+            );
+        }
         // Each pass is a block so it ends (is dropped) before the next
         // begins and before `encoder.finish()`, which need the encoder back.
         {
@@ -1242,6 +1253,10 @@ impl ScenePipeline {
             // Projected decals over the solid scene (the sky's pixels are
             // left alone by the prepass's depth).
             self.decal_pass.draw(&mut pass, &decal_draws);
+            if list.grid.is_some() {
+                self.grid_pass.draw(&mut pass);
+                pass.set_bind_group(0, frame_bind_group, &[]);
+            }
             // Screen-space outlines over the solid scene and the sky.
             if let Some(prepass) = edges {
                 pass.set_pipeline(&self.edge_pipeline);

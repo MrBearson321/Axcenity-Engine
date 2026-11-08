@@ -59,6 +59,7 @@ mod gpu;
 mod gpu_particles;
 mod gpu_timer;
 mod grading;
+mod grid;
 mod lens;
 mod light_probes;
 mod lighting;

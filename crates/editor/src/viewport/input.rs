@@ -105,7 +105,7 @@ impl Viewport {
         rect: egui::Rect,
         screen: &Screen,
         world: &World,
-        first: Option<Vec3>,
+        (first, points_on): (Option<Vec3>, bool),
     ) -> Option<SurfacePick> {
         let (pointer, alt) = ui.input(|input| (input.pointer.latest_pos(), input.modifiers.alt));
         let hover = pointer
@@ -121,6 +121,20 @@ impl Viewport {
                 })
             });
         let painter = ui.painter_at(rect);
+        // With snap points on, a click near one lands exactly on it.
+        let box_under = hover
+            .filter(|_| points_on)
+            .and_then(|pick| Some(snapping::Obb::of(Pose::of(world.get(pick.part)?)?)));
+        let hover = hover.map(|mut pick| {
+            if let Some(obb) = box_under {
+                let reach = screen.studs_per_point(pick.point) * snapping::SNAP_POINTS;
+                pick.point = snapping::points::pull_to_point(&obb, pick.point, reach);
+            }
+            pick
+        });
+        if let Some(obb) = box_under {
+            super::move_overlay::paint_part_points(&painter, screen, rect, &obb.snap_points());
+        }
         let stroke = egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR);
         for point in first.into_iter().chain(hover.map(|pick| pick.point)) {
             if let Some(at) = screen.point(point) {
@@ -343,8 +357,9 @@ impl Viewport {
             let moving: Vec<InstanceId> = parts.iter().map(|(id, _)| *id).collect();
             let reach = screen.studs_per_point(frame.position) * snapping::SNAP_POINTS;
             let obstacles = snapping::obstacles(world, &moving);
+            let sites = snapping::points::sites(world, &moving);
             self.drag = Drag::start_many(handle, frame, parts.clone(), modes, screen, pointer)
-                .map(|drag| Dragging::Handle(drag.among(obstacles, reach)));
+                .map(|drag| Dragging::Handle(drag.among(obstacles, reach).with_sites(sites)));
         }
         // A UI element or part's body only once the mouse has moved far
         // enough to be a drag, so a plain click still just selects. It's
@@ -417,6 +432,7 @@ impl Viewport {
             let mut moving = place.skip.clone();
             moving.push(hit.part);
             place.obstacles = snapping::obstacles(world, &moving);
+            place.sites = Box::new(snapping::points::sites(world, &moving));
             place.reach =
                 screen.studs_per_point(screen.ray(origin).at(hit.distance)) * snapping::SNAP_POINTS;
             self.drag = Some(Dragging::Body(place, others));

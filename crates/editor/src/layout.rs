@@ -7,6 +7,9 @@
 //! or the script used last, so code can sit next to the viewport. Script
 //! tabs follow `ScriptTabs` (see [`Layout::sync_scripts`]) and aren't saved.
 //!
+//! Dragging a tab off the edge of its window, or dropping it where a split
+//! won't take it, puts it in an OS window of its own (`layout/floating.rs`).
+//!
 //! [`egui_dock`] does the docking. This module only says which panels exist,
 //! how they start out, and how the layout is saved between runs.
 
@@ -15,6 +18,9 @@ use egui_dock::{DockState, NodeIndex};
 use serde::{Deserialize, Serialize};
 
 use crate::theme::{self, icons};
+
+pub mod floating;
+use floating::{FloatingWindow, SavedWindow};
 
 /// One dockable panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -175,6 +181,10 @@ impl Pane {
 /// The panels and where they are.
 pub struct Layout {
     pub dock: DockState<Pane>,
+    /// Panels in OS windows of their own.
+    pub windows: Vec<FloatingWindow>,
+    /// The last [`FloatingWindow::id`] given out.
+    next_window: u64,
     /// The script tab used last, which new script tabs open beside.
     last_script: Option<u64>,
 }
@@ -183,6 +193,8 @@ impl Default for Layout {
     fn default() -> Self {
         Self {
             dock: default_dock(),
+            windows: Vec::new(),
+            next_window: 0,
             last_script: None,
         }
     }
@@ -191,7 +203,7 @@ impl Default for Layout {
 impl Layout {
     /// True if `pane` is open anywhere, docked or floating.
     pub fn is_open(&self, pane: Pane) -> bool {
-        self.dock.find_tab(&pane).is_some()
+        self.dock.find_tab(&pane).is_some() || self.windows.iter().any(|window| window.holds(pane))
     }
 
     /// Opens `pane` if it's closed, or closes it if it's open. The Scene
@@ -200,11 +212,15 @@ impl Layout {
         if pane == Pane::Scene {
             return;
         }
-        match self.dock.find_tab(&pane) {
-            Some(found) => {
-                self.dock.remove_tab(found);
+        if let Some(found) = self.dock.find_tab(&pane) {
+            self.dock.remove_tab(found);
+        } else if let Some(window) = self.windows.iter_mut().find(|w| w.holds(pane)) {
+            if let Some(found) = window.dock.find_tab(&pane) {
+                window.dock.remove_tab(found);
             }
-            None => self.open(pane),
+            self.drop_empty_windows();
+        } else {
+            self.open(pane);
         }
     }
 
@@ -213,6 +229,13 @@ impl Layout {
     pub fn open(&mut self, pane: Pane) {
         if let Some((surface, node, tab)) = self.dock.find_tab(&pane) {
             self.dock.set_active_tab((surface, node, tab));
+            return;
+        }
+        if let Some(window) = self.windows.iter_mut().find(|w| w.holds(pane)) {
+            if let Some(found) = window.dock.find_tab(&pane) {
+                window.dock.set_active_tab(found);
+            }
+            window.focus = true;
             return;
         }
         let neighbor = match pane {
@@ -276,7 +299,16 @@ impl Layout {
     pub fn sync_scripts(&mut self, open: &[u64], focus: Option<u64>, active: Option<u64>) {
         for &id in open {
             let pane = Pane::Script(id);
-            if self.dock.find_tab(&pane).is_some() {
+            if self.is_open(pane) {
+                continue;
+            }
+            // Beside the last script when that one is in a window of its own.
+            if let Some(window) = self.last_script.and_then(|last| {
+                self.windows
+                    .iter_mut()
+                    .find(|w| w.holds(Pane::Script(last)))
+            }) {
+                window.dock.push_to_first_leaf(pane);
                 continue;
             }
             let beside = self
@@ -291,12 +323,21 @@ impl Layout {
                 None => self.dock.push_to_first_leaf(pane),
             }
         }
-        self.dock
-            .retain_tabs(|pane| !matches!(pane, Pane::Script(id) if !open.contains(id)));
-        if let Some(found) = focus.and_then(|id| self.dock.find_tab(&Pane::Script(id))) {
-            let (surface, node, _) = found;
-            self.dock.set_active_tab(found);
-            self.dock.set_focused_node_and_surface((surface, node));
+        let keep = |pane: &mut Pane| !matches!(pane, Pane::Script(id) if !open.contains(id));
+        self.dock.retain_tabs(keep);
+        for window in &mut self.windows {
+            window.dock.retain_tabs(keep);
+        }
+        self.drop_empty_windows();
+        if let Some(id) = focus {
+            let pane = Pane::Script(id);
+            if let Some(found) = self.dock.find_tab(&pane) {
+                let (surface, node, _) = found;
+                self.dock.set_active_tab(found);
+                self.dock.set_focused_node_and_surface((surface, node));
+            } else if self.is_open(pane) {
+                self.open(pane);
+            }
         }
         if let Some(id) = active.filter(|id| open.contains(id)) {
             self.last_script = Some(id);
@@ -311,44 +352,60 @@ impl Layout {
                 self.open(Pane::Plugin(id));
             }
         }
-        self.dock
-            .retain_tabs(|pane| !matches!(pane, Pane::Plugin(id) if !open.contains(id)));
+        let keep = |pane: &mut Pane| !matches!(pane, Pane::Plugin(id) if !open.contains(id));
+        self.dock.retain_tabs(keep);
+        for window in &mut self.windows {
+            window.dock.retain_tabs(keep);
+        }
+        self.drop_empty_windows();
     }
 
     /// Puts every panel back where it starts. Open scripts come back beside
     /// the Scene.
     pub fn reset(&mut self) {
         self.dock = default_dock();
+        self.windows.clear();
         self.last_script = None;
     }
 
     /// The layout as text, for eframe's storage. Script tabs are left out:
     /// scripts aren't reopened between runs.
     pub fn to_text(&self) -> String {
-        let dock = self
-            .dock
-            .filter_tabs(|pane| !matches!(pane, Pane::Script(_) | Pane::Plugin(_)));
-        serde_json::to_string(&dock).unwrap_or_default()
+        let keep = |pane: &Pane| !matches!(pane, Pane::Script(_) | Pane::Plugin(_));
+        serde_json::to_string(&SavedLayout {
+            dock: self.dock.filter_tabs(keep),
+            windows: self.saved_windows(keep),
+        })
+        .unwrap_or_default()
     }
 
-    /// A layout saved by [`to_text`](Self::to_text). A damaged one, or one
-    /// that somehow lost the Scene, gives the starting layout instead.
+    /// A layout saved by [`to_text`](Self::to_text), or by a version from
+    /// before panels had windows (then the text is just the dock). A damaged
+    /// one, or one that somehow lost the Scene, gives the starting layout.
     pub fn from_text(text: &str) -> Self {
-        let dock = serde_json::from_str::<serde_json::Value>(text)
+        let saved = serde_json::from_str::<serde_json::Value>(text)
             .ok()
             .and_then(|mut json| {
                 // Panels not drawn yet have infinite rectangles, which JSON
                 // saves as null. egui_dock works every rectangle out again
                 // each frame, so any number will do.
                 zero_nulls(&mut json);
-                serde_json::from_value::<DockState<Pane>>(json).ok()
+                if json.get("windows").is_some() {
+                    serde_json::from_value::<SavedLayout>(json).ok()
+                } else {
+                    let dock = serde_json::from_value::<DockState<Pane>>(json).ok()?;
+                    Some(SavedLayout {
+                        dock,
+                        windows: Vec::new(),
+                    })
+                }
             })
-            .filter(|dock| dock.find_main_surface_tab(&Pane::Scene).is_some())
-            .map(|mut dock| {
+            .filter(|saved| saved.dock.find_main_surface_tab(&Pane::Scene).is_some())
+            .map(|mut saved| {
                 // The Animation and Animator tabs of older layouts both
                 // load as Animation; keep the first.
                 let mut seen = false;
-                dock.retain_tabs(|pane| {
+                saved.dock.retain_tabs(|pane| {
                     if *pane != Pane::Animation {
                         return true;
                     }
@@ -356,13 +413,24 @@ impl Layout {
                     seen = true;
                     first
                 });
-                dock
+                saved
             });
-        Self {
-            dock: dock.unwrap_or_else(default_dock),
-            last_script: None,
+        let mut layout = Self::default();
+        if let Some(saved) = saved {
+            layout.dock = saved.dock;
+            for window in saved.windows {
+                layout.restore_window(window);
+            }
         }
+        layout
     }
+}
+
+/// How the panels are written to eframe's storage.
+#[derive(Serialize, Deserialize)]
+struct SavedLayout {
+    dock: DockState<Pane>,
+    windows: Vec<SavedWindow>,
 }
 
 /// Replaces null rectangle corners (`"x": null`, `"y": null`) in `json`
@@ -408,14 +476,13 @@ fn default_dock() -> DockState<Pane> {
 /// The docking area's look, from the theme's tokens: quiet tab bars on the
 /// app background, the active tab joined to its panel, thin dividers that
 /// light up in the accent when hovered or dragged, and a minimum panel size.
-pub fn style(style: &egui::Style, palette: &theme::Palette) -> egui_dock::Style {
+pub fn style(
+    style: &egui::Style,
+    palette: &theme::Palette,
+    pixels_per_point: f32,
+) -> egui_dock::Style {
     let mut dock = egui_dock::Style::from_egui(style);
-    let radius = egui::CornerRadius {
-        nw: 6,
-        ne: 6,
-        sw: 0,
-        se: 0,
-    };
+    let radius = egui::CornerRadius::ZERO;
     dock.dock_area_padding = None;
     dock.main_surface_border_stroke = egui::Stroke::NONE;
 
@@ -447,7 +514,7 @@ pub fn style(style: &egui::Style, palette: &theme::Palette) -> egui_dock::Style 
     dock.tab.focused_with_kb_focus = tab(palette.panel, palette.text_strong, palette.accent);
     dock.tab.inactive_with_kb_focus = tab(palette.app_bg, palette.text_strong, palette.accent);
     dock.tab.hline_below_active_tab_name = false;
-    dock.tab.spacing = 2.0;
+    dock.tab.spacing = 0.0;
     dock.tab.minimum_width = Some(72.0);
     dock.tab.tab_body.bg_fill = palette.panel;
     dock.tab.tab_body.stroke = egui::Stroke::NONE;
@@ -459,9 +526,10 @@ pub fn style(style: &egui::Style, palette: &theme::Palette) -> egui_dock::Style 
     dock.buttons.close_tab_bg_fill = palette.control_hover;
     dock.buttons.add_tab_bg_fill = palette.control_hover;
 
-    // A 1-point divider in the border colour; the accent shows where it can
-    // be dragged. Panels can't be squeezed below `extra` points.
-    dock.separator.width = 1.0;
+    // A hairline divider in the border colour, one pixel wide at any scale;
+    // the accent shows where it can be dragged. Panels can't be squeezed
+    // below `extra` points.
+    dock.separator.width = 1.0 / pixels_per_point.max(1.0);
     dock.separator.extra_interact_width = 6.0;
     dock.separator.extra = 140.0;
     dock.separator.color_idle = palette.border;
@@ -473,7 +541,7 @@ pub fn style(style: &egui::Style, palette: &theme::Palette) -> egui_dock::Style 
     dock.overlay.button_border_stroke = egui::Stroke::new(1.0_f32, palette.border_strong);
     dock.overlay.hovered_leaf_highlight.color = palette.accent.gamma_multiply(0.08);
     dock.overlay.hovered_leaf_highlight.stroke = egui::Stroke::new(1.0_f32, palette.accent);
-    dock.overlay.hovered_leaf_highlight.corner_radius = egui::CornerRadius::same(6);
+    dock.overlay.hovered_leaf_highlight.corner_radius = egui::CornerRadius::ZERO;
     dock
 }
 

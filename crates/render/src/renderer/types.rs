@@ -763,6 +763,7 @@ pub(super) struct ScenePipeline {
     /// Camera-facing pictures, such as particles.
     pub(super) sprites: sprites::SpritePass,
     pub(super) decal_pass: decals::DecalPass,
+    pub(super) grid_pass: grid::GridPass,
     pub(super) post: PostPasses,
     /// The scene's targets, remade when the scene's size, the
     /// anti-aliasing or the ambient occlusion changes.

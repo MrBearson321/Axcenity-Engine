@@ -92,15 +92,17 @@ pub(super) enum SnapSwitch {
     Surfaces,
     Collisions,
     Join,
+    Points,
 }
 
 impl SnapSwitch {
-    const ALL: [SnapSwitch; 5] = [
+    const ALL: [SnapSwitch; 6] = [
         SnapSwitch::Move,
         SnapSwitch::Rotate,
         SnapSwitch::Surfaces,
         SnapSwitch::Collisions,
         SnapSwitch::Join,
+        SnapSwitch::Points,
     ];
 
     fn label(self) -> &'static str {
@@ -110,6 +112,7 @@ impl SnapSwitch {
             SnapSwitch::Surfaces => "Surfaces",
             SnapSwitch::Collisions => "Collisions",
             SnapSwitch::Join => "Join Surfaces",
+            SnapSwitch::Points => "Snap Points",
         }
     }
 
@@ -120,6 +123,7 @@ impl SnapSwitch {
             SnapSwitch::Surfaces => &mut snap.surfaces,
             SnapSwitch::Collisions => &mut snap.collisions,
             SnapSwitch::Join => &mut snap.join,
+            SnapSwitch::Points => &mut snap.points,
         }
     }
 }
@@ -167,6 +171,7 @@ pub(super) enum Command {
     ResetLayout,
     LightCones,
     ViewCube,
+    Grid,
     ViewMode(ViewMode),
     Overlay(Overlay),
     NewRibbonTab,
@@ -643,6 +648,7 @@ impl EditorApp {
             Ok(()),
         );
         add(Command::ViewCube, "View Cube", "View", &[], None, Ok(()));
+        add(Command::Grid, "Grid", "View", &[], None, Ok(()));
         for mode in ViewMode::all() {
             add(
                 Command::ViewMode(mode),
@@ -1013,6 +1019,7 @@ impl EditorApp {
             Command::ResetLayout => self.layout.reset(),
             Command::LightCones => self.light_cones = !self.light_cones,
             Command::ViewCube => self.view_cube = !self.view_cube,
+            Command::Grid => self.grid = !self.grid,
             Command::ViewMode(mode) => self.view_mode = mode,
             Command::Overlay(overlay) => {
                 let flag = overlay.flag(&mut self.overlays);

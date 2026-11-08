@@ -193,6 +193,11 @@ impl EditorApp {
         )
         .on_hover_text("Off, only the selected light (or the part it's in) shows where it shines.");
         ui.checkbox(
+            &mut self.grid,
+            theme::with_icon(icons::GRID_NINE, "Show the measuring grid"),
+        )
+        .on_hover_text("Lines and distances in studs on the baseplate, while editing.");
+        ui.checkbox(
             &mut self.view_cube,
             theme::with_icon(icons::CUBE_FOCUS, "Show the view cube"),
         )

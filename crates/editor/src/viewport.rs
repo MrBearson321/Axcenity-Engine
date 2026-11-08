@@ -62,7 +62,9 @@ use crate::theme::{self, icons};
 use crate::ui_handles::{self, Grip, Handles, UiDrag, UiDragEdit};
 
 mod game_input;
+mod grid;
 mod input;
+mod move_overlay;
 mod overlays;
 mod view_cube;
 mod view_mode;
@@ -345,6 +347,8 @@ pub struct ViewportScene<'a> {
     pub light_cones: bool,
     /// Whether the view cube is drawn in the corner while editing.
     pub view_cube: bool,
+    /// Whether the measuring grid is drawn while editing.
+    pub grid: bool,
     /// Editor-only visual-debug overlays (View > Overlays).
     pub overlays: OverlayToggles,
     /// What the viewport shows: lit, or a debug view (View > View Mode).
@@ -651,6 +655,8 @@ pub struct Viewport {
     frozen_culling: Option<axcenity_render::Camera>,
     /// The camera swinging round after a click on the view cube.
     swing: Option<view_cube::Swing>,
+    /// The measuring grid's printed distances.
+    grid_labels: grid::Labels,
     /// A Spline point being dragged.
     spline_drag: Option<SplineDrag>,
     /// The left button went down on a Spline's curve and is held, so it
@@ -714,6 +720,7 @@ impl Viewport {
             last_pixels: (0, 0),
             frozen_culling: None,
             swing: None,
+            grid_labels: Default::default(),
         }
     }
 
@@ -857,6 +864,15 @@ impl Viewport {
         self.camera = FlyCamera::looking_at(position, target);
     }
 
+    /// What the part being moved has done so far, while one is.
+    fn move_report(&self) -> Option<&crate::snapping::points::MoveReport> {
+        match self.drag.as_ref()? {
+            Dragging::Handle(drag) => drag.report(),
+            Dragging::Body(place, _) => place.report.as_deref(),
+            Dragging::Ui(_) | Dragging::Icon(..) => None,
+        }
+    }
+
     /// True while a part or a handle is being dragged, or a terrain stroke
     /// is under way.
     pub fn is_dragging(&self) -> bool {
@@ -898,6 +914,7 @@ impl Viewport {
             console,
             light_cones,
             view_cube: show_cube,
+            grid: show_grid,
             overlays,
             view_mode,
             debug_rays,
@@ -1251,6 +1268,11 @@ impl Viewport {
             axcenity_scene::build_draw_list_posed(world, assets, camera, poses, &mut self.terrain);
         self.particles.draw(&mut draw_list, world, assets);
         self.particles.add_weather(&mut draw_list);
+        let grid_spec = (show_grid && !playing).then(|| grid::spec(world, snap.grid_step()));
+        draw_list.grid = grid_spec
+            .as_ref()
+            .map(|spec| grid::plane(spec, camera.position));
+        move_overlay::ghost_moving(&mut draw_list, &moving_parts(self.drag.as_ref(), world));
         draw_list.ui = ui_layout.draw_items.clone();
         if let Some(inventory) = hotbar {
             draw_list.ui.extend(axcenity_ui::hotbar_items(
@@ -1417,6 +1439,9 @@ impl Viewport {
             }
         }
         gizmo::paint(&ui.painter_at(rect), &drag.shapes, drag.highlighted);
+        if let Some(report) = self.move_report() {
+            move_overlay::paint(&ui.painter_at(rect), &screen, rect, report);
+        }
         if let (Some(brush), Some(point)) = (brush, terrain.and_then(|t| t.point)) {
             paint_terrain_brush(&ui.painter_at(rect), &screen, world, brush, point);
         }
@@ -1459,6 +1484,20 @@ impl Viewport {
                 pixels_per_point,
             );
         }
+        // Printed distances show only while a part is moving.
+        let moving = self.move_report().is_some_and(|report| report.is_moving());
+        if let Some(spec) = grid_spec.as_ref().filter(|_| moving) {
+            self.grid_labels.update(
+                world,
+                spec,
+                &screen,
+                camera.position,
+                grid::focus(spec, &screen, rect, camera.position),
+                ui.input(|input| input.time),
+            );
+            self.grid_labels
+                .paint(&ui.painter_at(rect), &screen, rect, spec);
+        }
         self.paint_speed_popup(ui, rect);
         // While editing, the view cube says which way the camera faces, and
         // a click on a face, edge or corner looks from that side.
@@ -1490,8 +1529,9 @@ impl Viewport {
             painter.circle_stroke(at, 9.0, egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR));
             painter.circle_filled(at, 3.0, SELECTION_COLOR);
         }
-        let surface = picking
-            .and_then(|first| self.surface_input(ui, &response, rect, &screen, world, first));
+        let surface = picking.and_then(|first| {
+            self.surface_input(ui, &response, rect, &screen, world, (first, snap.points))
+        });
         let plugin_mouse = plugin_mouse
             .filter(|_| play_camera.is_none())
             .and_then(|_| self.plugin_input(ui, &response, &screen, world));
@@ -1589,6 +1629,26 @@ pub fn shader_time(ui: &egui::Ui, list: &axcenity_render::DrawList) -> f32 {
         ui.ctx().request_repaint();
     }
     ui.input(|input| input.time) as f32
+}
+
+/// While parts are being moved: where each is now and how far that is from
+/// where it started.
+fn moving_parts(drag: Option<&Dragging>, world: &World) -> Vec<(Vec3, Vec3)> {
+    let starts: Vec<(InstanceId, Vec3)> = match drag {
+        Some(Dragging::Handle(drag)) if matches!(drag.handle, Handle::Move(_)) => drag.starts(),
+        Some(Dragging::Body(place, others)) => std::iter::once((place.part, place.start))
+            .chain(others.iter().copied())
+            .collect(),
+        _ => return Vec::new(),
+    };
+    starts
+        .into_iter()
+        .filter_map(|(id, start)| {
+            let now = Pose::of(world.get(id)?)?.position;
+            let by = now - start;
+            (by.length() >= 0.0005).then_some((now, by))
+        })
+        .collect()
 }
 
 fn start_camera() -> FlyCamera {

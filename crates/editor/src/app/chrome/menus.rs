@@ -391,6 +391,15 @@ impl EditorApp {
                 {
                     self.view_cube = !self.view_cube;
                 }
+                let grid =
+                    egui::Button::selectable(self.grid, theme::with_icon(icons::GRID_NINE, "Grid"));
+                if ui
+                    .add(grid)
+                    .on_hover_text("Show the measuring grid on the baseplate.")
+                    .clicked()
+                {
+                    self.grid = !self.grid;
+                }
                 ui.menu_button(theme::with_icon(icons::EYE, "View Mode"), |ui| {
                     for mode in ViewMode::all() {
                         let item = egui::Button::selectable(self.view_mode == mode, mode.label());

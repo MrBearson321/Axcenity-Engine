@@ -35,6 +35,7 @@ use eframe::egui;
 
 use crate::properties::MIN_SIZE;
 use crate::screen::Screen;
+use crate::snapping::points::{self, Freedom, MoveReport, Sites};
 use crate::snapping::{self, Obb, Obstacle};
 
 /// How long the Move arrows and how big the Rotate rings are, in points.
@@ -193,6 +194,9 @@ pub struct Snap {
     /// When a drag ends, the parts it moved are welded to the parts
     /// they're left touching.
     pub join: bool,
+    /// Markers show on the parts around a move, and its corners, edge and
+    /// face middles and Attachments click to theirs.
+    pub points: bool,
 }
 
 impl Default for Snap {
@@ -207,6 +211,7 @@ impl Default for Snap {
             surfaces: true,
             collisions: false,
             join: false,
+            points: true,
         }
     }
 }
@@ -227,6 +232,10 @@ impl Snap {
     }
 
     /// `distance` rounded to the move step, if move snapping is on.
+    pub fn grid_step(&self) -> f32 {
+        if self.move_on { self.move_step } else { 1.0 }
+    }
+
     pub fn studs(&self, distance: f32) -> f32 {
         snap(distance, self.move_on, self.move_step)
     }
@@ -651,6 +660,9 @@ pub fn paint(painter: &egui::Painter, shapes: &[Shape], highlighted: Option<Hand
     }
 }
 
+/// How far around a move markers show, as a multiple of the snap reach.
+const MARKER_REACH: f32 = 5.0;
+
 /// A handle being dragged.
 #[derive(Clone, Debug)]
 pub struct Drag {
@@ -678,6 +690,10 @@ pub struct Drag {
     /// With Collisions, the last turn (radians) that didn't go into a
     /// solid part: each turn sweeps from here, so it can't pass through one.
     free_turn: f32,
+    /// The Attachments around it, as snap points (see [`Drag::among`]).
+    sites: Box<Sites>,
+    /// A move's distance and markers, for drawing.
+    report: Option<Box<MoveReport>>,
 }
 
 /// The mouse during a drag: the ray it points along, where it is in the
@@ -810,6 +826,8 @@ impl Drag {
             obstacles: Vec::new(),
             reach: 0.0,
             free_turn: 0.0,
+            sites: Box::default(),
+            report: None,
         })
     }
 
@@ -820,6 +838,60 @@ impl Drag {
         self.obstacles = obstacles;
         self.reach = reach;
         self
+    }
+
+    /// The drag with the Attachments it can click to (see `points::sites`).
+    pub fn with_sites(mut self, sites: Sites) -> Self {
+        self.sites = Box::new(sites);
+        self
+    }
+
+    /// Each part being changed and where it started.
+    pub fn starts(&self) -> Vec<(InstanceId, Vec3)> {
+        self.parts
+            .iter()
+            .map(|(id, pose)| (*id, pose.position))
+            .collect()
+    }
+
+    /// How far a Move drag has come and what it can click to, once it's
+    /// been updated.
+    pub fn report(&self) -> Option<&MoveReport> {
+        self.report.as_deref()
+    }
+
+    /// Clicks a move of `boxes` by `raw` along `direction` to the nearest
+    /// snap point in reach. Gives the new distance and the two points.
+    fn click_to_point(&self, boxes: &[Obb], direction: Vec3, raw: f32) -> Option<(f32, Vec3)> {
+        let by = direction * raw;
+        let moved: Vec<Obb> = boxes.iter().map(|obb| obb.moved(by)).collect();
+        let own = points::own_points(&moved, &self.sites.own, by);
+        let around = points::nearby(&moved, &self.obstacles, &self.sites.others, self.reach);
+        let link = points::nearest(&own, &around, Freedom::Along(direction), self.reach)?;
+        Some((raw + link.shift.dot(direction), link.to))
+    }
+
+    /// Notes how far a Move drag has come, with the markers to show.
+    fn note_move(&mut self, way: Vec3, moved: f32, link: Option<Vec3>, snap: &Snap) {
+        let Some(&(_, last)) = self.parts.last() else {
+            return;
+        };
+        let by = way * moved;
+        let at = Obb::of(last).moved(by);
+        let targets = if snap.points {
+            // What's near enough to matter: about a hand's width on screen.
+            let radius = self.reach * MARKER_REACH;
+            points::nearby(&[at], &self.obstacles, &self.sites.others, radius)
+        } else {
+            Vec::new()
+        };
+        self.report = Some(Box::new(MoveReport::new(
+            last.position,
+            by,
+            Some(&at),
+            targets,
+            link,
+        )));
     }
 
     /// Each part's box as the drag started.
@@ -870,6 +942,7 @@ impl Drag {
                     })
                     .collect();
                 let boxes = self.start_boxes();
+                let mut link = None;
                 // Flush faces only when every part goes the same way.
                 if snap.surfaces
                     && modes.axes != MoveAxes::Local
@@ -878,7 +951,16 @@ impl Drag {
                 {
                     moved = flush;
                 }
+                // A point beats a face: it's the more exact of the two.
+                if snap.points
+                    && modes.axes != MoveAxes::Local
+                    && let Some((clicked, pair)) = self.click_to_point(&boxes, direction, raw)
+                {
+                    moved = clicked;
+                    link = Some(pair);
+                }
                 if snap.collisions {
+                    let wanted = moved;
                     // As far as the part that's stopped soonest can go.
                     moved = boxes
                         .iter()
@@ -888,7 +970,13 @@ impl Drag {
                         })
                         .min_by(|a, b| a.abs().total_cmp(&b.abs()))
                         .unwrap_or(moved);
+                    // Stopped short: the two points aren't together.
+                    if (moved - wanted).abs() > 1e-4 {
+                        link = None;
+                    }
                 }
+                let way = directions.last().copied().unwrap_or(direction);
+                self.note_move(way, moved, link, snap);
                 Some(
                     self.parts
                         .iter()

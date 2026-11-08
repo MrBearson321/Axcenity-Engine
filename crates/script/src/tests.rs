@@ -665,10 +665,11 @@ fn enum_properties_accept_enum_items_and_names() {
 #[test]
 fn a_misspelled_enum_item_lists_the_choices() {
     let (mut world, _) = world_with_block();
-    let output = output_of(&mut world, r#"workspace.Block.Material = "Wood""#);
+    let output = output_of(&mut world, r#"workspace.Block.Material = "Cardboard""#);
     assert_eq!(output.len(), 1);
     assert!(
-        output[0].ends_with("choose from Plastic, Metal, Glass, Neon, Ice, Rubber"),
+        output[0].contains("choose from Plastic, SmoothPlastic, Wood,")
+            && output[0].ends_with("Neon, Ice, Rubber"),
         "{output:?}"
     );
 
