@@ -4,7 +4,8 @@
 //! Each animated thing (the parent of an Animator, or of Animations) has
 //! one runner. Each frame it plays, in this order, so later ones win where
 //! two animate the same thing:
-//! 1. the Animator's state machine, if it has one;
+//! 1. the Animator's state machine, if it has one, and over its base layer
+//!    each of its layers, by the layer's weight and mask;
 //! 2. what plays on top, oldest start first: AnimationTracks from
 //!    `animator:LoadAnimation`, by their weight (fading in and out), and
 //!    Animations played with `animation:Play()` (or `AutoPlay`).
@@ -23,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axcenity_assets::{Assets, Model, ModelFormat, Posed, Rig, Take};
-use axcenity_core::{ClassName, InstanceId, PlayRequest, Value, Vector3, World};
+use axcenity_core::{ClassName, InstanceId, LayerWeight, PlayRequest, Value, Vector3, World};
 use glam::{EulerRot, Quat, Vec3};
 
 use crate::clip::{Clip, RootMotion};
@@ -152,6 +153,8 @@ struct RunningMachine {
     path: String,
     compiled: Arc<Compiled>,
     machine: Machine,
+    /// Where each of its layers is, in the file's order.
+    layers: Vec<Machine>,
 }
 
 /// Something playing over the state machine this frame.
@@ -427,6 +430,11 @@ impl Animators {
                     RunningMachine {
                         path: machine_path.clone(),
                         machine,
+                        layers: compiled
+                            .layers()
+                            .iter()
+                            .map(|layer| Machine::new(&layer.machine))
+                            .collect(),
                         compiled,
                     }
                 });
@@ -544,11 +552,22 @@ impl Animators {
             if running.machine.is_some() || !bone_layers.is_empty() || parts.ragdoll.is_some() {
                 let mut pose = match (&running.machine, parts.animator) {
                     (Some(machine), Some(animator)) => {
-                        let parameters = world
-                            .animator(animator)
-                            .map(|live| live.parameters.clone())
-                            .unwrap_or_default();
-                        machine.machine.pose(&machine.compiled, rig, &parameters)
+                        let live = world.animator(animator);
+                        let parameters =
+                            live.map(|live| live.parameters.clone()).unwrap_or_default();
+                        let mut pose = machine.machine.pose(&machine.compiled, rig, &parameters);
+                        // Each layer over the ones under it, the last on top.
+                        for (layer, run) in machine.compiled.layers().iter().zip(&machine.layers) {
+                            let weight = live
+                                .and_then(|live| live.layer_weights.get(&layer.name))
+                                .map_or(layer.weight, |w| w.weight);
+                            if weight <= 0.0 {
+                                continue;
+                            }
+                            let (over, cover) = run.layer_pose(&layer.machine, rig, &parameters);
+                            layer.mix(&mut pose, &over, &cover, weight as f32, rig);
+                        }
+                        pose
                     }
                     _ => rig.rest_pose(),
                 };
@@ -607,6 +626,13 @@ impl Animators {
                     .entry(def.name().to_owned())
                     .or_insert_with(|| def.initial());
             }
+            for layer in compiled.layers() {
+                let weight = state
+                    .layer_weights
+                    .entry(layer.name.clone())
+                    .or_insert_with(|| LayerWeight::new(layer.weight));
+                weight.step(dt);
+            }
             state.play.take()
         });
         if let Some(request) = request {
@@ -636,9 +662,17 @@ impl Animators {
             if let Some(rig) = rig {
                 move_by_root_motion(world, owner, rig, advanced.motion);
             }
+            // Layers move on by the same clock, without root motion.
+            for (layer, machine) in compiled.layers().iter().zip(&mut running.layers) {
+                let advanced = machine.advance(&layer.machine, None, &parameters, dt);
+                markers.extend(advanced.events);
+            }
             // Transitions whose time has come, now the clock has moved on.
             if let Some(live) = world.animator_mut(animator) {
                 running.machine.evaluate(&compiled, &mut live.parameters);
+                for (layer, machine) in compiled.layers().iter().zip(&mut running.layers) {
+                    machine.evaluate(&layer.machine, &mut live.parameters);
+                }
             }
         }
         // Parameters a script set that the state machine doesn't have can't
@@ -661,6 +695,24 @@ impl Animators {
                 for parameter in unknown {
                     self.report(format!(
                         "The Animator `{name}` was given the parameter `{parameter}`, which its state machine `{path}` doesn't have, so it changes nothing.",
+                        path = running.path
+                    ));
+                }
+            }
+        }
+        // The same for layer weights set for a layer it doesn't have.
+        if let Some(live) = world.animator(animator) {
+            let unknown: Vec<String> = live
+                .layer_weights
+                .keys()
+                .filter(|name| !compiled.layers().iter().any(|l| &l.name == *name))
+                .cloned()
+                .collect();
+            if !unknown.is_empty() {
+                let name = world.full_name(animator).unwrap_or_default();
+                for layer in unknown {
+                    self.report(format!(
+                        "The Animator `{name}` was given a weight for the layer `{layer}`, which its state machine `{path}` doesn't have, so it changes nothing.",
                         path = running.path
                     ));
                 }
@@ -1159,12 +1211,12 @@ impl RunningMachine {
     /// Whether its file, or a clip one of its states plays, is one that
     /// `is` picks.
     fn uses(&self, is: impl Fn(&str) -> bool) -> bool {
+        let file = &self.compiled.file;
         is(&self.path)
-            || self
-                .compiled
-                .file
+            || file
                 .states
                 .iter()
+                .chain(file.layers.iter().flat_map(|layer| &layer.states))
                 .any(|state| state.motion.clips().into_iter().any(|clip| is(clip)))
     }
 

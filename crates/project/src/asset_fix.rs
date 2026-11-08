@@ -523,12 +523,13 @@ impl Planner<'_> {
                 }
                 Ok(())
             }
-            Site::StateClip { file, state } => {
+            Site::StateClip { file, layer, state } => {
                 let Doc::Machine(machine) = self.doc(file, read_machine)? else {
                     return Err(format!("`{file}` isn't a state machine"));
                 };
                 let state = machine
-                    .states
+                    .layer_states_mut(layer)
+                    .ok_or_else(|| format!("`{file}` changed since the check; check again"))?
                     .iter_mut()
                     .find(|found| &found.name == state)
                     .ok_or_else(|| format!("`{file}` changed since the check; check again"))?;

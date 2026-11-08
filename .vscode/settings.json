@@ -2,8 +2,10 @@
     "python-envs.defaultEnvManager": "ms-python.python:system",
     "rust-analyzer.cargo.targetDir": true,
     "files.associations": {
-        "*.lua": "luau"
+        "*.lua": "luau",
+        "**/definitions/*.d.luau": "plaintext"
     },
+    "luau-lsp.ignoreGlobs": ["**/definitions/**"],
     "luau-lsp.platform.type": "standard",
     "luau-lsp.sourcemap.enabled": false,
     "luau-lsp.types.definitionFiles": {

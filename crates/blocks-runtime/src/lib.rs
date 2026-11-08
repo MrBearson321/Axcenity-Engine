@@ -703,6 +703,14 @@ pub enum BlockKind {
         animator: String,
         state: String,
     },
+    /// How much a state machine layer counts, faded over `seconds`
+    /// (`animator:SetLayerWeight(layer, weight, seconds)`, Phase 78).
+    SetAnimatorLayerWeight {
+        animator: String,
+        layer: String,
+        weight: Expression,
+        seconds: Expression,
+    },
     /// Loads an Animation on an Animator and plays the track
     /// (`animator:LoadAnimation(animation):Play()`).
     PlayAnimation {
@@ -1085,6 +1093,9 @@ impl BlockKind {
             BlockKind::KickPlayer { player, reason } => vec![player, reason],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
+            BlockKind::SetAnimatorLayerWeight {
+                weight, seconds, ..
+            } => vec![weight, seconds],
             BlockKind::SpawnDecal {
                 texture,
                 position,
@@ -1223,6 +1234,9 @@ impl BlockKind {
             BlockKind::KickPlayer { player, reason } => vec![player, reason],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
+            BlockKind::SetAnimatorLayerWeight {
+                weight, seconds, ..
+            } => vec![weight, seconds],
             BlockKind::SpawnDecal {
                 texture,
                 position,
@@ -1370,6 +1384,12 @@ pub enum Expression {
     AnimatorNumber {
         animator: String,
         parameter: String,
+    },
+    /// How much an Animator's layer counts now
+    /// (`animator:GetLayerWeight`, Phase 78).
+    AnimatorLayerWeight {
+        animator: String,
+        layer: String,
     },
     /// Whether `value` (an Instance) is of class `class` or inherits from
     /// it: `child:IsA("BasePart")`.

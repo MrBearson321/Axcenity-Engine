@@ -599,7 +599,7 @@ impl Network {
                         let update = Update {
                             ops: settled,
                             time: self.clock,
-                            levels: None,
+                            ..Update::default()
                         };
                         host.send_to(peer, &Message::Update { update });
                     }

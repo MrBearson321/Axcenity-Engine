@@ -6,9 +6,11 @@ use axcenity_assets::{Pose, Rig};
 use axcenity_core::Parameter;
 
 use crate::animators::LoadedClip;
+use crate::blend_space::blend_space_weights;
 use crate::clip::{Clip, RootMotion};
 use crate::files::{
-    ANY_STATE, Condition, Motion, StateMachineFile, Test, blend_weights, with_returns,
+    ANY_STATE, Condition, LayerMode, Motion, ParameterDef, StateMachineFile, Test, blend_weights,
+    with_returns,
 };
 use crate::property_clip::EvaluatedProperty;
 
@@ -22,6 +24,68 @@ pub struct Compiled {
     states: Vec<CompiledState>,
     transitions: Vec<CompiledTransition>,
     start: usize,
+    layers: Vec<CompiledLayer>,
+}
+
+/// A layer over the base layer (Phase 78), made ready: its own states, as
+/// a state machine of their own, and its mask by bone.
+#[derive(Debug)]
+pub struct CompiledLayer {
+    pub name: String,
+    /// Its weight when the game starts, from 0 to 1.
+    pub weight: f64,
+    pub mode: LayerMode,
+    /// Whether it may move each bone of the rig; empty is every bone.
+    pub mask: Vec<bool>,
+    pub machine: Compiled,
+}
+
+impl CompiledLayer {
+    /// How much its mask lets it move `bone`: 1 or 0.
+    pub fn masks(&self, bone: usize) -> f32 {
+        if self.mask.is_empty() || self.mask.get(bone).copied().unwrap_or(false) {
+            1.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Mixes the layer's pose `over` (covering each bone by `cover`, from
+    /// [`Machine::layer_pose`]) into the pose of the layers `under` it, by
+    /// `weight`, on the bones its mask picks. Override moves each bone
+    /// toward the layer's; Additive adds how far the layer's pose moves the
+    /// bone from the rig's rest pose.
+    pub fn mix(&self, under: &mut Pose, over: &Pose, cover: &[f32], weight: f32, rig: &Rig) {
+        let weight = if weight.is_finite() {
+            weight.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        for (bone, (under, over)) in under.iter_mut().zip(over).enumerate() {
+            let amount = weight * cover.get(bone).copied().unwrap_or(0.0) * self.masks(bone);
+            if amount <= 0.0 {
+                continue;
+            }
+            match self.mode {
+                LayerMode::Override => *under = under.lerp(over, amount),
+                LayerMode::Additive => {
+                    let Some(rest) = rig.bones.get(bone).map(|b| b.rest) else {
+                        continue;
+                    };
+                    let turn = rest.rotation.inverse() * over.rotation;
+                    let stretch = glam::Vec3::select(
+                        rest.scale.abs().cmpgt(glam::Vec3::splat(1e-6)),
+                        over.scale / rest.scale,
+                        glam::Vec3::ONE,
+                    );
+                    under.translation += (over.translation - rest.translation) * amount;
+                    under.rotation =
+                        (under.rotation * glam::Quat::IDENTITY.slerp(turn, amount)).normalize();
+                    under.scale *= glam::Vec3::ONE.lerp(stretch, amount);
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -42,6 +106,33 @@ enum CompiledMotion {
         /// Each child's threshold and clip.
         children: Vec<(f64, Option<Clip>)>,
     },
+    Space {
+        parameters: [String; 2],
+        /// Each child's point and clip.
+        children: Vec<([f64; 2], Option<Clip>)>,
+    },
+}
+
+/// A Number parameter's value, 0 if it isn't one.
+fn number(parameters: &Parameters, name: &str) -> f64 {
+    match parameters.get(name) {
+        Some(Parameter::Number(value)) => *value,
+        _ => 0.0,
+    }
+}
+
+/// The clips with a share above 0, their shares made to add up to 1 again
+/// (a clip that didn't load gives its share to the others).
+fn shared<'a>(children: impl Iterator<Item = (&'a Option<Clip>, f64)>) -> Vec<(&'a Clip, f64)> {
+    let playing: Vec<(&Clip, f64)> = children
+        .filter(|(_, weight)| *weight > 0.0)
+        .filter_map(|(clip, weight)| Some((clip.as_ref()?, weight)))
+        .collect();
+    let total: f64 = playing.iter().map(|(_, weight)| weight).sum();
+    playing
+        .into_iter()
+        .map(|(clip, weight)| (clip, weight / total.max(1e-12)))
+        .collect()
 }
 
 impl CompiledState {
@@ -52,28 +143,37 @@ impl CompiledState {
         match &self.motion {
             CompiledMotion::Clip(Some(clip)) => vec![(&**clip, 1.0)],
             CompiledMotion::Clip(None) => Vec::new(),
+            CompiledMotion::Tree { children, .. } => {
+                let weights = self.weights(parameters).unwrap_or_default();
+                shared(children.iter().map(|(_, clip)| clip).zip(weights))
+            }
+            CompiledMotion::Space { children, .. } => {
+                let weights = self.weights(parameters).unwrap_or_default();
+                shared(children.iter().map(|(_, clip)| clip).zip(weights))
+            }
+        }
+    }
+
+    /// Each child's share by `parameters`, in the file's order, before
+    /// shares of clips that didn't load move to the others. `None` for a
+    /// single clip.
+    fn weights(&self, parameters: &Parameters) -> Option<Vec<f64>> {
+        match &self.motion {
+            CompiledMotion::Clip(_) => None,
             CompiledMotion::Tree {
                 parameter,
                 children,
             } => {
-                let value = match parameters.get(parameter) {
-                    Some(Parameter::Number(value)) => *value,
-                    _ => 0.0,
-                };
                 let thresholds: Vec<f64> = children.iter().map(|(t, _)| *t).collect();
-                let weights = blend_weights(&thresholds, value);
-                let playing: Vec<(&Clip, f64)> = children
-                    .iter()
-                    .zip(weights)
-                    .filter(|(_, weight)| *weight > 0.0)
-                    .filter_map(|((_, clip), weight)| Some((clip.as_ref()?, weight)))
-                    .collect();
-                // Shares of clips that didn't load go to the others.
-                let total: f64 = playing.iter().map(|(_, weight)| weight).sum();
-                playing
-                    .into_iter()
-                    .map(|(clip, weight)| (clip, weight / total.max(1e-12)))
-                    .collect()
+                Some(blend_weights(&thresholds, number(parameters, parameter)))
+            }
+            CompiledMotion::Space {
+                parameters: [x, y],
+                children,
+            } => {
+                let points: Vec<[f64; 2]> = children.iter().map(|(p, _)| *p).collect();
+                let value = [number(parameters, x), number(parameters, y)];
+                Some(blend_space_weights(&points, value))
             }
         }
     }
@@ -105,6 +205,16 @@ impl Compiled {
         rig: Option<&Rig>,
         mut load_clip: impl FnMut(&str) -> Result<LoadedClip, String>,
     ) -> (Self, Vec<String>) {
+        Self::compile(file, rig, &mut load_clip)
+    }
+
+    /// [`new`](Self::new) through a `dyn` loader, so each layer compiles
+    /// with the same one (a generic loader would recurse in its type).
+    fn compile(
+        file: StateMachineFile,
+        rig: Option<&Rig>,
+        load_clip: &mut dyn FnMut(&str) -> Result<LoadedClip, String>,
+    ) -> (Self, Vec<String>) {
         let mut problems = Vec::new();
         let mut bind = |state: &str, path: &str, problems: &mut Vec<String>| {
             if path.is_empty() {
@@ -129,11 +239,7 @@ impl Compiled {
                         CompiledMotion::Clip(bind(&state.name, path, &mut problems).map(Box::new))
                     }
                     Motion::BlendTree(tree) => {
-                        let is_number = file.parameters.iter().any(|def| {
-                            def.name() == tree.parameter
-                                && matches!(def, crate::files::ParameterDef::Number { .. })
-                        });
-                        if !is_number {
+                        if !is_number(&file.parameters, &tree.parameter) {
                             problems.push(format!(
                                 "the blend tree of `{}` needs a Number parameter, and `{}` isn't one",
                                 state.name, tree.parameter
@@ -148,6 +254,28 @@ impl Compiled {
                                     let threshold =
                                         if child.threshold.is_finite() { child.threshold } else { 0.0 };
                                     (threshold, bind(&state.name, &child.clip, &mut problems))
+                                })
+                                .collect(),
+                        }
+                    }
+                    Motion::BlendSpace(space) => {
+                        for parameter in [&space.parameter_x, &space.parameter_y] {
+                            if !is_number(&file.parameters, parameter) {
+                                problems.push(format!(
+                                    "the blend space of `{}` needs Number parameters, and `{parameter}` isn't one",
+                                    state.name
+                                ));
+                            }
+                        }
+                        CompiledMotion::Space {
+                            parameters: [space.parameter_x.clone(), space.parameter_y.clone()],
+                            children: space
+                                .children
+                                .iter()
+                                .map(|child| {
+                                    let point =
+                                        child.position.map(|v| if v.is_finite() { v } else { 0.0 });
+                                    (point, bind(&state.name, &child.clip, &mut problems))
                                 })
                                 .collect(),
                         }
@@ -216,15 +344,68 @@ impl Compiled {
             .starting_state()
             .and_then(|start| file.states.iter().position(|s| s.name == start.name))
             .unwrap_or(0);
+        let mut layers = Vec::new();
+        for layer in &file.layers {
+            let (machine, layer_problems) =
+                Self::compile(layer.machine(&file.parameters), rig, load_clip);
+            problems.extend(
+                layer_problems
+                    .into_iter()
+                    .map(|problem| format!("the layer `{}`: {problem}", layer.name)),
+            );
+            let mask = match rig {
+                Some(rig) if !layer.mask.is_empty() => {
+                    let (mask, missing) = bone_mask(rig, &layer.mask);
+                    problems.extend(missing.into_iter().map(|path| {
+                        format!(
+                            "the layer `{}`'s mask names the bone `{path}`, which the skeleton doesn't have",
+                            layer.name
+                        )
+                    }));
+                    mask
+                }
+                _ => Vec::new(),
+            };
+            layers.push(CompiledLayer {
+                name: layer.name.clone(),
+                weight: if layer.weight.is_finite() {
+                    layer.weight.clamp(0.0, 1.0)
+                } else {
+                    1.0
+                },
+                mode: layer.mode,
+                mask,
+                machine,
+            });
+        }
         (
             Self {
                 file,
                 states,
                 transitions,
                 start,
+                layers,
             },
             problems,
         )
+    }
+
+    /// Its layers over the base layer, in the file's order (the last on top).
+    pub fn layers(&self) -> &[CompiledLayer] {
+        &self.layers
+    }
+
+    /// Whether any clip `state` plays now moves each of the rig's `bones`.
+    pub fn animated(&self, state: usize, parameters: &Parameters, bones: usize) -> Vec<bool> {
+        let mut animated = vec![false; bones];
+        for (clip, _) in self.playing(state, parameters) {
+            for (bone, moved) in clip.animated_bones().iter().enumerate() {
+                if *moved && let Some(slot) = animated.get_mut(bone) {
+                    *slot = true;
+                }
+            }
+        }
+        animated
     }
 
     /// The state named `name`'s index.
@@ -313,11 +494,12 @@ impl Compiled {
         }
     }
 
-    /// `state`'s clip, if it plays one clip that loaded (not a blend tree).
+    /// `state`'s clip, if it plays one clip that loaded (not a blend tree
+    /// or space).
     pub fn clip(&self, state: usize) -> Option<&Clip> {
         match &self.states.get(state)?.motion {
             CompiledMotion::Clip(clip) => clip.as_deref(),
-            CompiledMotion::Tree { .. } => None,
+            CompiledMotion::Tree { .. } | CompiledMotion::Space { .. } => None,
         }
     }
 
@@ -355,23 +537,38 @@ impl Compiled {
             .map_or_else(Vec::new, |clip| clip.events_between(from, to))
     }
 
-    /// Each child's share in `state`'s blend tree now, in the file's order,
-    /// for the editor. `None` if it isn't a blend tree.
+    /// Each child's share in `state`'s blend tree or blend space now, in
+    /// the file's order, for the editor. `None` for a single clip.
     pub fn tree_weights(&self, state: usize, parameters: &Parameters) -> Option<Vec<f64>> {
-        let CompiledMotion::Tree {
-            parameter,
-            children,
-        } = &self.states.get(state)?.motion
-        else {
-            return None;
-        };
-        let value = match parameters.get(parameter) {
-            Some(Parameter::Number(value)) => *value,
-            _ => 0.0,
-        };
-        let thresholds: Vec<f64> = children.iter().map(|(t, _)| *t).collect();
-        Some(blend_weights(&thresholds, value))
+        self.states.get(state)?.weights(parameters)
     }
+}
+
+/// Whether `parameters` has a Number named `name`.
+fn is_number(parameters: &[ParameterDef], name: &str) -> bool {
+    parameters
+        .iter()
+        .any(|def| def.name() == name && matches!(def, ParameterDef::Number { .. }))
+}
+
+/// Which of `rig`'s bones a mask of `paths` picks (each with every bone under
+/// it), and the paths it doesn't have.
+pub fn bone_mask(rig: &Rig, paths: &[String]) -> (Vec<bool>, Vec<String>) {
+    let all = crate::bone_paths(rig);
+    let mut listed = vec![false; rig.bones.len()];
+    let mut missing = Vec::new();
+    for path in paths {
+        match crate::find_bone(rig, &all, path) {
+            Some(bone) => listed[bone] = true,
+            None => missing.push(path.clone()),
+        }
+    }
+    // Bones come parents first, so a bone's parent is decided before it.
+    let mut mask = vec![false; rig.bones.len()];
+    for (bone, def) in rig.bones.iter().enumerate() {
+        mask[bone] = listed[bone] || def.parent.is_some_and(|parent| mask[parent]);
+    }
+    (mask, missing)
 }
 
 /// Whether `condition` holds for `parameters`. A parameter that isn't there,
@@ -584,6 +781,51 @@ impl Machine {
     pub fn pose(&self, controller: &Compiled, rig: &Rig, parameters: &Parameters) -> Pose {
         let weight = self.fade.map_or(1.0, |fade| fade.weight());
         self.pose_at(controller, rig, parameters, weight)
+    }
+
+    /// A layer's pose now, with how much it covers each bone (0 to 1): the
+    /// bones its clips move. Fading between a state that moves a bone and
+    /// one that doesn't (such as an empty state, which plays nothing) fades
+    /// how much it covers that bone, so the layer under it shows through.
+    pub fn layer_pose(
+        &self,
+        controller: &Compiled,
+        rig: &Rig,
+        parameters: &Parameters,
+    ) -> (Pose, Vec<f32>) {
+        let bones = rig.bones.len();
+        let sample = |playing: Playing| {
+            let mut pose = rig.rest_pose();
+            controller.sample(playing.state, playing.phase, rig, parameters, &mut pose);
+            let animated = controller.animated(playing.state, parameters, bones);
+            (pose, animated)
+        };
+        let (mut pose, animated) = sample(self.current);
+        let Some(fade) = &self.fade else {
+            let cover = animated
+                .iter()
+                .map(|&a| if a { 1.0 } else { 0.0 })
+                .collect();
+            return (pose, cover);
+        };
+        let weight = fade.weight() as f32;
+        let (old, old_animated) = sample(fade.from);
+        let mut cover = vec![0.0; bones];
+        for bone in 0..bones {
+            match (animated[bone], old_animated[bone]) {
+                (true, true) => {
+                    pose[bone] = old[bone].lerp(&pose[bone], weight);
+                    cover[bone] = 1.0;
+                }
+                (true, false) => cover[bone] = weight,
+                (false, true) => {
+                    pose[bone] = old[bone];
+                    cover[bone] = 1.0 - weight;
+                }
+                (false, false) => {}
+            }
+        }
+        (pose, cover)
     }
 
     /// The pose with the fade's new state counting `weight` (0 is all the

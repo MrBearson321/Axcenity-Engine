@@ -365,3 +365,50 @@ fn enter(pressed: bool) -> egui::Event {
         modifiers: Default::default(),
     }
 }
+
+#[test]
+fn a_layer_opens_as_its_own_state_machine_and_saves_back_into_the_file() {
+    let project = std::env::temp_dir().join(format!("axcenity-layers-doc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&project);
+    std::fs::create_dir_all(project.join("assets/animations")).unwrap();
+    let mut doc = doc();
+    assert_eq!(doc.open_layer_index(), None);
+    let index = doc.add_layer();
+    assert_eq!(doc.open_layer_index(), Some(index));
+    assert_eq!(doc.open_layer().unwrap().name, "Upper Body");
+    // The graph shows the layer's states: an empty one to start in.
+    assert_eq!(doc.file.states.len(), 1);
+    assert_eq!(doc.file.default_state, "Empty");
+    doc.apply(vec![GraphEvent::AddState(
+        [200.0, 0.0],
+        Some("assets/animations/hero/Reload.anim.json".into()),
+        None,
+    )]);
+    doc.apply(vec![GraphEvent::Link(Node::Any, 1)]);
+    let trigger = doc.add_parameter(ParameterKind::Trigger);
+    doc.mask_bone("Hips/Spine");
+    doc.rename_layer("Arms").unwrap();
+    assert!(doc.unwritten());
+    doc.write(&project).unwrap();
+    assert!(!doc.unwritten());
+    let text =
+        std::fs::read_to_string(project.join("assets/animations/hero.statemachine.json")).unwrap();
+    let saved = StateMachineFile::from_json(&text).unwrap();
+    // The base layer is as it was; the layer has its states, transition
+    // and mask; the parameter added in the layer is the file's.
+    assert_eq!(saved.states.len(), 2);
+    assert!(saved.parameters.iter().any(|p| p.name() == trigger));
+    let layer = saved.layer("Arms").unwrap();
+    assert_eq!(layer.states[1].name, "Reload");
+    assert_eq!(layer.transitions[0].to, "Reload");
+    assert_eq!(layer.mask, ["Hips/Spine"]);
+    // Back on the base layer, the graph shows its states again.
+    doc.show_layer(None);
+    assert_eq!(doc.file.states[1].name, "Walk");
+    assert_eq!(doc.file.layers.len(), 1);
+    assert!(!doc.unwritten());
+    doc.remove_layer(0);
+    assert!(doc.file.layers.is_empty());
+    assert!(doc.unwritten());
+    let _ = std::fs::remove_dir_all(&project);
+}

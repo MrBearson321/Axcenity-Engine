@@ -449,6 +449,10 @@ pub struct StateMachineFile {
     /// Where the editor's graph draws the Entry node, once it's moved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_position: Option<[f32; 2]>,
+    /// Layers over the states above (the base layer), each with its own
+    /// states (Phase 78). Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<LayerDef>,
 }
 
 impl Default for StateMachineFile {
@@ -461,6 +465,7 @@ impl Default for StateMachineFile {
             transitions: Vec::new(),
             any_state_position: None,
             entry_position: None,
+            layers: Vec::new(),
         }
     }
 }
@@ -490,6 +495,126 @@ impl StateMachineFile {
     pub fn to_json(&self) -> String {
         to_json(self)
     }
+
+    /// The layer named `name`.
+    pub fn layer(&self, name: &str) -> Option<&LayerDef> {
+        self.layers.iter().find(|layer| layer.name == name)
+    }
+
+    /// Every state, the base layer's first, each with its layer's name
+    /// (empty for the base layer).
+    pub fn all_states(&self) -> impl Iterator<Item = (&str, &StateDef)> {
+        let layers = self.layers.iter().flat_map(|layer| {
+            layer
+                .states
+                .iter()
+                .map(move |state| (layer.name.as_str(), state))
+        });
+        self.states.iter().map(|state| ("", state)).chain(layers)
+    }
+
+    /// Every state of every layer, to change.
+    pub fn all_states_mut(&mut self) -> impl Iterator<Item = &mut StateDef> {
+        let layers = self
+            .layers
+            .iter_mut()
+            .flat_map(|layer| layer.states.iter_mut());
+        self.states.iter_mut().chain(layers)
+    }
+
+    /// The states of the layer named `layer` (the base layer's for "").
+    pub fn layer_states_mut(&mut self, layer: &str) -> Option<&mut Vec<StateDef>> {
+        if layer.is_empty() {
+            return Some(&mut self.states);
+        }
+        self.layers
+            .iter_mut()
+            .find(|found| found.name == layer)
+            .map(|found| &mut found.states)
+    }
+}
+
+/// A layer of a state machine (Phase 78): its own states and transitions,
+/// sharing the file's parameters, mixed over the layers under it by its
+/// weight, on the bones its mask picks. An upper-body layer can reload
+/// while the base layer runs.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayerDef {
+    pub name: String,
+    /// How much it counts when the game starts, from 0 to 1. Scripts change
+    /// it with `animator:SetLayerWeight`.
+    #[serde(default = "one")]
+    pub weight: f64,
+    #[serde(default)]
+    pub mode: LayerMode,
+    /// The bones it moves, each with every bone under it (`Hips/Spine` is
+    /// the spine and up). Empty is the whole skeleton.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mask: Vec<String>,
+    /// The state it starts in. Empty means the first.
+    #[serde(default)]
+    pub default_state: String,
+    #[serde(default)]
+    pub states: Vec<StateDef>,
+    #[serde(default)]
+    pub transitions: Vec<TransitionDef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub any_state_position: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_position: Option<[f32; 2]>,
+}
+
+impl LayerDef {
+    /// An empty Override layer at full weight over the whole skeleton.
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            weight: 1.0,
+            mode: LayerMode::Override,
+            mask: Vec::new(),
+            default_state: String::new(),
+            states: Vec::new(),
+            transitions: Vec::new(),
+            any_state_position: None,
+            entry_position: None,
+        }
+    }
+
+    /// Its states as a state machine of their own, with `parameters` (the
+    /// file's), so it runs and edits like the base layer.
+    pub fn machine(&self, parameters: &[ParameterDef]) -> StateMachineFile {
+        StateMachineFile {
+            parameters: parameters.to_vec(),
+            default_state: self.default_state.clone(),
+            states: self.states.clone(),
+            transitions: self.transitions.clone(),
+            any_state_position: self.any_state_position,
+            entry_position: self.entry_position,
+            ..StateMachineFile::default()
+        }
+    }
+
+    /// Takes the states, transitions and node places of `machine` (made by
+    /// [`machine`](Self::machine) and edited).
+    pub fn set_machine(&mut self, machine: &StateMachineFile) {
+        self.default_state.clone_from(&machine.default_state);
+        self.states.clone_from(&machine.states);
+        self.transitions.clone_from(&machine.transitions);
+        self.any_state_position = machine.any_state_position;
+        self.entry_position = machine.entry_position;
+    }
+}
+
+/// How a layer mixes with the layers under it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LayerMode {
+    /// Its pose replaces theirs, by its weight, on the bones its clips move.
+    #[default]
+    Override,
+    /// How far its pose turns and moves each bone from the rest pose is
+    /// added to theirs, by its weight: an aim offset leaning the spine.
+    Additive,
 }
 
 /// One parameter, with its value when the game starts.
@@ -639,6 +764,9 @@ pub enum Motion {
     /// Related clips mixed by a Number parameter, such as Idle, Walk and
     /// Run by Speed.
     BlendTree(BlendTree),
+    /// Clips placed at points of two Number parameters, such as eight
+    /// strafes by sideways and forward speed (Phase 78).
+    BlendSpace(BlendSpace),
 }
 
 impl Motion {
@@ -647,6 +775,7 @@ impl Motion {
         match self {
             Motion::Clip(path) => vec![path],
             Motion::BlendTree(tree) => tree.children.iter().map(|child| &child.clip).collect(),
+            Motion::BlendSpace(space) => space.children.iter().map(|child| &child.clip).collect(),
         }
     }
 
@@ -659,8 +788,35 @@ impl Motion {
                 .iter_mut()
                 .map(|child| &mut child.clip)
                 .collect(),
+            Motion::BlendSpace(space) => space
+                .children
+                .iter_mut()
+                .map(|child| &mut child.clip)
+                .collect(),
         }
     }
+}
+
+/// A 2D blend space: clips at points of two Number parameters, mixed across
+/// the triangles between them (`crate::blend_space_weights`). An aim
+/// offset is one on an Additive layer, by pitch and yaw.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlendSpace {
+    /// The Number parameter along X, such as `MoveX` (sideways speed).
+    pub parameter_x: String,
+    /// The Number parameter along Y, such as `MoveZ` (forward speed).
+    pub parameter_y: String,
+    pub children: Vec<BlendSpaceChild>,
+}
+
+/// One clip of a blend space, at its point.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlendSpaceChild {
+    pub clip: String,
+    /// Its place: `[x, y]`, in the two parameters' values.
+    pub position: [f64; 2],
 }
 
 /// A 1D blend tree: clips at thresholds of a Number parameter. The two
@@ -933,7 +1089,58 @@ mod tests {
             }],
             any_state_position: Some([-200.0, 40.0]),
             entry_position: Some([-260.0, -40.0]),
+            layers: Vec::new(),
         }
+    }
+
+    #[test]
+    fn layers_and_blend_spaces_round_trip_and_files_without_them_read_the_same() {
+        let plain = sample_controller();
+        let text = plain.to_json();
+        assert!(!text.contains("layers"), "{text}");
+        assert_eq!(StateMachineFile::from_json(&text).unwrap(), plain);
+
+        let mut layered = sample_controller();
+        layered.states.push(StateDef::new(
+            "Strafe",
+            Motion::BlendSpace(BlendSpace {
+                parameter_x: "MoveX".into(),
+                parameter_y: "MoveZ".into(),
+                children: vec![
+                    BlendSpaceChild {
+                        clip: "assets/animations/hero/Idle.anim.json".into(),
+                        position: [0.0, 0.0],
+                    },
+                    BlendSpaceChild {
+                        clip: "assets/animations/hero/Left.anim.json".into(),
+                        position: [-1.0, 0.0],
+                    },
+                ],
+            }),
+            [0.0, 200.0],
+        ));
+        let mut upper = LayerDef::new("UpperBody");
+        upper.mask = vec!["Hips/Spine".into()];
+        upper.weight = 0.5;
+        upper.states = vec![StateDef::new(
+            "Reload",
+            Motion::Clip("assets/animations/hero/Reload.anim.json".into()),
+            [0.0, 0.0],
+        )];
+        let mut aim = LayerDef::new("Aim");
+        aim.mode = LayerMode::Additive;
+        layered.layers = vec![upper, aim];
+        let text = layered.to_json();
+        assert!(text.contains("\"blend_space\""), "{text}");
+        assert!(text.contains("\"mode\": \"Additive\""), "{text}");
+        assert_eq!(StateMachineFile::from_json(&text).unwrap(), layered);
+        assert_eq!(StateMachineFile::from_json(&text).unwrap().to_json(), text);
+        // A layer's states edit as a state machine of their own.
+        let mut machine = layered.layers[0].machine(&layered.parameters);
+        assert_eq!(machine.parameters, layered.parameters);
+        machine.default_state = "Reload".into();
+        layered.layers[0].set_machine(&machine);
+        assert_eq!(layered.layer("UpperBody").unwrap().default_state, "Reload");
     }
 
     #[test]

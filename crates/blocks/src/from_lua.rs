@@ -1110,6 +1110,12 @@ impl<'a> Converter<'a> {
                         parameter: name,
                         value: self.expression(value, scope),
                     },
+                    ("SetLayerWeight", [weight, seconds]) => BlockKind::SetAnimatorLayerWeight {
+                        animator,
+                        layer: name,
+                        weight: self.expression(weight, scope),
+                        seconds: self.expression(seconds, scope),
+                    },
                     ("SetTrigger", []) => BlockKind::SetAnimatorTrigger {
                         animator,
                         parameter: name,
@@ -2108,6 +2114,10 @@ impl<'a> Converter<'a> {
                         "GetNumber" => Some(Expression::AnimatorNumber {
                             animator,
                             parameter,
+                        }),
+                        "GetLayerWeight" => Some(Expression::AnimatorLayerWeight {
+                            animator,
+                            layer: parameter,
                         }),
                         _ => None,
                     };

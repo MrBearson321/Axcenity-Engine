@@ -35,7 +35,8 @@ pub use motion::{
 };
 pub use ownership::{CharacterCheck, Owned, OwnedSender, TELEPORT_DISTANCE};
 pub use replicate::{
-    Applied, LevelState, Op, Replicator, Update, WireChange, WireInstance, apply, replicated_parts,
+    Applied, LevelState, Op, Replicator, Update, WireAnimator, WireChange, WireInstance,
+    WireParameter, apply, replicated_parts,
 };
 pub use session::{HANDSHAKE_TIMEOUT, Host, HostSettings, Join, SessionEvent};
 pub use transport::{Channel, Client, Conditions, ConnectionId, LinkStats, Server, ServerEvent};
@@ -43,7 +44,7 @@ pub use wire::{WireArg, WireKind, WireMessage, WireValue};
 
 /// The network protocol's version: games on different ones can't play
 /// together, and the handshake says so. Raise it when a message changes.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 /// A chat message as sent on: trimmed, at most 200 characters, and not
 /// empty, whatever a modified client sends.
 pub(crate) fn chat_text(text: &str) -> Option<String> {

@@ -443,15 +443,20 @@ fn animation_refs(folder: &Path, found: &mut dyn FnMut(Reference)) {
         } else if lower.ends_with(STATE_MACHINE_EXTENSION)
             && let Ok(machine) = StateMachineFile::from_json(&text)
         {
-            for state in &machine.states {
+            for (layer, state) in machine.all_states() {
                 for clip in state.motion.clips() {
                     found(Reference {
                         owner: file.clone(),
-                        what: state.name.clone(),
+                        what: if layer.is_empty() {
+                            state.name.clone()
+                        } else {
+                            format!("{layer}/{}", state.name)
+                        },
                         path: clip.to_owned(),
                         place: RefPlace::Site(
                             Site::StateClip {
                                 file: file.clone(),
+                                layer: layer.to_owned(),
                                 state: state.name.clone(),
                             },
                             AssetKind::Clip,

@@ -66,6 +66,8 @@ pub enum NameKind {
     Trigger,
     State,
     Event,
+    /// A state machine layer (Phase 78).
+    Layer,
     /// A child's name, suggested from what's in the object.
     Child,
     /// A BindableEvent's path in ReplicatedStorage, suggested from the
@@ -92,6 +94,7 @@ impl NameKind {
             NameKind::Trigger => "Jump",
             NameKind::State => "Idle",
             NameKind::Event => "Footstep",
+            NameKind::Layer => "UpperBody",
             NameKind::Child => "Door",
             NameKind::Bindable => "Scored",
             NameKind::DataTable => "weapons",
@@ -106,6 +109,7 @@ impl NameKind {
             NameKind::Trigger => "Trigger",
             NameKind::State => "state",
             NameKind::Event => "animation event",
+            NameKind::Layer => "layer",
             NameKind::Child => "child",
             NameKind::Bindable => "BindableEvent",
             NameKind::DataTable => "data table",
@@ -324,6 +328,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WhenAnimationEvent { .. }
         | BlockKind::SetAnimatorBool { .. }
         | BlockKind::SetAnimatorNumber { .. }
+        | BlockKind::SetAnimatorLayerWeight { .. }
         | BlockKind::SetAnimatorTrigger { .. }
         | BlockKind::ResetAnimatorTrigger { .. }
         | BlockKind::PlayAnimatorState { .. }
@@ -369,7 +374,9 @@ fn reporter_category(expression: &Expression) -> Category {
         | Expression::IsA { .. }
         | Expression::SplinePosition { .. }
         | Expression::SplineClosestDistance { .. } => Category::Sensing,
-        Expression::AnimatorBool { .. } | Expression::AnimatorNumber { .. } => Category::Animation,
+        Expression::AnimatorBool { .. }
+        | Expression::AnimatorNumber { .. }
+        | Expression::AnimatorLayerWeight { .. } => Category::Animation,
         Expression::DataRow { .. } | Expression::DataValue { .. } => Category::More,
         Expression::Code { .. } => Category::Lua,
         _ => Category::Operators,
@@ -692,6 +699,25 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
                 Object(animator, Filter::Animators),
                 label("to"),
                 Slot(value, SlotKind::Number),
+            ])]
+        }
+        BlockKind::SetAnimatorLayerWeight {
+            animator,
+            layer,
+            weight,
+            seconds,
+        } => {
+            let path = animator.clone();
+            vec![Row(vec![
+                label("set layer"),
+                Part::Name(layer, NameKind::Layer, path),
+                label("of"),
+                Object(animator, Filter::Animators),
+                label("to"),
+                Slot(weight, SlotKind::Number),
+                label("over"),
+                Slot(seconds, SlotKind::Number),
+                label("seconds"),
             ])]
         }
         BlockKind::SetAnimatorTrigger {
@@ -1389,6 +1415,15 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
             let path = animator.clone();
             vec![
                 Part::Name(parameter, NameKind::Bool, path),
+                label("of"),
+                Object(animator, Filter::Animators),
+            ]
+        }
+        Expression::AnimatorLayerWeight { animator, layer } => {
+            let path = animator.clone();
+            vec![
+                label("weight of layer"),
+                Part::Name(layer, NameKind::Layer, path),
                 label("of"),
                 Object(animator, Filter::Animators),
             ]

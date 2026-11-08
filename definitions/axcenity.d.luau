@@ -3784,6 +3784,10 @@ declare extern type Animator extends Instance with
 	function SetTrigger(self, name: string): ()
 	--- Clears a Trigger that no transition has used yet.
 	function ResetTrigger(self, name: string): ()
+	--- Sets how much the state machine layer named `name` counts, from 0 (not at all) to 1 (fully), fading there over `fadeTime` seconds (at once if left out), such as an `UpperBody` layer's reload over a run.
+	function SetLayerWeight(self, name: string, weight: number, fadeTime: number?): ()
+	--- How much the state machine layer named `name` counts now, from 0 to 1 (0 for a layer the Animator hasn't started).
+	function GetLayerWeight(self, name: string): number
 	--- Switches to the state named `state`, from its start, blending from the pose now over `blend` seconds (0.25 if left out; 0 snaps).
 	function Play(self, state: string, blend: number?): ()
 	--- Loads `animation` (an Animation, whose Clip names the clip) on this Animator and returns an AnimationTrack to play, stop and blend over the state machine.

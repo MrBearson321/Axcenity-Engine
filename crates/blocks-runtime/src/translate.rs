@@ -884,6 +884,20 @@ impl Writer {
                     quote(parameter)
                 ));
             }
+            BlockKind::SetAnimatorLayerWeight {
+                animator,
+                layer,
+                weight,
+                seconds,
+            } => {
+                let weight = self.expression(weight)?;
+                let seconds = self.expression(seconds)?;
+                self.line(format!(
+                    "{}:SetLayerWeight({}, {weight}, {seconds})",
+                    target(animator)?,
+                    quote(layer)
+                ));
+            }
             BlockKind::SetAnimatorTrigger {
                 animator,
                 parameter,
@@ -1157,6 +1171,9 @@ impl Writer {
                 animator,
                 parameter,
             } => format!("{}:GetNumber({})", target(animator)?, quote(parameter)),
+            Expression::AnimatorLayerWeight { animator, layer } => {
+                format!("{}:GetLayerWeight({})", target(animator)?, quote(layer))
+            }
             Expression::IsA { value, class } => {
                 format!("{}:IsA({})", self.receiver(value)?, quote(class))
             }

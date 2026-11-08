@@ -15,6 +15,10 @@
 //! doesn't: once a part is on a device it moves by `motion`, quantized and
 //! within each player's budget (Phase 65).
 //!
+//! Animators' parameters and layer weights (Phase 78) aren't Instance
+//! properties; each frame's update carries those that changed too, so a
+//! device animates what the server's scripts asked for.
+//!
 //! A replica keeps the server's Instances at their own IDs (see
 //! `World::empty_replica`), so an ID means the same Instance on every
 //! computer. A player's own changes to their replica stay theirs: the
@@ -22,7 +26,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use axcenity_core::{ClassName, InstanceId, Value, World};
+use axcenity_core::{ClassName, InstanceId, LayerWeight, Parameter, Value, World};
 use serde::{Deserialize, Serialize};
 
 use crate::motion::MOTION_PROPERTIES;
@@ -91,6 +95,97 @@ pub struct Update {
     /// `LevelService`'s levels, when they changed (and in a snapshot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub levels: Option<LevelState>,
+    /// Animators' parameters and layer weights that changed (all of them in
+    /// a snapshot), applied after the Instances.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub animators: Vec<WireAnimator>,
+}
+
+/// What changed of an Animator's live state: parameters by name, and layer
+/// weights as where each is heading and over how many seconds.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireAnimator {
+    pub id: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<(String, WireParameter)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<(String, f64, f64)>,
+}
+
+/// An Animator parameter's value on the wire.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum WireParameter {
+    Bool(bool),
+    Number(f64),
+    /// Only sent when it's set: a device uses up its own.
+    Trigger,
+}
+
+impl WireParameter {
+    fn of(parameter: Parameter) -> Option<Self> {
+        match parameter {
+            Parameter::Bool(value) => Some(WireParameter::Bool(value)),
+            Parameter::Number(value) => Some(WireParameter::Number(value)),
+            Parameter::Trigger(true) => Some(WireParameter::Trigger),
+            Parameter::Trigger(false) => None,
+        }
+    }
+
+    fn value(self) -> Parameter {
+        match self {
+            WireParameter::Bool(value) => Parameter::Bool(value),
+            WireParameter::Number(value) => Parameter::Number(value),
+            WireParameter::Trigger => Parameter::Trigger(true),
+        }
+    }
+}
+
+/// An Animator's live state as it was last sent.
+#[derive(Clone, Default, PartialEq)]
+struct SentAnimator {
+    parameters: BTreeMap<String, Parameter>,
+    /// Each layer's target weight.
+    layers: BTreeMap<String, f64>,
+}
+
+impl SentAnimator {
+    fn of(world: &World, id: InstanceId) -> Option<Self> {
+        let live = world.animator(id)?;
+        Some(Self {
+            parameters: live.parameters.clone(),
+            layers: live
+                .layer_weights
+                .iter()
+                .map(|(name, weight)| (name.clone(), weight.target))
+                .collect(),
+        })
+    }
+
+    /// What of it to send to a device that had `before` (everything, for
+    /// none). A Trigger goes when it's set, not when it's used up.
+    fn changes(&self, world: &World, id: InstanceId, before: Option<&Self>) -> WireAnimator {
+        let mut wire = WireAnimator {
+            id: id.to_bits(),
+            ..WireAnimator::default()
+        };
+        for (name, value) in &self.parameters {
+            if before.and_then(|b| b.parameters.get(name)) != Some(value)
+                && let Some(value) = WireParameter::of(*value)
+            {
+                wire.parameters.push((name.clone(), value));
+            }
+        }
+        let live = world.animator(id);
+        for (name, target) in &self.layers {
+            if before.and_then(|b| b.layers.get(name)) != Some(target) {
+                let fade = live
+                    .and_then(|live| live.layer_weights.get(name))
+                    .map_or(0.0, |weight| weight.fade);
+                wire.layers.push((name.clone(), *target, fade));
+            }
+        }
+        wire
+    }
 }
 
 /// The level in the Workspace and those added beside it, each with its
@@ -103,7 +198,7 @@ pub struct LevelState {
 
 impl Update {
     pub fn is_empty(&self) -> bool {
-        self.ops.is_empty() && self.levels.is_none()
+        self.ops.is_empty() && self.levels.is_none() && self.animators.is_empty()
     }
 }
 
@@ -221,6 +316,20 @@ fn create(world: &World, id: InstanceId) -> Option<Op> {
 #[derive(Default)]
 pub struct Replicator {
     sent: BTreeMap<InstanceId, Sent>,
+    animators: BTreeMap<InstanceId, SentAnimator>,
+}
+
+/// The Animators players get that have live state.
+fn animators(world: &World, inside: &[InstanceId]) -> Vec<(InstanceId, SentAnimator)> {
+    inside
+        .iter()
+        .filter(|&&id| {
+            world
+                .get(id)
+                .is_some_and(|i| i.class() == ClassName::Animator)
+        })
+        .filter_map(|&id| Some((id, SentAnimator::of(world, id)?)))
+        .collect()
 }
 
 impl Replicator {
@@ -238,9 +347,15 @@ impl Replicator {
                 }));
             }
         }
-        ops.extend(inside.into_iter().filter_map(|id| create(world, id)));
+        ops.extend(inside.iter().filter_map(|&id| create(world, id)));
+        let animators = animators(world, &inside)
+            .into_iter()
+            .map(|(id, now)| now.changes(world, id, None))
+            .filter(|wire| !wire.parameters.is_empty() || !wire.layers.is_empty())
+            .collect();
         Update {
             ops,
+            animators,
             ..Update::default()
         }
     }
@@ -249,6 +364,15 @@ impl Replicator {
     /// world as it was then.
     pub fn frame(&mut self, world: &World) -> Update {
         let (services, inside) = replicated(world);
+        let mut wire_animators = Vec::new();
+        let now_animators = animators(world, &inside);
+        for (id, now) in &now_animators {
+            let wire = now.changes(world, *id, self.animators.get(id));
+            if !wire.parameters.is_empty() || !wire.layers.is_empty() {
+                wire_animators.push(wire);
+            }
+        }
+        self.animators = now_animators.into_iter().collect();
         let mut ops = Vec::new();
         let mut seen = BTreeSet::new();
         for id in services.into_iter().chain(inside) {
@@ -285,6 +409,7 @@ impl Replicator {
         }
         Update {
             ops,
+            animators: wire_animators,
             ..Update::default()
         }
     }
@@ -442,6 +567,20 @@ pub fn apply(world: &mut World, update: &Update) -> Applied {
     }
     for (id, name, value) in references {
         let _ = world.set_property(id, &name, value);
+    }
+    for wire in &update.animators {
+        let Some(live) = world.animator_mut(InstanceId::from_bits(wire.id)) else {
+            continue;
+        };
+        for (name, value) in &wire.parameters {
+            live.parameters.insert(name.clone(), value.value());
+        }
+        for (name, target, fade) in &wire.layers {
+            live.layer_weights
+                .entry(name.clone())
+                .or_insert_with(|| LayerWeight::new(*target))
+                .set(*target, *fade);
+        }
     }
     applied
 }

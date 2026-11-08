@@ -476,6 +476,12 @@ pub(super) fn palette(
                     animator: animator.clone(),
                     parameter: name(NameKind::Trigger),
                 }),
+                block(BlockKind::SetAnimatorLayerWeight {
+                    animator: animator.clone(),
+                    layer: name(NameKind::Layer),
+                    weight: number(1.0),
+                    seconds: number(0.25),
+                }),
                 block(BlockKind::PlayAnimatorState {
                     animator: animator.clone(),
                     state: name(NameKind::State),
@@ -507,6 +513,10 @@ pub(super) fn palette(
                 R(Expression::AnimatorNumber {
                     animator: animator.clone(),
                     parameter: name(NameKind::Number),
+                }),
+                R(Expression::AnimatorLayerWeight {
+                    animator: animator.clone(),
+                    layer: name(NameKind::Layer),
                 }),
                 R(Expression::Property {
                     target: animator,

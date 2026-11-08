@@ -151,9 +151,10 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::PlaceOnSpline { .. } => 82,
         BlockKind::Patrol { .. } => 83,
         BlockKind::SpawnDecal { .. } => 84,
+        BlockKind::SetAnimatorLayerWeight { .. } => 85,
     })
 }
-const STATEMENT_COUNT: usize = 85;
+const STATEMENT_COUNT: usize = 86;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -666,6 +667,15 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 value: number(4.0),
             },
             "workspace.Hero.Animator:SetNumber(\"Speed\", 4)",
+        ),
+        (
+            BlockKind::SetAnimatorLayerWeight {
+                animator: animator(),
+                layer: "UpperBody".to_owned(),
+                weight: number(1.0),
+                seconds: number(0.25),
+            },
+            "workspace.Hero.Animator:SetLayerWeight(\"UpperBody\", 1, 0.25)",
         ),
         (
             BlockKind::SetAnimatorTrigger {
@@ -2026,6 +2036,10 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
         Expression::AnimatorNumber {
             animator: animator(),
             parameter: "Speed".to_owned(),
+        },
+        Expression::AnimatorLayerWeight {
+            animator: animator(),
+            layer: "UpperBody".to_owned(),
         },
         Expression::Property {
             target: animator(),

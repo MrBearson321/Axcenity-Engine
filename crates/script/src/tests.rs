@@ -1428,6 +1428,50 @@ fn animator_parameters_are_set_and_read_by_kind() {
 }
 
 #[test]
+fn animator_layer_weights_are_set_faded_and_read() {
+    let mut world = World::new();
+    let animator = world.create(ClassName::Animator).unwrap();
+    world.set_parent(animator, Some(world.workspace())).unwrap();
+    world
+        .animator_mut(animator)
+        .unwrap()
+        .layer_weights
+        .insert("UpperBody".into(), axcenity_core::LayerWeight::new(1.0));
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/layers.server.lua",
+        "local animator = workspace.Animator
+         print(animator:GetLayerWeight('UpperBody'))
+         animator:SetLayerWeight('UpperBody', 0, 0.5)
+         print(animator:GetLayerWeight('UpperBody'))
+         animator:SetLayerWeight('Aim', 2)
+         print(animator:GetLayerWeight('Aim'))
+         print(animator:GetLayerWeight('Nothing'))
+         print(pcall(animator.SetLayerWeight, animator, 'Aim', 'full'))
+         print(pcall(animator.SetLayerWeight, animator, 'Aim', 1, -1))
+         print(pcall(animator.SetLayerWeight, animator, 3, 1))",
+    );
+    let output = lines(&mut runtime);
+    assert_eq!(output[..4], ["1", "1", "1", "0"]);
+    assert!(
+        output[4].contains("needs a weight from 0 to 1"),
+        "{}",
+        output[4]
+    );
+    assert!(output[5].contains("fade time"), "{}", output[5]);
+    assert!(output[6].contains("needs a layer's name"), "{}", output[6]);
+    // The fade is the host's to step: halfway after a quarter second.
+    let mut upper = world.animator(animator).unwrap().layer_weights["UpperBody"];
+    assert_eq!((upper.target, upper.fade), (0.0, 0.5));
+    upper.step(0.25);
+    assert!((upper.weight - 0.5).abs() < 1e-12);
+    upper.step(0.25);
+    assert_eq!(upper.weight, 0.0);
+}
+
+#[test]
 fn animators_take_play_requests_and_report_their_state() {
     let mut world = World::new();
     let animator = world.create(ClassName::Animator).unwrap();

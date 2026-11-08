@@ -111,6 +111,10 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::SetVolume { .. } => ("Set Volume", &["Sound", "Volume"]),
         BlockKind::SetAnimatorBool { .. } => ("Set Bool", &["Parameter", "Animator", "Value"]),
         BlockKind::SetAnimatorNumber { .. } => ("Set Number", &["Parameter", "Animator", "Value"]),
+        BlockKind::SetAnimatorLayerWeight { .. } => (
+            "Set Layer Weight",
+            &["Layer", "Animator", "Weight", "Seconds"],
+        ),
         BlockKind::SetAnimatorTrigger { .. } => ("Set Trigger", &["Trigger", "Animator"]),
         BlockKind::ResetAnimatorTrigger { .. } => ("Reset Trigger", &["Trigger", "Animator"]),
         BlockKind::PlayAnimatorState { .. } => ("Play State", &["State", "Animator"]),
@@ -188,6 +192,7 @@ pub(super) fn value_names(expression: &Expression) -> (String, &'static [&'stati
         Expression::IsA { .. } => ("Is A", &["Object", "Class"]),
         Expression::AnimatorBool { .. } => ("Get Bool", &["Parameter", "Animator"]),
         Expression::AnimatorNumber { .. } => ("Get Number", &["Parameter", "Animator"]),
+        Expression::AnimatorLayerWeight { .. } => ("Layer Weight", &["Layer", "Animator"]),
         Expression::DataRow { .. } => ("Get Row", &["Key", "Table"]),
         Expression::SplinePosition { .. } => ("Point Along Spline", &["T", "Spline"]),
         Expression::SplineClosestDistance { .. } => {
@@ -217,7 +222,8 @@ pub(super) fn value_type(expression: &Expression) -> SlotKind {
         | Expression::Function { .. }
         | Expression::Random { .. }
         | Expression::RandomNumber { .. }
-        | Expression::AnimatorNumber { .. } => SlotKind::Number,
+        | Expression::AnimatorNumber { .. }
+        | Expression::AnimatorLayerWeight { .. } => SlotKind::Number,
         Expression::Text { .. } | Expression::Join { .. } => SlotKind::Text,
         Expression::Vector3 { .. } => SlotKind::Vector,
         Expression::Color3 { .. } => SlotKind::Color,

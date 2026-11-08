@@ -824,7 +824,12 @@ impl AnimationStudio {
                         .iter()
                         .map(|s| (NameKind::State, s.name.clone())),
                 );
-                for clip in file.states.iter().flat_map(|s| s.motion.clips()) {
+                names.extend(
+                    file.layers
+                        .iter()
+                        .map(|layer| (NameKind::Layer, layer.name.clone())),
+                );
+                for clip in file.all_states().flat_map(|(_, s)| s.motion.clips()) {
                     if let Ok(clip) = store::read_clip(project, clip) {
                         for event in clip.events {
                             let entry = (NameKind::Event, event.name);

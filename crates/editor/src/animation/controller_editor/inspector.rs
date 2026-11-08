@@ -169,6 +169,8 @@ impl ControllerDoc {
         ui.weak(&self.path);
         ui.label("State machine: it starts at the state Entry is wired to, and follows a wire when what its label says is true.");
         ui.add_space(4.0);
+        self.layers_section(ui);
+        ui.separator();
         self.default_state_picker(ui);
         ui.separator();
         ui.strong("Parameters");
@@ -332,12 +334,15 @@ impl ControllerDoc {
             self.file.default_state = name.clone();
         }
         ui.add_space(4.0);
-        // Clip or blend tree.
+        // Clip, blend tree or blend space.
         let is_tree = matches!(self.file.states[index].motion, Motion::BlendTree(_));
+        let is_space = matches!(self.file.states[index].motion, Motion::BlendSpace(_));
+        let is_clip = !is_tree && !is_space;
         let mut make_tree = false;
+        let mut make_space = false;
         ui.horizontal_wrapped(|ui| {
             ui.label("Plays");
-            if ui.selectable_label(!is_tree, "A clip").clicked() && is_tree {
+            if ui.selectable_label(is_clip, "A clip").clicked() && !is_clip {
                 let first = self.file.states[index]
                     .motion
                     .clips()
@@ -356,7 +361,20 @@ impl ControllerDoc {
             {
                 make_tree = true;
             }
+            if ui
+                .selectable_label(is_space, "A blend space")
+                .on_hover_text(
+                    "Mix clips placed by two Number parameters, such as eight strafes by sideways and forward speed",
+                )
+                .clicked()
+                && !is_space
+            {
+                make_space = true;
+            }
         });
+        if make_space {
+            self.make_blend_space(index);
+        }
         if make_tree {
             let parameter = self.number_parameter();
             let children = match &self.file.states[index].motion {
@@ -373,6 +391,9 @@ impl ControllerDoc {
         }
         if matches!(self.file.states[index].motion, Motion::BlendTree(_)) {
             self.blend_tree_editor(ui, index, clips);
+        }
+        if matches!(self.file.states[index].motion, Motion::BlendSpace(_)) {
+            self.blend_space_editor(ui, index, clips);
         }
         crate::responsive::form(ui, "state settings", |ui| {
             let state = &mut self.file.states[index];

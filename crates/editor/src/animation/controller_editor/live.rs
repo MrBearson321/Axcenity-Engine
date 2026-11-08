@@ -15,6 +15,12 @@ impl ControllerDoc {
             .rig
             .clone()
             .ok_or_else(|| format!("`{mesh_id}` has no skeleton"))?;
+        if self.bones.len() != rig.bones.len() {
+            self.bones = axcenity_anim::bone_paths(&rig)
+                .into_iter()
+                .filter(|path| !path.is_empty())
+                .collect();
+        }
         if self.file.states.is_empty() {
             return Err("Add a state to preview it.".to_owned());
         }
@@ -100,6 +106,19 @@ impl ControllerDoc {
             }
             _ => run.machine.pose(&run.compiled, &rig, &run.parameters),
         };
+        // A layer shows what it moves: the bones its mask picks.
+        let mut pose = pose;
+        if let Some(layer) = self.open_layer()
+            && !layer.mask.is_empty()
+        {
+            let (mask, _) = axcenity_anim::bone_mask(&rig, &layer.mask);
+            let rest = rig.rest_pose();
+            for (bone, picked) in mask.iter().enumerate() {
+                if !picked {
+                    pose[bone] = rest[bone];
+                }
+            }
+        }
         model
             .pose(&pose)
             .map(Arc::new)

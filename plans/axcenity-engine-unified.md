@@ -2360,9 +2360,9 @@ Removing an Effect undoes its change. `Model:ApplyEffect(effect)` clones one ont
 
 ### Acceptance criteria
 
-- [ ] A character strafes in 8 directions from one 2D blend space, with no foot sliding at the sample points.
-- [ ] An upper-body reload layer plays while running, and the legs keep running.
-- [ ] Projects with only 1D blend trees play the same as before.
+- [x] A character strafes in 8 directions from one 2D blend space, with no foot sliding at the sample points.
+- [x] An upper-body reload layer plays while running, and the legs keep running.
+- [x] Projects with only 1D blend trees play the same as before.
 
 ---
 

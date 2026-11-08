@@ -367,7 +367,7 @@ impl CharacterCheck {
         Some(Update {
             ops,
             time,
-            levels: None,
+            ..Update::default()
         })
     }
 }

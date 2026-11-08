@@ -8,8 +8,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axcenity_anim::files::{
-    self, BlendChild, BlendTree, Condition, Motion, ParameterDef, StateDef, StateMachineFile, Test,
-    TransitionDef,
+    self, BlendChild, BlendSpace, BlendSpaceChild, BlendTree, Condition, Motion, ParameterDef,
+    StateDef, StateMachineFile, Test, TransitionDef,
 };
 use axcenity_anim::{
     ANY_STATE, Compiled, DEFAULT_BLEND, Fade, Machine, Playing, ReturnDef, ReturnWhen,
@@ -44,6 +44,12 @@ pub struct ControllerDoc {
     clip_lengths: std::collections::HashMap<String, f64>,
     /// A parameter being named in a wire's label editor.
     new_parameter: Option<wire_editor::NewParameter>,
+    /// While a layer is open (see `layers.rs`): the whole file, and the
+    /// layer's index. `file` then holds that layer's states.
+    base: Option<StateMachineFile>,
+    layer: usize,
+    /// The preview model's bones, by path, for picking a layer's mask.
+    bones: Vec<String>,
 }
 
 /// The state machine running in the preview.
@@ -83,6 +89,9 @@ impl ControllerDoc {
             scrub: 1.0,
             clip_lengths: std::collections::HashMap::new(),
             new_parameter: None,
+            base: None,
+            layer: 0,
+            bones: Vec::new(),
         }
     }
 
@@ -114,22 +123,29 @@ impl ControllerDoc {
     }
 
     pub fn unwritten(&self) -> bool {
-        self.file != self.written
+        self.merged() != self.written
     }
 
     pub fn write(&mut self, project: &Path) -> std::io::Result<bool> {
         if !self.unwritten() {
             return Ok(false);
         }
-        files::write_file(&project.join(&self.path), &self.file.to_json())?;
-        self.written = self.file.clone();
+        let file = self.merged();
+        files::write_file(&project.join(&self.path), &file.to_json())?;
+        self.written = file;
         Ok(true)
     }
 
     /// Takes the file as it is on disk now (after a clip rename rewrote it).
+    /// An open layer stays open if the file still has it.
     pub fn reload(&mut self, file: StateMachineFile) {
+        let layer = self.open_layer_index();
         self.written = file.clone();
         self.file = file;
+        self.base = None;
+        if layer.is_some() {
+            self.show_layer(layer);
+        }
     }
 
     /// The first clip's model, for a preview when nothing better is known.
@@ -407,7 +423,9 @@ impl ControllerDoc {
 }
 
 mod inspector;
+mod layers;
 mod live;
+mod space_editor;
 mod wire_editor;
 
 use inspector::*;

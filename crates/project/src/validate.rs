@@ -122,8 +122,13 @@ pub enum Site {
     },
     /// The model a linked clip's take comes from.
     ClipSource { file: String },
-    /// A clip of one state in a state machine.
-    StateClip { file: String, state: String },
+    /// A clip of one state in a state machine, in the layer named `layer`
+    /// (empty for the base layer).
+    StateClip {
+        file: String,
+        layer: String,
+        state: String,
+    },
     /// A texture a model file names, by the name the model gives it. The
     /// model looks for it next to itself and in `textures` there.
     ModelTexture { model: String, texture: String },
@@ -452,14 +457,16 @@ impl Scan {
                     continue;
                 }
             };
-            for state in &machine.states {
+            for (layer, state) in machine.all_states() {
                 for clip in state.motion.clips() {
                     let property = match &state.motion {
                         Motion::Clip(_) => "clip",
                         Motion::BlendTree(_) => "blend tree",
+                        Motion::BlendSpace(_) => "blend space",
                     };
                     let site = Site::StateClip {
                         file: path.clone(),
+                        layer: layer.to_owned(),
                         state: state.name.clone(),
                     };
                     self.reference(&path, property, clip, AssetKind::Clip, site);

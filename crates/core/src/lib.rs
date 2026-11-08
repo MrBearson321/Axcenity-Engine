@@ -28,7 +28,7 @@ mod value;
 mod world;
 
 pub use animation::{
-    AnimationTrackState, AnimatorState, Parameter, PlayRequest, PropertyAnimationState,
+    AnimationTrackState, AnimatorState, LayerWeight, Parameter, PlayRequest, PropertyAnimationState,
 };
 pub use arena::{Arena, Id};
 pub use class::{ClassName, DEFAULT_CLOCK_TIME, DEFAULT_LATITUDE, INSTANCE_EVENTS};

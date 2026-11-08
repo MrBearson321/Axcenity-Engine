@@ -147,6 +147,12 @@ pub(super) fn plays(motion: &Motion) -> String {
         Motion::Clip(path) if path.is_empty() => "(no clip)".to_owned(),
         Motion::Clip(path) => axcenity_anim::files::clip_name(path).to_owned(),
         Motion::BlendTree(tree) => format!("blend tree · {}", tree.parameter),
+        Motion::BlendSpace(space) => {
+            format!(
+                "blend space · {} × {}",
+                space.parameter_x, space.parameter_y
+            )
+        }
     }
 }
 
@@ -211,6 +217,7 @@ pub(super) fn draw_node(painter: &egui::Painter, look: NodeLook) {
             let icon = match &file.states[index].motion {
                 Motion::Clip(_) => icons::FILM_STRIP,
                 Motion::BlendTree(_) => icons::SLIDERS_HORIZONTAL,
+                Motion::BlendSpace(_) => icons::GRID_FOUR,
             };
             clipped.text(
                 Pos2::new(rect.left() + 22.0 * z, body_y),

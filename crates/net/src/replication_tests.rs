@@ -3,8 +3,8 @@
 //! replica of it on each player's device.
 
 use axcenity_core::{
-    CFrame, ClassName, Color3, EnumItem, InstanceId, Material, PhysicalProperties, UDim2, Value,
-    Vector2, Vector3, World,
+    CFrame, ClassName, Color3, EnumItem, InstanceId, LayerWeight, Material, Parameter,
+    PhysicalProperties, UDim2, Value, Vector2, Vector3, World,
 };
 use axcenity_script::{OutputKind, ScriptRuntime};
 
@@ -537,4 +537,77 @@ fn what_a_spline_scatter_made_isnt_sent_but_the_scatter_is() {
         assert!(!ids.contains(&tree.to_bits()), "each device makes its own");
     }
     assert!(!crate::replicate::replicated_parts(&world).contains(&tree));
+}
+
+#[test]
+fn animator_parameters_and_layer_weights_a_server_script_sets_reach_every_device() {
+    let (mut server, mut players) = three_players();
+    server
+        .scripts
+        .run_command(
+            &mut server.world,
+            r#"
+local hero = Instance.new("Model")
+hero.Name = "Hero"
+local animator = Instance.new("Animator")
+animator.Parent = hero
+hero.Parent = workspace
+animator:SetNumber("Speed", 6)
+animator:SetBool("Aiming", true)
+animator:SetTrigger("Reload")
+animator:SetLayerWeight("UpperBody", 1)
+_G.animator = animator
+"#,
+        )
+        .unwrap();
+    frames(&mut server, &mut players, 1);
+    let hero = server
+        .world
+        .find_first_child(server.world.workspace(), "Hero")
+        .unwrap();
+    let animator = server.world.find_first_child(hero, "Animator").unwrap();
+    for player in &players {
+        let live = player
+            .world
+            .animator(animator)
+            .expect("the Animator's state");
+        assert_eq!(live.parameters["Speed"], Parameter::Number(6.0));
+        assert_eq!(live.parameters["Aiming"], Parameter::Bool(true));
+        assert_eq!(live.parameters["Reload"], Parameter::Trigger(true));
+        assert_eq!(live.layer_weights["UpperBody"], LayerWeight::new(1.0));
+    }
+    // A fade goes as where it's heading and how long it takes; each device
+    // fades it itself.
+    server
+        .scripts
+        .run_command(
+            &mut server.world,
+            r#"_G.animator:SetLayerWeight("UpperBody", 0, 0.5) _G.animator:SetNumber("Speed", 2)"#,
+        )
+        .unwrap();
+    frames(&mut server, &mut players, 1);
+    for player in &mut players {
+        let live = player.world.animator_mut(animator).unwrap();
+        assert_eq!(live.parameters["Speed"], Parameter::Number(2.0));
+        let mut weight = live.layer_weights["UpperBody"];
+        assert_eq!((weight.weight, weight.target, weight.fade), (1.0, 0.0, 0.5));
+        weight.step(0.25);
+        assert!((weight.weight - 0.5).abs() < 1e-12);
+        // A device that uses up its Trigger keeps it used up: nothing
+        // changed on the server, so nothing is sent again.
+        live.parameters
+            .insert("Reload".into(), Parameter::Trigger(false));
+    }
+    frames(&mut server, &mut players, 2);
+    for player in &players {
+        let live = player.world.animator(animator).unwrap();
+        assert_eq!(live.parameters["Reload"], Parameter::Trigger(false));
+    }
+    // A player who joins later gets them all in the snapshot.
+    let client = server.network.connect_loopback().unwrap();
+    players.push(player(client, 104.0));
+    frames(&mut server, &mut players, 5);
+    let late = players[3].world.animator(animator).unwrap();
+    assert_eq!(late.parameters["Speed"], Parameter::Number(2.0));
+    assert_eq!(late.layer_weights["UpperBody"].target, 0.0);
 }

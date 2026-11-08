@@ -604,7 +604,50 @@ pub fn animator_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str,
             _ => unreachable!("get_parameter checks the kind"),
         }
     })?;
+    let set_layer_weight = lua.create_function(
+        |lua, (this, name, weight, fade): (LuaInstance, mlua::Value, mlua::Value, Option<f64>)| {
+            let name = layer_name(lua, &name, "SetLayerWeight")?;
+            let weight = match weight {
+                mlua::Value::Number(n) => n,
+                mlua::Value::Integer(n) => n as f64,
+                other => {
+                    return Err(mlua::Error::runtime(format!(
+                        "SetLayerWeight needs a weight from 0 to 1, not a {}",
+                        type_name(lua, &other)
+                    )));
+                }
+            };
+            if !weight.is_finite() {
+                return Err(mlua::Error::runtime("SetLayerWeight needs a finite weight"));
+            }
+            let fade = fade.unwrap_or(0.0);
+            if !(fade.is_finite() && fade >= 0.0) {
+                return Err(mlua::Error::runtime(
+                    "SetLayerWeight's fade time must be a number of seconds, 0 or more",
+                ));
+            }
+            let mut world = world_mut(lua)?;
+            let live = world.animator_mut(this.0).ok_or_else(destroyed)?;
+            // A layer the host hasn't started yet starts at the new weight.
+            live.layer_weights
+                .entry(name)
+                .or_insert_with(|| axcenity_core::LayerWeight::new(weight.clamp(0.0, 1.0)))
+                .set(weight, fade);
+            Ok(())
+        },
+    )?;
+    let get_layer_weight =
+        lua.create_function(|lua, (this, name): (LuaInstance, mlua::Value)| {
+            let name = layer_name(lua, &name, "GetLayerWeight")?;
+            let world = world(lua)?;
+            Ok(world
+                .animator(this.0)
+                .and_then(|live| live.layer_weights.get(&name))
+                .map_or(0.0, |weight| weight.weight))
+        })?;
     let mut methods = vec![
+        (ClassName::Animator, "SetLayerWeight", set_layer_weight),
+        (ClassName::Animator, "GetLayerWeight", get_layer_weight),
         (ClassName::Animator, "Play", play),
         (ClassName::Animator, "SetBool", set_bool),
         (ClassName::Animator, "GetBool", get_bool),
@@ -882,6 +925,16 @@ pub fn property_animation_methods(
 }
 
 /// A parameter's name, given to `method`.
+fn layer_name(lua: &Lua, name: &mlua::Value, method: &str) -> mlua::Result<String> {
+    match name {
+        mlua::Value::String(name) => Ok(name.to_string_lossy()),
+        other => Err(mlua::Error::runtime(format!(
+            "{method} needs a layer's name, such as animator:{method}(\"UpperBody\", ...), not a {}",
+            type_name(lua, other)
+        ))),
+    }
+}
+
 fn parameter_name(lua: &Lua, name: &mlua::Value, method: &str) -> mlua::Result<String> {
     match name {
         mlua::Value::String(name) => Ok(name.to_string_lossy()),

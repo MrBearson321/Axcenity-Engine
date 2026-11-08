@@ -59,6 +59,53 @@ pub struct AnimatorState {
     /// Counts up each time something starts playing on it, so the most
     /// recently started wins where two animate the same thing.
     pub next_order: u64,
+    /// Each state machine layer's weight, by the layer's name (Phase 78).
+    /// The host adds the layers' own (from the file) the first time it runs
+    /// the animator; `SetLayerWeight` may set them sooner.
+    pub layer_weights: BTreeMap<String, LayerWeight>,
+}
+
+/// A state machine layer's weight, which `animator:SetLayerWeight` can fade
+/// to a new one over time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LayerWeight {
+    /// How much the layer counts now, from 0 to 1.
+    pub weight: f64,
+    /// Where it's heading.
+    pub target: f64,
+    /// Seconds left to get there (0: it's there).
+    pub fade: f64,
+}
+
+impl LayerWeight {
+    /// Already at `weight`.
+    pub fn new(weight: f64) -> Self {
+        Self {
+            weight,
+            target: weight,
+            fade: 0.0,
+        }
+    }
+
+    /// Heads for `target` (kept in 0..=1) over `fade` seconds, at once for 0.
+    pub fn set(&mut self, target: f64, fade: f64) {
+        self.target = target.clamp(0.0, 1.0);
+        self.fade = if fade.is_finite() { fade.max(0.0) } else { 0.0 };
+        if self.fade == 0.0 {
+            self.weight = self.target;
+        }
+    }
+
+    /// Moves on by `dt` seconds, at an even pace toward the target.
+    pub fn step(&mut self, dt: f64) {
+        if self.fade <= 0.0 || dt >= self.fade {
+            self.weight = self.target;
+            self.fade = 0.0;
+        } else if dt > 0.0 {
+            self.weight += (self.target - self.weight) * dt / self.fade;
+            self.fade -= dt;
+        }
+    }
 }
 
 impl AnimatorState {

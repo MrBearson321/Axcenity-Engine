@@ -505,9 +505,8 @@ pub fn read_controller(project: &Path, path: &str) -> Result<StateMachineFile, S
 
 /// Every clip path a controller's states play.
 fn clips_of(file: &StateMachineFile) -> Vec<String> {
-    file.states
-        .iter()
-        .flat_map(|state| state.motion.clips().into_iter().cloned())
+    file.all_states()
+        .flat_map(|(_, state)| state.motion.clips().into_iter().cloned())
         .collect()
 }
 
@@ -523,7 +522,7 @@ fn update_controller(
         return Ok(());
     };
     let mut changed = false;
-    for state in &mut file.states {
+    for state in file.all_states_mut() {
         for clip in state.motion.clips_mut() {
             if let Some(new) = change(clip) {
                 *clip = new;

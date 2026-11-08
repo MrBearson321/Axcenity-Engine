@@ -2802,6 +2802,28 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
     (
         ClassName::Animator,
         Function {
+            name: "SetLayerWeight",
+            doc: "Sets how much the state machine layer named `name` counts, from 0 (not at all) to 1 (fully), fading there over `fadeTime` seconds (at once if left out), such as an `UpperBody` layer's reload over a run.",
+            params: &[
+                ("name", "string"),
+                ("weight", "number"),
+                ("fadeTime?", "number"),
+            ],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Animator,
+        Function {
+            name: "GetLayerWeight",
+            doc: "How much the state machine layer named `name` counts now, from 0 to 1 (0 for a layer the Animator hasn't started).",
+            params: &[("name", "string")],
+            returns: "number",
+        },
+    ),
+    (
+        ClassName::Animator,
+        Function {
             name: "Play",
             doc: "Switches to the state named `state`, from its start, blending from the pose now over `blend` seconds (0.25 if left out; 0 snaps).",
             params: &[("state", "string"), ("blend?", "number")],
