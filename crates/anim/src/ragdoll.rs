@@ -100,7 +100,7 @@ enum Limb {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum Side {
+pub(crate) enum Side {
     Left,
     Right,
 }
@@ -122,7 +122,7 @@ fn joint_of(limb: Limb) -> Option<JointPreset> {
 /// A bone name without its namespace (`mixamorig:`), lowercase, letters and
 /// digits only, and which side it's on, if it says: `LeftArm`, `upper_arm.L`
 /// and `Arm_R` all work.
-fn bone_kind(name: &str) -> (String, Option<Side>) {
+pub(crate) fn bone_kind(name: &str) -> (String, Option<Side>) {
     let name = name.rsplit(':').next().unwrap_or(name).to_ascii_lowercase();
     let mut side = None;
     let mut rest = name.as_str();
@@ -271,7 +271,7 @@ fn is_above(rig: &Rig, ancestor: usize, mut bone: usize) -> bool {
 }
 
 /// The lowest bone above both `a` and `b` (or one of them).
-fn common_ancestor(rig: &Rig, a: usize, b: usize) -> Option<usize> {
+pub(crate) fn common_ancestor(rig: &Rig, a: usize, b: usize) -> Option<usize> {
     let mut at = a;
     loop {
         if is_above(rig, at, b) {
@@ -346,7 +346,7 @@ pub(crate) fn placement(world: &World, part: InstanceId, rig: &Rig) -> Option<Ma
     place.is_finite().then_some(place)
 }
 
-fn to_vec3(v: Vector3) -> Vec3 {
+pub(crate) fn to_vec3(v: Vector3) -> Vec3 {
     Vec3::new(v.x, v.y, v.z)
 }
 
@@ -355,7 +355,7 @@ fn to_vector3(v: Vec3) -> Vector3 {
 }
 
 /// The rotation an `Orientation` in degrees stands for (Z, then X, then Y).
-fn rotation_of(orientation: Vector3) -> Quat {
+pub(crate) fn rotation_of(orientation: Vector3) -> Quat {
     Quat::from_euler(
         EulerRot::YXZ,
         orientation.y.to_radians(),

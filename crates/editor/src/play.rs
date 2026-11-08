@@ -141,7 +141,7 @@ impl Session {
             physics: Physics::with_assets(assets.clone()),
             characters: Controllers::default(),
             agents: Agents::default(),
-            animators: Animators::new(),
+            animators: Animators::with_ground(axcenity_character::foot_ground),
             assets,
             audio: GameAudio::default(),
             ui_sounds: Vec::new(),

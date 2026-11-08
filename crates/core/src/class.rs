@@ -320,6 +320,11 @@ pub enum ClassName {
     /// `Enabled`, physics moves the capsules and they pose the bones;
     /// otherwise they follow the animation and physics leaves them out.
     Ragdoll,
+    /// Inverse kinematics during the game for the skinned MeshPart it's in
+    /// (Phase 79): after the Animator and before drawing, it turns the
+    /// bones from `ChainRoot` down to `EndEffector` toward its `Target`, as
+    /// `Type` says. `Weight` says how much, fading over `SmoothTime`.
+    IKControl,
     /// Breaks the Part or MeshPart it's parented to into pieces (Phase 42):
     /// Generate in the editor cuts it into `Pieces` Voronoi pieces, saved
     /// as `<name>.fracture.glb` (`PiecesId`). An impact faster than
@@ -422,7 +427,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 131] = [
+    pub const ALL: [ClassName; 132] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -518,6 +523,7 @@ impl ClassName {
         ClassName::Attachment,
         ClassName::VehicleWheel,
         ClassName::Ragdoll,
+        ClassName::IKControl,
         ClassName::Fracture,
         ClassName::Health,
         ClassName::ProximityPrompt,
@@ -657,6 +663,7 @@ impl ClassName {
             ClassName::Attachment => "Attachment",
             ClassName::VehicleWheel => "VehicleWheel",
             ClassName::Ragdoll => "Ragdoll",
+            ClassName::IKControl => "IKControl",
             ClassName::Fracture => "Fracture",
             ClassName::Health => "Health",
             ClassName::ProximityPrompt => "ProximityPrompt",
@@ -1018,6 +1025,9 @@ impl ClassName {
                 // "assets/prefabs/Hero.prefab.json"; empty for the
                 // character Insert > Character makes.
                 ("StarterCharacter", Value::String(String::new())),
+                // On, each player's character plants its feet on what's
+                // under them, turning on its controller's FootPlacement.
+                ("CharacterFootPlacement", Value::Bool(false)),
             ],
             ClassName::Player => vec![
                 // The character Model it plays as, or none.
@@ -2363,6 +2373,34 @@ impl ClassName {
                 // The Animator state to play when it's turned off, or "".
                 ("GetUpState", Value::String(String::new())),
             ],
+            ClassName::IKControl => vec![
+                // "Transform", "Position", "Rotation" or "LookAt".
+                ("Type", Value::String("Position".to_owned())),
+                // Off, the pose goes back to the plain animation over
+                // `SmoothTime`.
+                ("Enabled", Value::Bool(true)),
+                // The bone that turns or reaches, by name or path, such as
+                // "Head" or "mixamorig:RightHand".
+                ("EndEffector", Value::String(String::new())),
+                // The highest bone that turns; empty for the two above the
+                // EndEffector (Position, Transform) or only it (LookAt).
+                ("ChainRoot", Value::String(String::new())),
+                // The Part or Attachment to reach or face.
+                ("Target", Value::Instance(None)),
+                // A Part or Attachment that elbows or knees bend toward.
+                ("Pole", Value::Instance(None)),
+                // How much of the solved pose is used, 0 to 1.
+                ("Weight", Value::Number(1.0)),
+                // Seconds a change in Weight or Enabled takes, and about how
+                // long it trails its Target by.
+                ("SmoothTime", Value::Number(0.1)),
+                // LookAt: the most degrees it turns from the way the
+                // character faces.
+                ("MaxAngle", Value::Number(75.0)),
+                // LookAt: the way the EndEffector faces, in the MeshPart's
+                // own axes. Zero works it out from the skeleton's toes.
+                ("Forward", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+            ],
             ClassName::Fracture => vec![
                 // How many pieces Generate cuts the part into.
                 ("Pieces", Value::Number(12.0)),
@@ -2775,6 +2813,7 @@ impl ClassName {
             | ClassName::Attachment
             | ClassName::VehicleWheel
             | ClassName::Ragdoll
+            | ClassName::IKControl
             | ClassName::LinearVelocity
             | ClassName::AngularVelocity
             | ClassName::VectorForce
@@ -3117,6 +3156,9 @@ pub fn free_standing_properties() -> Vec<(&'static str, Value)> {
 
 fn movement_properties() -> Vec<(&'static str, Value)> {
     vec![
+        // On, a skinned character plants its feet on slopes and stairs and
+        // lowers its hips to match, on each device.
+        ("FootPlacement", Value::Bool(false)),
         // "Walk", "Run" or "Crouch". Any other name is a custom mode that
         // scripts move; "" clears it back to the built-in mode it replaced.
         ("Movement", Value::String("Walk".to_owned())),

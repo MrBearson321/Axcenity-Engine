@@ -540,6 +540,64 @@ fn what_a_spline_scatter_made_isnt_sent_but_the_scatter_is() {
 }
 
 #[test]
+fn an_ikcontrols_weight_and_target_a_server_script_sets_reach_every_device() {
+    let (mut server, mut players) = three_players();
+    server
+        .scripts
+        .run_command(
+            &mut server.world,
+            r#"
+local hero = Instance.new("MeshPart")
+hero.Name = "Hero"
+local ik = Instance.new("IKControl")
+ik.Name = "Look"
+ik.Parent = hero
+local first = Instance.new("Part")
+first.Name = "First"
+first.Parent = workspace
+local second = Instance.new("Part")
+second.Name = "Second"
+second.Parent = workspace
+hero.Parent = workspace
+ik.Weight = 0.25
+ik.Target = first
+_G.ik = ik
+_G.second = second
+"#,
+        )
+        .unwrap();
+    frames(&mut server, &mut players, 1);
+    let world = &server.world;
+    let find = |name: &str| world.find_first_child(world.workspace(), name).unwrap();
+    let (hero, first, second) = (find("Hero"), find("First"), find("Second"));
+    let ik = world.find_first_child(hero, "Look").unwrap();
+    for player in &players {
+        let control = player.world.get(ik).expect("the IKControl");
+        assert_eq!(control.property("Weight"), Some(&Value::Number(0.25)));
+        assert_eq!(
+            control.property("Target"),
+            Some(&Value::Instance(Some(first)))
+        );
+    }
+    server
+        .scripts
+        .run_command(
+            &mut server.world,
+            "_G.ik.Weight = 1; _G.ik.Target = _G.second",
+        )
+        .unwrap();
+    frames(&mut server, &mut players, 1);
+    for player in &players {
+        let control = player.world.get(ik).unwrap();
+        assert_eq!(control.property("Weight"), Some(&Value::Number(1.0)));
+        assert_eq!(
+            control.property("Target"),
+            Some(&Value::Instance(Some(second)))
+        );
+    }
+}
+
+#[test]
 fn animator_parameters_and_layer_weights_a_server_script_sets_reach_every_device() {
     let (mut server, mut players) = three_players();
     server

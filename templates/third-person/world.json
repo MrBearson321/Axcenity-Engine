@@ -424,6 +424,11 @@
       }
     ]
   },
+  "starter_player": {
+    "properties": {
+      "CharacterFootPlacement": true
+    }
+  },
   "lighting": {
     "properties": {
       "ToneMapping": "Neutral",

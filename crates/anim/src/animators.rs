@@ -16,6 +16,10 @@
 //! off (see [`crate::ragdoll`]). Properties keep the value last given
 //! when nothing plays them any more; bones go back to what plays under them.
 //!
+//! Over a skeleton's pose (not while its Ragdoll is on) come its character
+//! controller's foot placement ([`crate::feet`]) and then its IKControls
+//! ([`crate::ik_control`]), all before drawing.
+//!
 //! A clip, state machine or model file that changed on disk
 //! ([`Animators::reload`]) is bound again at the next update, and each
 //! Animator using it stays in the state it was in, matched by name.
@@ -29,9 +33,11 @@ use glam::{EulerRot, Quat, Vec3};
 
 use crate::clip::{Clip, RootMotion};
 use crate::controller::{Compiled, Machine, Playing};
+use crate::feet::{self, GroundProbe, Legs};
 use crate::files::{
     CLIP_EXTENSION, ClipFile, DEFAULT_BLEND, STATE_MACHINE_EXTENSION, StateMachineFile,
 };
+use crate::ik_control;
 use crate::property_clip::{Applied, apply_evaluated, blend_evaluated};
 use crate::ragdoll;
 
@@ -114,6 +120,9 @@ pub struct Animators {
     reported: HashSet<String>,
     /// Files changed on disk since the last update ([`Animators::reload`]).
     changed: HashSet<String>,
+    /// How foot placement finds the ground. Without one, feet stay where
+    /// the animation has them.
+    ground: Option<GroundProbe>,
 }
 
 /// One animated thing being played.
@@ -131,6 +140,11 @@ struct Running {
     /// so a script's seek doesn't fire the events it jumps over.
     seen: HashMap<InstanceId, f64>,
     ragdoll: RagdollRun,
+    /// Each IKControl's progress.
+    ik: HashMap<InstanceId, ik_control::Run>,
+    /// The skeleton's legs (found again for a new model), if it has them.
+    legs: Option<Legs>,
+    feet: feet::Run,
 }
 
 /// Where a thing's Ragdoll has got to.
@@ -173,11 +187,21 @@ struct Parts {
     animator: Option<InstanceId>,
     animations: Vec<InstanceId>,
     ragdoll: Option<InstanceId>,
+    ik: Vec<InstanceId>,
 }
 
 impl Animators {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// One whose characters can plant their feet (`FootPlacement`), finding
+    /// the ground with `probe`.
+    pub fn with_ground(probe: GroundProbe) -> Self {
+        Self {
+            ground: Some(probe),
+            ..Self::default()
+        }
     }
 
     /// The posed models, by MeshPart, after the last [`update`](Self::update).
@@ -270,15 +294,19 @@ impl Animators {
             let class = instance.class();
             if !matches!(
                 class,
-                ClassName::Animator | ClassName::Animation | ClassName::Ragdoll
+                ClassName::Animator
+                    | ClassName::Animation
+                    | ClassName::Ragdoll
+                    | ClassName::IKControl
             ) {
                 continue;
             }
             let Some(mut owner) = instance.parent() else {
                 continue;
             };
-            // An Animation under an Animator animates the Animator's parent.
-            if class == ClassName::Animation
+            // An Animation or IKControl under an Animator animates the
+            // Animator's parent.
+            if matches!(class, ClassName::Animation | ClassName::IKControl)
                 && world
                     .get(owner)
                     .is_some_and(|parent| parent.class() == ClassName::Animator)
@@ -303,6 +331,7 @@ impl Animators {
                 ClassName::Ragdoll => {
                     parts.ragdoll.get_or_insert(id);
                 }
+                ClassName::IKControl => parts.ik.push(id),
                 _ => parts.animations.push(id),
             }
         }
@@ -359,6 +388,8 @@ impl Animators {
         if running.model_key != model_key {
             running.model_key = model_key;
             running.clips.clear();
+            running.legs = rig.as_deref().and_then(Legs::find);
+            running.feet = feet::Run::default();
             was_in = running.machine.take().map(RunningMachine::where_it_is);
         }
         if !changed.is_empty() {
@@ -549,7 +580,17 @@ impl Animators {
                 .iter()
                 .filter(|layer| layer.clip.animated_bones().iter().any(|&moved| moved))
                 .collect();
-            if running.machine.is_some() || !bone_layers.is_empty() || parts.ragdoll.is_some() {
+            // A controller's foot placement needs a pose under it, and one
+            // just turned off still has its feet to bring back.
+            let controller = parts.animator.and_then(|_| feet::wanted(world, owner));
+            let wants_feet = controller.is_some_and(|(on, _)| on);
+            if running.machine.is_some()
+                || !bone_layers.is_empty()
+                || parts.ragdoll.is_some()
+                || !parts.ik.is_empty()
+                || wants_feet
+                || running.feet.busy()
+            {
                 let mut pose = match (&running.machine, parts.animator) {
                     (Some(machine), Some(animator)) => {
                         let live = world.animator(animator);
@@ -593,11 +634,58 @@ impl Animators {
                         game_dt,
                     );
                 }
+                // A ragdoll that's on is physics' to pose: IK waits.
+                if parts.ragdoll.is_some_and(|ragdoll| is_on(world, ragdoll)) {
+                    running.feet = feet::Run::default();
+                    running.ik.clear();
+                } else {
+                    if let (Some(probe), Some((on, holder))) = (self.ground, controller) {
+                        match &running.legs {
+                            Some(legs) => feet::plant(
+                                world,
+                                assets,
+                                probe,
+                                owner,
+                                holder,
+                                rig,
+                                legs,
+                                &mut pose,
+                                &mut running.feet,
+                                on,
+                                game_dt,
+                            ),
+                            None if on => {
+                                let name = world.full_name(owner).unwrap_or_default();
+                                self.report(format!(
+                                    "`{name}` has FootPlacement on, but its skeleton has no legs (bones named such as `LeftFoot` and `RightFoot`), so its feet stay where the animation has them."
+                                ));
+                            }
+                            None => {}
+                        }
+                    }
+                    let problems = ik_control::apply(
+                        world,
+                        owner,
+                        rig,
+                        &mut pose,
+                        &parts.ik,
+                        &mut running.ik,
+                        game_dt,
+                    );
+                    for problem in problems {
+                        self.report(problem);
+                    }
+                }
                 if let Some(pose) = model.pose(&pose) {
                     self.poses.insert(owner, Arc::new(pose));
                     posed = true;
                 }
             }
+        } else if let Some(&control) = parts.ik.first() {
+            let name = world.full_name(control).unwrap_or_default();
+            self.report(format!(
+                "The IKControl `{name}` only works in a MeshPart with a skeleton."
+            ));
         }
         self.running.insert(owner, running);
         posed

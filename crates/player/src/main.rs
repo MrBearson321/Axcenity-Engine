@@ -210,7 +210,7 @@ fn main() -> Result<()> {
     scripts.set_graphics(&saved_graphics, &unknown_gpu);
     // Animators start in their default states (with their parameters at
     // their defaults) before any script runs, so scripts can read them.
-    let mut animators = Animators::new();
+    let mut animators = Animators::with_ground(axcenity_character::foot_ground);
     animators.update(&mut world, &assets, 0.0);
     // The character each player spawns as, before scripts look for it.
     if let Err(err) = axcenity_project::load_starter_character(&project.folder, &mut world) {
@@ -742,7 +742,7 @@ impl App {
         self.agents = Agents::default();
         self.particles = axcenity_scene::Particles::new();
         self.terrain = axcenity_scene::TerrainCache::new();
-        self.animators = Animators::new();
+        self.animators = Animators::with_ground(axcenity_character::foot_ground);
         self.animators.update(&mut self.world, &self.assets, 0.0);
         self.text_focus = None;
         self.ui_pressed_button = None;

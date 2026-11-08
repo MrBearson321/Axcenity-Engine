@@ -1620,6 +1620,17 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             choice_control(ui, name, current, choices, |choice| choice)
                 .map(|choice| Value::String(choice.to_owned()))
         }
+        // An IKControl's Type.
+        Value::String(text) if name == "Type" => {
+            let choices: &[&'static str] = &["Transform", "Position", "Rotation", "LookAt"];
+            let current = choices
+                .iter()
+                .copied()
+                .find(|choice| text.eq_ignore_ascii_case(choice))
+                .unwrap_or("Position");
+            choice_control(ui, name, current, choices, |choice| choice)
+                .map(|choice| Value::String(choice.to_owned()))
+        }
         // A Slider's or ProgressBar's way, and a Toggle's look.
         Value::String(text) if name == "Orientation" || name == "Style" => {
             let choices: &[&'static str] = if name == "Orientation" {

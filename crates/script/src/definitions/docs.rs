@@ -2429,6 +2429,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::ThirdPersonController,
+        "FootPlacement",
+        "If true, a skinned character plants each foot on what's under it on slopes and stairs, and lowers its hips to match, on each device. It needs an Animator and a skeleton with `LeftFoot` and `RightFoot` bones.",
+    ),
+    (
+        ClassName::ThirdPersonController,
         "MaxSlopeAngle",
         "The steepest slope the character walks up, in degrees from flat. A steeper slope stops it.",
     ),
@@ -2496,6 +2501,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::FirstPersonController,
         "Jump",
         "Set true to jump once if the character is on the ground. The controller sets it back to false on its next step, so a jump in the air does nothing.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "FootPlacement",
+        "If true, a skinned character plants each foot on what's under it on slopes and stairs, and lowers its hips to match, on each device. It needs an Animator and a skeleton with `LeftFoot` and `RightFoot` bones.",
     ),
     (
         ClassName::FirstPersonController,
@@ -2681,6 +2691,61 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Ragdoll,
         "GetUpState",
         "The name of the Animator's state to play (with no blend of its own) when Enabled turns false, such as a getting-up clip, or empty to carry on with the state playing.",
+    ),
+    (
+        ClassName::IKControl,
+        "Type",
+        "How it turns the bones: `\"Position\"` puts EndEffector at the Target, `\"Rotation\"` turns it as the Target is turned from the MeshPart, `\"Transform\"` does both, and `\"LookAt\"` faces it at the Target.",
+    ),
+    (
+        ClassName::IKControl,
+        "Enabled",
+        "If false, the pose goes back to the plain animation over SmoothTime.",
+    ),
+    (
+        ClassName::IKControl,
+        "EndEffector",
+        "The bone that reaches or faces the Target, by its name or path, such as `\"Head\"` (which finds `mixamorig:Head`).",
+    ),
+    (
+        ClassName::IKControl,
+        "ChainRoot",
+        "The highest bone that turns. Empty is the two bones above EndEffector for Position and Transform, or just EndEffector for LookAt and Rotation.",
+    ),
+    (
+        ClassName::IKControl,
+        "Target",
+        "The Part or Attachment to reach or face. With none, the pose goes back to the plain animation over SmoothTime.",
+    ),
+    (
+        ClassName::IKControl,
+        "Pole",
+        "A Part or Attachment that the elbow or knee of a Position or Transform chain bends toward. With none, the limb bends the way it already bends.",
+    ),
+    (
+        ClassName::IKControl,
+        "Weight",
+        "How much of the solved pose is used, from 0 (the plain animation) to 1. A change fades in over SmoothTime.",
+    ),
+    (
+        ClassName::IKControl,
+        "SmoothTime",
+        "Seconds a change in Weight or Enabled takes, and about how long the IK trails its Target. 0 follows at once.",
+    ),
+    (
+        ClassName::IKControl,
+        "MaxAngle",
+        "LookAt only: the most degrees the EndEffector turns from the way the character faces.",
+    ),
+    (
+        ClassName::IKControl,
+        "Forward",
+        "LookAt only: the way the EndEffector faces in the MeshPart's own axes, such as `Vector3.new(0, 0, 1)`. (0, 0, 0) works it out from the way the skeleton's toes point, or else -Z.",
+    ),
+    (
+        ClassName::StarterPlayer,
+        "CharacterFootPlacement",
+        "If true, each player's character spawns with its controller's FootPlacement on. If false, a StarterCharacter prefab keeps its own setting.",
     ),
     (ClassName::WeldConstraint, "BreakForce", BREAK_FORCE_DOC),
     (ClassName::WeldConstraint, "BreakTorque", BREAK_TORQUE_DOC),
@@ -5019,6 +5084,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::VehicleSeat => {
             "A Seat that drives the car it's welded into: the body made of every part welded to it, the chassis. While someone sits on it, the Move action sets Throttle and Steer, and the camera follows the car until they get out with Jump. The car rides on the VehicleWheels parented to its parts. Everything a Seat has, and MaxSpeed, Torque, TurnSpeed, SteerAngle, Throttle, Steer and HandBrake."
+        }
+        ClassName::IKControl => {
+            "Inverse kinematics during the game, for the skinned MeshPart it's in (or its Animator). After the Animator and before drawing, it turns the bones from ChainRoot down to EndEffector toward its Target, by its Type. Weight and Enabled fade in and out over SmoothTime."
         }
         ClassName::Ragdoll => {
             "A ragdoll for the skinned MeshPart it's in: a capsule Part per main bone, named after the bone, and a BallSocketConstraint per joint, which Build (in its Properties) makes from the skeleton with a humanoid preset's limits. While Enabled, physics moves the capsules and they pose the bones; otherwise they follow the animation and physics leaves them out."

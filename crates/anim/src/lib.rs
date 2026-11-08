@@ -21,6 +21,8 @@
 //! - [`sequence`]: cutscene sequences (`*.sequence.json`) and putting a
 //!   world where one has it at a time, shared by the editor's preview and
 //!   the Sequence Instance.
+//! - `ik_control` and `feet`: an IKControl and a character's FootPlacement
+//!   turning bones during the game, after the Animator and before drawing.
 //! - [`ragdoll`]: building a Ragdoll's capsules and joints from a skeleton,
 //!   and the pose its bodies give the bones while physics moves them.
 //!
@@ -33,8 +35,10 @@ mod bones;
 mod clip;
 mod controller;
 mod easing;
+mod feet;
 pub mod files;
 pub mod ik;
+mod ik_control;
 mod property_clip;
 pub mod ragdoll;
 pub mod sequence;
@@ -50,6 +54,7 @@ pub use controller::{
     holds,
 };
 pub use easing::{DEFAULT_BEZIER, Easing, EasingDirection, EasingStyle, cubic_bezier, ease};
+pub use feet::{GroundHit, GroundProbe};
 pub use files::{
     ANIMATIONS_FOLDER, ANY_STATE, BlendChild, BlendSpace, BlendSpaceChild, BlendTree,
     CLIP_EXTENSION, ClipEvent, ClipFile, Condition, DEFAULT_BLEND, FileError, Interp,
@@ -63,6 +68,8 @@ pub use property_clip::{
     target_path, value_from_numbers,
 };
 
+#[cfg(test)]
+mod ik_control_tests;
 #[cfg(test)]
 mod layer_tests;
 #[cfg(test)]

@@ -3,6 +3,8 @@ use axcenity_physics::Physics;
 
 use super::*;
 
+mod feet;
+
 const FRAME: f32 = 1.0 / 60.0;
 
 fn pos(world: &World, id: InstanceId) -> Vector3 {

@@ -474,6 +474,7 @@
               "Crouch": false,
               "CrouchHeight": 3,
               "CrouchSpeedScale": 0.5,
+              "FootPlacement": true,
               "Jump": false,
               "JumpHeight": 7.2,
               "MaxSlopeAngle": 45,
@@ -703,6 +704,17 @@
           "WindAffected": false
         },
         "children": [
+          {
+            "class": "IKControl",
+            "name": "LookAtPlayer",
+            "properties": {
+              "ChainRoot": "Neck",
+              "EndEffector": "Head",
+              "SmoothTime": 0.25,
+              "Target": ["Workspace", "Character", "Body"],
+              "Type": "LookAt"
+            }
+          },
           {
             "class": "SurfaceAppearance",
             "name": "Shoesmat",

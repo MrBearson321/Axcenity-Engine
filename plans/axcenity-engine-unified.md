@@ -2385,9 +2385,9 @@ It runs after the Animator and before drawing. It suits hands on a steering whee
 
 ### Acceptance criteria
 
-- [ ] An NPC with a LookAt IKControl turns its head to follow the player within its limits.
-- [ ] A character standing on stairs has both feet on a step, with no knee bending backwards.
-- [ ] Turning IK off returns to the plain animation within `SmoothTime`.
+- [x] An NPC with a LookAt IKControl turns its head to follow the player within its limits.
+- [x] A character standing on stairs has both feet on a step, with no knee bending backwards.
+- [x] Turning IK off returns to the plain animation within `SmoothTime`.
 
 ---
 

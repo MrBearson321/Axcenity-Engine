@@ -15,6 +15,10 @@ describe("Course", function()
 		Test.step(0.3)
 	end
 
+	it("plants its feet", function()
+		expect(character:FindFirstChildWhichIsA("ThirdPersonController").FootPlacement).toBe(true)
+	end)
+
 	it("spawns a Humanoid character on the spawn", function()
 		expect(character:FindFirstChildWhichIsA("Humanoid")).toBeTruthy()
 		local spawn = Test.find("Workspace.Spawn")

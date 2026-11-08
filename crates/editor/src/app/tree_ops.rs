@@ -334,6 +334,18 @@ impl EditorApp {
                 );
             }
         }
+        if what == Insertable::IKControl {
+            let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
+            let in_mesh_part = self
+                .world
+                .get(parent)
+                .is_some_and(|instance| instance.class() == ClassName::MeshPart);
+            if !in_mesh_part {
+                self.output.warning(
+                    "An IKControl turns the bones of the skinned MeshPart it's inside: select an imported character first.",
+                );
+            }
+        }
         if what == Insertable::Fracture {
             let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
             let in_part = self.world.get(parent).is_some_and(|instance| {

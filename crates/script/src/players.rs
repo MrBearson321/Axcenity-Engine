@@ -314,6 +314,25 @@ pub fn load_character(lua: &Lua, player: InstanceId) -> mlua::Result<InstanceId>
             Some(copy) => copy,
             None => axcenity_character::rig::character(&mut world, Vector3::default(), ""),
         };
+        if world
+            .get(world.starter_player())
+            .and_then(|starter| starter.property("CharacterFootPlacement"))
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            let controllers: Vec<InstanceId> = world
+                .descendants(character)
+                .into_iter()
+                .filter(|&id| {
+                    world
+                        .get(id)
+                        .is_some_and(|instance| instance.class().is_character_controller())
+                })
+                .collect();
+            for controller in controllers {
+                let _ = world.set_property(controller, "FootPlacement", Value::Bool(true));
+            }
+        }
         let name = world
             .get(player)
             .map(|instance| instance.name().to_owned())

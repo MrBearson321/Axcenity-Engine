@@ -709,6 +709,29 @@ impl Controllers {
     }
 }
 
+/// The ground a foot finds (`axcenity_anim::GroundProbe`): the first solid
+/// part along a ray, passing by `skip`. Hosts give it to
+/// `Animators::with_ground`.
+pub fn foot_ground(
+    world: &World,
+    assets: &Assets,
+    origin: Vector3,
+    direction: Vector3,
+    skip: &[InstanceId],
+) -> Option<axcenity_anim::GroundHit> {
+    let params = QueryParams {
+        filter: skip.to_vec(),
+        respect_can_collide: true,
+        ..QueryParams::default()
+    };
+    let hit = raycast(world, assets, origin, direction, &params)?;
+    Some(axcenity_anim::GroundHit {
+        position: hit.position,
+        normal: hit.normal,
+        distance: hit.distance,
+    })
+}
+
 /// Every part a controller in the Workspace moves. They are characters,
 /// not ground, so the navigation mesh leaves them out.
 pub fn character_parts(world: &World) -> Vec<InstanceId> {

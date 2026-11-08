@@ -116,6 +116,21 @@ pub fn reach(
     joint: usize,
     target: Vec3,
 ) -> bool {
+    reach_toward(rig, pose, chain, joint, target, None)
+}
+
+/// [`reach`], with the chain's middle joints swung around the line from its
+/// top to its end so they sit on the side of `pole` (a point in the rig's
+/// file space): an elbow or a knee points at it. With no pole, or a chain
+/// lying straight, the limb bends the way it already bends.
+pub fn reach_toward(
+    rig: &Rig,
+    pose: &mut [BoneTransform],
+    chain: &[usize],
+    joint: usize,
+    target: Vec3,
+    pole: Option<Vec3>,
+) -> bool {
     let joints = joint_positions(rig, pose);
     let Some(&end) = joints.get(joint) else {
         return false;
@@ -141,7 +156,7 @@ pub fn reach(
         .collect();
     let points: Vec<Vec3> = moving.iter().map(|&i| nodes[i]).chain([end]).collect();
     let spans: Vec<f32> = moving.iter().map(|&i| lengths[i]).collect();
-    let placed = match spans.len() {
+    let mut placed = match spans.len() {
         0 => return close(pose),
         1 => {
             let along = direction(target - points[0], points[1] - points[0], Vec3::X);
@@ -157,6 +172,9 @@ pub fn reach(
             fabrik(&points, &spans, target, hint)
         }
     };
+    if let Some(pole) = pole {
+        swing_to_pole(&mut placed, pole);
+    }
     let before = pose.to_vec();
     for (step, &i) in moving.iter().enumerate() {
         let tip = moving.get(step + 1).map_or(joint, |&next| bones[next]);
@@ -268,6 +286,32 @@ fn fabrik(points: &[Vec3], lengths: &[f32], target: Vec3, rest: Vec3) -> Vec<Vec
     points
 }
 
+/// Turns a chain's middle joints about the line from its top to its end,
+/// so they sit toward `pole`. Both ends stay where they are.
+fn swing_to_pole(points: &mut [Vec3], pole: Vec3) {
+    let last = points.len() - 1;
+    let top = points[0];
+    let Some(axis) = (points[last] - top).try_normalize() else {
+        return;
+    };
+    if last < 2 {
+        return;
+    }
+    let off_line = |point: Vec3| {
+        let from_top = point - top;
+        from_top - axis * from_top.dot(axis)
+    };
+    let sits: Vec3 = points[1..last].iter().map(|&point| off_line(point)).sum();
+    let (Some(now), Some(wanted)) = (sits.try_normalize(), off_line(pole).try_normalize()) else {
+        return;
+    };
+    let angle = axis.dot(now.cross(wanted)).atan2(now.dot(wanted));
+    let turn = Quat::from_axis_angle(axis, angle);
+    for point in &mut points[1..last] {
+        *point = top + turn * (*point - top);
+    }
+}
+
 /// Swings `bone` about its joint, the shortest way, so `tip` (a joint
 /// under it) points at `to`.
 fn aim(rig: &Rig, pose: &mut [BoneTransform], bone: usize, tip: usize, to: Vec3) {
@@ -279,13 +323,29 @@ fn aim(rig: &Rig, pose: &mut [BoneTransform], bone: usize, tip: usize, to: Vec3)
     ) else {
         return;
     };
-    let turn = Quat::from_rotation_arc(from, to);
+    turn_bone(rig, pose, &world, bone, Quat::from_rotation_arc(from, to));
+}
+
+/// Turns `bone` about its joint by `turn`, a rotation in the rig's file
+/// space. `world` is [`Rig::world`] of `pose`.
+pub(crate) fn turn_bone(
+    rig: &Rig,
+    pose: &mut [BoneTransform],
+    world: &[glam::Mat4],
+    bone: usize,
+    turn: Quat,
+) {
     // The turn in the world, seen from the parent's space.
-    let parent = rig.bones[bone].parent.map_or(Quat::IDENTITY, |p| {
-        world[p].to_scale_rotation_translation().1
-    });
+    let parent = parent_turn(rig, world, bone);
     let along = parent.inverse() * turn * parent;
     pose[bone].rotation = (along * pose[bone].rotation).normalize();
+}
+
+/// How `bone`'s parent is turned in the rig's file space.
+pub(crate) fn parent_turn(rig: &Rig, world: &[glam::Mat4], bone: usize) -> Quat {
+    rig.bones[bone].parent.map_or(Quat::IDENTITY, |p| {
+        world[p].to_scale_rotation_translation().1
+    })
 }
 
 #[cfg(test)]
@@ -358,6 +418,20 @@ mod tests {
     fn bend(rig: &Rig, pose: &[BoneTransform], [a, b, c]: [usize; 3]) -> Vec3 {
         let j = joint_positions(rig, pose);
         (j[b] - j[a]).cross(j[c] - j[b])
+    }
+
+    #[test]
+    fn a_pole_decides_which_way_the_middle_joint_bends() {
+        // The arm bends up (+Y); a pole below turns its elbow down instead.
+        let arm = arm();
+        let mut pose = arm.rest_pose();
+        let target = Vec3::new(1.4, 0.0, 0.0);
+        let pole = Some(Vec3::new(0.7, -5.0, 0.0));
+        assert!(reach_toward(&arm, &mut pose, &[1, 0], 2, target, pole));
+        let joints = joint_positions(&arm, &pose);
+        assert!(joints[2].distance(target) < 1e-3, "the hand still arrives");
+        assert!(joints[1].y < -0.1, "the elbow went down: {}", joints[1]);
+        assert_lengths_kept(&arm, &pose);
     }
 
     #[test]
