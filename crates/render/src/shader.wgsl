@@ -226,6 +226,9 @@ struct VertexOut {
     @location(7) @interpolate(flat) fade: f32,
     // Its decal role (`ROLE_CHARACTER`, `ROLE_DECAL`, else 0).
     @location(8) @interpolate(flat) role: f32,
+    // The middle of the item and half its size, for leaves (`leaf_canopy`).
+    @location(9) @interpolate(flat) item_middle: vec3<f32>,
+    @location(10) @interpolate(flat) item_half_size: vec3<f32>,
 }
 
 @vertex
@@ -255,6 +258,9 @@ fn item_vertex(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     out.emissive = instance.emissive_fade.xyz;
     out.fade = instance.emissive_fade.w;
     out.role = floor(instance.sway.w);
+    out.item_middle = instance.model_3.xyz;
+    out.item_half_size = 0.5 * vec3<f32>(length(instance.model_0.xyz),
+        length(instance.model_1.xyz), length(instance.model_2.xyz));
     out.surface = instance.surface.xyz;
     let tile = instance.surface.w;
     var uv = vertex.uv;
@@ -513,15 +519,12 @@ fn lit_pixel(
     } else if maps.shading.x == SHADING_TOON {
         color = toon_surface(in.world_position, geometric, shaded.normal, in.clip_position.xy,
             shaded.base_color, occlusion, solid);
+    } else if maps.shading.y > 0.0 {
+        color = lit_leaf(in, shaded, geometric, metalness, roughness, occlusion, dielectric,
+            solid, maps.shading.y);
     } else {
         color = light_surface(in.world_position, geometric, shaded.normal, in.clip_position.xy,
             shaded.base_color, metalness, roughness, occlusion, dielectric, solid);
-        if maps.shading.y > 0.0 {
-            // What passes through isn't also reflected.
-            color *= 1.0 - LEAF_REFLECTION_LOSS * maps.shading.y;
-            color += through_leaf(in.world_position, geometric, shaded.normal,
-                in.clip_position.xy, shaded.base_color, occlusion, maps.shading.y);
-        }
     }
 
     // Solid items stay solid whatever the texture's alpha, so the window's
@@ -537,26 +540,106 @@ const LEAF_REFLECTION_LOSS: f32 = 0.6;
 // How much of each color a leaf lets through, compared with what it
 // reflects: green and red pass, blue is taken, so lit from behind it glows
 // a brighter, yellower green.
-const THROUGH_LEAF_TINT: vec3<f32> = vec3<f32>(1.1, 1.3, 0.35);
+const THROUGH_LEAF_TINT: vec3<f32> = vec3<f32>(1.0, 1.12, 0.35);
+
+// How far a leaf's light is turned from its own card toward the outside of
+// its plant. Foliage is a volume: it's lit by where in the crown it is far
+// more than by which way one card happens to face.
+const CANOPY_BEND: f32 = 0.6;
+// How much sky reaches the very middle of a crown, compared with its outside.
+const CANOPY_DEPTH_SHADE: f32 = 0.5;
+// A crown's mass sits above the middle of the plant, by this share of half
+// its height: the trunk or stems are below.
+const CANOPY_LIFT: f32 = 0.3;
+// How rough a leaf is at least, on the outside of a crown and deep inside it.
+// Rough enough, a leaf seen edge-on doesn't mirror a white sky as grey.
+const LEAF_ROUGHNESS_OUTSIDE: f32 = 0.72;
+const LEAF_ROUGHNESS_INSIDE: f32 = 0.9;
+// How much individual leaves differ in brightness and in hue.
+const LEAF_TONE_VARIATION: f32 = 0.2;
+const LEAF_HUE_VARIATION: f32 = 0.18;
+
+// Where a leaf is in its plant.
+struct Canopy {
+    // Away from the crown's middle, in world space.
+    normal: vec3<f32>,
+    // 0 deep inside the crown, 1 on its outside.
+    openness: f32,
+}
+
+// The crown is taken as the ball filling the item, a little above its middle.
+fn leaf_canopy(world_position: vec3<f32>, middle: vec3<f32>, half_size: vec3<f32>, fallback: vec3<f32>)
+    -> Canopy {
+    let safe = max(half_size, vec3<f32>(0.001));
+    let along = (world_position - middle) / safe - vec3<f32>(0.0, CANOPY_LIFT, 0.0);
+    let reach = length(along);
+    if reach < 0.001 {
+        return Canopy(fallback, 0.0);
+    }
+    return Canopy(along / reach, smoothstep(0.2, 0.95, reach));
+}
+
+// A leaf's own brightness and hue: every card faces its own way, so the way
+// it faces tells them apart without any data of its own, and where it is
+// shifts whole sprays of them together. Smooth, so a bent card has no seams.
+fn leaf_tone(unflipped_normal: vec3<f32>, world_position: vec3<f32>, base_color: vec3<f32>)
+    -> vec3<f32> {
+    let n = unflipped_normal;
+    let spray = sin(dot(world_position, vec3<f32>(1.13, 0.71, 1.37)));
+    let tone = 0.65 * sin(dot(n, vec3<f32>(41.3, 67.1, 29.7))) + 0.35 * spray;
+    let hue = 0.65 * sin(dot(n, vec3<f32>(23.9, 13.7, 57.1))) + 0.35 * spray;
+    // Olive one way, blue-green the other.
+    let tint = vec3<f32>(1.0 + LEAF_HUE_VARIATION * hue, 1.0, 1.0 - LEAF_HUE_VARIATION * hue);
+    return base_color * tint * (1.0 + LEAF_TONE_VARIATION * tone);
+}
+
+// A leaf's light: reflected, and come through it from behind.
+fn lit_leaf(
+    in: VertexOut,
+    shaded: Surface,
+    geometric: vec3<f32>,
+    metalness: f32,
+    roughness: f32,
+    occlusion: f32,
+    dielectric: vec3<f32>,
+    solid: bool,
+    amount: f32,
+) -> vec3<f32> {
+    let canopy = leaf_canopy(in.world_position, in.item_middle, in.item_half_size, shaded.normal);
+    let bent = normalize(mix(shaded.normal, canopy.normal, CANOPY_BEND));
+    let base_color = leaf_tone(normalize(in.normal), in.world_position, shaded.base_color);
+    let open = mix(CANOPY_DEPTH_SHADE, 1.0, canopy.openness);
+    let rough = max(roughness,
+        mix(LEAF_ROUGHNESS_INSIDE, LEAF_ROUGHNESS_OUTSIDE, canopy.openness));
+    let reflected_light = light_surface(in.world_position, geometric, bent, in.clip_position.xy,
+        base_color, metalness, rough, occlusion * open, dielectric, solid);
+    // What passes through isn't also reflected.
+    return reflected_light * (1.0 - LEAF_REFLECTION_LOSS * amount)
+        + through_leaf(in.world_position, geometric, shaded.normal, bent, in.clip_position.xy,
+            base_color, occlusion, open, amount);
+}
 
 // The light that comes through a thin surface from its far side, from the
-// sun and from the sky behind it, scattered evenly toward the viewer.
-// Occlusion counts by half: what's close in front of a leaf doesn't block
-// what reaches it from behind.
+// sun and from the sky behind it, scattered evenly toward the viewer. The
+// sun lights each leaf by its own card (`n`), a sharp thing; the sky by the
+// crown around it (`bent`, `open`), a soft one. Occlusion counts by half:
+// what's close in front of a leaf doesn't block what reaches it from behind.
 fn through_leaf(
     world_position: vec3<f32>,
     geometric: vec3<f32>,
     n: vec3<f32>,
+    bent: vec3<f32>,
     pixel: vec2<f32>,
     base_color: vec3<f32>,
     occlusion: f32,
+    open: f32,
     amount: f32,
 ) -> vec3<f32> {
     let sun_visible = soft_sun_visibility(world_position, -geometric, pixel)
         * cloud_shadow(frame.clouds, world_position, frame.sun_direction.xyz);
     let from_sun = frame.sun_radiance.rgb * sun_visible
         * max(dot(-n, frame.sun_direction.xyz), 0.0) / PI;
-    let from_sky = surrounding_diffuse(world_position, -n, frame.sky_top.w);
+    let from_sky = surrounding_diffuse(world_position, -bent, frame.sky_top.w) * open;
     return amount * base_color * THROUGH_LEAF_TINT * mix(1.0, occlusion, 0.5) * (from_sun + from_sky);
 }
 

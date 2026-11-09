@@ -221,6 +221,71 @@ fn still_light_is_traced_once_and_no_more() {
     );
 }
 
+/// `yard` with enough small blocks to count as a heavy scene.
+fn heavy_yard(toward: Vec3) -> DrawList {
+    let mut list = yard(toward);
+    for index in 0..4001 {
+        list.items.push(item(
+            Shape::Block,
+            Vec3::new(index as f32 * 0.01, -2.0, 0.0),
+            0.01,
+        ));
+    }
+    list
+}
+
+fn a_sky_picture() -> crate::SkyImage {
+    crate::SkyImage {
+        key: 7,
+        width: 2,
+        height: 1,
+        rgb: Arc::new(vec![1.0; 6]),
+    }
+}
+
+#[test]
+fn a_heavy_scene_keeps_its_bake_when_its_sky_picture_arrives_late() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let lit = heavy_yard(SUN_ON_WALL);
+    let baked = bake(&device, &queue, &yard(SUN_ON_WALL));
+    let opening = with_volume(&lit, baked);
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    renderer.set_graphics(&settings(true));
+    renderer.render(&opening).unwrap();
+    // The picture is read on another thread: it's there a frame later.
+    let mut loaded = opening.clone();
+    loaded.sky.image = Some(a_sky_picture());
+    for _ in 0..12 {
+        renderer.render(&loaded).unwrap();
+    }
+    assert_eq!(renderer.scene.probes_traced(), Some(0));
+}
+
+#[test]
+fn a_heavy_scene_traces_a_face_at_a_time_when_its_light_moves() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let baked = bake(&device, &queue, &yard(SUN_ON_WALL));
+    let opening = with_volume(&heavy_yard(SUN_ON_WALL), baked.clone());
+    let moved = with_volume(&heavy_yard(SUN_BEHIND_WALL), baked);
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    renderer.set_graphics(&settings(true));
+    renderer.render(&opening).unwrap();
+    // One face every four frames: a probe's six in 24 frames, not two
+    // probes (twelve whole draws of the scene) in every one.
+    for _ in 0..23 {
+        renderer.render(&moved).unwrap();
+    }
+    assert_eq!(renderer.scene.probes_traced(), Some(0), "five faces so far");
+    renderer.render(&moved).unwrap();
+    assert_eq!(renderer.scene.probes_traced(), Some(1), "the sixth face");
+}
+
 #[test]
 fn with_realtime_gi_off_a_moving_sun_leaves_the_baked_probes_and_the_frame_alone() {
     let Some((device, queue)) = test_device() else {

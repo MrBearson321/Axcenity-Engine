@@ -19,8 +19,16 @@ use super::*;
 pub(super) const PROBES_PER_FRAME: u32 = 2;
 
 /// Scenes with more items than this keep their bake until the light
-/// changes, instead of tracing every probe from the first frame.
+/// changes, instead of tracing every probe from the first frame, and then
+/// trace a face at a time, with frames between ([`HEAVY_FACE_EVERY`]).
 const HEAVY_SCENE_ITEMS: usize = 4000;
+
+/// A heavy scene draws one of a probe's six faces every this many frames
+/// while its light settles. A face is a whole draw of the scene, longer
+/// than a frame there, so the frames between are what keep the window
+/// moving; tracing all of it would take minutes at a couple of frames a
+/// second.
+const HEAVY_FACE_EVERY: u32 = 4;
 
 /// The probes' faces and the pass that sums them.
 pub(super) struct RealtimeGi {
@@ -36,11 +44,15 @@ pub(super) struct RealtimeGi {
     next: u32,
     /// How many probes have been traced, for tests.
     pub(super) traced: u32,
-    /// What the probes were last traced under, and how many have been
-    /// traced since it changed: once that's all of them, there's nothing
-    /// new to see until the light changes.
-    light: u64,
+    /// What the probes were last traced under (`None` before the first
+    /// frame), and how many have been traced since it changed: once that's
+    /// all of them, there's nothing new to see until the light changes.
+    light: Option<LightState>,
     settled: u32,
+    /// A heavy scene's next face of probe `next`, and the frames since it
+    /// last drew one.
+    face: u32,
+    since_face: u32,
 }
 
 impl RealtimeGi {
@@ -145,8 +157,10 @@ impl RealtimeGi {
             pipeline,
             next: 0,
             traced: 0,
-            light: 0,
+            light: None,
             settled: 0,
+            face: 0,
+            since_face: 0,
         }
     }
 
@@ -165,26 +179,47 @@ impl RealtimeGi {
         }
         // Every probe is six small draws of the whole scene, so a scene
         // whose light is still pays for one pass over them and no more.
-        let light = light_state(list, total);
-        if light != self.light {
+        let items = list.items.len() + list.chunks.iter().map(|c| c.items.len()).sum::<usize>();
+        let heavy = items > HEAVY_SCENE_ITEMS;
+        let light = LightState::of(list, total);
+        if self.light.as_ref() != Some(&light) {
             // A heavy scene starts from its bake: tracing every probe of
-            // it first would be many slow frames for nothing new.
-            let starting = self.light == 0;
-            let items = list.items.len() + list.chunks.iter().map(|c| c.items.len()).sum::<usize>();
-            self.settled = if starting && items > HEAVY_SCENE_ITEMS {
-                total
-            } else {
-                0
-            };
-            self.light = light;
+            // it first would be many slow frames for nothing new. A sky
+            // picture is read on another thread, so it arrives some frames
+            // after the first, and that isn't the light changing either.
+            let keeps_bake = self
+                .light
+                .as_ref()
+                .is_none_or(|old| self.traced == 0 && light.is_with_sky_picture_of(old));
+            self.settled = if heavy && keeps_bake { total } else { 0 };
+            self.light = Some(light);
         }
         if self.settled >= total {
             return Ok(());
         }
         self.camera.set_graphics(&camera_settings(settings));
+        if heavy {
+            self.since_face += 1;
+            if self.since_face < HEAVY_FACE_EVERY {
+                return Ok(());
+            }
+            self.since_face = 0;
+            self.camera.show(list);
+            let index = self.next % total;
+            let center = probes.point(index).unwrap_or_default();
+            self.trace_face(center, 0, self.face)?;
+            self.face += 1;
+            if self.face < 6 {
+                return Ok(());
+            }
+            self.face = 0;
+            self.next = (index + 1) % total;
+            let mut targets = [[0u32; 4]; PROBES_PER_FRAME as usize];
+            targets[0][0] = index;
+            self.sum_probes(targets, 1, probes);
+            return Ok(());
+        }
         self.camera.show(list);
-        let device = self.camera.renderer.scene.device.clone();
-        let queue = self.camera.renderer.scene.queue.clone();
         let mut targets = [[0u32; 4]; PROBES_PER_FRAME as usize];
         let count = PROBES_PER_FRAME.min(total);
         for slot in 0..count {
@@ -193,31 +228,53 @@ impl RealtimeGi {
             targets[slot as usize][0] = index;
             let center = probes.point(index).unwrap_or_default();
             for face in 0..6 {
-                self.camera.draw_face(center, face)?;
-                // The camera draws every face into the same target, so each
-                // is copied out before the next is drawn.
-                let mut encoder = device.create_command_encoder(&Default::default());
-                encoder.copy_texture_to_texture(
-                    self.camera.hdr().as_image_copy(),
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &self.faces,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d {
-                            x: 0,
-                            y: 0,
-                            z: slot * 6 + face,
-                        },
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    wgpu::Extent3d {
-                        width: self.camera.size,
-                        height: self.camera.size,
-                        depth_or_array_layers: 1,
-                    },
-                );
-                queue.submit([encoder.finish()]);
+                self.trace_face(center, slot, face)?;
             }
         }
+        self.sum_probes(targets, count, probes);
+        Ok(())
+    }
+
+    /// Draws face `face` of a probe at `center` and copies it into `slot`'s
+    /// layers. The camera draws every face into the same target, so each is
+    /// copied out before the next is drawn.
+    fn trace_face(&mut self, center: glam::Vec3, slot: u32, face: u32) -> Result<()> {
+        self.camera.draw_face(center, face)?;
+        let device = self.camera.renderer.scene.device.clone();
+        let queue = self.camera.renderer.scene.queue.clone();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_texture(
+            self.camera.hdr().as_image_copy(),
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.faces,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: slot * 6 + face,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: self.camera.size,
+                height: self.camera.size,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit([encoder.finish()]);
+        Ok(())
+    }
+
+    /// Sums the first `count` slots' faces into the probes `targets` names,
+    /// which the frame drawn next uses.
+    fn sum_probes(
+        &mut self,
+        targets: [[u32; 4]; PROBES_PER_FRAME as usize],
+        count: u32,
+        probes: &LightProbes,
+    ) {
+        let device = self.camera.renderer.scene.device.clone();
+        let queue = self.camera.renderer.scene.queue.clone();
         queue.write_buffer(&self.targets, 0, bytemuck::cast_slice(&targets));
         // The light probes' buffer is made again when the volumes change,
         // so it's bound afresh each time.
@@ -252,7 +309,6 @@ impl RealtimeGi {
         queue.submit([encoder.finish()]);
         self.traced += count;
         self.settled += count;
-        Ok(())
     }
 
     /// Bytes of the faces and the probe camera's own targets.
@@ -264,20 +320,42 @@ impl RealtimeGi {
     }
 }
 
-/// A number for the light falling on `list`'s scene and how many probes
-/// there are: while it's the same, tracing them again would change nothing.
-/// The clouds' drift isn't in it (drifting clouds would never let it rest).
-fn light_state(list: &DrawList, probes: u32) -> u64 {
-    use std::hash::{DefaultHasher, Hash, Hasher};
-    let clouds = (list.clouds.cover, list.clouds.density, list.clouds.color);
-    let state = format!(
-        "{:?} {:?} {:?} {:?} {:?} {:?}",
-        list.sun, list.ambient, list.sky, clouds, list.weather, list.lights
-    );
-    let mut hasher = DefaultHasher::new();
-    state.hash(&mut hasher);
-    probes.hash(&mut hasher);
-    hasher.finish()
+/// The light falling on a scene, as numbers: while it's the same, tracing
+/// its probes again would change nothing.
+#[derive(PartialEq)]
+struct LightState {
+    /// Everything but the sky's picture, and how many probes there are.
+    /// The clouds' drift isn't in it (drifting clouds would never let it
+    /// rest).
+    light: u64,
+    sky_picture: Option<u64>,
+}
+
+impl LightState {
+    fn of(list: &DrawList, probes: u32) -> Self {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+        let clouds = (list.clouds.cover, list.clouds.density, list.clouds.color);
+        let sky = crate::Sky {
+            image: None,
+            ..list.sky.clone()
+        };
+        let state = format!(
+            "{:?} {:?} {:?} {:?} {:?} {:?}",
+            list.sun, list.ambient, sky, clouds, list.weather, list.lights
+        );
+        let mut hasher = DefaultHasher::new();
+        state.hash(&mut hasher);
+        probes.hash(&mut hasher);
+        Self {
+            light: hasher.finish(),
+            sky_picture: list.sky.image.as_ref().map(|image| image.key),
+        }
+    }
+
+    /// Whether this is `old` with only its sky picture newly loaded.
+    fn is_with_sky_picture_of(&self, old: &Self) -> bool {
+        self.light == old.light && old.sky_picture.is_none() && self.sky_picture.is_some()
+    }
 }
 
 /// What the probe camera draws with: the frame's settings, with the sun's

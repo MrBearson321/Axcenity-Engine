@@ -415,6 +415,43 @@ fn leaf_lit_from_behind(translucency: f32) -> [u8; 3] {
 }
 
 #[test]
+fn a_leaf_on_the_outside_of_its_crown_is_brighter_than_one_deep_inside() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // One flat card through the middle of its item, lit only by the sky:
+    // the card's middle is deep in the crown, its edge on the outside.
+    let mut list = list_of(vec![DrawItem {
+        transform: Mat4::from_scale_rotation_translation(
+            Vec3::splat(4.4),
+            glam::Quat::IDENTITY,
+            Vec3::new(0.0, 0.0, -5.0),
+        ),
+        material: Material {
+            base_color: [0.3, 0.6, 0.2],
+            double_sided: true,
+            translucency: 0.42,
+            ..Material::default()
+        },
+        casts_shadow: false,
+        ..item(Shape::Mesh(Arc::new(Square)), Vec3::ZERO, 1.0)
+    }]);
+    list.sky = Sky::default();
+    list.sun.intensity = 0.0;
+    let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+    renderer.render(&list).unwrap();
+    let pixels = renderer.read_pixels();
+    let green = |x: usize| pixels[(16 * 32 + x) * 4 + 1];
+    assert!(
+        green(25) > green(16) + 10,
+        "edge {} against middle {}",
+        green(25),
+        green(16)
+    );
+}
+
+#[test]
 fn a_translucent_leaf_glows_green_with_the_sun_behind_it() {
     let (solid, leaf) = (leaf_lit_from_behind(0.0), leaf_lit_from_behind(0.5));
     assert!(leaf[1] > solid[1] + 20, "{solid:?} against {leaf:?}");
