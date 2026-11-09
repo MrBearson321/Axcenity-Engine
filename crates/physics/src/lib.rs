@@ -381,13 +381,27 @@ impl PartState {
         instance: &Instance,
         assets: &Assets,
     ) -> Option<Self> {
+        let mut state = Self::read_terrain_ground(world, id, instance)?;
+        if let Form::Terrain(terrain) = &mut state.shape {
+            terrain.foliage_models = shapes::colliding_model_keys(&terrain.data, assets);
+        }
+        Some(state)
+    }
+
+    /// A Terrain's state without its colliding models' keys, which take a
+    /// walk over all its foliage and only matter for noticing a change.
+    pub(crate) fn read_terrain_ground(
+        world: &World,
+        id: InstanceId,
+        instance: &Instance,
+    ) -> Option<Self> {
         let vector = |name| instance.property(name).and_then(Value::as_vector3);
         let data = world.terrain(id)?.clone();
         let state = Self {
             anchored: true,
             can_collide: instance.property("CanCollide").and_then(Value::as_bool) != Some(false),
             shape: Form::Terrain(shapes::TerrainShape {
-                foliage_models: shapes::colliding_model_keys(&data, assets),
+                foliage_models: Vec::new(),
                 data,
             }),
             size: vector("Size")?,

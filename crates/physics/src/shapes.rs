@@ -19,7 +19,7 @@ use rapier3d::prelude::{Collider, ColliderBuilder, SharedShape};
 
 /// Parts thinner than this collide as if they were this thick. A shape with
 /// no volume has no mass, which rapier can't simulate.
-const MIN_SIZE: f32 = 0.01;
+pub(crate) const MIN_SIZE: f32 = 0.01;
 
 /// How much terrains and foliage grip (0 is ice) and bounce (0 is no
 /// bounce): what every part had before materials had their own. Parts get

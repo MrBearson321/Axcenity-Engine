@@ -4,10 +4,11 @@
 //! Screen points are in the renderer's normalized coordinates: x and y go
 //! from -1 to 1 across the view, with (-1, -1) at the bottom left.
 
-use axcenity_core::{InstanceId, PartType, World};
+use axcenity_core::{InstanceId, PartType, TerrainData, World};
 use axcenity_render::Camera;
 use axcenity_render::glam::camera::rh;
 use axcenity_render::glam::{Mat3, Mat4, Vec2, Vec3};
+use axcenity_terrain::Placement;
 
 use crate::draw_list::{part_pieces, part_placement};
 
@@ -230,6 +231,127 @@ const EDGE_SAMPLES: usize = 16;
 /// in front of them. From inside the box, every edge counts as facing.
 /// `None` if `id` isn't a Part.
 pub fn visible_box_edges(world: &World, id: InstanceId, eye: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
+    Occluders::of(world).visible_box_edges(id, eye)
+}
+
+/// A part that can stand in front of a selection box.
+struct Occluder {
+    id: InstanceId,
+    shape: PartType,
+    transform: Mat4,
+    center: Vec3,
+    /// Half the box's diagonal: nothing of the part is further from `center`.
+    radius: f32,
+}
+
+/// Everything in the world that can hide a selection box's edges, gathered
+/// once a frame. Checking an edge takes up to 17 rays and a box has up to
+/// 12 edges, so walking the world for each ray would cost several frames'
+/// worth of time per selected part in a big scene.
+pub struct Occluders<'a> {
+    world: &'a World,
+    parts: Vec<Occluder>,
+    terrains: Vec<(InstanceId, Placement, &'a TerrainData)>,
+}
+
+impl<'a> Occluders<'a> {
+    pub fn of(world: &'a World) -> Self {
+        let mut parts = Vec::new();
+        let mut terrains = Vec::new();
+        for id in world.descendants(world.workspace()) {
+            let Some(instance) = world.get(id) else {
+                continue;
+            };
+            if let (Some(placement), Some(data)) = (Placement::of(instance), world.terrain(id)) {
+                terrains.push((id, placement, &**data));
+            }
+            if axcenity_core::csg::out_of_world(world, id) {
+                continue;
+            }
+            let Some((shape, transform)) = part_placement(instance) else {
+                continue;
+            };
+            parts.push(Occluder {
+                id,
+                shape,
+                transform,
+                center: transform.w_axis.truncate(),
+                radius: box_radius(transform),
+            });
+        }
+        Self {
+            world,
+            parts,
+            terrains,
+        }
+    }
+
+    /// See the free function [`visible_box_edges`].
+    pub fn visible_box_edges(&self, id: InstanceId, eye: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
+        visible_edges(self, id, eye)
+    }
+
+    /// Whether something other than `id` is in front of `point`, from
+    /// `eye`, among the parts in `near`.
+    fn hides(&self, near: &[&Occluder], id: InstanceId, eye: Vec3, point: Vec3) -> bool {
+        let offset = point - eye;
+        let distance = offset.length();
+        if distance < 1e-4 {
+            return false;
+        }
+        let direction = offset / distance;
+        let ray = Ray {
+            origin: eye,
+            direction,
+        };
+        let limit = distance - (0.05_f32).max(distance * 0.002);
+        near.iter().any(|part| {
+            hit_surface(part.shape, part.transform, ray).is_some_and(|(hit, _)| hit < limit)
+        }) || self.terrains.iter().any(|(terrain, placement, data)| {
+            *terrain != id
+                && axcenity_terrain::raycast::raycast_within(data, placement, eye, direction, limit)
+                    .is_some_and(|hit| hit < limit)
+        })
+    }
+
+    /// The parts other than `id` that a ray from `eye` to somewhere on the
+    /// line from `a` to `b` can meet.
+    fn near_edge(&self, id: InstanceId, eye: Vec3, a: Vec3, b: Vec3) -> Vec<&Occluder> {
+        let middle = (a + b) / 2.0;
+        let reach = (b - a).length() / 2.0;
+        self.parts
+            .iter()
+            .filter(|part| {
+                part.id != id
+                    && distance_to_segment(part.center, eye, middle) <= part.radius + reach
+            })
+            .collect()
+    }
+}
+
+/// Half the diagonal of the box a part's transform stretches the 1×1×1
+/// mesh to.
+fn box_radius(transform: Mat4) -> f32 {
+    let lengths = transform.x_axis.truncate().length_squared()
+        + transform.y_axis.truncate().length_squared()
+        + transform.z_axis.truncate().length_squared();
+    lengths.sqrt() / 2.0
+}
+
+/// How far `point` is from the line segment from `a` to `b`.
+fn distance_to_segment(point: Vec3, a: Vec3, b: Vec3) -> f32 {
+    let along = b - a;
+    let length = along.length_squared();
+    let t = if length > 0.0 {
+        ((point - a).dot(along) / length).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (a + along * t).distance(point)
+}
+
+fn visible_edges(occluders: &Occluders, id: InstanceId, eye: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
+    let world = occluders.world;
     let (_, transform) = part_placement(world.get(id)?)?;
     let center = transform.w_axis.truncate();
     let axes = [
@@ -264,20 +386,8 @@ pub fn visible_box_edges(world: &World, id: InstanceId, eye: Vec3) -> Option<Vec
             }
             let (a, b) = (corner(i), corner(i | (1 << along)));
             // Split into the runs no other part hides.
-            let hidden = |t: f32| {
-                let point = a.lerp(b, t);
-                let offset = point - eye;
-                let distance = offset.length();
-                if distance < 1e-4 {
-                    return false;
-                }
-                let ray = Ray {
-                    origin: eye,
-                    direction: offset / distance,
-                };
-                pick_hit(world, ray, Some(id))
-                    .is_some_and(|hit| hit.distance < distance - (0.05_f32).max(distance * 0.002))
-            };
+            let near = occluders.near_edge(id, eye, a, b);
+            let hidden = |t: f32| occluders.hides(&near, id, eye, a.lerp(b, t));
             let mut run_start: Option<f32> = None;
             for step in 0..=EDGE_SAMPLES {
                 let t = step as f32 / EDGE_SAMPLES as f32;
@@ -733,6 +843,30 @@ mod tests {
         };
         assert_eq!(pick_hit(&world, down, None).unwrap().part, crate_);
         assert_eq!(pick_hit(&world, down, Some(crate_)).unwrap().part, floor);
+    }
+
+    #[test]
+    fn a_terrain_hides_the_box_edges_behind_it_and_only_those() {
+        let mut world = World::new();
+        let terrain = world.create(axcenity_core::ClassName::Terrain).unwrap();
+        world.set_parent(terrain, Some(world.workspace())).unwrap();
+        // The default terrain's ground is flat at Y = 0.
+        let above = part(
+            &mut world,
+            PartType::Block,
+            Vec3::new(0.0, 10.0, 0.0),
+            Vec3::splat(4.0),
+        );
+        let below = part(
+            &mut world,
+            PartType::Block,
+            Vec3::new(0.0, -10.0, 0.0),
+            Vec3::splat(4.0),
+        );
+        let eye = Vec3::new(20.0, 30.0, 20.0);
+        let occluders = Occluders::of(&world);
+        assert!(!occluders.visible_box_edges(above, eye).unwrap().is_empty());
+        assert!(occluders.visible_box_edges(below, eye).unwrap().is_empty());
     }
 
     #[test]

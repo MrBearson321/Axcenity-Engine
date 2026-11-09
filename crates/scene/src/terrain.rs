@@ -435,7 +435,7 @@ impl TerrainCache {
                 items.push(chunk_item(mesh, weights, &layers, transform, casts_shadow));
             }
         }
-        crate::foliage::draw_terrain(id, &placement, &data, assets, items);
+        crate::foliage::draw_terrain(id, &placement, &data, assets, camera.position, items);
     }
 }
 

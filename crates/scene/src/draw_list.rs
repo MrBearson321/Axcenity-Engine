@@ -1216,8 +1216,15 @@ fn surface_material(file: &ModelMaterial, appearance: &Instance, assets: &Assets
 }
 
 /// A model's primitives at `transform`, using the file's own materials.
-/// `id` is the same for the same thing each frame (see [`DrawItem::id`]).
-pub(crate) fn push_model(model: &Arc<Model>, transform: Mat4, id: u64, items: &mut Vec<DrawItem>) {
+/// `id` is the same for the same thing each frame (see [`DrawItem::id`]),
+/// and `cull_distance` is how far away it's still drawn (0 for always).
+pub(crate) fn push_model(
+    model: &Arc<Model>,
+    transform: Mat4,
+    id: u64,
+    cull_distance: f32,
+    items: &mut Vec<DrawItem>,
+) {
     for (index, primitive) in model.primitives.iter().enumerate() {
         items.push(DrawItem {
             shape: Shape::Mesh(Arc::new(ModelMesh::new(model, index))),
@@ -1226,7 +1233,7 @@ pub(crate) fn push_model(model: &Arc<Model>, transform: Mat4, id: u64, items: &m
             uv_tile: 0.0,
             casts_shadow: true,
             id,
-            cull_distance: 0.0,
+            cull_distance,
             skin: None,
             sway: None,
             decal_role: Default::default(),

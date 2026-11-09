@@ -197,7 +197,15 @@ fn plan(list: &DrawList) -> DrawPlan {
 fn plan_with(list: &DrawList, bounds: impl Fn(MeshKey) -> Bounds) -> DrawPlan {
     let view = Frustum::of(view_projection(list, 1.0));
     let draws = LodStates::default().resolve(list, 1).draws;
-    plan_draws(list, &draws, &view, |mesh, _| bounds(mesh), None)
+    let materials: Vec<MaterialKey> = draws.iter().map(|draw| material_key(draw.item)).collect();
+    plan_draws(
+        list,
+        &draws,
+        &materials,
+        &view,
+        |mesh, _| bounds(mesh),
+        None,
+    )
 }
 
 /// A caller's mesh with no triangles, for planning tests (it's never uploaded).
@@ -258,13 +266,14 @@ fn callers_meshes_are_grouped_by_mesh_then_texture() {
         .into_iter()
         .map(|batch| (batch.mesh, batch.material.textures[0], batch.instances))
         .collect();
+    // Within a mesh, materials come in the order the list first uses them.
     assert_eq!(
         textures,
         vec![
             (MeshKey::Block, Some(1), 0..1),
             (MeshKey::Custom(5), None, 1..2),
-            (MeshKey::Custom(7), Some(1), 2..3),
-            (MeshKey::Custom(7), Some(2), 3..5),
+            (MeshKey::Custom(7), Some(2), 2..4),
+            (MeshKey::Custom(7), Some(1), 4..5),
         ]
     );
 }

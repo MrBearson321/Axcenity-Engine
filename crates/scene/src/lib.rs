@@ -53,7 +53,7 @@ pub use particles::{
     GPU_PARTICLE_THRESHOLD, MAX_PER_EMITTER, Particles, built_in as built_in_particle,
 };
 pub use pick::{
-    CameraView, Hit, Ray, part_box_edges, part_half_extent, part_hit, pick, pick_hit,
+    CameraView, Hit, Occluders, Ray, part_box_edges, part_half_extent, part_hit, pick, pick_hit,
     pick_hit_skipping, visible_box_edges,
 };
 pub use preload::{AssetFile, asset_files};

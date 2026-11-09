@@ -1,10 +1,12 @@
 //! Painted plants, props, and models as draw items. They sit on the terrain
 //! surface and are not Instances, so sculpting moves them with the ground.
 
-use axcenity_assets::Assets;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use axcenity_assets::{Assets, Model};
 use axcenity_core::{
-    FoliageInstance, FoliagePlant, FoliageProp, FoliageSource, InstanceId, PartType, TerrainData,
-    Vector3,
+    FoliagePlant, FoliageProp, FoliageSource, InstanceId, PartType, TerrainData, Vector3,
 };
 use axcenity_render::glam::{Mat4, Quat, Vec2, Vec3};
 use axcenity_render::{DrawItem, Material, Shape, Sway};
@@ -306,8 +308,8 @@ fn shape_of(part: PartType) -> Shape {
 
 /// How far from the camera a plant of scale 1 is drawn, in studs: small
 /// plants vanish nearer than big ones. Each fades out before it's culled
-/// ([`DrawItem::cull_distance`]). Props and models are drawn at any
-/// distance (models use their levels of detail).
+/// ([`DrawItem::cull_distance`]). Props are drawn at any distance; a
+/// painted model's distance comes from its size ([`model_cull_distance`]).
 fn cull_distance(source: &FoliageSource) -> f32 {
     match source {
         FoliageSource::Plant(FoliagePlant::Grass) => 120.0,
@@ -316,6 +318,27 @@ fn cull_distance(source: &FoliageSource) -> f32 {
         FoliageSource::Plant(FoliagePlant::Tree) | FoliageSource::Prop(FoliageProp::Tree) => 800.0,
         FoliageSource::Prop(_) | FoliageSource::Model(_) => 0.0,
     }
+}
+
+/// Studs of drawing distance per stud of a painted model's size: the
+/// built-in plants' rate (grass 1.1 studs tall at 120, a bush of 2.2 at
+/// 300, a tree of about 7 at 800).
+const MODEL_CULL_PER_STUD: f32 = 120.0;
+/// The nearest a painted model is culled, however small (a pebble, a
+/// mushroom), and the farthest, however big.
+const MODEL_CULL_RANGE: (f32, f32) = (60.0, 1500.0);
+
+/// How far from the camera a painted model `size` studs across (as placed,
+/// its scale included) is drawn: by its largest extent, so a fern of half
+/// a stud goes at 60 studs and a 10-stud clump of trees at 1,200. Grass
+/// and pebbles painted from a model pack would otherwise be drawn across
+/// the whole terrain, thousands of them smaller than a pixel.
+fn model_cull_distance(size: Vec3) -> f32 {
+    let largest = size.abs().max_element();
+    if !largest.is_finite() {
+        return MODEL_CULL_RANGE.0;
+    }
+    (largest * MODEL_CULL_PER_STUD).clamp(MODEL_CULL_RANGE.0, MODEL_CULL_RANGE.1)
 }
 
 /// How much a built-in plant gives in the wind ([`Sway::strength`]):
@@ -365,36 +388,68 @@ fn corners() -> impl Iterator<Item = Vec3> {
 }
 
 /// Adds the painted foliage of `terrain` (its data `data`) to `items`,
-/// sitting on the surface.
+/// sitting on the surface. Plants and models past their cull distance
+/// from `camera` aren't built at all: the renderer would leave them out
+/// anyway ([`DrawItem::cull_distance`]), and a dense terrain has thousands.
+/// The distance is measured flat, in XZ, which is never more than the
+/// renderer's, so nothing that would be drawn is skipped.
 pub(crate) fn draw_terrain(
     terrain: InstanceId,
     placement: &Placement,
     data: &TerrainData,
     assets: &Assets,
+    camera: Vec3,
     items: &mut Vec<DrawItem>,
 ) {
+    // Each model is looked up once (a lock and a lookup by path), not once
+    // per instance painted from it.
+    let mut models: HashMap<&str, Option<Arc<Model>>> = HashMap::new();
+    let camera_xz = Vec2::new(camera.x, camera.z);
     for (index, instance) in data.foliage().iter().enumerate() {
-        let Some(transform) = instance_transform(placement, data, instance) else {
+        let scale = instance.scale.max(0.01);
+        let xz = placement.to_world_xz(data, Vec2::new(instance.x, instance.z));
+        let (cull_distance, model) = match &instance.source {
+            FoliageSource::Model(path) => {
+                let model = models
+                    .entry(path.as_str())
+                    .or_insert_with(|| assets.model(path));
+                let Some(model) = model else {
+                    continue;
+                };
+                (
+                    model_cull_distance(Vec3::from(model.size) * scale),
+                    Some(model.clone()),
+                )
+            }
+            source => (cull_distance(source) * scale, None),
+        };
+        if cull_distance > 0.0 && camera_xz.distance(xz) > cull_distance {
+            continue;
+        }
+        let Some(y) = placement.ground_y(data, xz.x, xz.y) else {
             continue;
         };
-        match &instance.source {
-            FoliageSource::Model(path) => {
-                let Some(model) = assets.model(path) else {
-                    continue;
-                };
-                let size = Vec3::from(model.size) * instance.scale.max(0.01);
-                let Some(ground) = instance_ground(placement, data, instance) else {
-                    continue;
-                };
+        let ground = Vec3::new(xz.x, y, xz.y);
+        let turn = Quat::from_rotation_y(instance.yaw);
+        match (&instance.source, model) {
+            (FoliageSource::Model(_), Some(model)) => {
+                let size = Vec3::from(model.size) * scale;
                 let model_transform = Mat4::from_scale_rotation_translation(
                     size.max(Vec3::splat(0.01)),
-                    Quat::from_rotation_y(instance.yaw),
+                    turn,
                     ground + Vec3::new(0.0, size.y.abs() * 0.5, 0.0),
                 );
-                push_model(&model, model_transform, draw_id((terrain, index)), items);
+                push_model(
+                    &model,
+                    model_transform,
+                    draw_id((terrain, index)),
+                    cull_distance,
+                    items,
+                );
             }
-            source => {
-                let cull_distance = cull_distance(source) * instance.scale.max(0.01);
+            (source, _) => {
+                let transform =
+                    Mat4::from_scale_rotation_translation(Vec3::splat(scale), turn, ground);
                 let sway = plant_sway(pieces(source), sway_strength(source), transform);
                 for piece in pieces(source) {
                     items.push(DrawItem {
@@ -406,30 +461,6 @@ pub(crate) fn draw_terrain(
             }
         }
     }
-}
-
-fn instance_ground(
-    placement: &Placement,
-    data: &TerrainData,
-    instance: &FoliageInstance,
-) -> Option<Vec3> {
-    let xz = placement.to_world_xz(data, Vec2::new(instance.x, instance.z));
-    let y = placement.ground_y(data, xz.x, xz.y)?;
-    Some(Vec3::new(xz.x, y, xz.y))
-}
-
-fn instance_transform(
-    placement: &Placement,
-    data: &TerrainData,
-    instance: &FoliageInstance,
-) -> Option<Mat4> {
-    let ground = instance_ground(placement, data, instance)?;
-    let scale = instance.scale.max(0.01);
-    Some(Mat4::from_scale_rotation_translation(
-        Vec3::splat(scale),
-        Quat::from_rotation_y(instance.yaw),
-        ground,
-    ))
 }
 
 /// Where `piece`'s shape sits in its plant or prop.
@@ -466,7 +497,7 @@ fn piece_item(piece: &Piece, instance: Mat4) -> DrawItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axcenity_core::{ClassName, FoliagePlant, TerrainData, Value, Vector3};
+    use axcenity_core::{ClassName, FoliageInstance, FoliagePlant, TerrainData, Value, Vector3};
 
     #[test]
     fn foliage_sits_on_the_terrain_surface() {
@@ -503,7 +534,14 @@ mod tests {
         let mut items = Vec::new();
         let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
         let data = world.terrain(terrain).unwrap();
-        draw_terrain(terrain, &placement, data, &Assets::default(), &mut items);
+        draw_terrain(
+            terrain,
+            &placement,
+            data,
+            &Assets::default(),
+            Vec3::ZERO,
+            &mut items,
+        );
         assert!(items.len() >= 3, "{} items", items.len());
         let xz = placement.to_world_xz(data, Vec2::ZERO);
         let top = placement.ground_y(data, xz.x, xz.y).unwrap();
@@ -548,7 +586,14 @@ mod tests {
         let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
         let data = world.terrain(terrain).unwrap();
         let mut items = Vec::new();
-        draw_terrain(terrain, &placement, data, &Assets::default(), &mut items);
+        draw_terrain(
+            terrain,
+            &placement,
+            data,
+            &Assets::default(),
+            Vec3::ZERO,
+            &mut items,
+        );
         let ground = |x| {
             let xz = placement.to_world_xz(data, Vec2::new(x, 4.0));
             placement.ground_y(data, xz.x, xz.y).unwrap()
@@ -566,5 +611,98 @@ mod tests {
         assert!((grass.height - 1.1).abs() < 1e-3, "{grass:?}");
         assert!(grass.strength > tree.strength);
         assert_eq!(items[4].sway, None, "crates stay still");
+    }
+
+    /// A terrain with one grass plant and one crate, seen from `camera`.
+    fn drawn_from(camera: Vec3) -> Vec<DrawItem> {
+        let mut world = axcenity_core::World::new();
+        let terrain = world.create(ClassName::Terrain).unwrap();
+        world.set_parent(terrain, Some(world.workspace())).unwrap();
+        let mut data = TerrainData::flat(9, 9, 0.25).unwrap();
+        let plant = |source, x| FoliageInstance {
+            source,
+            x,
+            z: 4.0,
+            yaw: 0.0,
+            scale: 1.0,
+            collide: false,
+        };
+        data.foliage_mut().extend([
+            plant(FoliageSource::Plant(FoliagePlant::Grass), 4.0),
+            plant(FoliageSource::Prop(FoliageProp::Crate), 6.0),
+        ]);
+        world.set_terrain(terrain, std::sync::Arc::new(data));
+        let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
+        let data = world.terrain(terrain).unwrap();
+        let mut items = Vec::new();
+        draw_terrain(
+            terrain,
+            &placement,
+            data,
+            &Assets::default(),
+            camera,
+            &mut items,
+        );
+        items
+    }
+
+    #[test]
+    fn plants_past_their_cull_distance_are_not_built() {
+        // Near, the grass (two wedges) and the crate are built.
+        let near = drawn_from(Vec3::new(0.0, 10.0, 0.0));
+        assert_eq!(
+            near.iter().filter(|item| item.cull_distance > 0.0).count(),
+            2,
+            "{near:?}"
+        );
+        // From 500 studs away only the crate is left, which has no cull
+        // distance. Height doesn't count: the camera is far up too.
+        let far = drawn_from(Vec3::new(500.0, 400.0, 0.0));
+        assert_eq!(far.len(), 1, "{far:?}");
+        assert!(matches!(far[0].shape, Shape::Block));
+        assert_eq!(far[0].cull_distance, 0.0);
+    }
+
+    #[test]
+    fn a_painted_model_is_culled_by_its_size() {
+        // A pebble goes at the least, a clump of trees at 120 studs per
+        // stud, and nothing is drawn past 1,500 studs however big.
+        assert_eq!(model_cull_distance(Vec3::new(0.4, 0.1, 0.4)), 60.0);
+        assert_eq!(model_cull_distance(Vec3::new(1.0, 1.0, 1.0)), 120.0);
+        assert_eq!(model_cull_distance(Vec3::new(10.0, 8.0, 9.0)), 1200.0);
+        assert_eq!(model_cull_distance(Vec3::splat(40.0)), 1500.0);
+        assert_eq!(model_cull_distance(Vec3::splat(f32::NAN)), 60.0);
+
+        // A model painted on a terrain carries that distance (its scale
+        // counted), and isn't built when the camera is past it.
+        let folder =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-mesh");
+        let assets = Assets::new(&folder);
+        let path = "assets/models/pyramid.gltf";
+        let model = assets.model(path).expect("the example's pyramid");
+        let mut world = axcenity_core::World::new();
+        let terrain = world.create(ClassName::Terrain).unwrap();
+        world.set_parent(terrain, Some(world.workspace())).unwrap();
+        let mut data = TerrainData::flat(9, 9, 0.25).unwrap();
+        data.foliage_mut().push(FoliageInstance {
+            source: FoliageSource::Model(path.to_owned()),
+            x: 4.0,
+            z: 4.0,
+            yaw: 0.0,
+            scale: 2.0,
+            collide: false,
+        });
+        world.set_terrain(terrain, std::sync::Arc::new(data));
+        let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
+        let data = world.terrain(terrain).unwrap();
+        let expected = model_cull_distance(Vec3::from(model.size) * 2.0);
+        let mut items = Vec::new();
+        draw_terrain(terrain, &placement, data, &assets, Vec3::ZERO, &mut items);
+        assert_eq!(items.len(), model.primitives.len());
+        assert!(items.iter().all(|item| item.cull_distance == expected));
+        let mut far = Vec::new();
+        let camera = Vec3::new(expected + 10.0, 0.0, 0.0);
+        draw_terrain(terrain, &placement, data, &assets, camera, &mut far);
+        assert!(far.is_empty(), "{far:?}");
     }
 }

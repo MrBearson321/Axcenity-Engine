@@ -27,6 +27,7 @@ Each prints its last frame's counts (items drawn, batches, draw calls, triangles
 | `bench_20_walking_characters` | 20 copies of hello-character's walking character (about 76,000 triangles and 8 primitives each), each with an Animator, posed every frame (added in graphics Phase 14) |
 | `bench_500_bullet_holes_in_the_graphics_reference_scene` | hello-graphics from (12, 8, 16), drawn without decals, then with 500 bullet holes spawned by `workspace:SpawnDecal` from a grid of raycasts (its cap raised to keep them all); fails if the GPU frame with them is over 16.7 ms (added in Phase 75, see [decals.md](decals.md)) |
 | `bench_2000_mesh_parts_behind_a_wall` | The 2,000 helmets in view but hidden behind an 80-stud wall the camera stands 40 studs from, then the same view with no helmets (added in graphics Phase 15, for occlusion culling) |
+| `bench_project` | A project of your own: set `AXCENITY_BENCH_PROJECT` to its folder. Drawn from its SpawnLocation at eye height looking ahead, then from an overview 120 studs up and 250 back. Skipped when the variable isn't set. Use it to find what a slow project costs before changing it or the engine (see Planning draws below) |
 
 ## Baseline
 
@@ -199,3 +200,40 @@ The debug views are built only with `render`'s `debug-views` feature, which the 
 | GPU depth prepass | 0.028 | 0.028 |
 
 So 500 projected decals cost about 0.1 ms of GPU time, well inside a 60 frames a second budget (16.7 ms). Games keep at most `MaxSpawnedDecals` (200 by default) from `workspace:SpawnDecal`, and the quality preset draws at most 512 at High.
+
+## A dense painted terrain (`bench_project`)
+
+The first project measured with `bench_project` was a 960 × 1,260-stud terrain with 8,339 models painted as foliage (grass, ferns, pebbles, bushes and 10-stud clumps of trees from a model pack, 20 to 550 triangles each) and 600 MeshParts (trees, boulders and a store), on the machine above (AMD Radeon RX 9070 XT, Vulkan), release build, 1280 × 720 on High. Times are milliseconds; the GPU frame was 2.8 to 3.0 ms throughout, so every number that mattered was CPU time.
+
+| | At the spawn, before | At the spawn, after | Overview, before | Overview, after |
+|---|---|---|---|---|
+| Items submitted / drawn | 22,368 / 11,897 | 16,035 / 10,339 | 22,368 / 19,591 | 12,091 / 10,708 |
+| CPU `build_draw_list` | 7.7 | 5.7 | 7.7 | 4.3 |
+| CPU `ScenePipeline::draw` | 19.5 | 12.5 | 19.3 | 8.0 |
+| GPU frame | 2.9 | 2.9 | 3.0 | 2.8 |
+
+What it said, and what changed:
+
+- **Painted models had no cull distance.** Built-in plants are left out past a distance by their kind, but a model painted from the Assets panel was drawn everywhere, so 8,339 of them became 17,600 draw items a frame across the whole terrain, ferns a third of a stud tall included. Now a painted model's cull distance comes from its size as placed, 120 studs per stud of its largest extent from 60 to 1,500 (`scene::foliage::model_cull_distance`, the built-in plants' rate), and `scene` skips a plant or model past it before building its items, looking each model up once per frame rather than once per instance (`docs/terrain.md`).
+- **Planning cost 11 to 15 ms of the 19.5**, timed inside `plan_draws`: 2 to 3 ms working out each draw's `MaterialKey` (330 bytes of texture keys and map settings), 2 to 5 ms sorting 22,000 indexes by comparing those keys and re-deriving each item's shader key per comparison, and 6 to 7 ms in the loop, where `instance_raw` converted six sRGB channels with `powf` per item. `upload_new` worked out every `MaterialKey` a second time. Now `ScenePipeline::draw` works the keys out once per draw and hands them to both; `plan_draws` sorts by a small `SortKey` (mesh, the material's index among the frame's distinct keys, with the plain material at index 0 without a lookup, shader, sidedness, shadow) and batches by it; and `LinearColors` keeps the last base and glow colors converted, since a batch's items share them.
+- **What's left is the count.** 16,000 items still reach the renderer from the spawn, which stands in a forest: clumps of trees are drawn to 1,200 studs, as their size says, and each is three to nine draw items. The next savings there are fewer primitives per painted model (one material per clump) and coarser levels of detail, which are the project's to make, or combining a terrain's painted instances of one model into one draw item each (the renderer already batches them into one instanced draw).
+- **The texture budget was full for another reason.** The project's `realistic/` models embed 2048² textures (21) and three 4096² ones, 540 MB with mips of the 1,012 MB on the GPU, so High's 1,024 MB budget had shrunk one. Nothing in the frame times came from that (the budget check costs 0.2 ms and nothing was replaced), but it's the first thing to downsize in such a pack.
+- **Debug builds pay more.** `scene`, `physics` and `terrain` are among the crates `[profile.dev.package]` optimizes, since the debug editor spends each frame in them (`build_draw_list` 13.4 ms unoptimized, 6.8 ms optimized, on this project). The engine's other crates stay unoptimized, so measure in release before blaming a project.
+
+### Play and the selection box on that terrain (`bench_project_play`)
+
+Selecting something made the editor crawl and Play was a slideshow, while neither the CPU nor the GPU looked busy: the work was on one thread (1 of 32, about 3% of the CPU in Task Manager) and the GPU had under 3 ms of work a frame. `bench_project_play` in `editor/src/play/tests.rs` times the game frame without drawing, and the selection box, on the project `AXCENITY_BENCH_PROJECT` names:
+
+```text
+cargo test -p axcenity-editor --release -- --ignored bench_project_play --nocapture --test-threads 1
+```
+
+| Release build | Before | After |
+|---|---|---|
+| `Session::frame`, walking (median) | 666 ms | 2.0 ms |
+| Selection box, per selected part | 17 ms | 0.1 to 0.3 ms |
+
+In a debug build the same frame is 8.5 ms and the box 0.5 to 1.4 ms.
+
+- **Every physics query built every collider.** `candidates` (`physics/src/query.rs`) made a collider for each part in the Workspace per ray: a convex hull per MeshPart, and a copy of all 345,249 height samples for the terrain. The walking character casts many rays a frame. Now a `Reach` (the capsule the query can touch) passes by parts whose bounding ball is outside it before anything is built, and a Terrain's colliders are kept between queries by its `uid` and `revision` (`terrain_colliders`; a copy of a terrain has its own `uid`, and a reloaded model rebuilds them).
+- **The selection box walked the world per ray.** Up to 12 edges of 17 rays each, every ray listing the Workspace twice and marching across the whole terrain. Now `scene::Occluders` gathers the parts and terrains once a frame, each edge tests only the parts near the line of sight to it, and terrain rays stop at the edge (`terrain::raycast::raycast_within`).

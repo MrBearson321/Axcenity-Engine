@@ -143,16 +143,29 @@ all = { level = "warn", priority = -1 }
 # Debug builds (`cargo run`) still optimize the libraries the engine uses,
 # such as image decoding, physics and wgpu: unoptimized, one 4K JPEG takes
 # about 4 s to decode instead of 0.2 s. The engine's own crates stay quick to
-# rebuild, except `render`, whose mipmap and terrain loops run on every new
-# texture (1.2 s for a 4K map unoptimized, 25 ms optimized). Libraries are
-# rebuilt once after this changes. Libraries keep only line tables (file
-# and line in panics and backtraces, no local variables): full debug info
-# doubled the editor binary to 1 GB and made every link and build slower.
+# rebuild, except the ones below, such as `render`, whose mipmap and terrain
+# loops run on every new texture (1.2 s for a 4K map unoptimized, 25 ms
+# optimized). Libraries are rebuilt once after this changes. Libraries keep
+# only line tables (file and line in panics and backtraces, no local
+# variables): full debug info doubled the editor binary to 1 GB and made
+# every link and build slower.
 [profile.dev.package."*"]
 opt-level = 3
 debug = "line-tables-only"
 
 [profile.dev.package.axcenity-render]
+opt-level = 3
+
+# `scene` builds the draw list and `physics` steps the game every frame:
+# in a big project, 13 ms against 5 ms and 6.6 ms against 0.9 ms unoptimized.
+# `terrain` samples heights under both.
+[profile.dev.package.axcenity-scene]
+opt-level = 3
+
+[profile.dev.package.axcenity-physics]
+opt-level = 3
+
+[profile.dev.package.axcenity-terrain]
 opt-level = 3
 
 # Building the navigation mesh walks every column of the world: 0.3 s for a

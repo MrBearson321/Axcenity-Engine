@@ -7,11 +7,11 @@ pub(super) fn paint_selection_box(
     ui: &egui::Ui,
     rect: egui::Rect,
     screen: &Screen,
-    world: &World,
+    occluders: &axcenity_scene::Occluders,
     selected: InstanceId,
     eye: Vec3,
 ) {
-    let Some(lines) = axcenity_scene::visible_box_edges(world, selected, eye) else {
+    let Some(lines) = occluders.visible_box_edges(selected, eye) else {
         return;
     };
     let painter = ui.painter_at(rect);

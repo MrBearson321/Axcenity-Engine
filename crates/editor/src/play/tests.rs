@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+use std::time::Instant;
+
 use axcenity_core::{ClassName, Value};
 
 use super::*;
@@ -600,4 +603,80 @@ fn with_10_percent_packet_loss_play_stays_usable_and_the_network_section_shows_t
         "about a tenth lost: {}",
         stats.link.packet_loss
     );
+}
+
+/// What Play and a selection cost in a project of the user's own, named by
+/// `AXCENITY_BENCH_PROJECT`: the game frame (physics, the character's rays)
+/// without drawing, and the selection box. Skipped when it isn't set.
+///
+/// `cargo test -p axcenity-editor --release -- --ignored bench_project_play --nocapture --test-threads 1`
+#[test]
+#[ignore = "benchmark: run with --release -- --ignored bench_"]
+fn bench_project_play() {
+    let Some(folder) = std::env::var_os("AXCENITY_BENCH_PROJECT") else {
+        eprintln!("skipped bench_project_play: set AXCENITY_BENCH_PROJECT to a project folder");
+        return;
+    };
+    let folder = PathBuf::from(folder);
+    let world = axcenity_project::load(&folder).unwrap().world;
+    let assets = Assets::new(&folder);
+    let mut output = Output::default();
+    let started = Instant::now();
+    let mut session = Session::start(
+        &world,
+        &[],
+        &Breakpoints::new(),
+        &mut output,
+        assets,
+        CameraState::default(),
+        &LoadingScreen::default(),
+        &InputMap::default(),
+        None,
+        &GraphicsSettings::default(),
+        &Capabilities::default(),
+        PlayLevels::default(),
+    )
+    .unwrap();
+    eprintln!("Session::start: {:?}", started.elapsed());
+    let mut times = Vec::new();
+    for frame in 0..30 {
+        let started = Instant::now();
+        let motion = MoveInput {
+            forward: true,
+            ..MoveInput::default()
+        };
+        session
+            .frame(1.0 / 60.0, &[], motion, CameraState::default(), &mut output)
+            .unwrap();
+        let took = started.elapsed();
+        let cost = session.cost().unwrap();
+        eprintln!(
+            "frame {frame}: {took:?} (physics {:?}, scripts {:?}, animation {:?})",
+            cost.physics, cost.scripts, cost.animation
+        );
+        times.push(took);
+    }
+    times.sort();
+    eprintln!("Session::frame median: {:?}", times[times.len() / 2]);
+
+    let eye = axcenity_render::glam::Vec3::new(0.0, 40.0, 80.0);
+    let parts: Vec<_> = world
+        .descendants(world.workspace())
+        .into_iter()
+        .filter(|id| {
+            world
+                .get(*id)
+                .is_some_and(|i| i.class() == ClassName::MeshPart)
+        })
+        .take(5)
+        .collect();
+    for id in parts {
+        let started = Instant::now();
+        let lines = axcenity_scene::Occluders::of(&world).visible_box_edges(id, eye);
+        eprintln!(
+            "visible_box_edges: {:?} ({} lines)",
+            started.elapsed(),
+            lines.map_or(0, |l| l.len())
+        );
+    }
 }

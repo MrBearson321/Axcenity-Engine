@@ -14,6 +14,19 @@ pub fn raycast(
     origin: Vec3,
     direction: Vec3,
 ) -> Option<f32> {
+    raycast_within(data, placement, origin, direction, f32::INFINITY)
+}
+
+/// [`raycast`], looking no further than `limit` along the ray: a hit past
+/// it isn't found. A ray that only has to reach a nearby point is far
+/// cheaper this way than marching on across the whole terrain.
+pub fn raycast_within(
+    data: &TerrainData,
+    placement: &Placement,
+    origin: Vec3,
+    direction: Vec3,
+    limit: f32,
+) -> Option<f32> {
     let length = direction.length();
     if length < 1e-9 || !origin.is_finite() || !direction.is_finite() {
         return None;
@@ -21,6 +34,7 @@ pub fn raycast(
     let low = placement.position - Vec3::new(placement.size.x / 2.0, 0.0, placement.size.z / 2.0);
     let high = low + placement.size;
     let (enter, exit) = box_span(origin, direction, low, high)?;
+    let exit = exit.min(limit);
     let cell = placement.cell_size(data).min_element().max(1e-4);
     let step = (cell * 0.5) / length;
     // How far above the ground a point on the ray is (negative below).
@@ -77,6 +91,25 @@ fn box_span(origin: Vec3, direction: Vec3, low: Vec3, high: Vec3) -> Option<(f32
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_limited_ray_stops_looking_at_its_limit() {
+        let data = TerrainData::flat(33, 33, 0.25).unwrap();
+        let placement = Placement {
+            position: Vec3::new(0.0, -10.0, 0.0),
+            size: Vec3::new(64.0, 40.0, 64.0),
+        };
+        let (from, down) = (Vec3::new(3.0, 50.0, -7.0), Vec3::NEG_Y);
+        let distance = raycast(&data, &placement, from, down).unwrap();
+        assert_eq!(
+            raycast_within(&data, &placement, from, down, distance + 1.0),
+            Some(distance)
+        );
+        assert_eq!(
+            raycast_within(&data, &placement, from, down, distance - 1.0),
+            None
+        );
+    }
 
     #[test]
     fn a_ray_down_hits_the_ground_and_one_beside_it_misses() {

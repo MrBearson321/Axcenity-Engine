@@ -336,3 +336,77 @@ fn shape_casts_find_the_first_part_they_sweep_into() {
     let hit = shapecast(&world, &assets, inside, v(0.0, 0.0, -20.0), &params);
     assert_eq!(hit.unwrap().instance, wall);
 }
+
+#[test]
+fn a_ray_hits_the_end_of_a_long_part_whose_center_is_far_from_it() {
+    let mut world = World::new();
+    let beam = part(&mut world, v(100.0, 0.0, 0.0), v(220.0, 1.0, 1.0), true);
+    let hit = raycast(
+        &world,
+        &Assets::default(),
+        v(-5.0, 5.0, 0.0),
+        v(0.0, -10.0, 0.0),
+        &QueryParams::default(),
+    )
+    .unwrap();
+    assert_eq!(hit.instance, beam);
+    assert!((hit.distance - 4.5).abs() < 1e-3, "{hit:?}");
+}
+
+#[test]
+fn a_ray_past_a_part_does_not_find_it() {
+    let mut world = World::new();
+    part(&mut world, v(0.0, 0.0, 0.0), v(2.0, 2.0, 2.0), true);
+    let hit = raycast(
+        &world,
+        &Assets::default(),
+        v(5.0, 5.0, 0.0),
+        v(0.0, -10.0, 0.0),
+        &QueryParams::default(),
+    );
+    assert_eq!(hit, None);
+}
+
+/// How far down from 50 studs up a ray at (-46, -46) meets `world`.
+fn drop_onto(world: &World) -> f32 {
+    raycast(
+        world,
+        &Assets::default(),
+        v(-46.0, 50.0, -46.0),
+        v(0.0, -100.0, 0.0),
+        &QueryParams::default(),
+    )
+    .unwrap()
+    .distance
+}
+
+/// Raises the default Terrain to 16 studs around (-46, -46).
+fn raise(world: &mut World, terrain: InstanceId) {
+    let data = world.terrain_mut(terrain).unwrap();
+    let rect = axcenity_core::SampleRect::new(90, 90, 120, 120);
+    let heights = data.heights_mut_in(rect);
+    for z in 90..120 {
+        for x in 90..120 {
+            heights[z * 257 + x] = 0.375;
+        }
+    }
+}
+
+#[test]
+fn rays_meet_a_terrain_where_it_is_now_after_an_edit_or_in_a_copy() {
+    let mut world = World::new();
+    let terrain = world.create(ClassName::Terrain).unwrap();
+    world.set_parent(terrain, Some(world.workspace())).unwrap();
+    assert!((drop_onto(&world) - 50.0).abs() < 0.01);
+
+    let mut copy = world.clone();
+    raise(&mut copy, terrain);
+    assert!((drop_onto(&copy) - 34.0).abs() < 0.01, "the edited copy");
+    assert!((drop_onto(&world) - 50.0).abs() < 0.01, "the original");
+
+    raise(&mut world, terrain);
+    assert!(
+        (drop_onto(&world) - 34.0).abs() < 0.01,
+        "the edited original"
+    );
+}

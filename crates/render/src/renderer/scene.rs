@@ -774,7 +774,11 @@ impl ScenePipeline {
             draws,
             culled: past_cull_distance,
         } = self.lods.resolve(list, self.frame);
-        self.upload_new(list, &draws);
+        // Each draw's material binding, worked out once for the uploads
+        // and the plan: it reads every map setting of the item.
+        let materials: Vec<MaterialKey> =
+            draws.iter().map(|draw| material_key(draw.item)).collect();
+        self.upload_new(list, &draws, &materials);
         // What the camera can see, or the frozen view's while it's set.
         let camera = self.frozen_view.as_ref().unwrap_or(&list.camera);
         let camera_view = Frustum::of(camera_view_projection(camera, aspect));
@@ -791,6 +795,7 @@ impl ScenePipeline {
         } = plan_draws(
             list,
             &draws,
+            &materials,
             &camera_view,
             |mesh, skin| self.item_bounds(mesh, skin),
             self.frozen_view.is_some().then_some(&mut seen),
@@ -1913,7 +1918,14 @@ impl ScenePipeline {
     /// detail) and textures in `list` that aren't on the GPU yet, and notes
     /// that the rest were drawn this frame. Textures are fitted to the
     /// texture budget before the materials using them are bound.
-    pub(super) fn upload_new(&mut self, list: &DrawList, draws: &[Draw]) {
+    /// `materials[i]` is the material key of `draws[i]` (see
+    /// [`material_key`]).
+    pub(super) fn upload_new(
+        &mut self,
+        list: &DrawList,
+        draws: &[Draw],
+        materials: &[MaterialKey],
+    ) {
         let frame = self.frame;
         let arrived = self.finish_background_uploads();
         for source in draws.iter().filter_map(Draw::source) {
@@ -2010,15 +2022,13 @@ impl ScenePipeline {
             self.sprites.forget(|key| !replaced.contains(&key));
             self.decal_pass.forget(|key| !replaced.contains(&key));
         }
-        for item in &list.items {
-            if item.material.terrain.is_some() {
+        for (draw, key) in draws.iter().zip(materials) {
+            let item = draw.item;
+            let key = *key;
+            if item.material.terrain.is_some() || key == MaterialKey::default() {
                 continue;
             }
             let sources = material_textures(item);
-            let key = material_key(item);
-            if key == MaterialKey::default() {
-                continue;
-            }
             match self.materials.entry(key) {
                 Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
                 Entry::Vacant(slot) => {

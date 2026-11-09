@@ -671,16 +671,39 @@ pub(super) struct DrawPlan {
 pub(super) fn plan_draws(
     list: &DrawList,
     draws: &[Draw],
+    materials: &[MaterialKey],
     view: &Frustum,
     bounds: impl Fn(MeshKey, Option<&Skin>) -> Bounds,
     mut seen: Option<&mut Vec<CullingBounds>>,
 ) -> DrawPlan {
-    // Each draw's mesh and material binding, worked out once. The draws
-    // are sorted by index, so sorting compares the keys in place and moves
-    // only indexes.
-    let keys: Vec<(MeshKey, MaterialKey)> = draws
+    debug_assert_eq!(draws.len(), materials.len());
+    // Each draw's sort key, worked out once: its mesh, its material as an
+    // index among the frame's distinct materials, and its pipeline. The
+    // plain material (no textures, standard shading), which most items of
+    // a big scene share, is index 0 without a lookup. A material key is
+    // hundreds of bytes, so the sort compares these instead.
+    let mut distinct = vec![MaterialKey::default()];
+    let mut indexes: HashMap<MaterialKey, u32> = HashMap::new();
+    let keys: Vec<SortKey> = draws
         .iter()
-        .map(|draw| (draw.mesh(), material_key(draw.item)))
+        .zip(materials)
+        .map(|(draw, material)| {
+            let material = if *material == distinct[0] {
+                0
+            } else {
+                *indexes.entry(*material).or_insert_with(|| {
+                    distinct.push(*material);
+                    (distinct.len() - 1) as u32
+                })
+            };
+            SortKey {
+                mesh: draw.mesh(),
+                material,
+                shader: shader_key(draw.item),
+                double_sided: draw.item.material.double_sided,
+                casts_shadow: draw.casts_shadow,
+            }
+        })
         .collect();
     // Water is drawn with the see-through items, before them (see
     // renderer/water.rs).
@@ -693,18 +716,7 @@ pub(super) fn plan_draws(
             draws[index].item.material.opacity < 1.0 || water(index) || decal(index)
         });
 
-    let sidedness = |draw: &Draw| {
-        (
-            shader_key(draw.item),
-            draw.item.material.double_sided,
-            !draw.casts_shadow,
-        )
-    };
-    opaque.sort_by(|&a, &b| {
-        keys[a]
-            .cmp(&keys[b])
-            .then_with(|| sidedness(&draws[a]).cmp(&sidedness(&draws[b])))
-    });
+    opaque.sort_by_key(|&index| keys[index]);
     let distance = |index: usize| {
         draws[index]
             .item
@@ -727,12 +739,17 @@ pub(super) fn plan_draws(
     // Items sharing a mesh are next to each other, so its bounds are looked
     // up once per run of them (unless a skin moves them).
     let mut last_bounds: Option<(MeshKey, Bounds)> = None;
+    let mut colors = LinearColors::default();
+    // The last batch's key and kind, to add to it without comparing the
+    // batch's material key.
+    let mut last_batch: Option<(SortKey, bool, bool, bool)> = None;
     let ordered = opaque
         .into_iter()
         .map(|index| (index, false))
         .chain(transparent.into_iter().map(|index| (index, true)));
     for (at, transparent) in ordered {
-        let (draw, (mesh, material)) = (&draws[at], keys[at]);
+        let (draw, key) = (&draws[at], keys[at]);
+        let mesh = key.mesh;
         let item = draw.item;
         let skin = item.skin.as_deref();
         let shape_bounds = match (last_bounds, skin) {
@@ -762,7 +779,7 @@ pub(super) fn plan_draws(
                 continue;
             }
         }
-        let Some(mut raw) = instance_raw(item) else {
+        let Some(mut raw) = instance_raw_with(item, &mut colors) else {
             continue;
         };
         if let Some(skin) = skin {
@@ -788,38 +805,44 @@ pub(super) fn plan_draws(
         }
         let index = plan.instances.len() as u32;
         plan.instances.push(raw);
-        let (double_sided, casts_shadow) = (item.material.double_sided, draw.casts_shadow);
-        let shader = shader_key(item);
         let water = item.material.water.is_some();
         let outline = !transparent && outline_uniform(&item.material)[3] > 0.0;
+        let batch = (key, transparent, water, outline);
         match plan.batches.last_mut() {
-            Some(last)
-                if last.mesh == mesh
-                    && last.material == material
-                    && last.transparent == transparent
-                    && last.double_sided == double_sided
-                    && last.casts_shadow == casts_shadow
-                    && last.shader == shader
-                    && last.water == water
-                    && last.outline == outline =>
-            {
+            Some(last) if last_batch == Some(batch) => {
                 last.instances.end = index + 1;
             }
-            _ => plan.batches.push(Batch {
-                mesh,
-                material,
-                transparent,
-                double_sided,
-                casts_shadow,
-                shader,
-                water,
-                outline,
-                instances: index..index + 1,
-            }),
+            _ => {
+                last_batch = Some(batch);
+                plan.batches.push(Batch {
+                    mesh,
+                    material: distinct[key.material as usize],
+                    transparent,
+                    double_sided: key.double_sided,
+                    casts_shadow: key.casts_shadow,
+                    shader: key.shader,
+                    water,
+                    outline,
+                    instances: index..index + 1,
+                });
+            }
         }
     }
     plan.skins = skins;
     plan
+}
+
+/// What a draw is sorted and batched by: draws with equal keys draw as one
+/// batch. Small, so sorting thousands of them compares little.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SortKey {
+    mesh: MeshKey,
+    /// Its material's index among the frame's distinct material keys.
+    material: u32,
+    /// Its surface shader's key, or `None` for the standard material.
+    shader: Option<u64>,
+    double_sided: bool,
+    casts_shadow: bool,
 }
 
 /// The key of the surface shader `item` is drawn with, or `None` for the
@@ -1016,18 +1039,46 @@ pub(super) fn uv_matrix(material: &Material) -> [f32; 4] {
 
 /// The GPU data for one item, or `None` if it can't be seen.
 pub(super) fn instance_raw(item: &DrawItem) -> Option<InstanceRaw> {
+    instance_raw_with(item, &mut LinearColors::default())
+}
+
+/// The last base and glow colors turned to linear light, kept because
+/// items drawn one after another mostly share them (a batch's) and the
+/// conversion takes a power per channel.
+#[derive(Default)]
+pub(super) struct LinearColors {
+    base: Option<([f32; 3], Vec3)>,
+    emissive: Option<([f32; 3], Vec3)>,
+}
+
+impl LinearColors {
+    fn convert(slot: &mut Option<([f32; 3], Vec3)>, color: [f32; 3]) -> Vec3 {
+        match slot {
+            Some((last, linear)) if *last == color => *linear,
+            _ => {
+                let linear = linear_color(color);
+                *slot = Some((color, linear));
+                linear
+            }
+        }
+    }
+}
+
+/// [`instance_raw`], converting colors through `colors`.
+pub(super) fn instance_raw_with(item: &DrawItem, colors: &mut LinearColors) -> Option<InstanceRaw> {
     let model3 = Mat3::from_mat4(item.transform);
     // A shape squashed flat (size 0 on some axis) has no inverse, and can't be seen anyway.
     if model3.determinant().abs() < 1e-12 {
         return None;
     }
     let material = &item.material;
-    let base_color = linear_color(material.base_color);
+    let base_color = LinearColors::convert(&mut colors.base, material.base_color);
+    let emissive = LinearColors::convert(&mut colors.emissive, material.emissive);
     Some(InstanceRaw {
         model: item.transform.to_cols_array_2d(),
         normal_matrix: model3.inverse().transpose().to_cols_array_2d(),
         base_color_opacity: base_color.extend(material.opacity).to_array(),
-        emissive_fade: linear_color(material.emissive).extend(1.0).to_array(),
+        emissive_fade: emissive.extend(1.0).to_array(),
         surface: [
             material.metalness,
             material.roughness,

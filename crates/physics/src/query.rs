@@ -3,9 +3,10 @@
 //! visual-debug overlays.
 
 use std::collections::HashSet;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use axcenity_assets::Assets;
-use axcenity_core::{CFrame, InstanceId, Vector3, World};
+use axcenity_core::{CFrame, ClassName, Instance, InstanceId, TerrainData, Value, Vector3, World};
 use rapier3d::glamx::{Quat, Vec3};
 use rapier3d::math::Pose;
 use rapier3d::parry::query::{self, ShapeCastOptions, ShapeCastStatus};
@@ -86,15 +87,157 @@ impl<'a> Filter<'a> {
     }
 }
 
-/// Each collider a query can find, with its part, its state and whether
-/// it's solid: a part's own, and a Terrain's colliding foliage.
+/// The room a query can touch: a capsule from `from` to `to`, `radius`
+/// wide. Parts wholly outside it are passed by before their colliders are
+/// built, which is most of what a query would otherwise cost.
+#[derive(Clone, Copy)]
+struct Reach {
+    from: Vec3,
+    to: Vec3,
+    radius: f32,
+}
+
+impl Reach {
+    /// A ray from `origin` along `direction`, its length how far it reaches.
+    fn ray(origin: Vec3, direction: Vec3) -> Self {
+        Self {
+            from: origin,
+            to: origin + direction,
+            radius: 0.0,
+        }
+    }
+
+    /// `shape` at `pose`, swept along `direction`.
+    fn swept(shape: &dyn Shape, pose: &Pose, direction: Vec3) -> Self {
+        let aabb = shape.compute_aabb(pose);
+        let from = aabb.center();
+        Self {
+            from,
+            to: from + direction,
+            radius: aabb.half_extents().length(),
+        }
+    }
+
+    /// Whether a ball at `center`, `radius` wide, can touch this.
+    fn touches(&self, center: Vec3, radius: f32) -> bool {
+        let along = self.to - self.from;
+        let length = along.length_squared();
+        let t = if length > 0.0 {
+            ((center - self.from).dot(along) / length).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let reach = self.radius + radius;
+        (self.from + along * t - center).length_squared() <= reach * reach
+    }
+
+    /// Whether `instance`, a Part or MeshPart, can touch this: its collider
+    /// is inside the box its Size makes (a model fills that box). False
+    /// for anything without a Position and a Size, which isn't a part.
+    fn may_touch(&self, instance: &Instance) -> bool {
+        let vector = |name| instance.property(name).and_then(Value::as_vector3);
+        let (Some(position), Some(size)) = (vector("Position"), vector("Size")) else {
+            return false;
+        };
+        let half = to_vec3(size).abs().max(Vec3::splat(shapes::MIN_SIZE)) / 2.0;
+        self.touches(to_vec3(position), half.length() + BOUND_MARGIN)
+    }
+}
+
+/// Added to a part's bounding ball, so rounding can't lose a grazing hit.
+const BOUND_MARGIN: f32 = 0.01;
+
+/// A Terrain's colliders in its own space, kept between queries.
+struct TerrainColliders {
+    uid: u64,
+    revision: u64,
+    size: [u32; 3],
+    /// The colliding models' keys when these were built: a reloaded model
+    /// builds them again.
+    models: Vec<(String, Option<u64>)>,
+    ground: Collider,
+    /// Each colliding plant, with the center and radius of a ball around it.
+    foliage: Vec<(Vec3, f32, Collider)>,
+}
+
+/// How many Terrains' colliders are kept (the oldest goes first).
+const KEPT_TERRAINS: usize = 8;
+
+/// A Terrain's colliders. Its heightfield is every height sample copied and
+/// its foliage is a convex hull per plant, far too much to build per ray,
+/// and queries have only the world to go on, so they're kept here by the
+/// terrain's identity and revision (a copy of a terrain gets its own uid).
+fn terrain_colliders(
+    data: &Arc<TerrainData>,
+    size: Vec3,
+    assets: &Assets,
+) -> Arc<TerrainColliders> {
+    static BUILT: LazyLock<Mutex<Vec<Arc<TerrainColliders>>>> = LazyLock::new(Mutex::default);
+    let (uid, revision) = (data.uid(), data.revision());
+    let bits = size.to_array().map(f32::to_bits);
+    let found = BUILT.lock().ok().and_then(|built| {
+        built
+            .iter()
+            .find(|kept| kept.uid == uid && kept.revision == revision && kept.size == bits)
+            .cloned()
+    });
+    if let Some(kept) = found
+        && kept
+            .models
+            .iter()
+            .all(|(path, key)| assets.model(path).map(|model| model.key()) == *key)
+    {
+        return kept;
+    }
+    let shape = Form::Terrain(shapes::TerrainShape {
+        data: data.clone(),
+        foliage_models: Vec::new(),
+    });
+    let foliage = shapes::foliage_colliders(data, size, assets)
+        .into_iter()
+        .map(|collider| {
+            let aabb = collider.compute_aabb();
+            (aabb.center(), aabb.half_extents().length(), collider)
+        })
+        .collect();
+    let colliders = Arc::new(TerrainColliders {
+        uid,
+        revision,
+        size: bits,
+        models: shapes::colliding_model_keys(data, assets),
+        ground: shapes::collider(&shape, size),
+        foliage,
+    });
+    if let Ok(mut built) = BUILT.lock() {
+        built.retain(|kept| kept.uid != uid);
+        if built.len() >= KEPT_TERRAINS {
+            built.remove(0);
+        }
+        built.push(colliders.clone());
+    }
+    colliders
+}
+
+/// Each collider a query can find inside `reach`, with its part, its state
+/// and whether it's solid: a part's own, and a Terrain's colliding foliage.
 fn candidates(
     world: &World,
     assets: &Assets,
     filter: &Filter,
+    reach: Reach,
     mut visit: impl FnMut(InstanceId, &PartState, &Collider, bool),
 ) {
     for id in world.descendants(world.workspace()) {
+        let Some(instance) = world.get(id) else {
+            continue;
+        };
+        if instance.class() == ClassName::Terrain {
+            terrain_candidates(world, assets, filter, reach, id, instance, &mut visit);
+            continue;
+        }
+        if !reach.may_touch(instance) {
+            continue;
+        }
         let Some(state) = PartState::read(world, id, assets) else {
             continue;
         };
@@ -103,14 +246,37 @@ fn candidates(
             collider.set_position(state.pose() * *collider.position());
             visit(id, &state, &collider, state.can_collide);
         }
-        if let Form::Terrain(terrain) = &state.shape
-            && filter.admits(id, &state, true)
-        {
-            for (local, form, form_size) in
-                shapes::foliage_forms(&terrain.data, to_vec3(state.size), assets)
-            {
-                let mut extra = shapes::collider(&form, form_size);
-                extra.set_position(state.pose() * local * *extra.position());
+    }
+}
+
+/// The Terrain `id`'s ground and the colliding foliage inside `reach`.
+fn terrain_candidates(
+    world: &World,
+    assets: &Assets,
+    filter: &Filter,
+    reach: Reach,
+    id: InstanceId,
+    instance: &Instance,
+    visit: &mut impl FnMut(InstanceId, &PartState, &Collider, bool),
+) {
+    let Some(state) = PartState::read_terrain_ground(world, id, instance) else {
+        return;
+    };
+    let Form::Terrain(terrain) = &state.shape else {
+        return;
+    };
+    let colliders = terrain_colliders(&terrain.data, to_vec3(state.size), assets);
+    let pose = state.pose();
+    if filter.admits(id, &state, state.can_collide) {
+        let mut ground = colliders.ground.clone();
+        ground.set_position(pose * *ground.position());
+        visit(id, &state, &ground, state.can_collide);
+    }
+    if filter.admits(id, &state, true) {
+        for (center, radius, collider) in &colliders.foliage {
+            if reach.touches(pose * *center, *radius) {
+                let mut extra = collider.clone();
+                extra.set_position(pose * *extra.position());
                 // Colliding foliage is a solid collider of its own.
                 visit(id, &state, &extra, true);
             }
@@ -163,8 +329,9 @@ pub fn raycast(
     }
     let ray = Ray::new(to_vec3(origin), dir / max_toi);
     let filter = Filter::new(world, params);
+    let reach = Reach::ray(ray.origin, dir);
     let mut best: Option<RayHit> = None;
-    candidates(world, assets, &filter, |id, _, collider, solid| {
+    candidates(world, assets, &filter, reach, |id, _, collider, solid| {
         let Some(hit) =
             collider
                 .shape()
@@ -223,8 +390,9 @@ pub fn shapecast(
         ..ShapeCastOptions::default()
     };
     let filter = Filter::new(world, params);
+    let reach = Reach::swept(cast.as_ref(), &pose, dir);
     let mut best: Option<RayHit> = None;
-    candidates(world, assets, &filter, |id, _, collider, solid| {
+    candidates(world, assets, &filter, reach, |id, _, collider, solid| {
         if Some(id) == itself {
             return;
         }
@@ -316,8 +484,9 @@ fn overlapping(
     params: &QueryParams,
 ) -> Vec<InstanceId> {
     let filter = Filter::new(world, params);
+    let reach = Reach::swept(shape, &pose, Vec3::ZERO);
     let mut found: Vec<InstanceId> = Vec::new();
-    candidates(world, assets, &filter, |id, state, collider, _| {
+    candidates(world, assets, &filter, reach, |id, state, collider, _| {
         if Some(id) == itself
             || matches!(state.shape, Form::Terrain(_))
             || found.last() == Some(&id)

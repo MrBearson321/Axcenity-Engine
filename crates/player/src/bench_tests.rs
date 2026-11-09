@@ -9,6 +9,7 @@
 //!
 //! The baseline is in `docs/rendering/performance.md`.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -742,4 +743,61 @@ fn bench_50000_parts_streaming() {
             axcenity_scene::build_draw_list_posed(&world, &assets, camera, &poses, &mut terrain)
         })
     });
+}
+
+/// A project of the user's own, named by the `AXCENITY_BENCH_PROJECT`
+/// environment variable (its folder), drawn from its SpawnLocation at eye
+/// height and from an overview above it, so a slow project can be measured
+/// like the scenes above. Skipped when the variable isn't set.
+#[test]
+#[ignore = "benchmark: run with --release -- --ignored bench_"]
+fn bench_project() {
+    let Some(folder) = std::env::var_os("AXCENITY_BENCH_PROJECT") else {
+        eprintln!("skipped bench_project: set AXCENITY_BENCH_PROJECT to a project folder");
+        return;
+    };
+    let folder = PathBuf::from(folder);
+    let project = axcenity_project::load(&folder).unwrap();
+    let world = project.world;
+    let assets = Assets::new(&folder);
+    let workspace = world.workspace();
+    let spawn = world
+        .descendants(workspace)
+        .into_iter()
+        .filter_map(|id| world.get(id))
+        .find(|instance| instance.class() == ClassName::SpawnLocation)
+        .and_then(|spawn| spawn.property("Position").and_then(Value::as_vector3))
+        .map(|position| Vec3::new(position.x, position.y, position.z))
+        .unwrap_or(Vec3::ZERO);
+    let eyes = spawn + Vec3::new(0.0, 2.5, 0.0);
+    let name = project.manifest.name.clone();
+    for (view, camera) in [
+        (
+            "at the spawn, looking ahead",
+            camera(eyes, eyes + Vec3::new(0.0, -0.1, -50.0)),
+        ),
+        (
+            "overview",
+            camera(
+                spawn + Vec3::new(0.0, 120.0, 250.0),
+                spawn + Vec3::new(0.0, 0.0, -100.0),
+            ),
+        ),
+    ] {
+        let mut cache = TerrainCache::new();
+        run(&format!("bench_project `{name}`: {view}"), |steps| {
+            steps.time("build_draw_list", || {
+                axcenity_scene::build_draw_list_posed(
+                    &world,
+                    &assets,
+                    camera,
+                    &Default::default(),
+                    &mut cache,
+                )
+            })
+        });
+    }
+    for error in assets.take_errors() {
+        eprintln!("asset error: {error}");
+    }
 }

@@ -1372,6 +1372,8 @@ impl Viewport {
         ui.painter()
             .image(target.texture_id, rect, whole_texture, egui::Color32::WHITE);
         let eye = camera.position;
+        // Only gathered once something selected needs them.
+        let occluders = std::cell::LazyCell::new(|| axcenity_scene::Occluders::of(world));
         for &id in selection {
             if Some(id) != selected {
                 if let Some(element) = ui_layout.element(id) {
@@ -1386,11 +1388,11 @@ impl Viewport {
                         egui::StrokeKind::Middle,
                     );
                 }
-                paint_selection_box(ui, rect, &screen, world, id, eye);
+                paint_selection_box(ui, rect, &screen, &occluders, id, eye);
             }
         }
         if let Some(selected) = selected {
-            paint_selection_box(ui, rect, &screen, world, selected, eye);
+            paint_selection_box(ui, rect, &screen, &occluders, selected, eye);
         }
         let painter = ui.painter_at(rect);
         for marker in &markers {
