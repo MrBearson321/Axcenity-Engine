@@ -1089,12 +1089,18 @@ pub(super) fn instance_raw_with(item: &DrawItem, colors: &mut LinearColors) -> O
         sway: {
             let mut sway = match item.sway {
                 Some(sway) if !sway.is_still() => {
-                    [sway.base, 1.0 / sway.height, sway.strength, 0.0]
+                    // The flutter rides in the fraction of the decal role.
+                    [
+                        sway.base,
+                        1.0 / sway.height,
+                        sway.strength,
+                        sway.flutter.clamp(0.0, 0.95),
+                    ]
                 }
                 _ => [0.0; 4],
             };
             // `ROLE_CHARACTER` and `ROLE_DECAL` in shader.wgsl.
-            sway[3] = match item.decal_role {
+            sway[3] += match item.decal_role {
                 DecalRole::Surface => 0.0,
                 DecalRole::Character => 1.0,
                 DecalRole::Decal => 2.0,

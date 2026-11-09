@@ -3,7 +3,7 @@
 
 use axcenity_assets::{
     Assets, Channel as FileChannel, MapFile, MapSettings, MaterialFile, MaterialMaps,
-    Shading as FileShading, StandardMaterial,
+    ModelMaterial, Shading as FileShading, StandardMaterial,
 };
 use axcenity_core::{ClassName, Instance, InstanceId, TextureChannel, Value, World};
 use axcenity_render::glam::Mat4;
@@ -141,8 +141,19 @@ pub(crate) fn variant_material(standard: &StandardMaterial, assets: &Assets) -> 
 /// in the wind: by height over the bottom of its box, as much as the
 /// material's `sway` says. `None` when it says 0.
 pub(crate) fn variant_sway(standard: &StandardMaterial, transform: Mat4) -> Option<Sway> {
+    box_sway(standard.sway, 0.0, transform)
+}
+
+/// How a piece of a model at `transform` (the model's 1×1×1 box) sways by
+/// what its own material says. Every piece of the model gets the same
+/// box, so a tree's bark and leaves bend as one.
+pub(crate) fn model_sway(material: &ModelMaterial, transform: Mat4) -> Option<Sway> {
+    box_sway(material.sway, material.flutter, transform)
+}
+
+pub(crate) fn box_sway(strength: f32, flutter: f32, transform: Mat4) -> Option<Sway> {
     // `filter` leaves out a NaN too.
-    let strength = Some(standard.sway).filter(|&sway| sway > 0.0)?;
+    let strength = Some(strength).filter(|&sway| sway > 0.0)?;
     // Half the box's height: how far up each of its axes reaches.
     let half_height =
         0.5 * (transform.x_axis.y.abs() + transform.y_axis.y.abs() + transform.z_axis.y.abs());
@@ -150,6 +161,7 @@ pub(crate) fn variant_sway(standard: &StandardMaterial, transform: Mat4) -> Opti
         base: transform.w_axis.y - half_height,
         height: 2.0 * half_height,
         strength,
+        flutter,
     })
 }
 
@@ -360,6 +372,25 @@ mod tests {
     use axcenity_render::{Camera, DrawItem};
 
     use super::*;
+
+    #[test]
+    fn a_models_own_material_sways_it_from_the_bottom_of_its_box() {
+        let leaves = ModelMaterial {
+            sway: 0.4,
+            flutter: 0.2,
+            ..ModelMaterial::default()
+        };
+        let box_of_it = Mat4::from_scale_rotation_translation(
+            Vec3::new(2.0, 8.0, 2.0),
+            Default::default(),
+            Vec3::new(0.0, 5.0, 0.0),
+        );
+        let sway = model_sway(&leaves, box_of_it).expect("it sways");
+        assert!((sway.base - 1.0).abs() < 1e-4, "{sway:?}");
+        assert!((sway.height - 8.0).abs() < 1e-4, "{sway:?}");
+        assert_eq!((sway.strength, sway.flutter), (0.4, 0.2));
+        assert_eq!(model_sway(&ModelMaterial::default(), box_of_it), None);
+    }
     use crate::build_draw_list;
 
     const BASE: &str = "assets/materials/brick.material.json";

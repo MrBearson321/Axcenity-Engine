@@ -29,8 +29,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 use glam::{Mat3, Mat4, Vec3};
 use gltf::image::Format;
@@ -254,6 +254,33 @@ impl Primitive {
     }
 }
 
+/// The most a model's material can say its corners shiver, in studs. The
+/// renderer keeps it in the fraction of a number, so it stays below 1.
+pub const MAX_FLUTTER: f32 = 0.95;
+
+/// The wind values in a glTF material's `extras` (`axcenity_sway`,
+/// `axcenity_flutter`) on a default material. Anything missing, not a
+/// number or below 0 is 0, so a file without them stays still.
+fn wind_of(extras: &gltf::json::Extras) -> ModelMaterial {
+    #[derive(serde::Deserialize)]
+    struct Wind {
+        axcenity_sway: Option<f32>,
+        axcenity_flutter: Option<f32>,
+    }
+    let wind = extras
+        .as_ref()
+        .and_then(|raw| serde_json::from_str::<Wind>(raw.get()).ok());
+    let (sway, flutter) = wind.map_or((None, None), |wind| {
+        (wind.axcenity_sway, wind.axcenity_flutter)
+    });
+    let usable = |value: Option<f32>| value.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
+    ModelMaterial {
+        sway: usable(sway).min(2.0),
+        flutter: usable(flutter).min(MAX_FLUTTER),
+        ..ModelMaterial::default()
+    }
+}
+
 /// A glTF metallic-roughness material. Colors are linear, as in the file.
 /// The textures all use the primitive's one set of texture coordinates.
 #[derive(Clone, Debug)]
@@ -301,6 +328,13 @@ pub struct ModelMaterial {
     pub uv_offset: [f32; 2],
     /// Both sides of each triangle are drawn, and lit (leaves, paper).
     pub double_sided: bool,
+    /// How much what's drawn with it bends in the wind, 0 for still, as a
+    /// material file's `sway` does. From glTF `extras`: `axcenity_sway`.
+    pub sway: f32,
+    /// How far its corners shiver in the wind, in studs, on top of the
+    /// bending: leaves do, the branches they grow on don't. From glTF
+    /// `extras`: `axcenity_flutter`.
+    pub flutter: f32,
 }
 
 impl Default for ModelMaterial {
@@ -328,6 +362,8 @@ impl Default for ModelMaterial {
             uv_rotation: 0.0,
             uv_offset: [0.0, 0.0],
             double_sided: false,
+            sway: 0.0,
+            flutter: 0.0,
         }
     }
 }
@@ -1250,6 +1286,7 @@ impl Reader<'_> {
             uv_rotation: transform.as_ref().map_or(0.0, |t| t.rotation()),
             uv_offset: transform.as_ref().map_or([0.0, 0.0], |t| t.offset()),
             double_sided: material.double_sided(),
+            ..wind_of(material.extras())
         };
         Ok((material, uv_set))
     }
@@ -1257,6 +1294,20 @@ impl Reader<'_> {
     fn image(&mut self, image: &gltf::Image) -> Result<Arc<Image>, ModelError> {
         if let Some(decoded) = self.images.get(&image.index()) {
             return Ok(decoded.clone());
+        }
+        // Packs embed the same texture in many models: each is decoded and
+        // uploaded once however many embed it.
+        let embedded = match image.source() {
+            gltf::image::Source::View { view, .. } => self
+                .buffers
+                .get(view.buffer().index())
+                .and_then(|buffer| buffer.get(view.offset()..view.offset() + view.length()))
+                .map(embedded_key),
+            gltf::image::Source::Uri { .. } => None,
+        };
+        if let Some(shared) = embedded.and_then(shared_embedded) {
+            self.images.insert(image.index(), shared.clone());
+            return Ok(shared);
         }
         let data = gltf::image::Data::from_source(image.source(), Some(self.folder), self.buffers)?;
         let name = match (image.name(), image.source()) {
@@ -1284,7 +1335,35 @@ impl Reader<'_> {
             file,
         });
         self.images.insert(image.index(), decoded.clone());
+        if let Some(key) = embedded {
+            share_embedded(key, &decoded);
+        }
         Ok(decoded)
+    }
+}
+
+/// Decoded embedded images still in use, by their encoded bytes. Weak, so
+/// an image goes when the last model using it does.
+static EMBEDDED_IMAGES: LazyLock<Mutex<HashMap<EmbeddedKey, Weak<Image>>>> =
+    LazyLock::new(Default::default);
+
+type EmbeddedKey = (usize, u64);
+
+fn embedded_key(bytes: &[u8]) -> EmbeddedKey {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    (bytes.len(), hasher.finish())
+}
+
+fn shared_embedded(key: EmbeddedKey) -> Option<Arc<Image>> {
+    EMBEDDED_IMAGES.lock().ok()?.get(&key)?.upgrade()
+}
+
+fn share_embedded(key: EmbeddedKey, image: &Arc<Image>) {
+    if let Ok(mut images) = EMBEDDED_IMAGES.lock() {
+        images.retain(|_, image| image.strong_count() > 0);
+        images.insert(key, Arc::downgrade(image));
     }
 }
 

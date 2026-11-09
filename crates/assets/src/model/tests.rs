@@ -357,3 +357,39 @@ fn a_files_own_lod1_object_is_the_simpler_copy_and_doesnt_size_the_model() {
     assert_eq!(picked[0].primitives[0].lods[0].indices.len(), 3);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_gltf_materials_extras_say_how_it_moves_in_the_wind() {
+    let wind = |text: &str| {
+        let raw = serde_json::value::RawValue::from_string(text.to_owned()).unwrap();
+        let material = super::wind_of(&Some(raw));
+        (material.sway, material.flutter)
+    };
+    assert_eq!(
+        wind(r#"{"axcenity_sway": 0.4, "axcenity_flutter": 0.2, "other": "kept out"}"#),
+        (0.4, 0.2)
+    );
+    // Past the limits, below 0, or the wrong sort of value.
+    assert_eq!(
+        wind(r#"{"axcenity_sway": 9, "axcenity_flutter": 3}"#),
+        (2.0, super::MAX_FLUTTER)
+    );
+    assert_eq!(wind(r#"{"axcenity_sway": -1}"#), (0.0, 0.0));
+    assert_eq!(wind(r#"{"axcenity_sway": "lots"}"#), (0.0, 0.0));
+    let none = super::wind_of(&None);
+    assert_eq!((none.sway, none.flutter), (0.0, 0.0));
+}
+
+#[test]
+fn the_same_embedded_texture_in_two_models_is_one_image() {
+    let bytes = checker_png();
+    let shared = embedded_key(&bytes);
+    let image = Arc::new(Image::new(2, 2, vec![255; 16]));
+    share_embedded(shared, &image);
+    let found = shared_embedded(shared).expect("still in use");
+    assert!(Arc::ptr_eq(&found, &image));
+    assert!(shared_embedded(embedded_key(b"other bytes")).is_none());
+    // It's let go with the last model that used it.
+    drop((image, found));
+    assert!(shared_embedded(shared).is_none());
+}

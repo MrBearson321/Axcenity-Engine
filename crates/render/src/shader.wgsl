@@ -143,6 +143,8 @@ const SWAY_WIND: f32 = 20.0;
 // ground with the wind, and a flutter shakes it. Both vary smoothly over
 // the world, so a plant drawn as several items bends as one. The farthest
 // a corner goes is `Sway::reach` in draw_list.rs: keep them matching.
+// The fraction of `sway.w` is its flutter: how many studs each corner
+// shivers, in waves that differ from one leaf to the next.
 fn swayed(world: vec3<f32>, sway: vec4<f32>) -> vec3<f32> {
     let wind = frame.clock.yw;
     let speed = length(wind);
@@ -160,7 +162,22 @@ fn swayed(world: vec3<f32>, sway: vec4<f32>) -> vec3<f32> {
     let offset = wind / speed * along;
     // Bending lowers the top a little, so the plant keeps its length.
     let drop = 0.5 * along * along * sway.y;
-    return world + vec3<f32>(offset.x, -drop, offset.y);
+    var moved = vec3<f32>(offset.x, -drop, offset.y);
+    let shiver = fract(sway.w);
+    if shiver > 0.0 {
+        // Quick waves, out of step between leaves: position decides the
+        // phase, so a card keeps its shape and its neighbour doesn't match.
+        // The gusts drive them, and the foot of the plant stays put.
+        let phase = dot(world, vec3<f32>(2.3, 1.7, 3.1));
+        let quick = time * (5.0 + speed * 0.25);
+        let side = sin(quick + phase);
+        let lift = sin(quick * 1.37 + phase * 1.7);
+        let drive = (1.0 - exp(-speed / SWAY_WIND)) * (0.35 + 0.9 * gust) * min(up * 4.0, 1.0);
+        let across = vec2<f32>(-wind.y, wind.x) / speed;
+        let level = wind / speed * side + across * lift;
+        moved += vec3<f32>(level.x, 0.6 * lift, level.y) * shiver * drive;
+    }
+    return world + moved;
 }
 
 // Per draw item. Must match `InstanceRaw` in renderer.rs.
@@ -180,7 +197,7 @@ struct InstanceIn {
     @location(11) surface: vec4<f32>,
     // Where the item's skin's joints start, and how many (0: not animated).
     @location(14) skin: vec2<u32>,
-    // How it sways in the wind (see `swayed`); w is its decal role
+    // How it sways in the wind (see `swayed`); w's whole part is its decal role
     // (`ROLE_CHARACTER`, `ROLE_DECAL`, else 0).
     @location(15) sway: vec4<f32>,
 }
@@ -237,7 +254,7 @@ fn item_vertex(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     out.base_color = instance.base_color;
     out.emissive = instance.emissive_fade.xyz;
     out.fade = instance.emissive_fade.w;
-    out.role = instance.sway.w;
+    out.role = floor(instance.sway.w);
     out.surface = instance.surface.xyz;
     let tile = instance.surface.w;
     var uv = vertex.uv;

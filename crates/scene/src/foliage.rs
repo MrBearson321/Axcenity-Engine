@@ -12,7 +12,7 @@ use axcenity_render::glam::{Mat4, Quat, Vec2, Vec3};
 use axcenity_render::{DrawItem, Material, Shape, Sway};
 use axcenity_terrain::Placement;
 
-use crate::draw_list::{draw_id, push_model};
+use crate::draw_list::{ModelPiece, draw_id, model_pieces, push_model};
 use crate::orientation::rotation_from_orientation;
 
 /// One part of a built-in plant or prop, in the instance's local space:
@@ -373,6 +373,7 @@ fn plant_sway(pieces: &[Piece], strength: f32, instance: Mat4) -> Option<Sway> {
         base,
         height: top - base,
         strength,
+        flutter: 0.0,
     })
 }
 
@@ -386,6 +387,9 @@ fn corners() -> impl Iterator<Item = Vec3> {
         )
     })
 }
+
+/// A model painted on a terrain, with what its copies share this frame.
+type PaintedModel = (Arc<Model>, Vec<ModelPiece>);
 
 /// Adds the painted foliage of `terrain` (its data `data`) to `items`,
 /// sitting on the surface. Plants and models past their cull distance
@@ -403,22 +407,25 @@ pub(crate) fn draw_terrain(
 ) {
     // Each model is looked up once (a lock and a lookup by path), not once
     // per instance painted from it.
-    let mut models: HashMap<&str, Option<Arc<Model>>> = HashMap::new();
+    let mut models: HashMap<&str, Option<PaintedModel>> = HashMap::new();
     let camera_xz = Vec2::new(camera.x, camera.z);
     for (index, instance) in data.foliage().iter().enumerate() {
         let scale = instance.scale.max(0.01);
         let xz = placement.to_world_xz(data, Vec2::new(instance.x, instance.z));
         let (cull_distance, model) = match &instance.source {
             FoliageSource::Model(path) => {
-                let model = models
-                    .entry(path.as_str())
-                    .or_insert_with(|| assets.model(path));
-                let Some(model) = model else {
+                let model = models.entry(path.as_str()).or_insert_with(|| {
+                    assets.model(path).map(|model| {
+                        let pieces = model_pieces(&model);
+                        (model, pieces)
+                    })
+                });
+                let Some((model, pieces)) = model else {
                     continue;
                 };
                 (
                     model_cull_distance(Vec3::from(model.size) * scale),
-                    Some(model.clone()),
+                    Some((Vec3::from(model.size), &*pieces)),
                 )
             }
             source => (cull_distance(source) * scale, None),
@@ -432,15 +439,15 @@ pub(crate) fn draw_terrain(
         let ground = Vec3::new(xz.x, y, xz.y);
         let turn = Quat::from_rotation_y(instance.yaw);
         match (&instance.source, model) {
-            (FoliageSource::Model(_), Some(model)) => {
-                let size = Vec3::from(model.size) * scale;
+            (FoliageSource::Model(_), Some((model_size, pieces))) => {
+                let size = model_size * scale;
                 let model_transform = Mat4::from_scale_rotation_translation(
                     size.max(Vec3::splat(0.01)),
                     turn,
                     ground + Vec3::new(0.0, size.y.abs() * 0.5, 0.0),
                 );
                 push_model(
-                    &model,
+                    pieces,
                     model_transform,
                     draw_id((terrain, index)),
                     cull_distance,

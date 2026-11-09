@@ -22,6 +22,7 @@ fn plant(sway: bool) -> DrawItem {
             base: 0.0,
             height: HEIGHT,
             strength: 1.0,
+            flutter: 0.0,
         }),
         ..item(Shape::Block, Vec3::ZERO, 1.0)
     }
@@ -249,6 +250,54 @@ fn a_swaying_plant_is_culled_by_how_far_it_can_reach() {
         base: 0.0,
         height: HEIGHT,
         strength: 1.0,
+        flutter: 0.0,
     });
     assert_eq!(plan(&list).culled, 0, "a swaying one may lean into view");
+}
+
+#[test]
+fn leaves_flutter_at_the_top_of_a_plant_and_not_at_its_foot() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, SIZE, SIZE);
+    let gale = Vec3::new(40.0, 0.0, 0.0);
+    let scene = |flutter: f32, time: f32| {
+        let mut list = plant_seen_side_on(true, gale);
+        list.items[0].sway.as_mut().unwrap().flutter = flutter;
+        list.time = time;
+        list
+    };
+    let shift = |renderer: &mut TextureRenderer, from: f32, to: f32| {
+        // The farthest the fluttering plant gets from the plain one, over
+        // moments a quick wave apart.
+        (0..8)
+            .map(|step| {
+                let time = 1.0 + step as f32 * 0.13;
+                let plain = plant_column(renderer, &scene(0.0, time), from, to);
+                let shaken = plant_column(renderer, &scene(0.9, time), from, to);
+                (plain - shaken).abs()
+            })
+            .fold(0.0_f32, f32::max)
+    };
+    let top = shift(&mut renderer, 6.0, 7.8);
+    assert!(top > 0.5, "the top only moved {top} pixels");
+    let foot = shift(&mut renderer, 0.05, 0.3);
+    assert!(foot < top * 0.5, "the foot moved {foot}, the top {top}");
+}
+
+#[test]
+fn flutter_keeps_the_decal_role_apart_and_widens_the_reach() {
+    let plain = Sway {
+        base: 0.0,
+        height: HEIGHT,
+        strength: 1.0,
+        flutter: 0.0,
+    };
+    let leaves = Sway {
+        flutter: 0.5,
+        ..plain
+    };
+    assert!(leaves.reach() > plain.reach());
 }

@@ -326,6 +326,7 @@ fn water_draws_with_fog_weather_clouds_and_wind_and_isnt_snowed_on() {
         base: SHALLOW,
         height: 4.0,
         strength: 1.0,
+        flutter: 0.0,
     });
     stormy.items.push(reed);
     stormy.sky.atmosphere = Some(Atmosphere::default());

@@ -1204,6 +1204,9 @@ pub struct Sway {
     /// How far it gives: 1 is grass, which leans about a quarter of its
     /// height in a strong wind. 0 keeps it still.
     pub strength: f32,
+    /// How far each corner shivers on top of the bend, in studs (leaves on
+    /// a branch), from 0 up to just under 1. Needs a `strength` above 0.
+    pub flutter: f32,
 }
 
 impl Sway {
@@ -1213,7 +1216,7 @@ impl Sway {
         if self.is_still() {
             0.0
         } else {
-            self.height * self.strength * SWAY_REACH
+            self.height * self.strength * SWAY_REACH + self.flutter.max(0.0) * FLUTTER_REACH
         }
     }
 
@@ -1228,6 +1231,10 @@ impl Sway {
 /// shader.wgsl: its lean (at most `SWAY_LEAN`) times its gusts and flutter
 /// (at most 1.2 + 0.15).
 const SWAY_REACH: f32 = 0.25 * 1.35;
+/// The farthest a corner shivers per stud of [`Sway::flutter`]. Matches
+/// `swayed` in shader.wgsl: two waves of at most 1 on each level axis and
+/// 0.6 of one upward, about 1.2 together.
+const FLUTTER_REACH: f32 = 1.3;
 
 /// One pose of an animated mesh, for skinning on the GPU: where each joint
 /// moves the corners weighted to it.

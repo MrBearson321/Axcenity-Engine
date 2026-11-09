@@ -1123,7 +1123,10 @@ fn mesh_part_draw_items(
             id: draw_id(id),
             cull_distance: 0.0,
             skin: skin.clone(),
-            sway,
+            sway: match &variant {
+                Some(_) => sway,
+                None => material::model_sway(&primitive.material, transform),
+            },
             decal_role: Default::default(),
         });
     }
@@ -1219,26 +1222,51 @@ fn surface_material(file: &ModelMaterial, appearance: &Instance, assets: &Assets
 /// `id` is the same for the same thing each frame (see [`DrawItem::id`]),
 /// and `cull_distance` is how far away it's still drawn (0 for always).
 pub(crate) fn push_model(
-    model: &Arc<Model>,
+    pieces: &[ModelPiece],
     transform: Mat4,
     id: u64,
     cull_distance: f32,
     items: &mut Vec<DrawItem>,
 ) {
-    for (index, primitive) in model.primitives.iter().enumerate() {
+    for piece in pieces {
         items.push(DrawItem {
-            shape: Shape::Mesh(Arc::new(ModelMesh::new(model, index))),
+            shape: piece.shape.clone(),
             transform,
-            material: model_material(&primitive.material),
+            material: piece.material.clone(),
             uv_tile: 0.0,
             casts_shadow: true,
             id,
             cull_distance,
             skin: None,
-            sway: None,
+            sway: material::box_sway(piece.sway, piece.flutter, transform),
             decal_role: Default::default(),
         });
     }
+}
+
+/// What every placed copy of one primitive of a model shares. A forest
+/// paints tens of thousands of copies of a few models, so this is worked
+/// out once a frame per model rather than once per copy.
+pub(crate) struct ModelPiece {
+    shape: Shape,
+    material: Material,
+    sway: f32,
+    flutter: f32,
+}
+
+/// The [`ModelPiece`]s of `model`, one per primitive.
+pub(crate) fn model_pieces(model: &Arc<Model>) -> Vec<ModelPiece> {
+    model
+        .primitives
+        .iter()
+        .enumerate()
+        .map(|(index, primitive)| ModelPiece {
+            shape: Shape::Mesh(Arc::new(ModelMesh::new(model, index))),
+            material: model_material(&primitive.material),
+            sway: primitive.material.sway,
+            flutter: primitive.material.flutter,
+        })
+        .collect()
 }
 
 /// A [`DrawItem::id`] for `thing`: the same for the same thing, and never

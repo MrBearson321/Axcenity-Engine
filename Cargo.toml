@@ -65,7 +65,7 @@ glyphon = "0.9"
 # `import` feature reads buffers and decodes PNG and JPEG textures with the
 # `image` crate (MIT OR Apache-2.0), which eframe already uses.
 # `KHR_texture_transform` reads textures' tiling, offset and rotation.
-gltf = { version = "1.4", features = ["KHR_texture_transform"] }
+gltf = { version = "1.4", features = ["KHR_texture_transform", "extras"] }
 # Decodes FBX models' textures. The same release `gltf` uses; the decoders are
 # pure Rust (MIT OR Apache-2.0). FBX files often use TGA or BMP textures.
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga"] }
