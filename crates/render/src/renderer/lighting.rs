@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use glam::camera::rh;
 use glam::{Mat3, Mat4, Vec2, Vec3};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::DecalRole;
 use crate::draw_list::{
@@ -17,8 +18,9 @@ use crate::draw_list::{
 };
 use crate::graphics::{AmbientOcclusion, EffectiveGraphics, ShadowMapSize, ShadowQuality};
 
-use super::culling::{Bounds, CullingBounds, Frustum, Sphere};
+use super::culling::{Bounds, CullingBounds, Frustum, ShadowView, Sphere};
 use super::lod::{Draw, OPAQUE};
+use super::parallel::{map_each, map_indexes, map_parts, sort_unstable, worth_sharing};
 use super::skinning::JointRaw;
 use super::{
     Batch, CASCADE_SPLIT_BLEND, CONTACT_SHADOW_LENGTH, CONTACT_SHADOW_THICKNESS, FAR_PLANE,
@@ -465,31 +467,72 @@ pub(super) fn cone_bounds(
     }
 }
 
-/// Copies the casters that `reaches` to the end of `instances`, grouped by
-/// mesh, for one shadow view. Returns the groups, and how many casters were
-/// left out.
-pub(super) fn casters_in(
-    instances: &mut Vec<InstanceRaw>,
-    casters: &[Caster],
-    reaches: impl Fn(Sphere) -> bool,
-) -> (Vec<(MeshKey, Range<u32>)>, u32) {
-    let mut groups: Vec<(MeshKey, Range<u32>)> = Vec::new();
-    let mut left_out = 0;
-    for caster in casters {
-        if !reaches(caster.sphere) {
-            left_out += 1;
-            continue;
+/// One shadow view's casters: their instance data and how they're drawn.
+pub(super) struct ViewCasters {
+    /// Their instances, in pieces (each thread's share).
+    pub(super) instances: Vec<Vec<InstanceRaw>>,
+    /// Which casters to draw, grouped by mesh, counting from the view's
+    /// first instance.
+    pub(super) groups: Vec<(MeshKey, Range<u32>)>,
+    /// How many casters were left out.
+    pub(super) left_out: u32,
+}
+
+/// Each of `views`' casters, in order. Each view and each share of the
+/// casters is its own job for the CPU's threads.
+pub(super) fn casters_in_views(casters: &[Vec<Caster>], views: &[ShadowView]) -> Vec<ViewCasters> {
+    let share = worth_sharing(casters.iter().map(Vec::len).sum());
+    map_each(views, share, |view| {
+        if matches!(view, ShadowView::Skipped) {
+            return ViewCasters {
+                instances: Vec::new(),
+                groups: Vec::new(),
+                left_out: 0,
+            };
         }
-        let copy = instances.len() as u32;
-        instances.push(caster.raw);
-        match groups.last_mut() {
-            Some((mesh, range)) if *mesh == caster.mesh && range.end == copy => {
-                range.end = copy + 1;
+        let parts = map_each(casters, share, |casters| {
+            let mut instances = Vec::with_capacity(casters.len());
+            let mut groups: Vec<(MeshKey, Range<u32>)> = Vec::new();
+            let mut left_out = 0;
+            for caster in casters {
+                if !view.touches(caster.sphere) {
+                    left_out += 1;
+                    continue;
+                }
+                let copy = instances.len() as u32;
+                instances.push(caster.raw);
+                match groups.last_mut() {
+                    Some((mesh, range)) if *mesh == caster.mesh && range.end == copy => {
+                        range.end = copy + 1;
+                    }
+                    _ => groups.push((caster.mesh, copy..copy + 1)),
+                }
             }
-            _ => groups.push((caster.mesh, copy..copy + 1)),
+            (instances, groups, left_out)
+        });
+        let mut joined = ViewCasters {
+            instances: Vec::with_capacity(parts.len()),
+            groups: Vec::new(),
+            left_out: 0,
+        };
+        let mut count = 0;
+        for (instances, groups, left_out) in parts {
+            joined.left_out += left_out;
+            for (mesh, range) in groups {
+                let range = range.start + count..range.end + count;
+                match joined.groups.last_mut() {
+                    // A group cut in two by where a share of the work ended.
+                    Some((last, joined)) if *last == mesh && joined.end == range.start => {
+                        joined.end = range.end;
+                    }
+                    _ => joined.groups.push((mesh, range)),
+                }
+            }
+            count += instances.len() as u32;
+            joined.instances.push(instances);
         }
-    }
-    (groups, left_out)
+        joined
+    })
 }
 
 pub(super) fn post_uniform(post: &PostProcessing) -> PostUniform {
@@ -622,6 +665,80 @@ pub(super) fn shadow_setup(
     setup
 }
 
+/// What a frame's draws use, each thing once, so that the work per material
+/// and per mesh follows how many there are and not how many draws share them.
+pub(super) struct FrameUses<'a> {
+    /// Every distinct material binding. The first is the plain one.
+    pub(super) materials: Vec<MaterialKey>,
+    /// Which of `materials` each draw is drawn with.
+    pub(super) material_of: Vec<u32>,
+    /// A draw using each of `materials`, the first one (0 for the plain
+    /// material, which may have none).
+    pub(super) first_draw: Vec<u32>,
+    /// Every distinct mesh of a caller's the draws use, by address.
+    pub(super) meshes: Vec<&'a Arc<dyn crate::MeshSource>>,
+}
+
+impl<'a> FrameUses<'a> {
+    /// Works out what `draws` use, on the CPU's threads.
+    pub(super) fn of(draws: &'a [Draw<'_>]) -> Self {
+        // A part's materials, each once, with the first draw of the part
+        // to use it.
+        let parts = map_parts(draws, |draws| {
+            let mut distinct: Vec<(MaterialKey, u32)> = Vec::new();
+            let mut indexes: FxHashMap<MaterialKey, u32> = FxHashMap::default();
+            let mut material_of = Vec::with_capacity(draws.len());
+            let mut seen_meshes: FxHashSet<*const ()> = FxHashSet::default();
+            let mut meshes = Vec::new();
+            for (at, draw) in draws.iter().enumerate() {
+                let key = material_key(draw.item);
+                let index = *indexes.entry(key).or_insert_with(|| {
+                    distinct.push((key, at as u32));
+                    (distinct.len() - 1) as u32
+                });
+                material_of.push(index);
+                if let Some(source) = draw.source()
+                    && seen_meshes.insert(Arc::as_ptr(source).cast())
+                {
+                    meshes.push(source);
+                }
+            }
+            (draws.len() as u32, distinct, material_of, meshes)
+        });
+        let mut uses = Self {
+            materials: vec![MaterialKey::default()],
+            material_of: Vec::with_capacity(draws.len()),
+            first_draw: vec![0],
+            meshes: Vec::new(),
+        };
+        let mut indexes: FxHashMap<MaterialKey, u32> = FxHashMap::default();
+        indexes.insert(MaterialKey::default(), 0);
+        let mut seen_meshes: FxHashSet<*const ()> = FxHashSet::default();
+        let mut start = 0;
+        for (len, distinct, material_of, meshes) in parts {
+            let remap: Vec<u32> = distinct
+                .into_iter()
+                .map(|(key, first)| {
+                    *indexes.entry(key).or_insert_with(|| {
+                        uses.materials.push(key);
+                        uses.first_draw.push(start + first);
+                        (uses.materials.len() - 1) as u32
+                    })
+                })
+                .collect();
+            uses.material_of
+                .extend(material_of.into_iter().map(|index| remap[index as usize]));
+            uses.meshes.extend(
+                meshes
+                    .into_iter()
+                    .filter(|source| seen_meshes.insert(Arc::as_ptr(source).cast())),
+            );
+            start += len;
+        }
+        uses
+    }
+}
+
 /// A solid item that casts a shadow, whether or not the camera sees it.
 #[derive(Clone, Copy)]
 pub(super) struct Caster {
@@ -633,13 +750,15 @@ pub(super) struct Caster {
 /// What a frame draws (see [`plan_draws`]).
 #[derive(Default)]
 pub(super) struct DrawPlan {
-    /// The scene pass's instances. Shadow views copy theirs after these.
-    pub(super) instances: Vec<InstanceRaw>,
+    /// The scene pass's instances, in pieces (each thread's share, in
+    /// order). Shadow views copy theirs after these.
+    pub(super) instances: Vec<Vec<InstanceRaw>>,
     /// The scene pass's batches: the items in the camera's view.
     pub(super) batches: Vec<Batch>,
     /// Every solid item that casts a shadow, in view or not, grouped by
-    /// mesh: one out of view can still shadow what's in it.
-    pub(super) casters: Vec<Caster>,
+    /// mesh: one out of view can still shadow what's in it. In pieces, as
+    /// `instances` are.
+    pub(super) casters: Vec<Vec<Caster>>,
     /// Items outside the camera's view.
     pub(super) culled: u32,
     /// Every drawn skin's joints, each skin's after the one before
@@ -671,55 +790,46 @@ pub(super) struct DrawPlan {
 pub(super) fn plan_draws(
     list: &DrawList,
     draws: &[Draw],
-    materials: &[MaterialKey],
+    uses: &FrameUses,
     view: &Frustum,
-    bounds: impl Fn(MeshKey, Option<&Skin>) -> Bounds,
-    mut seen: Option<&mut Vec<CullingBounds>>,
+    bounds: impl Fn(MeshKey, Option<&Skin>) -> Bounds + Sync,
+    seen: Option<&mut Vec<CullingBounds>>,
 ) -> DrawPlan {
-    debug_assert_eq!(draws.len(), materials.len());
+    debug_assert_eq!(draws.len(), uses.material_of.len());
     // Each draw's sort key, worked out once: its mesh, its material as an
-    // index among the frame's distinct materials, and its pipeline. The
-    // plain material (no textures, standard shading), which most items of
-    // a big scene share, is index 0 without a lookup. A material key is
-    // hundreds of bytes, so the sort compares these instead.
-    let mut distinct = vec![MaterialKey::default()];
-    let mut indexes: HashMap<MaterialKey, u32> = HashMap::new();
-    let keys: Vec<SortKey> = draws
-        .iter()
-        .zip(materials)
-        .map(|(draw, material)| {
-            let material = if *material == distinct[0] {
-                0
-            } else {
-                *indexes.entry(*material).or_insert_with(|| {
-                    distinct.push(*material);
-                    (distinct.len() - 1) as u32
-                })
-            };
-            SortKey {
-                band: distance_band(draw.item.transform.w_axis.truncate(), list.camera.position),
-                mesh: draw.mesh(),
-                material,
-                shader: shader_key(draw.item),
-                double_sided: draw.item.material.double_sided,
-                casts_shadow: draw.casts_shadow,
-            }
-        })
-        .collect();
+    // index among the frame's distinct materials (the plain one is 0), and
+    // its pipeline. A material key is hundreds of bytes, so the sort
+    // compares these instead.
+    let keys = map_indexes(draws.len(), |index| {
+        let draw = &draws[index];
+        let key = SortKey {
+            band: distance_band(draw.item.transform.w_axis.truncate(), list.camera.position),
+            mesh: draw.mesh(),
+            material: uses.material_of[index],
+            shader: shader_key(draw.item),
+            double_sided: draw.item.material.double_sided,
+            casts_shadow: draw.casts_shadow,
+            cut_out: draw.item.material.alpha_cutoff > 0.0,
+        };
+        (key, index as u32)
+    });
     // Water is drawn with the see-through items, before them (see
     // renderer/water.rs).
-    let water = |index: usize| draws[index].item.material.water.is_some();
+    let water = |index: u32| draws[index as usize].item.material.water.is_some();
     // A Part's Decal is blended by its texture's alpha even when solid.
-    let decal = |index: usize| draws[index].item.decal_role == DecalRole::Decal;
-    let (mut transparent, mut opaque): (Vec<usize>, Vec<usize>) = (0..draws.len())
-        .filter(|&index| draws[index].item.material.opacity > 0.0)
-        .partition(|&index| {
-            draws[index].item.material.opacity < 1.0 || water(index) || decal(index)
+    let decal = |index: u32| draws[index as usize].item.decal_role == DecalRole::Decal;
+    let (mut transparent, mut opaque): (Vec<_>, Vec<_>) = keys
+        .iter()
+        .copied()
+        .filter(|(_, index)| draws[*index as usize].item.material.opacity > 0.0)
+        .partition(|(_, index)| {
+            draws[*index as usize].item.material.opacity < 1.0 || water(*index) || decal(*index)
         });
 
-    opaque.sort_by_key(|&index| keys[index]);
-    let distance = |index: usize| {
-        draws[index]
+    // By key then index, which keeps the draws' order where keys are equal.
+    sort_unstable(&mut opaque);
+    let distance = |index: u32| {
+        draws[index as usize]
             .item
             .transform
             .w_axis
@@ -727,29 +837,71 @@ pub(super) fn plan_draws(
             .distance_squared(list.camera.position)
     };
     // `total_cmp` orders floats even when one is NaN, so sorting can't panic.
-    transparent.sort_by(|&a, &b| {
-        water(b)
-            .cmp(&water(a))
-            .then_with(|| distance(b).total_cmp(&distance(a)))
+    transparent.sort_by(|(_, a), (_, b)| {
+        water(*b)
+            .cmp(&water(*a))
+            .then_with(|| distance(*b).total_cmp(&distance(*a)))
     });
 
-    let mut plan = DrawPlan::default();
-    // Where each skin's joints start, by the skin's address: items posed
-    // alike share one.
-    let mut skins: HashMap<*const Skin, [u32; 2]> = HashMap::new();
+    let ordered: Vec<(SortKey, u32, bool)> = opaque
+        .into_iter()
+        .map(|(key, index)| (key, index, false))
+        .chain(
+            transparent
+                .into_iter()
+                .map(|(key, index)| (key, index, true)),
+        )
+        .collect();
+    let keep_seen = seen.is_some();
+    let parts = map_parts(&ordered, |part| {
+        plan_part(part, draws, uses, view, &bounds, keep_seen)
+    });
+    join_plan(parts, seen)
+}
+
+/// What makes two draws one batch.
+type BatchKind = (SortKey, bool, bool, bool);
+
+/// A skin's joints wanted by an instance or caster of a [`PlanPart`], each
+/// counted from the part's start.
+struct SkinUse<'a> {
+    skin: &'a Skin,
+    instance: Option<u32>,
+    caster: Option<u32>,
+}
+
+/// One thread's share of [`plan_draws`], with its instances and casters
+/// counted from its own start.
+#[derive(Default)]
+struct PlanPart<'a> {
+    instances: Vec<InstanceRaw>,
+    batches: Vec<(BatchKind, Batch)>,
+    casters: Vec<Caster>,
+    culled: u32,
+    lod_items: [u32; crate::LOD_LEVELS],
+    seen: Vec<CullingBounds>,
+    skins: Vec<SkinUse<'a>>,
+}
+
+/// Plans the draws `ordered` picks, in that order.
+fn plan_part<'a>(
+    ordered: &[(SortKey, u32, bool)],
+    draws: &[Draw<'a>],
+    uses: &FrameUses,
+    view: &Frustum,
+    bounds: &(impl Fn(MeshKey, Option<&Skin>) -> Bounds + Sync),
+    keep_seen: bool,
+) -> PlanPart<'a> {
+    let mut part = PlanPart::default();
     // Items sharing a mesh are next to each other, so its bounds are looked
     // up once per run of them (unless a skin moves them).
     let mut last_bounds: Option<(MeshKey, Bounds)> = None;
     let mut colors = LinearColors::default();
     // The last batch's key and kind, to add to it without comparing the
     // batch's material key.
-    let mut last_batch: Option<(SortKey, bool, bool, bool)> = None;
-    let ordered = opaque
-        .into_iter()
-        .map(|index| (index, false))
-        .chain(transparent.into_iter().map(|index| (index, true)));
-    for (at, transparent) in ordered {
-        let (draw, key) = (&draws[at], keys[at]);
+    let mut last_batch: Option<BatchKind> = None;
+    for &(key, at, transparent) in ordered {
+        let draw = &draws[at as usize];
         let mesh = key.mesh;
         let item = draw.item;
         let skin = item.skin.as_deref();
@@ -766,8 +918,8 @@ pub(super) fn plan_draws(
         // A swaying plant reaches past where it rests.
         let sphere = (center, radius + item.sway.map_or(0.0, |sway| sway.reach()));
         let visible = view.touches(sphere);
-        if let Some(seen) = seen.as_deref_mut() {
-            seen.push(CullingBounds {
+        if keep_seen {
+            part.seen.push(CullingBounds {
                 center: sphere.0,
                 radius: sphere.1,
                 drawn: visible,
@@ -775,7 +927,7 @@ pub(super) fn plan_draws(
         }
         let caster = !transparent && draw.casts_shadow;
         if !visible {
-            plan.culled += 1;
+            part.culled += 1;
             if !caster {
                 continue;
             }
@@ -783,51 +935,114 @@ pub(super) fn plan_draws(
         let Some(mut raw) = instance_raw_with(item, &mut colors) else {
             continue;
         };
+        let caster_at = caster.then(|| {
+            part.casters.push(Caster { mesh, sphere, raw });
+            (part.casters.len() - 1) as u32
+        });
+        raw.emissive_fade[3] = draw.fade;
+        let mut instance_at = None;
+        if visible {
+            // The copy fading out of a switch isn't counted.
+            if let Some(level) = draw.level
+                && draw.fade <= OPAQUE
+            {
+                part.lod_items[level] += 1;
+            }
+            let index = part.instances.len() as u32;
+            instance_at = Some(index);
+            part.instances.push(raw);
+            let water = item.material.water.is_some();
+            let outline = !transparent && outline_uniform(&item.material)[3] > 0.0;
+            let kind = (key, transparent, water, outline);
+            match part.batches.last_mut() {
+                Some((_, last)) if last_batch == Some(kind) => {
+                    last.instances.end = index + 1;
+                }
+                _ => {
+                    last_batch = Some(kind);
+                    part.batches.push((
+                        kind,
+                        Batch {
+                            mesh,
+                            material: uses.materials[key.material as usize],
+                            transparent,
+                            double_sided: key.double_sided,
+                            casts_shadow: key.casts_shadow,
+                            shader: key.shader,
+                            water,
+                            outline,
+                            // A surface shader or terrain decides its own
+                            // holes, and water isn't drawn with depth.
+                            prefilled: key.cut_out
+                                && !transparent
+                                && !water
+                                && key.shader.is_none()
+                                && item.material.terrain.is_none(),
+                            instances: index..index + 1,
+                        },
+                    ));
+                }
+            }
+        }
         if let Some(skin) = skin {
-            let joints = &mut plan.joints;
-            raw.skin = *skins.entry(std::ptr::from_ref(skin)).or_insert_with(|| {
-                let first = joints.len() as u32;
-                joints.extend(JointRaw::of(skin));
-                [first, joints.len() as u32 - first]
+            part.skins.push(SkinUse {
+                skin,
+                instance: instance_at,
+                caster: caster_at,
             });
         }
-        if caster {
-            plan.casters.push(Caster { mesh, sphere, raw });
+    }
+    part
+}
+
+/// Puts `parts` together, in order: a batch cut in two by where a share of
+/// the work ended is made whole, and each skin's joints are added once.
+fn join_plan(parts: Vec<PlanPart>, seen: Option<&mut Vec<CullingBounds>>) -> DrawPlan {
+    let mut plan = DrawPlan::default();
+    let mut first_instance = 0;
+    let mut last_kind: Option<BatchKind> = None;
+    // Where each skin's joints start, by the skin's address: items posed
+    // alike share one.
+    let mut skins: HashMap<*const Skin, [u32; 2]> = HashMap::new();
+    let mut seen = seen;
+    for mut part in parts {
+        plan.culled += part.culled;
+        for (level, count) in part.lod_items.into_iter().enumerate() {
+            plan.lod_items[level] += count;
         }
-        raw.emissive_fade[3] = draw.fade;
-        if !visible {
-            continue;
+        if let Some(seen) = seen.as_deref_mut() {
+            seen.append(&mut part.seen);
         }
-        // The copy fading out of a switch isn't counted.
-        if let Some(level) = draw.level
-            && draw.fade <= OPAQUE
-        {
-            plan.lod_items[level] += 1;
-        }
-        let index = plan.instances.len() as u32;
-        plan.instances.push(raw);
-        let water = item.material.water.is_some();
-        let outline = !transparent && outline_uniform(&item.material)[3] > 0.0;
-        let batch = (key, transparent, water, outline);
-        match plan.batches.last_mut() {
-            Some(last) if last_batch == Some(batch) => {
-                last.instances.end = index + 1;
+        for (kind, mut batch) in part.batches {
+            batch.instances =
+                batch.instances.start + first_instance..batch.instances.end + first_instance;
+            match plan.batches.last_mut() {
+                Some(last) if last_kind == Some(kind) => last.instances.end = batch.instances.end,
+                _ => {
+                    last_kind = Some(kind);
+                    plan.batches.push(batch);
+                }
             }
-            _ => {
-                last_batch = Some(batch);
-                plan.batches.push(Batch {
-                    mesh,
-                    material: distinct[key.material as usize],
-                    transparent,
-                    double_sided: key.double_sided,
-                    casts_shadow: key.casts_shadow,
-                    shader: key.shader,
-                    water,
-                    outline,
-                    instances: index..index + 1,
+        }
+        for used in part.skins {
+            let joints = &mut plan.joints;
+            let skin = *skins
+                .entry(std::ptr::from_ref(used.skin))
+                .or_insert_with(|| {
+                    let first = joints.len() as u32;
+                    joints.extend(JointRaw::of(used.skin));
+                    [first, joints.len() as u32 - first]
                 });
+            if let Some(at) = used.instance {
+                part.instances[at as usize].skin = skin;
+            }
+            if let Some(at) = used.caster {
+                part.casters[at as usize].raw.skin = skin;
             }
         }
+        first_instance += part.instances.len() as u32;
+        plan.instances.push(part.instances);
+        plan.casters.push(part.casters);
     }
     plan.skins = skins;
     plan
@@ -847,6 +1062,8 @@ struct SortKey {
     shader: Option<u64>,
     double_sided: bool,
     casts_shadow: bool,
+    /// Whether it has holes by its texture's alpha.
+    cut_out: bool,
 }
 
 /// Which distance band a point `from` the camera is in, the nearer the

@@ -455,6 +455,46 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     if shaded.opacity < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
         discard;
     }
+    return lit_pixel(in, facing, shaded, occlusion_texel, specular_texel);
+}
+
+// A cut-out surface, in the scene pass. Its depth was drawn just before
+// (`fs_depth_only`), so the depth test (equal) already passes only its
+// nearest layer, and only where it isn't cut out. With no `discard` here
+// the GPU tests depth before running this, so the leaves hidden behind
+// the nearest one are never lit.
+@fragment
+fn fs_prefilled(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let facing = select(-1.0, 1.0, front);
+    let shaded = pixel_surface(in, facing);
+    let occlusion_texel = textureSample(occlusion_texture, material_sampler, in.uv);
+    let specular_texel = textureSample(specular_texture, material_sampler, in.uv);
+    return lit_pixel(in, facing, shaded, occlusion_texel, specular_texel);
+}
+
+// Draws a cut-out surface's depth before the scene is lit. What it cuts
+// out must match `standard_surface` and `fs_main`.
+@fragment
+fn fs_depth_only(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(base_color_texture, material_sampler, in.uv);
+    let opacity_texel = textureSample(opacity_texture, material_sampler, in.uv);
+    let opacity_map = map_value(opacity_texel, maps.opacity, maps.invert.w);
+    let opacity = in.base_color.a * mix(texel.a, opacity_map, maps.settings.w);
+    if opacity < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
+        discard;
+    }
+    return vec4<f32>(0.0);
+}
+
+// The lit color of a pixel of a surface: `shaded`, its two remaining maps'
+// texels already read.
+fn lit_pixel(
+    in: VertexOut,
+    facing: f32,
+    shaded: Surface,
+    occlusion_texel: vec4<f32>,
+    specular_texel: vec4<f32>,
+) -> vec4<f32> {
     let metalness = clamp(shaded.metalness, 0.0, 1.0);
     // Perfectly smooth surfaces make the highlight infinitely small, so keep a minimum.
     let roughness = clamp(shaded.roughness, 0.04, 1.0);
@@ -512,8 +552,10 @@ fn through_leaf(
     occlusion: f32,
     amount: f32,
 ) -> vec3<f32> {
-    let sun = sun_arrival(world_position, -geometric, pixel, false);
-    let from_sun = sun.radiance * sun.visible * max(dot(-n, sun.l), 0.0) / PI;
+    let sun_visible = soft_sun_visibility(world_position, -geometric, pixel)
+        * cloud_shadow(frame.clouds, world_position, frame.sun_direction.xyz);
+    let from_sun = frame.sun_radiance.rgb * sun_visible
+        * max(dot(-n, frame.sun_direction.xyz), 0.0) / PI;
     let from_sky = surrounding_diffuse(world_position, -n, frame.sky_top.w);
     return amount * base_color * THROUGH_LEAF_TINT * mix(1.0, occlusion, 0.5) * (from_sun + from_sky);
 }

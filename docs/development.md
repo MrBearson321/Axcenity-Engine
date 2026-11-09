@@ -28,6 +28,7 @@ Settings are in `.config/nextest.toml`:
 - A test still running after 30 s is marked SLOW. After 2 minutes it's stopped and fails, so a hung test can't stall the run.
 - The slowest tests start first. Add a test there when it starts finishing last.
 - `--profile ci` (used by CI) allows more time.
+- The tests of `render` and `player` draw on the GPU, so they're in the `gpu` test group: at most 8 run at once. With dozens of processes sharing the GPU, a test's frames waited so long behind the others' that wgpu gave up on them and panicked (`We timed out while waiting on the last successful submission to complete!`).
 
 nextest prints a test's output only when it fails, unless you pass `--no-capture`. `cargo test` still works too (add `--no-fail-fast` to run every crate).
 

@@ -171,12 +171,14 @@ impl Watcher {
         // The thread gets its own handles to `stop` and `waker`: an `Arc` is
         // a shared pointer, and cloning it only adds another owner.
         let (thread_stop, thread_waker) = (stop.clone(), waker.clone());
+        // Taken here, not on the thread: a file saved just after this call
+        // would otherwise be in the first look, and never count as changed.
+        let mut last = stamps(&folder);
         let spawned = std::thread::Builder::new()
             .name("project watcher".to_string())
             // `move` gives the closure ownership of what it uses, because
             // the thread can outlive this function.
             .spawn(move || {
-                let mut last = stamps(&folder);
                 loop {
                     std::thread::sleep(INTERVAL);
                     if thread_stop.load(Ordering::Relaxed) {

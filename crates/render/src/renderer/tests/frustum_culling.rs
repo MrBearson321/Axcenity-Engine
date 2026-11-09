@@ -18,6 +18,7 @@ fn sized_block(size: Vec3, position: Vec3) -> DrawItem {
 fn drawn_at(plan: &DrawPlan) -> Vec<Vec3> {
     plan.instances
         .iter()
+        .flatten()
         .map(|raw| Vec3::from_slice(&raw.model[3][..3]))
         .collect()
 }
@@ -64,7 +65,7 @@ fn items_behind_or_beside_the_camera_are_culled_and_ones_crossing_the_edge_are_d
     );
     // Every solid block can still cast a shadow into the view; the glass
     // casts none.
-    assert_eq!(plan.casters.len(), 6);
+    assert_eq!(plan.casters.iter().flatten().count(), 6);
 }
 
 #[test]

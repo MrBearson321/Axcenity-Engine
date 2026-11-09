@@ -131,6 +131,40 @@ pub(super) fn create_pipeline(
     (color_format, samples): (wgpu::TextureFormat, u32),
     (transparent, double_sided): (bool, bool),
 ) -> wgpu::RenderPipeline {
+    create_pipeline_for(
+        device,
+        shader,
+        (vertex_entry, fragment_entry),
+        layouts,
+        (color_format, samples),
+        (transparent, double_sided),
+        DepthUse::Plain,
+    )
+}
+
+/// What a scene pipeline does with depth.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum DepthUse {
+    /// Tests against what's nearer, and writes unless it's see-through.
+    Plain,
+    /// Writes only depth, drawing no color: the cut-out surfaces' depth
+    /// before the scene is lit.
+    Fill,
+    /// Draws only where depth equals what [`DepthUse::Fill`] left, and
+    /// doesn't write it.
+    Filled,
+}
+
+/// [`create_pipeline`], with `depth` for what the pipeline does with depth.
+pub(super) fn create_pipeline_for(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    (vertex_entry, fragment_entry): (&str, &str),
+    layouts: &[&wgpu::BindGroupLayout],
+    (color_format, samples): (wgpu::TextureFormat, u32),
+    (transparent, double_sided): (bool, bool),
+    depth: DepthUse,
+) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("scene"),
         bind_group_layouts: layouts,
@@ -195,8 +229,12 @@ pub(super) fn create_pipeline(
             format: DEPTH_FORMAT,
             // See-through items are hidden behind solid ones, but don't hide
             // other see-through items behind them.
-            depth_write_enabled: !transparent,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_write_enabled: !transparent && depth != DepthUse::Filled,
+            depth_compare: if depth == DepthUse::Filled {
+                wgpu::CompareFunction::Equal
+            } else {
+                wgpu::CompareFunction::Less
+            },
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -211,7 +249,11 @@ pub(super) fn create_pipeline(
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
                 blend: Some(blend),
-                write_mask: wgpu::ColorWrites::ALL,
+                write_mask: if depth == DepthUse::Fill {
+                    wgpu::ColorWrites::empty()
+                } else {
+                    wgpu::ColorWrites::ALL
+                },
             })],
         }),
         multiview: None,

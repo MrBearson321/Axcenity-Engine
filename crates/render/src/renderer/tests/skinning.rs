@@ -111,7 +111,12 @@ fn items_posed_differently_share_one_mesh_and_batch() {
     // Two skins of one joint each.
     let plan = plan_with(&list, |_| Bounds::UNIT);
     assert_eq!(plan.joints.len(), 2);
-    let skins: Vec<[u32; 2]> = plan.instances.iter().map(|raw| raw.skin).collect();
+    let skins: Vec<[u32; 2]> = plan
+        .instances
+        .iter()
+        .flatten()
+        .map(|raw| raw.skin)
+        .collect();
     assert_eq!(skins, [[0, 1], [1, 1]]);
 }
 

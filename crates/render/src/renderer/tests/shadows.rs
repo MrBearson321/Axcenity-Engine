@@ -328,20 +328,16 @@ fn spot_shadows_skip_casters_outside_the_beams_bounds() {
         casts_shadow: false,
         ..item(Shape::Sphere, Vec3::new(0.0, 0.0, -4.0), 1.0)
     });
-    let DrawPlan {
-        mut instances,
-        casters,
-        ..
-    } = plan(&list);
-    let scene = instances.len() as u32;
+    let DrawPlan { casters, .. } = plan(&list);
     let beam = (Vec3::new(0.0, 0.0, -5.0), 4.0);
-    let (groups, left_out) = lighting::casters_in(&mut instances, &casters, |sphere| {
-        spheres_touch(beam, sphere)
-    });
+    // A view that sees everywhere, so only the lamp's reach decides.
+    let everywhere = Frustum::of(Mat4::ZERO);
+    let views = lighting::casters_in_views(&casters, &[ShadowView::Lamp(beam, everywhere)]);
     // Only the near solid block: the far one is out of reach, the glass is
     // see-through and the sphere casts no shadow.
-    assert_eq!(groups, [(MeshKey::Block, scene..scene + 1)]);
-    assert_eq!(left_out, 1);
-    assert_eq!(instances.len() as u32, scene + 1);
-    assert_eq!(instances[scene as usize].model[3][2], -3.0);
+    assert_eq!(views[0].groups, [(MeshKey::Block, 0..1)]);
+    assert_eq!(views[0].left_out, 1);
+    let instances: Vec<_> = views[0].instances.iter().flatten().collect();
+    assert_eq!(instances.len(), 1);
+    assert_eq!(instances[0].model[3][2], -3.0);
 }

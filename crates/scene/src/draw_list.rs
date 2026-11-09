@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use axcenity_assets::{
     AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial, Posed, Primitive,
@@ -1358,12 +1358,14 @@ pub(crate) fn srgb(linear: [f32; 3]) -> [f32; 3] {
 
 /// One primitive of a model at one level of detail, handed to the renderer
 /// without copying it.
-#[derive(Clone)]
 struct ModelMesh {
     model: Arc<Model>,
     index: usize,
     /// 0 for the primitive itself, else which of its simpler copies.
     level: usize,
+    /// Its simpler copies, each made the first time it's drawn and kept:
+    /// the renderer asks for one per draw.
+    copies: Vec<OnceLock<Arc<dyn MeshSource>>>,
 }
 
 impl ModelMesh {
@@ -1372,6 +1374,9 @@ impl ModelMesh {
             model: model.clone(),
             index,
             level: 0,
+            copies: (0..model.primitives[index].lods.len())
+                .map(|_| OnceLock::new())
+                .collect(),
         }
     }
 
@@ -1381,22 +1386,6 @@ impl ModelMesh {
             0 => full,
             level => &full.lods[level - 1],
         }
-    }
-
-    /// How many simpler copies the full primitive has; a copy has none.
-    fn copies(&self) -> usize {
-        match self.level {
-            0 => self.model.primitives[self.index].lods.len(),
-            _ => 0,
-        }
-    }
-
-    /// The full primitive's simpler copy `level`, if it has one.
-    fn copy(&self, level: usize) -> Option<Self> {
-        (1..=self.copies()).contains(&level).then(|| Self {
-            level,
-            ..self.clone()
-        })
     }
 }
 
@@ -1426,10 +1415,18 @@ impl MeshSource for ModelMesh {
         &self.primitive().weights
     }
     fn lod_count(&self) -> usize {
-        self.copies()
+        self.copies.len()
     }
-    fn lod(&self, level: usize) -> Option<Arc<dyn MeshSource>> {
-        Some(Arc::new(self.copy(level)?))
+    fn lod(&self, level: usize) -> Option<&Arc<dyn MeshSource>> {
+        let copy = self.copies.get(level.checked_sub(1)?)?;
+        Some(copy.get_or_init(|| {
+            Arc::new(ModelMesh {
+                model: self.model.clone(),
+                index: self.index,
+                level,
+                copies: Vec::new(),
+            })
+        }))
     }
 }
 

@@ -14,6 +14,17 @@ fail-fast = false
 filter = 'test(=tests::every_example_renders) | test(/^app::(asset_fix_tests|files::package_tests|imported_clip_tests|behavior_tree_tests)::/) | test(=validate::tests::a_clean_example_reports_nothing)'
 priority = 50
 
+# The tests that draw on the GPU share one, and each process has its own
+# device: with dozens at once, a test's submitted frames wait so long behind
+# the others' that wgpu gives up on them ("timed out while waiting on the
+# last successful submission").
+[test-groups]
+gpu = { max-threads = 8 }
+
+[[profile.default.overrides]]
+filter = 'package(axcenity-render) | package(axcenity-player)'
+test-group = 'gpu'
+
 # CI runners are slower and share their CPUs: allow more time.
 [profile.ci]
 slow-timeout = { period = "60s", terminate-after = 5 }

@@ -550,6 +550,9 @@ pub(super) struct Batch {
     /// Drawn again as its outline ([`crate::Material::outline`]) after the
     /// solid items. Only solid items have one.
     pub(super) outline: bool,
+    /// A cut-out surface, whose depth is drawn before anything is lit
+    /// ([`PrefillPipelines`]).
+    pub(super) prefilled: bool,
     pub(super) instances: Range<u32>,
 }
 
@@ -728,6 +731,29 @@ impl ItemPipelines {
     }
 }
 
+/// A sun cascade as it was last drawn, kept while it waits its turn to be
+/// drawn again.
+#[derive(Clone, Copy)]
+pub(super) struct DrawnCascade {
+    pub(super) matrix: [[f32; 4]; 4],
+    pub(super) texel: f32,
+    pub(super) depth: f32,
+    /// Where the camera was.
+    pub(super) camera: glam::Vec3,
+}
+
+/// The pipelines of cut-out surfaces (leaves, fences). Their `discard`
+/// keeps the GPU from skipping what's hidden, so a forest lights each
+/// pixel once per leaf in front of it. So their depth is drawn first, with
+/// a shader that only reads the alpha, and they're then lit with no
+/// `discard`, only where that depth is theirs.
+pub(super) struct PrefillPipelines {
+    /// The depth pass's, by `double_sided`.
+    pub(super) depth: [wgpu::RenderPipeline; 2],
+    /// The lit pass's, by `double_sided`.
+    pub(super) lit: [wgpu::RenderPipeline; 2],
+}
+
 /// The GPU objects for drawing a scene, whatever it's drawn into. Both
 /// [`Renderer`] and [`TextureRenderer`] own one.
 pub(super) struct ScenePipeline {
@@ -735,6 +761,12 @@ pub(super) struct ScenePipeline {
     pub(super) queue: wgpu::Queue,
     pub(super) sky_pipeline: wgpu::RenderPipeline,
     pub(super) item_pipelines: ItemPipelines,
+    pub(super) prefill_pipelines: PrefillPipelines,
+    /// Each sun cascade as last drawn, while the shadow map still holds it.
+    pub(super) cascades_drawn: [Option<DrawnCascade>; SHADOW_CASCADES],
+    /// How many shadow casters the last frame planned, whose far cascades
+    /// take turns when it's many (see `ScenePipeline::schedule_cascades`).
+    pub(super) casters_planned: usize,
     /// Solid items' outlines, whatever their surface shader: their back
     /// faces, pushed out along their normals (`vs_outline`). Every face is
     /// drawn and the front ones left out by the shader.

@@ -436,6 +436,7 @@ fn water_is_drawn_after_solid_items_and_before_other_see_through_ones() {
     assert!(
         plan.casters
             .iter()
+            .flatten()
             .all(|caster| caster.mesh != MeshKey::of(&list.items.last().unwrap().shape)),
         "water casts no shadow"
     );

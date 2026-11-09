@@ -54,9 +54,16 @@ impl MeshSource for Detailed {
     fn lod_count(&self) -> usize {
         if self.level == 0 { 2 } else { 0 }
     }
-    fn lod(&self, level: usize) -> Option<Arc<dyn MeshSource>> {
-        (self.level == 0 && (1..=2).contains(&level))
-            .then(|| Arc::new(Detailed { level }) as Arc<dyn MeshSource>)
+    fn lod(&self, level: usize) -> Option<&Arc<dyn MeshSource>> {
+        static COPIES: std::sync::OnceLock<[Arc<dyn MeshSource>; 2]> = std::sync::OnceLock::new();
+        let copies = COPIES.get_or_init(|| {
+            [1, 2].map(|level| Arc::new(Detailed { level }) as Arc<dyn MeshSource>)
+        });
+        if self.level == 0 {
+            copies.get(level.checked_sub(1)?)
+        } else {
+            None
+        }
     }
 }
 

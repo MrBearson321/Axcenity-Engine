@@ -21,6 +21,7 @@ approx = { version = "0.5", default-features = false, features = ["std"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 bytemuck = { version = "1", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "wasm_simd"] }
+crossbeam-utils = { version = "0.8" }
 either = { version = "1" }
 glam = { version = "0.33", features = ["approx", "mint", "nostd-libm"] }
 hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }

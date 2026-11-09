@@ -16,6 +16,7 @@ mod debug_views;
 mod decals;
 mod environment_maps;
 mod fog;
+mod frame_planning;
 mod frustum_culling;
 mod gpu_particles;
 mod grid;
@@ -176,6 +177,7 @@ fn item(shape: Shape, position: Vec3, opacity: f32) -> DrawItem {
 fn batch(mesh: MeshKey, transparent: bool, instances: Range<u32>) -> Batch {
     Batch {
         mesh,
+        prefilled: false,
         material: MaterialKey::default(),
         transparent,
         double_sided: false,
@@ -195,18 +197,11 @@ fn plan(list: &DrawList) -> DrawPlan {
 
 /// Plans `list` as its camera sees it on a square target, at each item's
 /// level of detail on a first frame, with each mesh's box from `bounds`.
-fn plan_with(list: &DrawList, bounds: impl Fn(MeshKey) -> Bounds) -> DrawPlan {
+fn plan_with(list: &DrawList, bounds: impl Fn(MeshKey) -> Bounds + Sync) -> DrawPlan {
     let view = Frustum::of(view_projection(list, 1.0));
     let draws = LodStates::default().resolve(list, 1, None).draws;
-    let materials: Vec<MaterialKey> = draws.iter().map(|draw| material_key(draw.item)).collect();
-    plan_draws(
-        list,
-        &draws,
-        &materials,
-        &view,
-        |mesh, _| bounds(mesh),
-        None,
-    )
+    let uses = FrameUses::of(&draws);
+    plan_draws(list, &draws, &uses, &view, |mesh, _| bounds(mesh), None)
 }
 
 /// A caller's mesh with no triangles, for planning tests (it's never uploaded).
@@ -384,6 +379,7 @@ fn see_through_items_come_last_and_farthest_first() {
             batch(MeshKey::Sphere, true, 3..4),
         ]
     );
+    let instances: Vec<_> = instances.iter().flatten().collect();
     let z = |i: usize| instances[i].model[3][2];
     assert_eq!([z(1), z(2), z(3)], [-9.0, -5.0, -2.0]);
 }

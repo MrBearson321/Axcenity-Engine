@@ -194,7 +194,7 @@ impl ScenePipeline {
         let settings = GraphicsSettings::default();
         let graphics = settings.effective(&capabilities);
         let samples = graphics.anti_aliasing.samples();
-        let (sky_pipeline, item_pipelines, outline_pipeline) = scene_pipelines(
+        let (sky_pipeline, item_pipelines, outline_pipeline, prefill_pipelines) = scene_pipelines(
             &device,
             [&frame_layout, &material_layout, &skinning.layout],
             samples,
@@ -272,6 +272,9 @@ impl ScenePipeline {
             queue,
             sky_pipeline,
             item_pipelines,
+            prefill_pipelines,
+            cascades_drawn: [None; SHADOW_CASCADES],
+            casters_planned: 0,
             outline_pipeline,
             edge_pipeline,
             edges: false,
@@ -437,6 +440,7 @@ impl ScenePipeline {
                 self.sky_pipeline,
                 self.item_pipelines,
                 self.outline_pipeline,
+                self.prefill_pipelines,
             ) = scene_pipelines(
                 &self.device,
                 [
@@ -702,6 +706,10 @@ impl ScenePipeline {
         for (matrix, face) in frame_uniform.point_shadows.iter_mut().zip(point_faces) {
             *matrix = face.to_cols_array_2d();
         }
+        // Far cascades of a heavy scene take turns being drawn: those not
+        // drawn this frame keep what they last drew, and the matrix it was
+        // drawn with goes in `frame_uniform`.
+        let cascade_drawn = self.schedule_cascades(list, &mut frame_uniform);
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
         // The sun's cascades, then the spot lights' views, then the point
@@ -801,30 +809,32 @@ impl ScenePipeline {
         } = self.lods.resolve(list, self.frame, reach.as_ref());
         // Each draw's material binding, worked out once for the uploads
         // and the plan: it reads every map setting of the item.
-        let materials: Vec<MaterialKey> =
-            draws.iter().map(|draw| material_key(draw.item)).collect();
-        self.upload_new(list, &draws, &materials);
+        let uses = FrameUses::of(&draws);
+        self.upload_new(list, &draws, &uses);
         // What the camera can see, or the frozen view's while it's set.
         let camera = self.frozen_view.as_ref().unwrap_or(&list.camera);
         let camera_view = Frustum::of(camera_view_projection(camera, aspect));
         let mut seen = std::mem::take(&mut self.culling_bounds);
         seen.clear();
         let DrawPlan {
-            mut instances,
+            instances,
             batches,
             casters,
             culled,
             joints,
             skins,
             lod_items,
-        } = plan_draws(
-            list,
-            &draws,
-            &materials,
-            &camera_view,
-            |mesh, skin| self.item_bounds(mesh, skin),
-            self.frozen_view.is_some().then_some(&mut seen),
-        );
+        } = {
+            let (meshes, custom_meshes) = (&self.meshes, &self.custom_meshes);
+            plan_draws(
+                list,
+                &draws,
+                &uses,
+                &camera_view,
+                |mesh, skin| item_bounds(meshes, custom_meshes, mesh, skin),
+                self.frozen_view.is_some().then_some(&mut seen),
+            )
+        };
         self.culling_bounds = seen;
         // What moved since last frame, for the motion vectors.
         let moved = self.frame_targets.temporal.as_ref().map(|_| {
@@ -855,30 +865,47 @@ impl ScenePipeline {
         // the spot lights' views, each near enough to its beam, then each
         // point light's faces, each within its reach.
         let cascades = map_size.map_or(0, |size| size.cascades as usize);
-        let mut casters_by_view: Vec<_> = frame_uniform.cascades[..cascades]
+        let mut shadow_view_list: Vec<ShadowView> = frame_uniform.cascades[..cascades]
             .iter()
-            .map(|matrix| {
-                let view = Frustum::of(glam::Mat4::from_cols_array_2d(matrix));
-                casters_in(&mut instances, &casters, |sphere| view.touches(sphere))
+            .zip(cascade_drawn)
+            .map(|(matrix, drawn)| {
+                if drawn {
+                    ShadowView::Sun(Frustum::of(glam::Mat4::from_cols_array_2d(matrix)))
+                } else {
+                    ShadowView::Skipped
+                }
             })
             .collect();
         for spot in &planned_lights.spot_shadows {
-            let view = Frustum::of(spot.view_proj);
-            casters_by_view.push(casters_in(&mut instances, &casters, |sphere| {
-                spheres_touch(spot.bounds, sphere) && view.touches(sphere)
-            }));
+            shadow_view_list.push(ShadowView::Lamp(spot.bounds, Frustum::of(spot.view_proj)));
         }
         for point in &planned_lights.point_shadows {
             for face in point.faces {
-                let view = Frustum::of(face);
-                casters_by_view.push(casters_in(&mut instances, &casters, |sphere| {
-                    spheres_touch(point.bounds, sphere) && view.touches(sphere)
-                }));
+                shadow_view_list.push(ShadowView::Lamp(point.bounds, Frustum::of(face)));
             }
         }
-        self.ensure_instance_capacity(instances.len());
-        self.queue
-            .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
+        self.casters_planned = casters.iter().map(Vec::len).sum();
+        let view_casters = casters_in_views(&casters, &shadow_view_list);
+        let mut instance_count = instances.iter().map(Vec::len).sum::<usize>() as u32;
+        let mut pieces: Vec<&[InstanceRaw]> = instances.iter().map(Vec::as_slice).collect();
+        let mut casters_by_view = Vec::with_capacity(view_casters.len());
+        for view in &view_casters {
+            let groups: Vec<_> = view
+                .groups
+                .iter()
+                .map(|(mesh, range)| {
+                    (
+                        *mesh,
+                        range.start + instance_count..range.end + instance_count,
+                    )
+                })
+                .collect();
+            casters_by_view.push((groups, view.left_out));
+            pieces.extend(view.instances.iter().map(Vec::as_slice));
+            instance_count += view.instances.iter().map(Vec::len).sum::<usize>() as u32;
+        }
+        self.ensure_instance_capacity(instance_count as usize);
+        write_pieces(&self.queue, &self.instance_buffer, &pieces);
         for font in &list.fonts {
             if self.loaded_fonts.insert(font.path.clone()) {
                 self.font_system
@@ -1090,6 +1117,10 @@ impl ScenePipeline {
             .flat_map(|map| map.layers.iter().zip(point_casters).enumerate())
             .map(|(index, view)| (SHADOW_CASCADES + MAX_SPOT_SHADOWS + index, view));
         for (index, (layer, (casters, _))) in cascades.chain(spots).chain(points) {
+            // A cascade waiting its turn keeps what it drew: not even cleared.
+            if index < SHADOW_CASCADES && !cascade_drawn[index] {
+                continue;
+            }
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow view"),
                 color_attachments: &[],
@@ -1153,7 +1184,7 @@ impl ScenePipeline {
                 pass.set_bind_group(0, &self.prepass_frame_bind_group, &[]);
                 pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
                 for batch in batches.iter().filter(|batch| !batch.transparent) {
-                    let Some(mesh) = self.bind_batch(&mut pass, batch, true) else {
+                    let Some(mesh) = self.bind_batch(&mut pass, batch, BatchPass::Prepass) else {
                         continue;
                     };
                     count(mesh, &batch.instances);
@@ -1225,6 +1256,8 @@ impl ScenePipeline {
             .filter(|_| copied)
             .unwrap_or(frame_bind_group);
         let mut drawn = (0, 0);
+        // The depth fill's draw calls, triangles and corners.
+        let mut depth_fill = (0, 0, 0);
         let mut draw_batches = |pass: &mut wgpu::RenderPass<'_>, batches: &[Batch]| {
             let mut water_bound = false;
             for batch in batches {
@@ -1237,7 +1270,7 @@ impl ScenePipeline {
                     };
                     pass.set_bind_group(0, group, &[]);
                 }
-                let Some(mesh) = self.bind_batch(pass, batch, false) else {
+                let Some(mesh) = self.bind_batch(pass, batch, BatchPass::Scene) else {
                     continue;
                 };
                 count(mesh, &batch.instances);
@@ -1250,7 +1283,7 @@ impl ScenePipeline {
             }
             // Outlines (solid items only) go behind what was just drawn.
             for batch in batches.iter().filter(|batch| batch.outline) {
-                let Some(mesh) = self.bind_batch(pass, batch, false) else {
+                let Some(mesh) = self.bind_batch(pass, batch, BatchPass::Scene) else {
                     continue;
                 };
                 pass.set_pipeline(&self.outline_pipeline);
@@ -1277,6 +1310,18 @@ impl ScenePipeline {
             let mut pass = begin_scene_pass(&mut encoder, &self.frame_targets, false, copied);
             pass.set_bind_group(0, frame_bind_group, &[]);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            // The cut-out surfaces' depth first, so they're lit only once
+            // per pixel, and what's behind them not at all.
+            for batch in solid.iter().filter(|batch| batch.prefilled) {
+                let Some(mesh) = self.bind_batch(&mut pass, batch, BatchPass::DepthFill) else {
+                    continue;
+                };
+                let instances = u64::from(batch.instances.end - batch.instances.start);
+                depth_fill.0 += 1;
+                depth_fill.1 += u64::from(mesh.index_count / 3) * instances;
+                depth_fill.2 += u64::from(mesh.vertex_count) * instances;
+                pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
+            }
             draw_batches(&mut pass, solid);
             pass.set_pipeline(&self.sky_pipeline);
             pass.draw(0..3, 0..1);
@@ -1318,7 +1363,9 @@ impl ScenePipeline {
             self.sprites.draw(&mut pass, &sprite_draws, &emitter_draws);
         }
         (counts.items_drawn, counts.batches) = drawn;
-        counts.draw_calls += motion_draws + decal_draws.len() as u32;
+        counts.draw_calls += motion_draws + depth_fill.0 + decal_draws.len() as u32;
+        counts.triangles += depth_fill.1;
+        counts.vertices += depth_fill.2;
         // The light the volumetric fog scattered in front of what was drawn.
         if let (Some(fog), Some(occlusion)) = (&self.volumetric_fog, &self.frame_targets.occlusion)
         {
@@ -1466,16 +1513,63 @@ impl ScenePipeline {
         Ok(())
     }
 
-    /// Sets `pass` up to draw `batch`, in the scene pass or (`prepass`) the
-    /// depth and normal prepass: its pipeline, its material or terrain
-    /// binding, and its mesh, which is returned. `None` skips it: a
-    /// caller's mesh with broken data was never uploaded.
+    /// Which of the sun's cascades this frame draws. In a heavy scene (more
+    /// shadow casters than [`HEAVY_SHADOW_CASTERS`]) the two farthest take
+    /// turns, so each frame draws one: they hold most of its shadow
+    /// triangles and cover what's far away, where one frame's lag doesn't
+    /// show. A cascade waiting its turn goes in `uniform` as it was last
+    /// drawn, for the shaders to read it the way it was drawn.
+    fn schedule_cascades(
+        &mut self,
+        list: &DrawList,
+        uniform: &mut FrameUniform,
+    ) -> [bool; SHADOW_CASCADES] {
+        let mut drawn = [true; SHADOW_CASCADES];
+        let Some((_, size)) = shadows_drawn(list.shadows, &self.graphics) else {
+            return drawn;
+        };
+        let cascades = size.cascades as usize;
+        let map_fits = self.shadow_map.as_ref().map(|map| map.size) == Some(size);
+        let heavy = self.casters_planned > HEAVY_SHADOW_CASTERS;
+        for (index, drawn) in drawn.iter_mut().enumerate().take(cascades) {
+            let takes_turns = heavy && map_fits && cascades >= 3 && index >= cascades - 2;
+            let its_turn = (self.frame as usize + index).is_multiple_of(2);
+            // A cascade reaches half the map's width from the camera: it
+            // isn't kept once the camera has gone a good way across it.
+            let near = |kept: &DrawnCascade| {
+                kept.camera.distance(list.camera.position) <= uniform.cascade_texels[index] * 256.0
+            };
+            match self.cascades_drawn[index] {
+                Some(kept) if takes_turns && !its_turn && near(&kept) => {
+                    *drawn = false;
+                    uniform.cascades[index] = kept.matrix;
+                    uniform.cascade_texels[index] = kept.texel;
+                    uniform.cascade_depths[index] = kept.depth;
+                }
+                _ => {
+                    self.cascades_drawn[index] = Some(DrawnCascade {
+                        matrix: uniform.cascades[index],
+                        texel: uniform.cascade_texels[index],
+                        depth: uniform.cascade_depths[index],
+                        camera: list.camera.position,
+                    });
+                }
+            }
+        }
+        drawn
+    }
+
+    /// Sets `pass` up to draw `batch`, in the scene pass, the depth fill
+    /// or the depth and normal prepass (`kind`): its pipeline, its material
+    /// or terrain binding, and its mesh, which is returned. `None` skips
+    /// it: a caller's mesh with broken data was never uploaded.
     fn bind_batch(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         batch: &Batch,
-        prepass: bool,
+        kind: BatchPass,
     ) -> Option<&GpuMesh> {
+        let prepass = kind == BatchPass::Prepass;
         let mesh = self.gpu_mesh(batch.mesh)?;
         if batch.material.terrain != terrain::TerrainKey::default() {
             let group = self.terrain.group(&batch.material.terrain)?;
@@ -1493,9 +1587,12 @@ impl ScenePipeline {
             } else {
                 &water.blended
             };
+            let side = usize::from(batch.double_sided);
             let pipeline = match (prepass, batch.double_sided, surface) {
+                _ if kind == BatchPass::DepthFill => &self.prefill_pipelines.depth[side],
                 // Water is never in the prepass.
                 _ if batch.water => water,
+                (false, _, None) if batch.prefilled => &self.prefill_pipelines.lit[side],
                 (false, _, Some(surface)) => surface.items.of(batch),
                 (false, _, None) => self.item_pipelines.of(batch),
                 (true, double_sided, Some(surface)) => surface.prepass(double_sided),
@@ -1747,33 +1844,21 @@ impl ScenePipeline {
 
     /// The box a mesh's corners span, for culling. A caller's mesh that
     /// was never uploaded isn't drawn, so the unit cube does for it.
+    #[cfg(test)]
     pub(super) fn mesh_bounds(&self, key: MeshKey) -> Bounds {
         self.gpu_mesh(key).map_or(Bounds::UNIT, |mesh| mesh.bounds)
     }
 
     /// The box an item's mesh spans, in its own space, once its `skin` (if
     /// any) moves its corners.
+    #[cfg(test)]
     pub(super) fn item_bounds(&self, key: MeshKey, skin: Option<&Skin>) -> Bounds {
-        match (self.gpu_mesh(key), skin) {
-            (
-                Some(GpuMesh {
-                    skin: Some(gpu), ..
-                }),
-                Some(skin),
-            ) => gpu.bounds(skin),
-            _ => self.mesh_bounds(key),
-        }
+        item_bounds(&self.meshes, &self.custom_meshes, key, skin)
     }
 
     /// The GPU copy of a mesh, or `None` for a caller's mesh that was never uploaded.
     pub(super) fn gpu_mesh(&self, key: MeshKey) -> Option<&GpuMesh> {
-        match key {
-            MeshKey::Custom(key) => self
-                .custom_meshes
-                .get(&key)
-                .and_then(|cached| cached.gpu.as_ref()),
-            builtin => self.meshes.get(builtin),
-        }
+        gpu_mesh_in(&self.meshes, &self.custom_meshes, key)
     }
 
     /// Shapes and uploads the UI text in `ui`, with its rich text runs,
@@ -1943,23 +2028,13 @@ impl ScenePipeline {
     /// detail) and textures in `list` that aren't on the GPU yet, and notes
     /// that the rest were drawn this frame. Textures are fitted to the
     /// texture budget before the materials using them are bound.
-    /// `materials[i]` is the material key of `draws[i]` (see
-    /// [`material_key`]).
-    pub(super) fn upload_new(
-        &mut self,
-        list: &DrawList,
-        draws: &[Draw],
-        materials: &[MaterialKey],
-    ) {
+    /// `uses` says what `draws` use.
+    pub(super) fn upload_new(&mut self, list: &DrawList, draws: &[Draw], uses: &FrameUses) {
         let frame = self.frame;
         let arrived = self.finish_background_uploads();
         // Thousands of draws share a few meshes and textures: each is
-        // looked up once, by address, rather than once per draw.
-        let mut seen_meshes = HashSet::new();
-        for source in draws.iter().filter_map(Draw::source) {
-            if !seen_meshes.insert(Arc::as_ptr(source).cast::<()>()) {
-                continue;
-            }
+        // looked up once rather than once per draw.
+        for &source in &uses.meshes {
             match self.custom_meshes.entry(source.key()) {
                 Entry::Occupied(mut cached) => {
                     let cached = cached.get_mut();
@@ -2024,17 +2099,16 @@ impl ScenePipeline {
                 self.note_texture(source, frame, false);
             }
         }
-        // A group's items share a handful of materials: each set of
-        // textures is noted once, found among the few seen so far.
-        let mut seen_textures: Vec<[Option<*const ()>; MATERIAL_TEXTURES]> = Vec::new();
-        for draw in draws.iter().filter(|draw| draw.chunked) {
-            let textures = material_textures(draw.item);
-            let addresses = textures.map(|source| source.map(|s| Arc::as_ptr(s).cast::<()>()));
-            if seen_textures.contains(&addresses) {
+        // Each material's textures are noted once. The list's own items
+        // are done above: this is for what's in its groups.
+        for (key, &first) in uses.materials.iter().zip(&uses.first_draw) {
+            if *key == MaterialKey::default() {
                 continue;
             }
-            seen_textures.push(addresses);
-            for source in textures.into_iter().flatten() {
+            for source in material_textures(draws[first as usize].item)
+                .into_iter()
+                .flatten()
+            {
                 self.note_texture(source, frame, false);
             }
         }
@@ -2067,10 +2141,13 @@ impl ScenePipeline {
             self.sprites.forget(|key| !replaced.contains(&key));
             self.decal_pass.forget(|key| !replaced.contains(&key));
         }
-        for (draw, key) in draws.iter().zip(materials) {
-            let item = draw.item;
+        for (key, &first) in uses.materials.iter().zip(&uses.first_draw) {
             let key = *key;
-            if item.material.terrain.is_some() || key == MaterialKey::default() {
+            if key == MaterialKey::default() {
+                continue;
+            }
+            let item = draws[first as usize].item;
+            if item.material.terrain.is_some() {
                 continue;
             }
             let sources = material_textures(item);
@@ -2304,6 +2381,55 @@ impl ScenePipeline {
 /// averaged into the HDR texture as it ends. `keep` keeps the samples and
 /// depth for a later pass (water's copy reads the depth); otherwise they're
 /// thrown away.
+/// More shadow casters a frame than this and the far cascades take turns
+/// (see [`ScenePipeline::schedule_cascades`]).
+const HEAVY_SHADOW_CASTERS: usize = 12000;
+
+/// Which pass a batch is being drawn in (see `ScenePipeline::bind_batch`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum BatchPass {
+    Scene,
+    /// The cut-out surfaces' depth, drawn first in the scene pass.
+    DepthFill,
+    Prepass,
+}
+
+/// The GPU copy of a mesh among `meshes` and `custom_meshes`, or `None` for
+/// a caller's mesh that was never uploaded.
+fn gpu_mesh_in<'a>(
+    meshes: &'a Meshes,
+    custom_meshes: &'a HashMap<u64, Cached<GpuMesh>>,
+    key: MeshKey,
+) -> Option<&'a GpuMesh> {
+    match key {
+        MeshKey::Custom(key) => custom_meshes
+            .get(&key)
+            .and_then(|cached| cached.gpu.as_ref()),
+        builtin => meshes.get(builtin),
+    }
+}
+
+/// The box a mesh spans, in its own space, once its `skin` (if any) moves
+/// its corners. A caller's mesh that was never uploaded isn't drawn, so the
+/// unit cube does for it.
+fn item_bounds(
+    meshes: &Meshes,
+    custom_meshes: &HashMap<u64, Cached<GpuMesh>>,
+    key: MeshKey,
+    skin: Option<&Skin>,
+) -> Bounds {
+    let mesh = gpu_mesh_in(meshes, custom_meshes, key);
+    match (mesh, skin) {
+        (
+            Some(GpuMesh {
+                skin: Some(gpu), ..
+            }),
+            Some(skin),
+        ) => gpu.bounds(skin),
+        _ => mesh.map_or(Bounds::UNIT, |mesh| mesh.bounds),
+    }
+}
+
 fn begin_scene_pass<'a>(
     encoder: &'a mut wgpu::CommandEncoder,
     targets: &'a FrameTargets,
@@ -2365,7 +2491,12 @@ fn scene_pipelines(
     device: &wgpu::Device,
     layouts: [&wgpu::BindGroupLayout; 3],
     samples: u32,
-) -> (wgpu::RenderPipeline, ItemPipelines, wgpu::RenderPipeline) {
+) -> (
+    wgpu::RenderPipeline,
+    ItemPipelines,
+    wgpu::RenderPipeline,
+    PrefillPipelines,
+) {
     let frame_layout = layouts[0];
     let shader = shader_module(device, "scene", gpu::SCENE_SHADER);
     let pipeline = |transparent, double_sided| {
@@ -2376,6 +2507,17 @@ fn scene_pipelines(
             &layouts,
             (HDR_FORMAT, samples),
             (transparent, double_sided),
+        )
+    };
+    let prefill = |fragment, double_sided, depth| {
+        create_pipeline_for(
+            device,
+            &shader,
+            ("vs_main", fragment),
+            &layouts,
+            (HDR_FORMAT, samples),
+            (false, double_sided),
+            depth,
         )
     };
     (
@@ -2394,6 +2536,12 @@ fn scene_pipelines(
             (HDR_FORMAT, samples),
             (false, true),
         ),
+        PrefillPipelines {
+            depth: [false, true]
+                .map(|double_sided| prefill("fs_depth_only", double_sided, DepthUse::Fill)),
+            lit: [false, true]
+                .map(|double_sided| prefill("fs_prefilled", double_sided, DepthUse::Filled)),
+        },
     )
 }
 

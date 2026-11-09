@@ -61,6 +61,27 @@ impl Reach {
     }
 }
 
+/// What a shadow view's casters must touch.
+#[derive(Clone, Copy)]
+pub(super) enum ShadowView {
+    /// One of the sun's cascades.
+    Sun(Frustum),
+    /// A lamp's view, limited to what the lamp can reach.
+    Lamp(Sphere, Frustum),
+    /// Not drawn this frame: a far cascade keeping what it drew last.
+    Skipped,
+}
+
+impl ShadowView {
+    pub(super) fn touches(&self, sphere: Sphere) -> bool {
+        match self {
+            ShadowView::Sun(view) => view.touches(sphere),
+            ShadowView::Lamp(lamp, view) => spheres_touch(*lamp, sphere) && view.touches(sphere),
+            ShadowView::Skipped => false,
+        }
+    }
+}
+
 /// Whether two spheres overlap.
 pub(super) fn spheres_touch((a, a_radius): Sphere, (b, b_radius): Sphere) -> bool {
     a.distance(b) <= a_radius + b_radius

@@ -1405,7 +1405,9 @@ pub trait MeshSource: Send + Sync {
     /// triangles than the level before, drawn in its place when it's small
     /// on screen: the renderer asks only for the level it draws. Each copy
     /// has its own key, fits the same box, and has no copies of its own.
-    fn lod(&self, level: usize) -> Option<Arc<dyn MeshSource>> {
+    /// Asked for once per draw, so keep the copies rather than making one
+    /// each time.
+    fn lod(&self, level: usize) -> Option<&Arc<dyn MeshSource>> {
         let _ = level;
         None
     }

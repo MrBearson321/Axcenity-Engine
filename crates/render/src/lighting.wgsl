@@ -309,6 +309,45 @@ fn sun_visibility(world_position: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>
     return mix(1.0, lit, fade);
 }
 
+// The width of `soft_sun_visibility`'s filter, in texels of the shadow map.
+const SOFT_SUN_FILTER_TEXELS: f32 = 3.0;
+
+// `sun_visibility`, cheaply: four filtered comparisons in the nearest
+// cascade covering the point, with no search for what blocks it. For light
+// that has already scattered on its way through something (a leaf), whose
+// shadow is soft whatever casts it. Costs a tenth of the full lookup.
+fn soft_sun_visibility(world_position: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>) -> f32 {
+    if frame.shadow.x == 0.0 {
+        return 1.0;
+    }
+    let angle = pixel_noise(pixel) * 6.2831853;
+    let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
+    let spread = SOFT_SUN_FILTER_TEXELS / f32(textureDimensions(shadow_map).x);
+    let count = u32(frame.shadow.z);
+    var lit = 1.0;
+    for (var i = 0u; i < count; i++) {
+        let texel = frame.cascade_texels[i];
+        let light = frame.cascades[i] * vec4<f32>(world_position + normal * (texel * 1.5), 1.0);
+        let uv = vec2<f32>(light.x * 0.5 + 0.5, 0.5 - light.y * 0.5);
+        let receiver = light.z;
+        if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || receiver > 1.0 || receiver < 0.0 {
+            continue;
+        }
+        let bias = 2.0 * texel / frame.cascade_depths[i];
+        var sum = 0.0;
+        for (var k = 0; k < 4; k++) {
+            let offset = rotation * POISSON[k * 4] * spread;
+            sum += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + offset, i32(i),
+                receiver - bias);
+        }
+        lit = sum / 4.0;
+        break;
+    }
+    let reach = frame.shadow.w;
+    let fade = 1.0 - smoothstep(reach * 0.8, reach, distance(frame.camera_position.xyz, world_position));
+    return mix(1.0, lit, fade);
+}
+
 // How much of a lamp's light reaches `point`, by layer `layer` of `map`,
 // drawn through `view`: 1 in the open, 0 in its shadow, and 1 outside the
 // view. Four comparisons around the point, each filtered between four

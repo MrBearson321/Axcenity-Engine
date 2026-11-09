@@ -65,6 +65,7 @@ mod light_probes;
 mod lighting;
 mod lod;
 mod occlusion;
+mod parallel;
 mod post;
 mod probe_bake;
 mod probes;
@@ -82,26 +83,27 @@ mod water;
 
 #[cfg(test)]
 use crate::draw_list::{ChannelMap, MeshSource};
-use culling::{Bounds, Frustum, Reach, spheres_touch};
+use culling::{Bounds, Frustum, Reach, ShadowView};
 #[cfg(test)]
 use glam::Vec3;
 #[cfg(test)]
 use gpu::mip_levels;
 use gpu::{
-    create_frame_bind_group, create_instance_buffer, create_material, create_pipeline,
-    create_shadow_pipeline, create_shadow_views, create_target_texture, create_texture,
-    drawable_size, shader_module, target_bytes, update_custom_mesh, upload_custom_mesh,
-    upload_mesh, upload_texture,
+    DepthUse, create_frame_bind_group, create_instance_buffer, create_material, create_pipeline,
+    create_pipeline_for, create_shadow_pipeline, create_shadow_views, create_target_texture,
+    create_texture, drawable_size, shader_module, target_bytes, update_custom_mesh,
+    upload_custom_mesh, upload_mesh, upload_texture,
 };
 use lighting::{
-    DrawPlan, camera_view_projection, casters_in, frame_uniform, linear_color, maps_uniform_of,
-    material_key, material_textures, plan_draws, plan_lights, post_drawn, post_uniform,
+    DrawPlan, FrameUses, camera_view_projection, casters_in_views, frame_uniform, linear_color,
+    maps_uniform_of, material_textures, plan_draws, plan_lights, post_drawn, post_uniform,
     shadows_drawn,
 };
 #[cfg(test)]
-use lighting::{cascade_ends, light_raw, uv_matrix, view_projection};
+use lighting::{cascade_ends, light_raw, material_key, uv_matrix, view_projection};
 use lod::{Draw, LodStates, Resolved};
 use occlusion::{create_edge_pipeline, edge_uniform, occlusion_uniform};
+use parallel::write_pieces;
 use skinning::Skinning;
 use std::sync::Arc;
 

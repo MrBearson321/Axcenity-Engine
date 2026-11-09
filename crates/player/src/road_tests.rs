@@ -170,7 +170,9 @@ fn the_road_is_drawn_along_its_whole_curve_with_no_gaps() {
         let i = (y.min(height as usize - 1) * width as usize + x.min(width as usize - 1)) * 4;
         [pixels[i], pixels[i + 1], pixels[i + 2]]
     };
-    let grassy = |[r, g, b]: [u8; 3]| i32::from(g) > i32::from(r.max(b)) + 12;
+    // The grass is an olive texture, and the road a blue-grey: green well
+    // above blue tells them apart whatever the light makes of the grass.
+    let grassy = |[_, g, b]: [u8; 3]| i32::from(g) > i32::from(b) + 20;
     // Grass beside the road looks like grass.
     let (start, right, _, _) = frame(&curve, 40.0);
     assert!(

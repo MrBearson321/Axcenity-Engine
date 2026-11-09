@@ -262,3 +262,26 @@ At 2560 × 1440 on Ultra, the GPU's frame was 40.1 ms before distance bands and 
 - **`upload_new`** looks up each mesh and each set of textures once per frame, by address, rather than once per draw.
 - **Distance bands (`SortKey::band`)**: solid items are drawn nearest first in about 2 bands per doubling of the distance, then by mesh and material. Looking along a forest, every pixel had 8 or more layers of leaves, each shaded; a band drawn first hides what's behind it, by depth, before the shader runs. It's a few more batches for about a quarter less GPU time there.
 
+## Sharing the frame's planning among the CPU's threads
+
+That forest ran at 26 frames a second at 2560 × 1440 on Ultra: 40.8 ms of CPU on one thread of 32, and 31 ms of GPU. Measured with `shoot_project` from the same camera, on the machine above (AMD Radeon RX 9070 XT, Vulkan), release build. The picture is the same to within noise: 176 of 3.7 million pixels differ by more than 32 of 255. Times are milliseconds.
+
+| 2560 × 1440, Ultra | Before | After |
+|---|---|---|
+| CPU `build_draw_list` | 1.2 | 1.3 |
+| CPU `ScenePipeline::draw` | 39.6 | 9.5 to 10.0 |
+| GPU frame | 31.0 | 13.6 to 13.9 |
+| GPU shadows | 7.5 | 5.6 to 5.7 |
+| GPU scene | 22.4 | 7.0 to 7.7 |
+
+Inside `ScenePipeline::draw`, before: `LodStates::resolve` 5.2, material keys 3.4, `upload_new` 8.4, `plan_draws` 12.9, the shadow views' casters 4.1. Recording every draw took only 1.2, so it isn't threaded.
+
+- **Threads (`renderer/parallel.rs`, rayon).** Levels of detail, material keys, sort keys, the sort, instance data and each shadow view's casters are worked out in shares of 512 items and joined in order, so a frame is the same however it was shared (`planning_comes_out_the_same_however_many_threads_share_it`). A terrain's groups outside every view are passed over before anything is shared. Each LOD state has its own lock, and states of items new this frame are added afterwards. Joining doesn't copy: `DrawPlan::instances` and `casters` stay in pieces, and `write_pieces` copies them straight into wgpu's staging memory. Under `WORTH_SHARING` (4,096) items a job stays on the calling thread: waking the others takes about 0.1 ms, which made small scenes slower. Past 16 threads there's no gain.
+- **Work per distinct thing, not per draw (`FrameUses`).** Hashing a 330-byte `MaterialKey` for every draw, twice, was most of `upload_new` and much of `plan_draws`. Now each material and mesh is looked up once. `MeshSource::lod` hands out a kept copy instead of allocating one per draw per frame.
+- **Depth fill for cut-out surfaces (`PrefillPipelines`).** A shader with `discard` can't have the GPU skip what's hidden, so every leaf in front of a pixel was fully lit, then covered. Solid standard-material batches with an `alpha_cutoff` now draw their depth first in the scene pass (`fs_depth_only`, which only reads alpha), then are lit with no `discard` where depth is equal (`fs_prefilled`), so each pixel is lit once. Surface shaders and terrain are drawn as before, since they decide their own holes. `fs_depth_only` must cut out exactly what `standard_surface` does.
+- **Far cascades take turns (`ScenePipeline::schedule_cascades`).** Past `HEAVY_SHADOW_CASTERS` (12,000) casters planned, the two farthest cascades are drawn on alternate frames, keeping the matrix they were drawn with. They held 11.3 of the 14.3 million shadow triangles. A cascade is drawn anyway once the camera has moved 256 of its texels from where it was kept.
+- **Light through a leaf (`soft_sun_visibility`)** takes four filtered shadow samples, not the full 32-sample soft shadow it was computing a second time per leaf pixel (0.6 ms).
+
+Against the commit before, small scenes are unchanged or better (10,000 parts: 3.4 to 4.0 down to 2.9; 2,000 helmets: 1.8 down to 1.2; terrain and foliage: 3.1 to 3.7 down to 2.8; two items: 0.26 both). Filtering small casters out of the far cascades was tried and removed: it left out 2 of 21,000.
+
+**What's left is GPU work**: at Ultra, 5.7 ms of shadow vertices and 7 ms of lighting at 3.7 million pixels. High at 2560 × 1440 is 9.4 ms of GPU. Each shadow view copies its casters' 176-byte instances, of which a shadow pass reads 88, so a slimmer instance would halve that upload.
