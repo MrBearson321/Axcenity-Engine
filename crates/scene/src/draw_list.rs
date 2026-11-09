@@ -525,7 +525,8 @@ pub fn build_draw_list_posed(
         }
     }
 
-    terrain.draw_all(world, assets, &camera, &mut items);
+    let mut chunks = Vec::new();
+    terrain.draw_all(world, assets, &camera, &mut items, &mut chunks);
 
     DrawList {
         sky: look.sky,
@@ -543,6 +544,7 @@ pub fn build_draw_list_posed(
         grading: look.grading,
         lens: crate::lens::lens_of(world),
         items,
+        chunks,
         sprites: Vec::new(),
         particle_emitters: Vec::new(),
         decals,
@@ -1314,6 +1316,7 @@ fn model_material(material: &ModelMaterial) -> Material {
         uv_rotation: material.uv_rotation,
         uv_offset: material.uv_offset,
         double_sided: material.double_sided,
+        translucency: material.translucency,
         terrain: None,
         ..Material::default()
     }

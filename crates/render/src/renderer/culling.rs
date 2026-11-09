@@ -42,6 +42,25 @@ impl Frustum {
     }
 }
 
+/// Every view a frame draws into: the camera, the sun's cascades, and the
+/// lamps' shadow views, each limited to what its lamp can reach. What
+/// touches none of them doesn't change the frame.
+#[derive(Default)]
+pub(super) struct Reach {
+    pub(super) views: Vec<Frustum>,
+    pub(super) lamps: Vec<(Sphere, Frustum)>,
+}
+
+impl Reach {
+    pub(super) fn touches(&self, sphere: Sphere) -> bool {
+        self.views.iter().any(|view| view.touches(sphere))
+            || self
+                .lamps
+                .iter()
+                .any(|(lamp, view)| spheres_touch(*lamp, sphere) && view.touches(sphere))
+    }
+}
+
 /// Whether two spheres overlap.
 pub(super) fn spheres_touch((a, a_radius): Sphere, (b, b_radius): Sphere) -> bool {
     a.distance(b) <= a_radius + b_radius

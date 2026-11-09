@@ -54,7 +54,14 @@ fn items_behind_or_beside_the_camera_are_culled_and_ones_crossing_the_edge_are_d
         ]
     );
     assert_eq!(plan.culled, 4);
-    assert_eq!(plan.batches, [batch(MeshKey::Block, false, 0..3)]);
+    // The two near blocks batch together; the far floor is a later band.
+    assert_eq!(
+        plan.batches,
+        [
+            batch(MeshKey::Block, false, 0..2),
+            batch(MeshKey::Block, false, 2..3),
+        ]
+    );
     // Every solid block can still cast a shadow into the view; the glass
     // casts none.
     assert_eq!(plan.casters.len(), 6);
@@ -301,4 +308,44 @@ fn frozen_culling_keeps_the_frozen_views_items_and_reports_their_bounds() {
     renderer.render(&list).unwrap();
     assert_eq!(renderer.stats().items_drawn, 1);
     assert!(renderer.culling_bounds().is_empty());
+}
+
+/// A list whose only items are a block `x` studs to the right, as one group.
+fn grouped_block(x: f32, cull_distance: f32) -> DrawList {
+    let item = DrawItem {
+        cull_distance,
+        ..block_at(Vec3::new(x, 0.0, -10.0))
+    };
+    let mut list = list_of(Vec::new());
+    list.chunks = vec![crate::ItemChunk::of(vec![item])];
+    list
+}
+
+#[test]
+fn a_group_no_view_reaches_is_passed_over_and_counted() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    renderer.render(&grouped_block(0.0, 0.0)).unwrap();
+    let seen = renderer.stats();
+    assert_eq!((seen.items_submitted, seen.items_drawn), (1, 1));
+
+    renderer.render(&grouped_block(500.0, 0.0)).unwrap();
+    let away = renderer.stats();
+    assert_eq!((away.items_submitted, away.items_drawn), (1, 0));
+    assert_eq!(away.items_culled, 1);
+}
+
+#[test]
+fn a_group_past_its_cull_distance_is_passed_over() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    renderer.render(&grouped_block(0.0, 5.0)).unwrap();
+    let stats = renderer.stats();
+    assert_eq!((stats.items_submitted, stats.items_drawn), (1, 0));
 }

@@ -1,7 +1,7 @@
 //! Painted plants, props, and models as draw items. They sit on the terrain
 //! surface and are not Instances, so sculpting moves them with the ground.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use axcenity_assets::{Assets, Model};
@@ -9,7 +9,7 @@ use axcenity_core::{
     FoliagePlant, FoliageProp, FoliageSource, InstanceId, PartType, TerrainData, Vector3,
 };
 use axcenity_render::glam::{Mat4, Quat, Vec2, Vec3};
-use axcenity_render::{DrawItem, Material, Shape, Sway};
+use axcenity_render::{DrawItem, ItemChunk, Material, Shape, Sway};
 use axcenity_terrain::Placement;
 
 use crate::draw_list::{ModelPiece, draw_id, model_pieces, push_model};
@@ -391,24 +391,102 @@ fn corners() -> impl Iterator<Item = Vec3> {
 /// A model painted on a terrain, with what its copies share this frame.
 type PaintedModel = (Arc<Model>, Vec<ModelPiece>);
 
-/// Adds the painted foliage of `terrain` (its data `data`) to `items`,
-/// sitting on the surface. Plants and models past their cull distance
-/// from `camera` aren't built at all: the renderer would leave them out
-/// anyway ([`DrawItem::cull_distance`]), and a dense terrain has thousands.
-/// The distance is measured flat, in XZ, which is never more than the
-/// renderer's, so nothing that would be drawn is skipped.
+/// The side, in studs, of the squares a terrain's foliage is grouped into.
+const GROUP_SIZE: f32 = 48.0;
+
+/// Plants and models drawn no farther than this are grouped apart from
+/// taller ones, so a group of grass is passed over as soon as it's out of
+/// reach, however far the trees around it are drawn.
+const SHORT_REACH: f32 = 400.0;
+
+/// A terrain's foliage, kept in groups between frames (see
+/// [`axcenity_render::ItemChunk`]), until the terrain or a painted model
+/// changes.
+pub(crate) struct PaintedFoliage {
+    key: FoliageKey,
+    /// The models painted, to find out whether one was loaded or reloaded.
+    paths: Vec<String>,
+    chunks: Vec<ItemChunk>,
+}
+
+/// What a terrain's foliage is built from.
+#[derive(PartialEq)]
+struct FoliageKey {
+    /// Addresses, only ever compared.
+    data: usize,
+    revision: u64,
+    placement: [u32; 6],
+    models: Vec<Option<usize>>,
+}
+
+impl FoliageKey {
+    fn of(
+        placement: &Placement,
+        data: &Arc<TerrainData>,
+        paths: &[String],
+        assets: &Assets,
+    ) -> Self {
+        let (at, size) = (placement.position, placement.size);
+        Self {
+            data: Arc::as_ptr(data) as usize,
+            revision: data.revision(),
+            placement: [at.x, at.y, at.z, size.x, size.y, size.z].map(f32::to_bits),
+            models: paths
+                .iter()
+                .map(|path| assets.model(path).map(|model| Arc::as_ptr(&model) as usize))
+                .collect(),
+        }
+    }
+}
+
+/// Adds a terrain's painted plants, models and props to `chunks`, each
+/// sitting on the surface, built once and kept in `kept` until the terrain
+/// or a model changes. How far each is drawn is its [`DrawItem::cull_distance`].
 pub(crate) fn draw_terrain(
+    kept: &mut Option<PaintedFoliage>,
+    terrain: InstanceId,
+    placement: &Placement,
+    data: &Arc<TerrainData>,
+    assets: &Assets,
+    chunks: &mut Vec<ItemChunk>,
+) {
+    if let Some(foliage) = kept.as_ref()
+        && foliage.key == FoliageKey::of(placement, data, &foliage.paths, assets)
+    {
+        chunks.extend_from_slice(&foliage.chunks);
+        return;
+    }
+    let mut paths: Vec<String> = data
+        .foliage()
+        .iter()
+        .filter_map(|instance| match &instance.source {
+            FoliageSource::Model(path) => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    paths.sort();
+    paths.dedup();
+    let foliage = PaintedFoliage {
+        key: FoliageKey::of(placement, data, &paths, assets),
+        chunks: built_groups(terrain, placement, data, assets),
+        paths,
+    };
+    chunks.extend_from_slice(&foliage.chunks);
+    *kept = Some(foliage);
+}
+
+/// Every plant, model and prop of a terrain, grouped by where it stands.
+fn built_groups(
     terrain: InstanceId,
     placement: &Placement,
     data: &TerrainData,
     assets: &Assets,
-    camera: Vec3,
-    items: &mut Vec<DrawItem>,
-) {
+) -> Vec<ItemChunk> {
     // Each model is looked up once (a lock and a lookup by path), not once
     // per instance painted from it.
     let mut models: HashMap<&str, Option<PaintedModel>> = HashMap::new();
-    let camera_xz = Vec2::new(camera.x, camera.z);
+    // In a set order, so the same terrain gives the same list every time.
+    let mut groups: BTreeMap<(i32, i32, bool), Vec<DrawItem>> = BTreeMap::new();
     for (index, instance) in data.foliage().iter().enumerate() {
         let scale = instance.scale.max(0.01);
         let xz = placement.to_world_xz(data, Vec2::new(instance.x, instance.z));
@@ -430,12 +508,16 @@ pub(crate) fn draw_terrain(
             }
             source => (cull_distance(source) * scale, None),
         };
-        if cull_distance > 0.0 && camera_xz.distance(xz) > cull_distance {
-            continue;
-        }
         let Some(y) = placement.ground_y(data, xz.x, xz.y) else {
             continue;
         };
+        let items = groups
+            .entry((
+                (xz.x / GROUP_SIZE).floor() as i32,
+                (xz.y / GROUP_SIZE).floor() as i32,
+                cull_distance > 0.0 && cull_distance <= SHORT_REACH,
+            ))
+            .or_default();
         let ground = Vec3::new(xz.x, y, xz.y);
         let turn = Quat::from_rotation_y(instance.yaw);
         match (&instance.source, model) {
@@ -468,6 +550,7 @@ pub(crate) fn draw_terrain(
             }
         }
     }
+    groups.into_values().map(ItemChunk::of).collect()
 }
 
 /// Where `piece`'s shape sits in its plant or prop.
@@ -538,17 +621,9 @@ mod tests {
             collide: true,
         });
         world.set_terrain(terrain, std::sync::Arc::new(data));
-        let mut items = Vec::new();
         let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
         let data = world.terrain(terrain).unwrap();
-        draw_terrain(
-            terrain,
-            &placement,
-            data,
-            &Assets::default(),
-            Vec3::ZERO,
-            &mut items,
-        );
+        let items = built(terrain, &placement, data, &Assets::default());
         assert!(items.len() >= 3, "{} items", items.len());
         let xz = placement.to_world_xz(data, Vec2::ZERO);
         let top = placement.ground_y(data, xz.x, xz.y).unwrap();
@@ -592,15 +667,7 @@ mod tests {
         world.set_terrain(terrain, std::sync::Arc::new(data));
         let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
         let data = world.terrain(terrain).unwrap();
-        let mut items = Vec::new();
-        draw_terrain(
-            terrain,
-            &placement,
-            data,
-            &Assets::default(),
-            Vec3::ZERO,
-            &mut items,
-        );
+        let items = built(terrain, &placement, data, &Assets::default());
         let ground = |x| {
             let xz = placement.to_world_xz(data, Vec2::new(x, 4.0));
             placement.ground_y(data, xz.x, xz.y).unwrap()
@@ -620,8 +687,23 @@ mod tests {
         assert_eq!(items[4].sway, None, "crates stay still");
     }
 
-    /// A terrain with one grass plant and one crate, seen from `camera`.
-    fn drawn_from(camera: Vec3) -> Vec<DrawItem> {
+    /// Every item of a terrain's foliage, in groups' order.
+    fn built(
+        terrain: InstanceId,
+        placement: &Placement,
+        data: &std::sync::Arc<TerrainData>,
+        assets: &Assets,
+    ) -> Vec<DrawItem> {
+        let mut chunks = Vec::new();
+        draw_terrain(&mut None, terrain, placement, data, assets, &mut chunks);
+        chunks
+            .iter()
+            .flat_map(|chunk| chunk.items.iter().cloned())
+            .collect()
+    }
+
+    /// A terrain with one grass plant and one crate.
+    fn grass_and_crate() -> (axcenity_core::World, InstanceId) {
         let mut world = axcenity_core::World::new();
         let terrain = world.create(ClassName::Terrain).unwrap();
         world.set_parent(terrain, Some(world.workspace())).unwrap();
@@ -639,35 +721,56 @@ mod tests {
             plant(FoliageSource::Prop(FoliageProp::Crate), 6.0),
         ]);
         world.set_terrain(terrain, std::sync::Arc::new(data));
+        (world, terrain)
+    }
+
+    #[test]
+    fn plants_are_grouped_apart_by_how_far_they_are_drawn() {
+        let (world, terrain) = grass_and_crate();
         let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
         let data = world.terrain(terrain).unwrap();
-        let mut items = Vec::new();
+        let mut chunks = Vec::new();
         draw_terrain(
+            &mut None,
             terrain,
             &placement,
             data,
             &Assets::default(),
-            camera,
-            &mut items,
+            &mut chunks,
         );
-        items
+        // Grass (two wedges) is drawn so far; the crate at any distance.
+        assert_eq!(chunks.len(), 2, "{chunks:?}");
+        let grass = chunks
+            .iter()
+            .find(|chunk| chunk.items.len() == 2)
+            .expect("the grass");
+        assert!(grass.cull_distance > 0.0 && grass.cull_distance <= SHORT_REACH);
+        let crates = chunks.iter().find(|chunk| chunk.items.len() == 1);
+        assert_eq!(crates.expect("the crate").cull_distance, 0.0);
     }
 
     #[test]
-    fn plants_past_their_cull_distance_are_not_built() {
-        // Near, the grass (two wedges) and the crate are built.
-        let near = drawn_from(Vec3::new(0.0, 10.0, 0.0));
-        assert_eq!(
-            near.iter().filter(|item| item.cull_distance > 0.0).count(),
-            2,
-            "{near:?}"
+    fn the_groups_are_kept_until_the_terrain_changes() {
+        let (mut world, terrain) = grass_and_crate();
+        let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
+        let assets = Assets::default();
+        let mut kept = None;
+        let drawn = |world: &axcenity_core::World, kept: &mut Option<PaintedFoliage>| {
+            let mut chunks = Vec::new();
+            let data = world.terrain(terrain).unwrap();
+            draw_terrain(kept, terrain, &placement, data, &assets, &mut chunks);
+            chunks
+        };
+        let first = drawn(&world, &mut kept);
+        let second = drawn(&world, &mut kept);
+        assert!(
+            std::sync::Arc::ptr_eq(&first[0].items, &second[0].items),
+            "built once"
         );
-        // From 500 studs away only the crate is left, which has no cull
-        // distance. Height doesn't count: the camera is far up too.
-        let far = drawn_from(Vec3::new(500.0, 400.0, 0.0));
-        assert_eq!(far.len(), 1, "{far:?}");
-        assert!(matches!(far[0].shape, Shape::Block));
-        assert_eq!(far[0].cull_distance, 0.0);
+        let mut changed = (**world.terrain(terrain).unwrap()).clone();
+        changed.foliage_mut().clear();
+        world.set_terrain(terrain, std::sync::Arc::new(changed));
+        assert!(drawn(&world, &mut kept).is_empty(), "built again");
     }
 
     #[test]
@@ -681,7 +784,7 @@ mod tests {
         assert_eq!(model_cull_distance(Vec3::splat(f32::NAN)), 60.0);
 
         // A model painted on a terrain carries that distance (its scale
-        // counted), and isn't built when the camera is past it.
+        // counted), and its group is passed over past it.
         let folder =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-mesh");
         let assets = Assets::new(&folder);
@@ -703,13 +806,8 @@ mod tests {
         let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
         let data = world.terrain(terrain).unwrap();
         let expected = model_cull_distance(Vec3::from(model.size) * 2.0);
-        let mut items = Vec::new();
-        draw_terrain(terrain, &placement, data, &assets, Vec3::ZERO, &mut items);
+        let items = built(terrain, &placement, data, &assets);
         assert_eq!(items.len(), model.primitives.len());
         assert!(items.iter().all(|item| item.cull_distance == expected));
-        let mut far = Vec::new();
-        let camera = Vec3::new(expected + 10.0, 0.0, 0.0);
-        draw_terrain(terrain, &placement, data, &assets, camera, &mut far);
-        assert!(far.is_empty(), "{far:?}");
     }
 }

@@ -801,3 +801,209 @@ fn bench_project() {
         eprintln!("asset error: {error}");
     }
 }
+
+/// Draws a project from named cameras and saves each view as a PNG, with
+/// the frame's numbers, so a project's look can be compared with a reference.
+/// `AXCENITY_BENCH_PROJECT` names the project, `AXCENITY_SHOT_DIR` the folder
+/// for the pictures, `AXCENITY_SHOT_VIEWS` the cameras
+/// (`name:eyeX,eyeY,eyeZ:targetX,targetY,targetZ[:fovY]`, separated by `;`),
+/// and `AXCENITY_SHOT_SIZE` (`1280x720`) and `AXCENITY_SHOT_QUALITY` (`High`)
+/// are optional.
+///
+/// `cargo test -p axcenity-player --release -- --ignored shoot_project --nocapture --test-threads 1`
+#[test]
+#[ignore = "tool: run with --release -- --ignored shoot_project"]
+fn shoot_project() {
+    let (Some(folder), Some(out), Some(views)) = (
+        std::env::var_os("AXCENITY_BENCH_PROJECT"),
+        std::env::var_os("AXCENITY_SHOT_DIR"),
+        std::env::var("AXCENITY_SHOT_VIEWS").ok(),
+    ) else {
+        eprintln!("skipped shoot_project: set AXCENITY_BENCH_PROJECT, _SHOT_DIR and _SHOT_VIEWS");
+        return;
+    };
+    let (width, height) = std::env::var("AXCENITY_SHOT_SIZE")
+        .ok()
+        .and_then(|size| {
+            let (width, height) = size.split_once('x')?;
+            Some((width.parse().ok()?, height.parse().ok()?))
+        })
+        .unwrap_or(SIZE);
+    let quality = match std::env::var("AXCENITY_SHOT_QUALITY").as_deref() {
+        Ok("Low") => Quality::Low,
+        Ok("Medium") => Quality::Medium,
+        Ok("Ultra") => Quality::Ultra,
+        _ => Quality::High,
+    };
+    let folder = PathBuf::from(folder);
+    let out = PathBuf::from(out);
+    std::fs::create_dir_all(&out).unwrap();
+    let loading = Instant::now();
+    let world = axcenity_project::load(&folder).unwrap().world;
+    println!("world read in {:.2} s", loading.elapsed().as_secs_f64());
+    let assets = Assets::new(&folder);
+    let vector_of = |text: &str| {
+        let numbers: Vec<f32> = text.split(',').map(|n| n.trim().parse().unwrap()).collect();
+        Vec3::new(numbers[0], numbers[1], numbers[2])
+    };
+    let (device, queue) = bench_gpu().expect("no graphics adapter");
+    let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+    let mut settings = GraphicsSettings::preset(quality);
+    if std::env::var_os("AXCENITY_SHOT_NOAA").is_some() {
+        settings.anti_aliasing = Some(axcenity_render::AntiAliasing::Off);
+    }
+    renderer.set_graphics(&settings);
+    let mut cache = TerrainCache::new();
+    for view in views.split(';').filter(|view| !view.trim().is_empty()) {
+        let parts: Vec<&str> = view.trim().split(':').collect();
+        let camera = Camera {
+            position: vector_of(parts[1]),
+            look_at: vector_of(parts[2]),
+            fov_y_degrees: parts.get(3).map_or(70.0, |fov| fov.parse().unwrap()),
+        };
+        let build = |cache: &mut TerrainCache| {
+            axcenity_scene::build_draw_list_posed(
+                &world,
+                &assets,
+                camera,
+                &Default::default(),
+                cache,
+            )
+        };
+        // The first frames read models and fill the caches.
+        let first = Instant::now();
+        for _ in 0..24 {
+            let list = build(&mut cache);
+            renderer.render(&list).unwrap();
+            device.poll(wgpu::PollType::Wait).unwrap();
+        }
+        println!(
+            "{}: first 24 frames {:.2} s",
+            parts[0],
+            first.elapsed().as_secs_f64()
+        );
+        let (mut built, mut drawn, mut gpu) = (Vec::new(), Vec::new(), Vec::new());
+        for _ in 0..60 {
+            let start = Instant::now();
+            let list = build(&mut cache);
+            built.push(start.elapsed());
+            let start = Instant::now();
+            renderer.render(&list).unwrap();
+            drawn.push(start.elapsed());
+            device.poll(wgpu::PollType::Wait).unwrap();
+            gpu.extend(renderer.stats().gpu_time);
+        }
+        let median = |times: &mut Vec<Duration>| {
+            times.sort();
+            times.get(times.len() / 2).copied().unwrap_or_default()
+        };
+        let stats = renderer.stats();
+        let mb = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+        println!(
+            "{} ({width} × {height}, {quality:?})\n  {} of {} items drawn in {} batches; {} draw calls, {} triangles\n  shadow casters {} drawn, {} culled\n  GPU memory: textures {:.0} MB, meshes {:.0} MB, targets {:.0} MB\n  CPU build_draw_list {}\n  CPU ScenePipeline::draw {}\n  GPU frame {}",
+            parts[0],
+            stats.items_drawn,
+            stats.items_submitted,
+            stats.batches,
+            stats.draw_calls,
+            stats.triangles,
+            stats.shadow_casters_drawn,
+            stats.shadow_casters_culled,
+            mb(stats.texture_bytes),
+            mb(stats.mesh_bytes),
+            mb(stats.target_bytes),
+            millis(median(&mut built)),
+            millis(median(&mut drawn)),
+            millis(median(&mut gpu)),
+        );
+        for pass in FramePass::ALL {
+            if let Some(time) = stats.pass_time(pass) {
+                println!("  GPU   {:<26} {}", pass.label(), millis(time));
+            }
+        }
+        let debug = std::env::var("AXCENITY_SHOT_DEBUG").ok();
+        if let Some(view) = debug.as_deref() {
+            use axcenity_render::DebugView;
+            renderer.set_debug_view(Some(match view {
+                "base" => DebugView::BaseColor,
+                "normals" => DebugView::Normals,
+                "ao" => DebugView::AmbientOcclusion,
+                "overdraw" => DebugView::Overdraw,
+                "rough" => DebugView::Roughness,
+                _ => DebugView::Unlit,
+            }));
+            let list = build(&mut cache);
+            renderer.render(&list).unwrap();
+            device.poll(wgpu::PollType::Wait).unwrap();
+        }
+        let pixels = renderer.read_pixels();
+        let name = out.join(format!("{}.png", parts[0]));
+        let file = std::io::BufWriter::new(std::fs::File::create(&name).unwrap());
+        let mut encoder = png::Encoder::new(file, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&pixels).unwrap();
+        writer.finish().unwrap();
+    }
+    for error in assets.take_errors() {
+        eprintln!("asset error: {error}");
+    }
+}
+
+/// Bakes a project's light probe volumes as the editor's Bake Probes does,
+/// at High, without opening the editor, and says how long each took.
+///
+/// `AXCENITY_BENCH_PROJECT=<folder> cargo test -p axcenity-player --release -- --ignored bake_project_probes --nocapture --test-threads 1`
+#[test]
+#[ignore = "tool: run with --release -- --ignored bake_project_probes"]
+fn bake_project_probes() {
+    use axcenity_assets::{LightProbes, write_light_probes};
+    use axcenity_render::LIGHT_PROBE_BAKE_SIZE;
+
+    let Some(folder) = std::env::var_os("AXCENITY_BENCH_PROJECT") else {
+        eprintln!("skipped bake_project_probes: set AXCENITY_BENCH_PROJECT");
+        return;
+    };
+    let folder = PathBuf::from(folder);
+    let world = axcenity_project::load(&folder).unwrap().world;
+    let assets = Assets::new(&folder);
+    let (device, queue) = bench_gpu().expect("no graphics adapter");
+    let list = axcenity_scene::build_draw_list(&world, &assets, camera(Vec3::ZERO, Vec3::NEG_Z));
+    let fingerprint = axcenity_scene::light_bake_fingerprint(&world);
+    for id in world.descendants(world.workspace()) {
+        let Some(instance) = world.get(id) else {
+            continue;
+        };
+        if instance.class() != ClassName::LightProbeVolume {
+            continue;
+        }
+        let Some(path) = instance
+            .property("Bake")
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned)
+        else {
+            eprintln!("{} has no Bake path", instance.name());
+            continue;
+        };
+        let grid = axcenity_scene::light_probe_points(&world, id).unwrap();
+        let start = Instant::now();
+        let probes = TextureRenderer::bake_light_probes(
+            &device,
+            &queue,
+            &list,
+            &grid.points,
+            LIGHT_PROBE_BAKE_SIZE,
+            &GraphicsSettings::preset(Quality::High),
+        )
+        .unwrap();
+        let probes = LightProbes::new(grid.counts, fingerprint, probes).unwrap();
+        write_light_probes(&folder, &path, &probes).unwrap();
+        println!(
+            "{path}: {:?} probes in {:.1} s",
+            grid.counts,
+            start.elapsed().as_secs_f64()
+        );
+    }
+}

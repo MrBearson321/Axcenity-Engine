@@ -97,6 +97,7 @@ pub(crate) fn variant_material(standard: &StandardMaterial, assets: &Assets) -> 
         uv_rotation: 0.0,
         uv_offset: standard.offset,
         double_sided: standard.double_sided,
+        translucency: 0.0,
         terrain: None,
         surface_shader: standard
             .shader

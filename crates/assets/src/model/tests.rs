@@ -11,6 +11,22 @@ fn example_bytes() -> Vec<u8> {
 }
 
 #[test]
+fn a_fluttering_material_is_a_leaf_unless_it_says_otherwise() {
+    let of = |text: &str| {
+        let raw = serde_json::value::RawValue::from_string(text.to_owned()).unwrap();
+        super::wind_of(&Some(raw))
+    };
+    assert_eq!(
+        of(r#"{"axcenity_flutter":0.2}"#).translucency,
+        super::LEAF_TRANSLUCENCY
+    );
+    let opaque = of(r#"{"axcenity_flutter":0.2,"axcenity_translucency":0}"#);
+    assert_eq!(opaque.translucency, 0.0);
+    assert_eq!(of(r#"{"axcenity_sway":0.1}"#).translucency, 0.0);
+    assert_eq!(of(r#"{"axcenity_translucency":3}"#).translucency, 1.0);
+}
+
+#[test]
 fn the_example_pyramid_loads_fitted_into_the_unit_cube() {
     let model = load_model(&example_bytes(), &example_folder(), ModelFormat::Gltf).unwrap();
     assert_eq!(model.size, [4.0, 3.0, 4.0]);

@@ -18,6 +18,10 @@ use super::*;
 /// light_probe_sum.wgsl.
 pub(super) const PROBES_PER_FRAME: u32 = 2;
 
+/// Scenes with more items than this keep their bake until the light
+/// changes, instead of tracing every probe from the first frame.
+const HEAVY_SCENE_ITEMS: usize = 4000;
+
 /// The probes' faces and the pass that sums them.
 pub(super) struct RealtimeGi {
     camera: ProbeCamera,
@@ -32,6 +36,11 @@ pub(super) struct RealtimeGi {
     next: u32,
     /// How many probes have been traced, for tests.
     pub(super) traced: u32,
+    /// What the probes were last traced under, and how many have been
+    /// traced since it changed: once that's all of them, there's nothing
+    /// new to see until the light changes.
+    light: u64,
+    settled: u32,
 }
 
 impl RealtimeGi {
@@ -136,6 +145,8 @@ impl RealtimeGi {
             pipeline,
             next: 0,
             traced: 0,
+            light: 0,
+            settled: 0,
         }
     }
 
@@ -150,6 +161,24 @@ impl RealtimeGi {
     ) -> Result<()> {
         let total = probes.count();
         if total == 0 {
+            return Ok(());
+        }
+        // Every probe is six small draws of the whole scene, so a scene
+        // whose light is still pays for one pass over them and no more.
+        let light = light_state(list, total);
+        if light != self.light {
+            // A heavy scene starts from its bake: tracing every probe of
+            // it first would be many slow frames for nothing new.
+            let starting = self.light == 0;
+            let items = list.items.len() + list.chunks.iter().map(|c| c.items.len()).sum::<usize>();
+            self.settled = if starting && items > HEAVY_SCENE_ITEMS {
+                total
+            } else {
+                0
+            };
+            self.light = light;
+        }
+        if self.settled >= total {
             return Ok(());
         }
         self.camera.set_graphics(&camera_settings(settings));
@@ -222,6 +251,7 @@ impl RealtimeGi {
         }
         queue.submit([encoder.finish()]);
         self.traced += count;
+        self.settled += count;
         Ok(())
     }
 
@@ -232,6 +262,22 @@ impl RealtimeGi {
         size * size * 8 * u64::from(6 * PROBES_PER_FRAME)
             + self.camera.renderer.stats().target_bytes
     }
+}
+
+/// A number for the light falling on `list`'s scene and how many probes
+/// there are: while it's the same, tracing them again would change nothing.
+/// The clouds' drift isn't in it (drifting clouds would never let it rest).
+fn light_state(list: &DrawList, probes: u32) -> u64 {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let clouds = (list.clouds.cover, list.clouds.density, list.clouds.color);
+    let state = format!(
+        "{:?} {:?} {:?} {:?} {:?} {:?}",
+        list.sun, list.ambient, list.sky, clouds, list.weather, list.lights
+    );
+    let mut hasher = DefaultHasher::new();
+    state.hash(&mut hasher);
+    probes.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// What the probe camera draws with: the frame's settings, with the sun's

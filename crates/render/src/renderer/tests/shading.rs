@@ -384,3 +384,42 @@ fn a_materials_shading_picks_its_binding_and_a_ramp_takes_the_specular_maps_plac
     assert_eq!(maps_uniform_of(&key).shading[1], 0.0, "read from the ramp");
     assert_eq!(maps_uniform_of(&key).specular[0], 0.0, "no specular map");
 }
+
+/// How bright the middle of a leaf facing the camera is, with the sun
+/// behind it.
+fn leaf_lit_from_behind(translucency: f32) -> [u8; 3] {
+    let Some((device, queue)) = test_device() else {
+        return [0; 3];
+    };
+    let mut list = list_of(vec![DrawItem {
+        transform: Mat4::from_scale_rotation_translation(
+            Vec3::new(8.0, 8.0, 0.1),
+            glam::Quat::IDENTITY,
+            Vec3::new(0.0, 0.0, -5.0),
+        ),
+        material: Material {
+            base_color: [0.3, 0.6, 0.2],
+            double_sided: true,
+            translucency,
+            ..Material::default()
+        },
+        casts_shadow: false,
+        ..item(Shape::Block, Vec3::ZERO, 1.0)
+    }]);
+    list.sun.direction = Vec3::new(0.0, 0.0, -1.0);
+    let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+    renderer.render(&list).unwrap();
+    let pixels = renderer.read_pixels();
+    let middle = (16 * 32 + 16) * 4;
+    [pixels[middle], pixels[middle + 1], pixels[middle + 2]]
+}
+
+#[test]
+fn a_translucent_leaf_glows_green_with_the_sun_behind_it() {
+    let (solid, leaf) = (leaf_lit_from_behind(0.0), leaf_lit_from_behind(0.5));
+    assert!(leaf[1] > solid[1] + 20, "{solid:?} against {leaf:?}");
+    assert!(
+        i32::from(leaf[1]) - i32::from(leaf[2]) > i32::from(solid[1]) - i32::from(solid[2]),
+        "more green than blue comes through: {solid:?} against {leaf:?}"
+    );
+}

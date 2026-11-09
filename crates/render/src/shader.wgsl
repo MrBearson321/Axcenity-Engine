@@ -476,6 +476,12 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     } else {
         color = light_surface(in.world_position, geometric, shaded.normal, in.clip_position.xy,
             shaded.base_color, metalness, roughness, occlusion, dielectric, solid);
+        if maps.shading.y > 0.0 {
+            // What passes through isn't also reflected.
+            color *= 1.0 - LEAF_REFLECTION_LOSS * maps.shading.y;
+            color += through_leaf(in.world_position, geometric, shaded.normal,
+                in.clip_position.xy, shaded.base_color, occlusion, maps.shading.y);
+        }
     }
 
     // Solid items stay solid whatever the texture's alpha, so the window's
@@ -483,6 +489,33 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     let alpha = select(clamp(shaded.opacity, 0.0, 1.0), 1.0, solid);
     let seen = fogged(frame.fog, frame.camera_position.xyz, in.world_position, color + shaded.emissive);
     return vec4<f32>(seen, alpha);
+}
+
+// How much of what a translucent surface passes on it no longer reflects.
+const LEAF_REFLECTION_LOSS: f32 = 0.6;
+
+// How much of each color a leaf lets through, compared with what it
+// reflects: green and red pass, blue is taken, so lit from behind it glows
+// a brighter, yellower green.
+const THROUGH_LEAF_TINT: vec3<f32> = vec3<f32>(1.1, 1.3, 0.35);
+
+// The light that comes through a thin surface from its far side, from the
+// sun and from the sky behind it, scattered evenly toward the viewer.
+// Occlusion counts by half: what's close in front of a leaf doesn't block
+// what reaches it from behind.
+fn through_leaf(
+    world_position: vec3<f32>,
+    geometric: vec3<f32>,
+    n: vec3<f32>,
+    pixel: vec2<f32>,
+    base_color: vec3<f32>,
+    occlusion: f32,
+    amount: f32,
+) -> vec3<f32> {
+    let sun = sun_arrival(world_position, -geometric, pixel, false);
+    let from_sun = sun.radiance * sun.visible * max(dot(-n, sun.l), 0.0) / PI;
+    let from_sky = surrounding_diffuse(world_position, -n, frame.sky_top.w);
+    return amount * base_color * THROUGH_LEAF_TINT * mix(1.0, occlusion, 0.5) * (from_sun + from_sky);
 }
 
 // `Maps::shading`'s models. Must match `SHADING_*` in renderer/types.rs.

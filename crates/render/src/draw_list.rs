@@ -48,6 +48,10 @@ pub struct DrawList {
     /// costs nothing.
     pub lens: LensEffects,
     pub items: Vec<DrawItem>,
+    /// Items kept between frames by whoever made them, in groups of nearby
+    /// items (see [`ItemChunk`]): a painted forest has tens of thousands,
+    /// which cost more to list again each frame than to draw.
+    pub chunks: Vec<ItemChunk>,
     /// Pictures that always face the camera, such as particles, drawn
     /// after every item. They aren't lit or shadowed.
     pub sprites: Vec<Sprite>,
@@ -1157,6 +1161,63 @@ impl Default for Shadows {
     }
 }
 
+/// A group of nearby items kept between frames. A group no view reaches
+/// is passed over whole, so a frame's cost follows what's near what it
+/// sees and not everything painted. Never holds water.
+#[derive(Clone, Debug)]
+pub struct ItemChunk {
+    /// The middle of a ball holding every item, as far as each can sway.
+    pub center: Vec3,
+    pub radius: f32,
+    /// The farthest [`DrawItem::cull_distance`] of its items, or 0 if one
+    /// of them is drawn at any distance.
+    pub cull_distance: f32,
+    pub items: Arc<[DrawItem]>,
+}
+
+impl ItemChunk {
+    /// A group of `items`, its ball and reach worked out from them.
+    pub fn of(items: Vec<DrawItem>) -> Self {
+        let mut low = Vec3::splat(f32::INFINITY);
+        let mut high = Vec3::splat(f32::NEG_INFINITY);
+        let mut widest = 0.0f32;
+        for item in &items {
+            let (center, radius) = item.resting_ball();
+            low = low.min(center);
+            high = high.max(center);
+            widest = widest.max(radius + item.sway.map_or(0.0, |sway| sway.reach()));
+        }
+        let unlimited = items.iter().any(|item| item.cull_distance <= 0.0);
+        Self {
+            center: (low + high) * 0.5,
+            radius: (high - low).length() * 0.5 + widest,
+            cull_distance: if unlimited {
+                0.0
+            } else {
+                items
+                    .iter()
+                    .map(|item| item.cull_distance)
+                    .fold(0.0, f32::max)
+            },
+            items: items.into(),
+        }
+    }
+}
+
+impl DrawItem {
+    /// The ball its shape fills where it rests: every shape fits the
+    /// 1×1×1 cube its transform scales.
+    pub fn resting_ball(&self) -> (Vec3, f32) {
+        let axes = [
+            self.transform.x_axis.truncate(),
+            self.transform.y_axis.truncate(),
+            self.transform.z_axis.truncate(),
+        ];
+        let corner = axes[0].length_squared() + axes[1].length_squared() + axes[2].length_squared();
+        (self.transform.w_axis.truncate(), corner.sqrt() * 0.5)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DrawItem {
     pub shape: Shape,
@@ -1432,6 +1493,9 @@ pub struct Material {
     pub water: Option<crate::Water>,
     /// How it's lit. Water and terrain ignore it.
     pub shading: Shading,
+    /// How much light from behind passes through it, from 0 (none) to 1,
+    /// for thin things like leaves. Only the standard shading has it.
+    pub translucency: f32,
     /// A line around its silhouette (an inverted hull), for solid items.
     /// Water and terrain ignore it.
     pub outline: Option<Outline>,
@@ -1529,6 +1593,7 @@ impl Default for Material {
             surface_parameters: [[0.0; 4]; SURFACE_PARAMETERS],
             water: None,
             shading: Shading::Standard,
+            translucency: 0.0,
             outline: None,
         }
     }

@@ -196,6 +196,32 @@ fn a_moving_sun_updates_the_probes_within_a_few_frames_with_realtime_gi_on() {
 }
 
 #[test]
+fn still_light_is_traced_once_and_no_more() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let lit = yard(SUN_ON_WALL);
+    let world = with_volume(&lit, bake(&device, &queue, &lit));
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    renderer.set_graphics(&settings(true));
+    for _ in 0..PROBES / realtime_gi_probes_per_frame() + 3 {
+        renderer.render(&world).unwrap();
+    }
+    assert_eq!(renderer.scene.probes_traced(), Some(PROBES), "one pass");
+    // The light moves: every probe is traced again.
+    let moved = with_volume(&yard(SUN_BEHIND_WALL), bake(&device, &queue, &lit));
+    for _ in 0..PROBES / realtime_gi_probes_per_frame() + 3 {
+        renderer.render(&moved).unwrap();
+    }
+    assert_eq!(
+        renderer.scene.probes_traced(),
+        Some(2 * PROBES),
+        "a second pass"
+    );
+}
+
+#[test]
 fn with_realtime_gi_off_a_moving_sun_leaves_the_baked_probes_and_the_frame_alone() {
     let Some((device, queue)) = test_device() else {
         eprintln!("skipped: no graphics adapter on this machine");

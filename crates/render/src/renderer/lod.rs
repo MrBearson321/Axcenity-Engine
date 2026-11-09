@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::culling::{Bounds, Sphere};
+use super::culling::{Bounds, Reach, Sphere};
 use super::types::MeshKey;
 use crate::{Camera, DrawItem, DrawList, MeshSource, Shape};
 
@@ -53,11 +53,14 @@ pub(super) struct Draw<'a> {
     /// False for the copy fading out of a switch: only the level coming in
     /// casts a shadow.
     pub(super) casts_shadow: bool,
+    /// Whether its item came from a [`crate::ItemChunk`].
+    pub(super) chunked: bool,
 }
 
 impl<'a> Draw<'a> {
     fn of(item: &'a DrawItem) -> Self {
         Self {
+            chunked: false,
             item,
             lod: None,
             level: None,
@@ -137,37 +140,90 @@ pub(super) struct Resolved<'a> {
     pub(super) draws: Vec<Draw<'a>>,
     /// Items past their cull distance, which aren't drawn at all.
     pub(super) culled: u32,
+    /// Every item the list holds, in its groups too.
+    pub(super) submitted: u32,
 }
 
 impl LodStates {
     /// The copies of `list`'s items that frame `frame` draws, each with its
-    /// level and fade.
-    pub(super) fn resolve<'a>(&mut self, list: &'a DrawList, frame: u64) -> Resolved<'a> {
+    /// level and fade. A group of items outside `reach` (what the frame's
+    /// views see, or `None` to keep everything) is passed over whole, and
+    /// the items of a group that's kept are checked one by one.
+    pub(super) fn resolve<'a>(
+        &mut self,
+        list: &'a DrawList,
+        frame: u64,
+        reach: Option<&Reach>,
+    ) -> Resolved<'a> {
         let camera = &list.camera;
         let mut resolved = Resolved {
             draws: Vec::with_capacity(list.items.len()),
             culled: 0,
+            submitted: list.items.len() as u32,
         };
         for item in &list.items {
-            let mut draw = Draw::of(item);
+            self.resolve_item(item, camera, frame, false, &mut resolved);
+        }
+        for chunk in &list.chunks {
+            let count = chunk.items.len() as u32;
+            resolved.submitted += count;
+            let far = chunk.cull_distance > 0.0
+                && chunk.center.distance(camera.position) - chunk.radius > chunk.cull_distance;
+            if far || reach.is_some_and(|reach| !reach.touches((chunk.center, chunk.radius))) {
+                resolved.culled += count;
+                continue;
+            }
+            for item in chunk.items.iter() {
+                if let Some(reach) = reach {
+                    let (center, radius) = item.resting_ball();
+                    let swayed = radius + item.sway.map_or(0.0, |sway| sway.reach());
+                    if item.skin.is_none() && !reach.touches((center, swayed)) {
+                        resolved.culled += 1;
+                        continue;
+                    }
+                }
+                self.resolve_item(item, camera, frame, true, &mut resolved);
+            }
+        }
+        if frame.is_multiple_of(60) {
+            self.states
+                .retain(|_, state| frame - state.last_drawn < FORGET_FRAMES);
+        }
+        resolved
+    }
+
+    /// Adds the copies of `item` the frame draws to `resolved`.
+    fn resolve_item<'a>(
+        &mut self,
+        item: &'a DrawItem,
+        camera: &Camera,
+        frame: u64,
+        chunked: bool,
+        resolved: &mut Resolved<'a>,
+    ) {
+        let mut draw = Draw {
+            chunked,
+            ..Draw::of(item)
+        };
+        {
             if item.cull_distance > 0.0 {
                 let distance = item.transform.w_axis.truncate().distance(camera.position);
                 // A NaN distance culls rather than draws.
                 if distance > item.cull_distance || distance.is_nan() {
                     resolved.culled += 1;
-                    continue;
+                    return;
                 }
                 let fade = (item.cull_distance - distance) / (item.cull_distance * CULL_FADE);
                 draw.fade = fade.min(OPAQUE);
             }
             let Shape::Mesh(source) = &item.shape else {
                 resolved.draws.push(draw);
-                continue;
+                return;
             };
             let levels = source.lod_count();
             if levels == 0 {
                 resolved.draws.push(draw);
-                continue;
+                return;
             }
             // Every shape fits the unit cube, so all the parts of one model
             // are the same size on screen and switch together.
@@ -181,7 +237,7 @@ impl LodStates {
                 resolved
                     .draws
                     .push(with_level(lod_level(size, None, levels)));
-                continue;
+                return;
             }
             let state = self
                 .states
@@ -222,11 +278,6 @@ impl LodStates {
                 }
             }
         }
-        if frame.is_multiple_of(60) {
-            self.states
-                .retain(|_, state| frame - state.last_drawn < FORGET_FRAMES);
-        }
-        resolved
     }
 }
 

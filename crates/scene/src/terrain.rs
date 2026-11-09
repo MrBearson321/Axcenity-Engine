@@ -23,8 +23,8 @@ use axcenity_core::{
 };
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
-    Camera, Channel, ChannelMap, DrawItem, Material, MeshSource, NormalMap, Shape, TerrainLayer,
-    TerrainLayers, TerrainSurface, TerrainView, TextureSource,
+    Camera, Channel, ChannelMap, DrawItem, ItemChunk, Material, MeshSource, NormalMap, Shape,
+    TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextureSource,
 };
 use axcenity_terrain::materials::{self, MaterialRules};
 use axcenity_terrain::mesh::{self, ChunkMesh, LOD_LEVELS};
@@ -164,6 +164,8 @@ struct Entry {
     size: Vec3,
     chunks: HashMap<(usize, usize), Chunk>,
     layers: Option<Arc<TerrainLayers>>,
+    /// Its painted plants and models, built once.
+    foliage: Option<crate::foliage::PaintedFoliage>,
 }
 
 #[derive(Default)]
@@ -255,7 +257,16 @@ impl TerrainCache {
     pub fn prepare(&mut self, world: &World, id: InstanceId, assets: &Assets, camera: &Camera) {
         if let Some(instance) = world.get(id) {
             // On a loading screen the chunks are built right away.
-            self.draw(world, id, instance, assets, camera, &mut Vec::new(), false);
+            self.draw(
+                world,
+                id,
+                instance,
+                assets,
+                camera,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                false,
+            );
         }
     }
 
@@ -267,6 +278,7 @@ impl TerrainCache {
         assets: &Assets,
         camera: &Camera,
         items: &mut Vec<DrawItem>,
+        chunks: &mut Vec<ItemChunk>,
     ) {
         self.take_finished_chunks();
         let background = self.streaming.settings().is_some();
@@ -279,7 +291,9 @@ impl TerrainCache {
                 continue;
             }
             seen.insert(id);
-            self.draw(world, id, instance, assets, camera, items, background);
+            self.draw(
+                world, id, instance, assets, camera, items, chunks, background,
+            );
         }
         self.terrains.retain(|id, _| seen.contains(id));
     }
@@ -293,6 +307,7 @@ impl TerrainCache {
         assets: &Assets,
         camera: &Camera,
         items: &mut Vec<DrawItem>,
+        chunks: &mut Vec<ItemChunk>,
         background: bool,
     ) {
         let Some(mut placement) = Placement::of(instance) else {
@@ -313,6 +328,7 @@ impl TerrainCache {
             size: placement.size,
             chunks: HashMap::new(),
             layers: None,
+            foliage: None,
         });
         // Another landscape or another size: nothing kept fits it.
         if entry.uid != data.uid() || entry.samples != data.size() || entry.size != placement.size {
@@ -322,6 +338,7 @@ impl TerrainCache {
                 size: placement.size,
                 chunks: HashMap::new(),
                 layers: None,
+                foliage: None,
             };
         }
         let layers = match &entry.layers {
@@ -435,7 +452,7 @@ impl TerrainCache {
                 items.push(chunk_item(mesh, weights, &layers, transform, casts_shadow));
             }
         }
-        crate::foliage::draw_terrain(id, &placement, &data, assets, camera.position, items);
+        crate::foliage::draw_terrain(&mut entry.foliage, id, &placement, &data, assets, chunks);
     }
 }
 
@@ -784,6 +801,7 @@ mod tests {
             &Assets::default(),
             &camera_at(Vec3::new(0.0, 50.0, 0.0)),
             &mut items,
+            &mut Vec::new(),
         );
         // 257 samples is 8 × 8 chunks.
         assert_eq!(items.len(), 64);
@@ -805,12 +823,12 @@ mod tests {
         let assets = Assets::default();
         let camera = camera_at(Vec3::new(0.0, 2000.0, 0.0));
         let mut before = Vec::new();
-        cache.draw_all(&world, &assets, &camera, &mut before);
+        cache.draw_all(&world, &assets, &camera, &mut before, &mut Vec::new());
         let data = world.terrain_mut(terrain).unwrap();
         let middle = axcenity_core::SampleRect::new(48, 48, 49, 49);
         data.heights_mut_in(middle)[48 * 257 + 48] = 0.9;
         let mut after = Vec::new();
-        cache.draw_all(&world, &assets, &camera, &mut after);
+        cache.draw_all(&world, &assets, &camera, &mut after, &mut Vec::new());
         let (before, after) = (chunk_versions(&before), chunk_versions(&after));
         let changed = before.iter().zip(&after).filter(|(a, b)| a != b).count();
         assert_eq!(changed, 1, "one chunk's mesh is rebuilt");
@@ -829,6 +847,7 @@ mod tests {
             &Assets::default(),
             &camera_at(Vec3::new(-250.0, 10.0, -250.0)),
             &mut items,
+            &mut Vec::new(),
         );
         let corners = |item: &DrawItem| match &item.shape {
             Shape::Mesh(mesh) => mesh.positions().len(),
@@ -853,6 +872,7 @@ mod tests {
             &Assets::default(),
             &camera_at(Vec3::new(0.0, 50.0, 0.0)),
             &mut items,
+            &mut Vec::new(),
         );
         assert_eq!(items.len(), 4);
         cache.set_override(terrain, None, None);

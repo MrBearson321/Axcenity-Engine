@@ -770,10 +770,35 @@ impl ScenePipeline {
 
         self.frame += 1;
         // Each item's level of detail, which decides the meshes uploaded.
+        // Everything the frame's views can see, or everything while a
+        // frozen view is being looked at from outside.
+        let reach = self.frozen_view.is_none().then(|| {
+            let mut reach = Reach::default();
+            reach
+                .views
+                .push(Frustum::of(camera_view_projection(&list.camera, aspect)));
+            let cascades = shadows_drawn(list.shadows, &self.graphics)
+                .map_or(0, |(_, size)| size.cascades as usize);
+            reach.views.extend(
+                frame_uniform.cascades[..cascades]
+                    .iter()
+                    .map(|matrix| Frustum::of(glam::Mat4::from_cols_array_2d(matrix))),
+            );
+            for spot in &planned_lights.spot_shadows {
+                reach.lamps.push((spot.bounds, Frustum::of(spot.view_proj)));
+            }
+            for point in &planned_lights.point_shadows {
+                for face in point.faces {
+                    reach.lamps.push((point.bounds, Frustum::of(face)));
+                }
+            }
+            reach
+        });
         let Resolved {
             draws,
             culled: past_cull_distance,
-        } = self.lods.resolve(list, self.frame);
+            submitted: items_submitted,
+        } = self.lods.resolve(list, self.frame, reach.as_ref());
         // Each draw's material binding, worked out once for the uploads
         // and the plan: it reads every map setting of the item.
         let materials: Vec<MaterialKey> =
@@ -1024,7 +1049,7 @@ impl ScenePipeline {
         };
         mark(&mut encoder, FramePass::Shadows);
         let mut counts = FrameCounts {
-            items_submitted: list.items.len() as u32,
+            items_submitted,
             items_culled: culled + past_cull_distance,
             shadow_casters_culled: casters_by_view.iter().map(|(_, culled)| culled).sum(),
             sprites_culled,
@@ -1928,7 +1953,13 @@ impl ScenePipeline {
     ) {
         let frame = self.frame;
         let arrived = self.finish_background_uploads();
+        // Thousands of draws share a few meshes and textures: each is
+        // looked up once, by address, rather than once per draw.
+        let mut seen_meshes = HashSet::new();
         for source in draws.iter().filter_map(Draw::source) {
+            if !seen_meshes.insert(Arc::as_ptr(source).cast::<()>()) {
+                continue;
+            }
             match self.custom_meshes.entry(source.key()) {
                 Entry::Occupied(mut cached) => {
                     let cached = cached.get_mut();
@@ -1990,6 +2021,20 @@ impl ScenePipeline {
                 continue;
             }
             for source in material_textures(item).into_iter().flatten() {
+                self.note_texture(source, frame, false);
+            }
+        }
+        // A group's items share a handful of materials: each set of
+        // textures is noted once, found among the few seen so far.
+        let mut seen_textures: Vec<[Option<*const ()>; MATERIAL_TEXTURES]> = Vec::new();
+        for draw in draws.iter().filter(|draw| draw.chunked) {
+            let textures = material_textures(draw.item);
+            let addresses = textures.map(|source| source.map(|s| Arc::as_ptr(s).cast::<()>()));
+            if seen_textures.contains(&addresses) {
+                continue;
+            }
+            seen_textures.push(addresses);
+            for source in textures.into_iter().flatten() {
                 self.note_texture(source, frame, false);
             }
         }

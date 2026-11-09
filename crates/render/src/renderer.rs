@@ -82,7 +82,7 @@ mod water;
 
 #[cfg(test)]
 use crate::draw_list::{ChannelMap, MeshSource};
-use culling::{Bounds, Frustum, spheres_touch};
+use culling::{Bounds, Frustum, Reach, spheres_touch};
 #[cfg(test)]
 use glam::Vec3;
 #[cfg(test)]

@@ -237,3 +237,28 @@ In a debug build the same frame is 8.5 ms and the box 0.5 to 1.4 ms.
 
 - **Every physics query built every collider.** `candidates` (`physics/src/query.rs`) made a collider for each part in the Workspace per ray: a convex hull per MeshPart, and a copy of all 345,249 height samples for the terrain. The walking character casts many rays a frame. Now a `Reach` (the capsule the query can touch) passes by parts whose bounding ball is outside it before anything is built, and a Terrain's colliders are kept between queries by its `uid` and `revision` (`terrain_colliders`; a copy of a terrain has its own `uid`, and a reloaded model rebuilds them).
 - **The selection box walked the world per ray.** Up to 12 edges of 17 rays each, every ray listing the Workspace twice and marching across the whole terrain. Now `scene::Occluders` gathers the parts and terrains once a frame, each edge tests only the parts near the line of sight to it, and terrain rays stop at the edge (`terrain::raycast::raycast_within`).
+
+## A painted forest (`shoot_project`)
+
+A 600-stud forest with 30,296 painted models (a project called Abandoned Farmhouse, all models in `.glb` packs with 4K embedded textures) was a slideshow: each of its 36,000 items was listed again and walked through the renderer every frame though only 5,700 were on screen. Pictures and timings come from `shoot_project` (`player/src/bench_tests.rs`), which draws named cameras and saves a PNG of each; `bake_project_probes`, beside it, bakes a project's light probe volumes without the editor:
+
+```text
+AXCENITY_BENCH_PROJECT=<folder> AXCENITY_SHOT_DIR=<folder> AXCENITY_SHOT_VIEWS='front:2.7,4.3,63:-0.6,11.5,0' \
+  cargo test -p axcenity-player --release -- --ignored shoot_project --nocapture --test-threads 1
+```
+
+`AXCENITY_SHOT_SIZE` and `AXCENITY_SHOT_QUALITY` choose the frame, and `AXCENITY_SHOT_DEBUG` (`ao`, `base`, `normals`, `overdraw`) saves a debug view.
+
+| 687 × 1024, High, release | Before | After |
+|---|---|---|
+| CPU `build_draw_list` | 12.2 ms | 1.2 ms |
+| CPU `ScenePipeline::draw` | 29.8 ms | 13.3 ms |
+| GPU frame (translucent leaves and probe light cost about 2.6 ms; the bands below save more at larger sizes) | 6.6 ms | 7.4 ms |
+
+At 2560 × 1440 on Ultra, the GPU's frame was 40.1 ms before distance bands and is 29.0 ms now, and the CPU is 36 ms (it draws twice the items, and a fourth shadow cascade).
+
+- **`DrawList::chunks` (`ItemChunk`)**: `scene` builds a terrain's foliage once (`foliage::PaintedFoliage`), in 48-stud squares with short-reach plants apart from trees, and hands the list `Arc`s of them. It's rebuilt only when the terrain or a painted model changes.
+- **`Reach` (`renderer/culling.rs`)**: every view the frame draws (the camera, the sun's cascades and the lamps' shadow views). `LodStates::resolve` passes over a group that touches none of them, or that's past its farthest cull distance, before any per-item work; a kept group's items are checked one by one. A frozen view keeps everything.
+- **`upload_new`** looks up each mesh and each set of textures once per frame, by address, rather than once per draw.
+- **Distance bands (`SortKey::band`)**: solid items are drawn nearest first in about 2 bands per doubling of the distance, then by mesh and material. Looking along a forest, every pixel had 8 or more layers of leaves, each shaded; a band drawn first hides what's behind it, by depth, before the shader runs. It's a few more batches for about a quarter less GPU time there.
+

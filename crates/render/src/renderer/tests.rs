@@ -131,6 +131,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
             occlusion: 1.0,
         },
         items,
+        chunks: Vec::new(),
         sprites: Vec::new(),
         particle_emitters: Vec::new(),
         shadows: Shadows::default(),
@@ -196,7 +197,7 @@ fn plan(list: &DrawList) -> DrawPlan {
 /// level of detail on a first frame, with each mesh's box from `bounds`.
 fn plan_with(list: &DrawList, bounds: impl Fn(MeshKey) -> Bounds) -> DrawPlan {
     let view = Frustum::of(view_projection(list, 1.0));
-    let draws = LodStates::default().resolve(list, 1).draws;
+    let draws = LodStates::default().resolve(list, 1, None).draws;
     let materials: Vec<MaterialKey> = draws.iter().map(|draw| material_key(draw.item)).collect();
     plan_draws(
         list,

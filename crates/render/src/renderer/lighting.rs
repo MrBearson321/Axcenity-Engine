@@ -697,6 +697,7 @@ pub(super) fn plan_draws(
                 })
             };
             SortKey {
+                band: distance_band(draw.item.transform.w_axis.truncate(), list.camera.position),
                 mesh: draw.mesh(),
                 material,
                 shader: shader_key(draw.item),
@@ -836,6 +837,9 @@ pub(super) fn plan_draws(
 /// batch. Small, so sorting thousands of them compares little.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct SortKey {
+    /// Drawn nearest first: what's hidden behind near items never reaches
+    /// the (costly) surface shader. Equal distances batch together.
+    band: u8,
     mesh: MeshKey,
     /// Its material's index among the frame's distinct material keys.
     material: u32,
@@ -844,6 +848,22 @@ struct SortKey {
     double_sided: bool,
     casts_shadow: bool,
 }
+
+/// Which distance band a point `from` the camera is in, the nearer the
+/// smaller: bands widen by half with distance, so a forest's many layers of
+/// trees are drawn near to far in a handful of batches of each mesh.
+fn distance_band(point: Vec3, camera: Vec3) -> u8 {
+    let distance = point.distance(camera);
+    if distance.is_nan() {
+        return u8::MAX;
+    }
+    (((distance / NEAREST_BAND).max(1.0).log2() * BANDS_PER_DOUBLING) as u8).min(u8::MAX - 1)
+}
+
+/// How far the nearest distance band reaches, in studs.
+const NEAREST_BAND: f32 = 12.0;
+/// How many distance bands each doubling of the distance is cut into.
+const BANDS_PER_DOUBLING: f32 = 1.7;
 
 /// The key of the surface shader `item` is drawn with, or `None` for the
 /// standard material's. Terrain has its own shader.
@@ -888,7 +908,15 @@ fn shading_uniform(material: &Material) -> ([f32; 4], [f32; 4]) {
         return ([SHADING_STANDARD, 0.0, 0.0, 0.0], [0.0; 4]);
     }
     match &material.shading {
-        Shading::Standard => ([SHADING_STANDARD, 0.0, 0.0, 0.0], [0.0; 4]),
+        Shading::Standard => (
+            [
+                SHADING_STANDARD,
+                material.translucency.clamp(0.0, 1.0),
+                0.0,
+                0.0,
+            ],
+            [0.0; 4],
+        ),
         Shading::Unlit => ([SHADING_UNLIT, 0.0, 0.0, 0.0], [0.0; 4]),
         Shading::Toon(toon) => {
             let steps = if toon.ramp.is_some() {
@@ -940,7 +968,7 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
     let outline = outline_uniform(&item.material);
     if textures.iter().all(Option::is_none)
         && params == [[0.0; 4]; SURFACE_PARAMETERS]
-        && shading[0] == SHADING_STANDARD
+        && shading == [SHADING_STANDARD, 0.0, 0.0, 0.0]
         && outline[3] == 0.0
     {
         return MaterialKey::default();

@@ -258,25 +258,45 @@ impl Primitive {
 /// renderer keeps it in the fraction of a number, so it stays below 1.
 pub const MAX_FLUTTER: f32 = 0.95;
 
-/// The wind values in a glTF material's `extras` (`axcenity_sway`,
-/// `axcenity_flutter`) on a default material. Anything missing, not a
-/// number or below 0 is 0, so a file without them stays still.
+/// How much light a leaf lets through when the file doesn't say.
+pub const LEAF_TRANSLUCENCY: f32 = 0.42;
+
+/// The wind and leaf values in a glTF material's `extras` (`axcenity_sway`,
+/// `axcenity_flutter`, `axcenity_translucency`) on a default material.
+/// Anything missing, not a number or below 0 is 0, so a file without them
+/// stays still; a material that flutters is a leaf, and lets
+/// [`LEAF_TRANSLUCENCY`] through unless it says otherwise.
 fn wind_of(extras: &gltf::json::Extras) -> ModelMaterial {
     #[derive(serde::Deserialize)]
     struct Wind {
         axcenity_sway: Option<f32>,
         axcenity_flutter: Option<f32>,
+        axcenity_translucency: Option<f32>,
     }
     let wind = extras
         .as_ref()
         .and_then(|raw| serde_json::from_str::<Wind>(raw.get()).ok());
-    let (sway, flutter) = wind.map_or((None, None), |wind| {
-        (wind.axcenity_sway, wind.axcenity_flutter)
+    let (sway, flutter, translucency) = wind.map_or((None, None, None), |wind| {
+        (
+            wind.axcenity_sway,
+            wind.axcenity_flutter,
+            wind.axcenity_translucency,
+        )
     });
     let usable = |value: Option<f32>| value.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
+    let flutter = usable(flutter).min(MAX_FLUTTER);
+    let leaf = if flutter > 0.0 {
+        LEAF_TRANSLUCENCY
+    } else {
+        0.0
+    };
     ModelMaterial {
         sway: usable(sway).min(2.0),
-        flutter: usable(flutter).min(MAX_FLUTTER),
+        flutter,
+        translucency: translucency
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(leaf)
+            .min(1.0),
         ..ModelMaterial::default()
     }
 }
@@ -335,6 +355,9 @@ pub struct ModelMaterial {
     /// bending: leaves do, the branches they grow on don't. From glTF
     /// `extras`: `axcenity_flutter`.
     pub flutter: f32,
+    /// How much light passes through it from behind, 0 for none: leaves.
+    /// From glTF `extras`: `axcenity_translucency`, or a leaf's default.
+    pub translucency: f32,
 }
 
 impl Default for ModelMaterial {
@@ -364,6 +387,7 @@ impl Default for ModelMaterial {
             double_sided: false,
             sway: 0.0,
             flutter: 0.0,
+            translucency: 0.0,
         }
     }
 }
