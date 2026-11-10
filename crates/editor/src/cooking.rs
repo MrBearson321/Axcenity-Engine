@@ -2,16 +2,17 @@
 //!
 //! When a project opens, a thread first gives each imported file under
 //! `assets/` an asset ID if it has none (a sidecar next to it,
-//! `axcenity_assets::give_asset_ids`), then cooks every texture that has
-//! no current cooked copy (`axcenity_cook::cook_project`), on fewer
-//! threads than the machine has so editing stays smooth. It then waits:
-//! when an imported, added, edited or deleted file under `assets/` turns
-//! up ([`Cooker::cook_again`], from the editor's file watcher), it does
-//! the same again, so a new texture is cooked right away rather than at
-//! the next open. What it cooks is used the next time each texture loads:
-//! the next Play run's new textures, the next open, and the player.
-//! Opening another project stops it between textures. `axcenity-editor
-//! --cook <folder>` does one pass and exits.
+//! `axcenity_assets::give_asset_ids`), deletes cached copies of files
+//! that are gone, then cooks every texture that has no current cooked
+//! copy (`axcenity_cook::cook_project`), on fewer threads than the
+//! machine has so editing stays smooth. It then waits: when an imported,
+//! added, edited or deleted file under `assets/` turns up
+//! ([`Cooker::cook_again`], from the editor's file watcher), it does the
+//! same again, so a new texture is cooked right away rather than at the
+//! next open. What it cooks is used the next time each texture loads: the
+//! next Play run's new textures, the next open, and the player. Opening
+//! another project stops it between textures. `axcenity-editor --cook
+//! <folder>` does one pass and exits.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -97,6 +98,13 @@ fn cook_pass(folder: &Path, stop: &AtomicBool) -> Report {
     if report.cooked > 0 {
         log::info!("cooked {} textures in {}", report.cooked, folder.display());
     }
+    if report.removed > 0 {
+        log::info!(
+            "deleted {} cached copies of files no longer in {}",
+            report.removed,
+            folder.display()
+        );
+    }
     report
 }
 
@@ -117,11 +125,12 @@ pub fn cook_from_command_line(folder: &Path) -> bool {
         Outcome::Failed(reason) => eprintln!("couldn't cook {path}: {reason}"),
     });
     println!(
-        "{} cooked, {} already current, {} left as they are, {} failed, in {:.1} s",
+        "{} cooked, {} already current, {} left as they are, {} failed, {} stale copies deleted, in {:.1} s",
         report.cooked,
         report.current,
         report.skipped,
         report.failed.len(),
+        report.removed,
         start.elapsed().as_secs_f64()
     );
     report.failed.is_empty()

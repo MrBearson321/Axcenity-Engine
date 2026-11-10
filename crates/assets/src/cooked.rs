@@ -195,13 +195,19 @@ pub(crate) fn plain_name(name: &str) -> String {
 /// name and a hash of its whole path, so two `Color.png`s in different
 /// folders don't meet.
 pub fn cooked_path(project: &Path, relative: &str) -> PathBuf {
+    project
+        .join(COOKED_FOLDER)
+        .join(format!("{}.{COOKED_EXTENSION}", cache_stem(relative)))
+}
+
+/// How every cached file made from the project file `relative` starts: its
+/// name and a hash of its whole path (`Color.png-0123456789abcdef`).
+pub(crate) fn cache_stem(relative: &str) -> String {
     let relative = relative.replace('\\', "/");
     let name = relative.rsplit('/').next().unwrap_or_default();
     let name: String = plain_name(name).chars().take(64).collect();
     let hash = content_hash(relative.to_lowercase().as_bytes());
-    project
-        .join(COOKED_FOLDER)
-        .join(format!("{name}-{hash:016x}.{COOKED_EXTENSION}"))
+    format!("{name}-{hash:016x}")
 }
 
 /// Where the cooked copy of `relative` goes inside the project, with `/`
