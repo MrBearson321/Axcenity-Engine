@@ -19,7 +19,8 @@ struct Maps {
     // normal map's green, z: occlusion strength, w: 1 if opacity comes from
     // its own map rather than the base color's alpha.
     settings: vec4<f32>,
-    // x: 1 if there's a specular map.
+    // x: 1 if there's a specular map. y: 1 if the normal map holds only
+    // red and green (BC5), so its blue is worked out from them.
     specular: vec4<f32>,
     // The columns of a 2x2 matrix that scales and turns the texture
     // coordinates (read by the vertex shader).
@@ -354,6 +355,10 @@ fn surface_normal(n: vec3<f32>, tangent: vec4<f32>, uv: vec2<f32>) -> vec3<f32> 
     let t = normalize(along);
     let b = cross(n, t) * tangent.w;
     var tipped = texel * 2.0 - 1.0;
+    if maps.specular.y != 0.0 {
+        // A unit normal's Z from its X and Y.
+        tipped.z = sqrt(saturate(1.0 - dot(tipped.xy, tipped.xy)));
+    }
     tipped = vec3<f32>(tipped.x, tipped.y * maps.settings.y, tipped.z);
     tipped = vec3<f32>(tipped.xy * maps.settings.x, max(tipped.z, 0.0));
     let mapped = mat3x3<f32>(t, b, n) * tipped;

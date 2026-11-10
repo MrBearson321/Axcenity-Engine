@@ -34,24 +34,35 @@ pub enum CookedFormat {
     /// through an sRGB view for colors and a plain one for values, like
     /// RGBA8. Every desktop GPU has it.
     Bc7,
+    /// BC5: 16 bytes for each 4×4 block of two channels, red and green,
+    /// each kept with twice BC7's care. For normal maps: blue is worked out
+    /// from them when drawn (a unit normal's X and Y give its Z).
+    Bc5,
 }
 
 impl CookedFormat {
     fn code(self) -> u32 {
         match self {
             CookedFormat::Bc7 => 1,
+            CookedFormat::Bc5 => 2,
         }
     }
 
     fn from_code(code: u32) -> Option<CookedFormat> {
-        (code == 1).then_some(CookedFormat::Bc7)
+        match code {
+            1 => Some(CookedFormat::Bc7),
+            2 => Some(CookedFormat::Bc5),
+            _ => None,
+        }
     }
 
     /// The bytes of a `width`×`height` level: every 4×4 block, a part
     /// block at an edge counting whole.
     pub fn level_bytes(self, width: u32, height: u32) -> usize {
         match self {
-            CookedFormat::Bc7 => width.div_ceil(4) as usize * height.div_ceil(4) as usize * 16,
+            CookedFormat::Bc7 | CookedFormat::Bc5 => {
+                width.div_ceil(4) as usize * height.div_ceil(4) as usize * 16
+            }
         }
     }
 }
@@ -338,12 +349,18 @@ pub fn read_cooked(project: &Path, relative: &str) -> Option<CookedTexture> {
 /// Whether `relative` has a current cooked copy. Only the cooked file's
 /// start is read.
 pub fn is_cooked(project: &Path, relative: &str) -> bool {
+    cooked_format(project, relative).is_some()
+}
+
+/// The format of `relative`'s current cooked copy, if it has one. Only the
+/// cooked file's start is read.
+pub fn cooked_format(project: &Path, relative: &str) -> Option<CookedFormat> {
     use std::io::Read;
-    let mut start = [0u8; MAGIC.len() + 24];
+    let mut start = [0u8; MAGIC.len() + 24 + 4];
     let read = fs::File::open(cooked_path(project, relative))
         .and_then(|mut file| file.read_exact(&mut start));
     if read.is_err() || &start[..MAGIC.len()] != MAGIC {
-        return false;
+        return None;
     }
     let word = |at: usize| {
         let at = MAGIC.len() + at * 8;
@@ -354,7 +371,11 @@ pub fn is_cooked(project: &Path, relative: &str) -> bool {
         modified: word(1),
         hash: word(2),
     };
-    is_current(project, relative, stamp)
+    let at = MAGIC.len() + 24;
+    let format = CookedFormat::from_code(u32::from_le_bytes(
+        start[at..at + 4].try_into().expect("4 bytes"),
+    ))?;
+    is_current(project, relative, stamp).then_some(format)
 }
 
 /// Whether the project file `relative` is still what `stamp` was made from.
@@ -533,6 +554,26 @@ mod tests {
 
         fs::remove_file(&source).unwrap();
         assert!(!is_cooked(&project, relative), "no source, no cooked copy");
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn a_bc5_copy_reads_back_and_says_its_format() {
+        let project = folder("bc5");
+        let relative = "assets/textures/Wood_Normal.png";
+        let source = project.join(relative);
+        fs::write(&source, b"normal map").unwrap();
+        let mut texture = checker(8, 8);
+        texture.format = CookedFormat::Bc5;
+        let stamp = SourceStamp::of(&source, b"normal map");
+        write_cooked(&project, relative, stamp, &texture).unwrap();
+        assert_eq!(cooked_format(&project, relative), Some(CookedFormat::Bc5));
+        let read = read_cooked(&project, relative).unwrap();
+        assert_eq!(read.format, CookedFormat::Bc5);
+        assert_eq!(read.levels, texture.levels);
+
+        fs::write(&source, b"edited map").unwrap();
+        assert_eq!(cooked_format(&project, relative), None, "out of date");
         let _ = fs::remove_dir_all(project);
     }
 
