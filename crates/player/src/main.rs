@@ -19,6 +19,7 @@ mod watch;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::ops;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -39,7 +40,7 @@ use axcenity_render::glam::Vec3;
 use axcenity_render::{Capabilities, GraphicsSettings, Renderer};
 use axcenity_scene::{FlyCamera, MoveKeys, UiFrame};
 use axcenity_script::{CameraState, CameraView, GameCamera, OutputKind, ScriptRuntime};
-use axcenity_sim::Sim;
+use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 use axcenity_ui::{
     LoadingGui, LogLevel, LogSide, NavKey, UiCursor, UiEvent, UiInput, UiInteraction,
 };
@@ -466,6 +467,7 @@ fn apply_audio(
 
 /// Fires `Seated` on each controller whose character just sat down or
 /// stood up.
+#[cfg(test)]
 fn fire_seated(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut Controllers) {
     let changes: Vec<_> = characters
         .take_seat_changes()
@@ -477,16 +479,9 @@ fn fire_seated(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut 
     }
 }
 
-/// The draw items for the ProximityPrompts `shown` (Phase 44), in a view
-/// `size` big.
-fn prompt_items(
-    world: &World,
-    shown: &[axcenity_script::ShownPrompt],
-    stylesheets: &[axcenity_ui::Stylesheet],
-    camera: &axcenity_render::Camera,
-    size: winit::dpi::PhysicalSize<u32>,
-) -> Vec<axcenity_render::UiDrawItem> {
-    let views: Vec<_> = shown
+/// The ProximityPrompts `shown` (Phase 44), for the UI to draw.
+fn prompt_views(shown: &[axcenity_script::ShownPrompt]) -> Vec<axcenity_ui::PromptView> {
+    shown
         .iter()
         .map(|shown| axcenity_ui::PromptView {
             prompt: shown.prompt,
@@ -494,8 +489,7 @@ fn prompt_items(
             progress: shown.progress,
             key: shown.key.clone(),
         })
-        .collect();
-    axcenity_ui::prompt_items(world, &views, stylesheets, camera, size.width, size.height)
+        .collect()
 }
 
 /// True while the player character has a Tool in hand, so the wheel goes
@@ -509,6 +503,7 @@ fn tool_in_hand(scripts: &ScriptRuntime, world: &World) -> bool {
 
 /// Fires `Landed` on each controller whose character just landed, after
 /// fall damage (Phase 43).
+#[cfg(test)]
 fn fire_landed(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut Controllers) {
     let landings = characters.take_landings();
     if !landings.is_empty() {
@@ -518,6 +513,7 @@ fn fire_landed(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut 
 
 /// Fires `PlayerSensed` on each agent that has just started seeing or
 /// hearing the player character, with the sense's name.
+#[cfg(test)]
 fn fire_sensed(scripts: &mut ScriptRuntime, world: &mut World, agents: &mut Agents) {
     for sensed in agents.take_sensed() {
         let sense = sensed.sense.as_str().to_owned();
@@ -647,6 +643,15 @@ struct App {
     ui_sounds: Vec<SoundAction>,
     /// The cursor last shown, so it's only set when it changes.
     cursor: CursorIcon,
+    /// The player's frame.
+    schedule: Schedule,
+    /// The window's size in this frame.
+    frame_size: winit::dpi::PhysicalSize<u32>,
+    /// True while this frame's Workspace assets are still loading.
+    frame_loading_assets: bool,
+    /// The list and UI layout the draw steps are building, for rendering.
+    frame_draw: Option<axcenity_render::DrawList>,
+    frame_ui_layout: Option<axcenity_ui::UiLayout>,
     /// When the previous frame was drawn, to measure how much time passed.
     last_frame: Option<Instant>,
     /// Seconds of frames run, which moving surface shaders read.
@@ -733,6 +738,11 @@ impl App {
             nav_keys: Vec::new(),
             ui_sounds: Vec::new(),
             cursor: CursorIcon::Default,
+            schedule: Schedule::for_host(Hosts::PLAYER),
+            frame_size: winit::dpi::PhysicalSize::new(0, 0),
+            frame_loading_assets: false,
+            frame_draw: None,
+            frame_ui_layout: None,
             last_frame: None,
             shader_time: 0.0,
             watcher: None,
@@ -908,6 +918,7 @@ impl App {
     /// Just before step 6 draws: LocalScripts' functions bound with
     /// `BindToRenderStep` run in priority order, then `RenderStepped`
     /// fires, so what they move (the camera too) is drawn this frame.
+    #[cfg(test)]
     fn render_step(&mut self, seconds: f32) {
         self.sim
             .scripts
@@ -918,18 +929,23 @@ impl App {
     /// fly camera (a character controller owns the view otherwise), then a
     /// Follow or Track camera follows its subject, which physics and
     /// animation have moved, and shakes move on.
+    #[cfg(test)]
     fn end_camera(&mut self, seconds: f32) {
-        if self.sim.characters.view(&self.sim.world).is_none()
-            && let Some(view) = self.sim.scripts.take_camera_move()
-        {
-            self.camera.set_view(view.position, view.orientation);
-        } else {
-            let _ = self.sim.scripts.take_camera_move();
-        }
+        let moved = self.sim.scripts.take_camera_move();
+        self.apply_camera_move(moved);
         self.game_camera = self
             .sim
             .scripts
             .step_camera(&self.sim.world, f64::from(seconds));
+    }
+
+    /// See [`HostIo::camera_moved`].
+    fn apply_camera_move(&mut self, moved: Option<CameraState>) {
+        if self.sim.characters.view(&self.sim.world).is_none()
+            && let Some(view) = moved
+        {
+            self.camera.set_view(view.position, view.orientation);
+        }
     }
 
     fn process_ui_mouse_events(&mut self, size: (u32, u32)) {
@@ -1204,6 +1220,393 @@ impl App {
     }
 }
 
+impl App {
+    /// One frame, in the order from docs/architecture/frame-loop.md.
+    fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        profiling::scope!("frame");
+        // `timescale` in the console speeds the game up or slows it.
+        let real_seconds = frame_seconds(&mut self.last_frame);
+        // `--bench` steps a fixed 1/60 s a frame, as the other
+        // hosts' benchmarks do, so every frame has the same work.
+        let seconds = if self.bench.is_some() {
+            1.0 / 60.0
+        } else {
+            self.game_seconds(real_seconds)
+        };
+        let mut watch = dev_console::Stopwatch::start();
+        let size = self
+            .window
+            .as_ref()
+            .expect("checked at the start of the event")
+            .inner_size();
+        self.frame_size = size;
+        self.process_ui_mouse_events((size.width, size.height));
+        self.process_ui_navigation(seconds);
+        // What the UI did last frame and this click: MouseEnter,
+        // MouseLeave and buttons' sounds.
+        let events = self.ui.take_events();
+        let sounds = fire_ui_events(&mut self.sim.scripts, &mut self.sim.world, events);
+        self.ui_sounds.extend(sounds);
+
+        // Assets changed on disk (`--watch`) are swapped in first,
+        // so this frame's steps use them.
+        if let Some(watcher) = &self.watcher {
+            let paths = watcher.changes();
+            let lines = watch::reload(
+                &paths,
+                &self.sim.assets,
+                &mut self.sim.animators,
+                &mut self.audio,
+            );
+            for line in lines {
+                logs::line(LogLevel::Info, None, &line);
+            }
+        }
+
+        // The steps, up to network send. `Player:Kick` on this device's
+        // player ends the frame and the game.
+        let schedule = std::mem::take(&mut self.schedule);
+        let ended = {
+            let mut ctx = FrameCtx::new(f64::from(seconds), Hosts::PLAYER, self);
+            schedule.run(&mut ctx, &mut watch);
+            ctx.ended()
+        };
+        self.schedule = schedule;
+        if ended {
+            event_loop.exit();
+            return;
+        }
+
+        // `|| ...` is a closure: a small function the renderer calls at the right moment.
+        let window = self
+            .window
+            .as_ref()
+            .expect("checked at the start of the event")
+            .clone();
+        let draw_list = self.frame_draw.take().expect("the draw steps ran");
+        let rendered = self
+            .renderer
+            .as_mut()
+            .expect("checked")
+            .render(&draw_list, || window.pre_present_notify());
+        if let Err(err) = rendered {
+            self.fail(event_loop, err);
+        }
+        // Materials whose shaders don't compile (drawn magenta).
+        if let Some(renderer) = &mut self.renderer {
+            for error in renderer.take_shader_errors() {
+                logs::line(LogLevel::Error, None, &format!("error: {error}"));
+            }
+        }
+        watch.lap("Render");
+        self.frame_stats.finish(real_seconds, &watch);
+        profiling::finish_frame!();
+        let loading_assets = self.frame_loading_assets;
+        if let Some(bench) = &mut self.bench {
+            bench.note("launch to first frame", self.launched.elapsed());
+            if !loading_assets {
+                bench.note("launch to assets loaded", self.launched.elapsed());
+            }
+        }
+        if let Some(bench) = &mut self.bench
+            && bench.record(&watch)
+        {
+            print!("{}", bench.finish_text("player", &self.bench_scene));
+            event_loop.exit();
+        }
+    }
+}
+
+impl HostIo for App {
+    fn sim(&mut self) -> &mut Sim {
+        &mut self.sim
+    }
+
+    fn following(&self) -> bool {
+        self.following
+    }
+
+    /// What scripts asked of NetworkService last frame, then who joined or
+    /// left (Phase 63).
+    fn net_receive(&mut self, seconds: f64) -> ops::ControlFlow<()> {
+        self.network
+            .receive(&mut self.sim.world, &mut self.sim.scripts, seconds);
+        print_network_log(&mut self.network);
+        print_output(&mut self.sim.scripts);
+        // `Player:Kick` on this device's player ends the game.
+        if let Some(reason) = self.network.take_kicked() {
+            logs::line(
+                LogLevel::Warning,
+                None,
+                &format!("You were kicked from the game: {reason}"),
+            );
+            return ops::ControlFlow::Break(());
+        }
+        if !axcenity_ui::chat_enabled(&self.sim.world) {
+            self.chat_typing = None;
+        }
+        if self.sim.scripts.is_client_only() && !self.following {
+            self.follow_server();
+        }
+        ops::ControlFlow::Continue(())
+    }
+
+    /// A character controller moves first and owns the camera, by the
+    /// input map's actions (with the player's rebinds). In a hosted or
+    /// joined game, only this device's player's character takes input, and
+    /// other devices move their own (Phase 66).
+    fn character_motion(&mut self, seconds: f32) -> MoveInput {
+        let motion = self.controller_input(seconds);
+        let others = self
+            .network
+            .other_characters(&self.sim.world, &self.sim.scripts);
+        self.sim
+            .characters
+            .set_players(self.sim.scripts.local_player(), others);
+        self.network.set_running(motion.run);
+        motion
+    }
+
+    fn flush_output(&mut self) {
+        print_output(&mut self.sim.scripts);
+    }
+
+    fn agent_warning(&mut self, warning: String) {
+        logs::line(LogLevel::Warning, None, &format!("warning: {warning}"));
+    }
+
+    /// Without a controller the fly camera moves, and LocalScripts see that.
+    fn frame_input(&mut self, seconds: f64) -> Vec<InputEvent> {
+        let size = (self.frame_size.width, self.frame_size.height);
+        self.begin_camera(seconds as f32, size);
+        let pointer = self.apply_cursor(size);
+        self.input.take_events(pointer)
+    }
+
+    /// Parts another device moves are held still here, and physics sleeps
+    /// far from the camera and every other player.
+    fn prepare_physics(&mut self) {
+        let held = self.network.held_parts(&self.sim.world, &self.sim.scripts);
+        self.sim.physics.set_held(held);
+        self.set_far_physics_sleep();
+    }
+
+    fn owns_physics(&self) -> bool {
+        self.network.simulates_physics()
+    }
+
+    fn audio(&mut self) {
+        let heard = listener_of_view(self.shown_view());
+        apply_audio(
+            &mut self.sim.scripts,
+            &mut self.sim.world,
+            &self.sim.assets,
+            &mut self.audio,
+            heard,
+            std::mem::take(&mut self.ui_sounds),
+        );
+    }
+
+    /// Big emitters move on the GPU, where it runs compute shaders.
+    fn particles(&mut self, seconds: f64) {
+        self.particles.set_gpu(
+            self.renderer
+                .as_ref()
+                .is_some_and(|renderer| renderer.capabilities().compute_shaders),
+        );
+        for (emitter, count) in self.sim.scripts.take_particle_emits() {
+            self.particles.emit(&self.sim.world, emitter, count);
+        }
+        self.particles.update(&self.sim.world, seconds as f32);
+    }
+
+    fn animator_error(&mut self, error: String) {
+        logs::line(LogLevel::Error, None, &format!("error: {error}"));
+    }
+
+    /// A level loaded this frame shows the loading screen again.
+    fn level_loads(&mut self) {
+        self.follow_level_loads();
+    }
+
+    /// The loading screen goes once its time is up and, when the game
+    /// waits for one, a LocalScript has said it's ready. The splash or
+    /// loading screen also waits for the preload.
+    fn loading_screen(&mut self, seconds: f64) {
+        let ready = self.sim.scripts.take_loading_screen_removed();
+        if ready {
+            self.splash.release();
+        }
+        let loading_assets = self.preload_loading();
+        self.frame_loading_assets = loading_assets;
+        self.splash.set_loading(loading_assets);
+        if let Some(loading) = &mut self.loading_gui {
+            loading.set_assets_loading(loading_assets);
+            loading.advance(&mut self.sim.world, seconds as f32, ready);
+        }
+    }
+
+    /// A LocalScript's move of a Custom camera goes to the fly camera; a
+    /// character controller owns the view otherwise.
+    fn camera_moved(&mut self, moved: Option<CameraState>) {
+        self.apply_camera_move(moved);
+    }
+
+    fn game_camera(&mut self, camera: GameCamera) {
+        self.game_camera = camera;
+    }
+
+    /// A LocalScript's graphics change (`UserGameSettings`) is saved and
+    /// drawn from this frame.
+    fn graphics_changed(&mut self) {
+        if let Some(change) = self.sim.scripts.take_graphics_change()
+            && let Some(renderer) = &mut self.renderer
+        {
+            let capabilities = *renderer.capabilities();
+            let settings = graphics::changed(self.data_folder.as_deref(), change, &capabilities);
+            set_graphics(renderer, &settings);
+        }
+    }
+
+    fn streaming(&mut self, seconds: f64) {
+        let render_camera = self.shown_camera();
+        let heard = listener_of_view(self.shown_view());
+        self.audio.set_listener(heard);
+        self.step_streaming(render_camera.position, seconds);
+    }
+
+    /// Builds the draw list at this window's current pixel size, from the
+    /// camera scripts left.
+    fn draw_scene(&mut self, seconds: f64) {
+        let size = self.frame_size;
+        let on_top = self.loading_gui.as_ref().and_then(LoadingGui::on_top);
+        let camera = self.shown_camera();
+        let (draw_list, ui_layout) = axcenity_scene::build_draw_list_with_ui_interaction(
+            &self.sim.world,
+            &self.sim.assets,
+            camera,
+            (size.width, size.height),
+            &self.stylesheets,
+            UiFrame {
+                interaction: &mut self.ui,
+                input: UiInput {
+                    pointer: self.pointer,
+                    pressed: self.ui_pressed_button,
+                    focused: self.text_focus,
+                    on_top,
+                },
+                seconds: seconds as f32,
+            },
+            self.sim.animators.poses(),
+            &mut self.terrain,
+        );
+        self.frame_draw = Some(draw_list);
+        self.frame_ui_layout = Some(ui_layout);
+    }
+
+    /// The game's overlays, the particles, the console and the splash or
+    /// loading screen, over the draw list.
+    fn draw_ui(&mut self, seconds: f64) {
+        let size = self.frame_size;
+        let render_camera = self.shown_camera();
+        let mut draw_list = self.frame_draw.take().expect("the scene was drawn first");
+        let ui_layout = self
+            .frame_ui_layout
+            .take()
+            .expect("the scene was drawn first");
+        self.note_ui_warnings(&ui_layout.warnings);
+        // The UI's cursor, else a ClickDetector's under the mouse.
+        let click_cursor = self.sim.scripts.click_cursor(&self.sim.world);
+        let cursor = match (ui_layout.cursor, click_cursor) {
+            (UiCursor::Default, Some(name)) => name.parse().unwrap_or(CursorIcon::Pointer),
+            (cursor, _) => cursor_icon(cursor),
+        };
+        if cursor != self.cursor
+            && let Some(window) = &self.window
+        {
+            self.cursor = cursor;
+            window.set_cursor(cursor);
+        }
+        // The hotbar, the ability bar, the quest tracker and dialogue box,
+        // the leaderboard, the chat window, then ProximityPrompts that show.
+        let inventory = self.sim.scripts.player_inventory(&self.sim.world);
+        let abilities = self.sim.scripts.ability_bar(&self.sim.world);
+        let quests = self.sim.scripts.quest_tracker(&self.sim.world);
+        let dialogue = self.sim.scripts.dialogue_view(&self.sim.world);
+        let lines: Vec<(Option<String>, String)> = self
+            .sim
+            .scripts
+            .chat_lines()
+            .into_iter()
+            .map(|line| (line.from, line.text))
+            .collect();
+        let prompts = prompt_views(self.sim.scripts.shown_prompts());
+        draw_list.ui.extend(axcenity_ui::overlay_items(
+            &self.sim.world,
+            &axcenity_ui::OverlayView {
+                inventory,
+                abilities: &abilities,
+                quests: &quests,
+                dialogue: dialogue.as_ref(),
+                leaderboard: self.sim.scripts.leaderboard_shown(),
+                chat: Some((&lines, self.chat_typing.as_deref())),
+                prompts: &prompts,
+            },
+            &self.stylesheets,
+            &render_camera,
+            size.width,
+            size.height,
+        ));
+        self.particles
+            .draw(&mut draw_list, &self.sim.world, &self.sim.assets);
+        self.particles.add_weather(&mut draw_list);
+        self.shader_time += seconds as f32;
+        draw_list.time = self.shader_time;
+        // The console's outlines and readout, then the console, over the
+        // game's UI (Phase 71).
+        self.take_log();
+        draw_list
+            .ui
+            .extend(self.console_items(render_camera, (size.width, size.height)));
+        let loading_assets = self.frame_loading_assets;
+        if self.show_splash {
+            // The first drawn frame starts the splash clock.
+            self.splash.tick();
+            // Once its bar is full, a splash still waiting for assets says
+            // how many are in.
+            let caption = match &self.preload {
+                Some(preload) if self.splash.waiting_for_assets() => preload.progress().caption(),
+                _ => "Made with Axcenity".to_owned(),
+            };
+            draw_list.ui.extend(
+                self.splash
+                    .items(size.width as f32, size.height as f32, &caption),
+            );
+        } else if loading_assets
+            && self.loading_gui.is_none()
+            && let Some(preload) = &self.preload
+        {
+            // No splash and no loading screen of the game's own: a plain
+            // one, so textures don't pop in.
+            draw_list.ui.extend(preload::screen_items(
+                size.width as f32,
+                size.height as f32,
+                preload.progress(),
+            ));
+        }
+        // Models that couldn't be loaded, by physics or for drawing.
+        for error in self.sim.assets.take_errors() {
+            logs::line(LogLevel::Error, None, &format!("error: {error}"));
+        }
+        self.frame_draw = Some(draw_list);
+    }
+
+    /// After the frame's scripts, physics and UI layout, before rendering.
+    fn net_send(&mut self) {
+        self.network.send(&self.sim.world, &mut self.sim.scripts);
+    }
+}
+
 /// Seconds since `last_frame` (0 for the first frame), and records now as the latest frame.
 ///
 /// This takes only the `last_frame` field rather than all of `App`, so it can
@@ -1469,517 +1872,9 @@ impl ApplicationHandler for App {
                 }
                 self.ui_mouse_events.push(false);
             }
-            // One frame, in the fixed order from docs/architecture/frame-loop.md.
-            WindowEvent::RedrawRequested => {
-                profiling::scope!("frame");
-                // `timescale` in the console speeds the game up or slows it.
-                let real_seconds = frame_seconds(&mut self.last_frame);
-                // `--bench` steps a fixed 1/60 s a frame, as the other
-                // hosts' benchmarks do, so every frame has the same work.
-                let seconds = if self.bench.is_some() {
-                    1.0 / 60.0
-                } else {
-                    self.game_seconds(real_seconds)
-                };
-                let mut watch = dev_console::Stopwatch::start();
-                let size = self
-                    .window
-                    .as_ref()
-                    .expect("checked at the start of the event")
-                    .inner_size();
-                self.process_ui_mouse_events((size.width, size.height));
-                self.process_ui_navigation(seconds);
-                // What the UI did last frame and this click: MouseEnter,
-                // MouseLeave and buttons' sounds.
-                let events = self.ui.take_events();
-                let sounds = fire_ui_events(&mut self.sim.scripts, &mut self.sim.world, events);
-                self.ui_sounds.extend(sounds);
-
-                // Assets changed on disk (`--watch`) are swapped in first,
-                // so this frame's steps use them.
-                if let Some(watcher) = &self.watcher {
-                    let paths = watcher.changes();
-                    let lines = watch::reload(
-                        &paths,
-                        &self.sim.assets,
-                        &mut self.sim.animators,
-                        &mut self.audio,
-                    );
-                    for line in lines {
-                        logs::line(LogLevel::Info, None, &line);
-                    }
-                }
-
-                // 0. Network receive: what scripts asked of NetworkService
-                //    last frame, then who joined or left (Phase 63).
-                self.network.receive(
-                    &mut self.sim.world,
-                    &mut self.sim.scripts,
-                    f64::from(seconds),
-                );
-                print_network_log(&mut self.network);
-                print_output(&mut self.sim.scripts);
-                // `Player:Kick` on this device's player ends the game.
-                if let Some(reason) = self.network.take_kicked() {
-                    logs::line(
-                        LogLevel::Warning,
-                        None,
-                        &format!("You were kicked from the game: {reason}"),
-                    );
-                    event_loop.exit();
-                    return;
-                }
-                if !axcenity_ui::chat_enabled(&self.sim.world) {
-                    self.chat_typing = None;
-                }
-                if self.sim.scripts.is_client_only() && !self.following {
-                    self.follow_server();
-                }
-                // A device following a server only runs its LocalScripts:
-                // the server moves parts, characters and agents.
-                let simulates = !self.following;
-
-                watch.lap("Network");
-
-                // 1. Input. A character controller moves first and owns
-                //    the camera, by the input map's actions (with the
-                //    player's rebinds). Otherwise the fly camera moves, and
-                //    LocalScripts see that.
-                let motion = self.controller_input(seconds);
-                // In a hosted or joined game, only this device's player's
-                // character takes input, and other devices move their own
-                // (Phase 66). A device following a server moves only its
-                // own character.
-                let others = self
-                    .network
-                    .other_characters(&self.sim.world, &self.sim.scripts);
-                self.sim
-                    .characters
-                    .set_players(self.sim.scripts.local_player(), others);
-                self.network.set_running(motion.run);
-                if !simulates {
-                    self.sim.characters.step(
-                        &mut self.sim.world,
-                        &self.sim.assets,
-                        motion,
-                        seconds,
-                    );
-                    fire_seated(
-                        &mut self.sim.scripts,
-                        &mut self.sim.world,
-                        &mut self.sim.characters,
-                    );
-                }
-                if simulates {
-                    self.sim.characters.step(
-                        &mut self.sim.world,
-                        &self.sim.assets,
-                        motion,
-                        seconds,
-                    );
-                    fire_seated(
-                        &mut self.sim.scripts,
-                        &mut self.sim.world,
-                        &mut self.sim.characters,
-                    );
-                    fire_landed(
-                        &mut self.sim.scripts,
-                        &mut self.sim.world,
-                        &mut self.sim.characters,
-                    );
-                    //    Then Humanoids: MoveTo, states and dying (Phase 46).
-                    self.sim.scripts.step_humanoids(
-                        &mut self.sim.world,
-                        &self.sim.characters,
-                        f64::from(seconds),
-                    );
-                    //    Then players: their first character, respawns and
-                    //    spawn ForceFields (Phase 47).
-                    self.sim
-                        .scripts
-                        .step_players(&mut self.sim.world, f64::from(seconds));
-                    watch.lap("Characters");
-                    // Then navigation agents, toward their destinations.
-                    self.sim
-                        .agents
-                        .step(&mut self.sim.world, &self.sim.assets, seconds);
-                    watch.lap("Agents");
-                    for warning in self.sim.agents.take_warnings() {
-                        logs::line(LogLevel::Warning, None, &format!("warning: {warning}"));
-                    }
-                    fire_sensed(
-                        &mut self.sim.scripts,
-                        &mut self.sim.world,
-                        &mut self.sim.agents,
-                    );
-                }
-                print_output(&mut self.sim.scripts);
-                self.begin_camera(seconds, (size.width, size.height));
-                let pointer = self.apply_cursor((size.width, size.height));
-                let events = self.input.take_events(pointer);
-                self.sim.scripts.input_events(&mut self.sim.world, &events);
-                //    Then ProximityPrompts and ClickDetectors, by that input,
-                //    then Tools: pickups, the hotbar, Drop and Primary.
-                if simulates {
-                    self.sim
-                        .scripts
-                        .step_prompts(&mut self.sim.world, f64::from(seconds));
-                    self.sim.scripts.step_tools(&mut self.sim.world);
-                }
-                //    Then Abilities' keys, on every device (Phase 76).
-                self.sim
-                    .scripts
-                    .step_abilities(&mut self.sim.world, f64::from(seconds));
-                print_output(&mut self.sim.scripts);
-
-                watch.lap("Input");
-
-                // 2. Resume scripts whose wait is over (and due `task.delay`s).
-                //    Game time is the sum of the (capped) frame times, so a
-                //    long pause doesn't make every waiting script fire at once.
-                self.sim
-                    .scripts
-                    .step(&mut self.sim.world, f64::from(seconds));
-                //    Then `RunService.Stepped`, before physics.
-                self.sim
-                    .scripts
-                    .stepped(&mut self.sim.world, f64::from(seconds));
-                print_output(&mut self.sim.scripts);
-
-                watch.lap("Scripts");
-
-                // 3. Hold characters and agents kinematic, then step physics at a
-                //    fixed 60 Hz (0 to N steps this frame). Anchoring is
-                //    after scripts, so a script cannot drop the character
-                //    for this step. Other parts keep their gravity.
-                // Parts another device moves are held still here.
-                let held = self.network.held_parts(&self.sim.world, &self.sim.scripts);
-                self.sim.physics.set_held(held);
-                self.set_far_physics_sleep();
-                if !simulates && self.network.simulates_physics() {
-                    // An assembly the server gave this device (a car it
-                    // drives) is simulated here; the server does the rest.
-                    self.sim
-                        .physics
-                        .step(&mut self.sim.world, f64::from(seconds));
-                    let _ = self.sim.physics.take_touches();
-                    let _ = self.sim.physics.take_touch_ends();
-                }
-                if simulates {
-                    self.sim.characters.keep_kinematic(&mut self.sim.world);
-                    self.sim.agents.keep_kinematic(&mut self.sim.world);
-                    self.sim
-                        .scripts
-                        .apply_shatters(&mut self.sim.world, &mut self.sim.physics);
-                    self.sim
-                        .physics
-                        .step(&mut self.sim.world, f64::from(seconds));
-                    watch.lap("Physics");
-
-                    // 4. Fire `Touched` for parts that started touching
-                    //    during those steps (and `Changed` for the parts
-                    //    that moved), `TouchEnded` for those that stopped,
-                    //    then `RunService.Heartbeat`. Handlers that wait
-                    //    carry on in step 2.
-                    let touches = self.sim.physics.take_touches();
-                    self.sim.scripts.fire_touched(&mut self.sim.world, &touches);
-                    let ends = self.sim.physics.take_touch_ends();
-                    self.sim
-                        .scripts
-                        .fire_touch_ended(&mut self.sim.world, &ends);
-                    //    Then `Broken` and `Shattered`, for joints and parts
-                    //    that broke.
-                    self.sim
-                        .scripts
-                        .fire_breaks(&mut self.sim.world, &mut self.sim.physics);
-                    //    Then damage zones and regeneration, and health bars
-                    //    follow their Health.
-                    self.sim
-                        .scripts
-                        .step_health(&mut self.sim.world, f64::from(seconds));
-                }
-                self.sim
-                    .scripts
-                    .heartbeat(&mut self.sim.world, f64::from(seconds));
-                print_output(&mut self.sim.scripts);
-                watch.lap("Heartbeat");
-                let heard = listener_of_view(self.shown_view());
-                apply_audio(
-                    &mut self.sim.scripts,
-                    &mut self.sim.world,
-                    &self.sim.assets,
-                    &mut self.audio,
-                    heard,
-                    std::mem::take(&mut self.ui_sounds),
-                );
-                // Particles move on, after scripts and physics moved their
-                // parts: big emitters on the GPU, where it runs compute shaders.
-                self.particles.set_gpu(
-                    self.renderer
-                        .as_ref()
-                        .is_some_and(|renderer| renderer.capabilities().compute_shaders),
-                );
-                for (emitter, count) in self.sim.scripts.take_particle_emits() {
-                    self.particles.emit(&self.sim.world, emitter, count);
-                }
-                self.particles.update(&self.sim.world, seconds);
-                // Animators move on and pose their models, after scripts
-                // asked for states and physics moved the parts.
-                let events = self.sim.animators.update(
-                    &mut self.sim.world,
-                    &self.sim.assets,
-                    f64::from(seconds),
-                );
-                for event in events {
-                    let (animator, name, args) = event.script_event();
-                    self.sim.scripts.fire_instance_event(
-                        &mut self.sim.world,
-                        animator,
-                        name,
-                        &args,
-                    );
-                }
-                print_output(&mut self.sim.scripts);
-                for error in self.sim.animators.take_errors() {
-                    logs::line(LogLevel::Error, None, &format!("error: {error}"));
-                }
-                // Tools in hand follow the posed hands.
-                self.sim
-                    .scripts
-                    .place_tools(&mut self.sim.world, self.sim.animators.poses());
-                print_output(&mut self.sim.scripts);
-
-                // A level loaded this frame shows the loading screen again.
-                self.follow_level_loads();
-                // The loading screen goes once its time is up and, when the
-                // game waits for one, a LocalScript has said it's ready.
-                let ready = self.sim.scripts.take_loading_screen_removed();
-                if ready {
-                    self.splash.release();
-                }
-                // The splash or loading screen also waits for the preload.
-                let loading_assets = self.preload_loading();
-                self.splash.set_loading(loading_assets);
-                if let Some(loading) = &mut self.loading_gui {
-                    loading.set_assets_loading(loading_assets);
-                    loading.advance(&mut self.sim.world, seconds, ready);
-                }
-
-                watch.lap("Animation");
-
-                // 5. Lay out ScreenGuis at this window's current pixel size.
-                let ui_size = (size.width, size.height);
-
-                // 6. Build and render, from the camera scripts left, after
-                //    the render step's bound functions and `RenderStepped`.
-                self.render_step(seconds);
-                print_output(&mut self.sim.scripts);
-                self.end_camera(seconds);
-                // A LocalScript's graphics change (`UserGameSettings`) is
-                // saved and drawn from this frame.
-                if let Some(change) = self.sim.scripts.take_graphics_change()
-                    && let Some(renderer) = &mut self.renderer
-                {
-                    let capabilities = *renderer.capabilities();
-                    let settings =
-                        graphics::changed(self.data_folder.as_deref(), change, &capabilities);
-                    set_graphics(renderer, &settings);
-                }
-                let render_camera = self.shown_camera();
-                let heard = listener_of_view(self.shown_view());
-                self.audio.set_listener(heard);
-                self.step_streaming(render_camera.position, f64::from(seconds));
-
-                let (mut draw_list, ui_layout) =
-                    axcenity_scene::build_draw_list_with_ui_interaction(
-                        &self.sim.world,
-                        &self.sim.assets,
-                        render_camera,
-                        ui_size,
-                        &self.stylesheets,
-                        UiFrame {
-                            interaction: &mut self.ui,
-                            input: UiInput {
-                                pointer: self.pointer,
-                                pressed: self.ui_pressed_button,
-                                focused: self.text_focus,
-                                on_top: self.loading_gui.as_ref().and_then(LoadingGui::on_top),
-                            },
-                            seconds,
-                        },
-                        self.sim.animators.poses(),
-                        &mut self.terrain,
-                    );
-                watch.lap("Draw list");
-                self.note_ui_warnings(&ui_layout.warnings);
-                // The UI's cursor, else a ClickDetector's under the mouse.
-                let cursor = match (
-                    ui_layout.cursor,
-                    self.sim.scripts.click_cursor(&self.sim.world),
-                ) {
-                    (UiCursor::Default, Some(name)) => name.parse().unwrap_or(CursorIcon::Pointer),
-                    (cursor, _) => cursor_icon(cursor),
-                };
-                if cursor != self.cursor
-                    && let Some(window) = &self.window
-                {
-                    self.cursor = cursor;
-                    window.set_cursor(cursor);
-                }
-                // The hotbar, the leaderboard, then ProximityPrompts that
-                // show, over the rest of the UI.
-                if let Some(inventory) = self.sim.scripts.player_inventory(&self.sim.world) {
-                    draw_list.ui.extend(axcenity_ui::hotbar_items(
-                        &self.sim.world,
-                        inventory,
-                        &self.stylesheets,
-                        size.width,
-                        size.height,
-                    ));
-                }
-                // The ability bar (Phase 76), with its cooldown sweeps.
-                let abilities = self.sim.scripts.ability_bar(&self.sim.world);
-                draw_list.ui.extend(axcenity_ui::ability_bar_items(
-                    &self.sim.world,
-                    &abilities,
-                    &self.stylesheets,
-                    size.width,
-                    size.height,
-                ));
-                // The quest tracker and the dialogue box (Phase 77).
-                let quests = self.sim.scripts.quest_tracker(&self.sim.world);
-                draw_list.ui.extend(axcenity_ui::quest_tracker_items(
-                    &self.sim.world,
-                    &quests,
-                    &self.stylesheets,
-                    size.width,
-                    size.height,
-                ));
-                if let Some(dialogue) = self.sim.scripts.dialogue_view(&self.sim.world) {
-                    draw_list.ui.extend(axcenity_ui::dialogue_box_items(
-                        &self.sim.world,
-                        &dialogue,
-                        &self.stylesheets,
-                        size.width,
-                        size.height,
-                    ));
-                }
-                // The leaderboard (each Player's `leaderstats`), unless Tab
-                // hid it.
-                if self.sim.scripts.leaderboard_shown() {
-                    draw_list.ui.extend(axcenity_ui::leaderboard_items(
-                        &self.sim.world,
-                        &self.stylesheets,
-                        size.width,
-                        size.height,
-                    ));
-                }
-                // The chat window (Phase 67), at the bottom left.
-                let lines: Vec<(Option<String>, String)> = self
-                    .sim
-                    .scripts
-                    .chat_lines()
-                    .into_iter()
-                    .map(|line| (line.from, line.text))
-                    .collect();
-                draw_list.ui.extend(axcenity_ui::chat_items(
-                    &self.sim.world,
-                    &lines,
-                    self.chat_typing.as_deref(),
-                    &self.stylesheets,
-                    size.width,
-                    size.height,
-                ));
-                draw_list.ui.extend(prompt_items(
-                    &self.sim.world,
-                    self.sim.scripts.shown_prompts(),
-                    &self.stylesheets,
-                    &render_camera,
-                    size,
-                ));
-                self.particles
-                    .draw(&mut draw_list, &self.sim.world, &self.sim.assets);
-                self.particles.add_weather(&mut draw_list);
-                self.shader_time += seconds;
-                draw_list.time = self.shader_time;
-                // The console's outlines and readout, then the console,
-                // over the game's UI (Phase 71).
-                self.take_log();
-                draw_list
-                    .ui
-                    .extend(self.console_items(render_camera, (size.width, size.height)));
-                if self.show_splash {
-                    // The first drawn frame starts the splash clock.
-                    self.splash.tick();
-                    // Once its bar is full, a splash still waiting for
-                    // assets says how many are in.
-                    let caption = match &self.preload {
-                        Some(preload) if self.splash.waiting_for_assets() => {
-                            preload.progress().caption()
-                        }
-                        _ => "Made with Axcenity".to_owned(),
-                    };
-                    draw_list.ui.extend(self.splash.items(
-                        size.width as f32,
-                        size.height as f32,
-                        &caption,
-                    ));
-                } else if loading_assets
-                    && self.loading_gui.is_none()
-                    && let Some(preload) = &self.preload
-                {
-                    // No splash and no loading screen of the game's own:
-                    // a plain one, so textures don't pop in.
-                    draw_list.ui.extend(preload::screen_items(
-                        size.width as f32,
-                        size.height as f32,
-                        preload.progress(),
-                    ));
-                }
-                // Models that couldn't be loaded, by physics or for drawing.
-                for error in self.sim.assets.take_errors() {
-                    logs::line(LogLevel::Error, None, &format!("error: {error}"));
-                }
-                // Network send: after the frame's scripts, physics and UI
-                // layout, before rendering.
-                self.network.send(&self.sim.world, &mut self.sim.scripts);
-                watch.lap("UI");
-                // `|| ...` is a closure: a small function the renderer calls at the right moment.
-                let window = self
-                    .window
-                    .as_ref()
-                    .expect("checked at the start of the event")
-                    .clone();
-                let rendered = self
-                    .renderer
-                    .as_mut()
-                    .expect("checked")
-                    .render(&draw_list, || window.pre_present_notify());
-                if let Err(err) = rendered {
-                    self.fail(event_loop, err);
-                }
-                // Materials whose shaders don't compile (drawn magenta).
-                if let Some(renderer) = &mut self.renderer {
-                    for error in renderer.take_shader_errors() {
-                        logs::line(LogLevel::Error, None, &format!("error: {error}"));
-                    }
-                }
-                watch.lap("Render");
-                self.frame_stats.finish(real_seconds, &watch);
-                profiling::finish_frame!();
-                if let Some(bench) = &mut self.bench {
-                    bench.note("launch to first frame", self.launched.elapsed());
-                    if !loading_assets {
-                        bench.note("launch to assets loaded", self.launched.elapsed());
-                    }
-                }
-                if let Some(bench) = &mut self.bench
-                    && bench.record(&watch)
-                {
-                    print!("{}", bench.finish_text("player", &self.bench_scene));
-                    event_loop.exit();
-                }
-            }
+            // One frame: the host's input first, then the shared schedule
+            // (`axcenity_sim`, docs/architecture/frame-loop.md), then render.
+            WindowEvent::RedrawRequested => self.frame(event_loop),
             _ => {}
         }
     }

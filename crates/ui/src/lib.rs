@@ -18,6 +18,7 @@ mod hotbar;
 mod interact;
 mod leaderboard;
 mod loading;
+mod overlay;
 mod paint;
 mod prompt;
 mod rich;
@@ -44,6 +45,7 @@ pub use interact::{
 };
 pub use leaderboard::{LEADERSTATS, leaderboard_items};
 pub use loading::LoadingGui;
+pub use overlay::{OverlayView, overlay_items};
 use paint::*;
 pub use prompt::{PromptView, prompt_items, prompt_text};
 pub use rich::{RichSpan, RichStroke, RichStyle, parse_rich_text, rich_text_plain};

@@ -283,12 +283,13 @@ fn snapshot(game: &Game, path: &Path) {
             VIEW,
             &stylesheets,
         );
-        draw_list.ui.extend(prompt_items(
+        draw_list.ui.extend(axcenity_ui::prompt_items(
             &game.world,
-            game.scripts.shown_prompts(),
+            &prompt_views(game.scripts.shown_prompts()),
             &stylesheets,
             &shown,
-            winit::dpi::PhysicalSize::new(VIEW.0, VIEW.1),
+            VIEW.0,
+            VIEW.1,
         ));
         renderer.render(&draw_list).unwrap();
     }
