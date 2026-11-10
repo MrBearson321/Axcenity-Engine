@@ -2450,6 +2450,12 @@ mod property_bench;
 mod chunks_tests;
 
 #[cfg(test)]
+mod native_tests;
+
+#[cfg(test)]
+mod native_vector_tests;
+
+#[cfg(test)]
 mod handler_threads_tests;
 
 #[cfg(test)]

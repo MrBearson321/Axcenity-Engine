@@ -46,6 +46,11 @@ impl Context {
             | StdLib::UTF8;
         let lua = Lua::new_with(libraries, LuaOptions::default())
             .expect("loading Lua's standard libraries only fails when out of memory");
+        // Native code only for `--!native` scripts (`chunks::load` turns it
+        // on for those); everything else stays in the interpreter.
+        lua.enable_jit(false);
+        // What `lua.load` compiles with (`chunks` uses the same).
+        lua.set_compiler(crate::sandbox::compiler());
         // First, so that every coroutine made from here on is watched.
         watchdog::install(&lua).expect("setting a hook only fails when out of memory");
         // Which side this is, for `sides::check`.
