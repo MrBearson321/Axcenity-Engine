@@ -255,6 +255,20 @@ pub fn plan_rename(
         before: None,
         after: Some(bytes),
     });
+    // Its sidecar goes with it, so it keeps its asset ID.
+    let sidecar = axcenity_assets::import_path(from);
+    if let Ok(sidecar_bytes) = fs::read(folder.join(&sidecar)) {
+        plan.files.push(FileWrite {
+            path: sidecar,
+            before: Some(sidecar_bytes.clone()),
+            after: None,
+        });
+        plan.files.push(FileWrite {
+            path: axcenity_assets::import_path(to),
+            before: None,
+            after: Some(sidecar_bytes),
+        });
+    }
     Ok(plan)
 }
 

@@ -202,6 +202,21 @@ pub fn files_of_kind(files: &[String], kind: AssetKind) -> Vec<String> {
         .collect()
 }
 
+/// Where the file `finding`'s reference wants went, by its asset ID, if
+/// it was renamed or moved outside the editor (`moved`, from
+/// [`axcenity_assets::moved_assets`]): the surest suggestion, since the
+/// name may have changed too. A model reference keeps its pick.
+pub fn moved_suggestion(finding: &Finding, moved: &BTreeMap<String, String>) -> Option<String> {
+    if !finding.can_point_elsewhere() || matches!(finding.site, Site::ModelTexture { .. }) {
+        return None;
+    }
+    let target = finding.target();
+    let found = moved.get(target)?;
+    // A model's `#pick` (its target is the path before it).
+    let pick = finding.path.strip_prefix(target).unwrap_or_default();
+    Some(format!("{found}{pick}"))
+}
+
 /// A project file with the name `finding`'s reference wants, somewhere
 /// else in the project, for Use: where a moved file went. With several,
 /// the one in the most of the same folders wins, then the shortest path.

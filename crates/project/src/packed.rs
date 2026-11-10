@@ -252,11 +252,11 @@ fn include_runtime_file(root: &Path, path: &Path) -> bool {
         return false;
     };
     // The Model Studio's sidecars (and sidecar folders of paint layers)
-    // are editing state; games load the `.glb`.
-    if relative
-        .to_string_lossy()
-        .to_ascii_lowercase()
-        .ends_with(axcenity_assets::MESH_EDIT_SUFFIX)
+    // are editing state; games load the `.glb`. So are asset IDs' sidecars
+    // for now: games find files by path.
+    let lower = relative.to_string_lossy().to_ascii_lowercase();
+    if lower.ends_with(axcenity_assets::MESH_EDIT_SUFFIX)
+        || axcenity_assets::is_import_file(&lower)
         || components.iter().any(|component| {
             component
                 .as_os_str()
@@ -343,7 +343,7 @@ mod tests {
     use axcenity_blocks_runtime::{Block, BlockKind, BlockScript};
 
     #[test]
-    fn a_built_game_has_models_but_not_their_model_studio_sidecars() {
+    fn a_built_game_has_models_but_not_their_sidecars() {
         let root = Path::new("game");
         assert!(include_runtime_file(
             root,
@@ -361,6 +361,11 @@ mod tests {
         assert!(include_runtime_file(
             root,
             &root.join("assets/models/textures/Head_Head_Skin_BaseColor.png")
+        ));
+        // Asset IDs' sidecars stay behind too.
+        assert!(!include_runtime_file(
+            root,
+            &root.join("assets/models/Head.glb.import.json")
         ));
     }
 

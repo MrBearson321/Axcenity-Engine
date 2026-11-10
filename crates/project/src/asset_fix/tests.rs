@@ -180,6 +180,54 @@ fn locating_a_file_outside_the_project_copies_it_in_once() {
 }
 
 #[test]
+fn a_model_renamed_outside_the_editor_is_found_by_its_asset_id() {
+    let folder = scratch("moved-id");
+    write(&folder, "assets/models/chair.glb", b"chair");
+    write(
+        &folder,
+        "assets/models/old/chair.glb",
+        b"same name, another file",
+    );
+    axcenity_assets::give_asset_ids(&folder).unwrap();
+    for (from, to) in [
+        (
+            "assets/models/chair.glb",
+            "assets/models/seats/armchair.glb",
+        ),
+        (
+            "assets/models/chair.glb.import.json",
+            "assets/models/seats/armchair.glb.import.json",
+        ),
+    ] {
+        write(&folder, to, &fs::read(folder.join(from)).unwrap());
+        fs::remove_file(folder.join(from)).unwrap();
+    }
+    let mut world = World::new();
+    add(
+        &mut world,
+        ClassName::MeshPart,
+        "A",
+        "MeshId",
+        "assets/models/chair.glb#Seat",
+    );
+    let report = check_assets(&folder, &world);
+    let missing = &report.findings[0];
+    assert_eq!(missing.kind, FindingKind::MissingFile);
+    let moved = axcenity_assets::moved_assets(&folder);
+    assert_eq!(
+        moved_suggestion(missing, &moved).as_deref(),
+        Some("assets/models/seats/armchair.glb#Seat")
+    );
+    // By name alone, the other chair would be picked.
+    let files = list_project_files(&folder);
+    assert_eq!(
+        suggestion(missing, &files).as_deref(),
+        Some("assets/models/old/chair.glb#Seat")
+    );
+    let _ = fs::remove_dir_all(folder);
+}
+
+#[test]
 fn a_models_missing_texture_is_copied_next_to_the_model() {
     let folder = scratch("model-texture");
     write(&folder, "assets/textures/wood.png", b"wood");

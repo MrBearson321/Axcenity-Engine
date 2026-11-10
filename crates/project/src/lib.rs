@@ -75,7 +75,7 @@ use serde::{Deserialize, Serialize};
 
 pub use asset_fix::{
     FileWrite, Fix, FixPlan, IGNORED_FILE, Ignored, PropertyFix, files_of_kind, list_project_files,
-    plan_fix, read_ignored, suggestion, write_ignored,
+    moved_suggestion, plan_fix, read_ignored, suggestion, write_ignored,
 };
 pub use asset_refs::{
     RefPlace, Reference, find_references, is_model_part, plan_rename, unused_assets,
