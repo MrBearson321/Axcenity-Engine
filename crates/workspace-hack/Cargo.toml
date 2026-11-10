@@ -20,6 +20,7 @@ publish = false
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 bytemuck = { version = "1", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "wasm_simd"] }
+byteorder = { version = "1" }
 crossbeam-utils = { version = "0.8" }
 either = { version = "1" }
 glam = { version = "0.34", features = ["mint-05"] }
@@ -28,9 +29,12 @@ libm = { version = "0.2" }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
 memchr = { version = "2" }
+num-complex = { version = "0.4", features = ["bytemuck"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
 once_cell = { version = "1" }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
+parry3d = { version = "0.31", default-features = false, features = ["alloc", "parallel", "required-features", "std"] }
+rapier3d = { version = "0.36", features = ["parallel"] }
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "std", "unicode"] }
 regex-syntax = { version = "0.8" }
