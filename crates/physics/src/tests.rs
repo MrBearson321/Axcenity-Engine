@@ -946,3 +946,50 @@ fn a_weld_in_another_service_still_joins_and_parts_its_parts() {
     physics.step(&mut world, STEP_SECONDS);
     assert_ne!(physics.parts[&a].body, physics.parts[&b].body);
 }
+
+/// A model that fills its box corner to corner: four faces, so not flat.
+fn tetrahedron() -> std::sync::Arc<axcenity_assets::Model> {
+    let primitive = axcenity_assets::Primitive::new(
+        vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        vec![[0.0, 1.0, 0.0]; 4],
+        Vec::new(),
+        vec![0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3],
+        axcenity_assets::ModelMaterial::default(),
+    );
+    std::sync::Arc::new(axcenity_assets::Model::from_primitives(vec![primitive]).unwrap())
+}
+
+#[test]
+fn a_hull_is_built_once_for_a_model_and_size() {
+    use crate::shapes::{Fidelity, Form, collider};
+    let model = tetrahedron();
+    let form = Form::Mesh(Some(model), Fidelity::Hull);
+    let size = rapier3d::glamx::Vec3::new(2.0, 4.0, 6.0);
+    let (first, second) = (collider(&form, size), collider(&form, size));
+    assert!(std::sync::Arc::ptr_eq(
+        &first.shared_shape().0,
+        &second.shared_shape().0
+    ));
+
+    // Another size has its own hull, stretched to it.
+    let bigger = rapier3d::glamx::Vec3::new(4.0, 8.0, 12.0);
+    let stretched = collider(&form, bigger);
+    assert!(!std::sync::Arc::ptr_eq(
+        &first.shared_shape().0,
+        &stretched.shared_shape().0
+    ));
+    let extents = |built: &rapier3d::prelude::Collider| built.compute_aabb().half_extents();
+    assert!((extents(&stretched) - extents(&first) * 2.0).length() < 1e-4);
+
+    // A model loaded again is a new model.
+    let reloaded = Form::Mesh(Some(tetrahedron()), Fidelity::Hull);
+    assert!(!std::sync::Arc::ptr_eq(
+        &first.shared_shape().0,
+        &collider(&reloaded, size).shared_shape().0
+    ));
+}
