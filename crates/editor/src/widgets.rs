@@ -131,6 +131,17 @@ pub fn segmented_at<T: Copy + PartialEq>(
     value: &mut T,
     options: &[(T, Option<&str>, &str)],
 ) -> (bool, Vec<egui::Rect>) {
+    segmented_tips(ui, value, options, &[])
+}
+
+/// [`segmented_at`], with `tips[k]` shown on hovering option `k` (an
+/// option past the end of `tips` has none).
+pub fn segmented_tips<T: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    options: &[(T, Option<&str>, &str)],
+    tips: &[&str],
+) -> (bool, Vec<egui::Rect>) {
     let palette = theme::palette(ui.ctx());
     let mut changed = false;
     let mut rects = Vec::with_capacity(options.len());
@@ -142,7 +153,7 @@ pub fn segmented_at<T: Copy + PartialEq>(
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             ui.horizontal(|ui| {
-                for &(option, icon, label) in options {
+                for (k, &(option, icon, label)) in options.iter().enumerate() {
                     let selected = *value == option;
                     let text = match icon {
                         Some(icon) => theme::with_icon(icon, label),
@@ -160,7 +171,10 @@ pub fn segmented_at<T: Copy + PartialEq>(
                     );
                     let height = ui.spacing().interact_size.y - 2.0;
                     let size = vec2(galley.size().x + 20.0, height);
-                    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+                    let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
+                    if let Some(tip) = tips.get(k) {
+                        response = response.on_hover_text(*tip);
+                    }
                     rects.push(rect);
                     response.widget_info(|| {
                         egui::WidgetInfo::selected(

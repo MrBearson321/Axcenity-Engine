@@ -11,7 +11,7 @@ use super::*;
 use crate::gizmo::{Drag, Handle, Modes, Pointer, Pose};
 use crate::screen::Screen;
 
-pub(super) fn cube_doc() -> StudioDoc {
+pub(crate) fn cube_doc() -> StudioDoc {
     StudioDoc::new(
         String::new(),
         ModelDoc::primitive(&PrimitiveSettings::default()),
@@ -325,4 +325,158 @@ fn the_tab_draws_a_loop_picked_on_a_cylinder_and_the_handles_on_a_face() {
             });
         },
     );
+}
+
+/// The text drawn by one frame's shapes, with where each is.
+fn drawn(output: &egui::FullOutput) -> Vec<(String, egui::Pos2)> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<(String, egui::Pos2)>) {
+        match shape {
+            egui::Shape::Text(text) => found.push((
+                text.galley.text().to_owned(),
+                text.visual_bounding_rect().center(),
+            )),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, found)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut found);
+    }
+    found
+}
+
+/// Draws the tab (no GPU) for a few frames with `events` in the first
+/// that has any, and returns what the last frame drew.
+fn frames(
+    ctx: &egui::Context,
+    studio: &mut ModelStudio,
+    events: Vec<egui::Event>,
+) -> Vec<(String, egui::Pos2)> {
+    let mut last = Vec::new();
+    let steps = if events.is_empty() {
+        vec![Vec::new(), Vec::new()]
+    } else {
+        events
+            .into_iter()
+            .map(|e| vec![e])
+            .chain([Vec::new()])
+            .collect()
+    };
+    for events in steps {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 500.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let output = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = studio.show(ui, None, &[], Snap::default(), true);
+            });
+        });
+        last = drawn(&output);
+    }
+    last
+}
+
+/// A button whose text ends with `label`.
+fn button<'a>(shown: &'a [(String, egui::Pos2)], label: &str) -> Option<&'a egui::Pos2> {
+    shown
+        .iter()
+        .find(|(text, _)| text == label || text.ends_with(&format!("  {label}")))
+        .map(|(_, at)| at)
+}
+
+fn click(at: egui::Pos2) -> Vec<egui::Event> {
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    vec![egui::Event::PointerMoved(at), press(true), press(false)]
+}
+
+/// U20: the toolbar shows only what works in the mode (the Mesh menu and
+/// handles for modeling, UV tools for modeling and Paint), Rig's three
+/// steps are a second switch, and a step that can't be entered yet says
+/// why instead of doing nothing.
+#[test]
+fn the_toolbar_fits_the_mode_and_rig_steps_say_why_they_wait() {
+    let ctx = crate::theme::test_context();
+    let mut studio = studio_with(StudioDoc::new(
+        String::new(),
+        super::rig_tests::humanoid_doc(),
+        false,
+    ));
+    let set = |studio: &mut ModelStudio, mode| {
+        studio.doc.as_mut().unwrap().set_mode(mode);
+        frames(&ctx, studio, Vec::new())
+    };
+    let shown = set(&mut studio, Mode::Object);
+    for label in ["Object", "Edit", "Paint", "Sculpt", "Rig", "Mesh", "UV"] {
+        assert!(button(&shown, label).is_some(), "{label} in {shown:?}");
+    }
+    for label in ["Weights", "Pose", "Bones"] {
+        assert!(button(&shown, label).is_none(), "{label} in Object mode");
+    }
+    let shown = set(&mut studio, Mode::Paint);
+    assert!(button(&shown, "UV").is_some(), "Paint keeps the UV tools");
+    assert!(
+        button(&shown, "Mesh").is_none(),
+        "no Mesh menu in Paint mode"
+    );
+    let shown = set(&mut studio, Mode::Sculpt);
+    assert!(button(&shown, "UV").is_none() && button(&shown, "Mesh").is_none());
+
+    // Rig: Bones, Weights and Pose; Weights waits for bones, and says so.
+    let shown = set(&mut studio, Mode::Armature);
+    assert!(button(&shown, "Mesh").is_none());
+    let weights = *button(&shown, "Weights").expect("Rig shows its steps");
+    assert!(button(&shown, "Bones").is_some() && button(&shown, "Pose").is_some());
+    let shown = frames(&ctx, &mut studio, click(weights));
+    assert_eq!(studio.doc.as_ref().unwrap().mode, Mode::Armature);
+    assert!(
+        shown
+            .iter()
+            .any(|(text, _)| text.contains("Add bones first")),
+        "{shown:?}"
+    );
+    // With bones it goes in, and the note goes.
+    assert!(studio.add_humanoid());
+    let shown = frames(&ctx, &mut studio, click(weights));
+    assert_eq!(studio.doc.as_ref().unwrap().mode, Mode::Weights);
+    assert!(
+        !shown
+            .iter()
+            .any(|(text, _)| text.contains("Add bones first"))
+    );
+    // Rig stays lit while its steps change.
+    assert!(button(&shown, "Bones").is_some());
+}
+
+/// Each mode that needs something says what, and Object and Rig never
+/// wait.
+#[test]
+fn modes_that_need_a_mesh_or_bones_say_so() {
+    let mut doc = cube_doc();
+    assert_eq!(doc.refuses(Mode::Edit), None);
+    assert_eq!(doc.refuses(Mode::Armature), None);
+    for mode in [Mode::Weights, Mode::Pose] {
+        assert!(doc.refuses(mode).unwrap().contains("Add bones first"));
+        doc.set_mode(mode);
+        assert_eq!(doc.mode, Mode::Object, "{mode:?} needs bones");
+    }
+    // A group has no mesh to edit, paint or sculpt.
+    let mut group = doc.model.objects[0].clone();
+    group.mesh = None;
+    doc.model.objects.push(group);
+    doc.active = 1;
+    for mode in [Mode::Edit, Mode::Paint, Mode::Sculpt] {
+        assert!(doc.refuses(mode).unwrap().contains("mesh"), "{mode:?}");
+    }
+    assert_eq!(doc.refuses(Mode::Object), None);
 }

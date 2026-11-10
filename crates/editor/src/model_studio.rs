@@ -93,6 +93,22 @@ pub enum Mode {
     Pose,
 }
 
+/// What each of the toolbar's modes is for, in the switch's order.
+const MODE_TIPS: [&str; 5] = [
+    "Object: pick, move, turn and scale whole objects (Tab goes to Edit)",
+    "Edit: change the active object's shape, its vertices, edges and faces (Tab)",
+    "Paint: paint colour and surface maps onto the active object",
+    "Sculpt: push, pull and smooth the surface like clay",
+    "Rig: give the model bones so it can be animated, paint how much each bone moves, and test a pose",
+];
+
+/// What each of Rig's steps is for.
+const RIG_TIPS: [&str; 3] = [
+    "Bones: add and place bones (Add Humanoid fits a ready-made skeleton), then give the mesh weights",
+    "Weights: paint how strongly the picked bone moves each part of the mesh",
+    "Pose: turn bones to test how the mesh bends (the pose isn't saved)",
+];
+
 /// What the tab asks the app to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StudioAction {
@@ -381,21 +397,32 @@ impl StudioDoc {
         };
     }
 
-    /// Into `mode` (Edit, Paint, Sculpt and Weights mode need the active
-    /// object to have a mesh; Pose mode needs bones).
+    /// Into `mode`, unless [`refuses`](Self::refuses) says why not.
     pub fn set_mode(&mut self, mode: Mode) {
-        let allowed = match mode {
-            Mode::Object | Mode::Armature => true,
-            Mode::Pose => self
-                .model
-                .armature
-                .as_ref()
-                .is_some_and(|arm| !arm.bones.is_empty()),
-            _ => self.mesh().is_some(),
-        };
-        if allowed {
+        if self.refuses(mode).is_none() {
             self.last_op = None;
             self.mode = mode;
+        }
+    }
+
+    /// Why `mode` can't be entered now, in words for the toolbar, or
+    /// `None` if it can. Edit, Paint, Sculpt and Weights mode need the
+    /// active object to have a mesh; Weights and Pose mode need bones.
+    pub fn refuses(&self, mode: Mode) -> Option<&'static str> {
+        let bones = self
+            .model
+            .armature
+            .as_ref()
+            .is_some_and(|arm| !arm.bones.is_empty());
+        match mode {
+            Mode::Object | Mode::Armature => None,
+            Mode::Edit | Mode::Paint | Mode::Sculpt | Mode::Weights if self.mesh().is_none() => {
+                Some("Pick an object with a mesh first (a group has none).")
+            }
+            Mode::Weights | Mode::Pose if !bones => {
+                Some("Add bones first: in Bones, click Add Humanoid or Add Bone.")
+            }
+            _ => None,
         }
     }
 
@@ -737,6 +764,9 @@ pub struct ModelStudio {
     hovered: bool,
     /// A model waiting to replace one with unsaved changes.
     pending: Option<StudioDoc>,
+    /// Why the last mode picked on the toolbar couldn't be entered, and
+    /// the mode the Studio stayed in (the note goes once that changes).
+    mode_note: Option<(Mode, &'static str)>,
     /// Lines for the Console.
     pub notices: Vec<String>,
     /// The active object's modifiers that couldn't run, worked out for
@@ -764,6 +794,7 @@ impl Default for ModelStudio {
             view: view::View::default(),
             hovered: false,
             pending: None,
+            mode_note: None,
             notices: Vec::new(),
             stack_errors: (0, 0, Vec::new()),
         }
@@ -878,7 +909,7 @@ impl ModelStudio {
                             }
                         }
                     });
-            } else if self.uv.open {
+            } else if self.uv.open && self.doc.as_ref().is_some_and(|doc| shows_uvs(doc.mode)) {
                 self.view_and_uvs(ui, render_state, snap, editable);
             } else {
                 self.viewport(ui, render_state, snap, editable);
@@ -983,22 +1014,46 @@ impl ModelStudio {
                 actions.push(StudioAction::Save);
             }
             ui.separator();
-            let mut mode = doc.mode;
-            if widgets::segmented(
+            // Five modes; Rig's three steps (bones, weights, a test pose)
+            // are a second switch beside it, as Edit's vertex, edge and
+            // face are.
+            let shown = match doc.mode {
+                Mode::Weights | Mode::Pose => Mode::Armature,
+                mode => mode,
+            };
+            let mut picked = shown;
+            let (changed, _) = widgets::segmented_tips(
                 ui,
-                &mut mode,
+                &mut picked,
                 &[
                     (Mode::Object, Some(icons::CUBE), "Object"),
                     (Mode::Edit, Some(icons::POLYGON), "Edit"),
                     (Mode::Paint, Some(icons::PAINT_BRUSH), "Paint"),
                     (Mode::Sculpt, Some(icons::HAND_GRABBING), "Sculpt"),
                     (Mode::Armature, Some(icons::BONE), "Rig"),
-                    (Mode::Weights, Some(icons::DROP_HALF), "Weights"),
-                    (Mode::Pose, Some(icons::PERSON_SIMPLE_RUN), "Pose"),
                 ],
-            ) && mode != doc.mode
-            {
-                doc.set_mode(mode);
+                &MODE_TIPS,
+            );
+            if changed {
+                self.mode_note = doc.refuses(picked).map(|why| (doc.mode, why));
+                doc.set_mode(picked);
+            }
+            if matches!(doc.mode, Mode::Armature | Mode::Weights | Mode::Pose) {
+                let mut step = doc.mode;
+                let (changed, _) = widgets::segmented_tips(
+                    ui,
+                    &mut step,
+                    &[
+                        (Mode::Armature, Some(icons::BONE), "Bones"),
+                        (Mode::Weights, Some(icons::DROP_HALF), "Weights"),
+                        (Mode::Pose, Some(icons::PERSON_SIMPLE_RUN), "Pose"),
+                    ],
+                    &RIG_TIPS,
+                );
+                if changed {
+                    self.mode_note = doc.refuses(step).map(|why| (doc.mode, why));
+                    doc.set_mode(step);
+                }
             }
             if doc.mode == Mode::Edit {
                 let mut select = doc.selection.mode;
@@ -1014,37 +1069,55 @@ impl ModelStudio {
                     doc.set_select_mode(select);
                 }
             }
-            ui.separator();
-            for (tool, icon, name) in [
-                (Tool::Select, icons::CURSOR, "Select (no handles)"),
-                (Tool::Move, icons::ARROWS_OUT_CARDINAL, "Move handles (G)"),
-                (Tool::Rotate, icons::ARROWS_CLOCKWISE, "Rotate handles (R)"),
-                (Tool::Scale, icons::ARROWS_OUT, "Scale handles (S)"),
-            ] {
-                if widgets::icon_button(ui, icon, name, self.tool == tool).clicked() {
-                    self.tool = tool;
+            match self.mode_note {
+                Some((stayed, note)) if stayed == doc.mode => {
+                    ui.colored_label(palette.warning, theme::with_icon(icons::WARNING, note));
                 }
+                _ => self.mode_note = None,
             }
-            let mut local = self.axes == MoveAxes::Local;
-            if widgets::icon_button(
-                ui,
-                icons::GLOBE,
-                "Local axes: the selection's own (the picked faces' normal is Y)",
-                local,
-            )
-            .clicked()
-            {
-                local = !local;
-                self.axes = if local {
-                    MoveAxes::Local
-                } else {
-                    MoveAxes::Global
-                };
-            }
-            if widgets::icon_button(ui, icons::ARROW_UP_RIGHT, "Show normals", self.show_normals)
+            // Only what works in this mode: the handles, axes, Mesh menu
+            // and pivot are for modeling; Paint keeps the UV tools, and
+            // Rig the 3D cursor its Add Bone uses.
+            let mode = doc.mode;
+            let modeling = matches!(mode, Mode::Object | Mode::Edit);
+            if modeling {
+                ui.separator();
+                for (tool, icon, name) in [
+                    (Tool::Select, icons::CURSOR, "Select (no handles)"),
+                    (Tool::Move, icons::ARROWS_OUT_CARDINAL, "Move handles (G)"),
+                    (Tool::Rotate, icons::ARROWS_CLOCKWISE, "Rotate handles (R)"),
+                    (Tool::Scale, icons::ARROWS_OUT, "Scale handles (S)"),
+                ] {
+                    if widgets::icon_button(ui, icon, name, self.tool == tool).clicked() {
+                        self.tool = tool;
+                    }
+                }
+                let mut local = self.axes == MoveAxes::Local;
+                if widgets::icon_button(
+                    ui,
+                    icons::GLOBE,
+                    "Local axes: the selection's own (the picked faces' normal is Y)",
+                    local,
+                )
                 .clicked()
-            {
-                self.show_normals = !self.show_normals;
+                {
+                    local = !local;
+                    self.axes = if local {
+                        MoveAxes::Local
+                    } else {
+                        MoveAxes::Global
+                    };
+                }
+                if widgets::icon_button(
+                    ui,
+                    icons::ARROW_UP_RIGHT,
+                    "Show normals",
+                    self.show_normals,
+                )
+                .clicked()
+                {
+                    self.show_normals = !self.show_normals;
+                }
             }
             ui.separator();
             let undo = doc
@@ -1067,19 +1140,27 @@ impl ModelStudio {
             {
                 doc.redo();
             }
-            if editable {
+            let uvs = shows_uvs(mode);
+            if editable && (uvs || mode == Mode::Armature) {
                 ui.separator();
-                self.mesh_menu(ui);
-                self.uv_menu(ui);
-                self.pivot_menu(ui);
+                if modeling {
+                    self.mesh_menu(ui);
+                }
+                if uvs {
+                    self.uv_menu(ui);
+                }
+                if modeling || mode == Mode::Armature {
+                    self.pivot_menu(ui);
+                }
             }
-            if widgets::icon_button(
-                ui,
-                icons::SQUARES_FOUR,
-                "UV editor: the active object's uvs beside the view",
-                self.uv.open,
-            )
-            .clicked()
+            if uvs
+                && widgets::icon_button(
+                    ui,
+                    icons::SQUARES_FOUR,
+                    "UV editor: the active object's uvs beside the view",
+                    self.uv.open,
+                )
+                .clicked()
             {
                 self.uv.open = !self.uv.open;
             }
@@ -1253,7 +1334,11 @@ impl ModelStudio {
             rect,
             response: &response,
             snap,
-            tool: if editable { self.tool } else { Tool::Select },
+            tool: if editable && matches!(mode, Some(Mode::Object | Mode::Edit)) {
+                self.tool
+            } else {
+                Tool::Select
+            },
             axes: self.axes,
             show_normals: self.show_normals,
             cursor: self.moves.cursor,
@@ -1645,6 +1730,11 @@ struct StudioKeys {
 /// Puts the vertices of `after` (an operation's result on `before`) that
 /// aren't where one of `before`'s was, the new and moved ones, on
 /// `surface`.
+/// The UV menu and editor work in Object, Edit and Paint mode.
+fn shows_uvs(mode: Mode) -> bool {
+    matches!(mode, Mode::Object | Mode::Edit | Mode::Paint)
+}
+
 fn snap_new_vertices(
     before: &axcenity_mesh_edit::EditMesh,
     after: &mut axcenity_mesh_edit::EditMesh,

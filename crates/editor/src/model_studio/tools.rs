@@ -866,43 +866,60 @@ impl ModelStudio {
     /// The toolbar's pivot and proportional editing settings, and the 3D
     /// cursor's commands.
     pub(super) fn pivot_menu(&mut self, ui: &mut egui::Ui) {
+        // Rig mode uses only the 3D cursor (Add Bone puts a bone there).
+        let modeling = self
+            .doc
+            .as_ref()
+            .is_some_and(|doc| matches!(doc.mode, Mode::Object | Mode::Edit));
         let proportional = &mut self.moves.proportional;
-        if widgets::icon_button(
-            ui,
-            icons::CIRCLE_DASHED,
-            "Proportional editing (O): what's near moves too",
-            proportional.on,
-        )
-        .clicked()
+        if modeling
+            && widgets::icon_button(
+                ui,
+                icons::CIRCLE_DASHED,
+                "Proportional editing (O): what's near moves too",
+                proportional.on,
+            )
+            .clicked()
         {
             proportional.on = !proportional.on;
         }
         let mut cursor_to_picked = false;
+        let tip = if modeling {
+            "Pivot, proportional editing and the 3D cursor"
+        } else {
+            "The 3D cursor, where Add Bone puts a bone"
+        };
         ui.menu_button(icons::CROSSHAIR, |ui| {
-            widgets::section_label(ui, "Pivot");
-            for pivot in Pivot::ALL {
-                ui.radio_value(&mut self.moves.pivot, pivot, pivot.label());
-            }
-            ui.separator();
-            widgets::section_label(ui, "Proportional editing");
-            let proportional = &mut self.moves.proportional;
-            ui.checkbox(&mut proportional.on, "On (O)");
-            egui::ComboBox::from_id_salt("studio falloff")
-                .selected_text(proportional.falloff.label())
-                .show_ui(ui, |ui| {
-                    for falloff in Falloff::ALL {
-                        ui.selectable_value(&mut proportional.falloff, falloff, falloff.label());
-                    }
+            if modeling {
+                widgets::section_label(ui, "Pivot");
+                for pivot in Pivot::ALL {
+                    ui.radio_value(&mut self.moves.pivot, pivot, pivot.label());
+                }
+                ui.separator();
+                widgets::section_label(ui, "Proportional editing");
+                let proportional = &mut self.moves.proportional;
+                ui.checkbox(&mut proportional.on, "On (O)");
+                egui::ComboBox::from_id_salt("studio falloff")
+                    .selected_text(proportional.falloff.label())
+                    .show_ui(ui, |ui| {
+                        for falloff in Falloff::ALL {
+                            ui.selectable_value(
+                                &mut proportional.falloff,
+                                falloff,
+                                falloff.label(),
+                            );
+                        }
+                    });
+                ui.horizontal(|ui| {
+                    ui.label("Radius");
+                    ui.add(
+                        egui::DragValue::new(&mut proportional.radius)
+                            .speed(0.02)
+                            .range(0.001..=10_000.0),
+                    );
                 });
-            ui.horizontal(|ui| {
-                ui.label("Radius");
-                ui.add(
-                    egui::DragValue::new(&mut proportional.radius)
-                        .speed(0.02)
-                        .range(0.001..=10_000.0),
-                );
-            });
-            ui.separator();
+                ui.separator();
+            }
             widgets::section_label(ui, "3D cursor (Shift+right-click)");
             if ui.button("Cursor to Selected").clicked() {
                 cursor_to_picked = true;
@@ -914,7 +931,7 @@ impl ModelStudio {
             }
         })
         .response
-        .on_hover_text("Pivot, proportional editing and the 3D cursor");
+        .on_hover_text(tip);
         if cursor_to_picked && let Some((center, _)) = self.doc.as_ref().and_then(|doc| doc.pivot())
         {
             self.moves.cursor = center;

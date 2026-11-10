@@ -145,7 +145,7 @@ The Test tab's Clients group (client count, Network menu for simulated latency/l
 
 ### A18. Model Studio and Sequencer (*reviewed*)
 
-Model Studio (modeling, UVs, paint, sculpt, rig) is a second large tool with its own undo; its empty state names the next step. The Sequencer reuses the Animation Studio's timeline, so AN1–AN3 fixes should be checked there too. Model Studio deserves its own pass later.
+Model Studio (modeling, UVs, paint, sculpt, rig) is a second large tool with its own undo; its empty state names the next step. The Sequencer reuses the Animation Studio's timeline, so AN1–AN3 fixes should be checked there too. Model Studio's own pass is [model-studio.md](model-studio.md).
 
 ## B. Research and how it applies
 

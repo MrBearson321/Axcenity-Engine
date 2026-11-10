@@ -130,4 +130,53 @@ fn editor_tour_snapshots() {
         select(app, id);
         app.animate(id);
     });
+    // Model Studio (U20).
+    let chair = |app: &mut EditorApp| {
+        app.layout.open(Pane::ModelStudio);
+        app.model_studio
+            .open(crate::model_studio::tests::cube_doc());
+        let doc = app.model_studio.doc.as_mut().unwrap();
+        crate::model_studio::tools_tests::model_chair(doc);
+        doc.select(|selection, _| selection.clear());
+        doc.set_mode(crate::model_studio::Mode::Object);
+    };
+    run("20-studio-empty", Some("hello-part"), &|app| {
+        app.layout.open(Pane::ModelStudio)
+    });
+    run("21-studio-object", Some("hello-part"), &|app| chair(app));
+    run("22-studio-edit", Some("hello-part"), &|app| {
+        chair(app);
+        let doc = app.model_studio.doc.as_mut().unwrap();
+        doc.set_mode(crate::model_studio::Mode::Edit);
+        doc.set_select_mode(axcenity_mesh_edit::SelectMode::Face);
+    });
+    for (name, mode) in [
+        ("23-studio-paint", crate::model_studio::Mode::Paint),
+        ("24-studio-sculpt", crate::model_studio::Mode::Sculpt),
+        ("25-studio-rig", crate::model_studio::Mode::Armature),
+    ] {
+        run(name, Some("hello-part"), &|app| {
+            app.layout.open(Pane::ModelStudio);
+            let model = crate::model_studio::rig_tests::humanoid_doc();
+            app.model_studio.open(crate::model_studio::StudioDoc::new(
+                String::new(),
+                model,
+                false,
+            ));
+            let doc = app.model_studio.doc.as_mut().unwrap();
+            doc.set_mode(mode);
+        });
+    }
+    run("26-studio-weights", Some("hello-part"), &|app| {
+        app.layout.open(Pane::ModelStudio);
+        let model = crate::model_studio::rig_tests::humanoid_doc();
+        app.model_studio.open(crate::model_studio::StudioDoc::new(
+            String::new(),
+            model,
+            false,
+        ));
+        crate::model_studio::rig_tests::rigged(&mut app.model_studio);
+        let doc = app.model_studio.doc.as_mut().unwrap();
+        doc.set_mode(crate::model_studio::Mode::Weights);
+    });
 }
