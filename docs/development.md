@@ -36,7 +36,7 @@ Keep single tests short. `axcenity-player`'s `every_example_renders` draws every
 
 ## Checking another platform
 
-CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: format, the workspace-hack check, and build, the player having no editor code, clippy and every test on Windows, macOS and Linux. It can't run the game on a real GPU or try LAN discovery between two computers, so before a release, or after a platform-specific change, also check on those computers. From the repository root:
+CI (`.github/workflows/ci.yml`) is written to run on every push to `main` and every pull request: format, the workspace-hack check, and build, the player having no editor code, clippy and every test on Windows, macOS and Linux. The workflow is turned off in the repository's Actions settings (since October 2026), so nothing runs it today; turn it on there (Actions, CI, Enable workflow) to have pull requests checked. While it's off, and in any case for what it can't check (the game on a real GPU, LAN discovery between two computers), check on those computers. From the repository root:
 
 | Platform | Command |
 |---|---|
