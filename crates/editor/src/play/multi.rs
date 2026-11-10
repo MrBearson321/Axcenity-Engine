@@ -103,13 +103,9 @@ impl Play {
         )?;
         let mut devices = Vec::new();
         if clients > 1 {
-            let Session {
-                world,
-                scripts: runtime,
-                network,
-                ..
-            } = &mut first;
-            let mut loopback = Some(network.host_in_memory(world, runtime, true));
+            let Session { sim, network, .. } = &mut first;
+            let mut loopback =
+                Some(network.host_in_memory(&mut sim.world, &mut sim.scripts, true));
             network.emulate(settings.conditions);
             devices.push(first);
             // The code each client starts again on the server's world.
@@ -151,14 +147,9 @@ impl Play {
                         .connect_loopback()
                         .expect("the first device hosts in memory"),
                 };
-                let Session {
-                    world,
-                    scripts: runtime,
-                    network,
-                    ..
-                } = &mut client;
+                let Session { sim, network, .. } = &mut client;
                 network.set_client_scripts(code.clone());
-                network.join_through(world, runtime, link, None);
+                network.join_through(&mut sim.world, &mut sim.scripts, link, None);
                 devices.push(client);
             }
         } else {
@@ -200,7 +191,7 @@ impl Play {
                 .sim
                 .scripts
                 .local_player()
-                .and_then(|player| device.world.get(player))
+                .and_then(|player| device.sim.world.get(player))
                 .map(|player| player.name().to_owned())
                 .unwrap_or_else(|| format!("Client {}", n + 1));
             views.push((PlayView::Client(n), name));
@@ -259,7 +250,7 @@ impl Play {
                     .sim
                     .scripts
                     .local_player()
-                    .and_then(|player| device.world.get(player))
+                    .and_then(|player| device.sim.world.get(player))
                     .map(|player| player.name().to_owned())
             {
                 device.label = Some(name);
@@ -317,7 +308,7 @@ impl Play {
             // Clients run only LocalScripts and the modules they need.
             let runs = n == 0
                 || matches!(
-                    device.world.get(script).map(|i| i.class()),
+                    device.sim.world.get(script).map(|i| i.class()),
                     Some(ClassName::LocalScript | ClassName::ModuleScript)
                 );
             if runs {
@@ -337,13 +328,13 @@ impl Play {
             .into_iter()
             .filter_map(|stats| {
                 let player = stats.player?;
-                let name = server.world.get(player)?.name().to_owned();
+                let name = server.sim.world.get(player)?.name().to_owned();
                 let device = self
                     .devices
                     .iter()
                     .skip(1)
                     .find(|device| device.sim.scripts.local_player() == Some(player));
-                let instances = device.map_or(0, |device| device.world.len());
+                let instances = device.map_or(0, |device| device.sim.world.len());
                 Some((name, stats, instances))
             })
             .collect()
