@@ -3,6 +3,12 @@
 //! rebuild reads again only the parts that changed, and puts the mesh
 //! together again only when a piece really changed.
 //!
+//! Reading the parts needs the world; putting the mesh together (merging,
+//! linking and numbering every cell, the slow part on a big world) needs
+//! only the pieces. [`MeshBuilder::look`] does the first and hands back the
+//! second as an [`Assembly`], which may run on another thread
+//! ([`crate::SharedNavMesh`] does that, roadmap item M13).
+//!
 //! The ground is what holds still: anchored parts, parts welded to one, and
 //! Terrains. Unanchored parts are left out, so a crate rolling about never
 //! rebuilds the mesh (roadmap item I7). Agents walk through where they lie,
@@ -10,6 +16,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::Arc;
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
@@ -38,9 +45,13 @@ struct Piece {
     /// The X and Z extent of its solids: min X, min Z, max X, max Z.
     bounds: Option<[f32; 4]>,
     /// Its stretch down each column centre it covers, by column counted
-    /// from the world's origin.
-    spans: Vec<(i64, i64, Column)>,
+    /// from the world's origin. Shared with an [`Assembly`] still running.
+    spans: Arc<[Span]>,
 }
+
+/// A stretch down one column centre: the column along X and Z, counted
+/// from the world's origin, and the stretch.
+type Span = (i64, i64, Column);
 
 /// How the world is cut into columns.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,6 +62,27 @@ struct Grid {
     first_z: i64,
     columns_x: usize,
     columns_z: usize,
+}
+
+/// What [`MeshBuilder::look`] found.
+pub enum Look {
+    /// Nothing the mesh is built from has changed.
+    Unchanged,
+    /// Parts changed and were read again, but the mesh would come out the
+    /// same.
+    Same,
+    /// The mesh must be put together again: run the assembly.
+    Changed(Assembly),
+}
+
+/// Putting a mesh together from the pieces a [`MeshBuilder`] read: the slow
+/// part of a build, which needs no world, so it can run on another thread.
+pub struct Assembly {
+    settings: NavSettings,
+    grid: Option<Grid>,
+    /// Every piece's spans, in the builder's (Instance) order, so the mesh
+    /// comes out the same wherever it runs.
+    pieces: Vec<Arc<[Span]>>,
 }
 
 /// What [`MeshBuilder::update`] did.
@@ -72,6 +104,8 @@ pub struct MeshBuilder {
     pieces: BTreeMap<InstanceId, Piece>,
     /// The grid the pieces' spans are on.
     cell: f32,
+    /// The grid of the mesh last assembled (or being assembled).
+    grid: Option<Grid>,
     mesh: NavMesh,
     built: bool,
 }
@@ -88,6 +122,7 @@ impl MeshBuilder {
             settings,
             pieces: BTreeMap::new(),
             cell: settings.cell_size,
+            grid: None,
             mesh: NavMesh {
                 settings,
                 ..NavMesh::default()
@@ -109,6 +144,21 @@ impl MeshBuilder {
     /// rebuilds the mesh if what they add to it changed. Cheap when nothing
     /// changed: one walk of the Workspace, comparing revisions.
     pub fn update(&mut self, world: &World, assets: &Assets) -> Refresh {
+        match self.look(world, assets) {
+            Look::Unchanged => Refresh::Unchanged,
+            Look::Same => Refresh::Same,
+            Look::Changed(assembly) => {
+                self.mesh = assembly.run();
+                Refresh::Rebuilt
+            }
+        }
+    }
+
+    /// [`Self::update`] without putting the mesh together: reads again the
+    /// ground parts that changed and says whether the mesh must be
+    /// assembled again. [`Self::mesh`] stays the old mesh; whoever runs the
+    /// [`Assembly`] keeps the new one.
+    pub fn look(&mut self, world: &World, assets: &Assets) -> Look {
         let ground = ground(world);
         let mut stale = Vec::new();
         let mut added = 0;
@@ -125,7 +175,7 @@ impl MeshBuilder {
         }
         let removed = self.pieces.len() + added != ground.len();
         if stale.is_empty() && !removed && self.built {
-            return Refresh::Unchanged;
+            return Look::Unchanged;
         }
 
         // A change to a property the piece isn't made from (a color, say)
@@ -148,11 +198,7 @@ impl MeshBuilder {
             });
         }
         if reread.is_empty() && !changed {
-            return if removed {
-                Refresh::Same
-            } else {
-                Refresh::Unchanged
-            };
+            return if removed { Look::Same } else { Look::Unchanged };
         }
 
         let mut fresh: HashMap<InstanceId, Vec<Solid>> = reread
@@ -193,7 +239,7 @@ impl MeshBuilder {
                 stamp,
                 key,
                 bounds: bounds_of(&solids),
-                spans: spans_of(&solids, cell),
+                spans: spans_of(&solids, cell).into(),
             };
             match self.pieces.insert(id, piece) {
                 Some(old) => {
@@ -203,38 +249,32 @@ impl MeshBuilder {
                 None => changed |= !self.pieces[&id].spans.is_empty(),
             }
         }
-        changed |= grid != self.grid();
+        changed |= grid != self.grid;
         if !changed {
-            return Refresh::Same;
+            return Look::Same;
         }
-        self.assemble(grid);
-        Refresh::Rebuilt
-    }
-
-    /// The grid the mesh was last built on.
-    fn grid(&self) -> Option<Grid> {
-        let mesh = &self.mesh;
-        (mesh.columns_x > 0).then(|| {
-            let cell = mesh.settings.cell_size;
-            Grid {
-                cell,
-                first_x: (mesh.origin_x / cell).round() as i64,
-                first_z: (mesh.origin_z / cell).round() as i64,
-                columns_x: mesh.columns_x,
-                columns_z: mesh.columns_z,
-            }
+        self.built = true;
+        self.grid = grid;
+        Look::Changed(Assembly {
+            settings: self.settings,
+            grid,
+            pieces: self
+                .pieces
+                .values()
+                .map(|piece| Arc::clone(&piece.spans))
+                .collect(),
         })
     }
+}
 
+impl Assembly {
     /// Puts the mesh together from the pieces.
-    fn assemble(&mut self, grid: Option<Grid>) {
-        self.built = true;
-        let Some(grid) = grid else {
-            self.mesh = NavMesh {
+    pub fn run(self) -> NavMesh {
+        let Some(grid) = self.grid else {
+            return NavMesh {
                 settings: self.settings,
                 ..NavMesh::default()
             };
-            return;
         };
         let mut mesh = NavMesh {
             settings: NavSettings {
@@ -256,8 +296,8 @@ impl MeshBuilder {
             inside.then(|| cz as usize * grid.columns_x + cx as usize)
         };
         let mut start = vec![0_usize; grid.columns_x * grid.columns_z + 1];
-        for piece in self.pieces.values() {
-            for &(x, z, _) in &piece.spans {
+        for piece in &self.pieces {
+            for &(x, z, _) in piece.iter() {
                 if let Some(column) = index(x, z) {
                     start[column + 1] += 1;
                 }
@@ -273,8 +313,8 @@ impl MeshBuilder {
         };
         let mut spans = vec![(0, empty); start[start.len() - 1]];
         let mut next = start.clone();
-        for piece in self.pieces.values() {
-            for &(x, z, column) in &piece.spans {
+        for piece in &self.pieces {
+            for &(x, z, column) in piece.iter() {
                 if let Some(at) = index(x, z) {
                     spans[next[at]] = (at, column);
                     next[at] += 1;
@@ -287,7 +327,7 @@ impl MeshBuilder {
         mesh.add_cells(&spans);
         mesh.link_cells();
         mesh.find_regions();
-        self.mesh = mesh;
+        mesh
     }
 }
 
@@ -475,7 +515,7 @@ fn grid(mut cell: f32, [min_x, min_z, max_x, max_z]: [f32; 4]) -> Grid {
 }
 
 /// Every solid's stretch down the centre of each column it covers.
-fn spans_of(solids: &[Solid], cell: f32) -> Vec<(i64, i64, Column)> {
+fn spans_of(solids: &[Solid], cell: f32) -> Vec<Span> {
     // The columns whose centres lie between `min` and `max` along one axis.
     let centres = |min: f32, max: f32| {
         let first = (min / cell - 0.5).ceil() as i64;

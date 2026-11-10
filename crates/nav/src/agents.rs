@@ -30,12 +30,8 @@ use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 
 use crate::behavior::{self, BehaviorTree, TreeRun};
 use crate::perception::{self, Player, Sensed, Senses};
-use crate::{MeshBuilder, NavMesh, NavSettings, Refresh};
+use crate::{MeshState, NavMesh, SharedNavMesh};
 
-/// The least game time between two looks at what changed, so anchored
-/// parts that scripts keep moving don't rebuild the mesh every frame. The
-/// editor's overlay waits as long.
-const REBUILD_SECONDS: f32 = 0.5;
 /// The longest stretch moved before the ground is looked up again, in cells.
 const SLICE: f32 = 0.5;
 const MAX_SLICES: f32 = 64.0;
@@ -96,20 +92,15 @@ struct Walk {
     blocked: Option<u64>,
 }
 
-/// The mesh the agents walk on, and what it was built from.
-struct Built {
-    builder: MeshBuilder,
-    /// Game seconds since what changed was last read.
-    age: f32,
-    /// Counts builds, so agents know when to look again.
-    generation: u64,
-}
-
 /// Steps every navigation agent. The player and the editor each own one
 /// for the game they are running.
 #[derive(Default)]
 pub struct Agents {
-    built: Option<Built>,
+    /// The game's navigation mesh, which this owns and steps the clock of,
+    /// and shares with Humanoids ([`Self::nav_mesh`]).
+    nav: SharedNavMesh,
+    /// The mesh the agents walk on this frame, once there is one.
+    built: Option<MeshState>,
     walks: BTreeMap<InstanceId, Walk>,
     senses: BTreeMap<InstanceId, Senses>,
     /// Each agent's behavior tree as it runs.
@@ -135,14 +126,15 @@ impl Agents {
     /// Moves every agent in the Workspace that has a body for `seconds` of
     /// game time, then has it look and listen for the player character.
     /// The mesh is built the first time an agent needs it, and again after
-    /// the world changes. Hosts call it after character controllers and
-    /// before scripts.
+    /// the world changes (see [`SharedNavMesh`]). Hosts call it every frame,
+    /// after character controllers and before scripts.
     pub fn step(&mut self, world: &mut World, assets: &Assets, seconds: f32) {
         let dt = if seconds.is_finite() && seconds > 0.0 {
             seconds
         } else {
             0.0
         };
+        self.nav.advance(dt);
         self.walks.retain(|id, _| world.contains(*id));
         self.senses.retain(|id, _| world.contains(*id));
         self.runs.retain(|id, _| world.contains(*id));
@@ -151,10 +143,7 @@ impl Agents {
         if agents.is_empty() {
             return;
         }
-        self.refresh_mesh(world, assets, dt);
-        if self.built.is_none() {
-            return;
-        }
+        self.refresh_mesh(world, assets);
         // Patrols pick the next point, then trees decide, from what the
         // agents sensed last frame.
         for &id in &agents {
@@ -329,35 +318,17 @@ impl Agents {
         std::mem::take(&mut self.sensed)
     }
 
-    /// Builds the mesh if there's none. Once the last look is old enough,
-    /// reads again the ground parts that changed, and rebuilds the mesh
-    /// when they change it. Agents that couldn't reach their destination
-    /// try again on the new mesh.
-    fn refresh_mesh(&mut self, world: &World, assets: &Assets, dt: f32) {
-        let Some(built) = &mut self.built else {
-            let mut builder = MeshBuilder::new(NavSettings::default());
-            builder.update(world, assets);
-            self.built = Some(Built {
-                builder,
-                age: 0.0,
-                generation: 0,
-            });
+    /// Brings the mesh up to date ([`SharedNavMesh::refresh`]). Agents
+    /// that couldn't reach their destination try again on a new mesh.
+    fn refresh_mesh(&mut self, world: &World, assets: &Assets) {
+        let state = self.nav.refresh(world, assets);
+        let rebuilt = self
+            .built
+            .as_ref()
+            .is_some_and(|built| built.generation != state.generation);
+        self.built = Some(state);
+        if !rebuilt {
             return;
-        };
-        built.age += dt;
-        if built.age < REBUILD_SECONDS {
-            return;
-        }
-        match built.builder.update(world, assets) {
-            Refresh::Unchanged => return,
-            Refresh::Same => {
-                built.age = 0.0;
-                return;
-            }
-            Refresh::Rebuilt => {
-                built.age = 0.0;
-                built.generation += 1;
-            }
         }
         for walk in self.walks.values_mut() {
             if walk.warned.is_some() && walk.corners.is_empty() {
@@ -403,7 +374,19 @@ impl Agents {
 
     /// The mesh the agents walk on, once one has been built.
     pub fn mesh(&self) -> Option<&NavMesh> {
-        self.built.as_ref().map(|built| built.builder.mesh())
+        self.built.as_ref().map(|built| &*built.mesh)
+    }
+
+    /// The game's navigation mesh, to share with whatever else walks on
+    /// it (`ScriptRuntime::share_nav_mesh` for Humanoids' `MoveTo`). The
+    /// agents step its clock.
+    pub fn nav_mesh(&self) -> SharedNavMesh {
+        self.nav.clone()
+    }
+
+    /// True while a rebuilt mesh is being put together on the worker.
+    pub fn is_rebuilding(&self) -> bool {
+        self.nav.is_rebuilding()
     }
 
     /// The warnings since the last call, such as a destination no route
@@ -502,12 +485,12 @@ fn set_status(world: &mut World, id: InstanceId, status: AgentStatus) {
 /// destination, or when it's newly blocked.
 fn step_agent(
     world: &mut World,
-    built: &Built,
+    built: &MeshState,
     id: InstanceId,
     walk: &mut Walk,
     dt: f32,
 ) -> Option<String> {
-    let mesh = built.builder.mesh();
+    let mesh = &*built.mesh;
     let parts = parts_of(world, id);
     let mut feet = feet_of(world, &parts)?;
     let velocity = vector(world, id, "Velocity").unwrap_or(Vector3::new(0.0, 0.0, 0.0));

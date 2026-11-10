@@ -392,7 +392,12 @@ fn an_agent_steers_round_a_part_pushed_into_its_path_and_rejoins_it() {
         "Position",
         Value::Vector3(at(0.0, 3.0, 0.0)),
     );
+    // The first step sees it; the mesh without the crate's room comes in
+    // APPLY_SECONDS later (M13).
     agents.step(&mut world, &Assets::default(), 1.0 / 60.0);
+    assert!(agents.is_rebuilding());
+    run(&mut agents, &mut world, crate::APPLY_SECONDS);
+    assert!(!agents.is_rebuilding());
     assert_eq!(status(&world, agent), "Moving");
     let detour = agents.path(agent).unwrap();
     assert!(detour.iter().any(|p| p.z.abs() >= 2.0), "{detour:?}");
@@ -431,7 +436,7 @@ fn an_agent_stops_and_reports_a_blockage_it_cant_go_round_until_it_clears() {
 
     // A crate across the whole walkway.
     let crate_ = part(&mut world, at(0.0, 3.0, 0.0), at(4.0, 6.0, 10.0));
-    run(&mut agents, &mut world, 0.1);
+    run(&mut agents, &mut world, 0.1 + crate::APPLY_SECONDS);
     let stopped = feet(&world, body);
     assert_eq!(status(&world, agent), "Blocked");
     run(&mut agents, &mut world, 2.0);
@@ -457,7 +462,7 @@ fn an_agent_stops_and_reports_a_blockage_it_cant_go_round_until_it_clears() {
         "Position",
         Value::Vector3(at(0.0, 3.0, 40.0)),
     );
-    run(&mut agents, &mut world, 0.1);
+    run(&mut agents, &mut world, 0.1 + crate::APPLY_SECONDS);
     assert_eq!(status(&world, agent), "Moving");
     run(&mut agents, &mut world, 3.0);
     assert_eq!(status(&world, agent), "Reached");

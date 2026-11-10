@@ -20,12 +20,14 @@ mod behavior;
 mod builder;
 mod path;
 mod perception;
+mod shared;
 
 pub use agents::{AgentStatus, Agents, agent_parts, feet_of};
 pub use behavior::{BEHAVIOR_NODE_KINDS, BEHAVIOR_TREE_SUFFIX, BehaviorTree, TreeError};
-pub use builder::{MeshBuilder, Refresh, fingerprint};
+pub use builder::{Assembly, Look, MeshBuilder, Refresh, fingerprint};
 pub use path::PathError;
 pub use perception::{Sense, Sensed};
+pub use shared::{APPLY_SECONDS, MeshState, REBUILD_SECONDS, SharedNavMesh};
 
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -363,5 +365,7 @@ mod agent_tests;
 mod behavior_tests;
 #[cfg(test)]
 mod perception_tests;
+#[cfg(test)]
+mod shared_tests;
 #[cfg(test)]
 mod tests;

@@ -1873,6 +1873,14 @@ impl ScriptRuntime {
     }
 
     /// Fires Humanoid events on both sides, after handing both the
+    /// Has Humanoids' `MoveTo` plan on `nav`, the game's one navigation
+    /// mesh, which its NavigationAgents walk on too
+    /// ([`axcenity_nav::Agents::nav_mesh`]), instead of building a second
+    /// one (roadmap item M13).
+    pub fn share_nav_mesh(&mut self, nav: axcenity_nav::SharedNavMesh) {
+        self.humanoids.share_nav_mesh(nav);
+    }
+
     /// Humanoids' states for `GetState`.
     fn fire_humanoid_events(&mut self, world: &mut World, events: &[humanoid::HumanoidEvent]) {
         for side in [Side::Server, Side::Client] {
@@ -2418,6 +2426,8 @@ mod tests;
 
 #[cfg(test)]
 mod client_server_tests;
+#[cfg(test)]
+mod humanoid_tests;
 
 #[cfg(test)]
 mod input_tests;

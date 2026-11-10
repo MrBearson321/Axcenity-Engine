@@ -148,6 +148,22 @@ Same container, release build, S10k, main and the I7 branch run back to back: th
 
 Before, the navmesh fingerprint hashed every part, the 1,000 falling drops included, and formatted values as text: about 4 ms every frame, and a 110–120 ms rebuild every 0.5 s. Now unanchored parts aren't ground, and a `MeshBuilder` reads again only the parts that changed. What's left of the worst Agents frame (about 20–30 ms in the test runner and player) is S10k's 100 anchored spinners: turning, their corners cross column centres, so the mesh really changes and is put together again every 0.5 s (gathering, linking and numbering 200,000 cells; roadmap M13 moves that to a worker). Editor Play rarely rebuilt (worst 4 and 14 ms); its 1.5 ms median is the check, every frame once 0.5 s has passed, that nothing the mesh is made from changed, which a world where nothing anchored moves also pays.
 
+### Navmesh on a worker, one mesh per game (M13)
+
+The I7 leftover above, S10k's spinners making the mesh rebuild every 0.5 s, now runs on a worker thread: the game's thread reads the parts that changed (`MeshBuilder::look`) and a `navmesh build` thread puts the mesh together (`Assembly::run`), coming in 0.1 s of game time later (`nav::SharedNavMesh`, [navigation](architecture/navigation.md)). Agents and Humanoids' `MoveTo` now share that one mesh instead of building one each; S10k has no Humanoid walks, so the numbers below are the worker alone.
+
+Test runner on S10k, the cloud container (4 vCPUs), `--bench 600`, main (320b2c5) and the branch run back to back, four runs each, milliseconds:
+
+| | main | M13 |
+|---|---|---|
+| Agents, median | 0.21–0.29 | 0.26–0.31 |
+| Agents, mean | 0.89–1.07 | 0.33–0.38 |
+| Agents, worst | 25–36 | 4.0–5.6 |
+| Frame, median | 11.1–12.9 | 11.4–11.8 |
+| Frame, worst | 46–57 | 28–40 |
+
+The worst Agents frame drops from a whole rebuild to the look that finds the change: 2.9–3.9 ms (timed by hand in one run), reading again the 100 turning spinners' solids and cutting them into columns, on the game's thread because it reads the world. Taking the finished mesh in, 0.1 s later, never showed among the slow frames: the worker had finished by then. The median is unchanged within noise; the worker shares the 4 cores with the rest of the frame while it runs. The frame's worst is now set by other steps (Physics, Characters).
+
 ### Class and tag index (M2)
 
 Taken on 2026-11-10 on a Ryzen 9 9950X3D under Windows, release build, main (940fabc, with M1) and the M2 branch run alternately. Each run was pinned to the V-cache CCD: unpinned, other work on the machine moved main's frame median between 12.7 and 19.2 ms and the comparison was noise. Medians of the runs' medians, in milliseconds; the frame's range across runs is in brackets. Test runner and server: seven 600-frame runs. Player: three 300-frame runs.
