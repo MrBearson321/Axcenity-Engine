@@ -923,6 +923,24 @@ impl History {
         self.redo.last().map(|step| step.label.as_str())
     }
 
+    /// Every step Undo can undo, newest first, for Edit ▸ Undo History.
+    pub fn undo_labels(&self) -> Vec<&str> {
+        self.undo
+            .iter()
+            .rev()
+            .map(|step| step.label.as_str())
+            .collect()
+    }
+
+    /// Every step Redo can redo, the next one first.
+    pub fn redo_labels(&self) -> Vec<&str> {
+        self.redo
+            .iter()
+            .rev()
+            .map(|step| step.label.as_str())
+            .collect()
+    }
+
     /// Puts the last step's "before" values back. Returns `None` if there
     /// was nothing to undo, or the files to change back, each from its
     /// `before` to its `after`.

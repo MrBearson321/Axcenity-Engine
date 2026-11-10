@@ -1084,6 +1084,29 @@ impl EditorApp {
             self.generate_frame();
         }
     }
+    /// Undoes (`jump` below 0) or redoes that many steps, one at a time as
+    /// Ctrl+Z and Ctrl+Y would, stopping early if one can't be done.
+    pub(in crate::app) fn jump_in_history(&mut self, jump: isize) {
+        for _ in 0..jump.unsigned_abs() {
+            let before = (
+                self.history.undo_labels().len(),
+                self.history.redo_labels().len(),
+            );
+            if jump < 0 {
+                self.undo();
+            } else {
+                self.redo();
+            }
+            let after = (
+                self.history.undo_labels().len(),
+                self.history.redo_labels().len(),
+            );
+            if after == before {
+                break;
+            }
+        }
+    }
+
     pub(super) fn redo(&mut self) {
         if self.ui_designer.graph_has_pointer() && !self.playing() && self.redo_graph() {
             return;

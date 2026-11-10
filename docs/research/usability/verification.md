@@ -87,3 +87,14 @@ The Sequencer has no Record and nothing is dropped when the playhead moves (move
 
 **Tests**: `a_linked_clips_range_change_is_one_undo_step` (posing tests: range change written, undo label "Edit Idle", undo restores the file and the open clip, redo puts the change back), `the_sequencer_says_to_turn_the_preview_off_to_move_things`. Full-suite results are in the PR.
 
+## PR 5: Undo History and the ClassName row (U16, U17)
+
+**Changed**
+
+| ID | Problem | Change |
+|---|---|---|
+| U17 | Undo named only the next step; going back several meant pressing Ctrl+Z and watching | **Edit ▸ Undo History** lists the steps newest first (25 of each), the undone ones dimmed above; clicking one undoes back to before it, or redoes up to it, one step at a time as Ctrl+Z/Ctrl+Y do |
+| U16 | Properties showed the class twice: in the header and as a ClassName row | The row only shows when Filter properties asks for it ("class"); the header still says the class |
+
+**Tests**: `undo_history_jumps_back_and_forward_several_steps` (three renames undone in one click from the drawn menu, redo of two, a jump past the end stops), `filter_properties_shows_only_matching_rows` (no ClassName row unfiltered, one for "class"), and the palette coverage test with Undo History as a submenu. `cargo test -p axcenity-editor`: 913 passed, only the known cloud failure.
+
