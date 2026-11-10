@@ -312,6 +312,19 @@ Taken on 2026-11-10 in the Linux cloud container, release build: `Assets::model_
 - **Simplifying was most of CityPropsCollection's fitting** (68 ms of it; 6 ms with the cache, hashing the primitives for the key included at 0.7 ms). What's left is ufbx parsing (36–42 ms) and reading its nodes (18–20 ms), which only a whole cooked model would remove.
 - **The two glTF files are mostly texture decoding** (their embedded maps weren't cooked in this test; imported into a project they would be), so the cache saves only their simplifying, about 18 and 70 ms.
 
+### Cooked models (L2)
+
+Taken on 2026-11-10 in the Linux cloud container, release build: `Assets::model_blocking` in a project holding each model with its textures, cooked first (`cook_project`). The first load parses the file and keeps the cooked model; the next two read it ([rendering/models.md](rendering/models.md)). The glTF files were brought in with `import_model`, which copies their embedded maps out so they can be cooked.
+
+| Model | Parse (textures cooked) | Cooked model |
+|---|---|---|
+| CityPropsCollection.fbx (70.8k triangles) | 143 ms | 1.7–1.9 ms |
+| Walking.fbx (35.2k triangles, skinned) | 178 ms | 19–24 ms |
+| DamagedHelmet.glb (5 embedded 2048² maps) | 71 ms | 8–13 ms |
+| AWP.glb (50 MB, three 4096² maps) | 243 ms | 61–63 ms |
+
+- What's left is reading the files: the cooked model, and each texture's cooked copy (a 4096² BC7 map with its mips is about 21 MiB). Without cooked textures, Walking.fbx took 683 ms to parse and wasn't kept (its embedded maps had no cooked copies yet).
+
 ### A Windows desktop with a real GPU
 
 Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table above): AMD Ryzen 9 9950X3D (16 cores), 62 GB of RAM, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Each host ran three times, 600 measured frames each; the table gives the median of the three runs' medians, and the worst frame seen in any run. The first player run was slower than the other two (Physics 14.3 ms against 5.4 ms); it came straight after the release build. Times are milliseconds.

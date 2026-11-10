@@ -23,7 +23,8 @@ use super::objects::{self, Listed, Siblings};
 use super::{
     AlphaMode, Bone, BoneTransform, Channel, ChannelTexture, Image, InProject, Joint, Keys,
     MAX_NODE_DEPTH, Model, ModelError, ModelMaterial, ModelObject, Pick, Primitive, Rig, Take,
-    Track, cooked_texture, decode_image, fit, fit_matrix, missing, new_key, smooth_normals, want,
+    Track, cooked_texture, decode_image, file_origin, fit, fit_matrix, missing, new_key,
+    smooth_normals, want,
 };
 
 /// Takes are baked at this many frames a second when the file doesn't say.
@@ -1006,6 +1007,7 @@ impl Reader<'_> {
                 Some(path) => match std::fs::read(self.folder.join(&path)) {
                     Ok(bytes) => decode_image(&bytes, &name).map(|image| Image {
                         file: Some(slash_path(&path)),
+                        origin: file_origin(self.project(), self.folder, Some(&slash_path(&path))),
                         ..image
                     }),
                     Err(err) => Err(err.to_string()),

@@ -164,5 +164,20 @@ fn a_models_embedded_textures_load_from_their_cooked_copies() {
     // Without decoding the cooked one, it still tells it has no alpha.
     assert_eq!(cooked.has_alpha(), alpha);
     assert!(cooked.rgba() == pixels, "decoded from the copied-out file");
+
+    // With every map cooked, the whole model is kept too, and read back
+    // with the same cooked maps.
+    assert_eq!(axcenity_assets::cooked_models(&folder, &mesh_id).len(), 1);
+    let again = Assets::new(&folder)
+        .model_blocking(&mesh_id)
+        .expect("loads");
+    let map = again.primitives[0]
+        .material
+        .base_color_texture
+        .as_ref()
+        .expect("a color map");
+    assert!(map.cooked().is_some());
+    assert_eq!(map.file, file);
+    assert_eq!(again.primitives[0].indices, model.primitives[0].indices);
     let _ = fs::remove_dir_all(folder);
 }

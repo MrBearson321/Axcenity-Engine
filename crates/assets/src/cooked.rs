@@ -14,7 +14,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use crate::model::Image;
+use crate::model::{Image, ImageOrigin};
 use crate::safe_path;
 
 /// Where cooked textures go, inside the project folder. Like the rest of
@@ -369,7 +369,8 @@ pub(crate) fn is_current(project: &Path, relative: &str, stamp: SourceStamp) -> 
 pub(crate) fn cooked_image(project: &Path, relative: &str) -> Option<Image> {
     let texture = read_cooked(project, relative)?;
     let source = project.join(safe_path(relative)?);
-    Some(Image::from_cooked(texture, source))
+    let origin = ImageOrigin::File(relative.replace('\\', "/"));
+    Some(Image::from_cooked(texture, source).with_origin(origin))
 }
 
 /// A texture embedded in a model as `bytes`, from the cooked copy of the
@@ -382,8 +383,29 @@ pub(crate) fn cooked_embedded_image(project: &Path, relative: &str, bytes: &[u8]
     }
     let cooked = fs::read(cooked_path(project, relative)).ok()?;
     let (stamp, texture) = decode_cooked(&cooked).ok()?;
+    let origin = ImageOrigin::CookedEmbedded {
+        path: relative.replace('\\', "/"),
+        hash: stamp.hash,
+    };
     (stamp.len == bytes.len() as u64 && stamp.hash == content_hash(bytes))
-        .then(|| Image::from_cooked(texture, source))
+        .then(|| Image::from_cooked(texture, source).with_origin(origin))
+}
+
+/// The cooked copy of the project file `relative`, if it was made from
+/// bytes with this `hash` (an embedded texture's, see
+/// [`cooked_embedded_image`]) and that file is still there.
+pub(crate) fn cooked_embedded_by_hash(project: &Path, relative: &str, hash: u64) -> Option<Image> {
+    let source = project.join(safe_path(relative)?);
+    if !source.is_file() {
+        return None;
+    }
+    let cooked = fs::read(cooked_path(project, relative)).ok()?;
+    let (stamp, texture) = decode_cooked(&cooked).ok()?;
+    let origin = ImageOrigin::CookedEmbedded {
+        path: relative.replace('\\', "/"),
+        hash,
+    };
+    (stamp.hash == hash).then(|| Image::from_cooked(texture, source).with_origin(origin))
 }
 
 /// The average of about 4,096 pixels spread over `rgba` (every pixel of a
