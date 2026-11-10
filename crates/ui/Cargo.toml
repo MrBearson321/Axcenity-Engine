@@ -12,6 +12,7 @@ axcenity-core.workspace = true
 axcenity-render.workspace = true
 gilrs.workspace = true
 log.workspace = true
+rustc-hash.workspace = true
 taffy.workspace = true
 axcenity-workspace-hack.workspace = true
 

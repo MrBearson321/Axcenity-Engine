@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::rc::Rc;
 
-use axcenity_core::{ClassName, InstanceId, Value, World};
+use axcenity_core::{ClassName, Instance, InstanceId, Value, World};
+use rustc_hash::FxHashMap;
 
 use crate::interact::UiState;
 use crate::transition::Transitions;
@@ -98,6 +100,187 @@ pub(crate) struct PseudoClasses<'a> {
     pub(crate) hidden: Option<&'a HashSet<InstanceId>>,
     /// The page each PageLayout shows on the UI Designer's artboard.
     pub(crate) pages: Option<&'a HashMap<InstanceId, InstanceId>>,
+    /// Styles already matched during this layout, shared by its passes
+    /// (see [`StyleCache`]).
+    pub(crate) styles: Option<&'a StyleCache>,
+    /// Only where elements go is wanted (a pass for hit tests), so their
+    /// boxes, text and scroll bars aren't painted.
+    pub(crate) unpainted: bool,
+}
+
+/// The pointer and focus states selectors match against: what a
+/// [`StyleCache`]'s entries were matched in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct MatchStates {
+    hovered: Option<InstanceId>,
+    active: Option<InstanceId>,
+    focused: Option<InstanceId>,
+    selected: Option<InstanceId>,
+    forced: Option<(InstanceId, UiState)>,
+}
+
+impl MatchStates {
+    fn of(pseudo: &PseudoClasses<'_>) -> Self {
+        Self {
+            hovered: pseudo.hovered,
+            active: pseudo.active,
+            focused: pseudo.focused,
+            selected: pseudo.selected,
+            forced: pseudo.forced,
+        }
+    }
+
+    /// The elements whose own state differs between `self` and `other`.
+    /// Only they and their descendants can match differently.
+    fn changed(&self, other: &Self) -> Vec<InstanceId> {
+        let mut changed = Vec::new();
+        let mut differ = |a: Option<InstanceId>, b: Option<InstanceId>| {
+            if a != b {
+                changed.extend(a);
+                changed.extend(b);
+            }
+        };
+        differ(self.hovered, other.hovered);
+        differ(self.active, other.active);
+        differ(self.focused, other.focused);
+        differ(self.selected, other.selected);
+        if self.forced != other.forced {
+            changed.extend(self.forced.map(|(id, _)| id));
+            changed.extend(other.forced.map(|(id, _)| id));
+        }
+        changed
+    }
+}
+
+/// The cascade's result for each element already resolved during one
+/// layout (roadmap item M14), before transitions ease it. Without it each
+/// element matched every rule against itself and every ancestor (for the
+/// custom properties it inherits), once for each time its styles were
+/// read. With it an element is matched once, and inherits its parent's
+/// cached variables.
+///
+/// It's only valid while the world is unchanged, so a layout makes a new
+/// one each frame. The entries hold for the states (hover, press, focus)
+/// set by [`StyleCache::begin`]; the passes of one frame differ only in
+/// those, so moving to the next pass keeps every entry outside the
+/// subtrees whose state changed. A lookup in other states bypasses it.
+#[derive(Debug, Default)]
+pub(crate) struct StyleCache {
+    inner: RefCell<StyleCacheInner>,
+}
+
+#[derive(Debug, Default)]
+struct StyleCacheInner {
+    states: Option<MatchStates>,
+    entries: HashMap<InstanceId, Rc<ResolvedStyles>>,
+    /// The entries once eased by the transitions at `eased_by`. Easing is
+    /// the same however often it's asked in one frame, so it's done once.
+    eased: HashMap<InstanceId, Rc<ResolvedStyles>>,
+    eased_by: Option<*const RefCell<Transitions>>,
+}
+
+impl StyleCache {
+    /// Makes the entries hold for `pseudo`'s states, forgetting those of
+    /// elements whose state (or an ancestor's) is different from before.
+    pub(crate) fn begin(&self, world: &World, pseudo: &PseudoClasses<'_>) {
+        let states = MatchStates::of(pseudo);
+        let mut inner = self.inner.borrow_mut();
+        let Some(old) = inner.states.replace(states) else {
+            return;
+        };
+        let changed = old.changed(&states);
+        if changed.is_empty() {
+            return;
+        }
+        let unchanged = |id: &InstanceId| {
+            let mut current = Some(*id);
+            while let Some(at) = current {
+                if changed.contains(&at) {
+                    return false;
+                }
+                current = world.get(at).and_then(Instance::parent);
+            }
+            true
+        };
+        inner.entries.retain(|id, _| unchanged(id));
+        inner.eased.retain(|id, _| unchanged(id));
+    }
+
+    /// `id`'s styles as `transitions` eased them earlier in these states.
+    fn eased(
+        &self,
+        id: InstanceId,
+        transitions: &RefCell<Transitions>,
+        pseudo: &PseudoClasses<'_>,
+    ) -> Option<Rc<ResolvedStyles>> {
+        let inner = self.inner.borrow();
+        if inner.states != Some(MatchStates::of(pseudo))
+            || inner.eased_by != Some(std::ptr::from_ref(transitions))
+        {
+            return None;
+        }
+        inner.eased.get(&id).cloned()
+    }
+
+    /// Keeps `styles`, `id`'s styles eased by `transitions` in `pseudo`'s states.
+    fn keep_eased(
+        &self,
+        id: InstanceId,
+        transitions: &RefCell<Transitions>,
+        pseudo: &PseudoClasses<'_>,
+        styles: &Rc<ResolvedStyles>,
+    ) {
+        let mut inner = self.inner.borrow_mut();
+        if inner.states != Some(MatchStates::of(pseudo)) {
+            return;
+        }
+        let by = std::ptr::from_ref(transitions);
+        if inner.eased_by != Some(by) {
+            inner.eased.clear();
+            inner.eased_by = Some(by);
+        }
+        inner.eased.insert(id, Rc::clone(styles));
+    }
+
+    /// `id`'s cascaded styles in `pseudo`'s states, matched now if they
+    /// aren't cached yet, or `None` when the cache is for other states.
+    fn styles(
+        &self,
+        world: &World,
+        id: InstanceId,
+        stylesheets: &[Stylesheet],
+        pseudo: &PseudoClasses<'_>,
+    ) -> Option<Rc<ResolvedStyles>> {
+        {
+            let inner = self.inner.borrow();
+            if inner.states != Some(MatchStates::of(pseudo)) {
+                return None;
+            }
+            if let Some(styles) = inner.entries.get(&id) {
+                return Some(Rc::clone(styles));
+            }
+        }
+        let instance = world.get(id)?;
+        let mut resolved = match instance.parent() {
+            Some(parent) => {
+                let inherited = self.styles(world, parent, stylesheets, pseudo);
+                ResolvedStyles {
+                    values: StyleMap::default(),
+                    variables: inherited
+                        .map(|styles| Rc::clone(&styles.variables))
+                        .unwrap_or_default(),
+                }
+            }
+            None => ResolvedStyles::default(),
+        };
+        add_own_declarations(world, id, stylesheets, *pseudo, &mut resolved);
+        let resolved = Rc::new(resolved);
+        self.inner
+            .borrow_mut()
+            .entries
+            .insert(id, Rc::clone(&resolved));
+        Some(resolved)
+    }
 }
 
 /// A part of an element that isn't an Instance, styled with a CSS
@@ -164,10 +347,22 @@ pub struct StyleWarning {
     pub message: String,
 }
 
+/// CSS property (or custom property) names to their values. Fx hashing,
+/// as styles are looked up by short names many times per element (M14).
+pub(crate) type StyleMap = FxHashMap<String, String>;
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ResolvedStyles {
-    pub(crate) values: HashMap<String, String>,
-    pub(crate) variables: HashMap<String, String>,
+    pub(crate) values: StyleMap,
+    /// Shared with the parent's until an element sets its own (M14).
+    pub(crate) variables: Rc<StyleMap>,
+}
+
+/// So code can take a list of styles, shared or not.
+impl AsRef<ResolvedStyles> for ResolvedStyles {
+    fn as_ref(&self) -> &ResolvedStyles {
+        self
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -305,8 +500,50 @@ pub(crate) fn resolve_styles(
     stylesheets: &[Stylesheet],
     pseudo: PseudoClasses<'_>,
 ) -> ResolvedStyles {
+    Rc::unwrap_or_clone(shared_styles(world, id, stylesheets, pseudo))
+}
+
+/// [`resolve_styles`], shared with `pseudo`'s [`StyleCache`] rather than
+/// copied out of it, for layout's hot path.
+pub(crate) fn shared_styles(
+    world: &World,
+    id: InstanceId,
+    stylesheets: &[Stylesheet],
+    pseudo: PseudoClasses<'_>,
+) -> Rc<ResolvedStyles> {
+    if let (Some(cache), Some(transitions)) = (pseudo.styles, pseudo.transitions)
+        && let Some(eased) = cache.eased(id, transitions, &pseudo)
+    {
+        return eased;
+    }
+    let cached = pseudo
+        .styles
+        .and_then(|cache| cache.styles(world, id, stylesheets, &pseudo));
+    let Some(transitions) = pseudo.transitions else {
+        return cached.unwrap_or_else(|| Rc::new(cascade(world, id, stylesheets, pseudo)));
+    };
+    let mut resolved = match cached {
+        Some(styles) => Rc::unwrap_or_clone(styles),
+        None => cascade(world, id, stylesheets, pseudo),
+    };
+    transitions.borrow_mut().apply(world, id, &mut resolved);
+    let resolved = Rc::new(resolved);
+    if let Some(cache) = pseudo.styles {
+        cache.keep_eased(id, transitions, &pseudo, &resolved);
+    }
+    resolved
+}
+
+/// `id`'s cascaded styles, matched from scratch: its own declarations,
+/// and the custom properties it inherits from its ancestors.
+fn cascade(
+    world: &World,
+    id: InstanceId,
+    stylesheets: &[Stylesheet],
+    pseudo: PseudoClasses<'_>,
+) -> ResolvedStyles {
     let mut ancestors = Vec::new();
-    let mut current = Some(id);
+    let mut current = world.get(id).and_then(Instance::parent);
     while let Some(instance_id) = current {
         let Some(instance) = world.get(instance_id) else {
             break;
@@ -314,24 +551,39 @@ pub(crate) fn resolve_styles(
         ancestors.push(instance_id);
         current = instance.parent();
     }
-    ancestors.reverse();
-
     let mut resolved = ResolvedStyles::default();
-    for instance_id in ancestors {
+    for &instance_id in ancestors.iter().rev() {
         let declarations = matching_declarations(world, instance_id, stylesheets, pseudo);
         for (name, winner) in declarations {
-            let value = winner.declaration.value.clone();
             if name.starts_with("--") {
-                resolved.variables.insert(name.to_owned(), value);
-            } else if instance_id == id {
-                resolved.values.insert(name.to_owned(), value);
+                let value = winner.declaration.value.clone();
+                Rc::make_mut(&mut resolved.variables).insert(name.to_owned(), value);
             }
         }
     }
-    if let Some(transitions) = pseudo.transitions {
-        transitions.borrow_mut().apply(world, id, &mut resolved);
+    if world.get(id).is_some() {
+        add_own_declarations(world, id, stylesheets, pseudo, &mut resolved);
     }
     resolved
+}
+
+/// Adds the declarations winning for `id` itself to `resolved`: its
+/// values, and its custom properties over the inherited ones.
+fn add_own_declarations(
+    world: &World,
+    id: InstanceId,
+    stylesheets: &[Stylesheet],
+    pseudo: PseudoClasses<'_>,
+    resolved: &mut ResolvedStyles,
+) {
+    for (name, winner) in matching_declarations(world, id, stylesheets, pseudo) {
+        let value = winner.declaration.value.clone();
+        if name.starts_with("--") {
+            Rc::make_mut(&mut resolved.variables).insert(name.to_owned(), value);
+        } else {
+            resolved.values.insert(name.to_owned(), value);
+        }
+    }
 }
 
 /// The styles of the tooltip `owner` shows: rules whose last part is
@@ -350,7 +602,7 @@ pub(crate) fn resolve_tooltip_styles(
     });
     for (name, winner) in winners {
         let target = if name.starts_with("--") {
-            &mut resolved.variables
+            Rc::make_mut(&mut resolved.variables)
         } else {
             &mut resolved.values
         };
@@ -381,7 +633,7 @@ pub(crate) fn resolve_part_styles(
     });
     for (name, winner) in winners {
         let target = if name.starts_with("--") {
-            &mut resolved.variables
+            Rc::make_mut(&mut resolved.variables)
         } else {
             &mut resolved.values
         };
@@ -417,7 +669,7 @@ pub(crate) fn resolve_widget_styles(
     let mut resolved = ResolvedStyles::default();
     for (name, winner) in winners {
         let target = if name.starts_with("--") {
-            &mut resolved.variables
+            Rc::make_mut(&mut resolved.variables)
         } else {
             &mut resolved.values
         };
@@ -617,7 +869,7 @@ fn matching_declarations<'a>(
     id: InstanceId,
     stylesheets: &'a [Stylesheet],
     pseudo: PseudoClasses<'_>,
-) -> HashMap<&'a str, Winner<'a>> {
+) -> FxHashMap<&'a str, Winner<'a>> {
     winning_declarations(stylesheets, |selector| {
         selector_matches(world, id, selector, pseudo)
     })
@@ -628,31 +880,42 @@ fn matching_declarations<'a>(
 fn winning_declarations<'a>(
     stylesheets: &'a [Stylesheet],
     matches: impl Fn(&Selector) -> bool,
-) -> HashMap<&'a str, Winner<'a>> {
-    let mut winners: HashMap<&str, Winner> = HashMap::new();
+) -> FxHashMap<&'a str, Winner<'a>> {
+    let mut winners: FxHashMap<&str, Winner> = FxHashMap::default();
     let mut order = 0;
     for stylesheet in stylesheets {
         for rule in &stylesheet.rules {
+            // Each selector is matched once per rule, not once per
+            // declaration (M14). Of a rule's selectors that match, the most
+            // specific one decides how its declarations compete.
+            let specificity = if rule.declarations.is_empty() {
+                None
+            } else {
+                rule.selectors
+                    .iter()
+                    .filter(|selector| matches(selector))
+                    .map(|selector| selector.specificity)
+                    .max()
+            };
+            let Some(specificity) = specificity else {
+                order += rule.declarations.len();
+                continue;
+            };
             for declaration in &rule.declarations {
-                for selector in &rule.selectors {
-                    if !matches(selector) {
-                        continue;
-                    }
-                    let replace = winners.get(declaration.name.as_str()).is_none_or(|old| {
-                        (selector.specificity, order) > (old.specificity, old.order)
-                    });
-                    if replace {
-                        winners.insert(
-                            &declaration.name,
-                            Winner {
-                                specificity: selector.specificity,
-                                order,
-                                path: &stylesheet.path,
-                                selector: &rule.selector_text,
-                                declaration,
-                            },
-                        );
-                    }
+                let replace = winners
+                    .get(declaration.name.as_str())
+                    .is_none_or(|old| (specificity, order) > (old.specificity, old.order));
+                if replace {
+                    winners.insert(
+                        &declaration.name,
+                        Winner {
+                            specificity,
+                            order,
+                            path: &stylesheet.path,
+                            selector: &rule.selector_text,
+                            declaration,
+                        },
+                    );
                 }
                 order += 1;
             }
@@ -762,40 +1025,9 @@ fn simple_matches(
     {
         return false;
     }
-    let interactable = instance.property("Interactable").and_then(Value::as_bool) != Some(false);
-    let forced = pseudo
-        .forced
-        .filter(|(forced, _)| *forced == id)
-        .map(|(_, state)| state);
-    // A pressed button is hovered too, as in CSS.
-    let (hovered, active, disabled) = match forced {
-        Some(UiState::Normal) => (false, false, !interactable),
-        Some(UiState::Hover) => (true, false, false),
-        Some(UiState::Pressed) => (true, true, false),
-        Some(UiState::Disabled) => (false, false, true),
-        None => (
-            pseudo.hovered == Some(id),
-            pseudo.active == Some(id),
-            !interactable,
-        ),
-    };
-    // A Toggle that's on, or a Tool in its Inventory's hand (the hotbar's
-    // slot, Phase 45).
-    let checked = match instance.class() {
-        ClassName::Toggle => instance.property("Value").and_then(Value::as_bool) == Some(true),
-        ClassName::Tool => axcenity_core::tool::inventory_holding(world, id)
-            .is_some_and(|inventory| axcenity_core::tool::equipped(world, inventory) == Some(id)),
-        _ => false,
-    };
-    let focused = pseudo.focused == Some(id) || pseudo.selected == Some(id);
-    if (selector.hovered && !hovered)
-        || (selector.active && !active)
-        || (selector.disabled && !disabled)
-        || (selector.checked && !checked)
-        || (selector.focus && !focused)
-    {
-        return false;
-    }
+    // The cheap tests first, and each state looked up only when the
+    // selector asks for it (M14): most selectors fail on their class, id
+    // or classes.
     if selector.id.as_deref().is_some_and(|id| {
         instance
             .property("Id")
@@ -805,15 +1037,59 @@ fn simple_matches(
     }) {
         return false;
     }
-    let classes = instance
-        .property("Class")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    selector.classes.iter().all(|class| {
-        classes
-            .split_whitespace()
-            .any(|candidate| candidate == class)
-    })
+    if !selector.classes.is_empty() {
+        let classes = instance
+            .property("Class")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let has = |class: &String| {
+            classes
+                .split_whitespace()
+                .any(|candidate| candidate == class)
+        };
+        if !selector.classes.iter().all(has) {
+            return false;
+        }
+    }
+    if !(selector.hovered
+        || selector.active
+        || selector.disabled
+        || selector.checked
+        || selector.focus)
+    {
+        return true;
+    }
+    let interactable = || instance.property("Interactable").and_then(Value::as_bool) != Some(false);
+    let forced = pseudo
+        .forced
+        .filter(|(forced, _)| *forced == id)
+        .map(|(_, state)| state);
+    // A pressed button is hovered too, as in CSS.
+    let (hovered, active) = match forced {
+        Some(UiState::Normal | UiState::Disabled) => (false, false),
+        Some(UiState::Hover) => (true, false),
+        Some(UiState::Pressed) => (true, true),
+        None => (pseudo.hovered == Some(id), pseudo.active == Some(id)),
+    };
+    let disabled = || match forced {
+        Some(UiState::Normal) | None => !interactable(),
+        Some(UiState::Hover | UiState::Pressed) => false,
+        Some(UiState::Disabled) => true,
+    };
+    // A Toggle that's on, or a Tool in its Inventory's hand (the hotbar's
+    // slot, Phase 45).
+    let checked = || match instance.class() {
+        ClassName::Toggle => instance.property("Value").and_then(Value::as_bool) == Some(true),
+        ClassName::Tool => axcenity_core::tool::inventory_holding(world, id)
+            .is_some_and(|inventory| axcenity_core::tool::equipped(world, inventory) == Some(id)),
+        _ => false,
+    };
+    let focused = pseudo.focused == Some(id) || pseudo.selected == Some(id);
+    !((selector.hovered && !hovered)
+        || (selector.active && !active)
+        || (selector.focus && !focused)
+        || (selector.disabled && !disabled())
+        || (selector.checked && !checked()))
 }
 
 fn parse_selector(selector: &str) -> Option<Selector> {
@@ -1096,16 +1372,13 @@ fn is_identifier(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 
-pub(crate) fn resolve_variables(
-    value: &str,
-    variables: &HashMap<String, String>,
-) -> Option<String> {
+pub(crate) fn resolve_variables(value: &str, variables: &StyleMap) -> Option<String> {
     resolve_variables_inner(value, variables, &mut Vec::new())
 }
 
 fn resolve_variables_inner(
     value: &str,
-    variables: &HashMap<String, String>,
+    variables: &StyleMap,
     resolving: &mut Vec<String>,
 ) -> Option<String> {
     let mut output = String::new();
@@ -1165,6 +1438,117 @@ fn matching_parenthesis(source: &str) -> Option<usize> {
 mod tests {
     use super::*;
     use axcenity_core::ClassName;
+
+    /// Every element's styles from a [`StyleCache`] kept across changing
+    /// pointer, press, focus and forced states (as one frame's layout
+    /// passes keep it) are the ones matched from scratch.
+    #[test]
+    fn cached_styles_match_the_cascade_as_states_change() {
+        let mut world = World::new();
+        let add = |world: &mut World, parent, class, props: &[(&str, &str)]| {
+            let id = world.create(class).unwrap();
+            world.set_parent(id, Some(parent)).unwrap();
+            for (name, value) in props {
+                world
+                    .set_property(id, name, Value::String((*value).to_owned()))
+                    .unwrap();
+            }
+            id
+        };
+        let workspace = world.workspace();
+        let gui = add(&mut world, workspace, ClassName::ScreenGui, &[]);
+        let root = add(
+            &mut world,
+            gui,
+            ClassName::Frame,
+            &[("Id", "root"), ("Class", "panel")],
+        );
+        let mut slots = Vec::new();
+        let mut buttons = Vec::new();
+        for index in 0..3 {
+            let class = if index == 1 { "slot rare" } else { "slot" };
+            let slot = add(&mut world, root, ClassName::Frame, &[("Class", class)]);
+            add(&mut world, slot, ClassName::TextLabel, &[("Class", "name")]);
+            buttons.push(add(
+                &mut world,
+                slot,
+                ClassName::TextButton,
+                &[("Class", "use")],
+            ));
+            slots.push(slot);
+        }
+        let toggle = add(&mut world, root, ClassName::Toggle, &[]);
+        world
+            .set_property(toggle, "Value", Value::Bool(true))
+            .unwrap();
+        world
+            .set_property(buttons[2], "Interactable", Value::Bool(false))
+            .unwrap();
+        let (sheet, warnings) = parse_stylesheet(
+            "test.css",
+            "#root { --c: red; --gap: 4px; padding: var(--gap); }
+             .panel .slot { --c: green; background-color: var(--c); }
+             .slot:hover { --c: blue; border-color: var(--c); }
+             .slot.rare:hover TextLabel { color: var(--c); }
+             .slot:hover TextLabel.name, #root TextButton:active { font-size: 20px; }
+             .use:focus { --c: yellow; color: var(--c); }
+             TextButton:disabled { opacity: 0.5; }
+             Toggle:checked { background-color: var(--c); }
+             Frame, TextLabel { --depth: 1; }",
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let sheets = [sheet];
+        let mut ids = vec![gui, root, toggle];
+        for &slot in &slots {
+            ids.push(slot);
+            ids.extend(world.get(slot).unwrap().children().iter().copied());
+        }
+        let states = [
+            PseudoClasses::default(),
+            PseudoClasses {
+                hovered: Some(slots[0]),
+                ..PseudoClasses::default()
+            },
+            PseudoClasses {
+                hovered: Some(slots[1]),
+                active: Some(buttons[1]),
+                ..PseudoClasses::default()
+            },
+            PseudoClasses {
+                hovered: Some(buttons[1]),
+                active: Some(buttons[1]),
+                focused: Some(buttons[0]),
+                ..PseudoClasses::default()
+            },
+            PseudoClasses {
+                selected: Some(buttons[2]),
+                forced: Some((slots[2], UiState::Hover)),
+                ..PseudoClasses::default()
+            },
+            PseudoClasses::default(),
+        ];
+        let cache = StyleCache::default();
+        for (index, state) in states.into_iter().enumerate() {
+            cache.begin(&world, &state);
+            let cached = PseudoClasses {
+                styles: Some(&cache),
+                ..state
+            };
+            // Children before parents on odd passes, so an element's
+            // ancestors are matched on its account first.
+            let order: Vec<_> = if index % 2 == 1 {
+                ids.iter().rev().copied().collect()
+            } else {
+                ids.clone()
+            };
+            for id in order {
+                let expected = cascade(&world, id, &sheets, state);
+                let got = resolve_styles(&world, id, &sheets, cached);
+                assert_eq!(got.values, expected.values, "state {index}, {id:?}");
+                assert_eq!(*got.variables, *expected.variables, "state {index}, {id:?}");
+            }
+        }
+    }
 
     #[test]
     fn selectors_use_specificity_cascade_and_descendants() {
@@ -1290,7 +1674,7 @@ mod tests {
 
     #[test]
     fn variables_resolve_with_fallbacks_and_detect_cycles() {
-        let variables = HashMap::from([
+        let variables = StyleMap::from_iter([
             ("--primary".to_owned(), "#1a2b3c".to_owned()),
             ("--alias".to_owned(), "var(--primary)".to_owned()),
             ("--cycle".to_owned(), "var(--cycle)".to_owned()),

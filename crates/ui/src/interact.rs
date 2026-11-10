@@ -18,7 +18,8 @@ use axcenity_render::{Camera, UiDrawItem, UiText};
 
 use crate::css::*;
 use crate::style::{
-    PseudoClasses, Stylesheet, focus_rule_applies, resolve_styles, resolve_tooltip_styles,
+    PseudoClasses, StyleCache, Stylesheet, focus_rule_applies, resolve_styles,
+    resolve_tooltip_styles,
 };
 use crate::transition::Transitions;
 use crate::widget::{self, DropdownList};
@@ -134,6 +135,74 @@ pub struct UiInteraction {
     list_cursor: Option<usize>,
     /// Lay out only this ScreenGui (see [`UiInteraction::only`]).
     only: Option<InstanceId>,
+    /// This frame's [`UiInteraction::hit_layout`], for [`UiInteraction::layout`].
+    hit: Option<HitLayout>,
+}
+
+/// A [`UiInteraction::hit_layout`], kept with the styles it matched.
+#[derive(Debug)]
+struct HitLayout {
+    key: HitLayoutKey,
+    layout: UiLayout,
+    styles: StyleCache,
+    /// The sum of the laid-out elements' revisions when it was made.
+    revisions: u64,
+}
+
+/// The sum of the revisions of the elements `layout` placed, which
+/// changes when any of them does.
+fn revisions(world: &World, layout: &UiLayout) -> u64 {
+    layout
+        .elements
+        .iter()
+        .filter_map(|element| world.get(element.id))
+        .fold(0, |sum, instance| sum.wrapping_add(instance.revision()))
+}
+
+/// What a hit layout was made from, so [`UiInteraction::layout`] only
+/// reuses one made from the same. The world is the same World (by
+/// identity); the caller promises it's unchanged in between, and the tree
+/// version and the laid-out elements' revisions check that cheaply.
+#[derive(Debug, PartialEq)]
+struct HitLayoutKey {
+    world: u64,
+    structure: u64,
+    screen: (u32, u32),
+    stylesheets: (*const Stylesheet, usize),
+    focused: Option<InstanceId>,
+    on_top: Option<InstanceId>,
+    selected: Option<InstanceId>,
+    only: Option<InstanceId>,
+    camera: Option<([f32; 3], [f32; 3], f32)>,
+}
+
+impl HitLayoutKey {
+    fn new(
+        ui: &UiInteraction,
+        world: &World,
+        screen: (u32, u32),
+        stylesheets: &[Stylesheet],
+        input: UiInput,
+        camera: Option<&Camera>,
+    ) -> Self {
+        Self {
+            world: world.identity(),
+            structure: world.structure_version(),
+            screen,
+            stylesheets: (stylesheets.as_ptr(), stylesheets.len()),
+            focused: input.focused,
+            on_top: input.on_top,
+            selected: ui.selected,
+            only: ui.only,
+            camera: camera.map(|camera| {
+                (
+                    camera.position.to_array(),
+                    camera.look_at.to_array(),
+                    camera.fov_y_degrees,
+                )
+            }),
+        }
+    }
 }
 
 /// A press on a widget that does something when it's let go over the same place.
@@ -235,22 +304,22 @@ impl UiInteraction {
         self.transitions
             .borrow_mut()
             .advance(world, f64::from(seconds.max(0.0)));
-        let mut base = layout_ui_with_pseudo(
-            world,
-            width,
-            height,
-            stylesheets,
-            PseudoClasses {
-                focused: input.focused,
-                selected: self.selected,
-                ..PseudoClasses::default()
-            },
-            camera,
-            ScreenGuis {
-                on_top: input.on_top,
-                only: self.only,
-            },
-        );
+        // The pass without pointer states: the one `hit_layout` made this
+        // frame, or a new one. Every pass this frame shares the styles it
+        // has matched (M14).
+        let key = HitLayoutKey::new(self, world, screen, stylesheets, input, camera);
+        let hit = self
+            .hit
+            .take()
+            .filter(|hit| hit.key == key && hit.revisions == revisions(world, &hit.layout));
+        let (styles, mut base) = match hit {
+            Some(hit) => (hit.styles, hit.layout),
+            None => {
+                let styles = StyleCache::default();
+                let base = self.hit_pass(world, screen, stylesheets, input, camera, &styles);
+                (styles, base)
+            }
+        };
         // An open Dropdown's list covers everything under it. Where it is
         // comes from this layout, so it's right on the frame it opens.
         let open = (&mut self.dropdown, &mut self.list, self.list_cursor);
@@ -281,6 +350,7 @@ impl UiInteraction {
             selected: self.selected,
             forced: None,
             transitions: Some(&self.transitions),
+            styles: Some(&styles),
             ..PseudoClasses::default()
         };
         let mut layout = layout_ui_with_pseudo(
@@ -359,6 +429,66 @@ impl UiInteraction {
         layout.animating |= self.transitions.borrow().running();
         self.elements.clone_from(&layout.elements);
         layout
+    }
+
+    /// The UI laid out with no element hovered or pressed, for hit tests
+    /// made before [`Self::layout`]: which button a click lands on. Its
+    /// elements are placed but not painted, so it has no draw items. It's
+    /// the first of the passes `layout` makes, so when a host calls this
+    /// and then `layout` in the same frame, with the same unchanged world,
+    /// screen, stylesheets, focus and camera, `layout` reuses it and lays
+    /// the UI out once fewer (M14). An open Dropdown's list isn't in it.
+    pub fn hit_layout(
+        &mut self,
+        world: &World,
+        screen: (u32, u32),
+        stylesheets: &[Stylesheet],
+        input: UiInput,
+        camera: Option<&Camera>,
+    ) -> &UiLayout {
+        let key = HitLayoutKey::new(self, world, screen, stylesheets, input, camera);
+        let styles = StyleCache::default();
+        let layout = self.hit_pass(world, screen, stylesheets, input, camera, &styles);
+        let revisions = revisions(world, &layout);
+        &self
+            .hit
+            .insert(HitLayout {
+                key,
+                layout,
+                styles,
+                revisions,
+            })
+            .layout
+    }
+
+    /// Lays the UI out without pointer states, matching styles into `styles`.
+    fn hit_pass(
+        &self,
+        world: &World,
+        (width, height): (u32, u32),
+        stylesheets: &[Stylesheet],
+        input: UiInput,
+        camera: Option<&Camera>,
+        styles: &StyleCache,
+    ) -> UiLayout {
+        layout_ui_with_pseudo(
+            world,
+            width,
+            height,
+            stylesheets,
+            PseudoClasses {
+                focused: input.focused,
+                selected: self.selected,
+                styles: Some(styles),
+                unpainted: true,
+                ..PseudoClasses::default()
+            },
+            camera,
+            ScreenGuis {
+                on_top: input.on_top,
+                only: self.only,
+            },
+        )
     }
 
     /// The Dropdown whose list is open, if one is.

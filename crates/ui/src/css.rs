@@ -428,7 +428,18 @@ fn border_parts(value: &str) -> BorderParts {
     (width, style, color)
 }
 
-const SIDES: [&str; 4] = ["top", "right", "bottom", "left"];
+/// Each side's `border-{side}`, `-width` and `-color` property names,
+/// written out so they aren't formatted for every element (M14).
+const SIDES: [[&str; 3]; 4] = [
+    ["border-top", "border-top-width", "border-top-color"],
+    ["border-right", "border-right-width", "border-right-color"],
+    [
+        "border-bottom",
+        "border-bottom-width",
+        "border-bottom-color",
+    ],
+    ["border-left", "border-left-width", "border-left-color"],
+];
 
 /// The element's border, from `border`, `border-width`, `border-color`,
 /// `border-style` and each side's `border-top` (and so on),
@@ -482,8 +493,8 @@ pub(crate) fn css_borders(styles: &ResolvedStyles) -> Borders {
     }) {
         style = parsed;
     }
-    for (side, name) in sides.iter_mut().zip(SIDES) {
-        if let Some(value) = css_property(styles, &format!("border-{name}")) {
+    for (side, [shorthand, width, color]) in sides.iter_mut().zip(SIDES) {
+        if let Some(value) = css_property(styles, shorthand) {
             let (width, side_style, color) = border_parts(&value);
             side.width = width.unwrap_or(side.width);
             if let Some(color) = color {
@@ -493,12 +504,10 @@ pub(crate) fn css_borders(styles: &ResolvedStyles) -> Borders {
                 side.width = 0.0;
             }
         }
-        if let Some(width) = css_property(styles, &format!("border-{name}-width"))
-            .and_then(|v| border_width(v.trim()))
-        {
+        if let Some(width) = css_property(styles, width).and_then(|v| border_width(v.trim())) {
             side.width = width;
         }
-        if let Some(color) = css_color(styles, &format!("border-{name}-color")) {
+        if let Some(color) = css_color(styles, color) {
             set_color(side, color);
         }
     }
