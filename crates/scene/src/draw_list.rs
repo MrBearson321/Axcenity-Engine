@@ -16,12 +16,13 @@ use axcenity_render::glam::{Mat4, Quat, Vec3};
 use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, Clouds, Cone, DecalRole, DrawItem, DrawList, Fog,
     Light, Material, MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage, RectArea,
-    ReflectionProbe, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, TextureMaps, TextureSource,
+    ReflectionProbe, Shadows, Shape, Sky, SkyImage, SpotShadows, TextureMaps, TextureSource,
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
 use crate::graphics_volumes::Look;
 use crate::material;
+use crate::mesh_cache::MeshCache;
 use crate::orientation::rotation_from_orientation;
 use crate::terrain::TerrainCache;
 
@@ -452,6 +453,7 @@ pub fn build_draw_list_posed(
     let mut light_probe_volumes = Vec::new();
     let mut decals = Vec::new();
     let mut characters = crate::decals::Characters::default();
+    terrain.meshes.start_frame();
     for (id, instance) in world
         .descendants(world.workspace())
         .into_iter()
@@ -477,7 +479,8 @@ pub fn build_draw_list_posed(
             }
             class if class.has_model() => {
                 let posed = poses.get(&id);
-                mesh_part_draw_items(world, id, instance, assets, posed, &mut items)
+                let meshes = &mut terrain.meshes;
+                mesh_part_draw_items(world, id, instance, assets, posed, meshes, &mut items)
             }
             class if class.is_light() => lights.extend(light_of(world, instance)),
             ClassName::ReflectionProbe => {
@@ -525,6 +528,7 @@ pub fn build_draw_list_posed(
             }
         }
     }
+    terrain.meshes.end_frame();
 
     let mut chunks = Vec::new();
     terrain.draw_all(world, assets, &camera, &mut items, &mut chunks);
@@ -1055,6 +1059,7 @@ fn mesh_part_draw_items(
     instance: &Instance,
     assets: &Assets,
     posed: Option<&Arc<Posed>>,
+    meshes: &mut MeshCache,
     items: &mut Vec<DrawItem>,
 ) {
     let Some((_, transform)) = part_placement(instance) else {
@@ -1069,7 +1074,7 @@ fn mesh_part_draw_items(
         .property("MeshId")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let Some(model) = assets.model(mesh_id) else {
+    let Some((model, pieces)) = meshes.models.get(assets, mesh_id) else {
         items.push(DrawItem {
             shape: Shape::Block,
             transform,
@@ -1103,8 +1108,10 @@ fn mesh_part_draw_items(
     // part of the model moves with the pose's joints, on the GPU.
     let skin = posed
         .filter(|posed| posed.model_key == model.key())
-        .map(|posed| Arc::new(Skin::new(posed.joints().to_vec())));
-    for (index, primitive) in model.primitives.iter().enumerate() {
+        .map(|posed| meshes.skins.get(id, posed));
+    // The model's meshes and file materials are made once and shared by
+    // every MeshPart showing it, frame after frame (I8).
+    for (primitive, piece) in model.primitives.iter().zip(pieces) {
         let appearance = appearances.iter().find(|appearance| {
             appearance.property("MaterialName").and_then(Value::as_str)
                 == Some(primitive.material.name.as_str())
@@ -1112,14 +1119,14 @@ fn mesh_part_draw_items(
         let mut material = match (appearance, &variant) {
             (Some(appearance), _) => surface_material(&primitive.material, appearance, assets),
             (None, Some(standard)) => material::variant_material(standard, assets),
-            (None, None) => model_material(&primitive.material),
+            (None, None) => piece.material.clone(),
         };
         if let Some(color) = whole_color {
             material.base_color = color;
             material.base_color_texture = None;
         }
         items.push(DrawItem {
-            shape: Shape::Mesh(Arc::new(ModelMesh::new(&model, index))),
+            shape: piece.shape.clone(),
             transform,
             material,
             uv_tile: 0.0,

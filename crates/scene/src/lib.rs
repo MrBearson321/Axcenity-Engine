@@ -26,6 +26,7 @@ mod graphics_volumes;
 mod lens;
 mod light_probes;
 mod material;
+mod mesh_cache;
 mod orientation;
 mod outlines;
 mod particles;

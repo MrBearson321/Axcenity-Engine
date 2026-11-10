@@ -299,6 +299,13 @@ impl Posed {
         &self.joints
     }
 
+    /// The matching turn for normals: each of [`joints`](Self::joints)'
+    /// inverse transposes, so normals stay perpendicular to stretched
+    /// surfaces.
+    pub fn normal_matrices(&self) -> &[Mat3] {
+        &self.normal_matrices
+    }
+
     /// Primitive `index` of `model` (the model this is a pose of) at level
     /// of detail `level`: 0 is the primitive itself, 1 its first simpler
     /// copy ([`Primitive::lods`](super::Primitive::lods)), and so on. A level

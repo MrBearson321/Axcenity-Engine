@@ -26,6 +26,7 @@ Each prints its last frame's counts (items drawn, batches, draw calls, triangles
 | `bench_20_animated_characters` | 20 copies of hello-animation's Noodle (about 200 triangles each), each with an Animator, posed every frame |
 | `bench_20_walking_characters` | 20 copies of hello-character's walking character (about 76,000 triangles and 8 primitives each), each with an Animator, posed every frame (added in graphics Phase 14) |
 | `bench_500_bullet_holes_in_the_graphics_reference_scene` | hello-graphics from (12, 8, 16), drawn without decals, then with 500 bullet holes spawned by `workspace:SpawnDecal` from a grid of raycasts (its cap raised to keep them all); fails if the GPU frame with them is over 16.7 ms (added in Phase 75, see [decals.md](decals.md)) |
+| `bench_build_2000_mesh_parts` (in `scene/tests/bench_mesh_parts.rs`, no GPU) | The same 2,000 helmets, timing only `build_draw_list_posed` with a `TerrainCache` kept across frames, so it runs on machines with no graphics adapter: `cargo test -p axcenity-scene --release --test bench_mesh_parts -- --ignored --nocapture` (added with I8) |
 | `bench_2000_mesh_parts_behind_a_wall` | The 2,000 helmets in view but hidden behind an 80-stud wall the camera stands 40 studs from, then the same view with no helmets (added in graphics Phase 15, for occlusion culling) |
 | `bench_project` | A project of your own: set `AXCENITY_BENCH_PROJECT` to its folder. Drawn from its SpawnLocation at eye height looking ahead, then from an overview 120 studs up and 250 back. Skipped when the variable isn't set. Use it to find what a slow project costs before changing it or the engine (see Planning draws below) |
 
@@ -286,3 +287,18 @@ Inside `ScenePipeline::draw`, before: `LodStates::resolve` 5.2, material keys 3.
 Against the commit before, small scenes are unchanged or better (10,000 parts: 3.4 to 4.0 down to 2.9; 2,000 helmets: 1.8 down to 1.2; terrain and foliage: 3.1 to 3.7 down to 2.8; two items: 0.26 both). Filtering small casters out of the far cascades was tried and removed: it left out 2 of 21,000.
 
 **What's left is GPU work**: at Ultra, 5.7 ms of shadow vertices and 7 ms of lighting at 3.7 million pixels. High at 2560 × 1440 is 9.4 ms of GPU. Each shadow view copies its casters' 176-byte instances, of which a shadow pass reads 88, so a slimmer instance would halve that upload.
+
+## MeshParts share their meshes between frames (I8)
+
+Each MeshPart used to make a new mesh for each primitive of its model every frame, with new textures for the file's material and (since each mesh kept its own) new simpler copies for its levels of detail. 2,000 copies of one helmet handed the renderer 2,000 meshes, which it told apart by address. Now `scene/src/mesh_cache.rs` keeps, in the host's `TerrainCache` (`TerrainCache::meshes`):
+
+- **Each model's pieces, by `MeshId`**: one mesh and one file material per primitive, made once and shared by every MeshPart showing that model. The assets are asked for the model once a frame per `MeshId`; when they hand back a different one (`Assets::reload` swapped it in), its pieces are made again. A model nothing drew this frame is let go.
+- **Each animated MeshPart's `Skin`**, kept while its `Posed::version` is the same. A new pose is copied into the same buffers when nothing else holds them (`Skin::set_pose`), using the normal matrices the pose already has (`Posed::normal_matrices`) instead of inverting every joint again.
+
+`build_draw_list` (no cache passed) still makes them each call. `bench_build_2000_mesh_parts` on the cloud container (4 vCPU Xeon at 2.1 GHz, release build, fastest batch's median of 5 × 60 frames, four runs each):
+
+| | Before | After |
+|---|---|---|
+| CPU `build_draw_list`, 2,000 helmets | 1.84 to 1.90 | 0.90 to 0.99 |
+
+The player's `bench_2000_mesh_parts` keeps a `TerrainCache` across frames too now, as the hosts do; it wasn't run for this change (the container has only a software GPU).

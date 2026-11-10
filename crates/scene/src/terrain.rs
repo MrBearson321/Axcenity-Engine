@@ -66,6 +66,8 @@ pub struct TerrainCache {
     chunk_worker: Option<ChunkWorker>,
     /// Chunks being built, by terrain, chunk and level of detail.
     pending: HashSet<ChunkId>,
+    /// MeshParts' meshes, materials and skins, kept between frames (I8).
+    pub(crate) meshes: crate::mesh_cache::MeshCache,
 }
 
 impl Default for TerrainCache {
@@ -78,6 +80,7 @@ impl Default for TerrainCache {
             streaming: Streaming::default(),
             chunk_worker: None,
             pending: HashSet::new(),
+            meshes: Default::default(),
         }
     }
 }

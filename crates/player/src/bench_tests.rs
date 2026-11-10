@@ -317,9 +317,12 @@ fn bench_2000_mesh_parts() {
     }
     let assets = Assets::new(&folder);
     let camera = camera(Vec3::new(0.0, 90.0, 190.0), Vec3::new(0.0, 0.0, 10.0));
+    // Kept across frames, as the player and the editor keep theirs.
+    let mut cache = TerrainCache::new();
+    let poses = axcenity_scene::Poses::new();
     run("bench_2000_mesh_parts", |steps| {
         steps.time("build_draw_list", || {
-            axcenity_scene::build_draw_list(&world, &assets, camera)
+            axcenity_scene::build_draw_list_posed(&world, &assets, camera, &poses, &mut cache)
         })
     });
     assert!(assets.take_errors().is_empty());

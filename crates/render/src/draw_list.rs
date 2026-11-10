@@ -1319,6 +1319,18 @@ impl Skin {
         Self { joints, normals }
     }
 
+    /// Changes this to another pose, reusing its buffers: `normals` are
+    /// `joints`' inverse transposes, already worked out by the caller (an
+    /// animated model's pose keeps them). A host keeps one `Skin` per
+    /// animated mesh and calls this each frame instead of [`Skin::new`].
+    pub fn set_pose(&mut self, joints: &[Mat4], normals: &[Mat3]) {
+        debug_assert_eq!(joints.len(), normals.len());
+        self.joints.clear();
+        self.joints.extend_from_slice(joints);
+        self.normals.clear();
+        self.normals.extend_from_slice(normals);
+    }
+
     pub fn joints(&self) -> &[Mat4] {
         &self.joints
     }
