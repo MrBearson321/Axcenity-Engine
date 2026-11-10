@@ -4,6 +4,7 @@ Map only. `render` draws a draw list. It does not know about Instances. Open the
 
 - Pipeline, materials, built-in shapes, platforms: [rendering/pipeline.md](rendering/pipeline.md)
 - Imported models, texture maps, material files, surface shaders and material graphs: [rendering/models.md](rendering/models.md)
+- Cooked textures (BC7 mip levels made ahead in `.axcenity/imported`, how they load and draw): [rendering/textures.md](rendering/textures.md)
 - Animation playback: [rendering/animation.md](rendering/animation.md)
 - Point and spot lights, and their shadows: [rendering/lights.md](rendering/lights.md)
 - Sky, time of day (sun, moon and stars), Atmosphere, sky images, environment maps, reflection probes, light probe volumes, real-time GI and environment lighting: [rendering/sky.md](rendering/sky.md)

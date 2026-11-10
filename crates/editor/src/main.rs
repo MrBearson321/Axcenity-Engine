@@ -22,6 +22,7 @@ mod color_palette;
 mod command_palette;
 mod console;
 mod constraints;
+mod cooking;
 mod css_syntax;
 mod data_table;
 mod dialog;
@@ -105,7 +106,8 @@ fn window_icon() -> egui::IconData {
 }
 
 /// eframe's GPU setup, plus timestamps where the GPU can take them, so the
-/// Profiler can show the viewport's GPU time. The player never asks for them.
+/// Profiler can show the viewport's GPU time (the player never asks for
+/// those), and BC7 for cooked textures.
 fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     use axcenity_render::wgpu;
     use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
@@ -114,7 +116,9 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     let base = setup.device_descriptor.clone();
     setup.device_descriptor = std::sync::Arc::new(move |adapter| {
         let mut descriptor = base(adapter);
-        descriptor.required_features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
+        // Cooked textures go up as BC7 where the GPU reads it.
+        descriptor.required_features |= adapter.features()
+            & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TEXTURE_COMPRESSION_BC);
         descriptor
     });
     eframe::egui_wgpu::WgpuConfiguration {
@@ -137,6 +141,17 @@ fn main() -> eframe::Result {
     // instead (see `relaunch.rs`); release builds never take it.
     let mut args = std::env::args_os().skip(1);
     let first = args.next();
+    if first.as_deref() == Some(cooking::COOK_FLAG.as_ref()) {
+        let Some(folder) = args.next() else {
+            eprintln!(
+                "usage: axcenity-editor {} <project folder>",
+                cooking::COOK_FLAG
+            );
+            std::process::exit(2);
+        };
+        let cooked = cooking::cook_from_command_line(&PathBuf::from(folder));
+        std::process::exit(if cooked { 0 } else { 1 });
+    }
     let (folder, handoff) = match first {
         Some(flag) if cfg!(debug_assertions) && flag == relaunch::RESUME_FLAG => {
             (None, args.next().map(PathBuf::from))
@@ -176,6 +191,7 @@ fn main() -> eframe::Result {
             app.load_settings(ctx, creation_context.storage);
             app.set_global_assets(global_assets::default_folder());
             app.set_plugin_data(plugins::default_folder());
+            app.cook_textures_in_background();
             // Read in the background, so the window shows at once.
             if let Some(handoff) = &handoff {
                 app.resume(ctx, handoff);

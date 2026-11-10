@@ -185,7 +185,7 @@ impl UiDesigner {
                 {
                     let pixels = egui::ColorImage::from_rgba_unmultiplied(
                         [image.width as usize, image.height as usize],
-                        &image.rgba,
+                        image.rgba(),
                     );
                     let handle = ui.ctx().load_texture(
                         "ui designer slice",

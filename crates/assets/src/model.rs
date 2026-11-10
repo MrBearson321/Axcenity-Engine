@@ -30,12 +30,14 @@ use std::fmt;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 
 use glam::{Mat3, Mat4, Vec3};
 use gltf::image::Format;
 use gltf::mesh::Mode;
 use objects::{Listed, Siblings};
+
+use crate::cooked::{self, CookedTexture};
 
 /// Nodes inside nodes deeper than this, or more node visits than
 /// [`MAX_NODE_VISITS`], mean a broken file (nodes in a loop). Real models
@@ -459,14 +461,18 @@ pub enum AlphaMode {
     Blend,
 }
 
-/// A decoded texture.
+/// A decoded texture, or a cooked one (see [`CookedTexture`]) whose pixels
+/// are decoded from its file only when [`rgba`](Self::rgba) is first asked.
 pub struct Image {
     key: u64,
     pub width: u32,
     pub height: u32,
-    /// 4 bytes per pixel (red, green, blue, alpha), rows from the top:
-    /// sRGB-encoded for colors, plain values for the other maps.
-    pub rgba: Vec<u8>,
+    /// 4 bytes per pixel (see [`rgba`](Self::rgba)), once decoded.
+    pixels: OnceLock<Vec<u8>>,
+    /// Its mip levels in a GPU format, when the file was cooked.
+    cooked: Option<CookedTexture>,
+    /// The file to decode the pixels from, for a cooked image.
+    source: Option<PathBuf>,
     /// Its file, relative to the model's folder (with `/` between
     /// folders). For an image embedded in the model, where importing
     /// copies it out to (`textures/…`). `None` if it has no file.
@@ -480,7 +486,22 @@ impl Image {
             key: new_key(),
             width,
             height,
-            rgba,
+            pixels: OnceLock::from(rgba),
+            cooked: None,
+            source: None,
+            file: None,
+        }
+    }
+
+    /// A cooked texture, its pixels decoded from `source` if asked for.
+    pub(crate) fn from_cooked(cooked: CookedTexture, source: PathBuf) -> Image {
+        Image {
+            key: new_key(),
+            width: cooked.width,
+            height: cooked.height,
+            pixels: OnceLock::new(),
+            cooked: Some(cooked),
+            source: Some(source),
             file: None,
         }
     }
@@ -488,6 +509,47 @@ impl Image {
     /// Different for every texture loaded.
     pub fn key(&self) -> u64 {
         self.key
+    }
+
+    /// 4 bytes per pixel (red, green, blue, alpha), rows from the top:
+    /// sRGB-encoded for colors, plain values for the other maps. A cooked
+    /// image decodes its file the first time (mid-grey if that fails now,
+    /// so the size always matches).
+    pub fn rgba(&self) -> &[u8] {
+        self.pixels.get_or_init(|| {
+            let decoded = self.source.as_ref().and_then(|path| {
+                let bytes = std::fs::read(path).ok()?;
+                decode_image(&bytes, &path.to_string_lossy()).ok()
+            });
+            match decoded {
+                Some(image) if (image.width, image.height) == (self.width, self.height) => {
+                    image.pixels.into_inner().unwrap_or_default()
+                }
+                _ => vec![128; self.width as usize * self.height as usize * 4],
+            }
+        })
+    }
+
+    /// Its mip levels in a GPU format, if its file was cooked.
+    pub fn cooked(&self) -> Option<&CookedTexture> {
+        self.cooked.as_ref()
+    }
+
+    /// Whether any pixel is see-through, without decoding a cooked image.
+    pub fn has_alpha(&self) -> bool {
+        match (&self.cooked, self.pixels.get()) {
+            (Some(cooked), None) => cooked.has_alpha,
+            _ => cooked::has_alpha(self.rgba()),
+        }
+    }
+
+    /// The [`sampled_average`](crate::sampled_average) of its pixels,
+    /// without decoding a cooked image.
+    pub fn sampled_average(&self) -> [u8; 4] {
+        match (&self.cooked, self.pixels.get()) {
+            (Some(cooked), None) => cooked.average,
+            _ => cooked::sampled_average(self.rgba()),
+        }
     }
 }
 
@@ -549,11 +611,48 @@ pub fn load_models(
     // panics (`unwrap`) on a few broken files; `ufbx` turns its own internal
     // errors into panics too. `catch_unwind` turns such a panic into an
     // error, so a bad file can never crash the engine.
+    load_models_in(bytes, folder, None, format, picks)
+}
+
+/// [`load_models`] for a model inside `project`, whose textures are taken
+/// from their cooked copies where those are current (see
+/// [`read_cooked`](crate::read_cooked)).
+pub(crate) fn load_models_in(
+    bytes: &[u8],
+    folder: &Path,
+    project: Option<&Path>,
+    format: ModelFormat,
+    picks: &[Pick],
+) -> Result<Vec<Model>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
-        ModelFormat::Gltf => read(bytes, folder, picks),
-        ModelFormat::Fbx => fbx::load(bytes, folder, picks),
+        ModelFormat::Gltf => read(bytes, folder, project, picks),
+        ModelFormat::Fbx => fbx::load(bytes, folder, project, picks),
     }))
     .unwrap_or(Err(ModelError::Damaged))
+}
+
+/// The cooked copy of `file` (relative to `folder`, a model's folder inside
+/// `project`), as an image for that model, if it has a current one. For a
+/// texture `embedded` in the model, `file` is where importing copied it out
+/// to, and the copy must have been made from those bytes.
+fn cooked_texture(
+    project: Option<&Path>,
+    folder: &Path,
+    file: &str,
+    embedded: Option<&[u8]>,
+) -> Option<Image> {
+    let project = project?;
+    let mut relative = folder.strip_prefix(project).ok()?.to_path_buf();
+    relative.push(file);
+    let relative = relative.to_str()?.replace('\\', "/");
+    let image = match embedded {
+        Some(bytes) => cooked::cooked_embedded_image(project, &relative, bytes)?,
+        None => cooked::cooked_image(project, &relative)?,
+    };
+    Some(Image {
+        file: Some(file.to_owned()),
+        ..image
+    })
 }
 
 /// Every take (animation timeline) in a model file's `bytes`, baked into
@@ -701,7 +800,12 @@ fn embedded_image_names(document: &gltf::Document) -> HashMap<usize, String> {
     names
 }
 
-fn read(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Model>, ModelError> {
+fn read(
+    bytes: &[u8],
+    folder: &Path,
+    project: Option<&Path>,
+    picks: &[Pick],
+) -> Result<Vec<Model>, ModelError> {
     let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(bytes)?;
     // Checked here, not left to `gltf`, so nothing outside `folder` is read
     // and a missing file is named.
@@ -714,6 +818,7 @@ fn read(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Model>, Model
 
     let mut reader = Reader {
         folder,
+        project,
         buffers: &buffers,
         images: HashMap::new(),
         primitives: Vec::new(),
@@ -999,6 +1104,8 @@ fn percent_decode(text: &str) -> Option<String> {
 /// Walks the node tree, collecting each mesh's triangles in model space.
 struct Reader<'a> {
     folder: &'a Path,
+    /// The project folder, where cooked textures are looked for.
+    project: Option<&'a Path>,
     buffers: &'a [gltf::buffer::Data],
     /// Textures decoded so far, by image index, so shared ones decode once.
     images: HashMap<usize, Arc<Image>>,
@@ -1315,6 +1422,29 @@ impl Reader<'_> {
         Ok((material, uv_set))
     }
 
+    /// `image` from its cooked copy, if it has a current one: a file it
+    /// names, or the file importing copied an embedded image out to.
+    fn cooked_image(&self, image: &gltf::Image) -> Option<Image> {
+        match image.source() {
+            gltf::image::Source::Uri { uri, .. } if !uri.starts_with("data:") => {
+                cooked_texture(self.project, self.folder, &percent_decode(uri)?, None)
+            }
+            gltf::image::Source::Uri { .. } => None,
+            gltf::image::Source::View { view, .. } => {
+                let bytes = self
+                    .buffers
+                    .get(view.buffer().index())?
+                    .get(view.offset()..view.offset() + view.length())?;
+                let file = format!(
+                    "{}/{}",
+                    crate::import::TEXTURES_FOLDER,
+                    self.embedded.get(&image.index())?
+                );
+                cooked_texture(self.project, self.folder, &file, Some(bytes))
+            }
+        }
+    }
+
     fn image(&mut self, image: &gltf::Image) -> Result<Arc<Image>, ModelError> {
         if let Some(decoded) = self.images.get(&image.index()) {
             return Ok(decoded.clone());
@@ -1332,6 +1462,14 @@ impl Reader<'_> {
         if let Some(shared) = embedded.and_then(shared_embedded) {
             self.images.insert(image.index(), shared.clone());
             return Ok(shared);
+        }
+        if let Some(cooked) = self.cooked_image(image) {
+            let cooked = Arc::new(cooked);
+            self.images.insert(image.index(), cooked.clone());
+            if let Some(key) = embedded {
+                share_embedded(key, &cooked);
+            }
+            return Ok(cooked);
         }
         let data = gltf::image::Data::from_source(image.source(), Some(self.folder), self.buffers)?;
         let name = match (image.name(), image.source()) {
@@ -1352,11 +1490,8 @@ impl Reader<'_> {
                 .map(|name| format!("{}/{name}", crate::import::TEXTURES_FOLDER)),
         };
         let decoded = Arc::new(Image {
-            key: new_key(),
-            width: data.width,
-            height: data.height,
-            rgba,
             file,
+            ..Image::new(data.width, data.height, rgba)
         });
         self.images.insert(image.index(), decoded.clone());
         if let Some(key) = embedded {
@@ -1461,13 +1596,7 @@ pub(crate) fn decode_image(bytes: &[u8], name: &str) -> Result<Image, String> {
     if rgba.width() == 0 || rgba.height() == 0 {
         return Err("it has no pixels".to_owned());
     }
-    Ok(Image {
-        key: new_key(),
-        width: rgba.width(),
-        height: rgba.height(),
-        rgba: rgba.into_raw(),
-        file: None,
-    })
+    Ok(Image::new(rgba.width(), rgba.height(), rgba.into_raw()))
 }
 
 /// Normals for a mesh that has none: each corner gets the average of the

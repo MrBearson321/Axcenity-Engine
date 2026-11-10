@@ -626,7 +626,7 @@ fn resample(image: &Image, size: u32, material: &ModelMaterial) -> Vec<u8> {
             cos * su * uv.x + sin * sv * uv.y + ou,
             -sin * su * uv.x + cos * sv * uv.y + ov,
         );
-        let sample = sample(&image.rgba, image.width, image.height, moved, true);
+        let sample = sample(image.rgba(), image.width, image.height, moved, true);
         pixels.extend(sample.map(|c| c.round().clamp(0.0, 255.0) as u8));
     }
     pixels

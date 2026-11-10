@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use crate::draw_list::{DrawList, TextureSource};
 
-use super::ScenePipeline;
 use super::gpu::{shrink_texture, texture_bytes, upload_texture};
 use super::lighting::material_textures;
+use super::{ScenePipeline, Texels};
 
 /// A surface texture as the budget sees it.
 #[derive(Clone, Copy, Debug)]
@@ -20,6 +20,7 @@ pub(super) struct Budgeted {
     pub(super) last_drawn: u64,
     /// Its size before the budget left any levels out (`GpuTexture::base`).
     pub(super) base: (u32, u32, u32),
+    pub(super) texels: Texels,
 }
 
 /// How many of each texture's largest levels to leave out so that `fixed`
@@ -32,15 +33,15 @@ pub(super) fn levels_to_drop(textures: &[Budgeted], fixed: u64, budget: u64) -> 
     let mut total = fixed
         + textures
             .iter()
-            .map(|texture| texture_bytes(texture.base, 0))
+            .map(|texture| texture_bytes(texture.texels, texture.base, 0))
             .sum::<u64>();
     // A max-heap: the oldest first (so `Reverse`), then the most bytes.
     let mut next: BinaryHeap<(Reverse<u64>, u64, usize)> = textures
         .iter()
         .enumerate()
-        .filter(|(_, texture)| texture.base.2 > 1)
+        .filter(|(_, texture)| texture.texels.max_dropped(texture.base) > 0)
         .map(|(index, texture)| {
-            let bytes = texture_bytes(texture.base, 0);
+            let bytes = texture_bytes(texture.texels, texture.base, 0);
             (Reverse(texture.last_drawn), bytes, index)
         })
         .collect();
@@ -48,10 +49,10 @@ pub(super) fn levels_to_drop(textures: &[Budgeted], fixed: u64, budget: u64) -> 
         && let Some((age, bytes, index)) = next.pop()
     {
         dropped[index] += 1;
-        let base = textures[index].base;
-        let smaller = texture_bytes(base, dropped[index]);
+        let Budgeted { base, texels, .. } = textures[index];
+        let smaller = texture_bytes(texels, base, dropped[index]);
         total -= bytes - smaller;
-        if dropped[index] + 1 < base.2 {
+        if dropped[index] < texels.max_dropped(base) {
             next.push((age, smaller, index));
         }
     }
@@ -85,6 +86,7 @@ impl ScenePipeline {
             .map(|key| Budgeted {
                 last_drawn: self.textures[key].last_drawn,
                 base: gpu(key).base,
+                texels: gpu(key).texels,
             })
             .collect();
         let held: u64 = keys.iter().map(|key| gpu(key).bytes.bytes()).sum();
@@ -138,6 +140,7 @@ impl ScenePipeline {
                     self.capabilities.max_texture_size,
                 ),
                 target,
+                true,
             );
             changed.insert(key);
         }
@@ -170,6 +173,7 @@ mod tests {
         Budgeted {
             last_drawn,
             base: (1024, 1024, 11),
+            texels: Texels::Rgba8,
         }
     }
 
@@ -177,7 +181,7 @@ mod tests {
         textures
             .iter()
             .zip(dropped)
-            .map(|(texture, &dropped)| texture_bytes(texture.base, dropped))
+            .map(|(texture, &dropped)| texture_bytes(texture.texels, texture.base, dropped))
             .sum()
     }
 
@@ -192,7 +196,7 @@ mod tests {
         // Two drawn this frame, one 10 frames ago: only the old one shrinks
         // while that's enough.
         let textures = [big(10), big(0), big(10)];
-        let budget = 2 * texture_bytes(big(0).base, 0) + 2 * MIB;
+        let budget = 2 * texture_bytes(Texels::Rgba8, big(0).base, 0) + 2 * MIB;
         let dropped = levels_to_drop(&textures, 0, budget);
         assert_eq!(dropped, [0, 1, 0]);
         assert!(total(&textures, &dropped) <= budget);
@@ -203,6 +207,7 @@ mod tests {
         let small = Budgeted {
             last_drawn: 3,
             base: (256, 256, 9),
+            texels: Texels::Rgba8,
         };
         let textures = [big(3), small, big(3), big(3)];
         let budget = 4 * MIB;
@@ -218,6 +223,26 @@ mod tests {
     fn each_texture_keeps_its_smallest_level() {
         let textures = [big(0), big(1)];
         assert_eq!(levels_to_drop(&textures, 10 * MIB, MIB), [10, 10]);
-        assert_eq!(texture_bytes(big(0).base, 10), 4, "one pixel each");
+        assert_eq!(
+            texture_bytes(Texels::Rgba8, big(0).base, 10),
+            4,
+            "one pixel each"
+        );
+    }
+
+    #[test]
+    fn a_bc7_texture_keeps_whole_blocks_and_takes_a_quarter() {
+        let cooked = Budgeted {
+            texels: Texels::Bc7,
+            ..big(0)
+        };
+        // 1024 down to 4 wide: 8 levels can go, leaving 4×4, 2×2 and 1×1.
+        assert_eq!(levels_to_drop(&[cooked], 0, 0), [8]);
+        // A byte a pixel, but the 2×2 and 1×1 levels take a whole block.
+        assert_eq!(
+            texture_bytes(Texels::Bc7, cooked.base, 0) * 4,
+            texture_bytes(Texels::Rgba8, cooked.base, 0) - (16 + 4) + 4 * (16 + 16),
+        );
+        assert_eq!(texture_bytes(Texels::Bc7, cooked.base, 8), 3 * 16);
     }
 }

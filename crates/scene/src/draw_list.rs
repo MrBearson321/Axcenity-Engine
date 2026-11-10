@@ -1522,7 +1522,13 @@ impl TextureSource for ImageTexture {
         (self.0.width, self.0.height)
     }
     fn rgba(&self) -> &[u8] {
-        &self.0.rgba
+        self.0.rgba()
+    }
+    fn bc7_levels(&self) -> &[Vec<u8>] {
+        match self.0.cooked() {
+            Some(cooked) if cooked.format == axcenity_assets::CookedFormat::Bc7 => &cooked.levels,
+            _ => &[],
+        }
     }
 }
 

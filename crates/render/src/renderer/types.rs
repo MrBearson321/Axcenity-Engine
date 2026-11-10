@@ -14,6 +14,71 @@ pub(super) const TARGET_DRAW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::
 /// sRGB view of them ([`TEXTURE_SRGB_FORMAT`]), so sampling gives linear light.
 pub(super) const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub(super) const TEXTURE_SRGB_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+/// How a material texture's texels are stored on the GPU.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Texels {
+    /// [`TEXTURE_FORMAT`]: 4 bytes a pixel, mips made on the CPU at upload.
+    Rgba8,
+    /// BC7 blocks from a cooked texture ([`TextureSource::bc7_levels`]):
+    /// 16 bytes for each 4×4 pixels.
+    Bc7,
+}
+
+impl Texels {
+    pub(super) fn format(self) -> wgpu::TextureFormat {
+        match self {
+            Texels::Rgba8 => TEXTURE_FORMAT,
+            Texels::Bc7 => wgpu::TextureFormat::Bc7RgbaUnorm,
+        }
+    }
+
+    /// The same texels read as sRGB, for colors.
+    pub(super) fn srgb_format(self) -> wgpu::TextureFormat {
+        match self {
+            Texels::Rgba8 => TEXTURE_SRGB_FORMAT,
+            Texels::Bc7 => wgpu::TextureFormat::Bc7RgbaUnormSrgb,
+        }
+    }
+
+    /// The bytes of a `width`×`height` level.
+    pub(super) fn level_bytes(self, width: u32, height: u32) -> u64 {
+        let (width, height) = self.stored_size(width, height);
+        match self {
+            Texels::Rgba8 => u64::from(width) * u64::from(height) * 4,
+            Texels::Bc7 => u64::from(width / 4) * u64::from(height / 4) * 16,
+        }
+    }
+
+    /// The size a `width`×`height` level takes up: whole blocks for BC7,
+    /// which is also the size to copy it by.
+    pub(super) fn stored_size(self, width: u32, height: u32) -> (u32, u32) {
+        match self {
+            Texels::Rgba8 => (width, height),
+            Texels::Bc7 => (width.next_multiple_of(4), height.next_multiple_of(4)),
+        }
+    }
+
+    /// Whether a texture's largest level can be `width`×`height`: a BC7
+    /// texture must start with whole blocks.
+    pub(super) fn can_start_at(self, width: u32, height: u32) -> bool {
+        match self {
+            Texels::Rgba8 => true,
+            Texels::Bc7 => width.is_multiple_of(4) && height.is_multiple_of(4),
+        }
+    }
+
+    /// How many of the largest levels of a texture of `base` size (see
+    /// [`GpuTexture::base`]) can be left out: all but one, and for BC7
+    /// only while the largest left still starts with whole blocks.
+    pub(super) fn max_dropped(self, (width, height, levels): (u32, u32, u32)) -> u32 {
+        (1..levels)
+            .take_while(|&level| {
+                self.can_start_at((width >> level).max(1), (height >> level).max(1))
+            })
+            .count() as u32
+    }
+}
+
 pub(super) const NEAR_PLANE: f32 = 0.1;
 pub(super) const FAR_PLANE: f32 = 5000.0;
 /// A caller's mesh or texture not drawn for this many frames is taken off
@@ -453,6 +518,8 @@ pub(super) struct GpuTexture {
     pub(super) base: (u32, u32, u32),
     /// How many of those largest levels the texture budget left out.
     pub(super) dropped: u32,
+    /// How its texels are stored.
+    pub(super) texels: Texels,
     /// Its size with every mip level, in [`ScenePipeline::texture_bytes`].
     pub(super) bytes: Counted,
 }

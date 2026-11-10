@@ -215,7 +215,7 @@ fn the_sculpted_face_retopologised_under_5k_triangles_and_baked_shows_the_sculpt
         let side: f32 = corners.iter().zip(weights).map(|(c, w)| c.side * w).sum();
         let uv: Vec2 = corners.iter().zip(weights).map(|(c, w)| c.uv * w).sum();
         let texel = sample(
-            &normal_map.rgba,
+            normal_map.rgba(),
             normal_map.width,
             normal_map.height,
             uv,

@@ -1428,6 +1428,15 @@ pub trait TextureSource: Send + Sync {
     /// Color textures (base color, emission) are sRGB-encoded like the
     /// colors; the others hold plain values (128 is 0.5).
     fn rgba(&self) -> &[u8];
+    /// Its mip levels made ahead in BC7 blocks (a cooked texture), largest
+    /// first (at [`size`](Self::size)), each half the last, down to 1×1.
+    /// Surface textures are uploaded from these when the GPU reads BC7,
+    /// with no mips to make and a quarter of the bytes; otherwise, and
+    /// when this is empty (the default), from [`rgba`](Self::rgba), which
+    /// must still work.
+    fn bc7_levels(&self) -> &[Vec<u8>] {
+        &[]
+    }
 }
 
 // So `Shape` and `Material` can derive `Debug`, which needs every field to

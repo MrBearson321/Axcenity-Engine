@@ -25,6 +25,11 @@ impl EditorApp {
             Err(err) => self.open_failed(folder, &format!("{:#}", anyhow::Error::new(err))),
         }
     }
+    /// Has every project opened from now on cook its textures in the
+    /// background (`cooking.rs`).
+    pub fn cook_textures_in_background(&mut self) {
+        self.cook_textures = true;
+    }
     /// Starts opening the project in `folder` in the background, with the
     /// loading screen over the window until it's read (see `loading.rs`).
     /// It opens in [`Self::follow_loading`].
@@ -165,6 +170,11 @@ impl EditorApp {
                 axcenity_project::FORMAT_VERSION,
             ));
         }
+
+        // The last project's cooking stops when it's dropped here.
+        self.cooker = self
+            .cook_textures
+            .then(|| crate::cooking::Cooker::start(project.folder.clone()));
 
         let scripts = project.scripts.len();
         let show_splash = project.manifest.show_splash;

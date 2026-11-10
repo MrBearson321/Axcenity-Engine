@@ -31,6 +31,7 @@
 //! world file or script can't make the engine read anything else.
 
 mod color_grading;
+mod cooked;
 mod data_table;
 mod fonts;
 mod import;
@@ -52,6 +53,11 @@ use loading::{Kind, LoadKey};
 pub use color_grading::{
     ColorLookup, LOOKUP_EXTENSIONS, MAX_LOOKUP_SIZE, MAX_PALETTE_COLORS, PROJECT_GRADING_FOLDER,
     Palette, lookup_from_strip, palette_from_image, parse_cube, read_color_lookup, read_palette,
+};
+pub use cooked::{
+    COOKED_EXTENSION, COOKED_FOLDER, CookedFormat, CookedTexture, SourceStamp, content_hash,
+    cooked_path, decode_cooked, encode_cooked, has_alpha, is_cooked, read_cooked, sampled_average,
+    write_cooked,
 };
 pub use data_table::{
     AssetType, Cell, Column, ColumnType, DATA_FOLDER, DATA_TABLE_SUFFIX, DataTable, DataTableError,
@@ -802,7 +808,7 @@ fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
         _ => err.to_string(),
     })?;
     let base = path.parent().unwrap_or(folder);
-    load_models(&bytes, base, format, &[pick])
+    model::load_models_in(&bytes, base, Some(folder), format, &[pick])
         .map(|mut models| models.remove(0))
         .map_err(|err| with_causes(&err))
 }
@@ -915,6 +921,10 @@ pub fn read_texture(folder: &Path, path: &str) -> Result<Image, String> {
     let relative = safe_path(path).ok_or(
         "a texture must be a file inside the project folder, such as \"assets/textures/wood.png\"",
     )?;
+    if let Some(mut image) = cooked::cooked_image(folder, path) {
+        image.file = Some(path.to_owned());
+        return Ok(image);
+    }
     let bytes = std::fs::read(folder.join(&relative)).map_err(|err| match err.kind() {
         std::io::ErrorKind::NotFound => "the file isn't there".to_owned(),
         _ => err.to_string(),
@@ -922,6 +932,13 @@ pub fn read_texture(folder: &Path, path: &str) -> Result<Image, String> {
     let mut image = model::decode_image(&bytes, path)?;
     image.file = Some(path.to_owned());
     Ok(image)
+}
+
+/// Decodes a PNG, JPEG, TGA or BMP texture file's `bytes` (`name` is for
+/// guessing the format and for messages), never from a cooked copy. For
+/// cooking (`axcenity-cook`).
+pub fn decode_texture(bytes: &[u8], name: &str) -> Result<Image, String> {
+    model::decode_image(bytes, name)
 }
 
 /// An error and its causes on one line: "it isn't a valid glTF file:

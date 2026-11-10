@@ -284,6 +284,21 @@ What the profile (Callgrind) showed, and what changed:
 
 What's left is about evenly split between painting (text and boxes from CSS values, which are strings resolved on each read), Taffy, transitions and building the frame's styles. Nothing is kept between frames, so a retained layout (relayout only what changed, as M4 does for the draw list) is the next step if a game's UI needs it. The player's `UI` and `Draw list` steps on S10k don't change, as it has no GUI.
 
+### Cooked textures (L2, first part)
+
+Taken on 2026-11-10 in the Linux cloud container (4 vCPUs, lavapipe), release build, hello-roads (four 4096² JPEG maps on a SurfaceAppearance), after `axcenity-editor --cook examples/hello-roads` ([rendering/textures.md](rendering/textures.md)). Upload times are from temporary timers around `upload_texture`, on the player's first frame.
+
+| | Before (decode, CPU mips, RGBA8) | Cooked (BC7) |
+|---|---|---|
+| Uploading one 4096² map on the first frame | 55–61 ms | 0.9–1.1 ms |
+| Reading one 4096² map on an asset worker | about 650 ms (JPEG decode) | about 30 ms (file read) |
+| GPU memory for one 4096² map with mips | 85 MiB | 21 MiB |
+| First frame, three alternating runs | 436–475 ms | 441–488 ms |
+
+- **The CPU's part of the first frame drops by about 230 ms** here (four maps), and by the same per map on any machine: no mipmaps to make and a quarter of the bytes to copy. Abandoned Farmhouse, whose 2.7–3 s first frame was this work for many embedded 4K maps (above), is the project to measure it on with a real GPU.
+- **The first frame on lavapipe didn't change**, because lavapipe does the GPU's work on the CPU too: it decodes BC7 in software on every sample, which costs what the upload saved. The steady frame stayed within noise (Render median 17.8–21.5 ms both ways). On a real GPU BC7 sampling is free, so this needs the Windows desktop to show.
+- **Cooking** took 32 s for hello-roads' 28 images (20 of them 4096²) on the container's 4 cores, once; 418 MB of cooked copies. Image quality with the "very fast" settings, PSNR against the source: 35.8 dB for the color map, 47.4 dB for roughness, 28.1 dB for the normal map ("basic" settings: 36.3, 47.7, 30.4). Normal maps would do better as BC5, which needs the shader to rebuild z; not done yet.
+
 ### A Windows desktop with a real GPU
 
 Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table above): AMD Ryzen 9 9950X3D (16 cores), 62 GB of RAM, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Each host ran three times, 600 measured frames each; the table gives the median of the three runs' medians, and the worst frame seen in any run. The first player run was slower than the other two (Physics 14.3 ms against 5.4 ms); it came straight after the release build. Times are milliseconds.

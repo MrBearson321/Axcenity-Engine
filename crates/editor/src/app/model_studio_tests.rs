@@ -384,7 +384,7 @@ fn unwrapped_uvs_save_in_the_glb_and_draw_the_same_texture_in_the_game_as_in_the
             .as_ref()
             .unwrap();
         assert_eq!((texture.width, texture.height), (shown.width, shown.height));
-        assert_eq!(texture.rgba, shown.rgba, "the same texture");
+        assert_eq!(texture.rgba(), shown.rgba(), "the same texture");
     }
     // Reopened, the seams are back from the sidecar and the uvs from the file.
     app.open_in_model_studio(&path);
@@ -477,10 +477,10 @@ fn rust_painted_on_the_chair_saves_maps_the_scene_view_draws_with_the_material_s
     for model in [&game, &app.assets.model_blocking(&path).unwrap()] {
         let material = &model.primitives[0].material;
         assert_eq!(material.base_color, [1.0; 4]);
-        assert_eq!(material.base_color_texture.as_ref().unwrap().rgba, color);
+        assert_eq!(material.base_color_texture.as_ref().unwrap().rgba(), color);
         let roughness = material.roughness_texture.as_ref().unwrap();
         assert_eq!(roughness.channel, axcenity_assets::Channel::Green);
-        let saved: Vec<u8> = roughness.image.rgba.chunks(4).map(|p| p[1]).collect();
+        let saved: Vec<u8> = roughness.image.rgba().chunks(4).map(|p| p[1]).collect();
         assert_eq!(saved, rough);
     }
     // The Scene view's draw list has the part with its painted maps.

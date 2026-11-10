@@ -682,7 +682,7 @@ impl ModelStudio {
             {
                 let pixels = egui::ColorImage::from_rgba_unmultiplied(
                     [image.image.width as usize, image.image.height as usize],
-                    &image.image.rgba,
+                    image.image.rgba(),
                 );
                 let handle =
                     ui.ctx()

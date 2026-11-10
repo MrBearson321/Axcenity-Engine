@@ -139,7 +139,7 @@ fn load(folder: &Path, path: &str, set: bool) -> Option<egui::ColorImage> {
         return shrink(sky.width, sky.height, &sky_rgba(&sky.rgb), THUMBNAIL_PIXELS);
     }
     let image = axcenity_assets::read_texture(folder, &picture).ok()?;
-    shrink(image.width, image.height, &image.rgba, THUMBNAIL_PIXELS)
+    shrink(image.width, image.height, image.rgba(), THUMBNAIL_PIXELS)
 }
 
 /// A sky image's linear light (red, green, blue, brighter than 1 where the
