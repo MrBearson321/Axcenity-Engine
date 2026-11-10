@@ -187,6 +187,40 @@ S10k has 200 scripts, so the Scripts step was already small; the frame differenc
 
 With many tasks resuming every step, resuming them is the cost, and the queue doesn't change it.
 
+### Property access and the watchdog (M6, part 2)
+
+`cargo test -p axcenity-script --release --lib -- --ignored bench_member_access --nocapture` times one `instance.Key` read or write from Luau, by kind of member, less an empty loop. Wall-clock times on the cloud container are noisy (±20%), so the table also gives CPU instructions per access from Callgrind (`BENCH_ONCE=1 BENCH_ONLY=<case> BENCH_COUNT=<n>`, the difference between two counts), which don't vary between runs. main is b9fb148.
+
+| Access | main ns | branch ns | main instructions | branch instructions |
+|---|---|---|---|---|
+| read `part.Position` | 512 | 397 | 6,580 | 5,417 |
+| write `part.Position` | 383 | 393 | 5,213 | 4,904 |
+| read `part.Anchored` | 356 | 241 | 4,696 | 3,537 |
+| read `part.Name` | 394 | 282 | 5,151 | 3,992 |
+| read `part.CFrame` | 637 | 479 | 7,558 | 6,411 |
+| read `part.Touched` (event) | 741 | 473 | 8,173 | 6,010 |
+| read `sound.Play` (class method) | 456 | 345 | 5,446 | 4,329 |
+| read `workspace.P` (child) | 796 | 557 | 8,970 | 6,884 |
+| call `part:IsA("BasePart")` | 266 | 192 | 3,713 | 2,844 |
+| call an empty Lua function | 112 | 25 | 1,464 | 595 |
+
+What the profile showed, and what changed:
+
+- **The watchdog was the largest single cost.** Luau calls the interrupt at every function call and loop iteration, and each call looked up the `Watchdog` in mlua's app data twice (about 870 instructions) only to count. It now counts in a shared `Cell` and touches the app data once every 1,000 interrupts, or while something is stopped. This speeds up all Lua code, not only property access: an empty function call is about 4× cheaper.
+- **Class methods** (`sound.Play`, `remote.FireServer`) are found in a table per class instead of a scan of every class's methods.
+- **Keys stay `String`.** The roadmap suggested borrowing the key as an `mlua::LuaString`; measured, that is slower with mlua 0.12 (5,869 against 5,417 instructions for `part.Position`), because holding a Lua string from Rust pushes it to mlua's reference thread and pops it again, which costs more than copying a short key.
+- **What's left is mostly mlua's.** Of the ~4,000 instructions in a `part.Name` read, the engine's own lookup (`instance::get`) is about 650, 400 of them making the result string. The rest is mlua: an Instance has both methods and `__index`, so mlua puts a generated Lua function in front of `__index` that checks the method table and makes an extra C call (`isfunction`) before calling Rust, and every Rust callback moves its arguments through mlua's reference thread. Removing that needs a change in mlua (a specialised `__index` wrapper) or dropping `add_method` for Instances, which would lose Luau's fast `__namecall` path for method calls. A `Vector3` result is a new userdata each read (about 980 instructions); that's roadmap L3 (native `vector`).
+
+S10k doesn't move (Scripts 0.016–0.017 ms, frames within noise), as its 200 scripts do little per frame.
+
+### Compiled-chunk cache (M6, part 3)
+
+`cargo test -p axcenity-script --release --lib -- --ignored bench_script_start --nocapture` starts 200 copies of a 31 KB script (what cloning a model with scripts does). Same container, three runs each: main 2.40–2.51 ms per copy, the branch 0.18–0.28 ms, as only the first copy is parsed and compiled. S10k's 200 scripts are all different, so its load doesn't change.
+
+### Reusing handler coroutines (M6, part 4)
+
+`cargo test -p axcenity-script --release --lib -- --ignored bench_handler_fire --nocapture` fires `Heartbeat` 1,000 times with 1,000 handlers that don't wait. Against the branch before it (#27), Callgrind counts 6.83 billion instructions before and 5.58 billion after, about 1,250 fewer per handler call (−18%): making a coroutine and the garbage collection it caused were 40% of the run, and resetting a finished one is 8%. Wall-clock on the container is too noisy to show it reliably (665–755 against 613–724 ns per call); against main, with part 2's watchdog change, it's 1,050–1,150 against 600–680 ns.
+
 ### A Windows desktop with a real GPU
 
 Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table above): AMD Ryzen 9 9950X3D (16 cores), 62 GB of RAM, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Each host ran three times, 600 measured frames each; the table gives the median of the three runs' medians, and the worst frame seen in any run. The first player run was slower than the other two (Physics 14.3 ms against 5.4 ms); it came straight after the release build. Times are milliseconds.

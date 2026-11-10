@@ -153,12 +153,7 @@ fn load_spec(
         .set_mode(ChunkMode::Text)
         .set_environment(env.clone())
         .call((env.clone(), host_functions(lua)?))?;
-    let spec = lua
-        .load(source)
-        .set_name(format!("@{path}"))
-        .set_mode(ChunkMode::Text)
-        .set_environment(env)
-        .into_function()?;
+    let spec = crate::chunks::load(lua, path, source, env)?;
     Ok((lua.create_thread(run)?, spec))
 }
 

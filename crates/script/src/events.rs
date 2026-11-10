@@ -26,7 +26,7 @@ use mlua::{
 
 use crate::instance;
 use crate::types::type_name;
-use crate::{push_error, scheduler, tween};
+use crate::{scheduler, tween};
 
 /// What an event belongs to: an Instance (`part.Touched`), or an engine
 /// object that isn't one (`UserInputService.InputBegan`, `RunService.Heartbeat`).
@@ -218,8 +218,8 @@ fn connections_mut(lua: &Lua) -> mlua::Result<AppDataRefMut<'_, Connections>> {
         .ok_or_else(|| mlua::Error::runtime("events aren't available"))
 }
 
-/// Runs every handler connected to `event` of `owner`, each in a new
-/// coroutine, in the order they were connected. A handler that waits pauses
+/// Runs every handler connected to `event` of `owner`, each in a coroutine
+/// of its own (see `handler_threads`), in the order they were connected. A handler that waits pauses
 /// only itself, and an error in one is reported without stopping the others.
 pub fn fire(lua: &Lua, owner: Owner, event: &'static str, args: impl IntoLuaMulti) {
     fire_handlers(lua, (owner, Event::Named(event)), None, args);
@@ -265,10 +265,7 @@ fn fire_handlers(lua: &Lua, key: EventKey, change: Option<u64>, args: impl IntoL
         if !connected {
             continue;
         }
-        match lua.create_thread(callback) {
-            Ok(thread) => scheduler::resume_as(lua, &thread, args.clone(), script),
-            Err(err) => push_error(lua, &err),
-        }
+        crate::handler_threads::run(lua, callback, args.clone(), script);
     }
 }
 

@@ -51,6 +51,7 @@ mod camera;
 mod cframe;
 mod changes;
 mod chat;
+mod chunks;
 mod click;
 mod client;
 mod collection;
@@ -73,6 +74,7 @@ mod edit;
 mod errors;
 mod events;
 mod gui_service;
+mod handler_threads;
 mod health;
 mod http;
 mod humanoid;
@@ -2428,6 +2430,15 @@ mod events_tests;
 
 #[cfg(test)]
 mod scheduler_tests;
+
+#[cfg(test)]
+mod property_bench;
+
+#[cfg(test)]
+mod chunks_tests;
+
+#[cfg(test)]
+mod handler_threads_tests;
 
 #[cfg(test)]
 mod sandbox_tests;

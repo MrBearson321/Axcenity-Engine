@@ -17,9 +17,9 @@ use axcenity_core::InstanceId;
 use mlua::{Function, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods, Value};
 
 use crate::events::{self, LuaSignal, Owner};
+use crate::scheduler;
 use crate::sides::{self, Side};
 use crate::types::{EnumType, LuaEnumItem, type_name};
-use crate::{push_error, scheduler};
 
 /// The RunService, as scripts see it. Both sides have one.
 #[derive(Clone, Copy)]
@@ -191,10 +191,7 @@ pub fn render_step(lua: &Lua, seconds: f64) {
         if !still_bound {
             continue;
         }
-        match lua.create_thread(callback) {
-            Ok(thread) => scheduler::resume_as(lua, &thread, seconds, script),
-            Err(err) => push_error(lua, &err),
-        }
+        crate::handler_threads::run(lua, callback, seconds, script);
     }
     events::fire(lua, Owner::RunService, "RenderStepped", seconds);
 }

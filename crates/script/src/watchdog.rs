@@ -31,6 +31,8 @@
 //! that `task.spawn`ed it gets a fresh budget: the scheduler started that
 //! one, so it's a separate task.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use mlua::debug::Debug;
@@ -55,8 +57,9 @@ pub struct Watchdog {
     tasks: Vec<Thread>,
     /// The coroutines the watchdog stopped in this run.
     stopped: Vec<Stopped>,
-    /// Interrupts since the clock was last read.
-    interrupts: u32,
+    /// What the interrupt reads on every call without borrowing the app
+    /// data (see [`Quick`]).
+    quick: Rc<Quick>,
     /// A task whose budget is used up, and how many more interrupts it may
     /// run before it's stopped.
     finishing: Option<(Thread, u32)>,
@@ -64,6 +67,28 @@ pub struct Watchdog {
     /// scripts' `coroutine` functions. Its keys are weak, so Lua still
     /// frees the coroutines.
     ever_stopped: Table,
+}
+
+/// The interrupt runs at every call and loop iteration, so nearly all of
+/// them only count: while nothing is stopped or finishing, it adds one and
+/// returns, from this shared counter, without looking up the [`Watchdog`] in
+/// the app data (which costs more than the counting).
+struct Quick {
+    /// Interrupts since the clock was last read.
+    interrupts: Cell<u32>,
+    /// Whether nothing is stopped or finishing, so counting is all there is
+    /// to do until the next clock read. Kept by [`Watchdog::sync`].
+    counting_only: Cell<bool>,
+}
+
+impl Watchdog {
+    /// Updates [`Quick::counting_only`]; call after changing `stopped` or
+    /// `finishing`.
+    fn sync(&self) {
+        self.quick
+            .counting_only
+            .set(self.stopped.is_empty() && self.finishing.is_none());
+    }
 }
 
 struct Stopped {
@@ -80,16 +105,29 @@ pub fn install(lua: &Lua) -> mlua::Result<()> {
     let weak_keys = lua.create_table()?;
     weak_keys.raw_set("__mode", "k")?;
     ever_stopped.set_metatable(Some(weak_keys))?;
+    let quick = Rc::new(Quick {
+        interrupts: Cell::new(0),
+        counting_only: Cell::new(true),
+    });
     lua.set_app_data(Watchdog {
         limit: DEFAULT_LIMIT,
         started: None,
         tasks: Vec::new(),
         stopped: Vec::new(),
-        interrupts: 0,
+        quick: Rc::clone(&quick),
         finishing: None,
         ever_stopped,
     });
-    lua.set_interrupt(check);
+    lua.set_interrupt(move |lua| {
+        if quick.counting_only.get() {
+            let interrupts = quick.interrupts.get() + 1;
+            if interrupts < CHECK_EVERY {
+                quick.interrupts.set(interrupts);
+                return Ok(VmState::Continue);
+            }
+        }
+        check(lua)
+    });
     Ok(())
 }
 
@@ -105,6 +143,7 @@ pub fn enter(lua: &Lua, thread: &Thread) {
         if watchdog.tasks.is_empty() {
             watchdog.started = Some(Instant::now());
             watchdog.stopped.clear();
+            watchdog.sync();
         }
         watchdog.tasks.push(thread.clone());
     }
@@ -130,6 +169,7 @@ pub fn leave(lua: &Lua) {
             // it carries on with a fresh budget.
             watchdog.started = Some(Instant::now());
         }
+        watchdog.sync();
     }
 }
 
@@ -199,13 +239,15 @@ fn check(lua: &Lua) -> mlua::Result<VmState> {
         }
         if finished {
             watchdog.finishing = None;
+            watchdog.sync();
             limit
         } else {
-            watchdog.interrupts += 1;
-            if watchdog.interrupts < CHECK_EVERY {
+            let interrupts = watchdog.quick.interrupts.get() + 1;
+            if interrupts < CHECK_EVERY {
+                watchdog.quick.interrupts.set(interrupts);
                 return Ok(VmState::Continue);
             }
-            watchdog.interrupts = 0;
+            watchdog.quick.interrupts.set(0);
             // Lua code can also run outside a resume (while the engine sets
             // up, say); that gets a budget from its first check on.
             let started = *watchdog.started.get_or_insert_with(Instant::now);
@@ -219,6 +261,7 @@ fn check(lua: &Lua) -> mlua::Result<VmState> {
                 && watchdog.finishing.is_none()
             {
                 watchdog.finishing = Some((task, CHECK_EVERY));
+                watchdog.sync();
             }
             limit
         }
@@ -239,6 +282,7 @@ fn check(lua: &Lua) -> mlua::Result<VmState> {
             message,
             reported: false,
         });
+        watchdog.sync();
     }
     Ok(VmState::Yield)
 }

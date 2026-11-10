@@ -183,7 +183,7 @@ impl Context {
             "GetService",
             instance::get_service(&lua).expect("only fails when out of memory"),
         ));
-        lua.set_app_data(ClassMethods(methods));
+        lua.set_app_data(ClassMethods::new(methods));
         Self { lua }
     }
 
@@ -366,15 +366,8 @@ impl Context {
         source: &str,
     ) -> mlua::Result<Thread> {
         let env = sandbox::environment(&self.lua, ids)?;
-        let function = self
-            .lua
-            .load(source)
-            // The `@` tells Lua this is a file path, so messages read `path:line:`.
-            .set_name(format!("@{path}"))
-            // Precompiled bytecode can crash the interpreter, so only accept source text.
-            .set_mode(ChunkMode::Text)
-            .set_environment(env)
-            .into_function()?;
+        // Compiled once per source (see `chunks`), so clones start quickly.
+        let function = crate::chunks::load(&self.lua, path, source, env)?;
         self.lua.create_thread(function)
     }
 
