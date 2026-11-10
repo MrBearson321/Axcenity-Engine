@@ -469,7 +469,15 @@ fn decode(input: &mut Input<'_>, project: &Path, relative: &str) -> Option<Model
                 let path = input.text()?;
                 cooked::cooked_embedded_by_hash(project, &path, input.u64()?)?
             }
-            3 => cooked::cooked_in_model_by_hash(project, relative, input.u64()?)?,
+            3 => {
+                // Shared with every other model using the same copy.
+                let hash = input.u64()?;
+                let file = input.optional_text()?;
+                images.push(cooked::cooked_in_model_by_hash(
+                    project, relative, hash, file,
+                )?);
+                continue;
+            }
             _ => return None,
         };
         image.file = input.optional_text()?;

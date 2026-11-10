@@ -998,7 +998,7 @@ impl Reader<'_> {
             })
         };
         if let Some(image) = cooked {
-            let image = Some(Arc::new(image));
+            let image = Some(image);
             self.images.insert(id, image.clone());
             return image;
         }

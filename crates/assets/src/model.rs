@@ -717,21 +717,26 @@ fn cooked_texture(
     folder: &Path,
     file: &str,
     embedded: Option<&[u8]>,
-) -> Option<Image> {
+) -> Option<Arc<Image>> {
     let in_project = in_project?;
     let project = in_project.project;
     let relative = project_path(project, folder, file)?;
-    let image = match embedded {
+    let named = |image: Image| {
+        Arc::new(Image {
+            file: Some(file.to_owned()),
+            ..image
+        })
+    };
+    match embedded {
         // Copied out by importing and cooked as a file, or else cooked
         // from inside the model (a model dropped into `assets/` by hand).
         Some(bytes) => cooked::cooked_embedded_image(project, &relative, bytes)
-            .or_else(|| cooked::cooked_in_model(project, in_project.relative, bytes))?,
-        None => cooked::cooked_image(project, &relative)?,
-    };
-    Some(Image {
-        file: Some(file.to_owned()),
-        ..image
-    })
+            .map(named)
+            .or_else(|| {
+                cooked::cooked_in_model(project, in_project.relative, bytes, Some(file.to_owned()))
+            }),
+        None => cooked::cooked_image(project, &relative).map(named),
+    }
 }
 
 /// The project path of `file`, relative to `folder` (a model's folder
@@ -1525,7 +1530,7 @@ impl Reader<'_> {
 
     /// `image` from its cooked copy, if it has a current one: a file it
     /// names, or the file importing copied an embedded image out to.
-    fn cooked_image(&self, image: &gltf::Image) -> Option<Image> {
+    fn cooked_image(&self, image: &gltf::Image) -> Option<Arc<Image>> {
         match image.source() {
             gltf::image::Source::Uri { uri, .. } if !uri.starts_with("data:") => {
                 cooked_texture(self.in_project, self.folder, &percent_decode(uri)?, None)
@@ -1573,7 +1578,6 @@ impl Reader<'_> {
             return Ok(shared);
         }
         if let Some(cooked) = self.cooked_image(image) {
-            let cooked = Arc::new(cooked);
             self.images.insert(image.index(), cooked.clone());
             if let Some(key) = embedded {
                 share_embedded(key, &cooked);

@@ -227,6 +227,9 @@ fn add_cooked_textures(root: &Path, files: &mut Vec<(String, Vec<u8>)>) -> Resul
             cooked.extend(axcenity_assets::embedded_cooked_files(root, name));
         }
     }
+    // Models that embed the same image share its cooked copy.
+    cooked.sort();
+    cooked.dedup();
     for name in cooked {
         let path = root.join(&name);
         let contents = fs::read(&path).map_err(|source| PackError::Read { path, source })?;
@@ -466,9 +469,12 @@ mod tests {
             has_alpha: false,
             average: [0; 4],
         };
-        axcenity_assets::write_embedded_cooked(&project, model, image, &cooked).unwrap();
+        axcenity_assets::write_embedded_cooked(&project, image, &cooked).unwrap();
+        let stamp = axcenity_assets::SourceStamp::of(&project.join(model), &bytes);
+        let hash = axcenity_assets::content_hash(image);
+        axcenity_assets::mark_embedded_cooked(&project, model, stamp, true, &[hash]).unwrap();
         let copies = axcenity_assets::embedded_cooked_files(&project, model);
-        assert_eq!(copies.len(), 1);
+        assert_eq!(copies.len(), 2, "the copy and the model's note: {copies:?}");
 
         let unpacked = temp_folder("embedded-unpacked");
         let _ = fs::remove_dir_all(&unpacked);
@@ -479,7 +485,7 @@ mod tests {
         );
         // Matched by the image's bytes, so unpacking's new times don't matter.
         assert_eq!(
-            axcenity_assets::embedded_cooked_format(&unpacked, model, image),
+            axcenity_assets::embedded_cooked_format(&unpacked, image),
             Some(axcenity_assets::CookedFormat::Bc7)
         );
         let _ = fs::remove_dir_all(project);

@@ -9,9 +9,11 @@
 //! as before. A cooked [`Image`] decodes its source's pixels only if
 //! something on the CPU asks for them ([`Image::rgba`]).
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::UNIX_EPOCH;
 
 use crate::model::{Image, ImageOrigin, PixelSource};
@@ -436,32 +438,32 @@ pub(crate) fn cooked_embedded_by_hash(project: &Path, relative: &str, hash: u64)
         .then(|| Image::from_cooked(texture, PixelSource::File(source)).with_origin(origin))
 }
 
-/// Where the cooked copy of an image embedded in the project model file
-/// `model` goes, by the hash of the image's bytes: after the model's own
-/// [`cache_stem`], so it's kept and deleted with the model's other cached
-/// files.
-pub fn embedded_cooked_path(project: &Path, model: &str, hash: u64) -> PathBuf {
-    project.join(COOKED_FOLDER).join(format!(
-        "{}-{hash:016x}.{COOKED_EXTENSION}",
-        cache_stem(model)
-    ))
+/// The start of the name of every image cooked from inside a model (see
+/// [`embedded_cooked_path`]).
+pub(crate) const EMBEDDED_PREFIX: &str = "embedded-";
+
+/// Where the cooked copy of an image embedded in a model goes, by the hash
+/// of the image's bytes. One copy serves every model in the project that
+/// embeds those bytes (packs often embed one texture in many models). A
+/// model's note (see [`mark_embedded_cooked`]) lists the copies it uses,
+/// and `remove_orphaned_copies` deletes those no note lists.
+pub fn embedded_cooked_path(project: &Path, hash: u64) -> PathBuf {
+    project
+        .join(COOKED_FOLDER)
+        .join(format!("{EMBEDDED_PREFIX}{hash:016x}.{COOKED_EXTENSION}"))
 }
 
 /// [`embedded_cooked_path`] without the project folder, with `/` between
 /// folders, for putting it in a packed game.
-pub fn embedded_cooked_relative_path(model: &str, hash: u64) -> String {
-    embedded_cooked_path(Path::new(""), model, hash)
-        .to_string_lossy()
-        .replace('\\', "/")
+pub fn embedded_cooked_relative_path(hash: u64) -> String {
+    format!("{COOKED_FOLDER}/{EMBEDDED_PREFIX}{hash:016x}.{COOKED_EXTENSION}")
 }
 
-/// Writes the cooked copy of the image `bytes` embedded in the project
-/// model file `model`. It's stamped with the image's own bytes (length and
-/// hash), not the model's: the copy stays current whatever else in the
-/// model changes.
+/// Writes the cooked copy of the image `bytes` embedded in a model. It's
+/// stamped with the image's own bytes (length and hash), not the model's:
+/// the copy stays current whatever else in the model changes.
 pub fn write_embedded_cooked(
     project: &Path,
-    model: &str,
     bytes: &[u8],
     texture: &CookedTexture,
 ) -> io::Result<()> {
@@ -471,18 +473,18 @@ pub fn write_embedded_cooked(
         hash: content_hash(bytes),
     };
     write_whole(
-        &embedded_cooked_path(project, model, stamp.hash),
+        &embedded_cooked_path(project, stamp.hash),
         &encode_cooked(stamp, texture),
     )
 }
 
-/// The format of the cooked copy of the image `bytes` embedded in `model`,
+/// The format of the cooked copy of the image `bytes` embedded in a model,
 /// if it has one. Only the cooked file's start is read.
-pub fn embedded_cooked_format(project: &Path, model: &str, bytes: &[u8]) -> Option<CookedFormat> {
+pub fn embedded_cooked_format(project: &Path, bytes: &[u8]) -> Option<CookedFormat> {
     use std::io::Read;
     let hash = content_hash(bytes);
     let mut start = [0u8; MAGIC.len() + 24 + 4];
-    fs::File::open(embedded_cooked_path(project, model, hash))
+    fs::File::open(embedded_cooked_path(project, hash))
         .and_then(|mut file| file.read_exact(&mut start))
         .ok()?;
     let word = |at: usize| {
@@ -497,106 +499,175 @@ pub fn embedded_cooked_format(project: &Path, model: &str, bytes: &[u8]) -> Opti
 }
 
 /// The image `bytes` embedded in the project model file `model`, from its
-/// own cooked copy (see [`embedded_cooked_path`]), if there's one made from
-/// those bytes. Its pixels are decoded from the model only if asked for.
-pub(crate) fn cooked_in_model(project: &Path, model: &str, bytes: &[u8]) -> Option<Image> {
-    embedded_cooked_format(project, model, bytes)?;
-    cooked_in_model_by_hash(project, model, content_hash(bytes))
+/// cooked copy (see [`embedded_cooked_path`]), if there's one made from
+/// those bytes. `file` is the name it goes by. Its pixels are decoded from
+/// the model only if asked for.
+pub(crate) fn cooked_in_model(
+    project: &Path,
+    model: &str,
+    bytes: &[u8],
+    file: Option<String>,
+) -> Option<Arc<Image>> {
+    embedded_cooked_format(project, bytes)?;
+    cooked_in_model_by_hash(project, model, content_hash(bytes), file)
 }
 
 /// The cooked copy of an image embedded in `model`, made from bytes with
-/// this `hash`, if there's one and the model is still there.
-pub(crate) fn cooked_in_model_by_hash(project: &Path, model: &str, hash: u64) -> Option<Image> {
+/// this `hash`, if there's one and the model is still there. While it's in
+/// use, every model that asks for the same copy gets the same image, so
+/// it's read and uploaded once.
+pub(crate) fn cooked_in_model_by_hash(
+    project: &Path,
+    model: &str,
+    hash: u64,
+    file: Option<String>,
+) -> Option<Arc<Image>> {
     let source = project.join(safe_path(model)?);
     if !source.is_file() {
         return None;
     }
-    let cooked = fs::read(embedded_cooked_path(project, model, hash)).ok()?;
-    let (stamp, texture) = decode_cooked(&cooked).ok()?;
-    (stamp.hash == hash).then(|| {
-        Image::from_cooked(
-            texture,
-            PixelSource::InModel {
-                model: source,
-                hash,
-            },
-        )
-        .with_origin(ImageOrigin::InModel { hash })
+    let path = embedded_cooked_path(project, hash);
+    shared_cooked(&path, || {
+        let cooked = fs::read(&path).ok()?;
+        let (stamp, texture) = decode_cooked(&cooked).ok()?;
+        (stamp.hash == hash).then(|| {
+            let mut image = Image::from_cooked(
+                texture,
+                PixelSource::InModel {
+                    model: source,
+                    hash,
+                },
+            )
+            .with_origin(ImageOrigin::InModel { hash });
+            image.file = file;
+            image
+        })
     })
 }
 
+/// Cooked images in use, by their cooked file. Weak, so an image goes when
+/// the last model using it does.
+static SHARED_COOKED: LazyLock<Mutex<HashMap<PathBuf, Weak<Image>>>> =
+    LazyLock::new(Default::default);
+
+/// The image cooked into `path` if one is in use, or else `load`'s, kept
+/// for the next to ask. Two models loading on different threads may both
+/// load it; the first one kept is used by both.
+fn shared_cooked(path: &Path, load: impl FnOnce() -> Option<Image>) -> Option<Arc<Image>> {
+    let in_use = || -> Option<Arc<Image>> { SHARED_COOKED.lock().ok()?.get(path)?.upgrade() };
+    if let Some(image) = in_use() {
+        return Some(image);
+    }
+    let image = Arc::new(load()?);
+    let Ok(mut images) = SHARED_COOKED.lock() else {
+        return Some(image);
+    };
+    if let Some(first) = images.get(path).and_then(Weak::upgrade) {
+        return Some(first);
+    }
+    images.retain(|_, image| image.strong_count() > 0);
+    images.insert(path.to_owned(), Arc::downgrade(&image));
+    Some(image)
+}
+
 /// The cooked copies of images embedded in the project model file `model`
-/// (see [`embedded_cooked_path`]), as project paths with `/` between
-/// folders.
+/// that its note lists (see [`mark_embedded_cooked`]) and that are there,
+/// as project paths with `/` between folders, then the note itself.
 pub fn embedded_cooked_files(project: &Path, model: &str) -> Vec<String> {
-    let prefix = format!("{}-", cache_stem(model));
-    let end = format!(".{COOKED_EXTENSION}");
-    let Ok(entries) = fs::read_dir(project.join(COOKED_FOLDER)) else {
+    let Some(note) = read_embedded_note(project, model) else {
         return Vec::new();
     };
-    let mut found: Vec<String> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().to_str()?.to_owned();
-            (name.starts_with(&prefix) && name.ends_with(&end))
-                .then(|| format!("{COOKED_FOLDER}/{name}"))
-        })
+    let mut found: Vec<String> = note
+        .hashes
+        .iter()
+        .filter(|&&hash| embedded_cooked_path(project, hash).is_file())
+        .map(|&hash| embedded_cooked_relative_path(hash))
         .collect();
     found.sort();
+    found.dedup();
+    found.push(format!("{COOKED_FOLDER}/{}", embedded_note_name(model)));
     found
 }
 
-/// Where the note that a model's embedded images are all cooked goes (see
-/// [`mark_embedded_cooked`]).
-fn embedded_done_path(project: &Path, model: &str) -> PathBuf {
-    project
-        .join(COOKED_FOLDER)
-        .join(format!("{}-embedded.done", cache_stem(model)))
+/// The end of the name of a model's note (see [`mark_embedded_cooked`]).
+pub(crate) const EMBEDDED_NOTE_END: &str = "-embedded.done";
+
+fn embedded_note_name(model: &str) -> String {
+    format!("{}{EMBEDDED_NOTE_END}", cache_stem(model))
 }
 
-/// Notes that every image embedded in the project model file `model`, as
-/// it is now (`stamp`), has a cooked copy: those made from bytes with
-/// these `hashes`. Cooking can then skip reading the model until it
-/// changes or one of the copies goes.
-pub fn mark_embedded_cooked(
-    project: &Path,
-    model: &str,
+/// What a model's note says (see [`mark_embedded_cooked`]).
+pub(crate) struct EmbeddedNote {
+    /// The model file as it was when noted.
     stamp: SourceStamp,
-    hashes: &[u64],
-) -> io::Result<()> {
-    let mut out = MAGIC.to_vec();
-    for value in [stamp.len, stamp.modified, stamp.hash] {
-        out.extend_from_slice(&value.to_le_bytes());
-    }
-    for hash in hashes {
-        out.extend_from_slice(&hash.to_le_bytes());
-    }
-    write_whole(&embedded_done_path(project, model), &out)
+    /// Whether every embedded image was cooked or can't be.
+    complete: bool,
+    /// The hashes of the images it embeds that have cooked copies.
+    pub(crate) hashes: Vec<u64>,
 }
 
-/// Whether [`mark_embedded_cooked`] noted `model` as it is now, and each
-/// copy it named is still there.
-pub fn embedded_cooked_done(project: &Path, model: &str) -> bool {
-    let Ok(bytes) = fs::read(embedded_done_path(project, model)) else {
-        return false;
-    };
-    let header = MAGIC.len() + 24;
+/// Reads a note written by [`mark_embedded_cooked`] at `path`.
+pub(crate) fn read_note_at(path: &Path) -> Option<EmbeddedNote> {
+    let bytes = fs::read(path).ok()?;
+    let header = MAGIC.len() + 32;
     if bytes.len() < header || &bytes[..MAGIC.len()] != MAGIC {
-        return false;
+        return None;
     }
     let words: Vec<u64> = bytes[MAGIC.len()..]
         .chunks_exact(8)
         .map(|word| u64::from_le_bytes(word.try_into().expect("8 bytes")))
         .collect();
-    let stamp = SourceStamp {
-        len: words[0],
-        modified: words[1],
-        hash: words[2],
-    };
-    is_current(project, model, stamp)
-        && words[3..]
-            .iter()
-            .all(|&hash| embedded_cooked_path(project, model, hash).is_file())
+    Some(EmbeddedNote {
+        stamp: SourceStamp {
+            len: words[0],
+            modified: words[1],
+            hash: words[2],
+        },
+        complete: words[3] == 1,
+        hashes: words[4..].to_vec(),
+    })
+}
+
+fn read_embedded_note(project: &Path, model: &str) -> Option<EmbeddedNote> {
+    read_note_at(&project.join(COOKED_FOLDER).join(embedded_note_name(model)))
+}
+
+/// Notes which cooked copies the images embedded in the project model file
+/// `model`, as it is now (`stamp`), use: those made from bytes with these
+/// `hashes`. They're kept while the note is. When `complete` (every image
+/// was cooked, or can't be), cooking skips the model until it changes or
+/// one of the copies goes.
+pub fn mark_embedded_cooked(
+    project: &Path,
+    model: &str,
+    stamp: SourceStamp,
+    complete: bool,
+    hashes: &[u64],
+) -> io::Result<()> {
+    let mut out = MAGIC.to_vec();
+    for value in [stamp.len, stamp.modified, stamp.hash, u64::from(complete)] {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+    for hash in hashes {
+        out.extend_from_slice(&hash.to_le_bytes());
+    }
+    write_whole(
+        &project.join(COOKED_FOLDER).join(embedded_note_name(model)),
+        &out,
+    )
+}
+
+/// Whether [`mark_embedded_cooked`] noted `model` as it is now and
+/// complete, and each copy it named is still there.
+pub fn embedded_cooked_done(project: &Path, model: &str) -> bool {
+    read_embedded_note(project, model).is_some_and(|note| {
+        note.complete
+            && is_current(project, model, note.stamp)
+            && note
+                .hashes
+                .iter()
+                .all(|&hash| embedded_cooked_path(project, hash).is_file())
+    })
 }
 
 /// The average of about 4,096 pixels spread over `rgba` (every pixel of a

@@ -266,8 +266,13 @@ fn a_models_embedded_textures_are_cooked_in_place_when_it_wasnt_imported() {
     let report = cook_project(&folder, &stop, |_, _| {});
     assert!(report.cooked >= 4, "{report:?}");
     assert!(report.failed.is_empty(), "{report:?}");
-    let copies = axcenity_assets::embedded_cooked_files(&folder, model);
-    assert_eq!(copies.len(), report.cooked, "{copies:?}");
+    let files = axcenity_assets::embedded_cooked_files(&folder, model);
+    let copies: Vec<&String> = files
+        .iter()
+        .filter(|file| file.ends_with(".axtex"))
+        .collect();
+    assert_eq!(copies.len(), report.cooked, "{files:?}");
+    assert_eq!(files.len(), copies.len() + 1, "and the model's note");
     // Noted as done: the next pass doesn't read the model again.
     let again = cook_project(&folder, &stop, |_, _| {});
     assert_eq!((again.cooked, again.failed.len()), (0, 0), "{again:?}");
@@ -287,7 +292,8 @@ fn a_models_embedded_textures_are_cooked_in_place_when_it_wasnt_imported() {
     assert_eq!(whole.primitives[0].indices, cooked.primitives[0].indices);
     drop((cooked, whole, image));
 
-    // Replaced by a model with other images: the old copies go.
+    // Replaced by a model with other images: the old copies go once no
+    // model uses them.
     let other = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/primitives/assets/models/AWP.glb");
     fs::copy(other, folder.join(model)).unwrap();
@@ -296,6 +302,78 @@ fn a_models_embedded_textures_are_cooked_in_place_when_it_wasnt_imported() {
     for copy in &copies {
         assert!(!folder.join(copy).exists(), "{copy}");
     }
+    let _ = fs::remove_dir_all(folder);
+}
+
+#[test]
+fn models_embedding_the_same_image_share_one_cooked_copy() {
+    let folder = project("shared-embedded");
+    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/hello-pbr/assets/models/DamagedHelmet/DamagedHelmet.glb");
+    fs::create_dir_all(folder.join("assets/a")).unwrap();
+    fs::create_dir_all(folder.join("assets/b")).unwrap();
+    let (first, second) = ("assets/a/Helmet.glb", "assets/b/Helmet.glb");
+    fs::copy(&example, folder.join(first)).unwrap();
+    fs::copy(&example, folder.join(second)).unwrap();
+
+    let stop = AtomicBool::new(false);
+    let report = cook_project(&folder, &stop, |_, _| {});
+    assert!(report.failed.is_empty(), "{report:?}");
+    let copies = |model: &str| -> Vec<String> {
+        axcenity_assets::embedded_cooked_files(&folder, model)
+            .into_iter()
+            .filter(|file| file.ends_with(".axtex"))
+            .collect()
+    };
+    // Cooked once, for both.
+    assert_eq!(copies(first), copies(second));
+    assert_eq!(report.cooked, copies(first).len(), "{report:?}");
+
+    // Loaded together, they share each map, so it's uploaded once.
+    let assets = Assets::new(&folder);
+    let (a, b) = (
+        assets.model_blocking(first).unwrap(),
+        assets.model_blocking(second).unwrap(),
+    );
+    let color = |model: &axcenity_assets::Model| {
+        model.primitives[0]
+            .material
+            .base_color_texture
+            .clone()
+            .unwrap()
+    };
+    assert!(color(&a).cooked().is_some());
+    assert!(std::sync::Arc::ptr_eq(&color(&a), &color(&b)));
+    drop((a, b));
+    // Read back as whole cooked models, still one image.
+    let assets = Assets::new(&folder);
+    let (a, b) = (
+        assets.model_blocking(first).unwrap(),
+        assets.model_blocking(second).unwrap(),
+    );
+    assert_eq!(axcenity_assets::cooked_models(&folder, second).len(), 1);
+    assert!(std::sync::Arc::ptr_eq(&color(&a), &color(&b)));
+    drop((a, b));
+
+    // With one model gone, the other keeps the copies; with both, they go.
+    fs::remove_file(folder.join(first)).unwrap();
+    let kept = cook_project(&folder, &stop, |_, _| {});
+    assert!(
+        kept.removed >= 1,
+        "the first model's note and caches: {kept:?}"
+    );
+    assert!(
+        copies(second)
+            .iter()
+            .all(|copy| folder.join(copy).is_file())
+    );
+    let shared = copies(second);
+    fs::remove_file(folder.join(second)).unwrap();
+    let gone = cook_project(&folder, &stop, |_, _| {});
+    for copy in &shared {
+        assert!(!folder.join(copy).exists(), "{copy}");
+    }
+    assert!(gone.removed > shared.len(), "{gone:?}");
     let _ = fs::remove_dir_all(folder);
 }
 
