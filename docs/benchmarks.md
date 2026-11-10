@@ -118,7 +118,21 @@ Real projects, on the owner's 32-thread Windows machine, release build, 120 fram
 | Temperate Wet Patch | 3,393 → 3,311 | 1,145 → 1,057 | 54.9 → 58.3 |
 | Tropical Snow Patch | 3,208 → 3,061 | 716 → 765 | 16.8 → 17.1 |
 
-Model-heavy projects gain most, because models used to parse one at a time. The player now reaches its first frame sooner, since startup no longer waits behind the global lock, and the first draw then waits for what's still loading: that's why Abandoned Farmhouse's first frame is longer while its total is about the same. Moving the draw list to `model_ready` would take that wait out of the frame.
+Model-heavy projects gain most, because models used to parse one at a time. The player now reaches its first frame sooner, since startup no longer waits behind the global lock, and the first draw then waits for what's still loading: that's why Abandoned Farmhouse's first frame is longer while its total is about the same. The next section takes that wait out of the frame.
+
+### Drawing without waiting for models (M5 follow-up)
+
+Same machine and method, main (with M5) against the non-blocking draw list. Medians of three runs, milliseconds, with other builds running.
+
+| Project | Launch to assets in, main → branch | First frame | Worst frame after warm-up |
+|---|---|---|---|
+| General Store Roadside | 3,811 → 3,776 | 1,341 → 1,347 | 11.2 → 10.7 |
+| Abandoned Farmhouse | 5,443 → 6,812 | 2,303 → 3,951 | 9.1 → 11.5 |
+| Arid Dry Patch | 5,392 → 3,650 | 1,012 → 824 | 64.6 → 62.1 |
+| Temperate Wet Patch | 3,843 → 3,229 | 1,143 → 927 | 70.7 → 57.4 |
+| Tropical Snow Patch | 2,985 → 3,010 | 675 → 682 | 14.4 → 14.1 |
+
+Abandoned Farmhouse's first frame is texture work, not models. Timing its stages (three more runs, launch to assets in 5,257–5,563) gave Render 2,716–2,976, Draw list 48–52 and Physics 8–9. That Render time is the CPU mipmaps and upload of its textures, which land together on the first frame now that they're decoded by then; roadmap L2 moves them to import time.
 
 ### Navmesh rebuilds (I7)
 
@@ -154,6 +168,25 @@ Taken on 2026-11-10 on a Ryzen 9 9950X3D under Windows, release build, main (940
 
 About 12%, 5% and 1.5% off the frame (the player also draws, which M2 leaves alone). Each walk replaced cost a few tens of microseconds on 10,000 parts, so the gain comes from there being many of them: `Scripts` (per-frame Health, Humanoid, follower and prompt walks) falls by about 0.11 ms on every host, `Input` by 0.14 ms and `Animation` in the player by 0.18 ms. A world with few Instances gains almost nothing: on copies of six real projects (General Store Roadside, Abandoned Farmhouse, three biome patches, The Dimming; under 1 MB of `world.json` each, on all three hosts) every difference was within run-to-run noise, in both directions.
 
+### Scheduler and handlers (M6, part 1)
+
+The wait list became a heap, and handlers are dropped when their Instance is destroyed instead of every handler being checked each frame. Same cloud container, release build, main and the branch run back to back: three 600-frame runs of each host, S10k. Milliseconds, median of the runs' medians, ranges in brackets.
+
+| Step | Test runner, main | Test runner, branch | Server, main | Server, branch |
+|---|---|---|---|---|
+| Scripts | 0.029 [0.029–0.031] | 0.018 [0.016–0.019] | 0.025 [0.025–0.026] | 0.017 [0.017–0.017] |
+| Frame | 12.1 [11.9–12.3] | 12.4 [11.7–12.5] | 8.9 [8.9–9.3] | 8.7 [8.6–8.8] |
+
+S10k has 200 scripts, so the Scripts step was already small; the frame difference is within run-to-run noise. The micro-benchmarks show where it matters, with many tasks or handlers (`cargo test -p axcenity-script --release --lib -- --ignored bench_scheduler bench_connections --nocapture`), nanoseconds per step:
+
+| Case | main | branch |
+|---|---|---|
+| 10,000 tasks waiting, none due | 95,457 | 35 |
+| 10,000 tasks looping on `task.wait` (about 1,000 resumed per step) | 1,364,000 | 1,364,000–1,424,000 |
+| `ScriptRuntime::step` with 10,000 handlers, none destroyed | 59,363 | 2,949 |
+
+With many tasks resuming every step, resuming them is the cost, and the queue doesn't change it.
+
 ### A Windows desktop with a real GPU
 
 Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table above): AMD Ryzen 9 9950X3D (16 cores), 62 GB of RAM, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Each host ran three times, 600 measured frames each; the table gives the median of the three runs' medians, and the worst frame seen in any run. The first player run was slower than the other two (Physics 14.3 ms against 5.4 ms); it came straight after the release build. Times are milliseconds.
@@ -183,6 +216,19 @@ The player's first frame was 130 to 152 ms, and launch to first frame 3.3 s (7.0
 
 - **The draw list is now the player's largest step**, and at 8.4 ms it doesn't shrink on a faster CPU: it is 8.1 ms on the cloud container, where physics is about 1.7× slower. Retained draw items (M4) cut it to about a third on S10k: 12.9 to 4.3–4.4 ms median on the cloud container (see [rendering/performance.md](rendering/performance.md)).
 - **Against the 3.3 ms in `rendering/performance.md`**: `bench_10000_parts` is 8.5 to 8.9 ms in `build_draw_list` here, so that figure is out of date. The roadmap's merges didn't cause it: 556b72b, the commit before them, is 8.0 to 8.8 ms on this machine, and each merge timed since is 7.4 to 8.9 ms. The rise came somewhere between the commit that added the render benchmarks and 556b72b.
+
+### The mouse's ray and mesh hulls (Input)
+
+A 16-core Ryzen 9 9950X3D desktop, each run pinned to the V-cache CCD, release build, 300 frames, main and this change run alternately: three runs of the test runner, two of the player, medians of the runs' medians. Milliseconds.
+
+| Scene | Test runner Input before | after | Frame before | after | Player Input before | after | Frame before | after |
+|---|---|---|---|---|---|---|---|---|
+| Arid Dry Patch | 30.9 | 0.006 | 31.4 | 0.21 | 36.8 | 0.013 | 44.9 | 6.7 |
+| Temperate Wet Patch | 28.4 | 0.006 | 28.9 | 0.21 | 30.6 | 0.012 | 37.6 | 5.5 |
+| Tropical Snow Patch | 1.06 | 0.006 | 1.29 | 0.21 | 1.21 | 0.013 | 7.8 | 6.3 |
+| S10k | 0.50 | 0.016 | 5.9 | 5.4 | 0.52 | 0.023 | 13.7 | 13.2 |
+
+`Clicks::step` casts the mouse's ray every frame, and a query builds a collider for each part near the ray. A MeshPart's collider was a new convex hull of every corner of its model, and the two scanned trees in those patches have 2-3 million corners between them (Tropical Snow's palms about 160,000). Hulls are now kept by model and size (`shapes::hull`), and the ray isn't cast at all when the game has no ClickDetector (`World::all_of`). The kept hulls also make every other ray, such as `workspace:Raycast`, cheap near heavy models. The editor Play bench keeps the camera at the origin, where its ray misses the trees, so it doesn't show the 30 ms (Input 0.020 before, 0.006 after).
 
 ### Calibrating against the rendering baseline
 

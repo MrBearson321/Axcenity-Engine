@@ -380,24 +380,16 @@ impl Context {
 
     /// Frame step 2 for this side: fires the RemoteEvent messages that
     /// arrived, moves tweens on, then moves the clock forward and resumes
-    /// due tasks.
-    pub fn step(&self, world: &mut World, messages: Vec<Message>, seconds: f64) {
-        let tweens = self
-            .lua
-            .app_data_mut::<tween::Tweens>()
-            .map(|mut tweens| tweens.alive())
-            .unwrap_or_default();
-        let streamed_out = self.lua.app_data_ref::<crate::network::StreamedOut>();
-        let is_out = |id| streamed_out.as_ref().is_some_and(|out| out.0.contains(&id));
-        if let Some(mut connections) = self.lua.app_data_mut::<events::Connections>() {
-            // A handler on something streamed out is waiting for it to
-            // come back (Phase 80).
-            connections.forget(|id| world.contains(id) || is_out(id), &tweens);
-        }
-        drop(streamed_out);
-        if let Some(mut callbacks) = self.lua.app_data_mut::<bindable::Callbacks>() {
-            callbacks.forget(|id| world.contains(id));
-        }
+    /// due tasks. `destroyed` is what was destroyed since the last step
+    /// ([`World::take_destroyed`]).
+    pub fn step(
+        &self,
+        world: &mut World,
+        messages: Vec<Message>,
+        seconds: f64,
+        destroyed: &[InstanceId],
+    ) {
+        self.forget_gone(world, destroyed);
         with_world(&self.lua, world, || {
             remote::deliver(&self.lua, messages);
             // Before scripts resume, so a script that waited sees this
@@ -409,6 +401,53 @@ impl Context {
             debris::step(&self.lua);
             crate::decals::step(&self.lua);
         });
+    }
+
+    /// Drops the handlers and callbacks of what went away since the last
+    /// step, so their functions (and whatever those use) can be freed. The
+    /// cost follows what went away, not how many handlers exist.
+    fn forget_gone(&self, world: &World, destroyed: &[InstanceId]) {
+        let dead_tweens = self
+            .lua
+            .app_data_mut::<tween::Tweens>()
+            .map(|mut tweens| tweens.take_dead())
+            .unwrap_or_default();
+        let streamed_out = self.lua.app_data_ref::<crate::network::StreamedOut>();
+        // A handler on something streamed out is waiting for it to come
+        // back (Phase 80).
+        let is_out = |id| streamed_out.as_ref().is_some_and(|out| out.0.contains(&id));
+        let gone = |id| !world.contains(id) && !is_out(id);
+        if let Some(mut connections) = self.lua.app_data_mut::<events::Connections>() {
+            for &id in destroyed.iter().filter(|&&id| gone(id)) {
+                connections.forget_owner(events::Owner::Instance(id));
+            }
+            for tween in dead_tweens {
+                connections.forget_owner(events::Owner::Tween(tween));
+            }
+            for owner in connections.take_connected_while_gone() {
+                match owner {
+                    events::Owner::Instance(id) if !gone(id) => {}
+                    owner => connections.forget_owner(owner),
+                }
+            }
+        }
+        drop(streamed_out);
+        if let Some(mut callbacks) = self.lua.app_data_mut::<bindable::Callbacks>() {
+            for &id in destroyed.iter().filter(|&&id| !world.contains(id)) {
+                callbacks.forget_instance(id);
+            }
+        }
+    }
+
+    /// Drops the handlers and callbacks of every Instance that doesn't
+    /// exist, for when the whole World was replaced.
+    pub fn forget_missing_instances(&self, world: &World) {
+        if let Some(mut connections) = self.lua.app_data_mut::<events::Connections>() {
+            connections.forget_missing_instances(|id| world.contains(id));
+        }
+        if let Some(mut callbacks) = self.lua.app_data_mut::<bindable::Callbacks>() {
+            callbacks.forget_missing_instances(|id| world.contains(id));
+        }
     }
 
     /// Fires `RunService.Stepped`, before physics.

@@ -34,24 +34,30 @@ fn near(a: Vector3, b: Vector3, within: f32) -> bool {
 impl App {
     /// One frame in the frame loop's order, in a window `size` pixels big.
     fn camera_frame(&mut self, size: (u32, u32)) {
-        self.input.map = self.scripts.input_map();
+        self.input.map = self.sim.scripts.input_map();
         let motion = self.input.motion_input([0.0, 0.0], 0.0, FRAME);
-        self.characters
-            .step(&mut self.world, &self.assets, motion, FRAME);
+        self.sim
+            .characters
+            .step(&mut self.sim.world, &self.sim.assets, motion, FRAME);
         self.begin_camera(FRAME, size);
         let events = self.input.take_events(self.pointer);
-        self.scripts.input_events(&mut self.world, &events);
-        self.scripts.step(&mut self.world, f64::from(FRAME));
-        self.scripts.stepped(&mut self.world, f64::from(FRAME));
-        self.characters.keep_kinematic(&mut self.world);
-        self.physics.step(&mut self.world, f64::from(FRAME));
-        self.scripts.heartbeat(&mut self.world, f64::from(FRAME));
+        self.sim.scripts.input_events(&mut self.sim.world, &events);
+        self.sim.scripts.step(&mut self.sim.world, f64::from(FRAME));
+        self.sim
+            .scripts
+            .stepped(&mut self.sim.world, f64::from(FRAME));
+        self.sim.characters.keep_kinematic(&mut self.sim.world);
+        self.sim.physics.step(&mut self.sim.world, f64::from(FRAME));
+        self.sim
+            .scripts
+            .heartbeat(&mut self.sim.world, f64::from(FRAME));
         self.render_step(FRAME);
         self.end_camera(FRAME);
     }
 
     fn said(&mut self) -> Vec<String> {
-        self.scripts
+        self.sim
+            .scripts
             .take_output()
             .into_iter()
             .map(|line| line.text)
@@ -77,10 +83,12 @@ impl App {
 
     fn part_position(&self, name: &str) -> Vector3 {
         let id = self
+            .sim
             .world
-            .find_first_child(self.world.workspace(), name)
+            .find_first_child(self.sim.world.workspace(), name)
             .unwrap();
-        self.world
+        self.sim
+            .world
             .get(id)
             .unwrap()
             .property("Position")
@@ -141,7 +149,7 @@ fn a_scriptable_flyover_follows_its_cframe_path_and_custom_gives_the_character_t
 
     // Custom again: the character's controller has the camera.
     assert_eq!(app.game_camera.scripted, None);
-    let character = app.characters.view(&app.world).unwrap();
+    let character = app.sim.characters.view(&app.sim.world).unwrap();
     assert!(near(app.shown_view().position, character.position, 1e-4));
     // And it follows the character as it walks.
     let before = app.shown_view().position;
@@ -150,7 +158,7 @@ fn a_scriptable_flyover_follows_its_cframe_path_and_custom_gives_the_character_t
         app.camera_frame(size);
     }
     let walked = app.shown_view().position;
-    let character = app.characters.view(&app.world).unwrap();
+    let character = app.sim.characters.view(&app.sim.world).unwrap();
     assert!(near(walked, character.position, 1e-4));
     assert!(!near(walked, before, 1.0), "{before:?} -> {walked:?}");
     let _ = std::fs::remove_dir_all(&folder);
@@ -187,9 +195,10 @@ fn world_to_screen_point_keeps_the_tag_over_the_beacon_as_the_camera_moves() {
     let (mut app, folder) = open("hello-camera", None);
     let stylesheets = app.stylesheets.clone();
     let tag = app
+        .sim
         .world
-        .find_first_child(app.world.workspace(), "Hud")
-        .and_then(|hud| app.world.find_first_child(hud, "Tag"))
+        .find_first_child(app.sim.world.workspace(), "Hud")
+        .and_then(|hud| app.sim.world.find_first_child(hud, "Tag"))
         .unwrap();
     // Above the 8-stud beacon's top, as the script puts it.
     let beacon = app.part_position("Beacon");
@@ -200,7 +209,7 @@ fn world_to_screen_point_keeps_the_tag_over_the_beacon_as_the_camera_moves() {
     for _ in 0..200 {
         app.camera_frame(size);
         let camera = app.shown_view();
-        let layout = axcenity_ui::layout_ui(&app.world, size.0, size.1, &stylesheets);
+        let layout = axcenity_ui::layout_ui(&app.sim.world, size.0, size.1, &stylesheets);
         let element = layout.elements.iter().find(|element| element.id == tag);
         let Some(element) = element else {
             continue; // Off screen: hidden.
@@ -236,12 +245,18 @@ fn render_step_functions_place_the_drawn_camera_in_priority_order_and_debris_cle
     let (mut app, folder) = open("hello-messages", None);
     let size = (960, 540);
     let sparks = |app: &App| {
-        app.world
-            .get(app.world.workspace())
+        app.sim
+            .world
+            .get(app.sim.world.workspace())
             .unwrap()
             .children()
             .iter()
-            .filter(|&&id| app.world.get(id).is_some_and(|part| part.name() == "Spark"))
+            .filter(|&&id| {
+                app.sim
+                    .world
+                    .get(id)
+                    .is_some_and(|part| part.name() == "Spark")
+            })
             .count()
     };
     let mut said = Vec::new();

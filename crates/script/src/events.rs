@@ -26,7 +26,7 @@ use mlua::{
 
 use crate::instance;
 use crate::types::type_name;
-use crate::{push_error, scheduler};
+use crate::{push_error, scheduler, tween};
 
 /// What an event belongs to: an Instance (`part.Touched`), or an engine
 /// object that isn't one (`UserInputService.InputBegan`, `RunService.Heartbeat`).
@@ -112,8 +112,13 @@ pub struct Connections {
     /// Counts up, so every connection has its own number.
     next_id: u64,
     /// The handlers of each event, in the order they were connected, which is
-    /// the order they run in. A `BTreeMap` so pruning visits them in order too.
+    /// the order they run in. A `BTreeMap` so all of one owner's events sit
+    /// together, for [`Connections::forget_owner`].
     handlers: BTreeMap<EventKey, Vec<Handler>>,
+    /// Owners that were already gone when a handler was connected, so no
+    /// [`forget_owner`](Connections::forget_owner) is coming for them. Looked
+    /// at once, at the next frame step.
+    connected_while_gone: Vec<Owner>,
 }
 
 struct Handler {
@@ -127,6 +132,12 @@ struct Handler {
 }
 
 impl Connections {
+    /// How many events have a handler.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.handlers.len()
+    }
+
     fn connect(
         &mut self,
         key: EventKey,
@@ -163,24 +174,41 @@ impl Connections {
     }
 
     fn is_connected(&self, key: EventKey, id: u64) -> bool {
-        self.handlers
-            .get(&key)
-            .is_some_and(|handlers| handlers.iter().any(|handler| handler.id == id))
+        // Connected in order, so sorted by `id`.
+        self.handlers.get(&key).is_some_and(|handlers| {
+            handlers
+                .binary_search_by_key(&id, |handler| handler.id)
+                .is_ok()
+        })
     }
 
-    /// Drops the handlers of Instances that no longer exist, and of the
-    /// Tweens not in `tweens` (those no script holds any more), so their
-    /// functions (and whatever those functions use) can be freed.
-    pub fn forget(&mut self, exists: impl Fn(InstanceId) -> bool, tweens: &[u64]) {
+    /// Drops every handler of `owner`, so their functions (and whatever
+    /// those functions use) can be freed. Finds them by key, so this
+    /// doesn't depend on how many handlers there are elsewhere.
+    pub fn forget_owner(&mut self, owner: Owner) {
+        // `Event::Named("")` sorts before every other event.
+        let keys: Vec<EventKey> = self
+            .handlers
+            .range((owner, Event::Named(""))..)
+            .map(|(key, _)| *key)
+            .take_while(|(other, _)| *other == owner)
+            .collect();
+        for key in keys {
+            self.handlers.remove(&key);
+        }
+    }
+
+    /// The owners noted since the last call as gone when connected to.
+    pub fn take_connected_while_gone(&mut self) -> Vec<Owner> {
+        std::mem::take(&mut self.connected_while_gone)
+    }
+
+    /// Drops the handlers of every Instance that doesn't exist, for when
+    /// the whole World was replaced and nothing says what's gone.
+    pub fn forget_missing_instances(&mut self, exists: impl Fn(InstanceId) -> bool) {
         self.handlers.retain(|(owner, _), _| match owner {
             Owner::Instance(instance) => exists(*instance),
-            Owner::Tween(tween) => tweens.contains(tween),
-            Owner::UserInputService
-            | Owner::RunService
-            | Owner::CollectionService
-            | Owner::LevelService
-            | Owner::NetworkService
-            | Owner::QuestService => true,
+            _ => true,
         });
     }
 }
@@ -273,9 +301,21 @@ impl UserData for LuaSignal {
             let key = (this.owner, this.event);
             // Scripts only run while the World is lent to Lua, so it's
             // always there.
-            let since = instance::world(lua)?.next_change_number();
+            let (since, gone) = {
+                let world = instance::world(lua)?;
+                let gone = match this.owner {
+                    Owner::Instance(id) => !world.contains(id),
+                    Owner::Tween(id) => !tween::is_alive(lua, id),
+                    _ => false,
+                };
+                (world.next_change_number(), gone)
+            };
             let script = scheduler::running_script(lua);
-            let id = connections_mut(lua)?.connect(key, callback, since, script);
+            let mut connections = connections_mut(lua)?;
+            let id = connections.connect(key, callback, since, script);
+            if gone {
+                connections.connected_while_gone.push(this.owner);
+            }
             Ok(LuaConnection { key, id })
         });
         methods.add_meta_method(MetaMethod::ToString, |_, this, ()| {

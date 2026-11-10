@@ -753,6 +753,7 @@ dependencies = [
  "axcenity-save",
  "axcenity-scene",
  "axcenity-script",
+ "axcenity-sim",
  "axcenity-ui",
  "axcenity-workspace-hack",
  "env_logger",
@@ -877,6 +878,7 @@ dependencies = [
  "luau0-src",
  "mlua",
  "profiling",
+ "rustc-hash 2.1.3",
  "serde_json",
 ]
 

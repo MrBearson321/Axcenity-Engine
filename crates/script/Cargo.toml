@@ -19,6 +19,7 @@ axcenity-render-types.workspace = true
 axcenity-save.workspace = true
 glam.workspace = true
 mlua.workspace = true
+rustc-hash.workspace = true
 serde_json.workspace = true
 profiling.workspace = true
 axcenity-workspace-hack.workspace = true
