@@ -505,6 +505,9 @@ fn every_kind_of_value_crosses_the_wire_unchanged() {
         let wire = crate::wire::WireValue::from_value(&value);
         let text = serde_json::to_string(&wire).unwrap();
         let back: crate::wire::WireValue = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.to_value(), Some(value.clone()), "{text}");
+        let bytes = postcard::to_allocvec(&wire).unwrap();
+        let back: crate::wire::WireValue = postcard::from_bytes(&bytes).unwrap();
         assert_eq!(back.to_value(), Some(value), "{text}");
     }
 }

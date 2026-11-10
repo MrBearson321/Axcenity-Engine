@@ -27,12 +27,14 @@
 //! computer. A player's own changes to their replica stay theirs: the
 //! server only overwrites what it changes itself.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use axcenity_core::{ClassName, InstanceId, LayerWeight, Parameter, Value, World};
+use axcenity_core::{
+    ClassName, Instance, InstanceId, LayerWeight, MOTION_PROPERTIES, Parameter, Value, World,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::motion::MOTION_PROPERTIES;
 use crate::wire::WireValue;
 
 /// An Instance as the server has it.
@@ -42,6 +44,8 @@ pub struct WireInstance {
     pub class: String,
     pub name: String,
     pub parent: u64,
+    /// The properties that differ from its class's defaults, which a
+    /// replica makes it with (roadmap M7).
     pub properties: Vec<(String, WireValue)>,
     pub attributes: Vec<(String, WireValue)>,
     pub tags: Vec<String>,
@@ -51,19 +55,13 @@ pub struct WireInstance {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WireChange {
     pub id: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Its new parent, if it moved.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<u64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<(String, WireValue)>,
     /// Each changed attribute's new value, or none where it was removed.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attributes: Vec<(String, Option<WireValue>)>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags_added: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags_removed: Vec<String>,
 }
 
@@ -79,7 +77,6 @@ impl WireChange {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "op")]
 pub enum Op {
     Create(WireInstance),
     Change(WireChange),
@@ -93,21 +90,16 @@ pub struct Update {
     pub ops: Vec<Op>,
     /// The server's clock when it was made, in seconds: a part's motion
     /// sent before it is stale.
-    #[serde(default)]
     pub time: f64,
     /// `LevelService`'s levels, when they changed (and in a snapshot).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub levels: Option<LevelState>,
     /// Animators' parameters and layer weights that changed (all of them in
     /// a snapshot), applied after the Instances.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub animators: Vec<WireAnimator>,
     /// Streaming (Phase 80): units the player no longer has (each a loose
     /// part or a Model), whose contents this update takes off their device.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub streamed_out: Vec<u64>,
     /// Streaming: units whose contents this update brought.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub streamed_in: Vec<u64>,
 }
 
@@ -116,9 +108,7 @@ pub struct Update {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WireAnimator {
     pub id: u64,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<(String, WireParameter)>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<(String, f64, f64)>,
 }
 
@@ -229,33 +219,105 @@ impl Update {
 
 /// An Instance as it was last sent.
 struct Sent {
-    /// The Instance's revision when this was made: the same revision
-    /// means nothing below has changed.
+    /// The Instance's [`revision_without_motion`] when this was made: the
+    /// same number means nothing below has changed, however the part moved.
+    ///
+    /// [`revision_without_motion`]: Instance::revision_without_motion
     revision: u64,
     name: String,
     parent: Option<InstanceId>,
+    /// In the Instance's own order (by name), which never changes: its
+    /// class decides which properties it has.
     properties: Vec<(&'static str, Value)>,
     attributes: BTreeMap<String, Value>,
     tags: Vec<String>,
 }
 
+/// The properties updates carry of `instance`: a part's motion goes on its
+/// own.
+fn sent_properties(instance: &Instance) -> impl Iterator<Item = (&'static str, &Value)> {
+    let part = instance.class().is_base_part();
+    instance
+        .properties()
+        .filter(move |(name, _)| !(part && MOTION_PROPERTIES.contains(name)))
+}
+
 impl Sent {
-    /// What updates carry of `id`: a part's motion goes on its own.
-    fn of(world: &World, id: InstanceId) -> Option<Sent> {
-        let instance = world.get(id)?;
-        let part = instance.class().is_base_part();
-        Some(Sent {
-            revision: instance.revision(),
+    fn of(instance: &Instance) -> Sent {
+        Sent {
+            revision: instance.revision_without_motion(),
             name: instance.name().to_owned(),
             parent: instance.parent(),
-            properties: instance
-                .properties()
-                .filter(|(name, _)| !(part && MOTION_PROPERTIES.contains(name)))
+            properties: sent_properties(instance)
                 .map(|(name, value)| (name, value.clone()))
                 .collect(),
             attributes: instance.attributes().clone(),
             tags: instance.tags().to_vec(),
-        })
+        }
+    }
+
+    /// Brings this up to `instance` and says what changed: only what
+    /// differs is copied.
+    fn update(&mut self, id: InstanceId, instance: &Instance) -> WireChange {
+        let mut change = WireChange {
+            id: id.to_bits(),
+            ..WireChange::default()
+        };
+        self.revision = instance.revision_without_motion();
+        if self.name != instance.name() {
+            self.name = instance.name().to_owned();
+            change.name = Some(self.name.clone());
+        }
+        if self.parent != instance.parent() {
+            self.parent = instance.parent();
+            change.parent = self.parent.map(InstanceId::to_bits);
+        }
+        // Both lists are in the same order, with the same names.
+        let mut now = sent_properties(instance);
+        for (name, was) in &mut self.properties {
+            let Some((now_name, value)) = now.next() else {
+                break;
+            };
+            debug_assert_eq!(*name, now_name, "an Instance's properties never change");
+            if was != value {
+                was.clone_from(value);
+                change
+                    .properties
+                    .push(((*name).to_owned(), WireValue::from_value(value)));
+            }
+        }
+        let attributes = instance.attributes();
+        if &self.attributes != attributes {
+            for (name, value) in attributes {
+                if self.attributes.get(name) != Some(value) {
+                    change
+                        .attributes
+                        .push((name.clone(), Some(WireValue::from_value(value))));
+                }
+            }
+            for name in self.attributes.keys() {
+                if !attributes.contains_key(name) {
+                    change.attributes.push((name.clone(), None));
+                }
+            }
+            self.attributes.clone_from(attributes);
+        }
+        let tags = instance.tags();
+        if self.tags != tags {
+            change.tags_added = tags
+                .iter()
+                .filter(|tag| !self.tags.contains(tag))
+                .cloned()
+                .collect();
+            change.tags_removed = self
+                .tags
+                .iter()
+                .filter(|tag| !tags.contains(tag))
+                .cloned()
+                .collect();
+            self.tags = tags.to_vec();
+        }
+        change
     }
 }
 
@@ -315,11 +377,53 @@ pub fn replicated_parts(world: &World) -> Vec<InstanceId> {
         .collect()
 }
 
-fn properties(instance: &axcenity_core::Instance) -> Vec<(String, WireValue)> {
+fn properties(instance: &Instance) -> Vec<(String, WireValue)> {
     instance
         .properties()
         .map(|(name, value)| (name.to_owned(), WireValue::from_value(value)))
         .collect()
+}
+
+thread_local! {
+    /// Each class's default properties, in name order, as a new Instance
+    /// has them.
+    static DEFAULTS: RefCell<HashMap<ClassName, Vec<(&'static str, Value)>>> =
+        RefCell::new(HashMap::new());
+}
+
+/// What `instance` has that a new Instance of its class doesn't. A replica
+/// makes each Instance with its class's defaults, so a Create carries only
+/// the rest (roadmap M7): a part has about 40 properties and changes a
+/// handful. With a Material that isn't the default go Metalness and
+/// Roughness, since setting the Material resets them (they come after it).
+fn changed_properties(instance: &Instance) -> Vec<(String, WireValue)> {
+    let class = instance.class();
+    DEFAULTS.with_borrow_mut(|defaults| {
+        let defaults = defaults.entry(class).or_insert_with(|| {
+            let mut defaults = class.default_properties();
+            defaults.sort_unstable_by_key(|(name, _)| *name);
+            defaults
+        });
+        let material_set = instance
+            .property("Material")
+            .is_some_and(|value| defaults.iter().any(|(n, v)| *n == "Material" && v != value));
+        let mut defaults = defaults.iter();
+        instance
+            .properties()
+            .filter(|(name, value)| {
+                if material_set && matches!(*name, "Metalness" | "Roughness") {
+                    return true;
+                }
+                // Both are in name order with the same names; look the name
+                // up if they ever aren't.
+                match defaults.next() {
+                    Some((default_name, default)) if default_name == name => default != *value,
+                    _ => true,
+                }
+            })
+            .map(|(name, value)| (name.to_owned(), WireValue::from_value(value)))
+            .collect()
+    })
 }
 
 pub(crate) fn create(world: &World, id: InstanceId) -> Option<Op> {
@@ -329,7 +433,7 @@ pub(crate) fn create(world: &World, id: InstanceId) -> Option<Op> {
         class: instance.class().as_str().to_owned(),
         name: instance.name().to_owned(),
         parent: instance.parent()?.to_bits(),
-        properties: properties(instance),
+        properties: changed_properties(instance),
         attributes: instance
             .attributes()
             .iter()
@@ -452,47 +556,34 @@ impl Replicator {
         self.animators = now_animators.into_iter().collect();
         let mut ops = Vec::new();
         let mut seen = BTreeSet::new();
-        let (services, inside) = (
-            std::mem::take(&mut self.services),
-            std::mem::take(&mut self.inside),
-        );
-        for &id in services.iter().chain(&inside) {
+        for &id in self.services.iter().chain(&self.inside) {
             if tree_changed {
                 seen.insert(id);
             }
             let Some(instance) = world.get(id) else {
                 continue;
             };
-            // Nothing about it changed: comparing would find nothing.
-            if self
-                .sent
-                .get(&id)
-                .is_some_and(|before| before.revision == instance.revision())
-            {
-                continue;
-            }
-            let Some(now) = Sent::of(world, id) else {
-                continue;
-            };
-            match self.sent.get(&id) {
-                None => {
-                    // A service is always there: only its properties.
-                    let is_service = world.get(id).is_some_and(|i| i.class().is_service());
-                    if !is_service && let Some(op) = create(world, id) {
-                        ops.push(op);
-                    }
-                }
+            match self.sent.get_mut(&id) {
+                // Nothing but its motion changed: comparing would find
+                // nothing.
+                Some(before) if before.revision == instance.revision_without_motion() => {}
                 Some(before) => {
-                    let change = diff(id, before, &now);
+                    let change = before.update(id, instance);
                     if !change.is_empty() {
                         ops.push(Op::Change(change));
                     }
                 }
+                None => {
+                    // A service is always there: only its properties.
+                    if !instance.class().is_service()
+                        && let Some(op) = create(world, id)
+                    {
+                        ops.push(op);
+                    }
+                    self.sent.insert(id, Sent::of(instance));
+                }
             }
-            self.sent.insert(id, now);
         }
-        self.services = services;
-        self.inside = inside;
         if tree_changed {
             let mut gone: Vec<InstanceId> = self
                 .sent
@@ -512,56 +603,6 @@ impl Replicator {
             ..Update::default()
         }
     }
-}
-
-fn diff(id: InstanceId, before: &Sent, now: &Sent) -> WireChange {
-    let mut change = WireChange {
-        id: id.to_bits(),
-        ..WireChange::default()
-    };
-    if before.name != now.name {
-        change.name = Some(now.name.clone());
-    }
-    if before.parent != now.parent {
-        change.parent = now.parent.map(InstanceId::to_bits);
-    }
-    for (name, value) in &now.properties {
-        let was = before
-            .properties
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v);
-        if was != Some(value) {
-            change
-                .properties
-                .push(((*name).to_owned(), WireValue::from_value(value)));
-        }
-    }
-    for (name, value) in &now.attributes {
-        if before.attributes.get(name) != Some(value) {
-            change
-                .attributes
-                .push((name.clone(), Some(WireValue::from_value(value))));
-        }
-    }
-    for name in before.attributes.keys() {
-        if !now.attributes.contains_key(name) {
-            change.attributes.push((name.clone(), None));
-        }
-    }
-    change.tags_added = now
-        .tags
-        .iter()
-        .filter(|tag| !before.tags.contains(tag))
-        .cloned()
-        .collect();
-    change.tags_removed = before
-        .tags
-        .iter()
-        .filter(|tag| !now.tags.contains(tag))
-        .cloned()
-        .collect();
-    change
 }
 
 /// What applying an update did that scripts hear about.

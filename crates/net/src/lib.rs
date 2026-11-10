@@ -45,7 +45,7 @@ pub use wire::{WireArg, WireKind, WireMessage, WireValue};
 
 /// The network protocol's version: games on different ones can't play
 /// together, and the handshake says so. Raise it when a message changes.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 /// A chat message as sent on: trimmed, at most 200 characters, and not
 /// empty, whatever a modified client sends.
 pub(crate) fn chat_text(text: &str) -> Option<String> {
@@ -72,3 +72,5 @@ mod smoothing_tests;
 mod streaming_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wire_tests;

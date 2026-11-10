@@ -18,7 +18,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use axcenity_core::{InstanceId, Value, Vector3, World};
+use axcenity_core::{InstanceId, MOTION_PROPERTIES, Value, Vector3, World};
 
 use crate::replicate::{Op, WireChange};
 use crate::wire::WireValue;
@@ -48,14 +48,6 @@ const BUDGET_BURST: f64 = 0.25;
 /// Samples further apart than this are a part that stood still between
 /// them, not one sent seldom (a far one, or one of many).
 const MAX_GAP: f64 = 1.0;
-
-/// The properties that travel as motion, for BaseParts.
-pub const MOTION_PROPERTIES: [&str; 4] = [
-    "Position",
-    "Orientation",
-    "AssemblyLinearVelocity",
-    "AssemblyAngularVelocity",
-];
 
 /// A part's state, quantized.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

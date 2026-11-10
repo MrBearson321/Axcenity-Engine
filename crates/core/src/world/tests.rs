@@ -1174,3 +1174,59 @@ fn the_index_order_is_deterministic() {
         assert_eq!(random_operations(seed, 500), random_operations(seed, 500));
     }
 }
+
+#[test]
+fn a_parts_motion_changes_its_revision_but_not_its_revision_without_motion() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let part = part_in(&mut world, workspace, "Crate");
+    let start = world.get(part).unwrap().revision_without_motion();
+    for name in MOTION_PROPERTIES {
+        let revision = world.get(part).unwrap().revision();
+        world
+            .set_property(part, name, Value::Vector3(Vector3::new(1.0, 2.0, 3.0)))
+            .unwrap();
+        let instance = world.get(part).unwrap();
+        assert_eq!(instance.revision(), revision + 1, "{name}");
+        assert_eq!(instance.revision_without_motion(), start, "{name}");
+    }
+    // Setting the value it has is no change at all.
+    world
+        .set_property(
+            part,
+            "Position",
+            Value::Vector3(Vector3::new(1.0, 2.0, 3.0)),
+        )
+        .unwrap();
+    assert_eq!(world.get(part).unwrap().revision_without_motion(), start);
+    // Anything else counts.
+    world
+        .set_property(part, "Transparency", Value::Number(0.5))
+        .unwrap();
+    assert_eq!(
+        world.get(part).unwrap().revision_without_motion(),
+        start + 1
+    );
+    world.set_name(part, "Box").unwrap();
+    assert_eq!(
+        world.get(part).unwrap().revision_without_motion(),
+        start + 2
+    );
+
+    // Only a BasePart has motion: an Attachment's Position is just a
+    // property.
+    let attachment = world.create(ClassName::Attachment).unwrap();
+    world.set_parent(attachment, Some(part)).unwrap();
+    let before = world.get(attachment).unwrap().revision_without_motion();
+    world
+        .set_property(
+            attachment,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 1.0, 0.0)),
+        )
+        .unwrap();
+    assert_eq!(
+        world.get(attachment).unwrap().revision_without_motion(),
+        before + 1
+    );
+}
