@@ -5,6 +5,7 @@
 use axcenity_core::sound::SoundAction;
 use axcenity_core::{ClassName, EnumItem, INSTANCE_EVENTS, InstanceId, Parameter, Value, World};
 use mlua::{FromLua, Function, IntoLua, Lua, MetaMethod, Table, UserDataMethods};
+use rustc_hash::FxHashMap;
 
 use crate::camera::LuaCamera;
 use crate::cframe::LuaCFrame;
@@ -141,6 +142,9 @@ impl LuaInstance {
 
         // `instance.Key`: a field, then a property, then a member only
         // some classes have, then an event, then a child with that name.
+        // The key is copied into a `String` on purpose: with mlua 0.12 a
+        // short copy costs less than holding the key as an `mlua::LuaString`
+        // (a reference on mlua's ref thread), measured with `property_bench`.
         methods.add_meta_method(MetaMethod::Index, |lua, this, key: String| {
             get(lua, this.0, &key)
         });
@@ -347,7 +351,7 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
             cf.write_to(&mut *world_mut(lua)?, id)
                 .map_err(mlua::Error::runtime)
         }
-        key if crate::attachment::FIELDS.contains(&key) && class == Some(ClassName::Attachment) => {
+        key if class == Some(ClassName::Attachment) && crate::attachment::FIELDS.contains(&key) => {
             crate::attachment::set(lua, id, key, value)
         }
         key if crate::physical::COMPUTED.contains(&key)
@@ -461,8 +465,29 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
 
 /// Methods only some classes have, such as `remote:FireServer` and
 /// `game:GetService`. Made once per interpreter (see `context.rs`) and kept
-/// in its app data.
-pub struct ClassMethods(pub Vec<(ClassName, &'static str, Function)>);
+/// in its app data: one table per class, so finding one is a hash lookup
+/// rather than a look through every class's methods.
+pub struct ClassMethods(FxHashMap<ClassName, FxHashMap<&'static str, Function>>);
+
+impl ClassMethods {
+    /// When a class lists the same name twice, the first one wins.
+    pub fn new(methods: Vec<(ClassName, &'static str, Function)>) -> Self {
+        let mut by_class: FxHashMap<ClassName, FxHashMap<&'static str, Function>> =
+            FxHashMap::default();
+        for (class, name, function) in methods {
+            by_class
+                .entry(class)
+                .or_default()
+                .entry(name)
+                .or_insert(function);
+        }
+        Self(by_class)
+    }
+
+    fn get(&self, class: ClassName, name: &str) -> Option<&Function> {
+        self.0.get(&class)?.get(name)
+    }
+}
 
 /// A member of `class` that isn't a property or an event: a method such as
 /// `remote:FireServer`, or a field such as `workspace.CurrentCamera`.
@@ -496,13 +521,9 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
             .map(|player| LuaInstance(player.0))
             .into_lua(lua)?,
         _ => {
-            let method = lua.app_data_ref::<ClassMethods>().and_then(|methods| {
-                methods
-                    .0
-                    .iter()
-                    .find(|(c, name, _)| *c == class && *name == key)
-                    .map(|(_, _, function)| function.clone())
-            });
+            let method = lua
+                .app_data_ref::<ClassMethods>()
+                .and_then(|methods| methods.get(class, key).cloned());
             match method {
                 Some(function) => mlua::Value::Function(function),
                 None => return Ok(None),

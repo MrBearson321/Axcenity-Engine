@@ -2430,6 +2430,9 @@ mod events_tests;
 mod scheduler_tests;
 
 #[cfg(test)]
+mod property_bench;
+
+#[cfg(test)]
 mod sandbox_tests;
 
 #[cfg(test)]
