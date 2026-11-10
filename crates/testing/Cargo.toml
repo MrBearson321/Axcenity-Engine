@@ -19,7 +19,12 @@ axcenity-nav.workspace = true
 axcenity-physics.workspace = true
 axcenity-project.workspace = true
 axcenity-script.workspace = true
+profiling.workspace = true
 axcenity-workspace-hack.workspace = true
+
+[features]
+# Sends profiler spans to Tracy (roadmap I1): `--features profile-tracy`.
+profile-tracy = ["profiling/profile-with-tracy"]
 
 [lints]
 workspace = true

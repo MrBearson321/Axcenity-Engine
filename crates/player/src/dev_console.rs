@@ -12,7 +12,6 @@
 
 use std::collections::VecDeque;
 use std::path::Path;
-use std::time::{Duration, Instant};
 
 use axcenity_render::UiDrawItem;
 use axcenity_render::glam::Vec3;
@@ -59,27 +58,9 @@ impl Default for DevSettings {
     }
 }
 
-/// Times one frame's steps, each from the end of the one before.
-pub struct Stopwatch {
-    last: Instant,
-    stages: Vec<(&'static str, Duration)>,
-}
-
-impl Stopwatch {
-    pub fn start() -> Self {
-        Self {
-            last: Instant::now(),
-            stages: Vec::new(),
-        }
-    }
-
-    /// Ends the step `name`.
-    pub fn lap(&mut self, name: &'static str) {
-        let now = Instant::now();
-        self.stages.push((name, now - self.last));
-        self.last = now;
-    }
-}
+/// Times one frame's steps, each from the end of the one before. The same
+/// timer every host's benchmark uses (`--bench`, roadmap I1).
+pub use axcenity_core::bench::Laps as Stopwatch;
 
 /// The measurements the Stats tab and `fps` show, kept between frames.
 #[derive(Default)]
@@ -93,7 +74,7 @@ pub struct FrameStats {
 
 impl FrameStats {
     /// Notes a frame `real_seconds` long, whose steps `watch` timed.
-    pub fn finish(&mut self, real_seconds: f32, watch: Stopwatch) {
+    pub fn finish(&mut self, real_seconds: f32, watch: &Stopwatch) {
         if real_seconds > 0.0 {
             self.frames.push_back(real_seconds);
             while self.frames.len() > AVERAGED_FRAMES {
@@ -101,9 +82,9 @@ impl FrameStats {
             }
         }
         self.stages = watch
-            .stages
-            .into_iter()
-            .map(|(name, time)| (name, time.as_secs_f32() * 1000.0))
+            .stages()
+            .iter()
+            .map(|&(name, time)| (name, time.as_secs_f32() * 1000.0))
             .collect();
         if self.frame.is_multiple_of(MEMORY_EVERY) {
             self.memory = memory_stats::memory_stats().map(|stats| stats.physical_mem as u64);

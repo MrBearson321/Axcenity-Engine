@@ -21,7 +21,12 @@ axcenity-script.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
 log.workspace = true
+profiling.workspace = true
 axcenity-workspace-hack.workspace = true
+
+[features]
+# Sends profiler spans to Tracy (roadmap I1): `--features profile-tracy`.
+profile-tracy = ["profiling/profile-with-tracy"]
 
 [lints]
 workspace = true

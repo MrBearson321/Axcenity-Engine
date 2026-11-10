@@ -27,6 +27,7 @@ use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::{GameAudio, SoundAction};
 use axcenity_character::{Controllers, MoveInput};
+use axcenity_core::bench::BenchRun;
 use axcenity_core::input::{InputEvent, InputKind};
 use axcenity_core::{ClassName, InstanceId, MouseBehavior, UserInputType, World};
 use axcenity_nav::Agents;
@@ -62,11 +63,12 @@ const REGION_WAIT_SECONDS: f64 = 5.0;
 const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
 const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | --join address:port] \
-                     [--password text] [project-folder | game.axgame]\n\
+                     [--password text] [--bench frames] [project-folder | game.axgame]\n\
                      example: cargo run -p axcenity-player -- examples/hello-part\n\
                      --watch reloads a project folder's changed assets while it plays\n\
                      --dev turns on the F9 Developer Console in a built game\n\
-                     --host hosts the game (port 47800 unless given); --join joins one";
+                     --host hosts the game (port 47800 unless given); --join joins one\n\
+                     --bench measures that many frames' steps, prints them and quits";
 
 fn main() -> Result<()> {
     // Show warnings and errors by default. `wgpu_hal` relays harmless graphics
@@ -274,6 +276,10 @@ fn main() -> Result<()> {
     app.watcher = watcher;
     app.network = network;
     app.console_allowed = console_allowed;
+    app.bench = arguments
+        .bench
+        .map(|frames| BenchRun::new(BenchRun::DEFAULT_WARM_UP, frames));
+    app.bench_scene = axcenity_core::bench::scene_name(&project.folder);
     event_loop.run_app(&mut app)?;
     // Tell the other players this one is gone.
     app.network.disconnect(&mut app.world, &mut app.scripts);
@@ -664,6 +670,9 @@ struct App {
     dev: dev_console::DevSettings,
     /// The frame rate and steps' times, for the console's Stats tab.
     frame_stats: dev_console::FrameStats,
+    /// `--bench`: the frames measured so far, and the scene's name.
+    bench: Option<BenchRun>,
+    bench_scene: String,
 }
 
 impl App {
@@ -735,6 +744,8 @@ impl App {
             console_allowed: false,
             dev: dev_console::DevSettings::default(),
             frame_stats: dev_console::FrameStats::default(),
+            bench: None,
+            bench_scene: String::new(),
         }
     }
 
@@ -1422,9 +1433,16 @@ impl ApplicationHandler for App {
             }
             // One frame, in the fixed order from docs/architecture/frame-loop.md.
             WindowEvent::RedrawRequested => {
+                profiling::scope!("frame");
                 // `timescale` in the console speeds the game up or slows it.
                 let real_seconds = frame_seconds(&mut self.last_frame);
-                let seconds = self.game_seconds(real_seconds);
+                // `--bench` steps a fixed 1/60 s a frame, as the other
+                // hosts' benchmarks do, so every frame has the same work.
+                let seconds = if self.bench.is_some() {
+                    1.0 / 60.0
+                } else {
+                    self.game_seconds(real_seconds)
+                };
                 let mut watch = dev_console::Stopwatch::start();
                 let size = self
                     .window
@@ -1511,8 +1529,10 @@ impl ApplicationHandler for App {
                     //    spawn ForceFields (Phase 47).
                     self.scripts
                         .step_players(&mut self.world, f64::from(seconds));
+                    watch.lap("Characters");
                     // Then navigation agents, toward their destinations.
                     self.agents.step(&mut self.world, &self.assets, seconds);
+                    watch.lap("Agents");
                     for warning in self.agents.take_warnings() {
                         logs::line(LogLevel::Warning, None, &format!("warning: {warning}"));
                     }
@@ -1568,6 +1588,7 @@ impl ApplicationHandler for App {
                     self.scripts
                         .apply_shatters(&mut self.world, &mut self.physics);
                     self.physics.step(&mut self.world, f64::from(seconds));
+                    watch.lap("Physics");
 
                     // 4. Fire `Touched` for parts that started touching
                     //    during those steps (and `Changed` for the parts
@@ -1588,7 +1609,7 @@ impl ApplicationHandler for App {
                 }
                 self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
-                watch.lap("Physics");
+                watch.lap("Heartbeat");
                 let heard = listener_of_view(self.shown_view());
                 apply_audio(
                     &mut self.scripts,
@@ -1685,6 +1706,7 @@ impl ApplicationHandler for App {
                         self.animators.poses(),
                         &mut self.terrain,
                     );
+                watch.lap("Draw list");
                 self.note_ui_warnings(&ui_layout.warnings);
                 // The UI's cursor, else a ClickDetector's under the mouse.
                 let cursor = match (ui_layout.cursor, self.scripts.click_cursor(&self.world)) {
@@ -1816,7 +1838,14 @@ impl ApplicationHandler for App {
                     }
                 }
                 watch.lap("Render");
-                self.frame_stats.finish(real_seconds, watch);
+                self.frame_stats.finish(real_seconds, &watch);
+                profiling::finish_frame!();
+                if let Some(bench) = &mut self.bench
+                    && bench.record(&watch)
+                {
+                    print!("{}", bench.finish_text("player", &self.bench_scene));
+                    event_loop.exit();
+                }
             }
             _ => {}
         }

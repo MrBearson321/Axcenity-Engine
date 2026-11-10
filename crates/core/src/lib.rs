@@ -12,6 +12,7 @@
 pub mod ability;
 mod animation;
 mod arena;
+pub mod bench;
 mod class;
 mod collision_groups;
 pub mod csg;

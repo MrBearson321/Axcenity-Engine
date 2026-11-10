@@ -46,9 +46,12 @@ zip.workspace = true
 dioxus-cli-config = { workspace = true, optional = true }
 dioxus-devtools = { workspace = true, optional = true }
 subsecond = { workspace = true, optional = true }
+profiling.workspace = true
 axcenity-workspace-hack.workspace = true
 
 [features]
+# Sends profiler spans to Tracy (roadmap I1): `--features profile-tracy`.
+profile-tracy = ["profiling/profile-with-tracy"]
 # Development only: patch changed function bodies into the running editor
 # when it's started with `dx serve --hot-patch` (see the README). Started
 # normally, or without this feature, engine edits rebuild and relaunch.

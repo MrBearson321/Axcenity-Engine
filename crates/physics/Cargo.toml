@@ -10,6 +10,7 @@ authors.workspace = true
 axcenity-assets.workspace = true
 axcenity-core.workspace = true
 rapier3d.workspace = true
+profiling.workspace = true
 axcenity-workspace-hack.workspace = true
 
 [dev-dependencies]

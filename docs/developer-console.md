@@ -13,7 +13,7 @@ Phase 71. A console over the game (F9), a game's own commands (`ConsoleService`)
 `axcenity_ui::DevConsole` (`ui/src/console.rs`) keeps the state and draws itself as draw items (`console_items`) over everything, in the top 55% of the view, in JetBrains Mono. While it's open it takes every key; opening it lets go of the game's held keys.
 
 - **Log**: what scripts and the engine printed. `L` cycles the level filter (all, warnings and errors, errors), `S` the side (both, server, client). Lines from the engine have no side and always show. The last 500 lines are kept.
-- **Stats**: frame rate (averaged over 60 frames), the last frame's time and each step's (player: Network, Input, Scripts, Physics, Animation, UI, Render; editor: Scripts, Physics, Audio, Animation), process memory, both Lua heaps, the Instance count, and, hosting or joined, players, the worst ping and the bytes sent and received a second.
+- **Stats**: frame rate (averaged over 60 frames), the last frame's time and each step's (player: Network, Characters, Agents, Input, Scripts, Physics, Heartbeat, Animation, Draw list, UI, Render, the same timer as `--bench` ([benchmarks.md](benchmarks.md)); editor: Scripts, Physics, Audio, Animation), process memory, both Lua heaps, the Instance count, and, hosting or joined, players, the worst ping and the bytes sent and received a second.
 - **Commands**: the log with a line to type under it. `Up`/`Down` go through earlier lines, `PageUp`/`PageDown` scroll, `Tab` changes tab, `Escape` or F9 closes.
 
 A typed line is, in order:

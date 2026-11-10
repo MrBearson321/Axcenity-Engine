@@ -1241,6 +1241,7 @@ impl ScriptRuntime {
     /// So a message sent before this step (during step 1, or by the server
     /// during this step) arrives in this step; anything later, next frame.
     pub fn step(&mut self, world: &mut World, seconds: f64) {
+        profiling::scope!("ScriptRuntime::step");
         self.fire_changes(world);
         self.fire_chat(world);
         // Players' data on a server is written once a second at most.
@@ -1897,6 +1898,7 @@ impl ScriptRuntime {
     /// `RunService.Stepped` with the game time and the frame's length in
     /// seconds, in Scripts and then in LocalScripts.
     pub fn stepped(&mut self, world: &mut World, seconds: f64) {
+        profiling::scope!("ScriptRuntime::stepped");
         self.fire_changes(world);
         for side in [Side::Server, Side::Client] {
             self.context(side).fire_stepped(world, seconds);
@@ -1930,6 +1932,7 @@ impl ScriptRuntime {
     /// The end of frame step 4, after `Touched`: fires `RunService.Heartbeat`
     /// with the frame's length in seconds, in Scripts and then in LocalScripts.
     pub fn heartbeat(&mut self, world: &mut World, seconds: f64) {
+        profiling::scope!("ScriptRuntime::heartbeat");
         self.fire_changes(world);
         for side in [Side::Server, Side::Client] {
             self.context(side).fire_heartbeat(world, seconds);

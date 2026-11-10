@@ -438,6 +438,7 @@ pub fn build_draw_list_posed(
     poses: &Poses,
     terrain: &mut TerrainCache,
 ) -> DrawList {
+    profiling::scope!("build_draw_list");
     let settings = lighting_settings(world, assets, &camera);
     let look = settings.look;
     let glow = if look.post.enabled && look.post.bloom_enabled {
@@ -612,6 +613,7 @@ pub fn build_draw_list_with_ui_interaction(
     terrain: &mut TerrainCache,
 ) -> (DrawList, UiLayout) {
     let mut list = build_draw_list_posed(world, assets, camera, poses, terrain);
+    profiling::scope!("UiInteraction::layout");
     let layout = ui.interaction.layout(
         world,
         viewport_size,
