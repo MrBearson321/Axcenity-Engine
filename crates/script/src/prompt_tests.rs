@@ -337,6 +337,30 @@ fn button(button: UserInputType, pressed: bool) -> InputKind {
 }
 
 #[test]
+fn a_click_detector_added_during_the_game_is_pointed_at() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    let button = part(
+        &mut world,
+        "Button",
+        Vector3::new(0.0, 5.0, 0.0),
+        Vector3::new(4.0, 4.0, 1.0),
+    );
+    runtime.set_viewport_size(800.0, 600.0);
+    runtime.set_camera(CameraState {
+        position: Vector3::new(0.0, 5.0, 20.0),
+        orientation: Vector3::new(0.0, 0.0, 0.0),
+    });
+    start(&mut world, &mut runtime, "");
+    mouse(&mut runtime, &mut world, &[moved([400.0, 300.0])]);
+    assert_eq!(runtime.click_cursor(&world), None);
+    let detector = world.create(ClassName::ClickDetector).unwrap();
+    world.set_parent(detector, Some(button)).unwrap();
+    mouse(&mut runtime, &mut world, &[]);
+    assert_eq!(runtime.click_cursor(&world).as_deref(), Some("pointer"));
+}
+
+#[test]
 fn clicking_a_part_with_a_click_detector_fires_mouse_click_and_hover_changes_the_cursor() {
     let mut world = World::new();
     let mut runtime = ScriptRuntime::new();

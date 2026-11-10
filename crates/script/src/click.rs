@@ -47,6 +47,11 @@ fn detector_of(world: &World, part: InstanceId) -> Option<InstanceId> {
     None
 }
 
+/// True if the game has a ClickDetector, which [`Clicks::pointed`] needs.
+fn any_detector(world: &World) -> bool {
+    world.all_of(ClassName::ClickDetector).next().is_some()
+}
+
 impl Clicks {
     /// The cursor over the detector pointed at: its `CursorIcon`, or
     /// `pointer` when that's empty. `None` when nothing is pointed at.
@@ -69,7 +74,10 @@ impl Clicks {
         input: &PromptInput,
         ray: Option<Ray>,
     ) -> Vec<Fired> {
-        let hovered = ray.and_then(|ray| self.pointed(world, assets, ray));
+        // With no detector the ray can't find one, so don't cast it.
+        let hovered = ray
+            .filter(|_| any_detector(world))
+            .and_then(|ray| self.pointed(world, assets, ray));
         let mut fired = Vec::new();
         if hovered != self.hovered {
             if let Some(old) = self.hovered.filter(|&id| world.contains(id)) {
