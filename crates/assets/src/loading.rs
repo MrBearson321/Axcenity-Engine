@@ -137,6 +137,10 @@ pub(crate) enum Kind {
     Material,
     /// A material as above, then every texture it uses.
     MaterialAndMaps,
+    /// A texture whose pixels the CPU reads (a terrain layer's map), then
+    /// its pixels decoded, which a cooked texture otherwise leaves until
+    /// they're asked for.
+    TexturePixels,
     /// Any other project file: nothing is kept, it only has to be there.
     File,
 }
@@ -175,7 +179,7 @@ impl Kind {
     fn stamped(self) -> bool {
         !matches!(
             self,
-            Self::Material | Self::MaterialAndMaps | Self::Fonts | Self::File
+            Self::Material | Self::MaterialAndMaps | Self::TexturePixels | Self::Fonts | Self::File
         )
     }
 
@@ -424,6 +428,23 @@ impl Assets {
         self.request_kind(Kind::Texture, path)
     }
 
+    /// As [`request_texture`](Self::request_texture), then decodes its
+    /// pixels on the worker too, for a texture the CPU reads when it's
+    /// first drawn (a terrain layer's map). A cooked texture otherwise
+    /// decodes its file only when asked, which would be on the frame.
+    pub fn request_texture_pixels(&self, path: &str) -> LoadTicket {
+        self.request_kind(Kind::TexturePixels, path)
+    }
+
+    /// The texture at `path` with its pixels decoded (see
+    /// [`request_texture_pixels`](Self::request_texture_pixels)), loading
+    /// it on this thread if it isn't loaded.
+    pub fn texture_pixels_blocking(&self, path: &str) -> Option<Arc<Image>> {
+        let image = self.texture_blocking(path)?;
+        image.rgba();
+        Some(image)
+    }
+
     /// As [`request_model`](Self::request_model), for a sky image.
     pub fn request_sky_image(&self, path: &str) -> LoadTicket {
         self.request_kind(Kind::SkyImage, path)
@@ -584,6 +605,7 @@ impl Assets {
             Kind::Fonts => drop(self.fonts()),
             Kind::Material => drop(self.material(path)),
             Kind::MaterialAndMaps => drop(self.material_and_maps(path)),
+            Kind::TexturePixels => drop(self.texture_pixels(path)),
             Kind::File => drop(self.check_file(path)),
         }
     }
@@ -612,6 +634,20 @@ impl Assets {
                 Ok(loaded == maps.len())
             },
             |_, loaded| loaded.unwrap_or(false),
+        )
+    }
+
+    /// Loads the texture at `path` and decodes its pixels, as a load of its
+    /// own so its ticket finishes once they're decoded. False if it can't
+    /// be read.
+    fn texture_pixels(&self, path: &str) -> bool {
+        self.load(
+            Kind::TexturePixels,
+            path,
+            false,
+            |_| None,
+            |_| Ok(self.texture_pixels_blocking(path).is_some()),
+            |_, decoded| decoded.unwrap_or(false),
         )
     }
 
@@ -688,6 +724,10 @@ fn known_status(shared: &Shared, kind: Kind, path: &str) -> Option<LoadStatus> {
         Kind::Takes => shared.takes.get(path).map(|found| of(found.is_some())),
         Kind::DataTable => shared.tables.get(path).map(|found| of(found.is_ok())),
         Kind::Material => shared.materials.get(path).map(|found| of(found.is_some())),
+        Kind::TexturePixels => match shared.textures.get(path)? {
+            None => Some(LoadStatus::Failed),
+            Some(image) => image.has_pixels().then_some(LoadStatus::Ready),
+        },
         Kind::Fonts | Kind::MaterialAndMaps | Kind::File => None,
     }
 }

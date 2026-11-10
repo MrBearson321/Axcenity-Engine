@@ -440,3 +440,50 @@ fn a_workers_progress_counts_everything_queued() {
         "nothing left: the count starts over"
     );
 }
+
+#[test]
+fn a_request_for_a_textures_pixels_decodes_a_cooked_texture_ahead() {
+    let folder = project("pixels");
+    let path = "assets/textures/ground.png";
+    let image = image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 20, 30, 255]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let png = png.into_inner();
+    fs::write(folder.join(path), &png).unwrap();
+    let stamp = SourceStamp::of(&folder.join(path), &png);
+    let cooked = CookedTexture {
+        format: CookedFormat::Bc7,
+        width: 4,
+        height: 4,
+        levels: vec![vec![0; 16]; 3],
+        has_alpha: false,
+        average: [10, 20, 30, 255],
+    };
+    write_cooked(&folder, path, stamp, &cooked).unwrap();
+    let assets = Assets::new(&folder);
+    assets.load_textures_in_background(|| {});
+
+    // A plain request leaves a cooked texture's pixels in its file.
+    assert_eq!(assets.request_texture(path).wait(), LoadStatus::Ready);
+    let texture = assets.texture(path).unwrap();
+    assert!(texture.cooked().is_some());
+    assert!(!texture.has_pixels());
+
+    // Asked for its pixels, the worker decodes them, so the first frame
+    // that reads them (a terrain layer's) doesn't.
+    assert_eq!(
+        assets.request_texture_pixels(path).wait(),
+        LoadStatus::Ready
+    );
+    assert!(texture.has_pixels());
+    assert_eq!(&texture.rgba()[..4], &[10, 20, 30, 255]);
+    let again = assets.request_texture_pixels(path);
+    assert_eq!(again.status(), LoadStatus::Ready, "known at once");
+    assert_eq!(
+        assets
+            .request_texture_pixels("assets/textures/gone.png")
+            .wait(),
+        LoadStatus::Failed
+    );
+    let _ = fs::remove_dir_all(folder);
+}

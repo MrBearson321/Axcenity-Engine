@@ -560,6 +560,12 @@ impl Image {
         })
     }
 
+    /// Whether its pixels are decoded already, so [`rgba`](Self::rgba)
+    /// returns at once.
+    pub fn has_pixels(&self) -> bool {
+        self.pixels.get().is_some()
+    }
+
     /// Its mip levels in a GPU format, if its file was cooked.
     pub fn cooked(&self) -> Option<&CookedTexture> {
         self.cooked.as_ref()
