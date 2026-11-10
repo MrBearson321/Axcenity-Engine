@@ -80,7 +80,8 @@ mlua = { version = "0.12", features = ["luau"] }
 # Pins the Luau sources `mlua` builds. mlua-sys 0.13.0 reads bytecode up to
 # version 11; luau0-src 0.22.1 (Luau 0.744) writes version 13, so mlua takes
 # every compiled chunk for source text and can't load it. Raise this only
-# together with `mlua`.
+# together with `mlua`; `crates/script/src/luau_pin_tests.rs` fails if the
+# two stop matching.
 luau0-src = "=0.22.0"
 # The process's memory use for the editor's profiler, on Windows, macOS and
 # Linux (MIT OR Apache-2.0).
@@ -186,3 +187,22 @@ opt-level = 3
 # times faster optimized.
 [profile.dev.package.axcenity-mesh-edit]
 opt-level = 3
+
+# Release builds (`cargo build --release`, and the editor's
+# `bench_project_play`): thin LTO lets the engine's crates inline across one
+# another, and line tables keep file and line in panics and backtraces.
+# `panic` stays "unwind" (the default) in every profile: asset loaders and
+# editor Play catch panics with `catch_unwind`, which "abort" would break.
+[profile.release]
+lto = "thin"
+debug = "line-tables-only"
+panic = "unwind"
+
+# What `release.yml` ships (`cargo build --profile dist`): whole-program LTO
+# and one codegen unit for the fastest binaries, at the cost of a much longer
+# build. Debug info is stripped; symbol names stay for backtraces.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "debuginfo"

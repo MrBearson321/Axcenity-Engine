@@ -73,9 +73,9 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
         if: matrix.host != 'macos'
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
         if: matrix.host == 'macos'
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -87,21 +87,21 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libdbus-1-dev libudev-dev pkg-config
       - name: Build Windows
         if: matrix.host == 'windows'
-        run: cargo build --release --locked -p axcenity-editor -p axcenity-player
+        run: cargo build --profile dist --locked -p axcenity-editor -p axcenity-player
       - name: Build Linux
         if: matrix.host == 'linux'
-        run: cargo build --release --locked -p axcenity-editor -p axcenity-player
+        run: cargo build --profile dist --locked -p axcenity-editor -p axcenity-player
       - name: Build macOS universal binaries
         if: matrix.host == 'macos'
         run: |
           set -euo pipefail
-          cargo build --release --locked -p axcenity-editor -p axcenity-player --target aarch64-apple-darwin
-          cargo build --release --locked -p axcenity-editor -p axcenity-player --target x86_64-apple-darwin
+          cargo build --profile dist --locked -p axcenity-editor -p axcenity-player --target aarch64-apple-darwin
+          cargo build --profile dist --locked -p axcenity-editor -p axcenity-player --target x86_64-apple-darwin
           mkdir -p dist-macos
           for bin in axcenity-editor axcenity-player; do
             lipo -create -output "dist-macos/$bin" \
-              "target/aarch64-apple-darwin/release/$bin" \
-              "target/x86_64-apple-darwin/release/$bin"
+              "target/aarch64-apple-darwin/dist/$bin" \
+              "target/x86_64-apple-darwin/dist/$bin"
           done
       - name: Upload Windows binaries
         if: matrix.host == 'windows'
@@ -109,16 +109,16 @@ jobs:
         with:
           name: bin-windows
           path: |
-            target/release/axcenity-editor.exe
-            target/release/axcenity-player.exe
+            target/dist/axcenity-editor.exe
+            target/dist/axcenity-player.exe
       - name: Upload Linux binaries
         if: matrix.host == 'linux'
         uses: actions/upload-artifact@v4
         with:
           name: bin-linux
           path: |
-            target/release/axcenity-editor
-            target/release/axcenity-player
+            target/dist/axcenity-editor
+            target/dist/axcenity-player
       - name: Upload macOS binaries
         if: matrix.host == 'macos'
         uses: actions/upload-artifact@v4

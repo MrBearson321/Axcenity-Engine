@@ -1,3 +1,7 @@
+# Pinned, not `stable`: CI builds with `-D warnings`, so a new compiler's new
+# lints could fail CI with no code change. Raise it on purpose (fix the new
+# warnings in the same change), and update the `dtolnay/rust-toolchain@`
+# version in `.github/workflows/ci.yml` and `release.yml` to match.
 [toolchain]
-channel = "stable"
+channel = "1.97.0"
 components = ["rustfmt", "clippy"]
