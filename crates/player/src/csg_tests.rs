@@ -64,7 +64,7 @@ struct Game {
 
 impl Game {
     fn new(world: World, assets: Assets) -> Self {
-        let mut scripts = ScriptRuntime::new();
+        let mut scripts = axcenity_sim::script_runtime();
         scripts.set_assets(assets.clone());
         Self {
             world,
@@ -193,7 +193,7 @@ fn subtract_async_scoops_a_crater_that_the_marble_rolls_into() {
     let mut world = project.world;
     let assets = Assets::new(&folder);
     let mut game = {
-        let mut scripts = ScriptRuntime::new();
+        let mut scripts = axcenity_sim::script_runtime();
         scripts.set_assets(assets.clone());
         start_scripts(&mut scripts, &mut world, &project.scripts);
         Game {

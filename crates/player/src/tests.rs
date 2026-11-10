@@ -870,7 +870,11 @@ fn hello_script_example_creates_a_part_and_moves_an_existing_one() {
     let mut world = project.world;
     let parts_before = world.descendants(world.workspace()).len();
 
-    start_scripts(&mut ScriptRuntime::new(), &mut world, &project.scripts);
+    start_scripts(
+        &mut axcenity_sim::script_runtime(),
+        &mut world,
+        &project.scripts,
+    );
 
     let workspace = world.workspace();
     let block = world.find_first_child(workspace, "Block").unwrap();
@@ -1500,7 +1504,7 @@ pub(super) fn start_example_in(name: &str) -> (World, ScriptRuntime, PathBuf) {
     copy_folder(&example, &folder);
     let project = axcenity_project::load(&folder).unwrap();
     let mut world = project.world;
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     start_scripts(&mut scripts, &mut world, &project.scripts);
     (world, scripts, folder)
 }
@@ -1702,7 +1706,7 @@ fn hello_mesh_drops_parts_onto_an_imported_model_which_reports_touches() {
         .unwrap();
     world.set_parent(ball, Some(workspace)).unwrap();
 
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let assets = Assets::new(folder);
     scripts.set_assets(assets.clone());
@@ -1844,7 +1848,7 @@ fn hello_tasks_example_blinks_spins_and_adds_a_ball_over_time() {
     let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-tasks");
     let project = axcenity_project::load(&folder).unwrap();
     let mut world = project.world;
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     start_scripts(&mut scripts, &mut world, &project.scripts);
 
     let workspace = world.workspace();
@@ -2409,7 +2413,7 @@ fn hello_ui_graph_runs_its_event_graph_as_an_ordinary_local_script() {
         file.source
     );
 
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let pages = world.find_first_child(menu, "Pages").unwrap();
     let home = world.find_first_child(pages, "Home").unwrap();
@@ -2464,7 +2468,7 @@ fn start_hello_saves(copy: &str, saves: &Path) -> (World, ScriptRuntime, PathBuf
     copy_folder(&example, &folder);
     let project = axcenity_project::load(&folder).unwrap();
     let mut world = project.world;
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     scripts.set_save_folder(Some(saves.to_path_buf()));
     // As `start_scripts` does, keeping the output for the test to read.
     for script in &project.scripts {
@@ -2903,7 +2907,7 @@ fn reading_and_writing_cframes_leaves_a_saved_world_byte_for_byte_the_same() {
             .set_parent(script, Some(world.server_script_service()))
             .unwrap();
         let before = axcenity_project::write_world(&world);
-        let mut scripts = ScriptRuntime::new();
+        let mut scripts = axcenity_sim::script_runtime();
         scripts.start_script(
             &mut world,
             script,

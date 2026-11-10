@@ -21,7 +21,7 @@ fn start(saves: &Path) -> (World, ScriptRuntime, PathBuf) {
     copy_folder(&example, &folder);
     let project = axcenity_project::load(&folder).unwrap();
     let mut world = project.world;
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     scripts.set_save_folder(Some(saves.to_path_buf()));
     for script in &project.scripts {
         scripts.start_script(&mut world, script.instance, &script.path, &script.source);

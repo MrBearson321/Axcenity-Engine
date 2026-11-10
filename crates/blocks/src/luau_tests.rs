@@ -4,7 +4,6 @@
 use std::path::{Path, PathBuf};
 
 use axcenity_core::{ClassName, World};
-use axcenity_script::ScriptRuntime;
 
 use super::*;
 
@@ -418,7 +417,7 @@ print(`total {total} doubled {doubled.value}`)
     world
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, lua, "scripts/Typed.server.lua", &written);
     runtime.step(&mut world, 0.1);
     let output: Vec<String> = runtime

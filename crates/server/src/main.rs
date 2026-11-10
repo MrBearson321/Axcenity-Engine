@@ -148,7 +148,7 @@ fn main() -> Result<()> {
     }
     let mut world = project.world;
     let assets = Assets::new(&project.folder);
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     scripts.set_dedicated();
     scripts.set_assets(assets.clone());
     scripts.set_save_folder(axcenity_save::game_folder(&project.manifest.name));

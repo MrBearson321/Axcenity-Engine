@@ -208,7 +208,7 @@ fn main() -> Result<()> {
     // scripts start and the window opens; the splash or loading screen
     // stays up until they're in (roadmap I11).
     let preload = preload::Preload::start(&world, &assets);
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     scripts.set_assets(assets.clone());
     scripts.set_save_folder(data_folder.clone());
     // Who plays, the same each time on this install (Phase 64).

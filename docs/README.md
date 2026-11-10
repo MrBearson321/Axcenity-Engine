@@ -9,6 +9,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | A crate boundary or a new dependency | [architecture/crates.md](architecture/crates.md) |
 | Instances and IDs | [architecture/data-model.md](architecture/data-model.md) |
 | The frame loop | [architecture/frame-loop.md](architecture/frame-loop.md) |
+| A game system outside `script` (`GameSystem`, the `gameplay` crate, Debris) | [architecture/game-systems.md](architecture/game-systems.md) |
 | Physics | [architecture/physics.md](architecture/physics.md) |
 | Fractures, the `mesh_edit` crate, or plane cutting | [architecture/fracture.md](architecture/fracture.md) |
 | Union, Negate, Intersect, Separate, `UnionOperation`, `CollisionFidelity` | [architecture/solid-modeling.md](architecture/solid-modeling.md) |

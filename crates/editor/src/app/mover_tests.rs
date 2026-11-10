@@ -7,7 +7,6 @@ use axcenity_core::{ClassName, Value, Vector3};
 use axcenity_physics::Physics;
 use axcenity_render::Camera;
 use axcenity_render::glam::Vec3;
-use axcenity_script::ScriptRuntime;
 
 use super::tests::{copy_of_example, example, inserted, play_for, printed};
 use super::*;
@@ -230,7 +229,7 @@ fn every_mover_saves_reloads_and_plays_as_the_player_runs_it() {
     // ...and run the way the player runs it, from the saved files.
     let project = axcenity_project::load(&folder).unwrap();
     let mut world = project.world;
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     for script in &project.scripts {
         scripts.start_script(&mut world, script.instance, &script.path, &script.source);
     }

@@ -52,7 +52,7 @@ fn play(game: &Path, dev_flag: bool) -> App {
     let allowed =
         dev_console::console_allowed(Some(game), dev_flag, project.manifest.developer_console);
     let mut world = project.world;
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
     let mut app = App::new(

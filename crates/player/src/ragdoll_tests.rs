@@ -395,7 +395,7 @@ impl Game {
         let project = axcenity_project::load(&folder).unwrap();
         let mut world = project.world;
         let assets = Assets::new(&folder);
-        let mut scripts = ScriptRuntime::new();
+        let mut scripts = axcenity_sim::script_runtime();
         scripts.set_assets(assets.clone());
         let mut animators = Animators::new();
         animators.update(&mut world, &assets, 0.0);

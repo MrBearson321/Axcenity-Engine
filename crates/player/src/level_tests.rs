@@ -53,7 +53,7 @@ impl Game {
         assert!(problems.is_empty(), "{problems:?}");
         let mut world = project.world;
         let assets = Assets::new(folder);
-        let mut scripts = ScriptRuntime::new();
+        let mut scripts = axcenity_sim::script_runtime();
         scripts.set_assets(assets.clone());
         scripts.set_save_folder(Some(saves.to_owned()));
         scripts.set_levels(&start, &start, levels);
@@ -364,7 +364,7 @@ fn a_project_with_only_world_json_has_one_level_and_plays_as_before() {
     let levels = game_levels(&example, "Start", &project.world, &mut problems);
     assert!(problems.is_empty());
     assert_eq!(levels.keys().collect::<Vec<_>>(), ["Start"]);
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     scripts.set_levels("Start", "Start", levels);
     let mut world = project.world;
     scripts

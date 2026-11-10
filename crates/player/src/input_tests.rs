@@ -32,7 +32,7 @@ pub(super) fn open(name: &str, map: Option<&InputMap>) -> (App, PathBuf) {
     let project = axcenity_project::load(&folder).unwrap();
     assert!(project.problems.is_empty(), "{:?}", project.problems);
     let mut world = project.world;
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     scripts.set_input_map(project.input_map.clone());
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let stylesheets = project

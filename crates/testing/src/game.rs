@@ -11,9 +11,7 @@ use axcenity_core::bench::Laps;
 use axcenity_core::input::{Input, InputEvent, InputKind, InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, KeyCode, UserInputType, Value, World};
 use axcenity_project::ScriptFile;
-use axcenity_script::{
-    CameraState, OutputKind, OutputLine, ScriptRuntime, TestReport, TestRequest,
-};
+use axcenity_script::{CameraState, OutputKind, OutputLine, TestReport, TestRequest};
 use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
 /// Each frame is this long, so a run is the same on every computer.
@@ -63,7 +61,7 @@ impl TestGame {
     pub fn start(setup: GameSetup) -> Self {
         let assets = Assets::new(setup.folder);
         let mut game = TestGame {
-            sim: Sim::new(setup.world, ScriptRuntime::new(), assets),
+            sim: Sim::new(setup.world, axcenity_sim::script_runtime(), assets),
             schedule: Schedule::for_host(Hosts::TEST),
             input: InputState::default(),
             events: Vec::new(),

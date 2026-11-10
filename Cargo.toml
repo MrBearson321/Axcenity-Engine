@@ -20,6 +20,7 @@ axcenity-blocks-runtime = { path = "crates/blocks-runtime" }
 axcenity-character = { path = "crates/character" }
 axcenity-cook = { path = "crates/cook" }
 axcenity-core = { path = "crates/core" }
+axcenity-gameplay = { path = "crates/gameplay" }
 axcenity-mesh-edit = { path = "crates/mesh_edit" }
 axcenity-nav = { path = "crates/nav" }
 axcenity-net = { path = "crates/net" }

@@ -1,6 +1,6 @@
 //! Tests for unified Phase 32: BindableEvents and BindableFunctions,
-//! RemoteFunctions, RunService's frame hooks, Debris, HttpService's JSON
-//! and the rest of the `task` library.
+//! RemoteFunctions, RunService's frame hooks, HttpService's JSON and the
+//! rest of the `task` library.
 
 use axcenity_core::{ClassName, InstanceId, World};
 
@@ -367,41 +367,6 @@ print(RunService:IsServer(), RunService:IsClient())
     )
     .unwrap();
     assert_eq!(edit.output[0].text, "true\tfalse");
-}
-
-#[test]
-fn debris_destroys_a_part_about_two_seconds_later_and_ignores_one_already_gone() {
-    let mut world = World::new();
-    let part = world.create(ClassName::Part).unwrap();
-    world.set_name(part, "Spark").unwrap();
-    world.set_parent(part, Some(world.workspace())).unwrap();
-    let gone = world.create(ClassName::Part).unwrap();
-    world.set_name(gone, "Gone").unwrap();
-    world.set_parent(gone, Some(world.workspace())).unwrap();
-    let mut runtime = ScriptRuntime::new();
-    start(
-        &mut runtime,
-        &mut world,
-        "scripts/debris.server.lua",
-        r#"
-local Debris = game:GetService("Debris")
-workspace.Spark.Destroying:Connect(function() print("spark gone") end)
-Debris:AddItem(workspace.Spark, 2)
-local gone = workspace.Gone
-Debris:AddItem(gone, 1)
-gone:Destroy()
-Debris:AddItem(gone, 0)
-"#,
-    );
-    // The script that added them stopping doesn't keep them.
-    for _ in 0..119 {
-        runtime.step(&mut world, FRAME);
-    }
-    assert!(world.contains(part), "still there just before two seconds");
-    assert!(!world.contains(gone));
-    runtime.step(&mut world, FRAME);
-    assert!(!world.contains(part), "gone at two seconds");
-    assert_eq!(lines(&mut runtime), ["spark gone"]);
 }
 
 #[test]
