@@ -176,7 +176,7 @@ impl EditorApp {
                 self.play_settings_controls(ui, playing);
             }),
             RibbonGroup::Check => ribbon::group(ui, "Check", |ui| {
-                let button = RibbonButton::new(icons::MAGNIFYING_GLASS, "Assets");
+                let button = RibbonButton::new(icons::MAGNIFYING_GLASS, "Check Assets");
                 clicks.check_assets = ui
                     .add_enabled(can_play, button)
                     .on_hover_text(

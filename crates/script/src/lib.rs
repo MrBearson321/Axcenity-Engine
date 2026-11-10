@@ -132,7 +132,9 @@ pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, Gam
 pub use chat::ChatLine;
 pub use console_service::{ConsoleCommandInfo, ConsoleRun, split_command};
 pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
-pub use definitions::{ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions};
+pub use definitions::{
+    ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions, property_description,
+};
 pub use edit::EditRuntime;
 pub use errors::error_message as error_text;
 pub use input::KeyEvent;

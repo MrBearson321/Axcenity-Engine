@@ -487,7 +487,7 @@ impl EditorApp {
             Command::CheckAssets,
             "Check Assets",
             "File",
-            &["Assets"],
+            &[],
             None,
             when(project, "Open a project first."),
         );

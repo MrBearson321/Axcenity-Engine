@@ -708,6 +708,22 @@ pub fn show(
                 edit = Some(Edit::OpenInModelStudio);
             }
             ui.add_space(2.0);
+            // Filter properties: shows only the rows whose names (or whose
+            // section's title) match, with their sections open. Kept from
+            // one selection to the next, like Roblox Studio's.
+            let filter_id = egui::Id::new("properties filter");
+            let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id)).unwrap_or_default();
+            let width = (ui.available_width() - crate::widgets::SEARCH_FIELD_MARGINS).max(60.0);
+            crate::widgets::search_field(ui, &mut filter, "Filter properties", width)
+                .on_hover_text("Show only the properties whose names have this in them");
+            ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+            let filter = filter.trim();
+            let filtering = !filter.is_empty();
+            let open = filtering.then_some(true);
+            let shows = |title: &str, name: &str| {
+                !filtering || matches_filter(name, filter) || matches_filter(title, filter)
+            };
+            let mut shown_any = false;
             // Only `Locked` itself can be changed on something locked.
             let locked = !playing && world.is_locked(id);
             if locked {
@@ -720,8 +736,12 @@ pub fn show(
             // the selection gives each Instance its own, so nothing typed for one
             // part turns up on the next one selected.
             ui.push_id(id, |ui| {
-                section(ui, "Data", |ui| {
-                    if let Some(keep) = field_name_with_pin(ui, "Name", pin(Field::Name)) {
+                let class = instance.class();
+                let data = ["Name", "ClassName"].map(|name| shows("Data", name));
+                shown_any |= data.contains(&true);
+                section(ui, "Data", open, data.contains(&true), |ui| {
+                  if data[0] {
+                    if let Some(keep) = field_name_with_pin(ui, class, "Name", pin(Field::Name)) {
                         edit = Some(Edit::Keep(Field::Name, keep));
                     }
                     let mut name = instance.name().to_string();
@@ -741,9 +761,12 @@ pub fn show(
                             .on_disabled_hover_text(hint);
                     }
                     ui.end_row();
-                    field_name(ui, "ClassName");
+                  }
+                  if data[1] {
+                    described_name(ui, class, "ClassName");
                     ui.label(instance.class().as_str());
                     ui.end_row();
+                  }
                 });
 
                 // In a placed prefab copy, what it sets differently (Phase 49).
@@ -753,15 +776,22 @@ pub fn show(
                         .map(|place| place.here().properties)
                         .unwrap_or_default(),
                 };
-                for group in sections(instance) {
-                    section(ui, group.title, |ui| {
+                for mut group in sections(instance) {
+                    group.properties.retain(|(name, _)| shows(group.title, name));
+                    if group.properties.is_empty() {
+                        continue;
+                    }
+                    shown_any = true;
+                    section(ui, group.title, open, true, |ui| {
                         for (name, value) in group.properties {
                             let field = Field::Property(name);
                             if overridden.contains(name) {
                                 if let Some(made) = override_name(ui, name) {
                                     edit = Some(made);
                                 }
-                            } else if let Some(keep) = field_name_with_pin(ui, name, pin(field)) {
+                            } else if let Some(keep) =
+                                field_name_with_pin(ui, class, name, pin(field))
+                            {
                                 edit = Some(Edit::Keep(field, keep));
                             }
                             let enabled = !locked || name == "Locked";
@@ -800,15 +830,28 @@ pub fn show(
                     });
                 }
                 // Services keep neither in the world file.
+                // While filtering, they show if their title or one of their
+                // attributes or tags matches.
                 if !instance.class().is_service() {
+                    let attributes = !filtering
+                        || matches_filter("Attributes", filter)
+                        || instance.attributes().keys().any(|a| matches_filter(a, filter));
+                    let tags = !filtering
+                        || matches_filter("Tags", filter)
+                        || instance.tags().iter().any(|t| matches_filter(t, filter));
+                    shown_any |= attributes || tags;
                     ui.add_enabled_ui(!locked, |ui| {
-                        if let Some(made) = attributes_section(ui, instance) {
+                        if attributes && let Some(made) = attributes_section(ui, instance, open) {
                             edit = Some(made);
                         }
-                        if let Some(made) = tags_section(ui, instance) {
+                        if tags && let Some(made) = tags_section(ui, instance, open) {
                             edit = Some(made);
                         }
                     });
+                }
+                if !shown_any {
+                    ui.add_space(8.0);
+                    ui.weak(format!("No properties match \"{filter}\"."));
                 }
                 if instance.class() == ClassName::ScreenGui
                     && instance
@@ -852,9 +895,9 @@ pub const ATTRIBUTE_TYPES: [(&str, NewValue); 9] = [
 
 /// The Attributes section: each attribute with its control and a button
 /// that removes it, then a row that adds one by name and type.
-fn attributes_section(ui: &mut egui::Ui, instance: &Instance) -> Option<Edit> {
+fn attributes_section(ui: &mut egui::Ui, instance: &Instance, open: Option<bool>) -> Option<Edit> {
     let mut edit = None;
-    section(ui, "Attributes", |ui| {
+    section(ui, "Attributes", open, true, |ui| {
         for (name, value) in instance.attributes() {
             // The ✕ goes by the name, so the value keeps the whole width.
             ui.horizontal(|ui| {
@@ -916,9 +959,9 @@ fn attributes_section(ui: &mut egui::Ui, instance: &Instance) -> Option<Edit> {
 
 /// The Tags row: a chip for each tag (click its ✕ to remove it), and a box
 /// that adds one on Enter.
-fn tags_section(ui: &mut egui::Ui, instance: &Instance) -> Option<Edit> {
+fn tags_section(ui: &mut egui::Ui, instance: &Instance, open: Option<bool>) -> Option<Edit> {
     let mut edit = None;
-    section(ui, "Tags", |ui| {
+    section(ui, "Tags", open, true, |ui| {
         field_name(ui, "Tags");
         ui.vertical(|ui| {
             ui.horizontal_wrapped(|ui| {
@@ -1003,7 +1046,18 @@ fn object_control(
 }
 
 /// A collapsible group with a two-column grid of names and controls.
-fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
+/// `open` forces it open (while filtering) or leaves it as it was (`None`);
+/// with `shown` false nothing is drawn.
+fn section(
+    ui: &mut egui::Ui,
+    title: &str,
+    open: Option<bool>,
+    shown: bool,
+    rows: impl FnOnce(&mut egui::Ui),
+) {
+    if !shown {
+        return;
+    }
     let icon = match title {
         "Data" => icons::IDENTIFICATION_CARD,
         "Appearance" => icons::PALETTE,
@@ -1047,6 +1101,7 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
     egui::CollapsingHeader::new(header)
         .id_salt(title)
         .default_open(true)
+        .open(open)
         .icon(crate::widgets::chevron)
         .show_unindented(ui, |ui| {
             crate::responsive::form(ui, title, rows);
@@ -1056,9 +1111,14 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
 /// A property's name in the left column, after its Keep pin when it was
 /// edited during Play (`pin` says whether it's kept). Returns the pin's new
 /// state when it was clicked.
-fn field_name_with_pin(ui: &mut egui::Ui, name: &str, pin: Option<bool>) -> Option<bool> {
+fn field_name_with_pin(
+    ui: &mut egui::Ui,
+    class: ClassName,
+    name: &str,
+    pin: Option<bool>,
+) -> Option<bool> {
     let Some(kept) = pin else {
-        field_name(ui, name);
+        described_name(ui, class, name);
         return None;
     };
     let mut clicked = None;
@@ -1073,7 +1133,7 @@ fn field_name_with_pin(ui: &mut egui::Ui, name: &str, pin: Option<bool>) -> Opti
         if crate::widgets::icon_button(ui, icons::PUSH_PIN, tooltip, kept).clicked() {
             clicked = Some(!kept);
         }
-        field_name(ui, name);
+        described_name(ui, class, name);
     });
     clicked
 }
@@ -1125,6 +1185,54 @@ fn override_name(ui: &mut egui::Ui, name: &str) -> Option<Edit> {
 fn field_name(ui: &mut egui::Ui, name: &str) {
     let palette = theme::palette(ui.ctx());
     ui.add(egui::Label::new(egui::RichText::new(name).color(palette.text_secondary)).truncate());
+}
+
+/// A property's name, as [`field_name`], that says on hover what the
+/// property does: the same description scripts' autocomplete and the API
+/// reference give it (`axcenity_script::property_description`), looked up
+/// only while hovered.
+fn described_name(ui: &mut egui::Ui, class: ClassName, name: &str) {
+    let palette = theme::palette(ui.ctx());
+    let label = ui.add(
+        egui::Label::new(egui::RichText::new(name).color(palette.text_secondary))
+            .truncate()
+            .show_tooltip_when_elided(false),
+    );
+    if label.hovered()
+        && let Some(about) = description(class, name)
+    {
+        label.on_hover_ui(|ui| {
+            ui.set_max_width(320.0);
+            ui.strong(name);
+            ui.label(about);
+        });
+    }
+}
+
+/// What `class`'s `name` does, for its hover: the Data rows' own words, or
+/// the script API's description of the property.
+pub fn description(class: ClassName, name: &str) -> Option<&'static str> {
+    match name {
+        "Name" => Some(
+            "What it's called, in the Explorer and in scripts (workspace.Door). Names don't \
+             have to be unique.",
+        ),
+        "ClassName" => Some("What kind of object it is. It can't be changed."),
+        _ => axcenity_script::property_description(class, name),
+    }
+}
+
+/// Whether a property `name` (or a section titled `name`) matches what's
+/// typed in the filter: letters in order, ignoring case and spaces, so
+/// "walk speed" finds WalkSpeed.
+pub fn matches_filter(name: &str, filter: &str) -> bool {
+    let squash = |text: &str| -> String {
+        text.chars()
+            .filter(|c| !c.is_whitespace())
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    squash(name).contains(&squash(filter))
 }
 
 /// A note above the properties, such as during Play.
@@ -2336,5 +2444,162 @@ mod decal_section_tests {
             titles(world.get(projected).unwrap()),
             ["Appearance", "Decal", "Box"]
         );
+    }
+
+    /// Every property the panel shows for the classes beginners meet first
+    /// says on hover what it does, from the script API's descriptions.
+    #[test]
+    fn common_properties_say_what_they_do() {
+        let mut world = World::new();
+        let mut missing = Vec::new();
+        for class in [
+            ClassName::Part,
+            ClassName::MeshPart,
+            ClassName::Model,
+            ClassName::PointLight,
+            ClassName::SpotLight,
+            ClassName::Sound,
+            ClassName::ParticleEmitter,
+            ClassName::Decal,
+            ClassName::Animation,
+            ClassName::Animator,
+        ] {
+            let id = world.create(class).unwrap();
+            let instance = world.get(id).unwrap();
+            for section in sections(instance) {
+                for (name, _) in section.properties {
+                    if description(class, name).is_none_or(str::is_empty) {
+                        missing.push(format!("{class:?}.{name}"));
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "no description: {missing:?}");
+        assert!(description(ClassName::Part, "Name").is_some());
+        assert!(
+            description(ClassName::Part, "Anchored")
+                .unwrap()
+                .contains("stays where it is")
+        );
+    }
+
+    #[test]
+    fn the_filter_ignores_case_and_spaces() {
+        assert!(matches_filter("WalkSpeed", "walk speed"));
+        assert!(matches_filter("CanCollide", "COLL"));
+        assert!(matches_filter("Anchored", ""));
+        assert!(!matches_filter("Anchored", "color"));
+    }
+
+    /// Text drawn by the Properties panel for `id` with `filter` typed in
+    /// its filter box.
+    fn shown_with_filter(world: &World, id: InstanceId, filter: &str) -> Vec<String> {
+        fn walk(shape: &egui::Shape, found: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => found.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, found)),
+                _ => {}
+            }
+        }
+        let ctx = crate::theme::test_context();
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("properties filter"), filter.to_owned()));
+        let mut found = Vec::new();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(300.0, 2000.0),
+                )),
+                ..Default::default()
+            };
+            let output = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let _ = show(ui, world, Some(id), false, &[], 1, |_| {});
+                });
+            });
+            found.clear();
+            for clipped in &output.shapes {
+                walk(&clipped.shape, &mut found);
+            }
+        }
+        found
+    }
+
+    /// Typing in Filter properties leaves only the rows whose names match
+    /// (and whole sections whose titles do), and says so when none do.
+    #[test]
+    fn filter_properties_shows_only_matching_rows() {
+        let mut world = World::new();
+        let part = world.create(ClassName::Part).unwrap();
+        world
+            .set_attribute(part, "Health", Some(Value::Number(100.0)))
+            .unwrap();
+        let has = |shown: &[String], text: &str| shown.iter().any(|t| t == text);
+
+        let all = shown_with_filter(&world, part, "");
+        for name in ["Name", "Color", "Anchored", "CanCollide", "Size", "Health"] {
+            assert!(has(&all, name), "{name} shows unfiltered: {all:?}");
+        }
+
+        let shown = shown_with_filter(&world, part, "can coll");
+        assert!(has(&shown, "CanCollide"), "{shown:?}");
+        for hidden in ["Name", "Color", "Anchored", "Size", "Health"] {
+            assert!(!has(&shown, hidden), "{hidden} is filtered out: {shown:?}");
+        }
+
+        // A section's title shows all of it.
+        let shown = shown_with_filter(&world, part, "appearance");
+        assert!(
+            has(&shown, "Color") && has(&shown, "Roughness"),
+            "{shown:?}"
+        );
+        assert!(!has(&shown, "Anchored"), "{shown:?}");
+
+        // Attributes match by name too.
+        let shown = shown_with_filter(&world, part, "health");
+        assert!(has(&shown, "Health"), "{shown:?}");
+
+        let shown = shown_with_filter(&world, part, "zzz");
+        assert!(
+            shown.iter().any(|t| t.contains("No properties match")),
+            "{shown:?}"
+        );
+
+        // With AXCENITY_SNAPSHOTS: the panel filtered to "can", and
+        // unfiltered with the mouse over Anchored, showing what it does.
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            let folder = std::path::PathBuf::from(folder);
+            for (file, filter, hover) in [
+                ("properties-filter.png", "can", None),
+                (
+                    "properties-description.png",
+                    "",
+                    Some(egui::pos2(40.0, 427.0)),
+                ),
+            ] {
+                let mut draw = |ctx: &egui::Context| {
+                    ctx.data_mut(|d| {
+                        d.insert_temp(egui::Id::new("properties filter"), filter.to_owned())
+                    });
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let _ = show(ui, &world, Some(part), false, &[], 1, |_| {});
+                    });
+                };
+                let frames = match hover {
+                    Some(at) => {
+                        let mut frames = vec![Vec::new(); 6];
+                        frames[0].push(egui::Event::PointerMoved(at));
+                        frames
+                    }
+                    None => vec![Vec::new(); 3],
+                };
+                crate::snapshot::snapshot(
+                    &folder.join(file),
+                    egui::vec2(300.0, 620.0),
+                    frames,
+                    &mut draw,
+                );
+            }
+        }
     }
 }

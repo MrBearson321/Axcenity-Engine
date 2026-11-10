@@ -595,6 +595,13 @@ fn event_doc(class: ClassName, event: &str) -> Option<&'static str> {
     doc_line(class).find_map(own)
 }
 
+/// What `class`'s `property` does, in one or two sentences: the description
+/// the definitions file and the API reference give it (inherited ones
+/// included), for the editor's Properties panel. `None` if it has none.
+pub fn property_description(class: ClassName, property: &str) -> Option<&'static str> {
+    property_doc(class, property)
+}
+
 fn property_doc(class: ClassName, property: &str) -> Option<&'static str> {
     let own = |class| {
         PROPERTY_DOCS
