@@ -43,7 +43,7 @@ fn built_game(test: &str) -> (App, World, PathBuf) {
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
     let mut app = App::new(world, scripts, Vec::new(), assets, Animators::new(), camera);
-    app.physics = Physics::with_assets(app.assets.clone());
+    app.sim.physics = Physics::with_assets(app.sim.assets.clone());
     (app, start, folder)
 }
 
@@ -53,27 +53,31 @@ impl App {
     fn cutscene_frame(&mut self) {
         let seconds = f64::from(FRAME);
         let motion = self.controller_input(FRAME);
-        self.characters
-            .step(&mut self.world, &self.assets, motion, FRAME);
-        self.scripts
-            .step_humanoids(&mut self.world, &self.characters, seconds);
-        self.scripts.step_players(&mut self.world, seconds);
+        self.sim
+            .characters
+            .step(&mut self.sim.world, &self.sim.assets, motion, FRAME);
+        self.sim
+            .scripts
+            .step_humanoids(&mut self.sim.world, &self.sim.characters, seconds);
+        self.sim.scripts.step_players(&mut self.sim.world, seconds);
         let events = self.input.take_events(self.pointer);
-        self.scripts.input_events(&mut self.world, &events);
-        self.scripts.step_prompts(&mut self.world, seconds);
-        self.scripts.step(&mut self.world, seconds);
-        self.characters.keep_kinematic(&mut self.world);
-        self.physics.step(&mut self.world, seconds);
-        self.scripts.heartbeat(&mut self.world, seconds);
+        self.sim.scripts.input_events(&mut self.sim.world, &events);
+        self.sim.scripts.step_prompts(&mut self.sim.world, seconds);
+        self.sim.scripts.step(&mut self.sim.world, seconds);
+        self.sim.characters.keep_kinematic(&mut self.sim.world);
+        self.sim.physics.step(&mut self.sim.world, seconds);
+        self.sim.scripts.heartbeat(&mut self.sim.world, seconds);
         let _ = self
+            .sim
             .animators
-            .update(&mut self.world, &self.assets, seconds);
-        assert!(self.animators.take_errors().is_empty());
-        self.game_camera = self.scripts.step_camera(&self.world, seconds);
+            .update(&mut self.sim.world, &self.sim.assets, seconds);
+        assert!(self.sim.animators.take_errors().is_empty());
+        self.game_camera = self.sim.scripts.step_camera(&self.sim.world, seconds);
     }
 
     fn printed(&mut self) -> Vec<String> {
-        self.scripts
+        self.sim
+            .scripts
             .take_output()
             .into_iter()
             .inspect(|line| {
@@ -84,13 +88,13 @@ impl App {
     }
 
     fn character_spot(&self) -> Vector3 {
-        let player = self.scripts.local_player().expect("the player joined");
-        let character = match self.world.get(player).unwrap().property("Character") {
+        let player = self.sim.scripts.local_player().expect("the player joined");
+        let character = match self.sim.world.get(player).unwrap().property("Character") {
             Some(Value::Instance(Some(character))) => *character,
             _ => panic!("the player has no character"),
         };
-        let parts = axcenity_character::body_parts(&self.world, character);
-        vector(&self.world, parts[0], "Position")
+        let parts = axcenity_character::body_parts(&self.sim.world, character);
+        vector(&self.sim.world, parts[0], "Position")
     }
 }
 
@@ -170,15 +174,15 @@ fn the_cutscene_plays_in_a_built_game_as_the_preview_shows_it() {
             continue;
         }
         let time = f64::from(frame) * f64::from(FRAME);
-        let (preview, shot) = preview_at(&start, &app.assets, time);
+        let (preview, shot) = preview_at(&start, &app.sim.assets, time);
         torso.push(vector(
-            &app.world,
-            find(&app.world, &["Hero", "Torso"]),
+            &app.sim.world,
+            find(&app.sim.world, &["Hero", "Torso"]),
             "Position",
         ));
         let leg = vector(
-            &app.world,
-            find(&app.world, &["Hero", "LeftLeg"]),
+            &app.sim.world,
+            find(&app.sim.world, &["Hero", "LeftLeg"]),
             "Orientation",
         );
         swing = swing.max(leg.x.abs());
@@ -190,7 +194,7 @@ fn the_cutscene_plays_in_a_built_game_as_the_preview_shows_it() {
         ] {
             for property in ["Position", "Orientation"] {
                 close(
-                    vector(&app.world, find(&app.world, path), property),
+                    vector(&app.sim.world, find(&app.sim.world, path), property),
                     vector(&preview, find(&preview, path), property),
                     &format!("{path:?} {property} at {time:.2}s"),
                 );
@@ -205,8 +209,8 @@ fn the_cutscene_plays_in_a_built_game_as_the_preview_shows_it() {
         close(held.position, shot.position, "camera position");
         close(held.orientation, shot.orientation, "camera orientation");
         assert!((app.game_camera.field_of_view - shot.field_of_view).abs() < 0.01);
-        assert_eq!(overlay(&app.world), overlay(&preview), "at {time:.2}s");
-        assert!(playing(&app.world, &["Music"]), "the music plays");
+        assert_eq!(overlay(&app.sim.world), overlay(&preview), "at {time:.2}s");
+        assert!(playing(&app.sim.world, &["Music"]), "the music plays");
     }
     // The hero walked from its start to the door, swinging its legs.
     // Its pivot moves from (-10, 2.6, 4) to (0, 2.6, -6) over 12 s.
@@ -222,14 +226,14 @@ fn the_cutscene_plays_in_a_built_game_as_the_preview_shows_it() {
     );
     assert!(swing > 10.0, "the walk clip swings the legs: {swing}");
     // Two subtitles, three cuts and the door all showed along the way.
-    let (_, wide) = preview_at(&start, &app.assets, 1.0);
-    let (_, door) = preview_at(&start, &app.assets, 10.0);
-    let (_, own) = preview_at(&start, &app.assets, 15.0);
+    let (_, wide) = preview_at(&start, &app.sim.assets, 1.0);
+    let (_, door) = preview_at(&start, &app.sim.assets, 10.0);
+    let (_, own) = preview_at(&start, &app.sim.assets, 15.0);
     assert_eq!(wide.unwrap().position, Vector3::new(0.0, 8.0, 20.0));
     assert_eq!(door.unwrap().position, Vector3::new(10.0, 5.0, 4.0));
     assert!(own.unwrap().position.z < 6.0 && own.unwrap().position.x > -7.0);
-    let (at_four, _) = preview_at(&start, &app.assets, 4.0);
-    let (at_ten, _) = preview_at(&start, &app.assets, 10.0);
+    let (at_four, _) = preview_at(&start, &app.sim.assets, 4.0);
+    let (at_ten, _) = preview_at(&start, &app.sim.assets, 10.0);
     assert_eq!(overlay(&at_four).unwrap().0, "intro.line1");
     assert_eq!(overlay(&at_ten).unwrap().0, "intro.line2");
 
@@ -244,12 +248,12 @@ fn the_cutscene_plays_in_a_built_game_as_the_preview_shows_it() {
     // Over: the door is open, the overlay and the music gone, and the
     // camera is the character's again.
     close(
-        vector(&app.world, find(&app.world, &["Door"]), "Position"),
+        vector(&app.sim.world, find(&app.sim.world, &["Door"]), "Position"),
         Vector3::new(4.2, 3.0, -9.4),
         "the open door",
     );
-    assert!(overlay(&app.world).is_none());
-    assert!(!playing(&app.world, &["Music"]));
+    assert!(overlay(&app.sim.world).is_none());
+    assert!(!playing(&app.sim.world, &["Music"]));
     assert!(app.game_camera.scripted.is_none());
     let _ = fs::remove_dir_all(folder);
 }
@@ -269,16 +273,16 @@ fn skipping_jumps_to_the_end_state_and_completed_fires_once() {
     }
     assert_eq!(app.printed(), ["cutscene finished: walk around"]);
     // Everything it keys is where the sequence leaves it at its end.
-    let (end, _) = preview_at(&start, &app.assets, 20.0);
+    let (end, _) = preview_at(&start, &app.sim.assets, 20.0);
     for path in [&["Door"][..], &["Hero", "Torso"], &["Hero", "Head"]] {
         close(
-            vector(&app.world, find(&app.world, path), "Position"),
+            vector(&app.sim.world, find(&app.sim.world, path), "Position"),
             vector(&end, find(&end, path), "Position"),
             &format!("{path:?} at the end"),
         );
     }
-    assert!(overlay(&app.world).is_none());
-    assert!(!playing(&app.world, &["Music"]));
+    assert!(overlay(&app.sim.world).is_none());
+    assert!(!playing(&app.sim.world, &["Music"]));
     assert!(app.game_camera.scripted.is_none());
     let _ = fs::remove_dir_all(folder);
 }
@@ -294,7 +298,7 @@ fn input_is_locked_while_it_plays_and_control_comes_back_after() {
     app.push_key(KeyCode::W, true, false);
     for _ in 0..600 {
         app.cutscene_frame();
-        assert!(app.scripts.input_locked(&app.world));
+        assert!(app.sim.scripts.input_locked(&app.sim.world));
     }
     let held = app.character_spot();
     assert!(
@@ -304,7 +308,10 @@ fn input_is_locked_while_it_plays_and_control_comes_back_after() {
     for _ in 0..560 {
         app.cutscene_frame();
     }
-    assert!(!app.scripts.input_locked(&app.world), "it has ended");
+    assert!(
+        !app.sim.scripts.input_locked(&app.sim.world),
+        "it has ended"
+    );
     for _ in 0..60 {
         app.cutscene_frame();
     }

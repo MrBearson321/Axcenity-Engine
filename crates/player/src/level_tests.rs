@@ -339,12 +339,16 @@ fn a_level_load_shows_the_games_loading_screen_again() {
     };
     app.follow_level_loads();
     assert!(app.loading_gui.is_none(), "nothing was loaded yet");
-    app.scripts
-        .run_command(&mut app.world, "game.LevelService:LoadLevel('Castle')")
+    app.sim
+        .scripts
+        .run_command(&mut app.sim.world, "game.LevelService:LoadLevel('Castle')")
         .unwrap();
-    app.scripts.fire_changes(&mut app.world);
+    app.sim.scripts.fire_changes(&mut app.sim.world);
     app.follow_level_loads();
-    let menu = app.world.find_first_child(app.world.workspace(), "Menu");
+    let menu = app
+        .sim
+        .world
+        .find_first_child(app.sim.world.workspace(), "Menu");
     assert_eq!(app.loading_gui.as_ref().and_then(LoadingGui::on_top), menu);
 }
 

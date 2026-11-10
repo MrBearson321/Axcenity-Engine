@@ -21,6 +21,7 @@ axcenity-render = { workspace = true, features = ["debug-views"] }
 axcenity-save.workspace = true
 axcenity-scene.workspace = true
 axcenity-script.workspace = true
+axcenity-sim.workspace = true
 axcenity-ui.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
