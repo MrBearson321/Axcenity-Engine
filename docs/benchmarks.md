@@ -122,23 +122,23 @@ Before, the navmesh fingerprint hashed every part, the 1,000 falling drops inclu
 
 ### Class and tag index (M2)
 
-Taken on 2026-11-10 on a Ryzen 9 9950X3D under Windows, release build, main and the M2 branch run alternately. Each run was pinned to the V-cache CCD: unpinned, other work on the machine moved main's frame median between 12.7 and 19.2 ms and the comparison was noise. Medians of the runs' medians, in milliseconds; the frame's range across runs is in brackets. Test runner and server: seven 600-frame runs. Player: three 300-frame runs.
+Taken on 2026-11-10 on a Ryzen 9 9950X3D under Windows, release build, main (940fabc, with M1) and the M2 branch run alternately. Each run was pinned to the V-cache CCD: unpinned, other work on the machine moved main's frame median between 12.7 and 19.2 ms and the comparison was noise. Medians of the runs' medians, in milliseconds; the frame's range across runs is in brackets. Test runner and server: seven 600-frame runs. Player: three 300-frame runs.
 
 | Step | Test runner main | M2 | Server main | M2 | Player main | M2 |
 |---|---|---|---|---|---|---|
-| Characters | 1.147 | 1.049 | – | – | 1.379 | 1.272 |
-| Agents | 0.118 | 0.065 | – | – | 0.144 | 0.086 |
-| Input | 0.660 | 0.518 | 0.018 | 0.001 | 0.685 | 0.536 |
-| Scripts | 0.121 | 0.010 | 0.117 | 0.006 | 0.129 | 0.011 |
-| Physics | 3.911 | 3.652 | 3.559 | 3.387 | 3.994 | 3.783 |
-| Heartbeat | 0.817 | 0.799 | 0.788 | 0.736 | 0.827 | 0.796 |
-| Animation | 0.090 | 0.060 | – | – | 0.272 | 0.085 |
-| Draw list | – | – | – | – | 5.563 | 5.454 |
-| Network send | – | – | 0.297 | 0.270 | – | – |
-| Render | – | – | – | – | 1.937 | 1.935 |
-| **Frame, median** | **7.02** (6.52–7.62) | **6.23** (5.73–7.02) | **4.82** (4.72–5.39) | **4.44** (4.36–4.89) | **14.95** (14.77–15.79) | **14.03** (13.70–14.68) |
+| Characters | 1.104 | 0.986 | – | – | 1.345 | 1.285 |
+| Agents | 0.115 | 0.059 | – | – | 0.15 | 0.091 |
+| Input | 0.639 | 0.501 | 0.018 | 0.001 | 0.681 | 0.534 |
+| Scripts | 0.119 | 0.008 | 0.116 | 0.008 | 0.129 | 0.012 |
+| Physics | 3.719 | 3.469 | 3.645 | 3.487 | 4.002 | 3.912 |
+| Heartbeat | 0.81 | 0.763 | 0.788 | 0.759 | 0.836 | 0.793 |
+| Animation | 0.087 | 0.057 | – | – | 0.275 | 0.092 |
+| Draw list | – | – | – | – | 5.877 | 6.092 |
+| Network send | – | – | 0.3 | 0.272 | – | – |
+| Render | – | – | – | – | 1.98 | 2.028 |
+| **Frame, median** | **6.68** (6.52–7.15) | **5.91** (5.78–6.25) | **4.88** (4.73–6.22) | **4.65** (4.50–5.65) | **15.48** (15.06–16.68) | **15.26** (14.09–15.67) |
 
-About 11%, 8% and 6% off the frame. Each walk replaced cost a few tens of microseconds on 10,000 parts, so the gain comes from there being many of them: `Scripts` (per-frame Health, Humanoid, follower and prompt walks) falls by about 0.11 ms on every host. A world with few Instances gains almost nothing. On copies of six real projects (General Store Roadside, Abandoned Farmhouse, three biome patches, The Dimming; under 1 MB of `world.json` each, on all three hosts) every difference was within run-to-run noise, in both directions.
+About 12%, 5% and 1.5% off the frame (the player also draws, which M2 leaves alone). Each walk replaced cost a few tens of microseconds on 10,000 parts, so the gain comes from there being many of them: `Scripts` (per-frame Health, Humanoid, follower and prompt walks) falls by about 0.11 ms on every host, `Input` by 0.14 ms and `Animation` in the player by 0.18 ms. A world with few Instances gains almost nothing: on copies of six real projects (General Store Roadside, Abandoned Farmhouse, three biome patches, The Dimming; under 1 MB of `world.json` each, on all three hosts) every difference was within run-to-run noise, in both directions.
 
 ### A Windows desktop with a real GPU
 
