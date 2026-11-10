@@ -27,7 +27,7 @@ use axcenity_anim::{
     find_bone, target_path,
 };
 use axcenity_assets::{BoneTransform, Rig};
-use axcenity_core::InstanceId;
+use axcenity_core::{ClassName, InstanceId};
 use axcenity_render::glam::{EulerRot, Quat};
 use eframe::egui;
 

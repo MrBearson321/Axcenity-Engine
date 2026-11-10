@@ -1584,6 +1584,8 @@ mod accessibility_tests;
 #[cfg(test)]
 mod agent_tests;
 #[cfg(test)]
+mod anim_drawer_tests;
+#[cfg(test)]
 mod asset_fix_tests;
 #[cfg(test)]
 mod asset_refs_tests;
