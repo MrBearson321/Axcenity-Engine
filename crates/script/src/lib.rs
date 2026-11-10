@@ -2469,6 +2469,8 @@ mod instance_identity_tests;
 #[cfg(test)]
 mod joint_tests;
 #[cfg(test)]
+mod luau_pin_tests;
+#[cfg(test)]
 mod mover_tests;
 #[cfg(test)]
 mod physical_tests;

@@ -36,7 +36,7 @@ Keep single tests short. `axcenity-player`'s `every_example_renders` draws every
 
 ## Checking another platform
 
-CI is off, so check Windows, macOS and Linux on those computers. From the repository root:
+CI (`.github/workflows/ci.yml`) is written to run on every push to `main` and every pull request: format, the workspace-hack check, and build, the player having no editor code, clippy and every test on Windows, macOS and Linux. The workflow is turned off in the repository's Actions settings (since October 2026), so nothing runs it today; turn it on there (Actions, CI, Enable workflow) to have pull requests checked. While it's off, and in any case for what it can't check (the game on a real GPU, LAN discovery between two computers), check on those computers. From the repository root:
 
 | Platform | Command |
 |---|---|
@@ -67,6 +67,8 @@ Each copy was also kept, so the target folder grew to 23 GB instead of 9 GB.
 ## Build settings
 
 - **Optimized libraries, line tables only.** `[profile.dev.package."*"]` in the workspace `Cargo.toml` optimizes third-party crates (and `render` and `nav`) in debug builds. It keeps only file-and-line debug info for third-party crates, so panics and backtraces still name the line. The engine's own crates keep full debug info for a debugger. With full debug info everywhere, the editor binary was 1 GB instead of 550 MB, a cold build peaked at 3.9 GB of RAM instead of 2.4 GB, and edits rebuilt 15–30% slower.
+- **Pinned toolchain.** `rust-toolchain.toml` names one Rust release (1.97.0), and the CI and release workflows install the same one (`dtolnay/rust-toolchain@1.97.0`). CI builds with `-D warnings`, so on `stable` a new compiler's new lints could fail CI with no code change. Raise all three together, and fix the new warnings in the same change.
+- **Release and dist profiles.** `--release` uses thin LTO and keeps line tables, so panics still name the line. `release.yml` builds with `--profile dist` (into `target/dist/`): fat LTO, one codegen unit and stripped debug info, for the fastest shipped binaries at the cost of a longer build. Every profile keeps `panic = "unwind"`: asset loaders and editor Play recover from panics with `catch_unwind`.
 - **Linker.** Rust links with LLD on x86-64 Linux by default, which is already fast. A faster linker such as mold saves little here.
 - **rust-analyzer** gets its own target folder (`rust-analyzer.cargo.targetDir` in `.vscode/settings.json`). Its checks on save then don't hold the build lock, which would otherwise keep `cargo` waiting with "Blocking waiting for file lock". Its first check builds once into `target/rust-analyzer`.
 

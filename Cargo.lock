@@ -554,7 +554,7 @@ dependencies = [
  "axcenity-assets",
  "axcenity-core",
  "axcenity-workspace-hack",
- "glam 0.34.1",
+ "glam 0.34.3",
  "serde",
  "serde_json",
 ]
@@ -564,7 +564,7 @@ name = "axcenity-assets"
 version = "0.1.0"
 dependencies = [
  "axcenity-workspace-hack",
- "glam 0.34.1",
+ "glam 0.34.3",
  "gltf",
  "image",
  "meshopt",
@@ -618,7 +618,7 @@ dependencies = [
  "axcenity-core",
  "axcenity-physics",
  "axcenity-workspace-hack",
- "glam 0.34.1",
+ "glam 0.34.3",
 ]
 
 [[package]]
@@ -683,7 +683,7 @@ dependencies = [
  "axcenity-assets",
  "axcenity-core",
  "axcenity-workspace-hack",
- "glam 0.34.1",
+ "glam 0.34.3",
  "image",
  "meshopt",
  "serde",
@@ -784,7 +784,7 @@ dependencies = [
  "axcenity-core",
  "axcenity-terrain",
  "axcenity-workspace-hack",
- "glam 0.34.1",
+ "glam 0.34.3",
 ]
 
 [[package]]
@@ -810,7 +810,7 @@ dependencies = [
  "anyhow",
  "axcenity-workspace-hack",
  "bytemuck",
- "glam 0.34.1",
+ "glam 0.34.3",
  "glyphon",
  "log",
  "pollster",
@@ -862,7 +862,7 @@ dependencies = [
  "axcenity-render",
  "axcenity-save",
  "axcenity-workspace-hack",
- "glam 0.34.1",
+ "glam 0.34.3",
  "luau0-src",
  "mlua",
  "profiling",
@@ -893,7 +893,7 @@ version = "0.1.0"
 dependencies = [
  "axcenity-core",
  "axcenity-workspace-hack",
- "glam 0.34.1",
+ "glam 0.34.3",
  "png",
  "serde",
  "serde_json",
@@ -934,7 +934,6 @@ name = "axcenity-workspace-hack"
 version = "0.1.0"
 dependencies = [
  "ahash",
- "approx",
  "arrayvec",
  "bitflags 2.13.2",
  "block2 0.6.2",
@@ -947,7 +946,7 @@ dependencies = [
  "dispatch2",
  "either",
  "getrandom 0.3.4",
- "glam 0.33.12",
+ "glam 0.34.3",
  "half",
  "hashbrown 0.17.1",
  "image",
@@ -2426,14 +2425,16 @@ checksum = "37bfe73dc8ec21f54d181e5a60554327ec3f1c600c455a75ccbfc65d2106a6c4"
 dependencies = [
  "approx",
  "libm",
- "mint",
 ]
 
 [[package]]
 name = "glam"
-version = "0.34.1"
+version = "0.34.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc148d4ddd3930c52f9e5ae79b89805c6f07e9ff417e7b083e0348cea60a5aba"
+checksum = "627003914c6057c9c8f0832ee4f870b5a4f599d0cfa83f4072675114860cd0ff"
+dependencies = [
+ "mint",
+]
 
 [[package]]
 name = "glamx"
@@ -3057,13 +3058,13 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kira"
-version = "0.12.5"
+version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aae7115ef1161313b8f71f49487702a662ab333bd2a47bf69af410b69112a519"
+checksum = "92df3bfdb0c2f061c5899695d1c1c8616b427005970f4b7fb129f587435b4644"
 dependencies = [
  "atomic-arena",
  "cpal",
- "glam 0.33.12",
+ "glam 0.34.3",
  "mint",
  "pastey",
  "rtrb",
@@ -4556,9 +4557,9 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "renet"
-version = "2.0.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8535f2f4b5afe5e31fc37be4b8a1f167e61177f356b1c6ee8456b7045d6c74c0"
+checksum = "4ff4fbced648dbc74405b8aa88a95e8392c83ce7585ce74a8b3e140a0cf6f27a"
 dependencies = [
  "bytes",
  "log",
@@ -4567,9 +4568,9 @@ dependencies = [
 
 [[package]]
 name = "renet_netcode"
-version = "2.0.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9479f1355a92d5aa04a0339ad341878fa572492cb9be09db7b34954bdb13a30"
+checksum = "284128e56a973662c37ea314b117a5e54dd438a9f34f141719691a1acc47e602"
 dependencies = [
  "log",
  "renet",
