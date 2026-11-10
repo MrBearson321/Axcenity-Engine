@@ -98,3 +98,19 @@ The Sequencer has no Record and nothing is dropped when the playhead moves (move
 
 **Tests**: `undo_history_jumps_back_and_forward_several_steps` (three renames undone in one click from the drawn menu, redo of two, a jump past the end stops), `filter_properties_shows_only_matching_rows` (no ClassName row unfiltered, one for "class"), and the palette coverage test with Undo History as a submenu. `cargo test -p axcenity-editor`: 913 passed, only the known cloud failure.
 
+
+## PR 7: Advanced section in Properties (U15)
+
+**Changed**
+
+| ID | Problem | Change |
+|---|---|---|
+| U15 / P4 | Rare properties sat beside common ones (Appearance showed MaterialVariant and BlueprintTexture between Material and Metalness) | Paul approved a short per-class list (`properties::is_advanced`). Those properties now sit in one closed **Advanced** section after the others. Its header counts the ones that differ from their defaults ("Advanced · 1 changed"), and Filter properties still finds them. Nothing is removed. A part's panel loses 12 rows by default. |
+
+**Tests**: `rare_settings_fold_under_advanced_and_say_how_many_changed` checks four things:
+- Rare rows are hidden and common ones stay.
+- The header counts a changed Massless.
+- Filtering "mass" shows Massless.
+- Brightness stays visible on a light but folds on an emitter. Controllers and TextLabel are checked too.
+
+The snapshot `properties-advanced.png` shows a part's panel: Data, Appearance (6 rows), Behavior (4), Part, then a closed "Advanced · 1 changed" header, then Attributes and Tags. `cargo test -p axcenity-editor`: 916 passed, only the known cloud failure.
