@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axcenity_assets::{Assets, Model, Posed};
+use axcenity_assets::{Assets, Model, Posed, Slot};
 use axcenity_core::InstanceId;
 use axcenity_render::Skin;
 
@@ -51,6 +51,15 @@ pub(crate) struct Models {
     frame: u64,
 }
 
+/// What drawing finds for a `MeshId` this frame.
+pub(crate) enum ModelLookup<'a> {
+    Ready(&'a Arc<Model>, &'a [ModelPiece]),
+    /// On its way: nothing is drawn for it yet.
+    Loading,
+    /// No file, or one that can't be loaded.
+    Failed,
+}
+
 struct CachedModel {
     model: Arc<Model>,
     pieces: Vec<ModelPiece>,
@@ -60,23 +69,25 @@ struct CachedModel {
 
 impl Models {
     /// The model at `mesh_id` and what its primitives share, from
-    /// [`Assets::model`]. The assets are asked once a frame for each model,
-    /// and when they hand back another one (it was reloaded) its pieces are
-    /// made again.
-    pub(crate) fn get(
-        &mut self,
-        assets: &Assets,
-        mesh_id: &str,
-    ) -> Option<(&Arc<Model>, &[ModelPiece])> {
+    /// [`Assets::model_slot`], so a frame never waits for a file. The assets
+    /// are asked once a frame for each model, and when they hand back
+    /// another one (it was reloaded) its pieces are made again.
+    pub(crate) fn get(&mut self, assets: &Assets, mesh_id: &str) -> ModelLookup<'_> {
         let frame = self.frame;
         // Looked up by `&str` first, so a hit doesn't allocate a key.
         let fresh = match self.by_id.get_mut(mesh_id) {
             Some(cached) if cached.checked == frame => false,
             Some(cached) => {
-                let model = assets.model_blocking(mesh_id)?;
-                if !Arc::ptr_eq(&model, &cached.model) {
-                    cached.pieces = model_pieces(&model);
-                    cached.model = model;
+                match assets.model_slot(mesh_id) {
+                    Slot::Ready(model) => {
+                        if !Arc::ptr_eq(&model, &cached.model) {
+                            cached.pieces = model_pieces(&model);
+                            cached.model = model;
+                        }
+                    }
+                    // Being read again: the last version stays on screen.
+                    Slot::Loading => {}
+                    Slot::Failed => return ModelLookup::Failed,
                 }
                 cached.checked = frame;
                 false
@@ -84,7 +95,11 @@ impl Models {
             None => true,
         };
         if fresh {
-            let model = assets.model_blocking(mesh_id)?;
+            let model = match assets.model_slot(mesh_id) {
+                Slot::Ready(model) => model,
+                Slot::Loading => return ModelLookup::Loading,
+                Slot::Failed => return ModelLookup::Failed,
+            };
             let pieces = model_pieces(&model);
             self.by_id.insert(
                 mesh_id.to_owned(),
@@ -95,8 +110,10 @@ impl Models {
                 },
             );
         }
-        let cached = self.by_id.get(mesh_id)?;
-        Some((&cached.model, &cached.pieces))
+        match self.by_id.get(mesh_id) {
+            Some(cached) => ModelLookup::Ready(&cached.model, &cached.pieces),
+            None => ModelLookup::Failed,
+        }
     }
 }
 
@@ -145,9 +162,11 @@ impl Skins {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
-    use axcenity_assets::{Assets, Reload};
+    use axcenity_assets::{Assets, LoadStatus, Reload};
     use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
     use axcenity_render::glam::Vec3;
     use axcenity_render::{Camera, DrawItem, MeshSource, Shape};
@@ -155,6 +174,8 @@ mod tests {
     use crate::{Poses, TerrainCache, build_draw_list_posed};
 
     const PYRAMID: &str = "assets/models/pyramid.gltf";
+    /// Only turns a load that never comes into a failed test.
+    const LIMIT: Duration = Duration::from_secs(30);
 
     fn examples() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples")
@@ -243,6 +264,95 @@ mod tests {
         assert_eq!(Arc::strong_count(&after), 1);
         assert!(assets.take_errors().is_empty());
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// Holds every load until the first sender is sent to, and says on the
+    /// receiver when one has got that far.
+    fn gate_loads(assets: &Assets) -> (mpsc::Sender<()>, mpsc::Receiver<()>) {
+        let (release, released) = mpsc::channel::<()>();
+        let released = Mutex::new(released);
+        let (reached, reaches) = mpsc::channel();
+        let reached = Mutex::new(reached);
+        assets.set_load_gate(move |_| {
+            let _ = reached.lock().unwrap().send(());
+            let _ = released.lock().unwrap().recv_timeout(LIMIT);
+        });
+        (release, reaches)
+    }
+
+    #[test]
+    fn a_model_still_loading_draws_nothing_and_doesnt_hold_up_the_frame() {
+        let mut world = World::new();
+        mesh_part(&mut world, PYRAMID);
+        let assets = Assets::new(examples().join("hello-mesh"));
+        assets.load_textures_in_background(|| {});
+        let (release, reached) = gate_loads(&assets);
+        let mut cache = TerrainCache::new();
+        let poses = Poses::new();
+
+        // The file is held open below, so a frame that waited for it would
+        // sit here until the gate gave up, and then find the model.
+        assert!(draw(&world, &assets, &poses, &mut cache).is_empty());
+        reached.recv_timeout(LIMIT).expect("the load started");
+        assert!(
+            draw(&world, &assets, &poses, &mut cache).is_empty(),
+            "not even the grey box of a model that can't be loaded"
+        );
+
+        release.send(()).unwrap();
+        assert_eq!(assets.request_model(PYRAMID).wait(), LoadStatus::Ready);
+        let items = draw(&world, &assets, &poses, &mut cache);
+        let model = assets.model_ready(PYRAMID).unwrap();
+        assert_eq!(items.len(), model.primitives.len(), "drawn once it's in");
+        assert!(
+            items
+                .iter()
+                .all(|item| matches!(item.shape, Shape::Mesh(_)))
+        );
+    }
+
+    #[test]
+    fn a_model_that_cant_load_is_the_grey_box_once_that_is_known() {
+        const GONE: &str = "assets/models/gone.glb";
+        let mut world = World::new();
+        mesh_part(&mut world, GONE);
+        let assets = Assets::new(examples().join("hello-mesh"));
+        assets.load_textures_in_background(|| {});
+        let (release, reached) = gate_loads(&assets);
+        let mut cache = TerrainCache::new();
+        assert!(draw(&world, &assets, &Poses::new(), &mut cache).is_empty());
+        reached.recv_timeout(LIMIT).expect("the load started");
+
+        release.send(()).unwrap();
+        assert_eq!(assets.request_model(GONE).wait(), LoadStatus::Failed);
+        let items = draw(&world, &assets, &Poses::new(), &mut cache);
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0].shape, Shape::Block));
+    }
+
+    #[test]
+    fn a_model_being_read_again_stays_on_screen() {
+        let mut world = World::new();
+        mesh_part(&mut world, PYRAMID);
+        let assets = Assets::new(examples().join("hello-mesh"));
+        assets.load_textures_in_background(|| {});
+        assert_eq!(assets.request_model(PYRAMID).wait(), LoadStatus::Ready);
+        let mut cache = TerrainCache::new();
+        let before = draw(&world, &assets, &Poses::new(), &mut cache).len();
+        assert!(before > 0);
+
+        let (release, reached) = gate_loads(&assets);
+        assets.forget(PYRAMID);
+        assert_eq!(
+            draw(&world, &assets, &Poses::new(), &mut cache).len(),
+            before
+        );
+        reached.recv_timeout(LIMIT).expect("the load started");
+        assert_eq!(
+            draw(&world, &assets, &Poses::new(), &mut cache).len(),
+            before
+        );
+        release.send(()).unwrap();
     }
 
     #[test]
