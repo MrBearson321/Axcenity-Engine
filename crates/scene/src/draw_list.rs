@@ -22,7 +22,7 @@ use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
 use crate::graphics_volumes::Look;
 use crate::material;
-use crate::mesh_cache::MeshCache;
+use crate::mesh_cache::{MeshCache, ModelLookup};
 use crate::orientation::rotation_from_orientation;
 use crate::terrain::TerrainCache;
 
@@ -1049,9 +1049,10 @@ fn place_maps(material: &mut Material, appearance: &Instance) {
 
 /// A MeshPart's draw items, one per part of its model, each with the
 /// model's own material, or its `MaterialVariant` in place of them all, or
-/// with the maps of the SurfaceAppearance inside it for that material. Until it has a model (no `MeshId` yet, or one
-/// that can't be loaded), it's drawn as a plain grey box, so it can still
-/// be seen and picked. With `posed` (a pose of its model), the model is
+/// with the maps of the SurfaceAppearance inside it for that material. While its model
+/// is still loading, nothing is drawn for it. With no model at all (no
+/// `MeshId` yet, or one that can't be loaded), it's drawn as a plain grey
+/// box, so it can still be seen and picked. With `posed` (a pose of its model), the model is
 /// drawn in that pose.
 fn mesh_part_draw_items(
     world: &World,
@@ -1074,20 +1075,24 @@ fn mesh_part_draw_items(
         .property("MeshId")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let Some((model, pieces)) = meshes.models.get(assets, mesh_id) else {
-        items.push(DrawItem {
-            shape: Shape::Block,
-            transform,
-            material: Material::default(),
-            uv_tile: 0.0,
-            casts_shadow: casts_shadow(instance),
-            id: 0,
-            cull_distance: 0.0,
-            skin: None,
-            sway: None,
-            decal_role: Default::default(),
-        });
-        return;
+    let (model, pieces) = match meshes.models.get(assets, mesh_id) {
+        ModelLookup::Ready(model, pieces) => (model, pieces),
+        ModelLookup::Loading => return,
+        ModelLookup::Failed => {
+            items.push(DrawItem {
+                shape: Shape::Block,
+                transform,
+                material: Material::default(),
+                uv_tile: 0.0,
+                casts_shadow: casts_shadow(instance),
+                id: 0,
+                cull_distance: 0.0,
+                skin: None,
+                sway: None,
+                decal_role: Default::default(),
+            });
+            return;
+        }
     };
     let appearances: Vec<&Instance> = instance
         .children()

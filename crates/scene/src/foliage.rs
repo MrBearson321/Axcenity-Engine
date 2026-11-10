@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use axcenity_assets::{Assets, Model};
+use axcenity_assets::{Assets, Model, Slot};
 use axcenity_core::{
     FoliagePlant, FoliageProp, FoliageSource, InstanceId, PartType, TerrainData, Vector3,
 };
@@ -433,10 +433,9 @@ impl FoliageKey {
             placement: [at.x, at.y, at.z, size.x, size.y, size.z].map(f32::to_bits),
             models: paths
                 .iter()
-                .map(|path| {
-                    assets
-                        .model_blocking(path)
-                        .map(|model| Arc::as_ptr(&model) as usize)
+                .map(|path| match assets.model_slot(path) {
+                    Slot::Ready(model) => Some(Arc::as_ptr(&model) as usize),
+                    Slot::Loading | Slot::Failed => None,
                 })
                 .collect(),
         }
@@ -497,10 +496,15 @@ fn built_groups(
         let (cull_distance, model) = match &instance.source {
             FoliageSource::Model(path) => {
                 let model = models.entry(path.as_str()).or_insert_with(|| {
-                    assets.model_blocking(path).map(|model| {
-                        let pieces = model_pieces(&model);
-                        (model, pieces)
-                    })
+                    // A model still loading is left out; the key above
+                    // changes when it's in, which builds the groups again.
+                    match assets.model_slot(path) {
+                        Slot::Ready(model) => {
+                            let pieces = model_pieces(&model);
+                            Some((model, pieces))
+                        }
+                        Slot::Loading | Slot::Failed => None,
+                    }
                 });
                 let Some((model, pieces)) = model else {
                     continue;
@@ -775,6 +779,54 @@ mod tests {
         changed.foliage_mut().clear();
         world.set_terrain(terrain, std::sync::Arc::new(changed));
         assert!(drawn(&world, &mut kept).is_empty(), "built again");
+    }
+
+    #[test]
+    fn a_painted_model_appears_when_it_has_loaded() {
+        let folder =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-mesh");
+        let assets = Assets::new(&folder);
+        assets.load_textures_in_background(|| {});
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let released = std::sync::Mutex::new(released);
+        assets.set_load_gate(move |_| {
+            let _ = released
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(30));
+        });
+        let path = "assets/models/pyramid.gltf";
+        let mut world = axcenity_core::World::new();
+        let terrain = world.create(ClassName::Terrain).unwrap();
+        world.set_parent(terrain, Some(world.workspace())).unwrap();
+        let mut data = TerrainData::flat(9, 9, 0.25).unwrap();
+        data.foliage_mut().push(FoliageInstance {
+            source: FoliageSource::Model(path.to_owned()),
+            x: 4.0,
+            z: 4.0,
+            yaw: 0.0,
+            scale: 1.0,
+            collide: false,
+        });
+        world.set_terrain(terrain, std::sync::Arc::new(data));
+        let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
+        let data = world.terrain(terrain).unwrap();
+        // Kept between frames, as drawing keeps it.
+        let mut kept = None;
+        let mut frame = |assets: &Assets| {
+            let mut chunks = Vec::new();
+            draw_terrain(&mut kept, terrain, &placement, data, assets, &mut chunks);
+            chunks.iter().map(|c| c.items.len()).sum::<usize>()
+        };
+
+        assert_eq!(frame(&assets), 0, "held at the gate, and no waiting for it");
+        release.send(()).unwrap();
+        assert_eq!(
+            assets.request_model(path).wait(),
+            axcenity_assets::LoadStatus::Ready
+        );
+        let model = assets.model_ready(path).unwrap();
+        assert_eq!(frame(&assets), model.primitives.len());
     }
 
     #[test]

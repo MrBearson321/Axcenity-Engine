@@ -118,7 +118,21 @@ Real projects, on the owner's 32-thread Windows machine, release build, 120 fram
 | Temperate Wet Patch | 3,393 → 3,311 | 1,145 → 1,057 | 54.9 → 58.3 |
 | Tropical Snow Patch | 3,208 → 3,061 | 716 → 765 | 16.8 → 17.1 |
 
-Model-heavy projects gain most, because models used to parse one at a time. The player now reaches its first frame sooner, since startup no longer waits behind the global lock, and the first draw then waits for what's still loading: that's why Abandoned Farmhouse's first frame is longer while its total is about the same. Moving the draw list to `model_ready` would take that wait out of the frame.
+Model-heavy projects gain most, because models used to parse one at a time. The player now reaches its first frame sooner, since startup no longer waits behind the global lock, and the first draw then waits for what's still loading: that's why Abandoned Farmhouse's first frame is longer while its total is about the same. The next section takes that wait out of the frame.
+
+### Drawing without waiting for models (M5 follow-up)
+
+Same machine and method, main (with M5) against the non-blocking draw list. Medians of three runs, milliseconds, with other builds running.
+
+| Project | Launch to assets in, main → branch | First frame | Worst frame after warm-up |
+|---|---|---|---|
+| General Store Roadside | 3,811 → 3,776 | 1,341 → 1,347 | 11.2 → 10.7 |
+| Abandoned Farmhouse | 5,443 → 6,812 | 2,303 → 3,951 | 9.1 → 11.5 |
+| Arid Dry Patch | 5,392 → 3,650 | 1,012 → 824 | 64.6 → 62.1 |
+| Temperate Wet Patch | 3,843 → 3,229 | 1,143 → 927 | 70.7 → 57.4 |
+| Tropical Snow Patch | 2,985 → 3,010 | 675 → 682 | 14.4 → 14.1 |
+
+Abandoned Farmhouse's first frame is texture work, not models. Timing its stages (three more runs, launch to assets in 5,257–5,563) gave Render 2,716–2,976, Draw list 48–52 and Physics 8–9. That Render time is the CPU mipmaps and upload of its textures, which land together on the first frame now that they're decoded by then; roadmap L2 moves them to import time.
 
 ### Navmesh rebuilds (I7)
 
