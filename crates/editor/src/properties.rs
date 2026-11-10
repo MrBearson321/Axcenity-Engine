@@ -535,6 +535,67 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
     sections
 }
 
+/// The title of the section that holds rare settings.
+const ADVANCED: &str = "Advanced";
+
+/// Whether `name` on a `class` is a rare setting, shown in the Advanced
+/// section instead of its group (the list Paul approved, 2026-11-10).
+pub fn is_advanced(class: ClassName, name: &str) -> bool {
+    let names: &[&str] = if class.is_base_part() {
+        &[
+            "MaterialVariant",
+            "BlueprintTexture",
+            "EmissiveColor",
+            "Emission",
+            "CanQuery",
+            "CollisionGroup",
+            "WindAffected",
+            "CustomPhysicalProperties",
+            "Massless",
+            "AssemblyLinearVelocity",
+            "AssemblyAngularVelocity",
+            "TileSize",
+        ]
+    } else if crate::style_panel::is_styled(class) {
+        &[
+            "Class",
+            "Id",
+            "Interactable",
+            "Selectable",
+            "NextSelectionUp",
+            "NextSelectionDown",
+            "NextSelectionLeft",
+            "NextSelectionRight",
+            "AccessibleName",
+            "TextKey",
+            "RichText",
+        ]
+    } else if class.is_character_controller() {
+        &[
+            "MaxSlopeAngle",
+            "MaxStepHeight",
+            "CrouchHeight",
+            "CrouchSpeedScale",
+            "CameraMinZoomDistance",
+            "CameraMaxZoomDistance",
+            "FootPlacement",
+            "MoveDirection",
+            "PlatformStand",
+            "Sit",
+        ]
+    } else {
+        match class {
+            ClassName::ParticleEmitter => {
+                &["Drag", "WindAffectsDrag", "LightEmission", "Brightness"]
+            }
+            ClassName::Sound => &["RollOffMinDistance", "RollOffMaxDistance", "SoundGroup"],
+            ClassName::Model => &["ModelStreamingMode"],
+            _ => &[],
+        }
+    };
+    names.contains(&name)
+}
+
 /// Whether the Properties panel lets you rename this Instance. Services keep
 /// their names, and a Script is named after its file, so renaming it here
 /// would be lost on the next load.
@@ -791,64 +852,95 @@ pub fn show(
                 } else {
                     instance.class().default_properties().into_iter().collect()
                 };
+                // One property's row: its name (with ↺, the prefab's ↺ or
+                // Play's pin) and its control.
+                let mut row = |ui: &mut egui::Ui, name: &'static str, value: Value| {
+                    let field = Field::Property(name);
+                    let reset = defaults
+                        .get(name)
+                        .filter(|default| resettable(default) && **default != value)
+                        .filter(|_| !locked || name == "Locked");
+                    if overridden.contains(name) {
+                        if let Some(made) = override_name(ui, name) {
+                            edit = Some(made);
+                        }
+                    } else if let Some(default) = reset {
+                        if field_name_with_reset(ui, class, name, default) {
+                            edit = Some(Edit::Property(name, default.clone()));
+                        }
+                    } else if let Some(keep) =
+                        field_name_with_pin(ui, class, name, pin(field))
+                    {
+                        edit = Some(Edit::Keep(field, keep));
+                    }
+                    let enabled = !locked || name == "Locked";
+                    let made = ui.add_enabled_ui(enabled, |ui| match value {
+                        // Who sits there is up to the game, not the editor.
+                        Value::Instance(target)
+                            if name == "Occupant"
+                                && instance.class().is_seat() =>
+                        {
+                            let who = target
+                                .and_then(|target| world.full_name(target))
+                                .unwrap_or_else(|| "None".to_owned());
+                            ui.label(who).on_hover_text(
+                                "The controller sitting here during Play: set by \
+                                 walking into the seat or by seat:Sit(controller).",
+                            );
+                            None
+                        }
+                        // An ObjectValue's Value picks from the world.
+                        Value::Instance(target) => object_control(ui, world, id, target)
+                            .map(|target| Edit::Property(name, Value::Instance(target))),
+                        // Shows the material's values while it has none.
+                        Value::PhysicalProperties(custom) => {
+                            physical_control(ui, instance, custom).map(|custom| {
+                                Edit::Property(name, Value::PhysicalProperties(custom))
+                            })
+                        }
+                        value => value_control(ui, name, value),
+                    })
+                    .inner;
+                    if made.is_some() {
+                        edit = made;
+                    }
+                    ui.end_row();
+                };
+                // Rare settings go in Advanced, at the end and closed until
+                // opened, so the common ones come first.
+                let mut advanced = Vec::new();
                 for mut group in sections(instance) {
                     group.properties.retain(|(name, _)| shows(group.title, name));
-                    if group.properties.is_empty() {
+                    let (rare, common): (Vec<_>, Vec<_>) = group
+                        .properties
+                        .into_iter()
+                        .partition(|(name, _)| is_advanced(class, name));
+                    advanced.extend(rare);
+                    if common.is_empty() {
                         continue;
                     }
                     shown_any = true;
                     section(ui, group.title, open, true, |ui| {
-                        for (name, value) in group.properties {
-                            let field = Field::Property(name);
-                            let reset = defaults
-                                .get(name)
-                                .filter(|default| resettable(default) && **default != value)
-                                .filter(|_| !locked || name == "Locked");
-                            if overridden.contains(name) {
-                                if let Some(made) = override_name(ui, name) {
-                                    edit = Some(made);
-                                }
-                            } else if let Some(default) = reset {
-                                if field_name_with_reset(ui, class, name, default) {
-                                    edit = Some(Edit::Property(name, default.clone()));
-                                }
-                            } else if let Some(keep) =
-                                field_name_with_pin(ui, class, name, pin(field))
-                            {
-                                edit = Some(Edit::Keep(field, keep));
-                            }
-                            let enabled = !locked || name == "Locked";
-                            let made = ui.add_enabled_ui(enabled, |ui| match value {
-                                // Who sits there is up to the game, not the editor.
-                                Value::Instance(target)
-                                    if name == "Occupant"
-                                        && instance.class().is_seat() =>
-                                {
-                                    let who = target
-                                        .and_then(|target| world.full_name(target))
-                                        .unwrap_or_else(|| "None".to_owned());
-                                    ui.label(who).on_hover_text(
-                                        "The controller sitting here during Play: set by \
-                                         walking into the seat or by seat:Sit(controller).",
-                                    );
-                                    None
-                                }
-                                // An ObjectValue's Value picks from the world.
-                                Value::Instance(target) => object_control(ui, world, id, target)
-                                    .map(|target| Edit::Property(name, Value::Instance(target))),
-                                // Shows the material's values while it has none.
-                                Value::PhysicalProperties(custom) => {
-                                    physical_control(ui, instance, custom).map(|custom| {
-                                        Edit::Property(name, Value::PhysicalProperties(custom))
-                                    })
-                                }
-                                value => value_control(ui, name, value),
-                            })
-                            .inner;
-                            if made.is_some() {
-                                edit = made;
-                            }
-                            ui.end_row();
+                        for (name, value) in common {
+                            row(ui, name, value);
+                        }
+                    });
+                }
+                if !advanced.is_empty() {
+                    shown_any = true;
+                    let changed = advanced
+                        .iter()
+                        .filter(|(name, value)| {
+                            defaults.get(name).is_some_and(|default| default != value)
+                        })
+                        .count();
+                    let title = match changed {
+                        0 => ADVANCED.to_owned(),
+                        n => format!("{ADVANCED} · {n} changed"),
+                    };
+                    section_titled(ui, ADVANCED, &title, false, open, |ui| {
+                        for (name, value) in advanced {
+                            row(ui, name, value);
                         }
                     });
                 }
@@ -1081,6 +1173,19 @@ fn section(
     if !shown {
         return;
     }
+    section_titled(ui, title, title, true, open, rows);
+}
+
+/// [`section`] with a header that can say more than its `title` (which
+/// keeps its open state), and closed at first unless `default_open`.
+fn section_titled(
+    ui: &mut egui::Ui,
+    title: &str,
+    header: &str,
+    default_open: bool,
+    open: Option<bool>,
+    rows: impl FnOnce(&mut egui::Ui),
+) {
     let icon = match title {
         "Data" => icons::IDENTIFICATION_CARD,
         "Appearance" => icons::PALETTE,
@@ -1110,12 +1215,13 @@ fn section(
         "Light" => icons::LIGHTBULB,
         "Attributes" => icons::LIST_BULLETS,
         "Tags" => icons::TAG,
+        ADVANCED => icons::SLIDERS_HORIZONTAL,
         _ => icons::DOTS_THREE_OUTLINE,
     };
     let palette = theme::palette(ui.ctx());
     ui.add_space(4.0);
     crate::widgets::divider(ui);
-    let header = egui::RichText::new(theme::with_icon(icon, title))
+    let header = egui::RichText::new(theme::with_icon(icon, header))
         .family(theme::medium_family())
         .color(palette.text_secondary);
     // Every section's names take the same width (from the panel's), so the
@@ -1123,7 +1229,7 @@ fn section(
     // values go under their names instead.
     egui::CollapsingHeader::new(header)
         .id_salt(title)
-        .default_open(true)
+        .default_open(default_open)
         .open(open)
         .icon(crate::widgets::chevron)
         .show_unindented(ui, |ui| {
@@ -2723,6 +2829,64 @@ mod decal_section_tests {
             default_text(&Value::String(String::new())).as_deref(),
             Some("empty")
         );
+    }
+
+    /// Rare settings start folded under Advanced, whose header counts the
+    /// ones changed; the filter finds them and opens it.
+    #[test]
+    fn rare_settings_fold_under_advanced_and_say_how_many_changed() {
+        let mut world = World::new();
+        let part = world.create(ClassName::Part).unwrap();
+        let has = |shown: &[String], text: &str| shown.iter().any(|t| t == text);
+        // A section's header has its icon in front.
+        let header =
+            |shown: &[String], text: &str| shown.iter().any(|t| t.ends_with(&format!("  {text}")));
+
+        let shown = shown_with_filter(&world, part, "");
+        assert!(header(&shown, "Advanced"), "{shown:?}");
+        for rare in ["Massless", "CollisionGroup", "MaterialVariant"] {
+            assert!(!has(&shown, rare), "{rare} is folded: {shown:?}");
+        }
+        for common in ["Color", "Anchored", "CanCollide", "Size"] {
+            assert!(has(&shown, common), "{common} stays: {shown:?}");
+        }
+
+        world
+            .set_property(part, "Massless", Value::Bool(true))
+            .unwrap();
+        let shown = shown_with_filter(&world, part, "");
+        assert!(header(&shown, "Advanced · 1 changed"), "{shown:?}");
+
+        let shown = shown_with_filter(&world, part, "mass");
+        assert!(has(&shown, "Massless"), "{shown:?}");
+
+        // With AXCENITY_SNAPSHOTS: the part's panel, Advanced closed.
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            crate::snapshot::snapshot(
+                &std::path::PathBuf::from(folder).join("properties-advanced.png"),
+                egui::vec2(300.0, 1100.0),
+                vec![Vec::new(); 3],
+                |ctx| {
+                    ctx.data_mut(|d| {
+                        d.insert_temp(egui::Id::new("properties filter"), String::new())
+                    });
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let _ = show(ui, &world, Some(part), false, &[], 1, |_| {});
+                    });
+                },
+            );
+        }
+
+        // Lights keep Brightness in view; an emitter's is rare.
+        assert!(!is_advanced(ClassName::PointLight, "Brightness"));
+        assert!(is_advanced(ClassName::ParticleEmitter, "Brightness"));
+        assert!(is_advanced(
+            ClassName::ThirdPersonController,
+            "MaxStepHeight"
+        ));
+        assert!(!is_advanced(ClassName::ThirdPersonController, "WalkSpeed"));
+        assert!(is_advanced(ClassName::TextLabel, "RichText"));
+        assert!(!is_advanced(ClassName::TextLabel, "Text"));
     }
 
     /// Typing in Filter properties leaves only the rows whose names match
