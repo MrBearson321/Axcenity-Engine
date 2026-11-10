@@ -1,6 +1,6 @@
 # Terrain
 
-Read this when changing terrain data, brushes, generation, or how a Terrain is saved and drawn. The Terrain Studio in the editor is `crates/editor` (`terrain_studio.rs`). This page is the algorithms in `crates/terrain`.
+Read this when changing terrain data, brushes, generation, or how a Terrain is saved and drawn. The Terrain Studio in the editor is `crates/editor` (`terrain_studio.rs`). Its tool palette (Sculpt, Materials, Terrain rows) shows icons, with each tool's name, key and hint on hover; from 400 points wide it also names each tool beside its icon (`CAPTIONS_WIDTH`; test `a_wide_panel_names_its_tools`). This page is the algorithms in `crates/terrain`.
 
 `TerrainData` lives on the Terrain Instance in `core`. This crate only computes on that data. It does not draw, simulate contacts, or touch the disk: `scene` meshes it, `physics` collides with it, and `project` reads and writes the files.
 

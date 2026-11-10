@@ -57,6 +57,10 @@ pub const LAYER_MAPS: [(&str, &str); 6] = [
     ("HeightMap", "Height"),
 ];
 
+/// From this panel width (in points), the tool palette names its tools
+/// beside their icons instead of only on hover.
+const CAPTIONS_WIDTH: f32 = 400.0;
+
 /// The resolutions offered for a terrain, in samples along a side.
 pub const RESOLUTIONS: [usize; 5] = [129, 257, 513, 1025, 2049];
 
@@ -741,8 +745,10 @@ impl TerrainStudio {
         );
     }
 
-    /// The tool palette: three rows of icon buttons.
+    /// The tool palette: three rows of icon buttons, with each tool's name
+    /// beside its icon when the panel is wide enough for it.
     fn palette(&mut self, ui: &mut egui::Ui) {
+        let captions = ui.available_width() >= CAPTIONS_WIDTH;
         let rows: [(&str, &[TerrainTool]); 3] = [
             ("Sculpt", &TerrainTool::SCULPTING),
             ("Materials", &TerrainTool::MATERIALS),
@@ -758,15 +764,41 @@ impl TerrainStudio {
                             .color(theme::palette(ui.ctx()).text_weak),
                     ),
                 );
-                for &tool in tools {
-                    let tooltip = match tool.key() {
-                        Some(key) => format!("{} ({})\n{}", tool.label(), key.name(), tool.hint()),
-                        None => format!("{}\n{}", tool.label(), tool.hint()),
-                    };
-                    let picked = self.tool == Some(tool);
-                    if widgets::icon_button(ui, tool.icon(), &tooltip, picked).clicked() {
-                        self.tool = if picked { None } else { Some(tool) };
+                let mut buttons = |ui: &mut egui::Ui| {
+                    for &tool in tools {
+                        let tooltip = match tool.key() {
+                            Some(key) => {
+                                format!("{} ({})\n{}", tool.label(), key.name(), tool.hint())
+                            }
+                            None => format!("{}\n{}", tool.label(), tool.hint()),
+                        };
+                        let picked = self.tool == Some(tool);
+                        let button = if captions {
+                            let palette = theme::palette(ui.ctx());
+                            ui.add(
+                                widgets::button(
+                                    Role::Ghost,
+                                    Some(tool.icon()),
+                                    tool.label(),
+                                    &palette,
+                                )
+                                .selected(picked)
+                                .frame(picked),
+                            )
+                            .on_hover_text(&tooltip)
+                        } else {
+                            widgets::icon_button(ui, tool.icon(), &tooltip, picked)
+                        };
+                        if button.clicked() {
+                            self.tool = if picked { None } else { Some(tool) };
+                        }
                     }
+                };
+                // Named buttons that wrap stay to the right of the row's title.
+                if captions {
+                    ui.horizontal_wrapped(buttons);
+                } else {
+                    buttons(ui);
                 }
             });
         }
