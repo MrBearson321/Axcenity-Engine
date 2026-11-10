@@ -220,8 +220,6 @@ pub(super) fn links_section(
         return;
     };
     let palette = theme::palette(ui.ctx());
-    ui.add_space(4.0);
-    widgets::section_label(ui, "Code & animation");
 
     // The path, to copy into a script.
     if let Some(path) = lua_path(world, id) {

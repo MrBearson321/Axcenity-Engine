@@ -13,7 +13,6 @@ use eframe::egui;
 use super::{DesignerAction, DesignerScene, UiDesigner};
 use crate::responsive;
 use crate::theme;
-use crate::widgets;
 
 /// The preview's largest side, in points.
 const PREVIEW: f32 = 200.0;
@@ -76,6 +75,19 @@ pub fn dragged_slices(
     slices
 }
 
+/// Whether `id` is drawn with a sliced picture (`border-image`).
+pub(super) fn has_slice(scene: &DesignerScene, id: InstanceId) -> bool {
+    axcenity_ui::style_value_in_state(
+        scene.world,
+        id,
+        scene.stylesheets,
+        UiState::Normal,
+        "border-image",
+    )
+    .and_then(|value| BorderImage::parse(&value))
+    .is_some()
+}
+
 impl UiDesigner {
     /// The Slice section.
     pub(super) fn slice_editor(
@@ -93,8 +105,6 @@ impl UiDesigner {
             "border-image",
         )
         .and_then(|value| BorderImage::parse(&value));
-        ui.add_space(4.0);
-        widgets::section_label(ui, "Slice");
         let mut write = |value: String, dragging: bool| {
             actions.push(DesignerAction::TextStyle {
                 id,

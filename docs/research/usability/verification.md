@@ -203,3 +203,30 @@ Findings and plan: [block-editor.md](block-editor.md).
 
 **Tests**: `retopology_and_bake_stay_folded_until_used` (closed at first, a click opens and closes it, a reference opens it), `the_mesh_menu_says_why_its_operations_are_greyed` (the note in Object mode, shading and Bridge Edge Loops listed, no note in Edit mode), `paint_warns_when_faces_share_texture_space_and_one_click_fixes_it` (a New cube warns; a click on Smart UV Project clears it as one undo step and stays in Paint; undo brings it back; an object with no uvs says so), and `every_ribbon_and_menu_command_can_be_run_from_the_palette` with the new button. Tour shots: `tour-21-studio-object.png` (the closed fold), `tour-27-studio-paint-new-cube.png` (the warning and its button), `tour-03-ribbon-Model.png` (the Models group).
 
+
+## UI Designer PR 1: beginner-first inspector (U20, UD1–UD4)
+
+Findings and plan: [ui-designer.md](ui-designer.md).
+
+**Changed**
+
+| ID | Problem | Change |
+|---|---|---|
+| UD1 | The inspector was one flat list of up to 14 always-open sections; a button's Styles, anchor and **When Activated** came last, under States, Bevel and Slice | Every section folds. Styles, Anchor, Text, Widget, Image, Look and Code & animation come first, open; States, Bevel and Slice start folded, and a folded header names what's set (**Bevel · Raised**). Folded, States edits nothing: the text toolbar edits the Normal look |
+| UD2 | Shadow's blur field drew over Letter spacing in a two-column inspector | Its fields on two fixed lines |
+| UD3, UD4 | "Background 100%" for an invisible background; stray spaces in Reset's hover text | "Transparency: 0% is solid, 100% is invisible." above the sliders; the hover text fixed |
+
+**Tests**: `the_inspector_lists_everyday_sections_first_and_the_fine_tuning_last`, `a_folded_section_opens_on_its_header_stays_open_and_names_what_it_has`, `with_states_folded_the_text_toolbar_edits_the_normal_look`; the States, Bevel and Slice tests open their section first. Tour shots 40–50 (`TOUR_ONLY=ui-`). `cargo test -p axcenity-editor`: only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`); clippy and fmt clean.
+
+## UI Designer PR 2: right-click menus and the empty tab (U20, UD5–UD8)
+
+Merged as #48. Findings and plan: [ui-designer.md](ui-designer.md).
+
+| ID | Problem | Change |
+|---|---|---|
+| UD5 | Right-click menus had no Rename or Delete; Delete was a key the designer never mentioned | **Rename** (the inspector's Name, all selected) and **Delete** (the Delete key's action, one undo step) on the artboard's and the Hierarchy's menus, with the Explorer's icons and shortcut text |
+| UD6 | "There's no ScreenGui to design yet." didn't say what a ScreenGui is | A heading and "Lay out the game's 2D interface here … It lives in a ScreenGui, a layer drawn over the game" above **New ScreenGui** |
+| UD7 | Fixed · Fit · Scale had no hover text | Each says what it does |
+| UD8 | "No CSS styles this element yet" | "No CSS rule styles this element yet" |
+
+**Tests**: `delete_on_the_right_click_menu_deletes_as_one_undo_step`, `rename_on_the_right_click_menu_types_over_the_name_in_the_inspector`, `the_empty_designer_says_what_a_screen_gui_is_and_makes_one` (`app/ui_designer_menu_tests.rs`). Snapshots of the empty tab and the menu. `cargo test -p axcenity-editor`: only the known cloud failure; clippy and fmt clean.

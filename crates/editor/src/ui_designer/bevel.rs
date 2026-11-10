@@ -17,7 +17,6 @@ use super::states::state_selector;
 use super::text_toolbar::number;
 use super::{DesignerAction, DesignerScene};
 use crate::responsive;
-use crate::widgets;
 
 /// The light edge's colour.
 const LIGHT: &str = "rgba(255, 255, 255, 0.6)";
@@ -203,6 +202,19 @@ pub fn bevel_values(
     (normal, pressed)
 }
 
+/// The bevel `id` has in its own rule, if any.
+pub(super) fn current(scene: &DesignerScene, id: InstanceId) -> Option<Bevel> {
+    axcenity_ui::style_value_in_state(
+        scene.world,
+        id,
+        scene.stylesheets,
+        UiState::Normal,
+        "box-shadow",
+    )
+    .and_then(|value| find_bevel(&value))
+    .map(|(bevel, _)| bevel)
+}
+
 /// The Bevel section: None, Raised or Sunken, then its depth, softness
 /// and light angle.
 pub(super) fn bevel_editor(
@@ -211,17 +223,7 @@ pub(super) fn bevel_editor(
     id: InstanceId,
     actions: &mut Vec<DesignerAction>,
 ) {
-    let current = axcenity_ui::style_value_in_state(
-        scene.world,
-        id,
-        scene.stylesheets,
-        UiState::Normal,
-        "box-shadow",
-    )
-    .and_then(|value| find_bevel(&value))
-    .map(|(bevel, _)| bevel);
-    ui.add_space(4.0);
-    widgets::section_label(ui, "Bevel");
+    let current = current(scene, id);
     let mut edited: Option<(Option<Bevel>, bool)> = None;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;

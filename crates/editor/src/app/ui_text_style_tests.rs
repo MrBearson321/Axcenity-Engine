@@ -7,7 +7,7 @@ use axcenity_render::glam::Vec3;
 use super::tests::copy_of_example;
 use super::ui_designer_tests::{
     act, build_menu, click_named, designer_frame, drag_on_artboard, drop_in, frame_ends, key,
-    on_artboard, press, run_designer, state, stylesheets, widget_named,
+    on_artboard, open_section, press, run_designer, state, stylesheets, widget_named,
 };
 use super::*;
 
@@ -408,8 +408,10 @@ fn the_states_editor_writes_hover_and_pressed_rules_that_show_in_its_preview_and
     // The tabs, as clicked: Hover shows the eye on the artboard, which
     // shows the button hovered until it's clicked off.
     let ctx = theme::test_context();
+    open_section(&ctx, crate::ui_designer::Section::States);
     let mut clock = 0.0;
-    let size = egui::vec2(1100.0, 700.0);
+    // Tall, so the fine-tuning sections at the end of the inspector show.
+    let size = egui::vec2(1100.0, 2400.0);
     for _ in 0..3 {
         designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
     }
@@ -702,8 +704,10 @@ fn a_raised_bevel_lights_the_top_left_and_flips_while_held_in_the_designer_and_i
 
     // Raised, clicked in the inspector's Bevel section.
     let ctx = theme::test_context();
+    open_section(&ctx, crate::ui_designer::Section::Bevel);
     let mut clock = 0.0;
-    let size = egui::vec2(1100.0, 1600.0);
+    // Tall, so the fine-tuning sections at the end of the inspector show.
+    let size = egui::vec2(1100.0, 2400.0);
     for _ in 0..3 {
         designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
     }
@@ -854,8 +858,10 @@ fn dragging_the_slice_editors_lines_changes_the_border_image_css() {
     };
 
     let ctx = theme::test_context();
+    open_section(&ctx, crate::ui_designer::Section::Slice);
     let mut clock = 0.0;
-    let size = egui::vec2(1100.0, 1600.0);
+    // Tall, so the fine-tuning sections at the end of the inspector show.
+    let size = egui::vec2(1100.0, 2400.0);
     for _ in 0..3 {
         designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
     }

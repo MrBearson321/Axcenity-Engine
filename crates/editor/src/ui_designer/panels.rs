@@ -1,14 +1,17 @@
 //! The designer's side panels: the palette of elements, the hierarchy, and
-//! the inspector (name, text, font, the text toolbar, states, bevel, slice,
-//! a widget's value, anchor and the Style section).
+//! the inspector: name, text and font, then its sections beginner-first
+//! (`sections`: Styles, Anchor, Text, Widget, Image, Look, Code &
+//! animation, then States, Bevel and Slice, folded; `fold.rs`), and the
+//! Style (CSS) section.
 
 use std::sync::Arc;
 
 use axcenity_core::{InstanceId, Value, World};
-use axcenity_ui::Stylesheet;
+use axcenity_ui::{Stylesheet, UiState};
 use eframe::egui;
 
 use super::anchors::{Pin, Placement, anchor_of};
+use super::fold::{self, Section, fold};
 use super::text_toolbar;
 use super::{
     CLICK_INSERT_AT, DesignerAction, DesignerScene, PALETTE, PaletteItem, UiDesigner,
@@ -322,40 +325,61 @@ impl UiDesigner {
                     ui.end_row();
                 }
             });
+            // Folded, States edits nothing: the text toolbar is Normal's.
+            self.states_open = Section::States.is_open(ui.ctx());
             let state = self.state_for(scene, id);
-            if has_text {
-                text_toolbar::text_toolbar(ui, scene, id, state, actions);
-            }
-            if super::states::has_states(world, id, scene.stylesheets) {
-                self.states_editor(ui, scene, id, actions);
-            }
-            if id != gui {
-                super::bevel::bevel_editor(ui, scene, id, actions);
-                if let Some(image) = instance.property("Image").and_then(Value::as_str) {
-                    responsive::form(ui, ("ui designer image", id), |ui| {
-                        super::image::image_row(ui, scene, id, image, actions);
-                    });
-                }
-                if super::slice::sliceable(instance.class()) {
-                    self.slice_editor(ui, scene, id, actions);
-                }
-                super::widget_section::widget_section(ui, scene, id, actions);
-                look_section(ui, scene, id, actions);
-                anchor_picker(ui, scene, gui, id, actions);
-                super::style_sets::styles_section(
-                    ui,
-                    scene,
-                    id,
-                    &mut self.imported_styles,
-                    actions,
-                );
-                super::links::links_section(ui, scene, gui, id, actions);
+            for section in sections(world, gui, id, scene.stylesheets) {
+                self.section(ui, scene, gui, id, section, state, actions);
             }
             if scene.editing
                 && let Some(edit) = style_panel::show(ui, world, Some(id), scene.stylesheets)
             {
                 actions.push(DesignerAction::Style(id, edit));
             }
+        });
+    }
+
+    /// Draws one of the inspector's sections, under its folding header.
+    #[allow(clippy::too_many_arguments)]
+    fn section(
+        &mut self,
+        ui: &mut egui::Ui,
+        scene: &DesignerScene,
+        gui: InstanceId,
+        id: InstanceId,
+        section: Section,
+        state: UiState,
+        actions: &mut Vec<DesignerAction>,
+    ) {
+        let title = match (section, state) {
+            // The text toolbar edits the state picked under States.
+            (Section::Text, UiState::Normal) => section.title().to_owned(),
+            (Section::Text, state) => format!("{} · {}", section.title(), state.name()),
+            _ => fold::title(scene, id, section),
+        };
+        fold(ui, section, &title, |ui| match section {
+            Section::Styles => {
+                super::style_sets::styles_section(ui, scene, id, &mut self.imported_styles, actions)
+            }
+            Section::Anchor => anchor_picker(ui, scene, gui, id, actions),
+            Section::Text => text_toolbar::text_toolbar(ui, scene, id, state, actions),
+            Section::Widget => super::widget_section::widget_section(ui, scene, id, actions),
+            Section::Image => {
+                let image = scene
+                    .world
+                    .get(id)
+                    .and_then(|instance| instance.property("Image"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                responsive::form(ui, ("ui designer image", id), |ui| {
+                    super::image::image_row(ui, scene, id, image, actions);
+                });
+            }
+            Section::Look => look_section(ui, scene, id, actions),
+            Section::Code => super::links::links_section(ui, scene, gui, id, actions),
+            Section::States => self.states_editor(ui, scene, id, actions),
+            Section::Bevel => super::bevel::bevel_editor(ui, scene, id, actions),
+            Section::Slice => self.slice_editor(ui, scene, id, actions),
         });
     }
 
@@ -403,8 +427,6 @@ fn look_section(
         return;
     };
     let number = |name| instance.property(name).and_then(Value::as_number);
-    ui.add_space(4.0);
-    widgets::section_label(ui, "Look");
     responsive::form(ui, "ui designer look", |ui| {
         if let Some(mut degrees) = number("Rotation") {
             ui.label("Rotation");
@@ -428,6 +450,18 @@ fn look_section(
             }
             ui.end_row();
         }
+    });
+    let parts = [
+        "BackgroundTransparency",
+        "TextTransparency",
+        "ImageTransparency",
+    ];
+    if parts.iter().all(|&name| number(name).is_none()) {
+        return;
+    }
+    // Said once, so "Background 100%" isn't read as fully shown.
+    ui.weak("Transparency: 0% is solid, 100% is invisible.");
+    responsive::form(ui, "ui designer transparency", |ui| {
         for (name, label, tip) in [
             (
                 "BackgroundTransparency",
@@ -500,6 +534,55 @@ fn font_picker(
     picked
 }
 
+/// The inspector's sections for `id` in `gui`, in order, beginner-first:
+/// the ready-made looks, where it's pinned, its text, value and picture,
+/// how see-through it is and what it does; then the fine-tuning (states,
+/// bevel, slice), which start folded. The ScreenGui has only Text, if any.
+pub fn sections(
+    world: &World,
+    gui: InstanceId,
+    id: InstanceId,
+    stylesheets: &[Stylesheet],
+) -> Vec<Section> {
+    let Some(instance) = world.get(id) else {
+        return Vec::new();
+    };
+    let has_text = instance.property("Text").and_then(Value::as_str).is_some();
+    if id == gui {
+        return if has_text {
+            vec![Section::Text]
+        } else {
+            Vec::new()
+        };
+    }
+    let class = instance.class();
+    let has_image = instance.property("Image").and_then(Value::as_str).is_some();
+    [
+        (Section::Styles, true),
+        (Section::Anchor, has_anchor(instance)),
+        (Section::Text, has_text),
+        (Section::Widget, class.is_value_widget()),
+        (Section::Image, has_image),
+        (Section::Look, true),
+        (Section::Code, true),
+        (
+            Section::States,
+            super::states::has_states(world, id, stylesheets),
+        ),
+        (Section::Bevel, true),
+        (Section::Slice, super::slice::sliceable(class)),
+    ]
+    .into_iter()
+    .filter_map(|(section, shown)| shown.then_some(section))
+    .collect()
+}
+
+/// Whether `instance` can be anchored: it has a `Position` and a `Size`.
+fn has_anchor(instance: &axcenity_core::Instance) -> bool {
+    let udim2 = |name| instance.property(name).and_then(Value::as_udim2);
+    udim2("Position").is_some() && udim2("Size").is_some()
+}
+
 /// Unity-style anchor presets: a 4×4 grid of where the element is pinned
 /// across (left, centre, right, stretched) and down (top, middle, bottom,
 /// stretched). Picking one keeps the element where it is.
@@ -521,8 +604,6 @@ fn anchor_picker(
     let Some((_, in_flow)) = placement(world, scene.stylesheets, gui, id) else {
         return;
     };
-    ui.add_space(4.0);
-    widgets::section_label(ui, "Anchor");
     if in_flow {
         ui.weak("Its parent's flex layout places it, so it has no anchor.");
         return;
@@ -577,7 +658,7 @@ fn anchor_picker(
     if ui
         .button("Reset")
         .on_hover_text(
-            "Anchor it to the top left, not stretched, without moving it.              Or drag the diamonds on the artboard to anchor it anywhere.",
+            "Anchor it to the top left, not stretched, without moving it. Or drag the diamonds on the artboard to anchor it anywhere.",
         )
         .clicked()
         && let Some(action) = reset_anchor_action(world, scene.stylesheets, gui, id)
