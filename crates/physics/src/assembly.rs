@@ -18,24 +18,26 @@ use axcenity_core::{ClassName, Instance, InstanceId, Value, World};
 pub fn welds(world: &World) -> Vec<(InstanceId, InstanceId)> {
     world
         .descendants_iter(world.root())
-        .filter_map(|id| {
-            let weld = world.get(id)?;
-            if weld.class() != ClassName::WeldConstraint
-                || weld.property("Enabled") != Some(&Value::Bool(true))
-                || crate::joints::is_breakable_weld(weld)
-            {
-                return None;
-            }
-            let part = |name| match weld.property(name) {
-                Some(Value::Instance(Some(part))) if world.get(*part).is_some_and(is_part) => {
-                    Some(*part)
-                }
-                _ => None,
-            };
-            let (part0, part1) = (part("Part0")?, part("Part1")?);
-            (part0 != part1).then_some((part0, part1))
-        })
+        .filter_map(|id| weld_parts(world, id))
         .collect()
+}
+
+/// The two parts `weld` holds together, if it's an enabled WeldConstraint
+/// that [`welds`] lists.
+pub fn weld_parts(world: &World, weld: InstanceId) -> Option<(InstanceId, InstanceId)> {
+    let weld = world.get(weld)?;
+    if weld.class() != ClassName::WeldConstraint
+        || weld.property("Enabled") != Some(&Value::Bool(true))
+        || crate::joints::is_breakable_weld(weld)
+    {
+        return None;
+    }
+    let part = |name| match weld.property(name) {
+        Some(Value::Instance(Some(part))) if world.get(*part).is_some_and(is_part) => Some(*part),
+        _ => None,
+    };
+    let (part0, part1) = (part("Part0")?, part("Part1")?);
+    (part0 != part1).then_some((part0, part1))
 }
 
 /// Splits `parts` into assemblies joined by `welds`. A weld naming a part

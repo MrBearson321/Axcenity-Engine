@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axcenity_core::{
     ClassName, FoliageInstance, FoliageProp, FoliageSource, InstanceId, PartType, SampleRect,
-    TerrainData,
+    TerrainData, Value,
 };
 
 use super::*;
@@ -257,6 +257,137 @@ fn sculpting_terrain_and_rebuilding_changes_the_mesh() {
     assert!(!mesh.is_walkable(at(16.0, 0.0, 16.0)));
     assert!(mesh.is_walkable(at(16.0, 16.0, 16.0)));
     assert!(!mesh.connected(at(16.0, 16.0, 16.0), at(-16.0, 0.0, -16.0)));
+}
+
+#[test]
+fn a_loose_part_is_not_ground_and_moving_it_needs_no_rebuild() {
+    let mut world = World::new();
+    part(&mut world, at(0.0, -0.5, 0.0), at(40.0, 1.0, 40.0));
+    let crate_ = part(&mut world, at(0.0, 2.0, 0.0), at(4.0, 4.0, 4.0));
+    set(&mut world, crate_, "Anchored", Value::Bool(false));
+    let before = fingerprint(&world);
+    assert_eq!(
+        ground(&build(&world), at(0.0, 4.0, 0.0)),
+        Some(0.0),
+        "the floor runs under the crate"
+    );
+
+    set(
+        &mut world,
+        crate_,
+        "Position",
+        Value::Vector3(at(8.0, 2.0, 0.0)),
+    );
+    set(
+        &mut world,
+        crate_,
+        "Orientation",
+        Value::Vector3(at(0.0, 30.0, 0.0)),
+    );
+    assert_eq!(fingerprint(&world), before, "rolling about isn't a change");
+
+    set(&mut world, crate_, "Anchored", Value::Bool(true));
+    assert_ne!(fingerprint(&world), before, "anchoring it is");
+    assert_eq!(ground(&build(&world), at(8.0, 4.0, 0.0)), Some(4.0));
+}
+
+#[test]
+fn a_loose_part_welded_to_an_anchored_one_is_ground() {
+    let mut world = World::new();
+    let floor = part(&mut world, at(0.0, -0.5, 0.0), at(40.0, 1.0, 40.0));
+    let step = part(&mut world, at(8.0, 2.0, 0.0), at(4.0, 4.0, 4.0));
+    set(&mut world, step, "Anchored", Value::Bool(false));
+    let weld = world.create(ClassName::WeldConstraint).unwrap();
+    world.set_parent(weld, Some(step)).unwrap();
+    set(&mut world, weld, "Part0", Value::Instance(Some(floor)));
+    set(&mut world, weld, "Part1", Value::Instance(Some(step)));
+    assert_eq!(ground(&build(&world), at(8.0, 4.0, 0.0)), Some(4.0));
+
+    let welded = fingerprint(&world);
+    set(&mut world, weld, "Enabled", Value::Bool(false));
+    assert_ne!(fingerprint(&world), welded, "unwelding it is a change");
+    assert_eq!(ground(&build(&world), at(8.0, 4.0, 0.0)), Some(0.0));
+}
+
+/// Builds a mesh with a fresh builder, to compare with one kept up to date.
+fn rebuilt(world: &World) -> NavMesh {
+    let mut builder = MeshBuilder::new(NavSettings::default());
+    assert_eq!(builder.update(world, &Assets::default()), Refresh::Rebuilt);
+    builder.into_mesh()
+}
+
+#[test]
+fn a_builder_kept_up_to_date_builds_what_a_fresh_one_does() {
+    let assets = Assets::default();
+    let mut world = World::new();
+    let terrain = flat_terrain(&mut world, None);
+    let floor = part(&mut world, at(0.0, -0.5, 60.0), at(40.0, 1.0, 40.0));
+    let platform = part(&mut world, at(0.0, 2.0, 60.0), at(8.0, 4.0, 8.0));
+    let mut builder = MeshBuilder::new(NavSettings::default());
+    assert_eq!(builder.update(&world, &assets), Refresh::Rebuilt);
+    assert_eq!(builder.mesh(), &rebuilt(&world));
+    assert_eq!(builder.update(&world, &assets), Refresh::Unchanged);
+
+    // A color isn't something the mesh is made from.
+    set(
+        &mut world,
+        platform,
+        "Color",
+        Value::Color3(axcenity_core::Color3::new(1.0, 0.0, 0.0)),
+    );
+    assert_eq!(builder.update(&world, &assets), Refresh::Unchanged);
+
+    // Each change, and the builder agrees with a fresh build after it.
+    type Change = Box<dyn Fn(&mut World)>;
+    let mut changes: Vec<Change> = vec![
+        Box::new(move |world| {
+            set(
+                world,
+                platform,
+                "Position",
+                Value::Vector3(at(12.0, 2.0, 60.0)),
+            )
+        }),
+        Box::new(move |world| raise_plateau(world, terrain)),
+        Box::new(move |world| {
+            part(world, at(100.0, 0.5, 100.0), at(4.0, 1.0, 4.0));
+        }),
+        Box::new(move |world| set(world, platform, "Anchored", Value::Bool(false))),
+        Box::new(move |world| set(world, floor, "CanCollide", Value::Bool(false))),
+        Box::new(move |world| world.destroy(terrain).unwrap()),
+    ];
+    for (index, change) in changes.drain(..).enumerate() {
+        change(&mut world);
+        assert_eq!(
+            builder.update(&world, &assets),
+            Refresh::Rebuilt,
+            "change {index}"
+        );
+        assert_eq!(builder.mesh(), &rebuilt(&world), "change {index}");
+    }
+}
+
+#[test]
+fn turning_a_part_that_covers_the_same_cells_needs_no_rebuild() {
+    let assets = Assets::default();
+    let mut world = World::new();
+    part(&mut world, at(0.0, -0.5, 0.0), at(40.0, 1.0, 40.0));
+    // A 2×2 post on a cell corner covers the four cells round it however
+    // it's turned about Y.
+    let post = part(&mut world, at(0.0, 2.0, 0.0), at(2.0, 4.0, 2.0));
+    let mut builder = MeshBuilder::new(NavSettings::default());
+    builder.update(&world, &assets);
+    let mesh = builder.mesh().clone();
+    for angle in [15.0, 30.0, 45.0, 60.0] {
+        set(
+            &mut world,
+            post,
+            "Orientation",
+            Value::Vector3(at(0.0, angle, 0.0)),
+        );
+        assert_eq!(builder.update(&world, &assets), Refresh::Same, "{angle}°");
+        assert_eq!(builder.mesh(), &mesh);
+    }
 }
 
 #[test]

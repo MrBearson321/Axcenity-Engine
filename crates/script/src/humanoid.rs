@@ -15,7 +15,7 @@ use axcenity_anim::read_state_machine;
 use axcenity_assets::Assets;
 use axcenity_character::Controllers;
 use axcenity_core::{ClassName, InstanceId, PlayRequest, Value, Vector3, World};
-use axcenity_nav::{NavMesh, NavSettings, fingerprint};
+use axcenity_nav::{MeshBuilder, NavMesh, NavSettings, Refresh};
 use mlua::{FromLua, Function, Lua};
 
 use crate::health::{self, HealthEvent};
@@ -49,8 +49,8 @@ const ARRIVE: f32 = 0.5;
 const CORNER: f32 = 0.3;
 /// A walk to a part plans again once the part has moved this far.
 const REPLAN: f32 = 1.0;
-/// The mesh is built again at most this often (seconds), once what it's
-/// built from has changed, as agents' is.
+/// What the mesh is built from is read again at most this often (seconds),
+/// as agents' is.
 const REBUILD_SECONDS: f32 = 0.5;
 
 /// What a Humanoid's character is doing: `Enum.HumanoidStateType`.
@@ -580,8 +580,7 @@ impl Walk {
 }
 
 struct Built {
-    mesh: NavMesh,
-    fingerprint: u64,
+    builder: MeshBuilder,
     age: f32,
 }
 
@@ -635,22 +634,17 @@ impl Humanoids {
     }
 
     fn mesh(&mut self, world: &World, assets: &Assets, dt: f32) -> &NavMesh {
-        let now = fingerprint(world);
-        let stale = match &mut self.built {
-            Some(built) => {
-                built.age += dt;
-                built.fingerprint != now && built.age >= REBUILD_SECONDS
-            }
-            None => true,
-        };
-        if stale {
-            self.built = Some(Built {
-                mesh: NavMesh::build(world, assets, NavSettings::default()),
-                fingerprint: now,
-                age: 0.0,
-            });
+        let built = self.built.get_or_insert_with(|| Built {
+            builder: MeshBuilder::new(NavSettings::default()),
+            // Old enough to build at once.
+            age: REBUILD_SECONDS,
+        });
+        built.age += dt;
+        if built.age >= REBUILD_SECONDS && built.builder.update(world, assets) != Refresh::Unchanged
+        {
+            built.age = 0.0;
         }
-        &self.built.as_ref().expect("just built").mesh
+        built.builder.mesh()
     }
 
     /// Frame step 1, after the controllers: makes missing pieces, walks
