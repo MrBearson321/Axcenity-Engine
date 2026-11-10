@@ -106,6 +106,20 @@ Same container, release build, 120 frames, three runs each. Milliseconds; ranges
 
 hello-roads draws four 4K JPEG maps and a model; hello-mesh two FBX prop sets with their textures. Before I11 the first frame decoded every texture on the main thread. Now the preload thread starts right after the project is read, so the decodes overlap the window and GPU start-up (about 8.5 s here, mostly lavapipe) and are done before the first frame; the splash hides nothing half-drawn. What's left of the first frame is mostly the CPU mipmaps and upload of the 4K textures (roadmap L2 moves those to import time). Steady-state frames are unchanged within run-to-run noise.
 
+### Loading off the lock (M5)
+
+Real projects, on the owner's 32-thread Windows machine, release build, 120 frames, three alternating runs each, medians in milliseconds. Other builds were running on the machine, so a difference of a few percent means nothing.
+
+| Project | Launch to assets in, main → M5 | First frame | Worst frame after warm-up |
+|---|---|---|---|
+| General Store Roadside | 4,104 → 3,438 | 1,515 → 1,215 | 16.3 → 13.6 |
+| Abandoned Farmhouse | 5,495 → 5,860 | 1,043 → 2,891 | 12.0 → 11.5 |
+| Arid Dry Patch | 5,056 → 3,204 | 2,941 → 1,017 | 168.1 → 59.2 |
+| Temperate Wet Patch | 3,393 → 3,311 | 1,145 → 1,057 | 54.9 → 58.3 |
+| Tropical Snow Patch | 3,208 → 3,061 | 716 → 765 | 16.8 → 17.1 |
+
+Model-heavy projects gain most, because models used to parse one at a time. The player now reaches its first frame sooner, since startup no longer waits behind the global lock, and the first draw then waits for what's still loading: that's why Abandoned Farmhouse's first frame is longer while its total is about the same. Moving the draw list to `model_ready` would take that wait out of the frame.
+
 ### Navmesh rebuilds (I7)
 
 Same container, release build, S10k, main and the I7 branch run back to back: three 600-frame runs of the test runner, two of editor Play, one 300-frame player run. Milliseconds; ranges are the runs.
@@ -119,6 +133,26 @@ Same container, release build, S10k, main and the I7 branch run back to back: th
 | Frame, worst | 148–165 | 50–54 | 149–151 | 29–40 | 292 | 149 |
 
 Before, the navmesh fingerprint hashed every part, the 1,000 falling drops included, and formatted values as text: about 4 ms every frame, and a 110–120 ms rebuild every 0.5 s. Now unanchored parts aren't ground, and a `MeshBuilder` reads again only the parts that changed. What's left of the worst Agents frame (about 20–30 ms in the test runner and player) is S10k's 100 anchored spinners: turning, their corners cross column centres, so the mesh really changes and is put together again every 0.5 s (gathering, linking and numbering 200,000 cells; roadmap M13 moves that to a worker). Editor Play rarely rebuilt (worst 4 and 14 ms); its 1.5 ms median is the check, every frame once 0.5 s has passed, that nothing the mesh is made from changed, which a world where nothing anchored moves also pays.
+
+### Class and tag index (M2)
+
+Taken on 2026-11-10 on a Ryzen 9 9950X3D under Windows, release build, main (940fabc, with M1) and the M2 branch run alternately. Each run was pinned to the V-cache CCD: unpinned, other work on the machine moved main's frame median between 12.7 and 19.2 ms and the comparison was noise. Medians of the runs' medians, in milliseconds; the frame's range across runs is in brackets. Test runner and server: seven 600-frame runs. Player: three 300-frame runs.
+
+| Step | Test runner main | M2 | Server main | M2 | Player main | M2 |
+|---|---|---|---|---|---|---|
+| Characters | 1.104 | 0.986 | – | – | 1.345 | 1.285 |
+| Agents | 0.115 | 0.059 | – | – | 0.15 | 0.091 |
+| Input | 0.639 | 0.501 | 0.018 | 0.001 | 0.681 | 0.534 |
+| Scripts | 0.119 | 0.008 | 0.116 | 0.008 | 0.129 | 0.012 |
+| Physics | 3.719 | 3.469 | 3.645 | 3.487 | 4.002 | 3.912 |
+| Heartbeat | 0.81 | 0.763 | 0.788 | 0.759 | 0.836 | 0.793 |
+| Animation | 0.087 | 0.057 | – | – | 0.275 | 0.092 |
+| Draw list | – | – | – | – | 5.877 | 6.092 |
+| Network send | – | – | 0.3 | 0.272 | – | – |
+| Render | – | – | – | – | 1.98 | 2.028 |
+| **Frame, median** | **6.68** (6.52–7.15) | **5.91** (5.78–6.25) | **4.88** (4.73–6.22) | **4.65** (4.50–5.65) | **15.48** (15.06–16.68) | **15.26** (14.09–15.67) |
+
+About 12%, 5% and 1.5% off the frame (the player also draws, which M2 leaves alone). Each walk replaced cost a few tens of microseconds on 10,000 parts, so the gain comes from there being many of them: `Scripts` (per-frame Health, Humanoid, follower and prompt walks) falls by about 0.11 ms on every host, `Input` by 0.14 ms and `Animation` in the player by 0.18 ms. A world with few Instances gains almost nothing: on copies of six real projects (General Store Roadside, Abandoned Farmhouse, three biome patches, The Dimming; under 1 MB of `world.json` each, on all three hosts) every difference was within run-to-run noise, in both directions.
 
 ### A Windows desktop with a real GPU
 

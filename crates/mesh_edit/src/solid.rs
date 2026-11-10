@@ -80,7 +80,7 @@ pub fn solid_of(world: &World, assets: &Assets, part: InstanceId) -> Result<Soli
             .and_then(Value::as_str)
             .unwrap_or_default();
         let model = assets
-            .model(mesh_id)
+            .model_blocking(mesh_id)
             .ok_or_else(|| format!("`{name}` has no model to combine (MeshId `{mesh_id}`)"))?;
         // The model in its file's units, stretched to the part's Size.
         let mut mesh = Mesh::from_model(&model);

@@ -101,7 +101,10 @@ fn union_cuts_the_negated_block_out_and_separate_gives_the_parts_back_unchanged(
         .and_then(Value::as_vector3)
         .unwrap();
     assert_eq!((size.x, size.y, size.z), (12.0, 8.0, 1.0));
-    let model = app.assets.model(mesh_id).expect("the union's model loads");
+    let model = app
+        .assets
+        .model_blocking(mesh_id)
+        .expect("the union's model loads");
     assert_eq!(model.primitives.len(), 2, "the wall's look and the door's");
 
     // Undo puts the parts back; redo makes the union again.

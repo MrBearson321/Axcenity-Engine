@@ -322,7 +322,7 @@ impl PartState {
                     Some(Value::EnumItem(item)) => Fidelity::named(&item.item),
                     _ => Fidelity::Hull,
                 };
-                Form::Mesh(assets.model(mesh_id), fidelity)
+                Form::Mesh(assets.model_blocking(mesh_id), fidelity)
             }
             _ => Form::Primitive(instance.property("Shape").and_then(Value::as_part_type)?),
         };
@@ -890,18 +890,14 @@ impl Physics {
         for (id, part) in &mut self.parts {
             part.revision = world.get(*id).map_or(0, axcenity_core::Instance::revision);
         }
-        self.synced = Some((world.structure_version(), self.held.clone()));
-        self.watched = world
-            .descendants_iter(world.root())
-            .filter_map(|id| {
-                let instance = world.get(id)?;
-                matches!(
-                    instance.class(),
-                    ClassName::WeldConstraint | ClassName::Ragdoll | ClassName::Inventory
-                )
-                .then(|| (id, instance.revision()))
-            })
-            .collect();
+        // Only the Workspace: moving things around in ReplicatedStorage or
+        // putting a Model together with no parent yet doesn't touch a part.
+        // `watched` catches what puts parts together wherever it is.
+        self.synced = Some((
+            world.structure_version_of(world.workspace()),
+            self.held.clone(),
+        ));
+        self.watched = watched(world).collect();
         self.finish_sync(world, moved, anything_changed);
     }
 
@@ -911,13 +907,11 @@ impl Physics {
     /// thousands of parts it's most of a frame, so it runs only when needed.
     fn sync_changed_parts(&mut self, world: &World) -> Option<(HashSet<RigidBodyHandle>, bool)> {
         let (structure, held) = self.synced.as_ref()?;
-        if *structure != world.structure_version() || *held != self.held {
+        if *structure != world.structure_version_of(world.workspace()) || *held != self.held {
             return None;
         }
-        for (id, revision) in &self.watched {
-            if world.get(*id)?.revision() != *revision {
-                return None;
-            }
+        if !self.watched.iter().copied().eq(watched(world)) {
+            return None;
         }
         let mut changed = Vec::new();
         for (&id, part) in &mut self.parts {
@@ -1362,10 +1356,23 @@ const RAGDOLL_ITERATIONS: usize = 16;
 /// Ragdoll that's off follow the animation, and the MeshPart of one that's
 /// on follows its bodies, so it doesn't push them apart. Then the bodies of
 /// the Ragdolls that are on.
+/// The Instances that decide how parts are put together, anywhere in the
+/// game, with their revisions.
+fn watched(world: &World) -> impl Iterator<Item = (InstanceId, u64)> + '_ {
+    world
+        .all_where(|class| {
+            matches!(
+                class,
+                ClassName::WeldConstraint | ClassName::Ragdoll | ClassName::Inventory
+            )
+        })
+        .filter_map(|id| Some((id, world.get(id)?.revision())))
+}
+
 fn ragdoll_parts(world: &World) -> (HashSet<InstanceId>, HashSet<InstanceId>) {
     let (mut left, mut bodies) = (HashSet::new(), HashSet::new());
-    for id in world.descendants_iter(world.workspace()) {
-        let Some(ragdoll) = world.get(id).filter(|i| i.class() == ClassName::Ragdoll) else {
+    for id in world.all_below(world.workspace(), |class| class == ClassName::Ragdoll) {
+        let Some(ragdoll) = world.get(id) else {
             continue;
         };
         if ragdoll.property("Enabled").and_then(Value::as_bool) == Some(true) {

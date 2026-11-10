@@ -73,7 +73,7 @@ impl Models {
         let fresh = match self.by_id.get_mut(mesh_id) {
             Some(cached) if cached.checked == frame => false,
             Some(cached) => {
-                let model = assets.model(mesh_id)?;
+                let model = assets.model_blocking(mesh_id)?;
                 if !Arc::ptr_eq(&model, &cached.model) {
                     cached.pieces = model_pieces(&model);
                     cached.model = model;
@@ -84,7 +84,7 @@ impl Models {
             None => true,
         };
         if fresh {
-            let model = assets.model(mesh_id)?;
+            let model = assets.model_blocking(mesh_id)?;
             let pieces = model_pieces(&model);
             self.by_id.insert(
                 mesh_id.to_owned(),
@@ -251,7 +251,7 @@ mod tests {
         let mut world = World::new();
         let part = mesh_part(&mut world, NOODLE);
         let assets = Assets::new(examples().join("hello-animation"));
-        let model = assets.model(NOODLE).unwrap();
+        let model = assets.model_blocking(NOODLE).unwrap();
         let rig = model.rig.clone().unwrap();
         let rest = Arc::new(model.pose(&rig.rest_pose()).unwrap());
         let mut bent_pose = rig.rest_pose();

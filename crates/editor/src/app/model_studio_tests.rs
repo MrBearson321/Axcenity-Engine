@@ -31,7 +31,7 @@ fn drawn_size(app: &EditorApp, part: InstanceId) -> [f32; 3] {
         .property("MeshId")
         .and_then(Value::as_str)
         .unwrap();
-    app.assets.model(mesh_id).unwrap().size
+    app.assets.model_blocking(mesh_id).unwrap().size
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn a_cube_made_in_the_studio_with_a_face_scaled_up_is_saved_and_used_by_a_meshpa
     assert_eq!(app.history.undo_label(), Some("Save Cube.glb"));
     let part = mesh_part(&mut app, &path);
     assert_eq!(drawn_size(&app, part), [2.0, 2.0, 2.0]);
-    let first = app.assets.model(&path).unwrap().key();
+    let first = app.assets.model_blocking(&path).unwrap().key();
 
     // One face scaled up in Edit mode, and saved again.
     let doc = app.model_studio.doc.as_mut().unwrap();
@@ -73,7 +73,7 @@ fn a_cube_made_in_the_studio_with_a_face_scaled_up_is_saved_and_used_by_a_meshpa
     let saved = Instant::now();
     app.save_model_studio().unwrap();
     // The MeshPart draws the new model now, without waiting for the watcher.
-    assert_ne!(app.assets.model(&path).unwrap().key(), first);
+    assert_ne!(app.assets.model_blocking(&path).unwrap().key(), first);
     assert_eq!(drawn_size(&app, part), [4.0, 2.0, 4.0]);
     let camera = axcenity_render::Camera {
         position: Vec3::new(10.0, 10.0, 10.0),
@@ -81,7 +81,7 @@ fn a_cube_made_in_the_studio_with_a_face_scaled_up_is_saved_and_used_by_a_meshpa
         fov_y_degrees: 50.0,
     };
     let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
-    let drawn = app.assets.model(&path).unwrap().primitives[0].key();
+    let drawn = app.assets.model_blocking(&path).unwrap().primitives[0].key();
     assert!(
         list.items.iter().any(
             |item| matches!(&item.shape, axcenity_render::Shape::Mesh(mesh) if mesh.key() == drawn)
@@ -115,8 +115,8 @@ fn an_fbx_opened_from_a_meshpart_lists_its_objects_and_saves_as_a_glb_beside_it(
     let saved = app.save_model_studio().unwrap();
     assert_eq!(saved, "assets/models/pbr_panel.glb");
     assert!(folder.join(fbx).is_file(), "the FBX stays");
-    let original = app.assets.model(fbx).unwrap();
-    let copy = app.assets.model(&saved).unwrap();
+    let original = app.assets.model_blocking(fbx).unwrap();
+    let copy = app.assets.model_blocking(&saved).unwrap();
     assert_eq!(copy.primitives.len(), original.primitives.len());
     for (a, b) in copy.size.iter().zip(original.size) {
         assert!((a - b).abs() < 1e-4, "{:?} {:?}", copy.size, original.size);
@@ -177,7 +177,7 @@ fn a_chair_modeled_from_one_cube_is_saved_and_drawn_by_a_meshpart_in_the_world()
     let triangles: usize = (0..mesh.face_count() as u32)
         .map(|f| mesh.face_vertices(f).len() - 2)
         .sum();
-    let model = app.assets.model(&path).unwrap();
+    let model = app.assets.model_blocking(&path).unwrap();
     let saved: usize = model.primitives.iter().map(|p| p.indices.len() / 3).sum();
     assert_eq!(saved, triangles);
 
@@ -225,7 +225,7 @@ fn a_half_head_with_mirror_and_subdivision_saves_whole_and_reopens_as_the_half_w
     let part = mesh_part(&mut app, &path);
     let [x, y, z] = drawn_size(&app, part);
     assert!((x - z).abs() < 1e-3 && x > 1.8, "{x} {y} {z}");
-    let drawn = app.assets.model(&path).unwrap();
+    let drawn = app.assets.model_blocking(&path).unwrap();
     let triangles: usize = drawn.primitives.iter().map(|p| p.indices.len() / 3).sum();
     assert!(
         triangles > half.face_count() * 2 * 16,
@@ -286,7 +286,7 @@ fn generated_lods_are_drawn_far_away_by_a_meshpart_without_another_step() {
 
     for mesh_id in [path.clone(), format!("{path}#UVSphere")] {
         let part = mesh_part(&mut app, &mesh_id);
-        let model = app.assets.model(&mesh_id).unwrap();
+        let model = app.assets.model_blocking(&mesh_id).unwrap();
         assert_eq!(
             model.primitives.len(),
             1,
@@ -371,7 +371,7 @@ fn unwrapped_uvs_save_in_the_glb_and_draw_the_same_texture_in_the_game_as_in_the
     let bytes = std::fs::read(folder.join(&path)).unwrap();
     let game =
         axcenity_assets::load_model(&bytes, &models, axcenity_assets::ModelFormat::Gltf).unwrap();
-    for drawn in [&game, &app.assets.model(&path).unwrap()] {
+    for drawn in [&game, &app.assets.model_blocking(&path).unwrap()] {
         assert_eq!(corner_uvs(drawn), corner_uvs(&studio), "the same uvs");
         let texture = drawn.primitives[0]
             .material
@@ -474,7 +474,7 @@ fn rust_painted_on_the_chair_saves_maps_the_scene_view_draws_with_the_material_s
     let bytes = std::fs::read(folder.join(&path)).unwrap();
     let game =
         axcenity_assets::load_model(&bytes, &models, axcenity_assets::ModelFormat::Gltf).unwrap();
-    for model in [&game, &app.assets.model(&path).unwrap()] {
+    for model in [&game, &app.assets.model_blocking(&path).unwrap()] {
         let material = &model.primitives[0].material;
         assert_eq!(material.base_color, [1.0; 4]);
         assert_eq!(material.base_color_texture.as_ref().unwrap().rgba, color);
@@ -490,7 +490,7 @@ fn rust_painted_on_the_chair_saves_maps_the_scene_view_draws_with_the_material_s
         fov_y_degrees: 50.0,
     };
     let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
-    let drawn = app.assets.model(&path).unwrap().primitives[0].key();
+    let drawn = app.assets.model_blocking(&path).unwrap().primitives[0].key();
     let item = list
         .items
         .iter()
@@ -605,7 +605,7 @@ fn a_sculpted_face_retopologised_and_baked_writes_maps_a_meshpart_draws_once_sav
     let mesh_id = format!("{path}#UVSphere_Low");
     let part = mesh_part(&mut app, &mesh_id);
     let _ = drawn_size(&app, part);
-    let model = app.assets.model(&mesh_id).unwrap();
+    let model = app.assets.model_blocking(&mesh_id).unwrap();
     let triangles: usize = model.primitives.iter().map(|p| p.indices.len() / 3).sum();
     assert!(triangles <= 4000, "{triangles}");
     let primitive = &model.primitives[0];

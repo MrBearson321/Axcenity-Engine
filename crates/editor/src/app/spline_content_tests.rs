@@ -137,7 +137,7 @@ fn baking_a_road_saves_its_bent_pieces_which_load_as_they_were() {
         let mesh_id = mesh_id.as_str().unwrap();
         assert_eq!(mesh_id, format!("{path}#Piece{}", i + 1));
         // Each loads from the file at the size it was made.
-        let loaded = app.assets.model(mesh_id).unwrap();
+        let loaded = app.assets.model_blocking(mesh_id).unwrap();
         let size = vector(&app, piece, "Size");
         for (a, b) in loaded.size.iter().zip([size.x, size.y, size.z]) {
             assert!(

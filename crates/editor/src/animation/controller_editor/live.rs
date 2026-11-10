@@ -9,7 +9,7 @@ impl ControllerDoc {
             .clone()
             .ok_or("Pick a model to preview on below.")?;
         let model = assets
-            .model(&mesh_id)
+            .model_blocking(&mesh_id)
             .ok_or_else(|| format!("`{mesh_id}` can't be loaded"))?;
         let rig = model
             .rig

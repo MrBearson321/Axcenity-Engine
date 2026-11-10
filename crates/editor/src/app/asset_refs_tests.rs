@@ -86,7 +86,10 @@ fn project(test: &str) -> (EditorApp, PathBuf, InstanceId) {
     let look = add(&mut app, ClassName::SurfaceAppearance, crate_part, "Look");
     set(&mut app, look, "ColorMap", Value::String(WOOD.into()));
     // A MeshPart's look is for the model's material of its MaterialName.
-    let model = app.assets.model("assets/models/Crate.glb").unwrap();
+    let model = app
+        .assets
+        .model_blocking("assets/models/Crate.glb")
+        .unwrap();
     let material = model.primitives[0].material.name.clone();
     set(&mut app, look, "MaterialName", Value::String(material));
     let sign = add(&mut app, ClassName::Part, workspace, "Sign");

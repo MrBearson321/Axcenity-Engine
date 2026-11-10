@@ -101,18 +101,13 @@ pub(crate) fn read(
     bodies: &RigidBodySet,
     rolling: &BTreeMap<InstanceId, Rolling>,
 ) -> Vec<Vehicle> {
-    let wheels: Vec<InstanceId> = world
-        .descendants_iter(world.workspace())
-        .filter(|&id| world.get(id).map(|i| i.class()) == Some(ClassName::VehicleWheel))
-        .collect();
+    let wheels: Vec<InstanceId> =
+        world.all_below(world.workspace(), |class| class == ClassName::VehicleWheel);
     let mut vehicles: Vec<Vehicle> = Vec::new();
-    for seat in world.descendants_iter(world.workspace()) {
+    for seat in world.all_below(world.workspace(), |class| class == ClassName::VehicleSeat) {
         let Some(instance) = world.get(seat) else {
             continue;
         };
-        if instance.class() != ClassName::VehicleSeat {
-            continue;
-        }
         let Some(body) = parts.get(&seat) else {
             continue;
         };

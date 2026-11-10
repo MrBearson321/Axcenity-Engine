@@ -328,6 +328,14 @@ declare extern type OverlapParams with
 	function AddToFilter(self, instances: Instance | {Instance}): ()
 end
 
+--- Loads files ahead of time, so they don't load the moment they're first needed, from `game:GetService("ContentProvider")`. Both sides have it.
+declare extern type ContentProvider with
+	--- How many files are still waiting or loading in the background. Read-only.
+	RequestQueueSize: number
+	--- Pauses the script until everything in the list has loaded or failed; the game and other scripts go on meanwhile. An entry is a file path in the project (such as `"assets/models/chair.glb"`) or an Instance, which stands for the files it and its descendants use. A file that can't be loaded isn't an error here: why goes to the Output, and `callback`, if given, is called for each file with its path and `Enum.AssetFetchStatus.Success` or `Failure`.
+	function PreloadAsync(self, contentIds: { string | Instance }, callback: ((string, EnumAssetFetchStatus) -> ())?): ()
+end
+
 --- The project's data tables (`assets/data/*.data.json`, made in the Data Table tab), from `game:GetService("DataService")`. Scripts read them; they can't change them.
 declare extern type DataService with
 	--- The table named `name`: `"weapons"` is `assets/data/weapons.data.json`. A table that isn't there, or can't be read, is an error saying why.
@@ -967,6 +975,16 @@ declare extern type EnumUserInputStateItems with
 	None: EnumUserInputState
 end
 
+--- One choice of `Enum.AssetFetchStatus`.
+declare extern type EnumAssetFetchStatus extends EnumItem with
+end
+
+--- The choices of `Enum.AssetFetchStatus`.
+declare extern type EnumAssetFetchStatusItems with
+	Success: EnumAssetFetchStatus
+	Failure: EnumAssetFetchStatus
+end
+
 --- One choice of `Enum.MouseBehavior`.
 declare extern type EnumMouseBehavior extends EnumItem with
 end
@@ -1219,6 +1237,7 @@ declare extern type EnumLibrary with
 	MotionBlur: EnumMotionBlurItems
 	UserInputType: EnumUserInputTypeItems
 	UserInputState: EnumUserInputStateItems
+	AssetFetchStatus: EnumAssetFetchStatusItems
 	MouseBehavior: EnumMouseBehaviorItems
 	CameraType: EnumCameraTypeItems
 	RenderPriority: EnumRenderPriorityItems
@@ -1364,6 +1383,8 @@ declare extern type DataModel extends Instance with
 	Debris: Debris
 	--- JSON and GUIDs (same as `game:GetService("HttpService")`).
 	HttpService: HttpService
+	--- Loads files ahead of time (same as `game:GetService("ContentProvider")`).
+	ContentProvider: ContentProvider
 	--- The project's data tables (same as `game:GetService("DataService")`).
 	DataService: DataService
 	--- The player's keyboard, mouse and controllers (same as `game:GetService("UserInputService")`). LocalScripts only.
@@ -1393,7 +1414,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"DialogueService"`, `"QuestService"`, `"ConsoleService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LevelService"`, `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"ContentProvider"`, `"DataService"`, `"DialogueService"`, `"QuestService"`, `"ConsoleService"`, `"PhysicsService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 

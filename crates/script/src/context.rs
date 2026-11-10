@@ -65,6 +65,7 @@ impl Context {
         lua.set_app_data(crate::players::Kicks::default());
         lua.set_app_data(crate::DebugRays::default());
         lua.set_app_data(Assets::default());
+        lua.set_app_data(crate::content_provider::PreloadJobs::default());
         lua.set_app_data(Outbox::default());
         lua.set_app_data(scheduler::Scheduler::default());
         lua.set_app_data(events::Connections::default());
@@ -262,6 +263,12 @@ impl Context {
         if let Some(mut jobs) = self.lua.app_data_mut::<crate::csg::CsgJobs>() {
             jobs.forget_script(script);
         }
+        if let Some(mut jobs) = self
+            .lua
+            .app_data_mut::<crate::content_provider::PreloadJobs>()
+        {
+            jobs.forget_script(script);
+        }
         if let Some(mut waits) = self.lua.app_data_mut::<crate::network::StreamWaits>() {
             waits.forget_script(script);
         }
@@ -398,6 +405,7 @@ impl Context {
             tween::step(&self.lua, seconds);
             scheduler::step(&self.lua, seconds);
             crate::csg::step(&self.lua);
+            crate::content_provider::step(&self.lua);
             debris::step(&self.lua);
             crate::decals::step(&self.lua);
         });

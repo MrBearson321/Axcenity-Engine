@@ -881,6 +881,25 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         }],
     },
     ValueType {
+        class: "ContentProvider",
+        doc: "Loads files ahead of time, so they don't load the moment they're first needed, from `game:GetService(\"ContentProvider\")`. Both sides have it.",
+        fields: &[Field {
+            name: "RequestQueueSize",
+            ty: "number",
+            doc: "How many files are still waiting or loading in the background. Read-only.",
+        }],
+        operators: &[],
+        methods: &[Function {
+            name: "PreloadAsync",
+            doc: "Pauses the script until everything in the list has loaded or failed; the game and other scripts go on meanwhile. An entry is a file path in the project (such as `\"assets/models/chair.glb\"`) or an Instance, which stands for the files it and its descendants use. A file that can't be loaded isn't an error here: why goes to the Output, and `callback`, if given, is called for each file with its path and `Enum.AssetFetchStatus.Success` or `Failure`.",
+            params: &[
+                ("contentIds", "{ string | Instance }"),
+                ("callback", "((string, EnumAssetFetchStatus) -> ())?"),
+            ],
+            returns: "()",
+        }],
+    },
+    ValueType {
         class: "DataService",
         doc: "The project's data tables (`assets/data/*.data.json`, made in the Data Table tab), from `game:GetService(\"DataService\")`. Scripts read them; they can't change them.",
         fields: &[],
@@ -2565,7 +2584,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"NetworkService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"DialogueService\"`, `\"QuestService\"`, `\"ConsoleService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LevelService\"`, `\"NetworkService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"ContentProvider\"`, `\"DataService\"`, `\"DialogueService\"`, `\"QuestService\"`, `\"ConsoleService\"`, `\"PhysicsService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -3082,6 +3101,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "HttpService",
             ty: "HttpService",
             doc: "JSON and GUIDs (same as `game:GetService(\"HttpService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "ContentProvider",
+            ty: "ContentProvider",
+            doc: "Loads files ahead of time (same as `game:GetService(\"ContentProvider\")`).",
         },
     ),
     (

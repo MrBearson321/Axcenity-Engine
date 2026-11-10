@@ -425,10 +425,10 @@ fn generate_writes_a_part_s_pieces() {
     let path = generate_for(&world, &assets, &project, pane, &settings).unwrap();
     assert_eq!(path, "assets/models/Pane.fracture.glb");
     let piece = assets
-        .model("assets/models/Pane.fracture.glb#Piece1")
+        .model_blocking("assets/models/Pane.fracture.glb#Piece1")
         .expect("a piece loads");
     assert!(piece.size.iter().all(|&s| s > 0.0));
-    let whole = assets.model(&path).expect("the whole file loads");
+    let whole = assets.model_blocking(&path).expect("the whole file loads");
     assert_near(whole.size, Vec3::new(4.0, 6.0, 0.2));
 
     // Generating again overwrites the same file; without a PiecesId, it
@@ -453,7 +453,7 @@ fn generate_writes_a_part_s_pieces() {
         generate(&world, &assets, &project, fracture),
         Ok("assets/models/Pane.fracture3.glb".into())
     );
-    let twelve = assets.model("assets/models/Pane.fracture3.glb#Piece12");
+    let twelve = assets.model_blocking("assets/models/Pane.fracture3.glb#Piece12");
     assert!(twelve.is_some(), "12 pieces by default");
 
     // Only parts break.
@@ -493,7 +493,7 @@ fn generate_breaks_a_mesh_part_next_to_its_model() {
         .unwrap();
     let path = generate_for(&world, &assets, &project, part, &Settings::default()).unwrap();
     assert_eq!(path, "assets/models/props/Crate.fracture.glb");
-    let whole = assets.model(&path).expect("the pieces load");
+    let whole = assets.model_blocking(&path).expect("the pieces load");
     assert_near(whole.size, Vec3::new(2.0, 1.0, 1.0));
 
     let _ = std::fs::remove_dir_all(&project);

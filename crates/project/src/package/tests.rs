@@ -251,7 +251,7 @@ fn an_imported_state_machine_plays_the_same_as_in_the_project_it_came_from() {
                 .poses()
                 .iter()
                 .map(|(id, posed)| {
-                    let model = assets.model("assets/models/noodle.fbx").unwrap();
+                    let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
                     let corners: Vec<_> = posed.primitives(&model).into_iter().cloned().collect();
                     (*id, corners)
                 })

@@ -403,8 +403,8 @@ mod tests {
         assert_eq!(second, "assets/models/pyramid2/pyramid2.gltf");
         // The copies load from the project like any MeshId.
         let assets = Assets::new(&project);
-        assert!(assets.model(&first).is_some());
-        assert!(assets.model(&second).is_some());
+        assert!(assets.model_blocking(&first).is_some());
+        assert!(assets.model_blocking(&second).is_some());
         assert!(assets.take_errors().is_empty());
     }
 
@@ -442,7 +442,7 @@ mod tests {
                 .join("assets/models/Tri_angle_/data/tri angle.bin")
                 .is_file()
         );
-        assert!(Assets::new(&project).model(&mesh_id).is_some());
+        assert!(Assets::new(&project).model_blocking(&mesh_id).is_some());
     }
 
     #[test]
@@ -469,7 +469,7 @@ mod tests {
         assert_eq!(mesh_id, "assets/models/Pyramid/Pyramid.glb");
         let textures = project.join("assets/models/Pyramid/textures");
         assert_eq!(fs::read_dir(textures).unwrap().count(), 1);
-        assert!(Assets::new(&project).model(&mesh_id).is_some());
+        assert!(Assets::new(&project).model_blocking(&mesh_id).is_some());
     }
 
     #[test]
@@ -483,7 +483,7 @@ mod tests {
         let (second, _) = import_model(&project, &source.join("Pyramid.FBX")).unwrap();
         assert_eq!(second, "assets/models/Pyramid2.fbx");
         let assets = Assets::new(&project);
-        assert!(assets.model(&mesh_id).is_some());
+        assert!(assets.model_blocking(&mesh_id).is_some());
         assert!(assets.take_errors().is_empty());
     }
 
@@ -504,7 +504,7 @@ mod tests {
                 .is_file()
         );
         let assets = Assets::new(&project);
-        let model = assets.model(&mesh_id).unwrap();
+        let model = assets.model_blocking(&mesh_id).unwrap();
         assert!(model.primitives[0].material.base_color_texture.is_some());
         assert!(assets.take_errors().is_empty());
     }
@@ -540,8 +540,8 @@ mod tests {
         assert_eq!(mesh_id, "assets/models/crate.fbx");
         assert_eq!(model.warnings.len(), 1);
         let assets = Assets::new(&project);
-        assert!(assets.model(&mesh_id).is_some());
-        assert!(assets.model(&mesh_id).is_some());
+        assert!(assets.model_blocking(&mesh_id).is_some());
+        assert!(assets.model_blocking(&mesh_id).is_some());
         let errors = assets.take_errors();
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(

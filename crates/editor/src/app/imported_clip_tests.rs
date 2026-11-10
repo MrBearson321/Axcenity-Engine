@@ -35,7 +35,7 @@ fn converted_take_bones(app: &EditorApp, mesh_id: &str) -> Vec<PropertyTrack> {
     let file = app.animation.open_clip_file();
     let link = file.link.clone().expect("a linked clip");
     let takes = app.assets.takes(&link.source).unwrap();
-    let model = app.assets.model(mesh_id).unwrap();
+    let model = app.assets.model_blocking(mesh_id).unwrap();
     let rig = model.rig.as_deref().unwrap();
     let take = takes.iter().find(|take| take.name == link.take).unwrap();
     let moved = take_bones(take, rig);

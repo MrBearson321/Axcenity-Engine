@@ -56,6 +56,7 @@ mod client;
 mod collection;
 mod console;
 mod console_service;
+mod content_provider;
 mod context;
 #[cfg(feature = "csg")]
 mod csg;
@@ -2458,6 +2459,8 @@ mod assembly_tests;
 mod collection_tests;
 #[cfg(test)]
 mod console_service_tests;
+#[cfg(test)]
+mod content_provider_tests;
 #[cfg(test)]
 mod data_tests;
 #[cfg(test)]

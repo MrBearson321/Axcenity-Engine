@@ -32,7 +32,7 @@ fn rigged_humanoid(app: &mut EditorApp) {
 
 /// A MeshPart in the Workspace drawing `mesh_id` at its size.
 fn mesh_part(app: &mut EditorApp, mesh_id: &str) -> InstanceId {
-    let size = app.assets.model(mesh_id).unwrap().size;
+    let size = app.assets.model_blocking(mesh_id).unwrap().size;
     let workspace = app.world.workspace();
     let part = app.world.create(ClassName::MeshPart).unwrap();
     for (name, value) in [
@@ -56,7 +56,7 @@ fn a_humanoid_rigged_in_the_studio_plays_a_mixamo_walk_through_an_animator_witho
     rigged_humanoid(&mut app);
     let path = app.save_model_studio().unwrap();
     assert_eq!(path, "assets/models/Humanoid.glb");
-    let model = app.assets.model(&path).unwrap();
+    let model = app.assets.model_blocking(&path).unwrap();
     let rig = model.rig.clone().expect("the saved model is skinned");
 
     // Without retargeting: the walk's tracks find the bones by name, and
@@ -156,7 +156,7 @@ fn game_corners(app: &EditorApp, path: &str, pose: &Pose) -> Vec<Vec3> {
         .unwrap()
         .to_rig()
         .0;
-    let model: std::sync::Arc<Model> = app.assets.model(path).unwrap();
+    let model: std::sync::Arc<Model> = app.assets.model_blocking(path).unwrap();
     let rig = model.rig.as_deref().unwrap();
     let game_pose: Pose = rig
         .bones
@@ -238,7 +238,7 @@ fn snapshots_of_the_walk() {
     let mut app = EditorApp::new(Some(&folder));
     rigged_humanoid(&mut app);
     let path = app.save_model_studio().unwrap();
-    let model = app.assets.model(&path).unwrap();
+    let model = app.assets.model_blocking(&path).unwrap();
     let part = mesh_part(&mut app, &path);
     let animator = app.world.create(ClassName::Animator).unwrap();
     app.world

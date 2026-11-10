@@ -68,7 +68,7 @@ impl Surfaces {
                     let mesh_id = instance.property("MeshId").and_then(Value::as_str)?;
                     models
                         .entry(mesh_id.to_owned())
-                        .or_insert_with(|| assets.model(mesh_id))
+                        .or_insert_with(|| assets.model_blocking(mesh_id))
                         .clone()
                 })
                 .flatten();

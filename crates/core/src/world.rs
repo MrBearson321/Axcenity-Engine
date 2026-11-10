@@ -5,15 +5,16 @@
 //! [`InstanceId`]s of its parent and children, and all access goes through
 //! [`World`], which owns every Instance in an [`Arena`].
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::animation::{AnimationTrackState, AnimatorState, PropertyAnimationState};
 use crate::arena::{Arena, Id};
 use crate::class::ClassName;
 use crate::collision_groups::CollisionGroups;
+use crate::index::Index;
 use crate::prefab::PrefabLink;
 use crate::strings::StringTable;
 use crate::terrain::TerrainData;
@@ -84,10 +85,12 @@ impl Instance {
     /// How many times this Instance has changed. The same number means
     /// its name, parent, properties, attributes and tags are as they were,
     /// so replication doesn't read them again (Phase 80).
+    #[inline]
     pub fn revision(&self) -> u64 {
         self.revision
     }
 
+    #[inline]
     pub fn class(&self) -> ClassName {
         self.class
     }
@@ -104,11 +107,13 @@ impl Instance {
         Some(if own.is_empty() { &self.name } else { own })
     }
 
+    #[inline]
     pub fn parent(&self) -> Option<InstanceId> {
         self.parent
     }
 
     /// Children in the order they were added.
+    #[inline]
     pub fn children(&self) -> &[InstanceId] {
         &self.children
     }
@@ -136,6 +141,7 @@ impl Instance {
         &self.tags
     }
 
+    #[inline]
     pub fn has_tag(&self, tag: &str) -> bool {
         self.tags.iter().any(|t| t == tag)
     }
@@ -292,6 +298,11 @@ pub struct World {
     /// Goes up each time an Instance changes parent (see
     /// [`World::structure_version`]).
     structure_version: u64,
+    /// The same for each service (see [`World::structure_version_of`]). A
+    /// service nothing has moved in or out of yet isn't here.
+    service_versions: FxHashMap<InstanceId, u64>,
+    /// Which Instances in the game have each class and tag.
+    index: Index,
 }
 
 /// The Instances below one Instance, parents before their children: see
@@ -416,6 +427,8 @@ impl World {
             collision_groups: CollisionGroups::default(),
             master_volume: 1.0,
             structure_version: 0,
+            service_versions: FxHashMap::default(),
+            index: Index::default(),
         }
     }
 
@@ -473,14 +486,20 @@ impl World {
     }
 
     pub fn collision_groups_mut(&mut self) -> &mut CollisionGroups {
-        // Physics reads parts' groups along with the tree.
-        self.structure_version += 1;
+        self.collision_groups_changed();
         &mut self.collision_groups
     }
 
     pub fn set_collision_groups(&mut self, groups: CollisionGroups) {
-        self.structure_version += 1;
+        self.collision_groups_changed();
         self.collision_groups = groups;
+    }
+
+    /// Physics reads parts' groups along with the tree: to it, a change of
+    /// groups is a change in the Workspace.
+    fn collision_groups_changed(&mut self) {
+        self.structure_version += 1;
+        *self.service_versions.entry(self.workspace).or_default() += 1;
     }
 
     /// `key`'s value in the active language, if the string table has one.
@@ -745,6 +764,62 @@ impl World {
         self.structure_version
     }
 
+    /// Goes up each time an Instance moves in or out of a parent inside
+    /// `service` (a child of `game`; StarterPlayerScripts' contents count
+    /// as StarterPlayer's), so a reader of one service doesn't start over
+    /// when another changes. Moves with no service on either side, such as
+    /// building a Model before parenting it, don't count; 0 for anything
+    /// that isn't a service.
+    #[inline]
+    pub fn structure_version_of(&self, service: InstanceId) -> u64 {
+        self.service_versions.get(&service).copied().unwrap_or(0)
+    }
+
+    /// The child of `game` that `id` is, or is inside. `None` for `game`
+    /// itself and anything not in the game.
+    fn service_of(&self, id: InstanceId) -> Option<InstanceId> {
+        let mut at = id;
+        loop {
+            let parent = self.get(at)?.parent?;
+            if parent == self.root {
+                return Some(at);
+            }
+            at = parent;
+        }
+    }
+
+    /// Notes a change of parent in `top` (see [`service_of`](Self::service_of)),
+    /// if it's a service.
+    fn service_changed(&mut self, top: Option<InstanceId>) {
+        if let Some(service) =
+            top.filter(|&top| self.get(top).is_some_and(|i| i.class.is_service()))
+        {
+            *self.service_versions.entry(service).or_default() += 1;
+        }
+    }
+
+    /// Adds `top` and everything inside it to the index, or takes them out.
+    fn index_subtree(&mut self, top: InstanceId, add: bool) {
+        // Taken out for the walk, which borrows the whole world.
+        let mut index = std::mem::take(&mut self.index);
+        for id in std::iter::once(top).chain(self.descendants_iter(top)) {
+            let instance = self.get(id).expect("the walk only finds what's alive");
+            if add {
+                index.add_class(instance.class, id);
+            } else {
+                index.remove_class(instance.class, id);
+            }
+            for tag in &instance.tags {
+                if add {
+                    index.add_tag(tag, id);
+                } else {
+                    index.remove_tag(tag, id);
+                }
+            }
+        }
+        self.index = index;
+    }
+
     /// The number of Instances alive, including ones with no parent.
     pub fn len(&self) -> usize {
         self.instances.len()
@@ -835,6 +910,7 @@ impl World {
             return Err(TreeError::Service(instance.class));
         }
         let old_parent = instance.parent;
+        let old_top = self.service_of(id);
 
         if let Some((new_parent, _)) = new_parent {
             if !self.contains(new_parent) {
@@ -844,6 +920,10 @@ impl World {
                 return Err(TreeError::Cycle);
             }
         }
+        // `service_of` the new parent is `None` for `game` itself, and `id`
+        // right below `game` is in the game as well.
+        let new_top = new_parent.and_then(|(parent, _)| self.service_of(parent));
+        let into_game = new_top.is_some() || new_parent.is_some_and(|(p, _)| p == self.root);
 
         // Each `get_mut` borrow ends at the end of its line, so the three
         // updates below don't conflict with each other.
@@ -863,6 +943,15 @@ impl World {
         instance.revision += 1;
         if old_parent != new_parent {
             self.structure_version += 1;
+            self.service_changed(old_top);
+            if new_top != old_top {
+                self.service_changed(new_top);
+            }
+            match (old_top.is_some(), into_game) {
+                (false, true) => self.index_subtree(id, true),
+                (true, false) => self.index_subtree(id, false),
+                _ => {}
+            }
         }
 
         // Moving among the same parent's children isn't a change of Parent.
@@ -1157,12 +1246,16 @@ impl World {
 
     /// Gives `id` the tag `tag`. True if it didn't have it already.
     pub fn add_tag(&mut self, id: InstanceId, tag: &str) -> Result<bool, TreeError> {
+        let in_game = self.service_of(id).is_some();
         let instance = self.instances.get_mut(id.0).ok_or(TreeError::Stale)?;
         if instance.has_tag(tag) {
             return Ok(false);
         }
         instance.tags.push(tag.to_owned());
         instance.revision += 1;
+        if in_game {
+            self.index.add_tag(tag, id);
+        }
         self.changed(Change::Tag {
             instance: id,
             tag: tag.to_owned(),
@@ -1173,12 +1266,16 @@ impl World {
 
     /// Takes the tag `tag` off `id`. True if it had it.
     pub fn remove_tag(&mut self, id: InstanceId, tag: &str) -> Result<bool, TreeError> {
+        let in_game = self.service_of(id).is_some();
         let instance = self.instances.get_mut(id.0).ok_or(TreeError::Stale)?;
         let Some(index) = instance.tags.iter().position(|t| t == tag) else {
             return Ok(false);
         };
         instance.tags.remove(index);
         instance.revision += 1;
+        if in_game {
+            self.index.remove_tag(tag, id);
+        }
         self.changed(Change::Tag {
             instance: id,
             tag: tag.to_owned(),
@@ -1190,20 +1287,152 @@ impl World {
     /// Every Instance in the game (inside `game`) with the tag `tag`, in
     /// [`descendants`](Self::descendants) order.
     pub fn tagged(&self, tag: &str) -> Vec<InstanceId> {
-        self.descendants_iter(self.root)
-            .filter(|&id| self.get(id).is_some_and(|instance| instance.has_tag(tag)))
-            .collect()
+        self.in_tree_order(self.index.with_tag(tag).iter().copied().collect())
+    }
+
+    /// Every Instance in the game with the tag `tag`, by ID, without
+    /// walking the tree or collecting them. When tree order matters, use
+    /// [`tagged`](Self::tagged).
+    #[inline]
+    pub fn tagged_iter(&self, tag: &str) -> impl Iterator<Item = InstanceId> + '_ {
+        self.index.with_tag(tag).iter().copied()
+    }
+
+    /// Every Instance of class `class` in the game, by ID, without walking
+    /// the tree. Doesn't list services (see [`service`](Self::service)).
+    ///
+    /// This is ID order, not tree order: use it when what you do with each
+    /// one doesn't depend on the others, else [`all_below`](Self::all_below).
+    #[inline]
+    pub fn all_of(&self, class: ClassName) -> impl Iterator<Item = InstanceId> + '_ {
+        self.index.of_class(class).iter().copied()
+    }
+
+    /// Every Instance in the game whose class `wanted` picks, a class at a
+    /// time and by ID within each, without walking the tree. Doesn't list
+    /// services. For classes that group several, such as
+    /// [`ClassName::is_mover`].
+    #[inline]
+    pub fn all_where<'a>(
+        &'a self,
+        wanted: impl Fn(ClassName) -> bool + 'a,
+    ) -> impl Iterator<Item = InstanceId> + 'a {
+        ClassName::ALL
+            .iter()
+            .filter(move |&&class| wanted(class))
+            .flat_map(|&class| self.all_of(class))
+    }
+
+    /// Every Instance below `under` whose class `wanted` picks, in
+    /// [`descendants`](Self::descendants) order: the same list as filtering
+    /// a walk from `under` by class, but without walking. Doesn't list
+    /// services.
+    pub fn all_below(
+        &self,
+        under: InstanceId,
+        wanted: impl Fn(ClassName) -> bool,
+    ) -> Vec<InstanceId> {
+        let found = self
+            .all_where(wanted)
+            .filter(|&id| under == self.root || self.is_descendant_of(id, under))
+            .collect();
+        self.in_tree_order(found)
+    }
+
+    /// Puts `ids`, which should all be in the game, in
+    /// [`descendants`](Self::descendants) order. Anything not in the game
+    /// is left out, and an ID listed twice comes back once.
+    ///
+    /// Walks only the branches that lead to one of them, and stops at the
+    /// last one found, so it costs a look at the siblings of each one and
+    /// each of their ancestors, not the whole tree.
+    pub fn in_tree_order(&self, ids: Vec<InstanceId>) -> Vec<InstanceId> {
+        if ids.len() < 2 {
+            return ids;
+        }
+        // Everything on the way down from `game` to one of them.
+        let mut leading: FxHashSet<InstanceId> = FxHashSet::default();
+        for &id in &ids {
+            let mut at = Some(id);
+            while let Some(here) = at {
+                if !leading.insert(here) {
+                    break;
+                }
+                at = self.get(here).and_then(Instance::parent);
+            }
+        }
+        let wanted: FxHashSet<InstanceId> = ids.iter().copied().collect();
+        let mut sorted = Vec::with_capacity(wanted.len());
+        let Some(game) = self.get(self.root) else {
+            return sorted;
+        };
+        // One position per level, innermost last.
+        let mut path = vec![game.children.iter()];
+        while let Some(list) = path.last_mut() {
+            let Some(&id) = list.next() else {
+                path.pop();
+                continue;
+            };
+            if !leading.contains(&id) {
+                continue;
+            }
+            if wanted.contains(&id) {
+                sorted.push(id);
+                if sorted.len() == wanted.len() {
+                    break;
+                }
+            }
+            if let Some(instance) = self.get(id) {
+                path.push(instance.children.iter());
+            }
+        }
+        sorted
     }
 
     /// Every tag an Instance in the game has, sorted, with how many have it.
     pub fn all_tags(&self) -> BTreeMap<String, usize> {
-        let mut tags = BTreeMap::new();
+        self.index
+            .tags()
+            .map(|(tag, ids)| (tag.to_owned(), ids.len()))
+            .collect()
+    }
+
+    /// Compares the class and tag index with a walk of the tree: `Err`
+    /// says what differs. For tests and debug builds, since it walks
+    /// everything.
+    pub fn check_index(&self) -> Result<(), String> {
+        let mut classes: BTreeMap<usize, BTreeSet<InstanceId>> = BTreeMap::new();
+        let mut tags: BTreeMap<&str, BTreeSet<InstanceId>> = BTreeMap::new();
         for id in self.descendants_iter(self.root) {
-            for tag in self.get(id).map(Instance::tags).unwrap_or_default() {
-                *tags.entry(tag.clone()).or_default() += 1;
+            let instance = self.get(id).expect("the walk only finds what's alive");
+            if !instance.class.is_service() {
+                classes
+                    .entry(instance.class as usize)
+                    .or_default()
+                    .insert(id);
+            }
+            for tag in &instance.tags {
+                tags.entry(tag).or_default().insert(id);
             }
         }
-        tags
+        for class in ClassName::ALL {
+            let walked = classes.get(&(class as usize));
+            let listed = self.index.of_class(class);
+            if walked.unwrap_or(&BTreeSet::new()) != listed {
+                return Err(format!(
+                    "class {class}: the index has {listed:?}, the tree {walked:?}"
+                ));
+            }
+        }
+        let listed: BTreeMap<&str, BTreeSet<InstanceId>> = self
+            .index
+            .tags()
+            .map(|(tag, ids)| (tag, ids.clone()))
+            .collect();
+        if listed != tags {
+            return Err(format!("tags: the index has {listed:?}, the tree {tags:?}"));
+        }
+        Ok(())
     }
 
     /// The first child of `parent` with this name, in child order.
@@ -1282,11 +1511,13 @@ impl World {
 
     /// True if `id` is somewhere inside `ancestor` (not `ancestor` itself).
     /// Detached Instances are inside nothing.
+    #[inline]
     pub fn is_descendant_of(&self, id: InstanceId, ancestor: InstanceId) -> bool {
         id != ancestor && self.is_ancestor_or_self(ancestor, id)
     }
 
     /// True if `ancestor` is `id` itself or any Instance above it.
+    #[inline]
     fn is_ancestor_or_self(&self, ancestor: InstanceId, id: InstanceId) -> bool {
         let mut current = Some(id);
         while let Some(next) = current {

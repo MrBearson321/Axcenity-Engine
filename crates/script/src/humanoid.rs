@@ -663,14 +663,8 @@ impl Humanoids {
         } else {
             0.0
         };
-        let humanoids: Vec<InstanceId> = world
-            .descendants_iter(world.workspace())
-            .filter(|&id| {
-                world
-                    .get(id)
-                    .is_some_and(|instance| instance.class() == ClassName::Humanoid)
-            })
-            .collect();
+        let humanoids: Vec<InstanceId> =
+            world.all_below(world.workspace(), |class| class == ClassName::Humanoid);
         self.walks.retain(|id, _| humanoids.contains(id));
         self.states.0.retain(|id, _| humanoids.contains(id));
         self.playing.retain(|id, _| humanoids.contains(id));

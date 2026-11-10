@@ -604,7 +604,7 @@ pub fn build(world: &mut World, assets: &Assets, ragdoll: InstanceId) -> Result<
         .unwrap_or_default()
         .to_owned();
     let rig = assets
-        .model(&mesh_id)
+        .model_blocking(&mesh_id)
         .and_then(|model| model.rig.clone())
         .ok_or_else(|| format!("The MeshPart's model `{mesh_id}` has no skeleton."))?;
     let limbs = find_limbs(&rig).map_err(|problem| format!("Can't build a ragdoll: {problem}."))?;

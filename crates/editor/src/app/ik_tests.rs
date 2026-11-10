@@ -20,13 +20,18 @@ const WALK: &str = "assets/animations/noodle/Walk.anim.json";
 
 /// The noodle's rig.
 fn rig(app: &EditorApp) -> std::sync::Arc<Rig> {
-    app.assets.model(NOODLE).unwrap().rig.clone().unwrap()
+    app.assets
+        .model_blocking(NOODLE)
+        .unwrap()
+        .rig
+        .clone()
+        .unwrap()
 }
 
 /// How far a move of the noodle's Hat goes: down and to the side, a fifth
 /// of the model's height each way.
 fn hat_move(app: &EditorApp) -> Vec3 {
-    let height = app.assets.model(NOODLE).unwrap().size[1];
+    let height = app.assets.model_blocking(NOODLE).unwrap().size[1];
     Vec3::new(0.2, -0.2, 0.0) * height
 }
 

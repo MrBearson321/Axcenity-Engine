@@ -10,7 +10,7 @@ use super::*;
 fn noodle() -> Arc<Model> {
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-animation");
     Assets::new(example)
-        .model("assets/models/noodle.fbx")
+        .model_blocking("assets/models/noodle.fbx")
         .unwrap()
 }
 
@@ -495,7 +495,7 @@ fn shown(folds: &mut Folds, model: &str, rig: &Rig, keys: &[usize]) -> Vec<Strin
 fn a_mixamo_rigs_bone_tree_folds_unfolds_and_collapses_to_its_root() {
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-events");
     let walking = "assets/models/Walking/Walking.fbx";
-    let model = Assets::new(example).model(walking).unwrap();
+    let model = Assets::new(example).model_blocking(walking).unwrap();
     let rig = model.rig.as_deref().unwrap();
     let all = bone_rows(rig);
     assert!(all.len() > 40, "a Mixamo rig has many bones");
@@ -559,7 +559,7 @@ fn a_mixamo_rigs_bone_tree_folds_unfolds_and_collapses_to_its_root() {
 fn mixamo() -> Arc<Model> {
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-events");
     Assets::new(example)
-        .model("assets/models/Walking/Walking.fbx")
+        .model_blocking("assets/models/Walking/Walking.fbx")
         .unwrap()
 }
 
