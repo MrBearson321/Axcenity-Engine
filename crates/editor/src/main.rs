@@ -76,6 +76,8 @@ mod theme;
 mod thumbnail;
 mod toast;
 mod tree;
+#[cfg(test)]
+mod ui_cost_tests;
 mod ui_designer;
 mod ui_handles;
 mod viewport;

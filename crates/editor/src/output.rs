@@ -23,6 +23,22 @@ pub enum OutputKind {
     Command,
 }
 
+impl OutputKind {
+    /// Its place in [`Output`]'s counts.
+    fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// The most lines the Console keeps: older ones are dropped, so a script
+/// that prints every frame can't slow the editor down over a session.
+pub const MAX_LINES: usize = 10_000;
+/// Dropped lines leave memory this many at a time, so a full Console
+/// doesn't move 10,000 lines along for each new one.
+const DROP_BATCH: usize = 1_000;
+/// The room between lines.
+const LINE_GAP: f32 = 2.0;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputLine {
     pub kind: OutputKind,
@@ -52,20 +68,37 @@ pub struct Location {
     pub line: usize,
 }
 
+/// The Console's lines. Each line has a number, counted from the first
+/// line ever added; it stays the same as older lines are dropped, so
+/// `seen`, `reveal` and `marked` keep pointing at the same line.
 #[derive(Default)]
 pub struct Output {
+    /// The lines kept, oldest first: the newest [`MAX_LINES`] of these
+    /// (see [`lines`](Self::lines)), plus up to [`DROP_BATCH`] dropped ones
+    /// waiting to leave memory.
     lines: Vec<OutputLine>,
+    /// How many lines have left `lines`: the first one's number.
+    gone: usize,
+    /// Lines dropped for being over [`MAX_LINES`] since the last Clear.
+    dropped: usize,
+    /// How many kept lines there are of each kind, for the filter buttons.
+    counts: [usize; 4],
+    /// Each line's height (beside `lines`) at the width and font size in
+    /// `heights_for`: as last drawn, or worked out until it's drawn; `None`
+    /// until it's needed.
+    heights: Vec<Option<f32>>,
+    heights_for: (u32, u32),
     /// Kinds of line switched off with the filter buttons. Only what's
     /// shown changes; every line is kept.
     hidden: Vec<OutputKind>,
-    /// How many lines there were when the panel was last drawn: errors
-    /// after that haven't been seen.
+    /// The number of the next line when the panel was last drawn: errors
+    /// from there on haven't been seen.
     seen: usize,
     /// The frame (`theme::frame_number`) the panel was last drawn in.
     drawn_pass: Option<u64>,
-    /// A line to scroll to the next time the panel is drawn.
+    /// A line (by number) to scroll to the next time the panel is drawn.
     reveal: Option<usize>,
-    /// The line last scrolled to, outlined so the eye finds it.
+    /// The line (by number) last scrolled to, outlined so the eye finds it.
     marked: Option<usize>,
 }
 
@@ -93,10 +126,31 @@ impl Output {
 
     /// Removes every line.
     pub fn clear(&mut self) {
+        self.gone += self.lines.len();
         self.lines.clear();
-        self.seen = 0;
+        self.heights.clear();
+        self.counts = [0; 4];
+        self.dropped = 0;
+        self.seen = self.gone;
         self.reveal = None;
         self.marked = None;
+    }
+
+    /// Where the kept lines start in `lines`.
+    fn start(&self) -> usize {
+        self.lines.len().saturating_sub(MAX_LINES)
+    }
+
+    /// The number the next line will get: how many lines have been added
+    /// since the editor started.
+    pub fn total(&self) -> usize {
+        self.gone + self.lines.len()
+    }
+
+    /// The kept lines numbered `from` or later (see [`total`](Self::total)).
+    pub fn since(&self, from: usize) -> &[OutputLine] {
+        let first = from.max(self.gone + self.start()) - self.gone;
+        &self.lines[first.min(self.lines.len())..]
     }
 
     /// Errors added since the panel was last drawn, or 0 while it's
@@ -108,7 +162,7 @@ impl Output {
         if showing {
             return 0;
         }
-        self.lines[self.seen.min(self.lines.len())..]
+        self.since(self.seen)
             .iter()
             .filter(|line| line.kind == OutputKind::Error)
             .count()
@@ -117,10 +171,11 @@ impl Output {
     /// Scrolls to the newest error (showing errors if they were filtered
     /// out) the next time the panel is drawn.
     pub fn reveal_last_error(&mut self) {
-        self.reveal = self
-            .lines
+        let start = self.start();
+        self.reveal = self.lines[start..]
             .iter()
-            .rposition(|line| line.kind == OutputKind::Error);
+            .rposition(|line| line.kind == OutputKind::Error)
+            .map(|index| self.gone + start + index);
         if self.reveal.is_some() {
             self.hidden.retain(|kind| *kind != OutputKind::Error);
         }
@@ -156,23 +211,37 @@ impl Output {
                 text,
             })
             .collect();
+        self.counts[kind.index()] += 1;
         self.lines.push(OutputLine {
             kind,
             text,
             location,
             trace,
         });
+        self.heights.push(None);
+        if self.lines.len() > MAX_LINES {
+            let leaving = self.lines[self.lines.len() - MAX_LINES - 1].kind;
+            self.counts[leaving.index()] -= 1;
+            self.dropped += 1;
+        }
+        if self.lines.len() >= MAX_LINES + DROP_BATCH {
+            let leaving = self.lines.len() - MAX_LINES;
+            self.lines.drain(..leaving);
+            self.heights.drain(..leaving);
+            self.gone += leaving;
+        }
     }
 
+    /// The kept lines, oldest first: at most [`MAX_LINES`].
     pub fn lines(&self) -> &[OutputLine] {
-        &self.lines
+        &self.lines[self.start()..]
     }
 
     /// Draws the panel. Returns the location of a script error that was
     /// clicked, to open the script there.
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<Location> {
         let palette = theme::palette(ui.ctx());
-        self.seen = self.lines.len();
+        self.seen = self.total();
         self.drawn_pass = Some(theme::frame_number(ui.ctx()));
         let reveal = self.reveal.take();
         if reveal.is_some() {
@@ -196,7 +265,7 @@ impl Output {
                 ),
                 (OutputKind::Error, icons::X_CIRCLE, palette.error, "errors"),
             ] {
-                let count = self.lines.iter().filter(|line| line.kind == kind).count();
+                let count = self.counts[kind.index()];
                 let shown = !self.hidden.contains(&kind);
                 if filter_toggle(ui, icon, color, count, shown)
                     .on_hover_text(if shown {
@@ -216,7 +285,7 @@ impl Output {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .add_enabled(
-                        !self.lines.is_empty(),
+                        !self.lines().is_empty(),
                         widgets::button(
                             widgets::Role::Ghost,
                             Some(icons::BROOM),
@@ -236,14 +305,32 @@ impl Output {
         widgets::divider(ui);
 
         let mut clicked = None;
+        let font = egui::TextStyle::Monospace.resolve(ui.style());
+        let start = self.start();
+        let (gone, dropped) = (self.gone, self.dropped);
+        let hidden = &self.hidden;
+        let lines = &self.lines;
+        let heights = &mut self.heights;
+        let heights_for = &mut self.heights_for;
         egui::ScrollArea::vertical()
-            // Keep showing the newest line, unless the user scrolled up to read.
-            .stick_to_bottom(true)
+            // Keep showing the newest line, unless the user scrolled up to
+            // read, or a line is being revealed (sticking would pull back).
+            .stick_to_bottom(reveal.is_none())
             .auto_shrink(false)
-            .show(ui, |ui| {
+            .show_viewport(ui, |ui, viewport| {
+                let origin = ui.max_rect().top();
                 ui.add_space(4.0);
-                ui.spacing_mut().item_spacing.y = 2.0;
-                if self.lines.is_empty() {
+                ui.spacing_mut().item_spacing.y = LINE_GAP;
+                if dropped > 0 {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{dropped} older lines were dropped: the Console keeps the newest \
+                             {MAX_LINES}."
+                        ))
+                        .color(palette.text_weak),
+                    );
+                }
+                if lines.len() == start {
                     ui.label(
                         egui::RichText::new(
                             "Nothing yet. Editor messages, and what scripts print during Play, \
@@ -252,65 +339,174 @@ impl Output {
                         .color(palette.text_weak),
                     );
                 }
-                for (index, line) in self
-                    .lines
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, line)| !self.hidden.contains(&line.kind))
-                {
-                    let (icon, icon_color, color) = match line.kind {
-                        OutputKind::Info => (icons::INFO, palette.text_weak, palette.text),
-                        OutputKind::Warning => (icons::WARNING, palette.warning, palette.warning),
-                        OutputKind::Error => (icons::X_CIRCLE, palette.error, palette.error),
-                        OutputKind::Command => {
-                            (icons::CARET_RIGHT, palette.accent_text, palette.text_strong)
-                        }
-                    };
-                    let font = egui::TextStyle::Monospace.resolve(ui.style());
-                    // The icon sits left of the text, which wraps beside it.
-                    let row = ui.horizontal_top(|ui| {
-                        ui.label(
-                            egui::RichText::new(icon)
-                                .font(egui::FontId::proportional(font.size))
-                                .color(icon_color),
-                        );
-                        // The stack trace goes under the text, beside the icon.
-                        ui.vertical(|ui| {
-                            if let Some(location) =
-                                text_or_link(ui, &line.text, &line.location, font.clone(), color)
-                            {
-                                clicked = Some(location);
-                            }
-                            for frame in &line.trace {
-                                ui.horizontal_top(|ui| {
-                                    ui.add_space(12.0);
-                                    if let Some(location) = text_or_link(
-                                        ui,
-                                        &frame.text,
-                                        &frame.location,
-                                        font.clone(),
-                                        palette.text_weak,
-                                    ) {
-                                        clicked = Some(location);
-                                    }
-                                });
-                            }
-                        });
-                    });
-                    if reveal == Some(index) {
-                        ui.scroll_to_rect(row.response.rect, Some(egui::Align::Center));
+                // Lines wrap, so each has its own height: as last drawn, or
+                // worked out from its length until it has been.
+                let width = ui.available_width();
+                let key = (width.to_bits(), font.size.to_bits());
+                if *heights_for != key {
+                    heights.fill(None);
+                    *heights_for = key;
+                }
+                let measure = Measure::new(ui, &font, width);
+                let top = ui.cursor().top() - origin;
+                let (mut above, mut below, mut y) = (0.0, 0.0, top);
+                let mut visible = Vec::new();
+                let mut reveal_at = None;
+                for index in start..lines.len() {
+                    let line = &lines[index];
+                    if hidden.contains(&line.kind) {
+                        continue;
                     }
-                    if marked == Some(index) {
+                    // Worked out once; drawing replaces it with the real one.
+                    let height = *heights[index].get_or_insert_with(|| measure.height(line));
+                    if reveal.is_some_and(|number| number == gone + index) {
+                        reveal_at = Some((y, height));
+                    }
+                    if y + height < viewport.min.y {
+                        above += height + LINE_GAP;
+                    } else if y > viewport.max.y {
+                        below += height + LINE_GAP;
+                    } else {
+                        visible.push(index);
+                    }
+                    y += height + LINE_GAP;
+                }
+                ui.add_space(above);
+                for index in visible {
+                    let line = &lines[index];
+                    let (row, link) = draw_line(ui, line, &font, &palette);
+                    if link.is_some() {
+                        clicked = link;
+                    }
+                    heights[index] = Some(row.height());
+                    if marked == Some(gone + index) {
                         ui.painter().rect_stroke(
-                            row.response.rect.expand(2.0),
+                            row.expand(2.0),
                             theme::radius::CONTROL,
                             egui::Stroke::new(1.0_f32, palette.error),
                             egui::StrokeKind::Outside,
                         );
                     }
                 }
+                ui.add_space(below);
+                if let Some((y, height)) = reveal_at {
+                    let rect = egui::Rect::from_min_size(
+                        egui::pos2(ui.max_rect().left(), origin + y),
+                        egui::vec2(width, height),
+                    );
+                    // At once: an animated scroll would end up stuck to the bottom.
+                    ui.scroll_to_rect_animation(
+                        rect,
+                        Some(egui::Align::Center),
+                        egui::style::ScrollAnimation::none(),
+                    );
+                }
             });
         clicked
+    }
+}
+
+/// One line: its icon, then its text (wrapping beside the icon) with the
+/// stack trace under it. Returns where it was drawn, and its script
+/// location if it was clicked.
+fn draw_line(
+    ui: &mut egui::Ui,
+    line: &OutputLine,
+    font: &egui::FontId,
+    palette: &theme::Palette,
+) -> (egui::Rect, Option<Location>) {
+    let (icon, icon_color, color) = line_style(line.kind, palette);
+    let mut clicked = None;
+    let row = ui.horizontal_top(|ui| {
+        ui.label(
+            egui::RichText::new(icon)
+                .font(egui::FontId::proportional(font.size))
+                .color(icon_color),
+        );
+        ui.vertical(|ui| {
+            if let Some(location) =
+                text_or_link(ui, &line.text, &line.location, font.clone(), color)
+            {
+                clicked = Some(location);
+            }
+            for frame in &line.trace {
+                ui.horizontal_top(|ui| {
+                    ui.add_space(TRACE_INDENT);
+                    if let Some(location) = text_or_link(
+                        ui,
+                        &frame.text,
+                        &frame.location,
+                        font.clone(),
+                        palette.text_weak,
+                    ) {
+                        clicked = Some(location);
+                    }
+                });
+            }
+        });
+    });
+    (row.response.rect, clicked)
+}
+
+/// How far a stack trace is indented under its error.
+const TRACE_INDENT: f32 = 12.0;
+
+/// A line's icon, the icon's colour and the text's colour.
+fn line_style(
+    kind: OutputKind,
+    palette: &theme::Palette,
+) -> (&'static str, egui::Color32, egui::Color32) {
+    match kind {
+        OutputKind::Info => (icons::INFO, palette.text_weak, palette.text),
+        OutputKind::Warning => (icons::WARNING, palette.warning, palette.warning),
+        OutputKind::Error => (icons::X_CIRCLE, palette.error, palette.error),
+        OutputKind::Command => (icons::CARET_RIGHT, palette.accent_text, palette.text_strong),
+    }
+}
+
+/// Works out a line's height before it's drawn, from how many characters
+/// fit on a row of the code font. Words wrap, so a drawn line can be a row
+/// taller; its drawn height replaces this once it's on screen.
+struct Measure {
+    row: f32,
+    char_width: f32,
+    /// The text's width beside the icon, and a trace line's.
+    text_width: f32,
+    trace_width: f32,
+}
+
+impl Measure {
+    fn new(ui: &egui::Ui, font: &egui::FontId, width: f32) -> Self {
+        let (row, char_width, icon) = ui.fonts(|fonts| {
+            (
+                fonts.row_height(font),
+                fonts.glyph_width(font, 'M'),
+                fonts.glyph_width(&egui::FontId::proportional(font.size), '\u{e000}'),
+            )
+        });
+        let spacing = ui.spacing().item_spacing.x;
+        let text_width = (width - icon.max(font.size) - spacing).max(char_width);
+        Self {
+            row,
+            char_width: char_width.max(1.0),
+            text_width,
+            trace_width: (text_width - TRACE_INDENT - spacing).max(char_width),
+        }
+    }
+
+    fn rows(&self, text: &str, width: f32) -> f32 {
+        let per_row = (width / self.char_width).floor().max(1.0);
+        text.split('\n')
+            .map(|part| (part.chars().count() as f32 / per_row).ceil().max(1.0))
+            .sum()
+    }
+
+    fn height(&self, line: &OutputLine) -> f32 {
+        let mut height = self.rows(&line.text, self.text_width) * self.row;
+        for frame in &line.trace {
+            height += LINE_GAP + self.rows(&frame.text, self.trace_width) * self.row;
+        }
+        height.max(self.row)
     }
 }
 
@@ -556,5 +752,126 @@ mod unseen_tests {
         draw(&ctx, &mut output);
         assert_eq!(output.marked, Some(2));
         assert_eq!(output.reveal, None);
+    }
+}
+
+#[cfg(test)]
+mod bounded_tests {
+    use super::*;
+
+    /// Draws the panel 900 by 260 and returns the text it drew.
+    fn draw(ctx: &egui::Context, output: &mut Output) -> Vec<String> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 260.0),
+            )),
+            ..Default::default()
+        };
+        let drawn = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                output.show(ui);
+            });
+        });
+        let mut texts = Vec::new();
+        for clipped in &drawn.shapes {
+            if let egui::Shape::Text(text) = &clipped.shape {
+                texts.push(text.galley.text().to_owned());
+            }
+        }
+        texts
+    }
+
+    #[test]
+    fn the_newest_10000_lines_are_kept_and_counted() {
+        let mut output = Output::default();
+        output.error("first, an error");
+        for index in 1..MAX_LINES {
+            output.info(format!("line {index}"));
+        }
+        assert_eq!(output.lines().len(), MAX_LINES);
+        assert_eq!(output.counts[OutputKind::Error.index()], 1);
+        // The 10,001st line drops the first, and its count.
+        output.warning("one too many");
+        assert_eq!(output.lines().len(), MAX_LINES);
+        assert_eq!(output.lines()[0].text, "line 1");
+        assert_eq!(output.counts[OutputKind::Error.index()], 0);
+        assert_eq!(output.counts[OutputKind::Warning.index()], 1);
+        assert_eq!(output.counts[OutputKind::Info.index()], MAX_LINES - 1);
+        assert_eq!(output.dropped, 1);
+        // Past a batch, dropped lines leave memory; numbers stay the same.
+        let seen = output.total();
+        for index in 0..DROP_BATCH + 10 {
+            output.info(format!("more {index}"));
+        }
+        assert!(output.lines.len() < MAX_LINES + DROP_BATCH);
+        assert_eq!(output.lines().len(), MAX_LINES);
+        assert_eq!(output.since(seen).len(), DROP_BATCH + 10);
+        assert_eq!(output.since(seen)[0].text, "more 0");
+        assert_eq!(output.total(), MAX_LINES + 1 + DROP_BATCH + 10);
+        let counted: usize = output.counts.iter().sum();
+        assert_eq!(counted, MAX_LINES);
+        // Clear starts the count of dropped lines again; numbers go on.
+        output.clear();
+        assert!(output.lines().is_empty());
+        assert_eq!(output.dropped, 0);
+        output.error("after clear");
+        assert_eq!(output.since(seen + DROP_BATCH + 10).len(), 1);
+    }
+
+    #[test]
+    fn only_the_lines_on_screen_are_drawn_newest_at_the_bottom() {
+        let ctx = theme::test_context();
+        let mut output = Output::default();
+        for index in 0..MAX_LINES + 5 {
+            output.info(format!("line {index}"));
+        }
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            texts = draw(&ctx, &mut output);
+        }
+        let lines: Vec<&String> = texts
+            .iter()
+            .filter(|text| text.starts_with("line "))
+            .collect();
+        assert!(lines.len() < 40, "{} lines drawn", lines.len());
+        let last = format!("line {}", MAX_LINES + 4);
+        assert!(lines.iter().any(|text| **text == last), "{lines:?}");
+        // With the lines filtered out, the note at the top shows.
+        output.hidden.push(OutputKind::Info);
+        draw(&ctx, &mut output);
+        let texts = draw(&ctx, &mut output);
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.starts_with("5 older lines were dropped")),
+            "{texts:?}"
+        );
+    }
+
+    /// Clicking an error's toast reveals it, wherever it is in a long log,
+    /// and a long line wraps without the lines after it overlapping.
+    #[test]
+    fn a_revealed_error_far_up_is_scrolled_to_and_marked() {
+        let ctx = theme::test_context();
+        let mut output = Output::default();
+        for index in 0..3_000 {
+            if index == 1_000 {
+                output.error("scripts/Spin.server.lua:4: the one to find");
+            } else {
+                output.info(format!("line {index} {}", "long words ".repeat(index % 30)));
+            }
+        }
+        draw(&ctx, &mut output);
+        output.reveal_last_error();
+        let mut texts = Vec::new();
+        for _ in 0..4 {
+            texts = draw(&ctx, &mut output);
+        }
+        assert!(
+            texts.iter().any(|text| text.contains("the one to find")),
+            "{texts:?}"
+        );
+        assert_eq!(output.marked, Some(1_000));
     }
 }

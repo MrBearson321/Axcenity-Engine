@@ -311,3 +311,35 @@ Plan and findings: [design-system.md](design-system.md). Approved by Paul with P
 **Left.** The start screen's own cards and the Learn window still lay out their pages themselves (they're pages, not dialogs).
 
 **Next.** Phase 3: the Explorer draws only visible rows from a cached list (V7) and the Console keeps at most 10,000 lines and draws only what shows (V8).
+
+## Design system Phase 3: scale (V7, V8)
+
+Plan and findings: [design-system.md](design-system.md). Approved by Paul with Phases 1–5 on 2026-11-10. Built on Phase 2.
+
+| ID | What changed | Files |
+|---|---|---|
+| V7 (DS21) | The Explorer keeps its row list between frames and builds it again only when the world, its structure or child order (`World::identity`, `structure_version`, `child_order_version`) or the open branches change, and every frame while filtering. It draws with `ScrollArea::show_rows`, so only the rows on screen are laid out. Names are read live from the world when a row is drawn. Revealing a selection scrolls to its row from its index, so a row that was never drawn can be shown | `explorer.rs` |
+| V8 (DS22) | The Console keeps the newest 10,000 lines (`Output::MAX_LINES`), dropping the oldest 1,000 at a time, with "N older lines were dropped: the Console keeps the newest 10000." at the top. Counts per severity are kept as lines arrive. Line heights are worked out once per line (from the font, the width and the stack trace's length) and replaced by the real height once the line is drawn; all are worked out again when the width or font size changes. Only lines on screen are drawn (`show_viewport`). Seen, revealed and marked lines are numbered from the first line ever added, so they stay right as old lines drop. Revealing an error scrolls straight to it (no animation, so sticking to the bottom can't undo it) | `output.rs`, `app/dev_console.rs` |
+
+**Timings.** `ui_cost_tests.rs` (new, ignored; `cargo test -p axcenity-editor --release --bins ui_cost -- --ignored --nocapture`) draws each panel alone in its usual shape (Explorer 300×800 with a Folder of Parts open, Console 900×260), averaging 20 frames after 3 to warm up. Release build, cloud container:
+
+| Rows | Explorer before | Explorer after | Console before | Console after |
+|---:|---:|---:|---:|---:|
+| 100 | 0.82 ms | 0.17 ms | 0.35 ms | 0.05 ms |
+| 1,000 | 4.99 ms | 0.16 ms | 3.31 ms | 0.06 ms |
+| 10,000 | 75.29 ms | 0.15 ms | 40.12 ms | 0.09 ms |
+
+Both now cost the same at 10,000 rows as at 100 (the plan's target was at most twice).
+
+**Differs from the plan, on purpose.**
+- *Names (V7).* The world has no version counter for names, so instead of rebuilding the list when a name changes, each drawn row reads its name from the world. A rename shows at once, and the filter (rebuilt every frame) still matches the new name.
+- *S10k Play bench (V7).* Not run: `bench_project_play` runs the game frame without drawing any panel, so it can't show the Explorer's cost. The timing test above measures it directly.
+- *Line heights (V8)* are estimated before a line is first drawn, so the scroll bar can shift by a few points as lines come into view; a revealed line is still scrolled to exactly, because it's drawn and measured in that frame.
+
+**What's preserved.** Drag-and-drop onto rows, rename in place, right-click menus, Shift-click ranges, the filter and its dimmed branches, scroll to the selection; the Console's filters, search, script links, stack traces, sticking to the bottom, revealing an error from a toast, and the Dev Console's unread count.
+
+**Tests.** New: `only_rows_on_screen_are_drawn_and_reveal_scrolls_to_any_row` (10,000 Parts: fewer than 60 rows laid out; revealing the 6,000th scrolls it to the middle), `rows_are_kept_until_the_tree_or_the_open_branches_change`, `the_newest_10000_lines_are_kept_and_counted` (the 10,001st line drops the first; counts and the dropped note stay right), `only_the_lines_on_screen_are_drawn_newest_at_the_bottom`, `a_revealed_error_far_up_is_scrolled_to_and_marked`, and the ignored timing test. `cargo test -p axcenity-editor`: 977 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`, no audio device); clippy and fmt clean. The whole-editor snapshot shows the Explorer and Console as before. Not checked on Windows or a real GPU.
+
+**Left.** Other long lists (Assets in list view, the Tags and Levels panels, Find in Scripts results) still lay out every row; none was measured as slow.
+
+**Next.** Phase 4: Properties edits every selected Instance (V5) and the Explorer moves the selection with the arrow keys (V6), built on this phase's row list.
