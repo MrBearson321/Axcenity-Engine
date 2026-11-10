@@ -106,6 +106,20 @@ Same container, release build, 120 frames, three runs each. Milliseconds; ranges
 
 hello-roads draws four 4K JPEG maps and a model; hello-mesh two FBX prop sets with their textures. Before I11 the first frame decoded every texture on the main thread. Now the preload thread starts right after the project is read, so the decodes overlap the window and GPU start-up (about 8.5 s here, mostly lavapipe) and are done before the first frame; the splash hides nothing half-drawn. What's left of the first frame is mostly the CPU mipmaps and upload of the 4K textures (roadmap L2 moves those to import time). Steady-state frames are unchanged within run-to-run noise.
 
+### Loading off the lock (M5)
+
+Real projects, on the owner's 32-thread Windows machine, release build, 120 frames, three alternating runs each, medians in milliseconds. Other builds were running on the machine, so a difference of a few percent means nothing.
+
+| Project | Launch to assets in, main → M5 | First frame | Worst frame after warm-up |
+|---|---|---|---|
+| General Store Roadside | 4,104 → 3,438 | 1,515 → 1,215 | 16.3 → 13.6 |
+| Abandoned Farmhouse | 5,495 → 5,860 | 1,043 → 2,891 | 12.0 → 11.5 |
+| Arid Dry Patch | 5,056 → 3,204 | 2,941 → 1,017 | 168.1 → 59.2 |
+| Temperate Wet Patch | 3,393 → 3,311 | 1,145 → 1,057 | 54.9 → 58.3 |
+| Tropical Snow Patch | 3,208 → 3,061 | 716 → 765 | 16.8 → 17.1 |
+
+Model-heavy projects gain most, because models used to parse one at a time. The player now reaches its first frame sooner, since startup no longer waits behind the global lock, and the first draw then waits for what's still loading: that's why Abandoned Farmhouse's first frame is longer while its total is about the same. Moving the draw list to `model_ready` would take that wait out of the frame.
+
 ### Navmesh rebuilds (I7)
 
 Same container, release build, S10k, main and the I7 branch run back to back: three 600-frame runs of the test runner, two of editor Play, one 300-frame player run. Milliseconds; ranges are the runs.
