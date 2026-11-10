@@ -15,6 +15,7 @@ When behavior changes, update the topic file. Keep each crate `CLAUDE.md` under 
 - Instances live in a generational-ID arena; don't make an `Rc<RefCell>` tree.
 - Blocks translate to Lua; there is one scripting runtime. Use Axcenity's Roblox-familiar API names, never Roblox branding.
 - Keep the engine cross-platform. Pin new dependencies in the workspace and check Apache-2.0-compatible licensing.
+- Follow the [development policy](docs/development-policy.md): desktop first (Windows and Linux), no infrastructure before it's needed, local tests for significant changes. GitHub Actions is off on purpose, so local runs are the only check.
 
 ## Commands
 
