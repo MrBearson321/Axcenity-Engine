@@ -27,12 +27,8 @@ const PLAYER: &[&str] = &[
     "net.send",
 ];
 
-/// Exceptions the editor still has (each one is a line of `DRIFT`):
-/// - the render step runs before Animators and Tools, so `RenderStepped`
-///   sees last frame's poses;
-/// - audio runs after the render step;
-/// - particles and streaming aren't steps at all: the Scene viewport does
-///   them while it draws (`crates/editor/src/viewport.rs`).
+/// Editor Play runs the player's order without drawing: the Scene
+/// viewport draws what the frame left (`crates/editor/src/viewport.rs`).
 #[rustfmt::skip]
 const EDITOR_PLAY: &[&str] = &[
     "net.receive",
@@ -43,11 +39,11 @@ const EDITOR_PLAY: &[&str] = &[
     "physics.hold", "physics.kinematic", "physics.shatters", "physics.step",
     "touches.began", "touches.ended", "breaks", "health",
     "heartbeat",
-    "levels.loaded", "loading.screen",
-    "render_step", "camera.move", "graphics.changed",
-    "audio",
+    "audio", "particles",
     "animators", "tools.place",
-    "camera.follow",
+    "levels.loaded", "loading.screen",
+    "render_step", "camera.move", "camera.follow", "graphics.changed",
+    "streaming",
     "net.send",
 ];
 
@@ -87,7 +83,7 @@ fn the_player_runs_the_standard_order() {
 }
 
 #[test]
-fn the_editor_runs_the_player_order_but_for_its_listed_drift() {
+fn the_editor_runs_the_player_order_without_drawing() {
     assert_eq!(names(Hosts::EDITOR_PLAY), EDITOR_PLAY);
 }
 
@@ -159,9 +155,9 @@ fn every_host_laps_in_the_benchmark_step_names() {
             "Scripts",
             "Physics",
             "Heartbeat",
-            "RenderStep",
             "Audio",
             "Animation",
+            "RenderStep",
             "Network send"
         ]
     );
@@ -196,4 +192,53 @@ fn inserting_after_a_missing_step_is_a_bug() {
     let mut schedule = Schedule::for_host(Hosts::TEST);
     let extra = schedule.steps()[0];
     schedule.insert_after("nowhere", extra);
+}
+
+/// The schedule as the Markdown table in `docs/architecture/frame-loop.md`:
+/// each standard step, its stage and the hosts that run it.
+fn frame_table() -> String {
+    let hosts = [
+        Hosts::PLAYER,
+        Hosts::EDITOR_PLAY,
+        Hosts::SERVER,
+        Hosts::TEST,
+    ]
+    .map(names);
+    let mut table = String::from(
+        "| Step | Stage | Player | Editor Play | Server | Test runner |\n\
+         |---|---|:-:|:-:|:-:|:-:|\n",
+    );
+    for step in Schedule::standard().steps() {
+        let runs = hosts
+            .iter()
+            .map(|names| {
+                if names.contains(&step.name) {
+                    "✓"
+                } else {
+                    ""
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        table.push_str(&format!(
+            "| `{}` | {:?} | {runs} |\n",
+            step.name, step.stage
+        ));
+    }
+    table
+}
+
+#[test]
+fn the_frame_loop_doc_lists_the_schedule() {
+    let doc = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/architecture/frame-loop.md"
+    ))
+    .unwrap()
+    .replace("\r\n", "\n");
+    let table = frame_table();
+    assert!(
+        doc.contains(&table),
+        "docs/architecture/frame-loop.md's step table is out of date; put this in its place:\n\n{table}"
+    );
 }

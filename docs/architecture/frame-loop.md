@@ -2,7 +2,48 @@
 
 The fixed order of one frame. Do not reorder it casually.
 
-The order is one table, `STANDARD` in `crates/sim/src/steps.rs` (roadmap M1): every step, its stage and the hosts that run it. `crates/sim/src/golden.rs` writes out each host's order, so moving a step fails a test. The test runner, the dedicated server and the player run that table; editor Play moves onto it next.
+The order is one table, `STANDARD` in `crates/sim/src/steps.rs` (roadmap M1): every step, its stage and the hosts that run it. `crates/sim/src/golden.rs` writes out each host's order, so moving a step fails a test. The player, editor Play, the dedicated server and the test runner all run that table, each through its own `HostIo` (input, sound, network, drawing). Each step is named and timed in a profiler span. The steps by stage, and which hosts run each (`the_frame_loop_doc_lists_the_schedule` checks this table against the schedule and prints the new one when a step changes):
+
+| Step | Stage | Player | Editor Play | Server | Test runner |
+|---|---|:-:|:-:|:-:|:-:|
+| `net.receive` | NetReceive | ✓ | ✓ | ✓ |  |
+| `characters.step` | Input | ✓ | ✓ |  | ✓ |
+| `characters.landed` | Input | ✓ | ✓ |  | ✓ |
+| `humanoids` | Input | ✓ | ✓ |  | ✓ |
+| `players` | Input | ✓ | ✓ | ✓ | ✓ |
+| `agents.step` | Input | ✓ | ✓ |  | ✓ |
+| `agents.sensed` | Input | ✓ | ✓ |  | ✓ |
+| `input.events` | Input | ✓ | ✓ |  | ✓ |
+| `prompts` | Input | ✓ | ✓ |  | ✓ |
+| `tools` | Input | ✓ | ✓ |  | ✓ |
+| `abilities` | Input | ✓ | ✓ |  | ✓ |
+| `scripts.step` | PreSimulation | ✓ | ✓ | ✓ | ✓ |
+| `scripts.stepped` | PreSimulation | ✓ | ✓ | ✓ | ✓ |
+| `physics.hold` | PreSimulation | ✓ | ✓ | ✓ |  |
+| `physics.kinematic` | PreSimulation | ✓ | ✓ |  | ✓ |
+| `physics.shatters` | PreSimulation | ✓ | ✓ | ✓ | ✓ |
+| `physics.step` | Simulation | ✓ | ✓ | ✓ | ✓ |
+| `touches.began` | PostSimulation | ✓ | ✓ | ✓ | ✓ |
+| `touches.ended` | PostSimulation | ✓ | ✓ | ✓ | ✓ |
+| `breaks` | PostSimulation | ✓ | ✓ | ✓ | ✓ |
+| `health` | PostSimulation | ✓ | ✓ | ✓ | ✓ |
+| `heartbeat` | Heartbeat | ✓ | ✓ | ✓ | ✓ |
+| `audio` | PreAnimation | ✓ | ✓ |  | ✓ |
+| `particles` | PreAnimation | ✓ | ✓ |  | ✓ |
+| `animators` | Animation | ✓ | ✓ |  | ✓ |
+| `tools.place` | Animation | ✓ | ✓ |  | ✓ |
+| `levels.loaded` | PreRender | ✓ | ✓ |  | ✓ |
+| `loading.screen` | PreRender | ✓ | ✓ |  | ✓ |
+| `render_step` | PreRender | ✓ | ✓ |  | ✓ |
+| `camera.move` | PreRender | ✓ | ✓ |  | ✓ |
+| `camera.follow` | PreRender | ✓ | ✓ |  | ✓ |
+| `graphics.changed` | PreRender | ✓ | ✓ |  |  |
+| `streaming` | PreRender | ✓ | ✓ |  |  |
+| `draw.scene` | PreRender | ✓ |  |  |  |
+| `draw.ui` | PreRender | ✓ |  |  |  |
+| `net.send` | NetSend | ✓ | ✓ | ✓ |  |
+
+The server runs `physics.shatters` before `physics.hold` (its one `DRIFT` line). The numbered steps below are the same frame, described by what happens in it.
 
 0. Network receive (Phase 63): `net::Network::receive` does the `NetworkService` requests scripts made last frame (`ScriptRuntime::take_network_requests`), then takes in what arrived: players who joined or left go in or out of `Players` (`PlayerAdded`, `PlayerRemoving`), a failed or refused connection fires `ConnectionFailed`, and a finished LAN search resumes `FindLanGames`. See [networking.md](networking.md).
 1. Read input. Keys for the UI's focus (Tab, the arrows, Enter, Escape while something is focused) and game controllers' buttons move focus first, through the host's `UiInteraction` (`docs/ui.md`, Keyboard and controller focus); a confirmed button fires `Activated` here, as a click does. When a `ThirdPersonController` or `FirstPersonController` in the Workspace has a body, `character` steps it here (walk or run, jump and fall, crouch, slopes and steps, and its camera: following and wheel zoom, or at the eyes) before scripts run. Only the first such controller receives the keys; the others walk their `MoveDirection` (Phase 46). Every controller with a body sits on a Seat it touches, or that `seat:Sit` gave it, and stands up when asked (Phase 39); hosts then fire `Seated` (`ScriptRuntime::fire_seated`, from `Controllers::take_seat_changes`), then fall damage and `Landed` (`ScriptRuntime::fire_landed`, from `Controllers::take_landings`, Phase 43). Then `ScriptRuntime::step_humanoids` (Phase 46) makes Humanoids' missing pieces, walks each `MoveTo` on by its controller's `MoveDirection` (used on the next controller step), works out each Humanoid's state and fires `MoveToFinished`, `StateChanged` and `Died`; its Animator gets the matching state. A Health that dies at any step kills its Humanoid at once (from `fire_changes`). Then `ScriptRuntime::step_players` (Phase 47) joins the player and gives them their first character, removes spawn ForceFields whose time is up, and respawns players whose `RespawnTime` has passed; `PlayerAdded`, `CharacterRemoving` and `CharacterAdded` fire (from `fire_changes`). The host draws the leaderboard (`ui::leaderboard_items`, while `leaderboard_shown`) over the UI with the hotbar. After the frame's input reaches scripts (`ScriptRuntime::input_events`), `ScriptRuntime::step_prompts` shows the ProximityPrompts in reach and follows their actions, and follows the mouse for ClickDetectors, firing their events (Phase 44); the host draws `shown_prompts` over the UI and shows `click_cursor`. Then `ScriptRuntime::step_tools` picks up the dropped Tools characters touch and follows the player's hotbar keys, Drop and Primary (Phase 45); the host draws the hotbar (`player_inventory`, `ui::hotbar_items`) under the prompts. Then `nav` steps every `NavigationAgent` with a body toward its `Destination`, or at its `Velocity`, and has it look and listen for the player character; hosts fire `PlayerSensed` for the senses that just started (`docs/architecture/navigation.md`).
@@ -12,17 +53,13 @@ The order is one table, `STANDARD` in `crates/sim/src/steps.rs` (roadmap M1): ev
 5. Move the loading screen on (a LocalScript's `RemoveDefaultLoadingScreen`, the player's asset preload, then `LoadingGui::advance`, which may turn its ScreenGui off), then update UI layout (`taffy`) and shape text
 6. Build the draw list (UI layout included), then network send (`Network::send`, Phase 63), then render
 
-The player runs the schedule's steps from `App::frame`, then renders (`crates/player/src/main.rs`; its `HostIo` is the input, sound, streaming and drawing). The editor runs steps 0-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`), then network send at the end of `Session::frame`; its viewport lays out UI at step 5 using its current pixel size, then builds and draws step 6. Play's network step talks to its other Play devices over the in-memory loopback (multi-client Play, Phase 64); it can't host or join a real game, so scripts' `Host` and `Join` fire `ConnectionFailed` and a LAN search finds nothing. Editor Play's order differs from the player's in three places (the player's order is the one to follow; they come together when the frame becomes one shared schedule, roadmap M1):
-
-- **`render_step` before Animators.** The player moves Animators on (and `place_tools`) and then runs `render_step`; Play runs `render_step` first, so `RenderStepped` sees last frame's poses.
-- **Audio after `render_step`.** The player applies sound actions before particles, Animators and `render_step`; Play applies them after `render_step`, so a sound a render-step function plays starts this frame in Play and next frame in the player.
-- **Particles and streaming in the viewport.** The player emits and moves particles and steps world streaming inside its frame; Play does both while the Scene viewport draws (`crates/editor/src/viewport.rs`), so they move on only while a Scene tab is drawn.
+The player runs the schedule's steps from `App::frame`, then renders (`crates/player/src/main.rs`; its `HostIo` is the input, sound, streaming and drawing). The editor runs steps 0-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`, through its `PlayHost`), then network send at the end of the frame; its viewport lays out UI at step 5 using its current pixel size, then builds and draws step 6. Play's network step talks to its other Play devices over the in-memory loopback (multi-client Play, Phase 64); it can't host or join a real game, so scripts' `Host` and `Join` fire `ConnectionFailed` and a LAN search finds nothing. Editor Play runs the player's order without drawing (roadmap M1): sound actions right after Heartbeat, then particles, Animators and Tools, then the render step, and world streaming around the camera drawn this frame. Its particles and streaming belong to the `Session`, so they move on whether or not a Scene tab is open; the Scene viewport borrows them to draw (`Session::swap_effects`), and moves its own particles only while editing.
 
 `axcenity-server` runs the schedule's server steps (step 0, steps 2-4 without characters, agents or animation, then network send), with its own network, printing and far-physics sleep as its `HostIo` (`crates/server/src/main.rs`). The game test runner's `TestGame::frame` (`crates/testing/src/game.rs`, Phase 53) runs the schedule's test-runner steps at a fixed 1/60 second: steps 1-4, then the render step's scripts and the game camera, with no audio or drawing. Visual-debug overlays (colliders, raycasts, bounds, emitters, the navigation mesh, agent paths) are painted in the editor viewport after the scene texture; they do not change this order, and the player never draws them.
 
 Since Phase 16, change events (`Changed`, `ChildAdded`, ...) for whatever changed fire at every step that runs scripts, before and after it, so physics' changes fire at the start of step 4 (see `docs/scripting/execution.md`).
 
-Since Phase 32, `RunService.Stepped` fires on both sides between steps 2 and 3 (`ScriptRuntime::stepped`), and just before step 6 builds the frame `ScriptRuntime::render_step` runs LocalScripts' `BindToRenderStep` functions in priority order and then `RenderStepped`, before `take_camera_move` and `step_camera`, so a camera they move is drawn this frame. The player calls it right before `end_camera`; the editor's Play after the loading screen moves on and before it takes the camera move (its Animators update after it).
+Since Phase 32, `RunService.Stepped` fires on both sides between steps 2 and 3 (`ScriptRuntime::stepped`), and just before step 6 builds the frame `ScriptRuntime::render_step` runs LocalScripts' `BindToRenderStep` functions in priority order and then `RenderStepped`, before `take_camera_move` and `step_camera`, so a camera they move is drawn this frame. The player calls it right before `end_camera`; the editor's Play at the same place, after Animators, so `RenderStepped` sees this frame's poses in both.
 
 Since Phase 14, step 1 also hands LocalScripts the camera (`set_camera`) and the key presses since the last frame (`ScriptRuntime::input`), and step 2 first delivers RemoteEvent messages to each side (server, then client) before resuming its tasks. Where a LocalScript moved the camera (`take_camera_move`) is applied just before step 6, unless a character controller owns the view; then that move is dropped and the controller's camera is drawn. Since Phase 31, step 1 also passes the view's size (`set_viewport_size`), and just before step 6 `step_camera` moves a Follow or Track camera after its subject and moves shakes on; its `GameCamera::view` turns the host's camera into the one drawn (a CameraType other than Custom draws the script's camera instead, and the fly camera waits). See `docs/scripting/client-server.md` and `docs/scripting/api-character.md`.
 

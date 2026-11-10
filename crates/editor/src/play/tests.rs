@@ -420,6 +420,129 @@ fn a_local_script_in_play_reads_keys_and_moves_the_camera() {
     );
 }
 
+/// `RenderStepped` sees the pose the Animators set this frame, as in the
+/// player: Play used to run the render step before them, a frame behind
+/// (roadmap M1).
+#[test]
+fn render_stepped_sees_this_frames_animated_pose() {
+    let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-door");
+    let mut world = axcenity_project::load(&folder).unwrap().world;
+    no_character(&mut world);
+    let instance = world.create(ClassName::LocalScript).unwrap();
+    world
+        .set_parent(instance, Some(world.starter_player_scripts()))
+        .unwrap();
+    let scripts = [ScriptFile {
+        instance,
+        path: "scripts/pose.client.lua".to_string(),
+        source: r#"
+                local door = workspace.Door
+                door.Animator:LoadAnimation(door.Open):Play()
+                game:GetService("RunService").RenderStepped:Connect(function()
+                    print(string.format("%.4f", door.Position.Y))
+                end)
+            "#
+        .to_string(),
+    }];
+    let mut output = Output::default();
+    let mut session = Session::start(
+        &world,
+        &scripts,
+        &Breakpoints::new(),
+        &mut output,
+        Assets::new(&folder),
+        CameraState::default(),
+        &LoadingScreen::default(),
+        &InputMap::default(),
+        None,
+        &GraphicsSettings::default(),
+        &Capabilities::default(),
+        PlayLevels::default(),
+    )
+    .unwrap();
+    let door = session
+        .world()
+        .find_first_child(session.world().workspace(), "Door")
+        .unwrap();
+    for _ in 0..10 {
+        session
+            .frame(
+                1.0 / 60.0,
+                &[],
+                MoveInput::default(),
+                CameraState::default(),
+                &mut output,
+            )
+            .unwrap();
+        let y = session
+            .world()
+            .get(door)
+            .and_then(|door| door.property("Position"))
+            .and_then(Value::as_vector3)
+            .unwrap()
+            .y;
+        assert!(y > 2.0, "the door opens");
+        assert_eq!(
+            output.lines().last().unwrap().text,
+            format!("{:.4}", f64::from(y))
+        );
+    }
+}
+
+/// Particles and world streaming move on in Play's frame, as in the
+/// player, whether or not a Scene tab draws them: Play used to leave both
+/// to the viewport (roadmap M1).
+#[test]
+fn particles_and_streaming_move_on_in_the_frame_without_a_scene_tab() {
+    let mut world = World::new();
+    no_character(&mut world);
+    world
+        .set_property(world.workspace(), "StreamingEnabled", Value::Bool(true))
+        .unwrap();
+    let part = world.create(ClassName::Part).unwrap();
+    world.set_parent(part, Some(world.workspace())).unwrap();
+    let emitter = world.create(ClassName::ParticleEmitter).unwrap();
+    world.set_parent(emitter, Some(part)).unwrap();
+    world
+        .set_property(emitter, "Rate", Value::Number(0.0))
+        .unwrap();
+    let scripts = [script(
+        &mut world,
+        "workspace.Part.ParticleEmitter:Emit(10)",
+    )];
+    let mut output = Output::default();
+    let mut session = Session::start(
+        &world,
+        &scripts,
+        &Breakpoints::new(),
+        &mut output,
+        Assets::default(),
+        CameraState::default(),
+        &LoadingScreen::default(),
+        &InputMap::default(),
+        None,
+        &GraphicsSettings::default(),
+        &Capabilities::default(),
+        PlayLevels::default(),
+    )
+    .unwrap();
+    session
+        .frame(
+            1.0 / 60.0,
+            &[],
+            MoveInput::default(),
+            CameraState::default(),
+            &mut output,
+        )
+        .unwrap();
+    // What a Scene tab would draw, had one been open.
+    let mut particles = Particles::new();
+    let mut streaming = Streaming::default();
+    session.swap_effects(&mut particles, &mut streaming);
+    assert_eq!(particles.count(), 10, "the script's Emit(10)");
+    assert!(streaming.settings().is_some(), "the world streams");
+}
+
 /// Starts Play of `world` with `clients` clients.
 fn play(world: &World, scripts: &[ScriptFile], clients: usize, output: &mut Output) -> Play {
     Play::start(

@@ -56,7 +56,7 @@ pub(crate) static STANDARD: &[Step] = &[
     step("heartbeat",         Stage::Heartbeat,      ALL,  heartbeat),
 
     step("audio",             Stage::PreAnimation,   GAME, audio),
-    step("particles",         Stage::PreAnimation,   P.with(Hosts::TEST), particles),
+    step("particles",         Stage::PreAnimation,   GAME, particles),
 
     step("animators",         Stage::Animation,      GAME, animators),
     step("tools.place",       Stage::Animation,      GAME, tools_place),
@@ -67,7 +67,7 @@ pub(crate) static STANDARD: &[Step] = &[
     step("camera.move",       Stage::PreRender,      GAME, camera_move),
     step("camera.follow",     Stage::PreRender,      GAME, camera_follow),
     step("graphics.changed",  Stage::PreRender,      PE,   graphics_changed),
-    step("streaming",         Stage::PreRender,      P,    streaming),
+    step("streaming",         Stage::PreRender,      PE,   streaming),
     step("draw.scene",        Stage::PreRender,      P,    draw_scene),
     step("draw.ui",           Stage::PreRender,      P,    draw_ui),
 
@@ -90,12 +90,6 @@ pub(crate) static DRIFT: &[Drift] = &[
     // The server replaces shattered parts before asking which parts are
     // held still, where the other hosts ask first.
     Drift { host: Hosts::SERVER, step: "physics.shatters", after: "scripts.stepped" },
-    // Editor Play: the render step's functions see last frame's poses,
-    // because Animators run after them.
-    Drift { host: Hosts::EDITOR_PLAY, step: "camera.follow", after: "graphics.changed" },
-    Drift { host: Hosts::EDITOR_PLAY, step: "audio", after: "graphics.changed" },
-    Drift { host: Hosts::EDITOR_PLAY, step: "animators", after: "audio" },
-    Drift { host: Hosts::EDITOR_PLAY, step: "tools.place", after: "animators" },
 ];
 
 /// Where each host's benchmark steps end: `(step, benchmark step name)`.
@@ -123,9 +117,9 @@ pub(crate) static LAPS: &[(Hosts, &[(&str, &str)])] = &[
         ("scripts.stepped", "Scripts"),
         ("physics.step", "Physics"),
         ("heartbeat", "Heartbeat"),
-        ("graphics.changed", "RenderStep"),
         ("audio", "Audio"),
-        ("tools.place", "Animation"),
+        ("loading.screen", "Animation"),
+        ("graphics.changed", "RenderStep"),
         ("net.send", "Network send"),
     ]),
     (Hosts::SERVER, &[

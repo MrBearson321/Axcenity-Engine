@@ -838,6 +838,15 @@ impl EditorApp {
         }
     }
 
+    /// Trades the shown Play device's particles and streaming with the
+    /// viewport's (`Session::swap_effects`); a second call trades back.
+    fn swap_play_effects(&mut self) {
+        if let Some(play) = &mut self.play {
+            let (particles, streaming) = self.viewport.effects_mut();
+            play.swap_effects(particles, streaming);
+        }
+    }
+
     /// The Scene View panel: the viewport.
     pub(in crate::app) fn scene_pane(
         &mut self,
@@ -847,6 +856,9 @@ impl EditorApp {
         let ctx = ui.ctx().clone();
         self.refresh_nav_mesh(&ctx);
         self.update_sequence_preview();
+        // The game's particles and streaming, which its frame moves on, are
+        // drawn in the viewport while it shows Play; swapped back below.
+        self.swap_play_effects();
         // The Sequencer's preview, outside Play (Phase 51): its own copy
         // of the world, posed and seen from its camera cut.
         let sequence = (!self.playing() && self.layout.is_open(Pane::Sequencer))
@@ -983,6 +995,7 @@ impl EditorApp {
                 }
             })
             .inner;
+        self.swap_play_effects();
         if let Some(render) = output.render {
             self.profiler.record_render(render);
         }

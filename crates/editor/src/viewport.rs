@@ -749,6 +749,12 @@ impl Viewport {
         std::mem::take(&mut self.character_zoom)
     }
 
+    /// The particles and world streaming the viewport draws, for Play to
+    /// swap its own in while it draws (`Session::swap_effects`).
+    pub fn effects_mut(&mut self) -> (&mut Particles, &mut axcenity_scene::Streaming) {
+        (&mut self.particles, &mut self.terrain.streaming)
+    }
+
     /// Takes every particle away, for a new world (Play, Stop, another project).
     pub fn clear_particles(&mut self) {
         self.particles.clear();
@@ -1257,21 +1263,22 @@ impl Viewport {
         // Big emitters move on the GPU, where it runs compute shaders.
         self.particles
             .set_gpu(target.renderer.capabilities().compute_shaders);
-        for &(emitter, count) in emits {
-            self.particles.emit(world, emitter, count);
+        // During Play the game's frame moves its particles on (they're
+        // swapped in for drawing: `Session::swap_effects`).
+        if !game_playing {
+            for &(emitter, count) in emits {
+                self.particles.emit(world, emitter, count);
+            }
+            self.particles.update(world, seconds);
         }
-        self.particles.update(world, seconds);
         // Particles keep moving without input, so keep drawing frames.
         if self.particles.is_active(world) {
             ui.ctx().request_repaint();
         }
         let still = axcenity_scene::Poses::new();
         let poses = poses.unwrap_or(&still);
-        if game_playing {
-            self.terrain
-                .streaming
-                .step(world, camera.position, f64::from(seconds));
-        } else if self.terrain.streaming.settings().is_some() {
+        // During Play the game's frame streams the world, as for particles.
+        if !game_playing && self.terrain.streaming.settings().is_some() {
             // Editing shows everything, whatever Play streamed.
             self.terrain.streaming = axcenity_scene::Streaming::default();
         }
@@ -1298,59 +1305,22 @@ impl Viewport {
         });
         move_overlay::ghost_moving(&mut draw_list, &moving_parts(self.drag.as_ref(), world));
         draw_list.ui = ui_layout.draw_items.clone();
-        if let Some(inventory) = hotbar {
-            draw_list.ui.extend(axcenity_ui::hotbar_items(
-                world,
-                inventory,
-                stylesheets,
-                width,
-                height,
-            ));
-        }
-        draw_list.ui.extend(axcenity_ui::ability_bar_items(
+        // The hotbar, the ability bar, the quest tracker and dialogue box,
+        // the leaderboard, the chat window, then ProximityPrompts, drawn as
+        // the player draws them.
+        draw_list.ui.extend(axcenity_ui::overlay_items(
             world,
-            &ability_bar,
-            stylesheets,
-            width,
-            height,
-        ));
-        draw_list.ui.extend(axcenity_ui::quest_tracker_items(
-            world,
-            &quests,
-            stylesheets,
-            width,
-            height,
-        ));
-        if let Some(dialogue) = &dialogue {
-            draw_list.ui.extend(axcenity_ui::dialogue_box_items(
-                world,
-                dialogue,
-                stylesheets,
-                width,
-                height,
-            ));
-        }
-        if leaderboard {
-            draw_list.ui.extend(axcenity_ui::leaderboard_items(
-                world,
-                stylesheets,
-                width,
-                height,
-            ));
-        }
-        if let Some((lines, typing)) = &chat {
-            draw_list.ui.extend(axcenity_ui::chat_items(
-                world,
-                lines,
-                typing.as_deref(),
-                stylesheets,
-                width,
-                height,
-            ));
-        }
-        draw_list.ui.extend(axcenity_ui::prompt_items(
-            world,
-            &prompts,
+            &axcenity_ui::OverlayView {
+                inventory: hotbar,
+                abilities: &ability_bar,
+                quests: &quests,
+                dialogue: dialogue.as_ref(),
+                leaderboard,
+                chat: chat
+                    .as_ref()
+                    .map(|(lines, typing)| (lines.as_slice(), typing.as_deref())),
+                prompts: &prompts,
+            },
             stylesheets,
             &camera,
             width,
