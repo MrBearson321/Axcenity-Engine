@@ -52,6 +52,11 @@ env_logger = "0.11"
 # and editor Play (Apache-2.0 OR MIT). Windows uses Windows.Gaming.Input,
 # macOS IOKit, and Linux evdev through libudev (`libudev-dev` to build).
 gilrs = "0.11"
+# Event-based file watching for `project::Watcher` (roadmap I10): inotify,
+# FSEvents and ReadDirectoryChangesW. CC0-1.0 (public domain dedication, no
+# patent grant), compatible with Apache-2.0. The watcher falls back to its own
+# polling where events can't be had.
+notify = "8.2"
 # Phosphor icons as a font, for the editor (MIT OR Apache-2.0; the icons are MIT).
 # 0.10 is the release for egui 0.32: upgrade it with eframe.
 egui-phosphor = { version = "0.10", default-features = false, features = ["fill", "regular"] }

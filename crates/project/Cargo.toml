@@ -12,6 +12,7 @@ axcenity-assets.workspace = true
 axcenity-blocks-runtime.workspace = true
 axcenity-core.workspace = true
 axcenity-terrain.workspace = true
+notify.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
