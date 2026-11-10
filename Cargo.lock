@@ -652,6 +652,7 @@ dependencies = [
  "axcenity-save",
  "axcenity-scene",
  "axcenity-script",
+ "axcenity-sim",
  "axcenity-terrain",
  "axcenity-testing",
  "axcenity-ui",

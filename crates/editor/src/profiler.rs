@@ -45,6 +45,31 @@ pub struct FrameCost {
     pub total: Duration,
 }
 
+impl FrameCost {
+    /// A frame's cost from the benchmark steps it was timed in.
+    pub fn from_laps(
+        laps: &axcenity_core::bench::Laps,
+        physics_steps: u32,
+        total: Duration,
+    ) -> Self {
+        let mut cost = FrameCost {
+            physics_steps,
+            total,
+            ..FrameCost::default()
+        };
+        for &(name, time) in laps.stages() {
+            match name {
+                "Input" | "Scripts" | "Heartbeat" | "RenderStep" => cost.scripts += time,
+                "Physics" => cost.physics += time,
+                "Audio" => cost.audio += time,
+                "Animation" => cost.animation += time,
+                _ => {}
+            }
+        }
+        cost
+    }
+}
+
 /// How much the game has to simulate.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct GameLoad {

@@ -10,25 +10,24 @@
 
 use std::any::Any;
 use std::collections::BTreeSet;
+use std::ops::ControlFlow;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::{GameAudio, SoundAction};
-use axcenity_character::{Controllers, MoveInput};
+use axcenity_character::MoveInput;
 use axcenity_core::input::{InputEvent, InputMap, InputState};
 use axcenity_core::{InstanceId, KeyCode, MouseBehavior, Vector3, World};
-use axcenity_nav::Agents;
 use axcenity_net::Network;
-use axcenity_physics::Physics;
 use axcenity_project::{LoadingScreen, ScriptFile};
 use axcenity_render::{Capabilities, GraphicsSettings};
 use axcenity_script::{
     Breakpoints, CameraState, CameraView, GameCamera, KeyEvent, NetworkRequest, OutputKind, Pause,
     ScriptRuntime,
 };
+use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 use axcenity_ui::LoadingGui;
 use eframe::egui;
 
@@ -54,17 +53,10 @@ pub struct Crash(pub String);
 /// The game while it plays: the copied world, the scripts running in it and
 /// the physics moving its parts.
 pub struct Session {
-    world: World,
-    scripts: ScriptRuntime,
-    physics: Physics,
-    /// Walks third-person characters and owns the camera when one is present.
-    characters: Controllers,
-    /// Walks NavigationAgents along their paths.
-    agents: Agents,
-    /// Plays the Animators (state machines, AnimationTracks and played
-    /// Animations), posing skeletons and setting keyed properties.
-    animators: Animators,
-    assets: Assets,
+    /// The copied world, the scripts running in it, its physics and so on.
+    sim: Sim,
+    /// Editor Play's frame.
+    schedule: Schedule,
     /// Dropped at Stop, which silences every sound.
     audio: GameAudio,
     /// Buttons' hover and click sounds, played with the next frame's audio.
@@ -139,13 +131,8 @@ impl Session {
         levels: PlayLevels,
     ) -> Result<Session, Crash> {
         let mut session = Session {
-            world: edit_world.clone(),
-            scripts: ScriptRuntime::new(),
-            physics: Physics::with_assets(assets.clone()),
-            characters: Controllers::default(),
-            agents: Agents::default(),
-            animators: Animators::with_ground(axcenity_character::foot_ground),
-            assets,
+            sim: Sim::new(edit_world.clone(), ScriptRuntime::new(), assets),
+            schedule: Schedule::for_host(Hosts::EDITOR_PLAY),
             audio: GameAudio::default(),
             ui_sounds: Vec::new(),
             loading_gui: None,
@@ -162,7 +149,7 @@ impl Session {
         };
         // Up before any script runs, as in the player.
         session.loading_gui = LoadingGui::start(
-            &mut session.world,
+            &mut session.sim.world,
             &loading.screen_gui,
             loading.min_seconds,
             loading.wait_for_script,
@@ -176,36 +163,39 @@ impl Session {
         }
         // The character each player spawns as (Phase 47), before scripts
         // look for it.
-        if let Some(folder) = session.assets.folder()
-            && let Err(err) = axcenity_project::load_starter_character(&folder, &mut session.world)
+        if let Some(folder) = session.sim.assets.folder()
+            && let Err(err) =
+                axcenity_project::load_starter_character(&folder, &mut session.sim.world)
         {
             output.warning(err);
         }
-        session.scripts.set_assets(session.assets.clone());
-        session.scripts.set_save_folder(save_folder);
+        session.sim.scripts.set_assets(session.sim.assets.clone());
+        session.sim.scripts.set_save_folder(save_folder);
         // Who plays, the same each time on this install (Phase 64).
-        session.scripts.set_user_id(play_user_id());
-        session.scripts.set_input_map(input_map.clone());
+        session.sim.scripts.set_user_id(play_user_id());
+        session.sim.scripts.set_input_map(input_map.clone());
         if !levels.worlds.is_empty() {
             session
+                .sim
                 .scripts
                 .set_levels(&levels.start, &levels.current, levels.worlds);
         }
-        session.scripts.set_graphics(graphics, capabilities);
-        session.scripts.enable_debugger();
+        session.sim.scripts.set_graphics(graphics, capabilities);
+        session.sim.scripts.enable_debugger();
         // `RunService:IsStudio()` is true in the editor's Play.
-        session.scripts.set_studio(true);
-        session.scripts.set_breakpoints(breakpoints);
+        session.sim.scripts.set_studio(true);
+        session.sim.scripts.set_breakpoints(breakpoints);
         guard(|| {
             // Animators start in their default states before any script
             // runs, as in the player, so scripts can read them.
             session
+                .sim
                 .animators
-                .update(&mut session.world, &session.assets, 0.0);
+                .update(&mut session.sim.world, &session.sim.assets, 0.0);
             session.forward_animator_errors(output);
             for script in scripts {
-                session.scripts.start_script(
-                    &mut session.world,
+                session.sim.scripts.start_script(
+                    &mut session.sim.world,
                     script.instance,
                     &script.path,
                     &script.source,
@@ -225,36 +215,37 @@ impl Session {
     /// The player character's Inventory (Phase 45), whose hotbar the
     /// viewport draws.
     pub fn hotbar(&self) -> Option<InstanceId> {
-        self.scripts.player_inventory(&self.world)
+        self.sim.scripts.player_inventory(&self.sim.world)
     }
 
     /// The player's Abilities and their cooldowns (Phase 76), for the
     /// ability bar the viewport draws.
     pub fn ability_bar(&self) -> Vec<axcenity_core::ability::AbilitySlot> {
-        self.scripts.ability_bar(&self.world)
+        self.sim.scripts.ability_bar(&self.sim.world)
     }
 
     /// The active quests (Phase 77), for the quest tracker the viewport
     /// draws.
     pub fn quest_tracker(&self) -> Vec<axcenity_core::dialogue::QuestView> {
-        self.scripts.quest_tracker(&self.world)
+        self.sim.scripts.quest_tracker(&self.sim.world)
     }
 
     /// What the dialogue box shows while a dialogue runs (Phase 77).
     pub fn dialogue_view(&self) -> Option<axcenity_core::dialogue::DialogueView> {
-        self.scripts.dialogue_view(&self.world)
+        self.sim.scripts.dialogue_view(&self.sim.world)
     }
 
     /// Whether the viewport draws the default leaderboard (Phase 47): Tab
     /// hides and shows it.
     pub fn leaderboard(&self) -> bool {
-        self.scripts.leaderboard_shown()
+        self.sim.scripts.leaderboard_shown()
     }
 
     /// The chat window's lines (Phase 67): who said each (`None` for a
     /// system message) and what.
     pub fn chat_lines(&self) -> Vec<(Option<String>, String)> {
-        self.scripts
+        self.sim
+            .scripts
             .chat_lines()
             .into_iter()
             .map(|line| (line.from, line.text))
@@ -263,7 +254,7 @@ impl Session {
 
     /// Sends a line typed in the chat window, as this device's player.
     pub fn send_chat(&mut self, text: &str) {
-        self.scripts.send_chat(text);
+        self.sim.scripts.send_chat(text);
     }
 
     /// Why this device's player was kicked (`Player:Kick`), once.
@@ -273,7 +264,8 @@ impl Session {
 
     /// The ProximityPrompts that show (Phase 44), for the viewport to draw.
     pub fn prompts(&self) -> Vec<axcenity_ui::PromptView> {
-        self.scripts
+        self.sim
+            .scripts
             .shown_prompts()
             .iter()
             .map(|shown| axcenity_ui::PromptView {
@@ -288,12 +280,12 @@ impl Session {
     /// The cursor over the ClickDetector the mouse points at, as a CSS
     /// cursor name, if it points at one.
     pub fn click_cursor(&self) -> Option<String> {
-        self.scripts.click_cursor(&self.world)
+        self.sim.scripts.click_cursor(&self.sim.world)
     }
 
     /// The world as the game has it now, for the panels and the viewport.
     pub fn world(&self) -> &World {
-        &self.world
+        &self.sim.world
     }
 
     /// The audio's peak levels since the last call, for the Mixer panel.
@@ -309,7 +301,7 @@ impl Session {
     /// The game's world, for the Properties panel's edits during Play. The
     /// game's scripts see those changes at the next frame.
     pub fn world_mut(&mut self) -> &mut World {
-        &mut self.world
+        &mut self.sim.world
     }
 
     /// The values edited in Properties during Play, and which are kept.
@@ -324,18 +316,18 @@ impl Session {
     /// Where a script is paused at a breakpoint, if one is. While paused,
     /// [`Self::frame`] does nothing, so the whole game holds still.
     pub fn pause(&self) -> Option<Pause> {
-        self.scripts.pause()
+        self.sim.scripts.pause()
     }
 
     pub fn set_breakpoints(&mut self, breakpoints: &Breakpoints) {
-        self.scripts.set_breakpoints(breakpoints);
+        self.sim.scripts.set_breakpoints(breakpoints);
     }
 
     /// Continues from the pause: the paused script runs on from its line,
     /// then whatever waited for it. It may pause again at a breakpoint.
     pub fn continue_from_pause(&mut self, output: &mut Output) -> Result<(), Crash> {
         guard(|| {
-            self.scripts.continue_from_pause(&mut self.world);
+            self.sim.scripts.continue_from_pause(&mut self.sim.world);
             self.forward_output(output);
         })
     }
@@ -352,7 +344,9 @@ impl Session {
         output: &mut Output,
     ) -> Result<(), Crash> {
         guard(|| {
-            self.scripts.activate_ui_button(&mut self.world, button);
+            self.sim
+                .scripts
+                .activate_ui_button(&mut self.sim.world, button);
             self.forward_output(output);
         })
     }
@@ -369,12 +363,14 @@ impl Session {
             for event in events {
                 match event {
                     axcenity_ui::UiEvent::MouseEnter(id) => {
-                        self.scripts
-                            .fire_ui_event(&mut self.world, id, "MouseEnter");
+                        self.sim
+                            .scripts
+                            .fire_ui_event(&mut self.sim.world, id, "MouseEnter");
                     }
                     axcenity_ui::UiEvent::MouseLeave(id) => {
-                        self.scripts
-                            .fire_ui_event(&mut self.world, id, "MouseLeave");
+                        self.sim
+                            .scripts
+                            .fire_ui_event(&mut self.sim.world, id, "MouseLeave");
                     }
                     axcenity_ui::UiEvent::PlaySound(sound_id) => {
                         self.ui_sounds.push(SoundAction::PlayOnce { sound_id });
@@ -394,7 +390,7 @@ impl Session {
     ) -> Result<axcenity_ui::TextOutcome, Crash> {
         let mut outcome = axcenity_ui::TextOutcome::Ignored;
         guard(|| {
-            outcome = axcenity_ui::edit_text_box(&mut self.world, text_box, command);
+            outcome = axcenity_ui::edit_text_box(&mut self.sim.world, text_box, command);
             self.forward_output(output);
         })?;
         Ok(outcome)
@@ -407,7 +403,9 @@ impl Session {
         output: &mut Output,
     ) -> Result<(), Crash> {
         guard(|| {
-            self.scripts.release_text_box(&mut self.world, text_box);
+            self.sim
+                .scripts
+                .release_text_box(&mut self.sim.world, text_box);
             self.forward_output(output);
         })
     }
@@ -422,7 +420,7 @@ impl Session {
     ) -> Result<Result<(), String>, Crash> {
         let mut result = Ok(());
         guard(|| {
-            result = self.scripts.run_command(&mut self.world, source);
+            result = self.sim.scripts.run_command(&mut self.sim.world, source);
             self.forward_output(output);
         })?;
         Ok(result)
@@ -437,7 +435,10 @@ impl Session {
     ) -> Result<axcenity_script::ConsoleRun, Crash> {
         let mut run = axcenity_script::ConsoleRun::Unknown;
         guard(|| {
-            run = self.scripts.run_console_command(&mut self.world, line);
+            run = self
+                .sim
+                .scripts
+                .run_console_command(&mut self.sim.world, line);
             self.forward_output(output);
         })?;
         Ok(run)
@@ -445,39 +446,40 @@ impl Session {
 
     /// The commands the game's scripts registered, for the console's `help`.
     pub fn console_commands(&self) -> Vec<axcenity_script::ConsoleCommandInfo> {
-        self.scripts.console_commands()
+        self.sim.scripts.console_commands()
     }
 
     /// Whether `name` means something to Lua typed in the console.
     pub fn console_knows(&self, name: &str) -> bool {
-        self.scripts.console_knows(&self.world, name)
+        self.sim.scripts.console_knows(&self.sim.world, name)
     }
 
     /// Turns the console's `noclip` on or off; returns whether it's on.
     pub fn toggle_noclip(&mut self) -> bool {
-        let on = !self.characters.noclip();
-        self.characters.set_noclip(on);
+        let on = !self.sim.characters.noclip();
+        self.sim.characters.set_noclip(on);
         on
     }
 
     /// Moves the player's character so its feet are at `to` (the console's
     /// `teleport`). False when there's none.
     pub fn teleport(&mut self, to: Vector3) -> bool {
-        self.characters.teleport(&mut self.world, to)
+        self.sim.characters.teleport(&mut self.sim.world, to)
     }
 
     /// The follow camera of a third-person controller, if the play world has
     /// one with a body. The fly camera is left alone; Stop shows it again.
     #[cfg(test)]
     pub fn character_camera(&self) -> Option<axcenity_character::CharacterCamera> {
-        self.characters.view(&self.world)
+        self.sim.characters.view(&self.sim.world)
     }
 
     /// Whether the game holds the view (a character controller, or a
     /// CameraType other than Custom), so the fly camera stays put.
     pub fn holds_camera(&self) -> bool {
         !self.observing
-            && (self.characters.view(&self.world).is_some() || self.scripts.camera_scripted())
+            && (self.sim.characters.view(&self.sim.world).is_some()
+                || self.sim.scripts.camera_scripted())
     }
 
     /// The camera the viewport draws during Play, given the fly camera:
@@ -494,7 +496,7 @@ impl Session {
 
     /// The viewport's size in pixels (`Camera.ViewportSize`), before a frame.
     pub fn set_viewport_size(&mut self, width: f32, height: f32) {
-        self.scripts.set_viewport_size(width, height);
+        self.sim.scripts.set_viewport_size(width, height);
     }
 
     /// Runs one frame, `seconds` long, with the input since the last frame
@@ -516,279 +518,56 @@ impl Session {
         camera: CameraState,
         output: &mut Output,
     ) -> Result<Option<CameraState>, Crash> {
-        let mut moved = None;
         self.cost = None;
-        if self.scripts.pause().is_some() {
+        if self.sim.scripts.pause().is_some() {
             return Ok(None);
         }
         // Each step's time, for the Profiler. Reading the clock costs next
         // to nothing, so it's measured whether or not the panel is open.
-        let mut cost = FrameCost::default();
         let started = Instant::now();
         self.laps = axcenity_core::bench::Laps::start();
         profiling::scope!("Play frame");
+        let schedule = std::mem::take(&mut self.schedule);
+        let mut laps = std::mem::take(&mut self.laps);
+        let mut host = PlayHost {
+            session: self,
+            input,
+            motion,
+            camera,
+            output,
+            moved: None,
+            physics_steps: 0,
+        };
         let result = guard(|| {
-            if self.panic_next_frame {
+            if host.session.panic_next_frame {
                 panic!("a deliberate engine panic, from Debug > Panic during Play");
             }
-            // Play doesn't host or join (Phase 63): `NetworkService` calls
-            // fail with a reason, and LAN searches find nothing.
-            for request in self.scripts.take_network_requests() {
-                match request {
-                    NetworkRequest::FindLanGames => {
-                        self.scripts.finish_lan_search(&mut self.world, &[]);
-                    }
-                    NetworkRequest::Disconnect => {}
-                    // The viewport streams around the camera, and Play has
-                    // no other device to send a region to.
-                    NetworkRequest::StreamAround { request, .. } => {
-                        self.scripts.finish_stream_around(&mut self.world, request);
-                    }
-                    NetworkRequest::Host { .. } | NetworkRequest::Join { .. } => {
-                        self.scripts
-                            .fire_connection_failed(&mut self.world, PLAY_IS_OFFLINE);
-                    }
-                }
-            }
-            // Then what the other Play devices sent (Phase 64).
-            self.network
-                .receive(&mut self.world, &mut self.scripts, seconds);
-            self.forward_network_log(output);
-            self.forward_output(output);
-            self.laps.lap("Network");
-            let following = self.network.is_following();
-            // A Sequence that locks input leaves the character still, and
-            // the server view takes none.
-            let motion = if self.scripts.movement_locked(&self.world) || self.observing {
-                MoveInput::default()
-            } else {
-                motion
-            };
-            let input: &[InputEvent] = if self.observing { &[] } else { input };
-            // Each device moves its own player's character (Phase 66).
-            let others = self.network.other_characters(&self.world, &self.scripts);
-            let player = if self.observing {
-                None
-            } else {
-                self.scripts.local_player()
-            };
-            self.characters.set_players(player, others);
-            self.network.set_running(motion.run);
-            self.characters
-                .step(&mut self.world, &self.assets, motion, seconds as f32);
-            let seats: Vec<_> = self
-                .characters
-                .take_seat_changes()
-                .into_iter()
-                .map(|change| (change.controller, change.seated, change.seat))
-                .collect();
-            if !seats.is_empty() {
-                self.scripts.fire_seated(&mut self.world, &seats);
-            }
-            let landings = self.characters.take_landings();
-            // A device following the server leaves the rest to it.
-            if !following {
-                if !landings.is_empty() {
-                    self.scripts.fire_landed(&mut self.world, &landings);
-                }
-                // Then Humanoids: MoveTo, states and dying (Phase 46).
-                self.scripts
-                    .step_humanoids(&mut self.world, &self.characters, seconds);
-                // Then players: their first character, respawns and spawn
-                // ForceFields (Phase 47).
-                self.scripts.step_players(&mut self.world, seconds);
-                self.laps.lap("Characters");
-                // Then navigation agents, toward their destinations.
-                self.agents
-                    .step(&mut self.world, &self.assets, seconds as f32);
-                self.laps.lap("Agents");
-                for warning in self.agents.take_warnings() {
-                    output.warning(warning);
-                }
-                for sensed in self.agents.take_sensed() {
-                    let sense = sensed.sense.as_str().to_owned();
-                    self.scripts.fire_instance_event(
-                        &mut self.world,
-                        sensed.agent,
-                        "PlayerSensed",
-                        &[sense],
-                    );
-                }
-            }
-            let mut clock = Instant::now();
-            // The time since `clock`, which then starts again.
-            let mut lap = || {
-                let now = Instant::now();
-                let took = now - clock;
-                clock = now;
-                took
-            };
-            // 1. Input, for LocalScripts: the camera and the input. A
-            //    third-person controller owns the camera when one is present.
-            let seen = self.script_camera(camera);
-            self.scripts.set_camera(seen);
-            self.scripts.input_events(&mut self.world, input);
-            // Then ProximityPrompts and ClickDetectors, by that input,
-            // then Tools: pickups, the hotbar, Drop and Primary.
-            if !following {
-                self.scripts.step_prompts(&mut self.world, seconds);
-                self.scripts.step_tools(&mut self.world);
-            }
-            // Then Abilities' keys, on every device (Phase 76).
-            self.scripts.step_abilities(&mut self.world, seconds);
-            self.forward_output(output);
-            self.laps.lap("Input");
-            if self.scripts.pause().is_some() {
-                cost.scripts += lap();
-                return;
-            }
-            // 2. Resume scripts whose wait is over (and due `task.delay`s),
-            //    after delivering RemoteEvent messages.
-            self.scripts.step(&mut self.world, seconds);
-            // `RunService.Stepped`, before physics.
-            if self.scripts.pause().is_none() {
-                self.scripts.stepped(&mut self.world, seconds);
-            }
-            self.forward_output(output);
-            cost.scripts += lap();
-            self.laps.lap("Scripts");
-            if self.scripts.pause().is_some() {
-                return;
-            }
-            // The character is not a dynamic body. Anchoring here, after
-            // scripts and before physics, keeps a script from dropping it
-            // for this step. Gravity and friction of other parts are unchanged.
-            // Parts another device moves are held still here.
-            let held = self.network.held_parts(&self.world, &self.scripts);
-            self.physics.set_held(held);
-            // Far from the camera and the other devices, physics sleeps
-            // (Phase 80).
-            let far = axcenity_core::streaming::Settings::of(&self.world).map(|settings| {
-                let at = camera.position;
-                let mut focuses = vec![axcenity_core::Vector3::new(at.x, at.y, at.z)];
-                focuses.extend(self.network.player_focuses(&self.world));
-                (focuses, settings.unload_radius())
-            });
-            self.physics.set_far_sleep(far);
-            if !following {
-                self.characters.keep_kinematic(&mut self.world);
-                self.agents.keep_kinematic(&mut self.world);
-                // 3. Step physics at a fixed 60 Hz (0 to N steps this
-                //    frame), after the parts scripts shattered are replaced.
-                self.scripts
-                    .apply_shatters(&mut self.world, &mut self.physics);
-                cost.physics_steps = self.physics.step(&mut self.world, seconds);
-                cost.physics += lap();
-                self.laps.lap("Physics");
-                // 4. Fire `Touched` for parts that started touching (and
-                //    `Changed` for parts that moved), `TouchEnded` for
-                //    those that stopped, then `RunService.Heartbeat`.
-                let touches = self.physics.take_touches();
-                self.scripts.fire_touched(&mut self.world, &touches);
-                let ends = self.physics.take_touch_ends();
-                self.scripts.fire_touch_ended(&mut self.world, &ends);
-                self.scripts.fire_breaks(&mut self.world, &mut self.physics);
-            } else if self.network.simulates_physics() {
-                // An assembly the server gave this device (a car it drives).
-                cost.physics_steps = self.physics.step(&mut self.world, seconds);
-                let _ = self.physics.take_touches();
-                let _ = self.physics.take_touch_ends();
-                cost.physics += lap();
-            }
-            if self.scripts.pause().is_none() {
-                if !following {
-                    self.scripts.step_health(&mut self.world, seconds);
-                }
-                self.scripts.heartbeat(&mut self.world, seconds);
-            }
-            self.forward_output(output);
-            self.laps.lap("Heartbeat");
-            // A level loaded this frame shows the loading screen again.
-            if !self.scripts.take_level_loads().is_empty()
-                && let Some(shown) = LoadingGui::start(
-                    &mut self.world,
-                    &self.loading.screen_gui,
-                    self.loading.min_seconds,
-                    false,
-                )
-            {
-                self.loading_gui = Some(shown);
-            }
-            let ready = self.scripts.take_loading_screen_removed();
-            if let Some(loading) = &mut self.loading_gui {
-                loading.advance(&mut self.world, seconds as f32, ready);
-            }
-            // Before the frame is drawn: functions bound with
-            // `BindToRenderStep`, then `RenderStepped`, so a camera they
-            // move is this frame's.
-            if self.scripts.pause().is_none() {
-                self.scripts.render_step(&mut self.world, seconds);
-                self.forward_output(output);
-            }
-            moved = self.scripts.take_camera_move();
-            if let Some(graphics) = self.scripts.take_graphics_change() {
-                self.graphics = Some(graphics);
-            }
-            cost.scripts += lap();
-            self.laps.lap("RenderStep");
-            if self.scripts.pause().is_some() {
-                return;
-            }
-            let listener = self.shown_camera(moved.unwrap_or(camera));
-            let listener = CameraState {
-                position: listener.position,
-                orientation: listener.orientation,
-            };
-            if self.characters.view(&self.world).is_some() {
-                // The controller owns the camera, so a LocalScript's move
-                // is not copied onto the fly camera.
-                moved = None;
-            }
-            // Only the first device is heard: the others are the same
-            // game on more players' devices.
-            if self.label.is_none() {
-                self.apply_audio(listener, output);
-            } else {
-                drop(self.scripts.take_sound_actions());
-                self.ui_sounds.clear();
-            }
-            cost.audio += lap();
-            self.laps.lap("Audio");
-            // Animators move on and pose their models, as in the player.
-            let events = self
-                .animators
-                .update(&mut self.world, &self.assets, seconds);
-            for event in events {
-                let (animator, name, args) = event.script_event();
-                self.scripts
-                    .fire_instance_event(&mut self.world, animator, name, &args);
-            }
-            // Tools in hand follow the posed hands.
-            self.scripts
-                .place_tools(&mut self.world, self.animators.poses());
-            self.forward_output(output);
-            self.forward_animator_errors(output);
-            cost.animation += lap();
-            self.laps.lap("Animation");
-            // Then a Follow or Track camera follows its subject, which
-            // physics and animation have moved, and shakes move on.
-            self.game_camera = self.scripts.step_camera(&self.world, seconds);
-            // Network send, last: the world's changes and remote messages
-            // for the other Play devices.
-            self.network.send(&self.world, &mut self.scripts);
-            self.forward_network_log(output);
-            self.laps.lap("Network send");
+            schedule.run(
+                &mut FrameCtx::new(seconds, Hosts::EDITOR_PLAY, &mut host),
+                &mut laps,
+            );
         });
-        cost.total = started.elapsed();
-        self.cost = Some(cost);
+        let (moved, physics_steps) = (host.moved, host.physics_steps);
+        self.schedule = schedule;
+        self.laps = laps;
+        self.cost = Some(FrameCost::from_laps(
+            &self.laps,
+            physics_steps,
+            started.elapsed(),
+        ));
         result?;
-        Ok(moved)
+        // The controller owns the camera, so a LocalScript's move is not
+        // copied onto the fly camera. (A frame a breakpoint ended keeps it,
+        // as Continue would.)
+        let held = self.sim.scripts.pause().is_none()
+            && self.sim.characters.view(&self.sim.world).is_some();
+        Ok(if held { None } else { moved })
     }
 
     /// The camera scripts should see: the follow camera when a controller
     /// owns it, otherwise `fallback` (the fly camera, or a LocalScript's move).
     fn script_camera(&self, fallback: CameraState) -> CameraState {
-        match self.characters.view(&self.world) {
+        match self.sim.characters.view(&self.sim.world) {
             Some(view) => CameraState {
                 position: view.position,
                 orientation: view.orientation,
@@ -800,12 +579,12 @@ impl Session {
     /// The input map with the player's rebinds, for the controllers and
     /// UI navigation.
     pub fn input_map(&self) -> InputMap {
-        self.scripts.input_map()
+        self.sim.scripts.input_map()
     }
 
     /// `UserInputService.MouseBehavior` and `MouseIconEnabled`.
     pub fn mouse(&self) -> (MouseBehavior, bool) {
-        self.scripts.mouse()
+        self.sim.scripts.mouse()
     }
 
     /// What the last frame's steps took, or `None` if it didn't run.
@@ -823,26 +602,26 @@ impl Session {
     /// How much the game has to simulate, for the Profiler.
     pub fn load(&self) -> GameLoad {
         GameLoad {
-            bodies: self.physics.body_count(),
+            bodies: self.sim.physics.body_count(),
             sounds_playing: self.audio.playing_count(),
-            lua_bytes: self.scripts.used_memory(),
+            lua_bytes: self.sim.scripts.used_memory(),
         }
     }
 
     /// The posed models of the animated MeshParts, for the viewport.
     pub fn poses(&self) -> &axcenity_scene::Poses {
-        self.animators.poses()
+        self.sim.animators.poses()
     }
 
     /// The path each NavigationAgent is walking, from its feet, for the
     /// Agent Paths overlay. Reading them changes nothing.
     pub fn agent_paths(&self) -> Vec<(InstanceId, Vec<Vector3>)> {
-        self.agents.paths()
+        self.sim.agents.paths()
     }
 
     /// Recent `workspace:Raycast` calls, for the editor overlay.
     pub fn debug_rays(&self) -> Vec<axcenity_script::DebugRay> {
-        self.scripts.debug_rays()
+        self.sim.scripts.debug_rays()
     }
 
     /// The asset file at `path` changed on disk during Play: Animators
@@ -851,8 +630,8 @@ impl Session {
     /// plays. A sound that can't be decoded keeps its last good version.
     /// True if a playing Animator or a Sound that has played uses it.
     pub fn asset_changed(&mut self, path: &str, output: &mut Output) -> bool {
-        let animated = self.animators.reload(path);
-        let heard = match self.audio.reload(path, &self.assets) {
+        let animated = self.sim.animators.reload(path);
+        let heard = match self.audio.reload(path, &self.sim.assets) {
             Ok(heard) => heard,
             Err(err) => {
                 output.error(format!(
@@ -877,13 +656,14 @@ impl Session {
     ) -> Result<(), Crash> {
         let name = path.rsplit('/').next().unwrap_or(path);
         guard(|| {
-            let reloaded = self
-                .scripts
-                .reload_script(&mut self.world, script, path, source);
+            let reloaded =
+                self.sim
+                    .scripts
+                    .reload_script(&mut self.sim.world, script, path, source);
             self.forward_output(output);
             match reloaded {
                 Ok(()) => output.info(format!("Reloaded {name}")),
-                Err(_) if !self.world.contains(script) => output.info(format!(
+                Err(_) if !self.sim.world.contains(script) => output.info(format!(
                     "{name} isn't in the game any more, so it wasn't reloaded."
                 )),
                 Err(_) => output.warning(format!(
@@ -894,7 +674,7 @@ impl Session {
     }
 
     fn forward_animator_errors(&mut self, output: &mut Output) {
-        for error in self.animators.take_errors() {
+        for error in self.sim.animators.take_errors() {
             output.error(error);
         }
     }
@@ -907,12 +687,12 @@ impl Session {
 
     /// The `emitter:Emit(count)` calls scripts made since the last call.
     pub fn take_particle_emits(&mut self) -> Vec<(InstanceId, u32)> {
-        self.scripts.take_particle_emits()
+        self.sim.scripts.take_particle_emits()
     }
 
     /// Moves what scripts printed, and their errors, into the Output panel.
     fn forward_output(&mut self, output: &mut Output) {
-        for line in self.scripts.take_output() {
+        for line in self.sim.scripts.take_output() {
             // A client device's lines say whose they are.
             let text = match &self.label {
                 Some(label) => format!("{} ({label})", line.text),
@@ -941,20 +721,223 @@ impl Session {
     }
 
     fn apply_audio(&mut self, camera: CameraState, output: &mut Output) {
-        let mut actions = self.scripts.take_sound_actions();
+        let mut actions = self.sim.scripts.take_sound_actions();
         actions.append(&mut self.ui_sounds);
         let listener = axcenity_audio::Listener::from_view(camera.position, camera.orientation);
         let update = self
             .audio
-            .update(actions, &self.world, &self.assets, listener);
+            .update(actions, &self.sim.world, &self.sim.assets, listener);
         for err in update.errors {
             output.error(format!("Audio: {err}"));
         }
         if !update.ended.is_empty() {
-            self.scripts
-                .fire_sounds_ended(&mut self.world, &update.ended);
+            self.sim
+                .scripts
+                .fire_sounds_ended(&mut self.sim.world, &update.ended);
             self.forward_output(output);
         }
+    }
+}
+
+/// What Play's frame needs that isn't the game itself: the input and the
+/// camera this frame, and the Output panel. It lives only as long as a
+/// frame, unlike the [`Session`].
+struct PlayHost<'a> {
+    session: &'a mut Session,
+    input: &'a [InputEvent],
+    motion: MoveInput,
+    /// The viewport's fly camera.
+    camera: CameraState,
+    output: &'a mut Output,
+    /// Where a LocalScript moved the camera, for the viewport.
+    moved: Option<CameraState>,
+    physics_steps: u32,
+}
+
+impl HostIo for PlayHost<'_> {
+    fn sim(&mut self) -> &mut Sim {
+        &mut self.session.sim
+    }
+
+    fn following(&self) -> bool {
+        self.session.network.is_following()
+    }
+
+    /// Play doesn't host or join (Phase 63): `NetworkService` calls fail
+    /// with a reason, and LAN searches find nothing. Then what the other
+    /// Play devices sent (Phase 64).
+    fn net_receive(&mut self, seconds: f64) -> ControlFlow<()> {
+        let session = &mut *self.session;
+        for request in session.sim.scripts.take_network_requests() {
+            match request {
+                NetworkRequest::FindLanGames => {
+                    session
+                        .sim
+                        .scripts
+                        .finish_lan_search(&mut session.sim.world, &[]);
+                }
+                NetworkRequest::Disconnect => {}
+                // The viewport streams around the camera, and Play has
+                // no other device to send a region to.
+                NetworkRequest::StreamAround { request, .. } => {
+                    session
+                        .sim
+                        .scripts
+                        .finish_stream_around(&mut session.sim.world, request);
+                }
+                NetworkRequest::Host { .. } | NetworkRequest::Join { .. } => {
+                    session
+                        .sim
+                        .scripts
+                        .fire_connection_failed(&mut session.sim.world, PLAY_IS_OFFLINE);
+                }
+            }
+        }
+        session
+            .network
+            .receive(&mut session.sim.world, &mut session.sim.scripts, seconds);
+        session.forward_network_log(self.output);
+        session.forward_output(self.output);
+        ControlFlow::Continue(())
+    }
+
+    /// A Sequence that locks input leaves the character still, and the
+    /// server view takes none. Each device moves its own player's
+    /// character (Phase 66).
+    fn character_motion(&mut self, _seconds: f32) -> MoveInput {
+        let session = &mut *self.session;
+        let motion = if session.sim.scripts.movement_locked(&session.sim.world) || session.observing
+        {
+            MoveInput::default()
+        } else {
+            std::mem::take(&mut self.motion)
+        };
+        let others = session
+            .network
+            .other_characters(&session.sim.world, &session.sim.scripts);
+        let player = if session.observing {
+            None
+        } else {
+            session.sim.scripts.local_player()
+        };
+        session.sim.characters.set_players(player, others);
+        session.network.set_running(motion.run);
+        motion
+    }
+
+    fn flush_output(&mut self) {
+        self.session.forward_output(self.output);
+    }
+
+    fn agent_warning(&mut self, warning: String) {
+        self.output.warning(warning);
+    }
+
+    /// A third-person controller owns the camera when one is present. The
+    /// server view takes no input.
+    fn frame_input(&mut self, _seconds: f64) -> Vec<InputEvent> {
+        let session = &mut *self.session;
+        let seen = session.script_camera(self.camera);
+        session.sim.scripts.set_camera(seen);
+        if session.observing {
+            Vec::new()
+        } else {
+            self.input.to_vec()
+        }
+    }
+
+    /// Parts another device moves are held still here, and physics sleeps
+    /// far from the camera and the other devices (Phase 80).
+    fn prepare_physics(&mut self) {
+        let session = &mut *self.session;
+        let held = session
+            .network
+            .held_parts(&session.sim.world, &session.sim.scripts);
+        session.sim.physics.set_held(held);
+        let far = axcenity_core::streaming::Settings::of(&session.sim.world).map(|settings| {
+            let at = self.camera.position;
+            let mut focuses = vec![axcenity_core::Vector3::new(at.x, at.y, at.z)];
+            focuses.extend(session.network.player_focuses(&session.sim.world));
+            (focuses, settings.unload_radius())
+        });
+        session.sim.physics.set_far_sleep(far);
+    }
+
+    fn owns_physics(&self) -> bool {
+        self.session.network.simulates_physics()
+    }
+
+    fn physics_stepped(&mut self, steps: u32) {
+        self.physics_steps = steps;
+    }
+
+    /// Only the first device is heard: the others are the same game on
+    /// more players' devices.
+    fn audio(&mut self) {
+        let session = &mut *self.session;
+        let listener = session.shown_camera(self.moved.unwrap_or(self.camera));
+        let listener = CameraState {
+            position: listener.position,
+            orientation: listener.orientation,
+        };
+        if session.label.is_none() {
+            session.apply_audio(listener, self.output);
+        } else {
+            drop(session.sim.scripts.take_sound_actions());
+            session.ui_sounds.clear();
+        }
+    }
+
+    fn animator_error(&mut self, error: String) {
+        self.output.error(error);
+    }
+
+    /// A level loaded this frame shows the loading screen again.
+    fn level_loads(&mut self) {
+        let session = &mut *self.session;
+        if !session.sim.scripts.take_level_loads().is_empty()
+            && let Some(shown) = LoadingGui::start(
+                &mut session.sim.world,
+                &session.loading.screen_gui,
+                session.loading.min_seconds,
+                false,
+            )
+        {
+            session.loading_gui = Some(shown);
+        }
+    }
+
+    fn loading_screen(&mut self, seconds: f64) {
+        let session = &mut *self.session;
+        let ready = session.sim.scripts.take_loading_screen_removed();
+        if let Some(loading) = &mut session.loading_gui {
+            loading.advance(&mut session.sim.world, seconds as f32, ready);
+        }
+    }
+
+    fn camera_moved(&mut self, moved: Option<CameraState>) {
+        self.moved = moved;
+    }
+
+    fn game_camera(&mut self, camera: GameCamera) {
+        self.session.game_camera = camera;
+    }
+
+    fn graphics_changed(&mut self) {
+        let session = &mut *self.session;
+        if let Some(graphics) = session.sim.scripts.take_graphics_change() {
+            session.graphics = Some(graphics);
+        }
+    }
+
+    /// Last: the world's changes and remote messages for the other Play
+    /// devices.
+    fn net_send(&mut self) {
+        let session = &mut *self.session;
+        session
+            .network
+            .send(&session.sim.world, &mut session.sim.scripts);
+        session.forward_network_log(self.output);
     }
 }
 

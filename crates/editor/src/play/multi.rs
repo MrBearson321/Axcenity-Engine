@@ -143,7 +143,7 @@ impl Play {
                     levels.clone(),
                 )?;
                 client.label = Some(format!("client {}", n + 1));
-                client.scripts.set_user_id(play_user_id() + n as f64);
+                client.sim.scripts.set_user_id(play_user_id() + n as f64);
                 let link = match loopback.take() {
                     Some(link) => link,
                     None => devices[0]
@@ -197,6 +197,7 @@ impl Play {
         }
         for (n, device) in self.devices.iter().enumerate() {
             let name = device
+                .sim
                 .scripts
                 .local_player()
                 .and_then(|player| device.world.get(player))
@@ -255,6 +256,7 @@ impl Play {
             // A client's lines carry its player's name once it has one.
             if n > 0
                 && let Some(name) = device
+                    .sim
                     .scripts
                     .local_player()
                     .and_then(|player| device.world.get(player))
@@ -340,7 +342,7 @@ impl Play {
                     .devices
                     .iter()
                     .skip(1)
-                    .find(|device| device.scripts.local_player() == Some(player));
+                    .find(|device| device.sim.scripts.local_player() == Some(player));
                 let instances = device.map_or(0, |device| device.world.len());
                 Some((name, stats, instances))
             })
