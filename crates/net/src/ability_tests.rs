@@ -41,7 +41,7 @@ impl Device {
         self.network
             .receive(&mut self.world, &mut self.scripts, SECONDS);
         self.scripts.input_events(&mut self.world, events);
-        self.scripts.step_abilities(&mut self.world, SECONDS);
+        axcenity_gameplay::step_abilities(&mut self.scripts, &mut self.world, SECONDS);
         self.scripts.step(&mut self.world, SECONDS);
         if !self.network.is_following() {
             self.scripts.step_health(&mut self.world, SECONDS);
@@ -68,7 +68,7 @@ fn game(latency: Duration) -> (Device, Device, InstanceId) {
     world
         .set_parent(script, Some(world.server_script_service()))
         .unwrap();
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_gameplay::script_runtime();
     scripts.set_dedicated();
     scripts.start_script(&mut world, script, "scripts/abilities.server.lua", SERVER);
     let mut network = Network::new(info()).with_discovery_port(47935);
@@ -85,7 +85,7 @@ fn game(latency: Duration) -> (Device, Device, InstanceId) {
     };
 
     let mut world = World::new();
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_gameplay::script_runtime();
     scripts.set_user_id(700.0);
     let mut map = InputMap::default();
     map.actions.push(Action {
@@ -168,12 +168,15 @@ fn a_modified_client_that_ignores_its_cooldown_still_gets_one_fireball_per_coold
 fn the_players_device_shows_the_cooldown_sweep_at_once_and_the_server_confirms_it() {
     let (mut server, mut player, fireball) = game(Duration::from_millis(150));
     let me = player.scripts.local_player().unwrap();
-    assert_eq!(player.scripts.ability_bar(&player.world).len(), 1);
+    assert_eq!(
+        axcenity_gameplay::ability_bar(&player.scripts, &player.world).len(),
+        1
+    );
 
     server.frame(&[]);
     player.frame(&[key(true)]);
     // The same frame, before any reply: the sweep is full.
-    let slot = &player.scripts.ability_bar(&player.world)[0];
+    let slot = &axcenity_gameplay::ability_bar(&player.scripts, &player.world)[0];
     assert_eq!(slot.key, "Q");
     assert!(slot.sweep() > 0.95, "{}", slot.sweep());
     assert_eq!(mana(&player, me), 100.0, "the server spends it");

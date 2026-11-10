@@ -1530,7 +1530,7 @@ impl HostIo for App {
         // The hotbar, the ability bar, the quest tracker and dialogue box,
         // the leaderboard, the chat window, then ProximityPrompts that show.
         let inventory = self.sim.scripts.player_inventory(&self.sim.world);
-        let abilities = self.sim.scripts.ability_bar(&self.sim.world);
+        let abilities = axcenity_gameplay::ability_bar(&self.sim.scripts, &self.sim.world);
         let quests = axcenity_gameplay::quest_tracker(&self.sim.scripts, &self.sim.world);
         let dialogue = axcenity_gameplay::dialogue_view(&self.sim.scripts, &self.sim.world);
         let lines: Vec<(Option<String>, String)> = self
