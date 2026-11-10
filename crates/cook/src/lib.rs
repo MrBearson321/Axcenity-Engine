@@ -17,9 +17,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axcenity_assets::{
-    CookedFormat, CookedTexture, MapSlot, SourceStamp, TEXTURE_EXTENSIONS, cooked_format,
-    decode_texture, has_alpha, remove_orphaned_copies, safe_path, sampled_average, texture_roles,
-    write_cooked,
+    CookedFormat, CookedTexture, MapSlot, ModelFormat, SourceStamp, TEXTURE_EXTENSIONS,
+    TEXTURES_FOLDER, content_hash, cooked_format, decode_texture, embedded_cooked_done,
+    embedded_cooked_files, embedded_cooked_format, embedded_cooked_relative_path, embedded_files,
+    has_alpha, mark_embedded_cooked, remove_orphaned_copies, safe_path, sampled_average,
+    texture_roles, write_cooked, write_embedded_cooked,
 };
 use intel_tex_2::{RgSurface, RgbaSurface, bc5, bc7};
 use rayon::prelude::*;
@@ -228,6 +230,16 @@ pub fn cook_file(project: &Path, relative: &str) -> Outcome {
 /// Every image file under the project's `assets/` folder, as project paths
 /// with `/` between folders, in a steady order.
 pub fn texture_files(project: &Path) -> Vec<String> {
+    files_under_assets(project, is_texture)
+}
+
+/// Every model file (glTF, GLB, FBX) under the project's `assets/` folder,
+/// like [`texture_files`].
+pub fn model_files(project: &Path) -> Vec<String> {
+    files_under_assets(project, |path| ModelFormat::of(path).is_some())
+}
+
+fn files_under_assets(project: &Path, wanted: impl Fn(&Path) -> bool) -> Vec<String> {
     let mut found = Vec::new();
     let mut folders = vec![PathBuf::from("assets")];
     while let Some(folder) = folders.pop() {
@@ -241,7 +253,7 @@ pub fn texture_files(project: &Path) -> Vec<String> {
             };
             if kind.is_dir() {
                 folders.push(relative);
-            } else if is_texture(&relative)
+            } else if wanted(&relative)
                 && let Some(text) = relative.to_str()
             {
                 found.push(text.replace('\\', "/"));
@@ -302,13 +314,108 @@ pub fn cook_project(
         }
         let outcome = cook_file(project, &relative);
         progress(&relative, &outcome);
-        match outcome {
-            Outcome::Cooked => report.cooked += 1,
-            Outcome::NotBlockSized => report.skipped += 1,
-            Outcome::Failed(reason) => report.failed.push((relative, reason)),
+        report.add(relative, outcome);
+    }
+    for model in model_files(project) {
+        if stop.load(Ordering::Relaxed) {
+            break;
         }
+        cook_embedded(project, &model, stop, &mut report, &mut progress);
     }
     report
+}
+
+impl Report {
+    fn add(&mut self, path: String, outcome: Outcome) {
+        match outcome {
+            Outcome::Cooked => self.cooked += 1,
+            Outcome::NotBlockSized => self.skipped += 1,
+            Outcome::Failed(reason) => self.failed.push((path, reason)),
+        }
+    }
+}
+
+/// Cooks the images embedded in the project model file `model` that have
+/// no current cooked copy, in place: into `.axcenity/imported/textures/`
+/// beside the model's other cached files
+/// ([`axcenity_assets::embedded_cooked_path`]), where loading the model
+/// finds them by the image's bytes. An image importing copied out to the
+/// model's `textures/` folder is left to [`cook_file`], like any texture.
+/// Each is reported as `model › image name`. Copies of images the model no
+/// longer holds are deleted. Once all are cooked, the model is noted, so
+/// later passes don't read it again until it changes.
+pub fn cook_embedded(
+    project: &Path,
+    model: &str,
+    stop: &AtomicBool,
+    report: &mut Report,
+    mut progress: impl FnMut(&str, &Outcome),
+) {
+    if embedded_cooked_done(project, model) {
+        return;
+    }
+    let Some(path) = safe_path(model).map(|path| project.join(path)) else {
+        return;
+    };
+    let (Ok(bytes), Some(format)) = (std::fs::read(&path), ModelFormat::of(&path)) else {
+        return;
+    };
+    let stamp = SourceStamp::of(&path, &bytes);
+    let images = match embedded_files(&bytes, format) {
+        Ok(images) => images,
+        Err(err) => {
+            report.failed.push((model.to_owned(), err.to_string()));
+            return;
+        }
+    };
+    let folder = model.rsplit_once('/').map_or("", |(folder, _)| folder);
+    let mut hashes = Vec::new();
+    let mut all = true;
+    for (name, content) in &images {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        let copied_out = format!("{folder}/{TEXTURES_FOLDER}/{name}");
+        if project.join(&copied_out).is_file() {
+            continue;
+        }
+        let hash = content_hash(content);
+        let wanted = format_for(name);
+        if embedded_cooked_format(project, model, content) == Some(wanted) {
+            report.current += 1;
+            hashes.push(hash);
+            continue;
+        }
+        let outcome = match decode_texture(content, name) {
+            Err(reason) => Outcome::Failed(reason),
+            Ok(image) => match cook_as(wanted, image.width, image.height, image.rgba()) {
+                None => Outcome::NotBlockSized,
+                Some(cooked) => match write_embedded_cooked(project, model, content, &cooked) {
+                    Ok(()) => {
+                        hashes.push(hash);
+                        Outcome::Cooked
+                    }
+                    Err(err) => Outcome::Failed(err.to_string()),
+                },
+            },
+        };
+        all &= !matches!(outcome, Outcome::Failed(_));
+        let label = format!("{model} › {name}");
+        progress(&label, &outcome);
+        report.add(label, outcome);
+    }
+    // Copies of images the model held before it changed.
+    for file in embedded_cooked_files(project, model) {
+        let kept = hashes
+            .iter()
+            .any(|&hash| embedded_cooked_relative_path(model, hash) == file);
+        if !kept && std::fs::remove_file(project.join(&file)).is_ok() {
+            report.removed += 1;
+        }
+    }
+    if all {
+        let _ = mark_embedded_cooked(project, model, stamp, &hashes);
+    }
 }
 
 #[cfg(test)]

@@ -62,8 +62,10 @@ pub use color_grading::{
 };
 pub use cooked::{
     COOKED_EXTENSION, COOKED_FOLDER, CookedFormat, CookedTexture, SourceStamp, content_hash,
-    cooked_format, cooked_path, cooked_relative_path, decode_cooked, encode_cooked, has_alpha,
-    is_cooked, read_cooked, sampled_average, write_cooked,
+    cooked_format, cooked_path, cooked_relative_path, decode_cooked, embedded_cooked_done,
+    embedded_cooked_files, embedded_cooked_format, embedded_cooked_path,
+    embedded_cooked_relative_path, encode_cooked, has_alpha, is_cooked, mark_embedded_cooked,
+    read_cooked, sampled_average, write_cooked, write_embedded_cooked,
 };
 pub use data_table::{
     AssetType, Cell, Column, ColumnType, DATA_FOLDER, DATA_TABLE_SUFFIX, DataTable, DataTableError,
@@ -94,8 +96,8 @@ pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys,
     MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER, MapSlot, Model, ModelError, ModelFormat, ModelMaterial,
     ModelObject, Pick, Pose, Posed, PosedPrimitive, Primitive, Rig, Take, TextureRole, Track,
-    cached_meshes, cooked_models, list_objects, load_model, load_models, load_takes, lod_level,
-    tangents, texture_roles,
+    cached_meshes, cooked_models, embedded_files, list_objects, load_model, load_models,
+    load_takes, lod_level, tangents, texture_roles,
 };
 pub use orphaned::remove_orphaned_copies;
 pub use probe::{

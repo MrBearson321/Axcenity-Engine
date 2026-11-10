@@ -224,6 +224,7 @@ fn add_cooked_textures(root: &Path, files: &mut Vec<(String, Vec<u8>)>) -> Resul
         } else if axcenity_assets::ModelFormat::of(Path::new(name)).is_some() {
             cooked.extend(axcenity_assets::cached_meshes(root, name));
             cooked.extend(axcenity_assets::cooked_models(root, name));
+            cooked.extend(axcenity_assets::embedded_cooked_files(root, name));
         }
     }
     for name in cooked {

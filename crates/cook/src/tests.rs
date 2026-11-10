@@ -241,3 +241,58 @@ fn cooking_a_project_cooks_normal_maps_as_bc5_and_redoes_older_bc7_copies() {
     assert_eq!((again.cooked, again.current), (0, 1));
     let _ = fs::remove_dir_all(folder);
 }
+
+#[test]
+fn a_models_embedded_textures_are_cooked_in_place_when_it_wasnt_imported() {
+    let folder = project("in-place");
+    let model = "assets/models/DamagedHelmet.glb";
+    std::fs::create_dir_all(folder.join("assets/models")).unwrap();
+    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/hello-pbr/assets/models/DamagedHelmet/DamagedHelmet.glb");
+    // Dropped into assets/ by hand: nothing copied out.
+    fs::copy(&example, folder.join(model)).unwrap();
+    let decoded = Assets::new(&folder).model_blocking(model).expect("loads");
+    let map = |model: &axcenity_assets::Model| {
+        model.primitives[0]
+            .material
+            .base_color_texture
+            .clone()
+            .expect("a color map")
+    };
+    assert!(map(&decoded).cooked().is_none());
+    let pixels = map(&decoded).rgba().to_vec();
+    drop(decoded);
+
+    let stop = AtomicBool::new(false);
+    let report = cook_project(&folder, &stop, |_, _| {});
+    assert!(report.cooked >= 4, "{report:?}");
+    assert!(report.failed.is_empty(), "{report:?}");
+    let copies = axcenity_assets::embedded_cooked_files(&folder, model);
+    assert_eq!(copies.len(), report.cooked, "{copies:?}");
+    // Noted as done: the next pass doesn't read the model again.
+    let again = cook_project(&folder, &stop, |_, _| {});
+    assert_eq!((again.cooked, again.failed.len()), (0, 0), "{again:?}");
+
+    let cooked = Assets::new(&folder).model_blocking(model).expect("loads");
+    let image = map(&cooked);
+    assert!(image.cooked().is_some(), "from its cooked copy");
+    assert!(image.rgba() == pixels, "decoded from inside the model if asked");
+    // Every map cooked, so the whole model is kept, and read back with
+    // the same cooked maps.
+    assert_eq!(axcenity_assets::cooked_models(&folder, model).len(), 1);
+    let whole = Assets::new(&folder).model_blocking(model).expect("loads");
+    assert!(map(&whole).cooked().is_some());
+    assert_eq!(whole.primitives[0].indices, cooked.primitives[0].indices);
+    drop((cooked, whole, image));
+
+    // Replaced by a model with other images: the old copies go.
+    let other = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/primitives/assets/models/AWP.glb");
+    fs::copy(other, folder.join(model)).unwrap();
+    let replaced = cook_project(&folder, &stop, |_, _| {});
+    assert_eq!(replaced.removed, copies.len(), "{replaced:?}");
+    for copy in &copies {
+        assert!(!folder.join(copy).exists(), "{copy}");
+    }
+    let _ = fs::remove_dir_all(folder);
+}
