@@ -29,7 +29,7 @@ The order is one table, `STANDARD` in `crates/sim/src/steps.rs` (roadmap M1): ev
 | `health` | PostSimulation | ✓ | ✓ | ✓ | ✓ |
 | `heartbeat` | Heartbeat | ✓ | ✓ | ✓ | ✓ |
 | `audio` | PreAnimation | ✓ | ✓ |  | ✓ |
-| `particles` | PreAnimation | ✓ |  |  | ✓ |
+| `particles` | PreAnimation | ✓ | ✓ |  | ✓ |
 | `animators` | Animation | ✓ | ✓ |  | ✓ |
 | `tools.place` | Animation | ✓ | ✓ |  | ✓ |
 | `levels.loaded` | PreRender | ✓ | ✓ |  | ✓ |
@@ -38,7 +38,7 @@ The order is one table, `STANDARD` in `crates/sim/src/steps.rs` (roadmap M1): ev
 | `camera.move` | PreRender | ✓ | ✓ |  | ✓ |
 | `camera.follow` | PreRender | ✓ | ✓ |  | ✓ |
 | `graphics.changed` | PreRender | ✓ | ✓ |  |  |
-| `streaming` | PreRender | ✓ |  |  |  |
+| `streaming` | PreRender | ✓ | ✓ |  |  |
 | `draw.scene` | PreRender | ✓ |  |  |  |
 | `draw.ui` | PreRender | ✓ |  |  |  |
 | `net.send` | NetSend | ✓ | ✓ | ✓ |  |
@@ -53,9 +53,7 @@ The server runs `physics.shatters` before `physics.hold` (its one `DRIFT` line).
 5. Move the loading screen on (a LocalScript's `RemoveDefaultLoadingScreen`, the player's asset preload, then `LoadingGui::advance`, which may turn its ScreenGui off), then update UI layout (`taffy`) and shape text
 6. Build the draw list (UI layout included), then network send (`Network::send`, Phase 63), then render
 
-The player runs the schedule's steps from `App::frame`, then renders (`crates/player/src/main.rs`; its `HostIo` is the input, sound, streaming and drawing). The editor runs steps 0-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`, through its `PlayHost`), then network send at the end of the frame; its viewport lays out UI at step 5 using its current pixel size, then builds and draws step 6. Play's network step talks to its other Play devices over the in-memory loopback (multi-client Play, Phase 64); it can't host or join a real game, so scripts' `Host` and `Join` fire `ConnectionFailed` and a LAN search finds nothing. Editor Play runs the player's order (roadmap M1), sound actions included: both apply them after Heartbeat, so a sound a render-step function plays starts next frame, and both then move the listener to the camera drawn this frame. One difference is left:
-
-- **Particles and streaming in the viewport.** The player emits and moves particles and steps world streaming inside its frame; Play does both while the Scene viewport draws (`crates/editor/src/viewport.rs`), so they move on only while a Scene tab is drawn.
+The player runs the schedule's steps from `App::frame`, then renders (`crates/player/src/main.rs`; its `HostIo` is the input, sound, streaming and drawing). The editor runs steps 0-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`, through its `PlayHost`), then network send at the end of the frame; its viewport lays out UI at step 5 using its current pixel size, then builds and draws step 6. Play's network step talks to its other Play devices over the in-memory loopback (multi-client Play, Phase 64); it can't host or join a real game, so scripts' `Host` and `Join` fire `ConnectionFailed` and a LAN search finds nothing. Editor Play runs the player's order without drawing (roadmap M1): sound actions right after Heartbeat, then particles, Animators and Tools, then the render step, and world streaming around the camera drawn this frame. Its particles and streaming belong to the `Session`, so they move on whether or not a Scene tab is open; the Scene viewport borrows them to draw (`Session::swap_effects`), and moves its own particles only while editing.
 
 `axcenity-server` runs the schedule's server steps (step 0, steps 2-4 without characters, agents or animation, then network send), with its own network, printing and far-physics sleep as its `HostIo` (`crates/server/src/main.rs`). The game test runner's `TestGame::frame` (`crates/testing/src/game.rs`, Phase 53) runs the schedule's test-runner steps at a fixed 1/60 second: steps 1-4, then the render step's scripts and the game camera, with no audio or drawing. Visual-debug overlays (colliders, raycasts, bounds, emitters, the navigation mesh, agent paths) are painted in the editor viewport after the scene texture; they do not change this order, and the player never draws them.
 

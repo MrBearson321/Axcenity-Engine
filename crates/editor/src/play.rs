@@ -23,6 +23,7 @@ use axcenity_core::{InstanceId, KeyCode, MouseBehavior, Vector3, World};
 use axcenity_net::Network;
 use axcenity_project::{LoadingScreen, ScriptFile};
 use axcenity_render::{Capabilities, GraphicsSettings};
+use axcenity_scene::{Particles, Streaming};
 use axcenity_script::{
     Breakpoints, CameraState, CameraView, GameCamera, KeyEvent, NetworkRequest, OutputKind, Pause,
     ScriptRuntime,
@@ -59,6 +60,13 @@ pub struct Session {
     schedule: Schedule,
     /// Dropped at Stop, which silences every sound.
     audio: GameAudio,
+    /// The ParticleEmitters' particles, moved on in the frame as the
+    /// player does. The Scene viewport borrows them to draw
+    /// ([`Session::swap_effects`]).
+    particles: Particles,
+    /// World streaming around the camera, stepped in the frame; the
+    /// viewport borrows it to draw too.
+    streaming: Streaming,
     /// Buttons' hover and click sounds, played with the next frame's audio.
     ui_sounds: Vec<SoundAction>,
     /// The project's own loading screen, as the built game shows it.
@@ -134,6 +142,8 @@ impl Session {
             sim: Sim::new(edit_world.clone(), ScriptRuntime::new(), assets),
             schedule: Schedule::for_host(Hosts::EDITOR_PLAY),
             audio: GameAudio::default(),
+            particles: Particles::new(),
+            streaming: Streaming::default(),
             ui_sounds: Vec::new(),
             loading_gui: None,
             loading: loading.clone(),
@@ -181,6 +191,9 @@ impl Session {
                 .set_levels(&levels.start, &levels.current, levels.worlds);
         }
         session.sim.scripts.set_graphics(graphics, capabilities);
+        // Big emitters move on the GPU where the renderer runs compute
+        // shaders, as in the viewport.
+        session.particles.set_gpu(capabilities.compute_shaders);
         session.sim.scripts.enable_debugger();
         // `RunService:IsStudio()` is true in the editor's Play.
         session.sim.scripts.set_studio(true);
@@ -703,9 +716,13 @@ impl Session {
         self.graphics.as_ref()
     }
 
-    /// The `emitter:Emit(count)` calls scripts made since the last call.
-    pub fn take_particle_emits(&mut self) -> Vec<(InstanceId, u32)> {
-        self.sim.scripts.take_particle_emits()
+    /// Trades this game's particles and streaming for the ones in the
+    /// viewport's hands. The app swaps them in before the Scene viewport
+    /// draws during Play and back after, so the frame moves them on and
+    /// the viewport draws them.
+    pub fn swap_effects(&mut self, particles: &mut Particles, streaming: &mut Streaming) {
+        std::mem::swap(&mut self.particles, particles);
+        std::mem::swap(&mut self.streaming, streaming);
     }
 
     /// Moves what scripts printed, and their errors, into the Output panel.
@@ -903,6 +920,16 @@ impl HostIo for PlayHost<'_> {
         }
     }
 
+    /// Particles move on after scripts and physics moved their parts, as
+    /// in the player, whether or not a Scene tab is drawn.
+    fn particles(&mut self, seconds: f64) {
+        let session = &mut *self.session;
+        for (emitter, count) in session.sim.scripts.take_particle_emits() {
+            session.particles.emit(&session.sim.world, emitter, count);
+        }
+        session.particles.update(&session.sim.world, seconds as f32);
+    }
+
     fn animator_error(&mut self, error: String) {
         self.output.error(error);
     }
@@ -943,6 +970,19 @@ impl HostIo for PlayHost<'_> {
         if let Some(graphics) = session.sim.scripts.take_graphics_change() {
             session.graphics = Some(graphics);
         }
+    }
+
+    /// World streaming around the camera drawn this frame.
+    fn streaming(&mut self, seconds: f64) {
+        let session = &mut *self.session;
+        let at = session
+            .shown_camera(self.moved.unwrap_or(self.camera))
+            .position;
+        session.streaming.step(
+            &session.sim.world,
+            axcenity_render::glam::Vec3::new(at.x, at.y, at.z),
+            seconds,
+        );
     }
 
     /// Last: the world's changes and remote messages for the other Play

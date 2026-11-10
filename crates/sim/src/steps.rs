@@ -56,7 +56,7 @@ pub(crate) static STANDARD: &[Step] = &[
     step("heartbeat",         Stage::Heartbeat,      ALL,  heartbeat),
 
     step("audio",             Stage::PreAnimation,   GAME, audio),
-    step("particles",         Stage::PreAnimation,   P.with(Hosts::TEST), particles),
+    step("particles",         Stage::PreAnimation,   GAME, particles),
 
     step("animators",         Stage::Animation,      GAME, animators),
     step("tools.place",       Stage::Animation,      GAME, tools_place),
@@ -67,7 +67,7 @@ pub(crate) static STANDARD: &[Step] = &[
     step("camera.move",       Stage::PreRender,      GAME, camera_move),
     step("camera.follow",     Stage::PreRender,      GAME, camera_follow),
     step("graphics.changed",  Stage::PreRender,      PE,   graphics_changed),
-    step("streaming",         Stage::PreRender,      P,    streaming),
+    step("streaming",         Stage::PreRender,      PE,   streaming),
     step("draw.scene",        Stage::PreRender,      P,    draw_scene),
     step("draw.ui",           Stage::PreRender,      P,    draw_ui),
 

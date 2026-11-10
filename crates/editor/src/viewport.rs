@@ -749,6 +749,12 @@ impl Viewport {
         std::mem::take(&mut self.character_zoom)
     }
 
+    /// The particles and world streaming the viewport draws, for Play to
+    /// swap its own in while it draws (`Session::swap_effects`).
+    pub fn effects_mut(&mut self) -> (&mut Particles, &mut axcenity_scene::Streaming) {
+        (&mut self.particles, &mut self.terrain.streaming)
+    }
+
     /// Takes every particle away, for a new world (Play, Stop, another project).
     pub fn clear_particles(&mut self) {
         self.particles.clear();
@@ -1257,21 +1263,22 @@ impl Viewport {
         // Big emitters move on the GPU, where it runs compute shaders.
         self.particles
             .set_gpu(target.renderer.capabilities().compute_shaders);
-        for &(emitter, count) in emits {
-            self.particles.emit(world, emitter, count);
+        // During Play the game's frame moves its particles on (they're
+        // swapped in for drawing: `Session::swap_effects`).
+        if !game_playing {
+            for &(emitter, count) in emits {
+                self.particles.emit(world, emitter, count);
+            }
+            self.particles.update(world, seconds);
         }
-        self.particles.update(world, seconds);
         // Particles keep moving without input, so keep drawing frames.
         if self.particles.is_active(world) {
             ui.ctx().request_repaint();
         }
         let still = axcenity_scene::Poses::new();
         let poses = poses.unwrap_or(&still);
-        if game_playing {
-            self.terrain
-                .streaming
-                .step(world, camera.position, f64::from(seconds));
-        } else if self.terrain.streaming.settings().is_some() {
+        // During Play the game's frame streams the world, as for particles.
+        if !game_playing && self.terrain.streaming.settings().is_some() {
             // Editing shows everything, whatever Play streamed.
             self.terrain.streaming = axcenity_scene::Streaming::default();
         }

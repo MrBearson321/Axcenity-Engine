@@ -27,9 +27,8 @@ const PLAYER: &[&str] = &[
     "net.send",
 ];
 
-/// Editor Play runs the player's order. Particles and streaming aren't
-/// its steps: the Scene viewport does them while it draws
-/// (`crates/editor/src/viewport.rs`), and it draws nothing in the frame.
+/// Editor Play runs the player's order without drawing: the Scene
+/// viewport draws what the frame left (`crates/editor/src/viewport.rs`).
 #[rustfmt::skip]
 const EDITOR_PLAY: &[&str] = &[
     "net.receive",
@@ -40,10 +39,11 @@ const EDITOR_PLAY: &[&str] = &[
     "physics.hold", "physics.kinematic", "physics.shatters", "physics.step",
     "touches.began", "touches.ended", "breaks", "health",
     "heartbeat",
-    "audio",
+    "audio", "particles",
     "animators", "tools.place",
     "levels.loaded", "loading.screen",
     "render_step", "camera.move", "camera.follow", "graphics.changed",
+    "streaming",
     "net.send",
 ];
 
