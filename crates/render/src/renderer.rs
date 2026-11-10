@@ -31,6 +31,7 @@ use crate::draw_list::{
 };
 use crate::graphics::{
     Capabilities, EffectiveGraphics, GraphicsSettings, POINT_SHADOW_FACES, ShadowMapSize,
+    read_capabilities,
 };
 use crate::mesh::{self};
 use anyhow::{Context, Result};
@@ -263,7 +264,7 @@ impl Renderer {
             ),
         }
         surface.configure(&device, &config);
-        let capabilities = Capabilities::read(&device, Some(&adapter.get_info()));
+        let capabilities = read_capabilities(&device, Some(&adapter.get_info()));
 
         Ok(Self {
             surface,
@@ -375,7 +376,7 @@ impl TextureRenderer {
             TARGET_DRAW_FORMAT,
             width,
             height,
-            Capabilities::read(device, None),
+            read_capabilities(device, None),
         );
         let (texture, draw_view, view) = create_target_texture(device, width, height);
         Self {

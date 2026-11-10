@@ -114,13 +114,13 @@ fn sound_play_and_stop_queue_host_actions() {
     assert_eq!(
         runtime.take_sound_actions(),
         [
-            axcenity_audio::SoundAction::Play {
+            axcenity_core::sound::SoundAction::Play {
                 instance: sound,
                 sound_id: "assets/audio/chime.wav".to_owned(),
                 volume: 0.5,
                 looped: true,
             },
-            axcenity_audio::SoundAction::Stop(sound),
+            axcenity_core::sound::SoundAction::Stop(sound),
         ]
     );
 }
@@ -234,7 +234,7 @@ fn touched_events_play_effects_while_startup_music_loops() {
     );
     assert_eq!(
         runtime.take_sound_actions(),
-        [axcenity_audio::SoundAction::Play {
+        [axcenity_core::sound::SoundAction::Play {
             instance: music,
             sound_id: "assets/audio/ambient-loop.wav".to_owned(),
             volume: 1.0,
@@ -245,7 +245,7 @@ fn touched_events_play_effects_while_startup_music_loops() {
     runtime.fire_touched(&mut world, &[(pad, ball)]);
     assert_eq!(
         runtime.take_sound_actions(),
-        [axcenity_audio::SoundAction::Play {
+        [axcenity_core::sound::SoundAction::Play {
             instance: chime,
             sound_id: "assets/audio/chime.wav".to_owned(),
             volume: 1.0,
@@ -1618,4 +1618,28 @@ fn workspace_raycast_keeps_the_last_casts_for_the_editor_overlay() {
     assert_eq!(rays.len(), 2);
     assert!(rays[0].hit.is_some());
     assert!(rays[1].hit.is_none());
+}
+
+/// Without the `csg` feature (roadmap M8) the solid modeling methods are
+/// still there, and say why they can't run.
+#[cfg(not(feature = "csg"))]
+#[test]
+fn union_async_explains_itself_without_the_csg_feature() {
+    let (mut world, _) = world_with_block();
+    let output = output_of(
+        &mut world,
+        r#"
+        local block = workspace.Block
+        local ok, err = pcall(function()
+            return block:UnionAsync({ block:Clone() })
+        end)
+        print(ok, err)
+        "#,
+    );
+    assert_eq!(output.len(), 1, "{output:?}");
+    assert!(output[0].starts_with("false"), "{output:?}");
+    assert!(
+        output[0].contains("UnionAsync isn't available"),
+        "{output:?}"
+    );
 }

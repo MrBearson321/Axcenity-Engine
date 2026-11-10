@@ -57,6 +57,10 @@ mod collection;
 mod console;
 mod console_service;
 mod context;
+#[cfg(feature = "csg")]
+mod csg;
+#[cfg(not(feature = "csg"))]
+#[path = "csg_off.rs"]
 mod csg;
 mod data;
 mod debris;
@@ -109,11 +113,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use axcenity_assets::Assets;
-use axcenity_audio::SoundAction;
 use axcenity_core::input::{InputEvent, InputMap};
+use axcenity_core::sound::SoundAction;
 use axcenity_core::{ClassName, InstanceId, KeyCode, MouseBehavior, Value, Vector3, World};
 use axcenity_physics::RayHit;
-use axcenity_render::{Capabilities, GraphicsSettings};
+use axcenity_render_types::{Capabilities, GraphicsSettings};
 use axcenity_save::Saves;
 use mlua::Lua;
 

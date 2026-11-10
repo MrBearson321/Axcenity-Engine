@@ -7,7 +7,7 @@ The machine's graphics choices: presets, overrides, what the GPU can do, and who
 Two kinds of setting, never mixed:
 
 - **Look** belongs to the world: Lighting (`ToneMapping`, `Exposure`, bloom, `EnvironmentIntensity`, `SkyImage`, `AmbientOcclusionIntensity`, shadows) and the lights. It's saved in `world.json`, and Lua, blocks and the Properties panel change it.
-- **Cost** belongs to the machine: `render::GraphicsSettings` (`render/src/graphics.rs`). It's saved per machine (the editor's settings, the player's `graphics.json`), never in a project.
+- **Cost** belongs to the machine: `render::GraphicsSettings` (from `render-types`) (`render-types/src/graphics.rs`). It's saved per machine (the editor's settings, the player's `graphics.json`), never in a project.
 
 Where a Lighting value is also a cost, the world's value is a request and the settings are a ceiling: shadows draw only if `ShadowsEnabled` and the shadow quality allow them, out to the smaller of the two distances (`lighting::shadows_drawn`), and post-processing runs only if `PostProcessingEnabled` and the settings allow it (`lighting::post_drawn`). No Lighting property changes meaning.
 
@@ -51,7 +51,7 @@ High is the look worlds were made with. `automatic` (Lua's `Enum.GraphicsQuality
 
 ## Tests
 
-- `render/src/graphics.rs`: each preset's values, overrides, the `graphics.json` shape, and `effective` lowering and never raising.
+- `render-types/src/graphics.rs`: each preset's values, overrides, the `graphics.json` shape, and `effective` lowering and never raising.
 - `player/src/graphics_tests.rs`: hello-graphics matches `reference-low.png`, `reference-medium.png`, `reference.png` (High, also checked by `every_example_renders`) and `reference-ultra.png`, at 480×270 within 6 per channel on average. After a deliberate change to the look, run `hello_graphics_matches_each_presets_reference` with `AXCENITY_WRITE_REFERENCES` set to rewrite Low, Medium and Ultra (High is rewritten as [pipeline.md](pipeline.md) says), and check them by eye. Also: lighting changes move every kind of material the same way, a LocalScript's changes show in the next frame and are saved, and a GPU limited to no MSAA and 1024² (then 64²) textures draws with fallbacks and notes.
 - `render/src/renderer/tests.rs`: `switching_every_setting_and_dropping_renderers_leaves_no_resources_behind` switches every setting through every value, checks each target and map is alive only while used and that the caches come back to their starting counts, then drops the renderer and checks, with wgpu's report (`Instance::generate_report`), that the device holds no more textures, views, buffers, bind groups, pipelines, samplers or query sets than before.
 

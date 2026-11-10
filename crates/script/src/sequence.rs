@@ -417,8 +417,11 @@ fn give_back_camera(playback: &mut Playback, camera: &mut Camera) {
 /// What the Sounds in `cues` need from the host's audio: each started one
 /// plays from its start (its `Playing` set), each stopped one stops. The
 /// editor's preview uses this too.
-pub fn sound_actions(world: &mut World, cues: Vec<SoundCue>) -> Vec<axcenity_audio::SoundAction> {
-    use axcenity_audio::SoundAction;
+pub fn sound_actions(
+    world: &mut World,
+    cues: Vec<SoundCue>,
+) -> Vec<axcenity_core::sound::SoundAction> {
+    use axcenity_core::sound::SoundAction;
     let mut actions = Vec::new();
     for cue in cues {
         match cue {

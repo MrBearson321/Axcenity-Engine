@@ -27,6 +27,7 @@ axcenity-plugins = { path = "crates/plugins" }
 axcenity-procedural = { path = "crates/procedural" }
 axcenity-project = { path = "crates/project" }
 axcenity-render = { path = "crates/render" }
+axcenity-render-types = { path = "crates/render-types" }
 axcenity-save = { path = "crates/save" }
 axcenity-scene = { path = "crates/scene" }
 axcenity-script = { path = "crates/script" }

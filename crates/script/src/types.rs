@@ -673,7 +673,7 @@ impl EnumType {
             EnumType::FracturePattern => vec!["Uniform", "Impact"],
             EnumType::CollisionFidelity => vec!["Box", "Hull", "PreciseConvexDecomposition"],
             // The room a ReverbZone sounds like (Phase 52).
-            EnumType::ReverbType => axcenity_audio::REVERB_TYPES.to_vec(),
+            EnumType::ReverbType => axcenity_core::sound::REVERB_TYPES.to_vec(),
             // What a Weather lets fall (graphics Phase 27).
             EnumType::Precipitation => vec!["None", "Rain", "Snow"],
             // How a SplinePoint's handles are made (Phase 73).

@@ -10,8 +10,8 @@
 //! data, so the editor's Play and the player move it the same way.
 
 use axcenity_core::{ClassName, InstanceId, Vector2, Vector3, World};
-use axcenity_render::glam::camera::rh;
-use axcenity_render::glam::{EulerRot, Mat4, Quat, Vec3};
+use glam::camera::rh;
+use glam::{EulerRot, Mat4, Quat, Vec3};
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
 use crate::cframe::{
@@ -114,11 +114,11 @@ pub struct CameraView {
 impl CameraView {
     /// The view as the renderer draws it. Screen points and rays
     /// (`ScreenPointToRay`, `WorldToScreenPoint`) use the same camera.
-    pub fn render_camera(self) -> axcenity_render::Camera {
+    pub fn render_camera(self) -> axcenity_render_types::Camera {
         let pitch = self.orientation.x.clamp(-MAX_PITCH, MAX_PITCH);
         let look = look_vector(Vector3::new(pitch, self.orientation.y, 0.0));
         let position = to_vec3(self.position);
-        axcenity_render::Camera {
+        axcenity_render_types::Camera {
             position,
             look_at: position + to_vec3(look),
             fov_y_degrees: self.field_of_view,
@@ -351,7 +351,7 @@ impl Camera {
 
 /// The renderer's view matrix: the same `look_at` as `render` and
 /// `scene::CameraView`, so rays match what is drawn.
-fn view_matrix(camera: &axcenity_render::Camera) -> Mat4 {
+fn view_matrix(camera: &axcenity_render_types::Camera) -> Mat4 {
     rh::view::look_at_mat4(camera.position, camera.look_at, Vec3::Y)
 }
 

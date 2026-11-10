@@ -1,0 +1,18 @@
+[package]
+name = "axcenity-render-types"
+description = "The renderer's plain data that scripts and servers share: graphics settings, GPU capabilities and the camera. No GPU code."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+glam.workspace = true
+serde.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

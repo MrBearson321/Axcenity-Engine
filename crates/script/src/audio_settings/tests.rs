@@ -242,7 +242,7 @@ fn a_script_turns_the_music_low_pass_on_while_the_pause_menu_is_open() {
         .unwrap();
     runtime.step(&mut world, 1.0 / 60.0);
     assert_eq!(enabled(&world), Some(Value::Bool(true)));
-    let effect = axcenity_audio::mix::effects(&world, music);
+    let effect = axcenity_core::sound::effects(&world, music);
     assert_eq!(effect.len(), 1);
     assert!(effect[0].enabled);
 

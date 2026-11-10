@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use glam::{Mat3, Mat4, Quat, Vec3};
 
+pub use axcenity_render_types::Camera;
+
 use crate::{Atmosphere, ToneMapping};
 
 #[derive(Clone, Debug)]
@@ -661,15 +663,6 @@ pub enum TextAlign {
     Left,
     Center,
     Right,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Camera {
-    pub position: Vec3,
-    /// The point at the center of the view.
-    pub look_at: Vec3,
-    /// The vertical field of view.
-    pub fov_y_degrees: f32,
 }
 
 /// A light infinitely far away that shines in one direction, like the sun.

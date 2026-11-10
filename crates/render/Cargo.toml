@@ -9,13 +9,13 @@ authors.workspace = true
 # No engine crates here, on purpose: `render` only knows about draw lists.
 [dependencies]
 anyhow.workspace = true
+axcenity-render-types.workspace = true
 bytemuck.workspace = true
 glyphon.workspace = true
 glam.workspace = true
 log.workspace = true
 rayon.workspace = true
 rustc-hash.workspace = true
-serde.workspace = true
 wgpu.workspace = true
 axcenity-workspace-hack.workspace = true
 
@@ -27,7 +27,6 @@ debug-views = []
 [dev-dependencies]
 # GPU tests set up a device without a window.
 pollster.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

@@ -2,7 +2,7 @@
 //! every read and write looks the Instance up in the World, which is lent to
 //! Lua while scripts run (see `lent.rs`).
 
-use axcenity_audio::SoundAction;
+use axcenity_core::sound::SoundAction;
 use axcenity_core::{ClassName, EnumItem, INSTANCE_EVENTS, InstanceId, Parameter, Value, World};
 use mlua::{FromLua, Function, IntoLua, Lua, MetaMethod, Table, UserDataMethods};
 
