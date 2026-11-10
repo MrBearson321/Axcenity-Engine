@@ -36,7 +36,10 @@ const BATCHES: usize = 5;
 const BATCH_FRAMES: usize = 60;
 
 /// A GPU device that takes timestamps where the adapter can, on the
-/// fastest adapter.
+/// fastest adapter. It asks for BC compression as the player's own device
+/// does, so cooked textures go up as their blocks here too; without it they
+/// were decoded from their source files and the tools measured and drew
+/// the uncooked path.
 fn bench_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -49,7 +52,8 @@ fn bench_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
         "adapter: {} ({:?}, {})",
         info.name, info.backend, info.driver_info
     );
-    let required_features = adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
+    let required_features = adapter.features()
+        & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TEXTURE_COMPRESSION_BC);
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("benchmark device"),
         required_features,
