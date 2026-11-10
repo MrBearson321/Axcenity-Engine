@@ -412,7 +412,7 @@ pub(crate) fn pivot(world: &World, id: InstanceId) -> mlua::Result<LuaCFrame> {
         return Ok(cf);
     }
     let mut bounds: Option<(Vec3, Vec3)> = None;
-    for part in world.descendants(id) {
+    for part in world.descendants_iter(id) {
         let Some(part) = world.get(part) else {
             continue;
         };

@@ -82,8 +82,7 @@ pub fn character_parts(world: &World, player: InstanceId) -> Vec<InstanceId> {
         return Vec::new();
     };
     world
-        .descendants(character)
-        .into_iter()
+        .descendants_iter(character)
         .filter(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
         .collect()
 }
@@ -104,8 +103,7 @@ fn root_of(world: &World, character: InstanceId) -> Option<InstanceId> {
         .or_else(|| world.find_first_child(character, "HumanoidRootPart"))
         .or_else(|| {
             world
-                .descendants(character)
-                .into_iter()
+                .descendants_iter(character)
                 .find(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
         })
 }
@@ -314,8 +312,7 @@ impl CharacterCheck {
     /// server, where scripts see `Occupant`.
     fn sit(&self, world: &mut World, controller: InstanceId, seat: Option<u64>) {
         let seats: Vec<InstanceId> = world
-            .descendants(world.workspace())
-            .into_iter()
+            .descendants_iter(world.workspace())
             .filter(|&id| {
                 world
                     .get(id)
@@ -439,7 +436,7 @@ impl OwnedSender {
 /// to it, or the parts in its Model.
 fn carriers(world: &World) -> Vec<InstanceId> {
     let mut parts = Vec::new();
-    for id in world.descendants(world.workspace()) {
+    for id in world.descendants_iter(world.workspace()) {
         let Some(follower) = world.get(id) else {
             continue;
         };
@@ -451,7 +448,7 @@ fn carriers(world: &World) -> Vec<InstanceId> {
         };
         parts.extend(
             std::iter::once(target)
-                .chain(world.descendants(target))
+                .chain(world.descendants_iter(target))
                 .filter(|&part| world.get(part).is_some_and(|i| i.class().is_base_part())),
         );
     }

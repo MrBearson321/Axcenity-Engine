@@ -72,7 +72,7 @@ impl Player {
         let (x, z) = ((min.x + max.x) * 0.5, (min.z + max.z) * 0.5);
         let middle = Vector3::new(x, (min.y + max.y) * 0.5, z);
         let head = Vector3::new(x, min.y + (max.y - min.y) * EYE_HEIGHT, z);
-        let sounding = world.descendants(holder).into_iter().any(|id| {
+        let sounding = world.descendants_iter(holder).any(|id| {
             world.get(id).is_some_and(|instance| {
                 instance.class() == ClassName::Sound
                     && instance.property("Playing").and_then(Value::as_bool) == Some(true)

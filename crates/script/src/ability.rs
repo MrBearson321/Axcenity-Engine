@@ -640,7 +640,7 @@ impl Abilities {
         let mut abilities = Vec::new();
         let mut effects = Vec::new();
         for place in [world.workspace(), world.players()] {
-            for id in world.descendants(place) {
+            for id in world.descendants_iter(place) {
                 match class_of(world, id) {
                     Some(ClassName::Ability) => abilities.push(id),
                     Some(ClassName::Effect) => effects.push(id),

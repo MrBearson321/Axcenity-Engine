@@ -398,16 +398,13 @@ fn rebuild_parts(world: &World, partition: &Partition, stream: &mut PeerStream) 
         .filter(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()));
     stream.parts.extend(members);
     // And what's always there.
-    stream.parts.extend(
-        world
-            .descendants(world.workspace())
-            .into_iter()
-            .filter(|&id| {
-                !partition.is_member(id)
-                    && !stream.sent.contains(&id)
-                    && world.get(id).is_some_and(|i| i.class().is_base_part())
-            }),
-    );
+    stream
+        .parts
+        .extend(world.descendants_iter(world.workspace()).filter(|&id| {
+            !partition.is_member(id)
+                && !stream.sent.contains(&id)
+                && world.get(id).is_some_and(|i| i.class().is_base_part())
+        }));
     stream.parts.sort_unstable();
 }
 

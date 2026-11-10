@@ -9,7 +9,7 @@
 //!
 //! [`TerrainCache`]: crate::TerrainCache
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use axcenity_core::streaming::{Partition, Settings};
 use axcenity_core::{InstanceId, Vector3, World};
@@ -26,9 +26,9 @@ pub struct Streaming {
     partition: Partition,
     settings: Option<Settings>,
     /// Everything in a unit out of range.
-    hidden: HashSet<InstanceId>,
+    hidden: FxHashSet<InstanceId>,
     /// The units in range now, to keep near the edge.
-    shown: HashSet<InstanceId>,
+    shown: FxHashSet<InstanceId>,
     regions: Vec<(Vec3, f64)>,
     clock: f64,
     focus: Vec3,
@@ -90,8 +90,8 @@ impl Streaming {
             .into_iter()
             .map(|p| Vector3::new(p.x, p.y, p.z))
             .collect();
-        let mut hidden = HashSet::new();
-        let mut shown = HashSet::new();
+        let mut hidden = FxHashSet::default();
+        let mut shown = FxHashSet::default();
         for unit in self.partition.units() {
             let distance = focuses
                 .iter()

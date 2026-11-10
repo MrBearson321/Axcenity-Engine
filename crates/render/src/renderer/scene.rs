@@ -1,4 +1,5 @@
 use super::*;
+use rustc_hash::FxHashMap;
 
 impl ScenePipeline {
     pub(super) fn new(
@@ -313,7 +314,7 @@ impl ScenePipeline {
             ui_sheet_pipeline,
             ui_image_layout,
             ui_sampler,
-            ui_image_groups: HashMap::new(),
+            ui_image_groups: FxHashMap::default(),
             ui_buffer,
             ui_capacity,
             font_system,
@@ -354,10 +355,10 @@ impl ScenePipeline {
             white_texture,
             plain_material,
             uploader: None,
-            custom_meshes: HashMap::new(),
-            textures: HashMap::new(),
-            full_textures: HashMap::new(),
-            materials: HashMap::new(),
+            custom_meshes: FxHashMap::default(),
+            textures: FxHashMap::default(),
+            full_textures: FxHashMap::default(),
+            materials: FxHashMap::default(),
             terrain,
             frame: 0,
             gpu_timer,
@@ -2398,7 +2399,7 @@ pub(super) enum BatchPass {
 /// a caller's mesh that was never uploaded.
 fn gpu_mesh_in<'a>(
     meshes: &'a Meshes,
-    custom_meshes: &'a HashMap<u64, Cached<GpuMesh>>,
+    custom_meshes: &'a FxHashMap<u64, Cached<GpuMesh>>,
     key: MeshKey,
 ) -> Option<&'a GpuMesh> {
     match key {
@@ -2414,7 +2415,7 @@ fn gpu_mesh_in<'a>(
 /// unit cube does for it.
 fn item_bounds(
     meshes: &Meshes,
-    custom_meshes: &HashMap<u64, Cached<GpuMesh>>,
+    custom_meshes: &FxHashMap<u64, Cached<GpuMesh>>,
     key: MeshKey,
     skin: Option<&Skin>,
 ) -> Bounds {

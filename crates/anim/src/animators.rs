@@ -287,7 +287,7 @@ impl Animators {
     /// what scripts should hear about, in order.
     pub fn update(&mut self, world: &mut World, assets: &Assets, dt: f64) -> Vec<AnimatorEvent> {
         let mut owners: Vec<(InstanceId, Parts)> = Vec::new();
-        for id in world.descendants(world.workspace()) {
+        for id in world.descendants_iter(world.workspace()) {
             let Some(instance) = world.get(id) else {
                 continue;
             };

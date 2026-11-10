@@ -150,7 +150,7 @@ pub fn pick_hit_skipping(world: &World, ray: Ray, skip: &[InstanceId]) -> Option
                 normal,
             },
         );
-    for id in world.descendants(world.workspace()) {
+    for id in world.descendants_iter(world.workspace()) {
         if skip.contains(&id) || axcenity_core::csg::out_of_world(world, id) {
             continue;
         }
@@ -258,7 +258,7 @@ impl<'a> Occluders<'a> {
     pub fn of(world: &'a World) -> Self {
         let mut parts = Vec::new();
         let mut terrains = Vec::new();
-        for id in world.descendants(world.workspace()) {
+        for id in world.descendants_iter(world.workspace()) {
             let Some(instance) = world.get(id) else {
                 continue;
             };

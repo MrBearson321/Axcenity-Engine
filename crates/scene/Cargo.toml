@@ -15,6 +15,7 @@ axcenity-render.workspace = true
 axcenity-terrain.workspace = true
 axcenity-ui.workspace = true
 profiling.workspace = true
+rustc-hash.workspace = true
 axcenity-workspace-hack.workspace = true
 
 [dev-dependencies]

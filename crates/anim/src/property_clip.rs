@@ -422,7 +422,7 @@ impl Placement {
 pub fn model_pivot(world: &World, model: InstanceId) -> Option<Placement> {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for id in world.descendants(model) {
+    for id in world.descendants_iter(model) {
         let Some(placement) = Placement::of_part(world, id) else {
             continue;
         };
@@ -481,8 +481,7 @@ impl Applied {
         self.rest.entry(id).or_insert_with(|| Rest {
             at,
             parts: world
-                .descendants(id)
-                .into_iter()
+                .descendants_iter(id)
                 .filter_map(|part| Some((part, at.relative(Placement::of_part(world, part)?))))
                 .collect(),
         })
@@ -553,9 +552,8 @@ pub fn apply_evaluated(
         // were the first time it did.
         let carries = items.iter().any(moves)
             && world
-                .descendants(id)
-                .iter()
-                .any(|&d| Placement::of_part(world, d).is_some());
+                .descendants_iter(id)
+                .any(|d| Placement::of_part(world, d).is_some());
         if carries && let Some(at) = Placement::of_part(world, id) {
             applied.rest(world, id, at);
         }

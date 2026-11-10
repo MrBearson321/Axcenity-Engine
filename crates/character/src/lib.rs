@@ -743,8 +743,7 @@ pub fn character_parts(world: &World) -> Vec<InstanceId> {
 
 fn controllers(world: &World) -> Vec<InstanceId> {
     world
-        .descendants(world.workspace())
-        .into_iter()
+        .descendants_iter(world.workspace())
         .filter(|&id| {
             world
                 .get(id)
@@ -815,7 +814,7 @@ fn ragdolled(world: &World, controller: InstanceId) -> bool {
     let Some(holder) = world.get(controller).and_then(|c| c.parent()) else {
         return false;
     };
-    world.descendants(holder).into_iter().any(|id| {
+    world.descendants_iter(holder).any(|id| {
         world.get(id).is_some_and(|ragdoll| {
             ragdoll.class() == ClassName::Ragdoll
                 && ragdoll.property("Enabled").and_then(Value::as_bool) == Some(true)
@@ -866,7 +865,7 @@ pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
         parts.push(parent);
     }
     let own_tool = axcenity_core::tool::tool_of(world, parent);
-    for id in world.descendants(parent) {
+    for id in world.descendants_iter(parent) {
         if world
             .get(id)
             .is_some_and(|child| child.class().is_base_part())

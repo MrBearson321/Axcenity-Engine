@@ -167,8 +167,7 @@ enum RelativeTo {
 /// body, in ID order.
 pub(crate) fn read(world: &World, parts: &BTreeMap<InstanceId, Body>) -> Vec<Mover> {
     world
-        .descendants(world.workspace())
-        .into_iter()
+        .descendants_iter(world.workspace())
         .filter_map(|id| {
             let mover = world.get(id)?;
             if !mover.class().is_mover() || mover.property("Enabled") != Some(&Value::Bool(true)) {

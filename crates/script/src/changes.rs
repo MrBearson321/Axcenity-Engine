@@ -129,7 +129,7 @@ fn fire_descendant_event(
             next = world.get(id).and_then(|instance| instance.parent());
         }
         let mut moved = vec![child];
-        moved.extend(world.descendants(child));
+        moved.extend(world.descendants_iter(child));
         (above, moved)
     };
     for ancestor in above {
@@ -150,7 +150,7 @@ fn fire_ancestry_changed(lua: &Lua, instance: InstanceId, number: u64) {
         };
         let parent = world.get(instance).and_then(|i| i.parent());
         let mut moved = vec![instance];
-        moved.extend(world.descendants(instance));
+        moved.extend(world.descendants_iter(instance));
         (parent, moved)
     };
     for id in moved {

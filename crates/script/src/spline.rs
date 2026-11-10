@@ -186,8 +186,7 @@ impl Followers {
         };
         self.runs.retain(|&id, _| world.contains(id));
         let followers: Vec<InstanceId> = world
-            .descendants(world.workspace())
-            .into_iter()
+            .descendants_iter(world.workspace())
             .filter(|&id| {
                 world
                     .get(id)
@@ -308,8 +307,7 @@ fn start(
         (pivot, parts)
     } else {
         let parts: Vec<InstanceId> = world
-            .descendants(target)
-            .into_iter()
+            .descendants_iter(target)
             .filter(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
             .collect();
         let primary = instance

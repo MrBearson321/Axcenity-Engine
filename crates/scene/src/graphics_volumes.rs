@@ -42,8 +42,7 @@ pub(crate) fn blend(
     mut look: Look,
 ) -> Look {
     let mut volumes: Vec<(f64, f32, &Instance)> = world
-        .descendants(world.workspace())
-        .into_iter()
+        .descendants_iter(world.workspace())
         .filter(|&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(|id| world.get(id))
         .filter(|instance| instance.class() == ClassName::GraphicsVolume)

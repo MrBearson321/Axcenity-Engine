@@ -410,7 +410,7 @@ impl NavMesh {
 pub fn fingerprint(world: &World) -> u64 {
     let skip = moving_parts(world);
     let mut hasher = DefaultHasher::new();
-    for id in world.descendants(world.workspace()) {
+    for id in world.descendants_iter(world.workspace()) {
         let Some(instance) = world.get(id) else {
             continue;
         };

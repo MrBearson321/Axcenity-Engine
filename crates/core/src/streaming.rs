@@ -211,7 +211,7 @@ fn mode_of(world: &World, id: InstanceId) -> &'static str {
 
 /// Whether anything inside `id` is code a device runs.
 fn holds_client_code(world: &World, id: InstanceId) -> bool {
-    world.descendants(id).into_iter().any(|inside| {
+    world.descendants_iter(id).any(|inside| {
         world.get(inside).is_some_and(|instance| {
             matches!(
                 instance.class(),
@@ -280,8 +280,7 @@ fn collect(world: &World, parent: InstanceId, characters: &[InstanceId], units: 
 /// Whether there's a Model anywhere inside `id`.
 fn holds_model(world: &World, id: InstanceId) -> bool {
     world
-        .descendants(id)
-        .into_iter()
+        .descendants_iter(id)
         .any(|inside| world.get(inside).is_some_and(|i| is_model(i.class())))
 }
 
@@ -294,8 +293,7 @@ fn tree_of(world: &World, id: InstanceId, with_root: bool) -> Vec<InstanceId> {
     }
     tree.extend(
         world
-            .descendants(id)
-            .into_iter()
+            .descendants_iter(id)
             .filter(|&inside| !spline::is_generated(world, inside)),
     );
     tree

@@ -638,8 +638,7 @@ fn lerp((from, to): (f32, f32), t: f32) -> f32 {
 /// parts kept inside a UnionOperation, whose parts aren't drawn.
 fn emitters(world: &World) -> impl Iterator<Item = (InstanceId, &Instance)> {
     world
-        .descendants(world.workspace())
-        .into_iter()
+        .descendants_iter(world.workspace())
         .filter(move |&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(move |id| Some((id, world.get(id)?)))
         .filter(|(_, instance)| instance.class() == ClassName::ParticleEmitter)

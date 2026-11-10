@@ -405,8 +405,7 @@ fn emitter_position(world: &World, sound: InstanceId, fallback: [f32; 3]) -> [f3
 /// Every Sound in the game, wherever it is.
 fn sounds(world: &World) -> impl Iterator<Item = (InstanceId, &Instance)> {
     world
-        .descendants(world.root())
-        .into_iter()
+        .descendants_iter(world.root())
         .filter_map(|id| Some((id, world.get(id)?)))
         .filter(|(_, instance)| instance.class() == ClassName::Sound)
 }

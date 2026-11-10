@@ -141,8 +141,7 @@ struct Described {
 /// joints, and welds that can break.
 fn constraints(world: &World) -> Vec<InstanceId> {
     world
-        .descendants(world.workspace())
-        .into_iter()
+        .descendants_iter(world.workspace())
         .filter(|&id| {
             world
                 .get(id)

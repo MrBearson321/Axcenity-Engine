@@ -317,7 +317,7 @@ fn goals(
 /// Every part in the character.
 fn parts_of(world: &World, holder: InstanceId) -> Vec<InstanceId> {
     std::iter::once(holder)
-        .chain(world.descendants(holder))
+        .chain(world.descendants_iter(holder))
         .filter(|&id| {
             world
                 .get(id)

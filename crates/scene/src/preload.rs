@@ -69,7 +69,7 @@ pub fn asset_files(world: &World) -> Vec<AssetFile> {
             files.push(file);
         }
     };
-    for id in world.descendants(world.workspace()) {
+    for id in world.descendants_iter(world.workspace()) {
         let Some(instance) = world.get(id) else {
             continue;
         };

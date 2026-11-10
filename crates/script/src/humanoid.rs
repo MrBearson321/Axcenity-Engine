@@ -194,7 +194,7 @@ pub struct Pieces {
 
 impl Pieces {
     pub fn of(world: &World, holder: InstanceId) -> Self {
-        let animator = world.descendants(holder).into_iter().find(|&id| {
+        let animator = world.descendants_iter(holder).find(|&id| {
             world
                 .get(id)
                 .is_some_and(|instance| instance.class() == ClassName::Animator)
@@ -331,8 +331,7 @@ fn camera_yaw(lua: &Lua) -> Option<f32> {
 /// Turns every Ragdoll in `holder` on or off.
 fn set_ragdolls(world: &mut World, holder: InstanceId, on: bool) -> bool {
     let ragdolls: Vec<InstanceId> = world
-        .descendants(holder)
-        .into_iter()
+        .descendants_iter(holder)
         .filter(|&id| {
             world
                 .get(id)
@@ -346,7 +345,7 @@ fn set_ragdolls(world: &mut World, holder: InstanceId, on: bool) -> bool {
 }
 
 fn ragdolled(world: &World, holder: InstanceId) -> bool {
-    world.descendants(holder).into_iter().any(|id| {
+    world.descendants_iter(holder).any(|id| {
         world.get(id).is_some_and(|instance| {
             instance.class() == ClassName::Ragdoll
                 && instance.property("Enabled").and_then(Value::as_bool) == Some(true)
@@ -671,8 +670,7 @@ impl Humanoids {
             0.0
         };
         let humanoids: Vec<InstanceId> = world
-            .descendants(world.workspace())
-            .into_iter()
+            .descendants_iter(world.workspace())
             .filter(|&id| {
                 world
                     .get(id)
@@ -945,8 +943,7 @@ fn die(world: &mut World, humanoid: InstanceId) {
     }
     if flag(world, humanoid, "BreakJointsOnDeath") {
         let joints: Vec<InstanceId> = world
-            .descendants(holder)
-            .into_iter()
+            .descendants_iter(holder)
             .filter(|&id| {
                 world.get(id).is_some_and(|instance| {
                     let class = instance.class();
