@@ -2521,6 +2521,12 @@ fn scene_pipelines(
             depth,
         )
     };
+    // With one sample per pixel there's nothing for coverage to share out.
+    let depth_fill = if samples > 1 {
+        "fs_depth_coverage"
+    } else {
+        "fs_depth_only"
+    };
     (
         create_sky_pipeline(device, frame_layout, samples),
         ItemPipelines {
@@ -2539,7 +2545,7 @@ fn scene_pipelines(
         ),
         PrefillPipelines {
             depth: [false, true]
-                .map(|double_sided| prefill("fs_depth_only", double_sided, DepthUse::Fill)),
+                .map(|double_sided| prefill(depth_fill, double_sided, DepthUse::Fill)),
             lit: [false, true]
                 .map(|double_sided| prefill("fs_prefilled", double_sided, DepthUse::Filled)),
         },
