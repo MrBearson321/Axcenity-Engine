@@ -161,6 +161,9 @@ pub struct PropertyDoc {
     /// Whether the tab's Record is on, set by its owner each frame, so an
     /// empty dope sheet says the right next step.
     pub recording: bool,
+    /// Whether these are a sequence's keys in the Sequencer, whose preview
+    /// can't be edited, so an empty dope sheet says to key from the Scene view.
+    pub sequence: bool,
 }
 
 impl PropertyDoc {
@@ -182,6 +185,7 @@ impl PropertyDoc {
             fps: 30.0,
             gesture: None,
             recording: false,
+            sequence: false,
             new_event: "Opened".to_owned(),
             show_curves: false,
             curve_view: CurveView::default(),
@@ -332,7 +336,10 @@ impl PropertyDoc {
 
     /// What an empty dope sheet or Curves view says to do first.
     pub fn empty_hint(&self) -> &'static str {
-        if self.recording {
+        if self.sequence {
+            "No tracks yet: with Preview off, select something in the Scene view, move it, and \
+             press K. Key camera keys the view."
+        } else if self.recording {
             "No tracks yet: select something in the preview and move it. Record keys it."
         } else {
             "No tracks yet: select something in the preview, move it, and press K."

@@ -230,14 +230,17 @@ impl ClipDoc {
         self.file != self.written
     }
 
-    /// Writes it if it changed.
-    pub fn write(&mut self, project: &Path) -> std::io::Result<bool> {
+    /// Writes it if it changed, and returns the file's text before and
+    /// after, for an undo step.
+    pub fn write(&mut self, project: &Path) -> std::io::Result<Option<(String, String)>> {
         if !self.unwritten() {
-            return Ok(false);
+            return Ok(None);
         }
-        super::store::save_clip(project, &self.path, &self.file.to_file())?;
+        let before = self.written.to_file().to_json();
+        let after = self.file.to_file();
+        super::store::save_clip(project, &self.path, &after)?;
         self.written = self.file.clone();
-        Ok(true)
+        Ok(Some((before, after.to_json())))
     }
 
     fn take(&self) -> Option<&Take> {

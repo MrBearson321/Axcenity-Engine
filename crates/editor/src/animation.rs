@@ -1012,7 +1012,7 @@ fn asset_menu(ui: &mut egui::Ui, path: &str, pick: &mut Option<Pick>) {
 }
 
 /// Writes the open clip and state machine, and returns a record of the
-/// property-clip edit if that write changed its file. Take-clip and state
+/// clip edit (keyed or linked) if that write changed its file. State
 /// machine edits stay unrecorded.
 fn flush(
     clip: &mut Option<Clip>,
@@ -1022,17 +1022,19 @@ fn flush(
 ) -> Option<StudioAction> {
     let mut record = None;
     if let Some(clip) = clip {
-        let result = match clip {
-            Clip::Take(doc) => doc.write(project).map(|_| ()),
-            Clip::Property(doc) => doc.write(project).map(|written| {
-                record = written.map(|(before, after)| StudioAction::RecordFile {
-                    path: doc.path.clone(),
-                    before,
-                    after,
-                    label: format!("Edit {}", axcenity_anim::files::clip_name(&doc.path)),
-                });
-            }),
+        let path = clip.path().to_owned();
+        let written = match clip {
+            Clip::Take(doc) => doc.write(project),
+            Clip::Property(doc) => doc.write(project),
         };
+        let result = written.map(|written| {
+            record = written.map(|(before, after)| StudioAction::RecordFile {
+                label: format!("Edit {}", axcenity_anim::files::clip_name(&path)),
+                path,
+                before,
+                after,
+            });
+        });
         if let Err(err) = result {
             output.error(format!("Could not save `{}`: {err}", clip.path()));
         }

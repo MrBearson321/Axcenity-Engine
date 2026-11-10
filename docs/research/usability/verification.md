@@ -71,5 +71,19 @@ Steps and clicks are unchanged; what changed is that the editor now says which m
 
 **Tests**: `the_filter_shows_what_matches_and_the_branches_above_it`, `clicking_an_arrow_while_filtering_leaves_the_branches_alone`, `snapshot_of_the_filter` (`explorer-filter.png`), `a_changed_property_resets_to_its_default_with_one_click` (`properties-reset.png`), `defaults_are_said_briefly`, and the Humanoid test above. Full-suite results are in the PR.
 
-**Left for later**: U12–U14 (next PR), then U15–U20.
+**Left for later**: U12–U14 (PR 4), then U15–U20.
+
+## PR 4: Animation follow-ups (U12–U14)
+
+**Changed**
+
+| ID | Problem | Change |
+|---|---|---|
+| U12 (AN6) | A linked (take) clip's settings (range, loop, speed, events) weren't undo steps; only Revert put the file back | Each write is one undo step ("Edit Idle"), like a keyed clip's; undo and redo reopen the clip as the file has it. Revert still goes back to the file as opened |
+| U13 (AN8) | Two panels in the state-machine view were both called **Parameters** | The live values under the preview are now **Try parameters**, with a hover that says they only change the preview |
+| U14 | The Sequencer reused the dope sheet's "select something in the preview, move it, and press K", but its preview has no tools | While Preview is on, a line above the keys says "Previewing: … Turn Preview off to move things, then key them (K)"; the empty dope sheet says "with Preview off, select something in the Scene view, move it, and press K. Key camera keys the view." |
+
+The Sequencer has no Record and nothing is dropped when the playhead moves (moves happen in the edited world), so the Animation tab's amber "Not keyed yet" note doesn't apply there; the problem it had was saying the wrong next step.
+
+**Tests**: `a_linked_clips_range_change_is_one_undo_step` (posing tests: range change written, undo label "Edit Idle", undo restores the file and the open clip, redo puts the change back), `the_sequencer_says_to_turn_the_preview_off_to_move_things`. Full-suite results are in the PR.
 

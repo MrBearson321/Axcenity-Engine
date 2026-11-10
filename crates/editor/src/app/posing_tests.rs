@@ -624,3 +624,41 @@ fn making_keys_and_changing_their_easing_undo_and_redo_with_their_values_and_eas
     assert_eq!(app.animation.open_tracks(), eased.tracks);
     let _ = fs::remove_dir_all(&folder);
 }
+
+/// A linked clip's settings (here its range) are undo steps like a keyed
+/// clip's edits: undo puts the file and the open clip back, redo again.
+#[test]
+fn a_linked_clips_range_change_is_one_undo_step() {
+    let folder = copy_of_example("hello-animation", "linked-clip-undo");
+    let mut app = EditorApp::new(Some(&folder));
+    let noodle = part(&app, "Noodle");
+    app.animation.open_for(
+        &folder,
+        &app.assets,
+        noodle,
+        IDLE,
+        &mut app.world,
+        &mut app.output,
+    );
+    assert!(app.animation.open_badge().contains("Linked to noodle.fbx"));
+    let opened = app.animation.open_clip_file();
+    let on_disk = || fs::read_to_string(folder.join(IDLE)).unwrap();
+    let before = on_disk();
+
+    app.animation.set_clip_range(0.25, 0.75);
+    record_clip_edit(&mut app, &folder);
+    let edited = on_disk();
+    assert_ne!(edited, before, "the range was written");
+    assert_eq!(app.history.undo_label(), Some("Edit Idle"));
+
+    app.undo();
+    assert_eq!(app.animation.open_clip_file(), opened);
+    assert_eq!(
+        axcenity_anim::ClipFile::from_json(&on_disk()).unwrap(),
+        axcenity_anim::ClipFile::from_json(&before).unwrap()
+    );
+    app.redo();
+    assert_eq!(app.animation.open_clip_file().to_json(), edited);
+    assert_eq!(on_disk(), edited);
+    let _ = fs::remove_dir_all(&folder);
+}
