@@ -194,6 +194,7 @@ pub(super) enum Command {
     InsertScript(ClassName),
     InsertControls,
     TerrainStudio,
+    ModelStudio,
     TerrainTool(TerrainTool),
     /// A button on a plugin's toolbar.
     PluginButton {
@@ -853,10 +854,18 @@ impl EditorApp {
         add(
             Command::Import,
             "Import…",
-            &ribbon("Import"),
+            &ribbon("Models"),
             &[],
             None,
             when(editing, not_editing),
+        );
+        add(
+            Command::ModelStudio,
+            "Model Studio",
+            &ribbon("Models"),
+            &["Model Studio"],
+            None,
+            when(project, "Open a project first."),
         );
         add(
             Command::InsertControls,
@@ -1064,6 +1073,7 @@ impl EditorApp {
             Command::InsertScript(class) if !playing => self.act(Action::InsertScript(class)),
             Command::InsertControls if !playing => self.insert_controls_ui(),
             Command::TerrainStudio => self.layout.open(Pane::Terrain),
+            Command::ModelStudio => self.layout.open(Pane::ModelStudio),
             Command::TerrainTool(tool) if !playing => {
                 self.terrain.tool = Some(tool);
                 self.layout.open(Pane::Terrain);

@@ -57,7 +57,7 @@ The problems are about **context** and **explanation**, not missing features:
 
 | PR | Findings | Size |
 |---|---|---|
-| 1. Modes and toolbar | MS1, MS2, MS3 (and the stray cube) | M |
+| 1. Modes and toolbar (#42) | MS1, MS2, MS3 (and the stray cube) | M |
 | 2. Explain and fold | MS4, MS5, MS6, MS7, MS8 | M |
 
 **Not planned:** renaming Blender's standard terms; captions on the toolbar's icons (the toolbar now fits one row, and each icon has a tooltip); putting the Studio's operations in the command palette (worth doing once the palette has a per-tab command list; medium work).

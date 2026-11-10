@@ -196,6 +196,9 @@ impl StudioDoc {
     }
 }
 
+/// The fold Retopology and Bake sit in.
+pub(super) const RETOPO_HEADER: &str = "Retopology and Bake";
+
 impl ModelStudio {
     /// The reference's surface, made again if its mesh changed.
     pub(crate) fn reference_surface(&mut self) -> Option<Arc<Reference>> {
@@ -420,7 +423,37 @@ impl ModelStudio {
     }
 
     /// The Retopology and Bake sections of the side panel.
+    /// Retopology and Bake, folded closed: a sculpt → low poly → bake
+    /// pipeline few models need. It opens by itself while it's in use (a
+    /// reference set, Poly Build on, or a bake's report showing).
     pub(super) fn retopo_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        editable: bool,
+        actions: &mut Vec<StudioAction>,
+    ) {
+        let Some(doc) = &self.doc else {
+            return;
+        };
+        let in_use = doc.reference_object().is_some()
+            || self.retopo.poly_build.is_some()
+            || self.retopo.report.is_some();
+        ui.add_space(8.0);
+        let mut header = egui::CollapsingHeader::new(RETOPO_HEADER)
+            .id_salt("studio retopology and bake")
+            .default_open(false);
+        if in_use {
+            header = header.open(Some(true));
+        }
+        header
+            .show(ui, |ui| self.retopo_sections(ui, editable, actions))
+            .header_response
+            .on_hover_text(
+                "Build a light copy over a detailed sculpt and bake the sculpt's detail into its textures",
+            );
+    }
+
+    fn retopo_sections(
         &mut self,
         ui: &mut egui::Ui,
         editable: bool,
@@ -430,7 +463,6 @@ impl ModelStudio {
             return;
         };
         let palette = theme::palette(ui.ctx());
-        ui.add_space(8.0);
         widgets::section_label(ui, "Retopology");
         let names: Vec<String> = doc.model.objects.iter().map(|o| o.name.clone()).collect();
         let name = |index: Option<usize>| {

@@ -163,6 +163,10 @@ pub(super) enum KeyMenu {
     Delete,
 }
 
+/// Why the Mesh menu's operations and Mark Seam are greyed out.
+pub(super) const EDIT_ONLY: &str =
+    "These work on what's picked in Edit mode: press Tab or click Edit.";
+
 impl ModelStudio {
     /// Runs `op` on what's picked as one undo step. False (with the reason
     /// in the Console and the view) if it couldn't run.
@@ -713,29 +717,49 @@ impl ModelStudio {
     }
 
     /// The toolbar's Mesh menu: every operation, with first settings sized
-    /// to the mesh.
+    /// to the mesh, each explained on hover.
     pub(super) fn mesh_menu(&mut self, ui: &mut egui::Ui) {
         let edit = self.doc.as_ref().is_some_and(|doc| doc.mode == Mode::Edit);
         let size = self.mesh_size();
         let cursor = self.moves.cursor;
         let mut chosen: Option<MeshOp> = None;
         let mut start = None;
+        // Shows `tip` on hover, enabled or not.
+        let explain = |response: egui::Response, tip: &str| {
+            response.on_hover_text(tip).on_disabled_hover_text(tip)
+        };
         ui.menu_button(theme::with_icon(icons::WRENCH, "Mesh"), |ui| {
+            if !edit {
+                ui.weak(EDIT_ONLY);
+            }
             ui.add_enabled_ui(edit, |ui| {
-                let mut item = |ui: &mut egui::Ui, name: &str, op: MeshOp| {
-                    if ui.button(name).clicked() {
+                let mut item = |ui: &mut egui::Ui, name: &str, tip: &str, op: MeshOp| {
+                    if explain(ui.button(name), tip).clicked() {
                         chosen = Some(op);
                         ui.close();
                     }
                 };
-                for (name, mode) in [
-                    ("Extrude Region (E)", ExtrudeMode::Region),
-                    ("Extrude Individual Faces", ExtrudeMode::Individual),
-                    ("Extrude Along Normals", ExtrudeMode::AlongNormals),
+                for (name, tip, mode) in [
+                    (
+                        "Extrude Region (E)",
+                        "Pull the picked faces out, with walls joining them to the rest. Picked open edges pull out into new faces.",
+                        ExtrudeMode::Region,
+                    ),
+                    (
+                        "Extrude Individual Faces",
+                        "Pull each picked face out on its own, with walls of its own.",
+                        ExtrudeMode::Individual,
+                    ),
+                    (
+                        "Extrude Along Normals",
+                        "Pull the picked faces out along their own normals, keeping an even thickness.",
+                        ExtrudeMode::AlongNormals,
+                    ),
                 ] {
                     item(
                         ui,
                         name,
+                        tip,
                         MeshOp::Extrude {
                             mode,
                             distance: size * 0.25,
@@ -745,19 +769,29 @@ impl ModelStudio {
                 item(
                     ui,
                     "Inset Faces (I)",
+                    "A smaller copy inside the picked faces, joined to them by a ring of faces: panels, windows, rims.",
                     MeshOp::Inset {
                         thickness: size * 0.05,
                         depth: 0.0,
                         individual: false,
                     },
                 );
-                for (name, vertices) in [
-                    ("Bevel Edges (Ctrl+B)", false),
-                    ("Bevel Vertices (Ctrl+Shift+B)", true),
+                for (name, tip, vertices) in [
+                    (
+                        "Bevel Edges (Ctrl+B)",
+                        "Round or cut off the picked edges with a band of new faces.",
+                        false,
+                    ),
+                    (
+                        "Bevel Vertices (Ctrl+Shift+B)",
+                        "Cut the picked corners off.",
+                        true,
+                    ),
                 ] {
                     item(
                         ui,
                         name,
+                        tip,
                         MeshOp::Bevel {
                             width: size * 0.05,
                             segments: 1,
@@ -766,23 +800,58 @@ impl ModelStudio {
                         },
                     );
                 }
-                if ui.button("Loop Cut and Slide (Ctrl+R)").clicked() {
+                let tool = |ui: &mut egui::Ui, name: &str, tip: &str| explain(ui.button(name), tip).clicked();
+                if tool(
+                    ui,
+                    "Loop Cut and Slide (Ctrl+R)",
+                    "Hover an edge to see a loop of edges round the shape, click to cut it there, then slide it.",
+                ) {
                     start = Some("loop cut");
                     ui.close();
                 }
-                if ui.button("Knife (K)").clicked() {
+                if tool(
+                    ui,
+                    "Knife (K)",
+                    "Click points on edges to cut new edges across the faces between them; Enter cuts, Esc stops.",
+                ) {
                     start = Some("knife");
                     ui.close();
                 }
-                item(ui, "Edge Slide (G G)", MeshOp::EdgeSlide { factor: 0.5 });
+                item(
+                    ui,
+                    "Edge Slide (G G)",
+                    "Slide the picked edges along the faces beside them, keeping the shape.",
+                    MeshOp::EdgeSlide { factor: 0.5 },
+                );
                 ui.separator();
-                item(ui, "Bridge Edge Loops", MeshOp::Bridge);
-                item(ui, "Fill (F)", MeshOp::Fill);
-                item(ui, "Grid Fill", MeshOp::GridFill { span: 0, offset: 0 });
-                item(ui, "Subdivide", MeshOp::Subdivide { cuts: 1 });
+                item(
+                    ui,
+                    "Bridge Edge Loops",
+                    "Join two picked holes (loops of open edges) with a tube of faces.",
+                    MeshOp::Bridge,
+                );
+                item(
+                    ui,
+                    "Fill (F)",
+                    "Close each picked hole (a loop of open edges) with one face.",
+                    MeshOp::Fill,
+                );
+                item(
+                    ui,
+                    "Grid Fill",
+                    "Close one picked hole with a grid of four-sided faces (the loop needs an even number of edges).",
+                    MeshOp::GridFill { span: 0, offset: 0 },
+                );
+                item(
+                    ui,
+                    "Subdivide",
+                    "Split each picked face into smaller ones.",
+                    MeshOp::Subdivide { cuts: 1 },
+                );
                 item(
                     ui,
                     "Spin",
+                    "Sweep the picked faces or edges round the 3D cursor, making faces as they turn: bowls, vases, rings.",
                     MeshOp::Spin {
                         degrees: 90.0,
                         steps: 9,
@@ -791,63 +860,111 @@ impl ModelStudio {
                     },
                 );
                 ui.separator();
-                ui.menu_button("Merge (M)", |ui| {
-                    for (name, at) in [
-                        ("At Center", MergeAt::Center),
-                        ("At Cursor", MergeAt::Cursor),
-                        ("By Distance", MergeAt::Distance),
-                    ] {
-                        item(
-                            ui,
-                            name,
-                            MeshOp::Merge {
-                                at,
-                                cursor,
-                                distance: 0.0001,
-                            },
-                        );
-                    }
-                });
-                ui.menu_button("Delete (X)", |ui| {
-                    for (name, kind) in [
-                        ("Vertices", DeleteKind::Vertices),
-                        ("Edges", DeleteKind::Edges),
-                        ("Faces", DeleteKind::Faces),
-                        ("Only Faces", DeleteKind::OnlyFaces),
-                    ] {
-                        item(ui, name, MeshOp::Delete(kind));
-                    }
-                });
-                ui.menu_button("Dissolve", |ui| {
-                    for (name, kind) in [
-                        ("Vertices", DissolveKind::Vertices),
-                        ("Edges", DissolveKind::Edges),
-                        ("Faces", DissolveKind::Faces),
-                    ] {
-                        item(ui, name, MeshOp::Dissolve(kind));
-                    }
-                });
+                explain(
+                    ui.menu_button("Merge (M)", |ui| {
+                        for (name, tip, at) in [
+                            ("At Center", "Join the picked vertices into one, at their middle.", MergeAt::Center),
+                            ("At Cursor", "Join the picked vertices into one, at the 3D cursor.", MergeAt::Cursor),
+                            (
+                                "By Distance",
+                                "Join picked vertices that sit on top of each other (cleans up doubles).",
+                                MergeAt::Distance,
+                            ),
+                        ] {
+                            item(
+                                ui,
+                                name,
+                                tip,
+                                MeshOp::Merge {
+                                    at,
+                                    cursor,
+                                    distance: 0.0001,
+                                },
+                            );
+                        }
+                    })
+                    .response,
+                    "Join picked vertices into one.",
+                );
+                explain(
+                    ui.menu_button("Delete (X)", |ui| {
+                        for (name, tip, kind) in [
+                            ("Vertices", "Remove the picked vertices and every edge and face using them.", DeleteKind::Vertices),
+                            ("Edges", "Remove the picked edges and the faces beside them.", DeleteKind::Edges),
+                            ("Faces", "Remove the picked faces, leaving a hole.", DeleteKind::Faces),
+                            (
+                                "Only Faces",
+                                "Remove the picked faces but keep their edges and vertices.",
+                                DeleteKind::OnlyFaces,
+                            ),
+                        ] {
+                            item(ui, name, tip, MeshOp::Delete(kind));
+                        }
+                    })
+                    .response,
+                    "Remove what's picked, leaving a hole.",
+                );
+                explain(
+                    ui.menu_button("Dissolve", |ui| {
+                        for (name, tip, kind) in [
+                            (
+                                "Vertices",
+                                "Remove the picked vertices; the faces round each become one.",
+                                DissolveKind::Vertices,
+                            ),
+                            (
+                                "Edges",
+                                "Remove the picked edges; the faces either side become one.",
+                                DissolveKind::Edges,
+                            ),
+                            ("Faces", "Join the picked faces into one.", DissolveKind::Faces),
+                        ] {
+                            item(ui, name, tip, MeshOp::Dissolve(kind));
+                        }
+                    })
+                    .response,
+                    "Remove what's picked without leaving a hole: the faces round it join up.",
+                );
                 ui.separator();
-                item(ui, "Flip Normals (Alt+N)", MeshOp::FlipNormals);
+                item(
+                    ui,
+                    "Flip Normals (Alt+N)",
+                    "Turn the picked faces inside out.",
+                    MeshOp::FlipNormals,
+                );
                 item(
                     ui,
                     "Recalculate Outside (Shift+N)",
+                    "Make the picked faces agree and face outwards (fixes faces that look dark or missing).",
                     MeshOp::RecalculateNormals { inside: false },
                 );
                 item(
                     ui,
                     "Recalculate Inside (Ctrl+Shift+N)",
+                    "Make the picked faces agree and face inwards (for the inside of a room).",
                     MeshOp::RecalculateNormals { inside: true },
                 );
             });
             ui.separator();
             // Shading works on whole objects in Object mode too.
-            for (name, op) in [
-                ("Shade Smooth", MeshOp::ShadeSmooth),
-                ("Shade Flat", MeshOp::ShadeFlat),
-                ("Shade Auto Smooth", MeshOp::AutoSmooth { degrees: 30.0 }),
+            for (name, tip, op) in [
+                (
+                    "Shade Smooth",
+                    "Light the faces as one smooth surface.",
+                    MeshOp::ShadeSmooth,
+                ),
+                (
+                    "Shade Flat",
+                    "Light each face on its own, so the facets show.",
+                    MeshOp::ShadeFlat,
+                ),
+                (
+                    "Shade Auto Smooth",
+                    "Smooth, except edges sharper than 30°, which stay crisp.",
+                    MeshOp::AutoSmooth { degrees: 30.0 },
+                ),
             ] {
-                if ui.button(name).clicked() {
+                if explain(ui.button(name), tip).clicked() {
                     chosen = Some(op);
                     ui.close();
                 }

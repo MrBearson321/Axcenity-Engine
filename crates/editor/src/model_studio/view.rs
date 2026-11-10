@@ -441,7 +441,7 @@ impl View {
             (None, Mode::Armature) => "Click a bone · E: extrude · G: move · X: delete · right-drag: turn view · Tab: Object mode".to_owned(),
             (None, Mode::Weights) => "Drag: paint the picked bone's weights · Ctrl-click: pick a bone · [ ]: radius · Tab: Object mode".to_owned(),
             (None, Mode::Pose) => "Click a bone · R: turn it · the pose isn't saved · Tab: Object mode".to_owned(),
-            (None, Mode::Edit) => "1 2 3: vertex, edge, face · Alt-click: loop · L: linked · Ctrl +/−: grow, shrink · drag: box · E I Ctrl+B Ctrl+R K M X F: model · U: unwrap".to_owned(),
+            (None, Mode::Edit) => "1 2 3: vertex, edge, face · Alt-click: loop · drag: box · E: extrude · I: inset · Ctrl+B: bevel · the Mesh menu has the rest, with their keys · U: unwrap".to_owned(),
         };
         let palette = theme::palette(ui.ctx());
         painter.text(
