@@ -90,12 +90,8 @@ pub(crate) static DRIFT: &[Drift] = &[
     // The server replaces shattered parts before asking which parts are
     // held still, where the other hosts ask first.
     Drift { host: Hosts::SERVER, step: "physics.shatters", after: "scripts.stepped" },
-    // Editor Play: the render step's functions see last frame's poses,
-    // because Animators run after them.
-    Drift { host: Hosts::EDITOR_PLAY, step: "camera.follow", after: "graphics.changed" },
+    // Editor Play plays sounds after the render step.
     Drift { host: Hosts::EDITOR_PLAY, step: "audio", after: "graphics.changed" },
-    Drift { host: Hosts::EDITOR_PLAY, step: "animators", after: "audio" },
-    Drift { host: Hosts::EDITOR_PLAY, step: "tools.place", after: "animators" },
 ];
 
 /// Where each host's benchmark steps end: `(step, benchmark step name)`.

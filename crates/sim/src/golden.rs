@@ -28,8 +28,6 @@ const PLAYER: &[&str] = &[
 ];
 
 /// Exceptions the editor still has (each one is a line of `DRIFT`):
-/// - the render step runs before Animators and Tools, so `RenderStepped`
-///   sees last frame's poses;
 /// - audio runs after the render step;
 /// - particles and streaming aren't steps at all: the Scene viewport does
 ///   them while it draws (`crates/editor/src/viewport.rs`).
@@ -43,11 +41,10 @@ const EDITOR_PLAY: &[&str] = &[
     "physics.hold", "physics.kinematic", "physics.shatters", "physics.step",
     "touches.began", "touches.ended", "breaks", "health",
     "heartbeat",
-    "levels.loaded", "loading.screen",
-    "render_step", "camera.move", "graphics.changed",
-    "audio",
     "animators", "tools.place",
-    "camera.follow",
+    "levels.loaded", "loading.screen",
+    "render_step", "camera.move", "camera.follow", "graphics.changed",
+    "audio",
     "net.send",
 ];
 
@@ -159,9 +156,9 @@ fn every_host_laps_in_the_benchmark_step_names() {
             "Scripts",
             "Physics",
             "Heartbeat",
+            "Animation",
             "RenderStep",
             "Audio",
-            "Animation",
             "Network send"
         ]
     );
