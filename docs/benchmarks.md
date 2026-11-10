@@ -244,6 +244,8 @@ Physics fell by about 22% on the test runner and 18% on the server (29% and 28% 
 - **Write-back** is once per frame and looks only at awake bodies. It saves little on S10k because none of its 1,000 drops ever sleeps: they rest in one pile (one rapier island), and the drops script lifts 100 of them every second, which keeps the whole island awake. The ~1,100 parts written each frame cost about 0.8 µs each in `World::set_property` (string-keyed properties and the change log; roadmap L1 and M6). A world whose bodies come to rest now writes nothing. The benchmarks run one 60 Hz step per frame, so writing once per frame instead of once per step only pays when frames are slower than 60 Hz.
 - **rapier's `parallel`** took about 1 ms (17%) off rapier's step on 4 cores, more in the 95th percentile, and should gain more on a desktop with more cores. In tiny scenes it costs a little: `hello-physics` 0.008 → 0.011 ms and `hello-vehicle` 0.05–0.07 → 0.19 ms a frame. A pile of 150 parts lands exactly the same way with and without it, with any number of threads.
 
+After merging main with M4 and M6 (ad41ded), the same comparison again (three runs each, same container): test runner Physics 11.41 → 8.23 ms (p95 16.12 → 11.52) and frame 18.88 → 14.20 ms; server Physics 9.07 → 7.96 ms (p95 14.17 → 10.85) and frame 11.79 → 11.04 ms.
+
 The real projects (General Store Roadside, Abandoned Farmhouse, The Dimming, the biome patches) weren't run for M3: they're on the Windows desktop, not in the container.
 
 ### A Windows desktop with a real GPU
