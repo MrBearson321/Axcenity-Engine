@@ -955,6 +955,7 @@ dependencies = [
  "axcenity-sim",
  "axcenity-workspace-hack",
  "profiling",
+ "serde_json",
 ]
 
 [[package]]
