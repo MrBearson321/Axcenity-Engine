@@ -26,6 +26,13 @@ impl EditorApp {
             .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
+                // Every tab keeps the tallest tab's height (Home's snapping
+                // grid), so the panels below don't jump when tabs change.
+                let tallest_id =
+                    egui::Id::new(("ribbon tallest", format!("{:?}", theme::density(ui.ctx()))));
+                let tallest: f32 = ui.data(|d| d.get_temp(tallest_id)).unwrap_or(0.0);
+                ui.set_min_height(tallest);
+                let top = ui.min_rect().top();
                 egui::ScrollArea::horizontal().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
@@ -37,6 +44,10 @@ impl EditorApp {
                         }
                     });
                 });
+                let height = ui.min_rect().bottom() - top;
+                if height > tallest {
+                    ui.data_mut(|d| d.insert_temp(tallest_id, height));
+                }
             })
             .response
             .rect;

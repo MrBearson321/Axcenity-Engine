@@ -88,6 +88,7 @@ fn the_panel_snapshots_with_its_main_tools() {
     }
     for (tool, file) in [
         (None, "terrain-none.png"),
+        (Some(TerrainTool::Smooth), "terrain-wide.png"),
         (Some(TerrainTool::Raise), "terrain-raise.png"),
         (Some(TerrainTool::Paint), "terrain-paint.png"),
         (Some(TerrainTool::Generate), "terrain-generate.png"),
@@ -97,13 +98,19 @@ fn the_panel_snapshots_with_its_main_tools() {
             tool,
             ..TerrainStudio::default()
         };
+        // The wide one shows the tools' names.
+        let width = if file == "terrain-wide.png" {
+            520.0
+        } else {
+            340.0
+        };
         crate::snapshot::snapshot(
             &std::path::PathBuf::from(&folder).join(file),
-            egui::vec2(340.0, 900.0),
+            egui::vec2(width, 900.0),
             vec![Vec::new(); 3],
             |ctx| {
                 egui::SidePanel::right("terrain")
-                    .default_width(320.0)
+                    .default_width(width - 20.0)
                     .show(ctx, |ui| {
                         studio.show(
                             ui,
@@ -208,4 +215,56 @@ fn an_open_layer_and_its_texture_menu_snapshot() {
             });
         },
     );
+}
+
+/// A wide panel names the tools beside their icons; a narrow one keeps
+/// the icons (names on hover), so it still fits a 260-point column.
+#[test]
+fn a_wide_panel_names_its_tools() {
+    let mut world = World::new();
+    let terrain = world.create(ClassName::Terrain).unwrap();
+    world.set_parent(terrain, Some(world.workspace())).unwrap();
+    let names_drawn = |width: f32| {
+        let ctx = crate::theme::test_context();
+        let mut studio = TerrainStudio::default();
+        let mut output = None;
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 900.0),
+                )),
+                ..Default::default()
+            };
+            output = Some(ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    studio.show(
+                        ui,
+                        &StudioContext {
+                            world: &world,
+                            selected: None,
+                            editing: true,
+                            time: 0.0,
+                            textures: &[],
+                            pictures: &HashMap::new(),
+                        },
+                    );
+                });
+            }));
+        }
+        fn walk(shape: &egui::Shape, found: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => found.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, found)),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        for clipped in &output.unwrap().shapes {
+            walk(&clipped.shape, &mut found);
+        }
+        found.iter().any(|text| text.contains("Raise / Lower"))
+    };
+    assert!(names_drawn(600.0));
+    assert!(!names_drawn(260.0));
 }

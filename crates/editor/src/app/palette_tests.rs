@@ -463,3 +463,28 @@ fn undo_history_jumps_back_and_forward_several_steps() {
     assert_eq!(name(&app, 2), "Renamed2");
     assert!(app.history.redo_labels().is_empty());
 }
+
+/// Every ribbon tab is as tall as the tallest (Home, with its snapping
+/// grid), so the layout under it doesn't jump when tabs change.
+#[test]
+fn the_ribbon_keeps_one_height_across_tabs() {
+    let mut app = EditorApp::new(Some(&example("hello-touched")));
+    let ctx = warm(theme::test_context());
+    let mut clock = 0.0;
+    let mut heights = Vec::new();
+    for tab in BuiltInTab::ALL.into_iter().chain([BuiltInTab::World]) {
+        app.ribbon_tabs.set_active(ActiveTab::BuiltIn(tab));
+        for _ in 0..3 {
+            chrome_frame(&mut app, &ctx, &mut clock, Vec::new());
+        }
+        let ribbon = egui::containers::panel::PanelState::load(&ctx, egui::Id::new("ribbon"))
+            .expect("the ribbon was drawn")
+            .rect;
+        heights.push((tab, ribbon.height()));
+    }
+    let first = heights[0].1;
+    assert!(
+        heights.iter().all(|(_, h)| (h - first).abs() < 0.5),
+        "{heights:?}"
+    );
+}

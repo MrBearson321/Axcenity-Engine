@@ -98,6 +98,16 @@ The Sequencer has no Record and nothing is dropped when the playhead moves (move
 
 **Tests**: `undo_history_jumps_back_and_forward_several_steps` (three renames undone in one click from the drawn menu, redo of two, a jump past the end stops), `filter_properties_shows_only_matching_rows` (no ClassName row unfiltered, one for "class"), and the palette coverage test with Undo History as a submenu. `cargo test -p axcenity-editor`: 913 passed, only the known cloud failure.
 
+## PR 6: Terrain tool names and a steady ribbon (U18, U19)
+
+**Changed**
+
+| ID | Problem | Change |
+|---|---|---|
+| U18 | Terrain Studio's Sculpt, Materials and Terrain rows were icon-only; a beginner had to hover each one | From 400 points wide, each tool is named beside its icon (the picked one filled), wrapping beside its row's title; narrower panels keep the icon-only rows, so a 260-point column still fits |
+| U19 (N2) | The ribbon was 119 points tall on Home, 105 on Test and 101 elsewhere, so the layout jumped when switching tabs | Every tab keeps the tallest tab's height |
+
+**Tests**: `a_wide_panel_names_its_tools` (names at 600 points, none at 260), `terrain-wide.png` from `the_panel_snapshots_with_its_main_tools`, `the_ribbon_keeps_one_height_across_tabs` (every built-in tab, then World again, the same height). `cargo test -p axcenity-editor`: 916 passed, only the known cloud failure.
 
 ## PR 7: Advanced section in Properties (U15)
 
