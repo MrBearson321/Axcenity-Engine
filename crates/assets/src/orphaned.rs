@@ -5,13 +5,19 @@
 //! made from: [`cache_stem`], its name and a hash of its path. A copy made
 //! from a file that was deleted, renamed or moved is never read again, so
 //! [`remove_orphaned_copies`] deletes the copies no project file names.
+//! Images cooked from inside models are named by their bytes instead, one
+//! copy for every model that embeds them, and kept while a model's note
+//! lists them.
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use crate::cooked::{COOKED_FOLDER, cache_stem};
+use crate::cooked::{
+    COOKED_FOLDER, EMBEDDED_NOTE_END, EMBEDDED_PREFIX, cache_stem, embedded_cooked_path,
+    read_note_at,
+};
 use crate::model::{MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER};
 
 /// Every folder of cached copies named by [`cache_stem`].
@@ -22,7 +28,8 @@ const CACHE_FOLDERS: [&str; 3] = [COOKED_FOLDER, MESH_CACHE_FOLDER, MODEL_CACHE_
 const ABANDONED_AFTER: Duration = Duration::from_secs(60 * 60);
 
 /// Deletes each cached copy in `.axcenity/imported/` whose source file
-/// isn't in the project any more, and half-written copies left behind.
+/// isn't in the project any more, each image cooked from inside a model
+/// that no model's note lists, and half-written copies left behind.
 /// Returns how many files it deleted.
 pub fn remove_orphaned_copies(project: &Path) -> usize {
     let stems = project_stems(project);
@@ -37,6 +44,9 @@ pub fn remove_orphaned_copies(project: &Path) -> usize {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_lowercase();
+            if embedded_hash(&name).is_some() {
+                continue;
+            }
             let orphaned = if name.ends_with(".partial") {
                 entry
                     .metadata()
@@ -53,7 +63,42 @@ pub fn remove_orphaned_copies(project: &Path) -> usize {
             }
         }
     }
-    removed
+    removed + remove_unlisted_embedded(project)
+}
+
+/// Deletes each image cooked from inside a model (see
+/// [`embedded_cooked_path`]) that no remaining model's note lists. Notes of
+/// models that are gone have been deleted by then, by their stems.
+fn remove_unlisted_embedded(project: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(project.join(COOKED_FOLDER)) else {
+        return 0;
+    };
+    let names: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    let listed: HashSet<u64> = names
+        .iter()
+        .filter(|name| name.ends_with(EMBEDDED_NOTE_END))
+        .filter_map(|name| read_note_at(&project.join(COOKED_FOLDER).join(name)))
+        .flat_map(|note| note.hashes)
+        .collect();
+    names
+        .iter()
+        .filter_map(|name| embedded_hash(&name.to_lowercase()))
+        .filter(|hash| !listed.contains(hash))
+        .filter(|&hash| fs::remove_file(embedded_cooked_path(project, hash)).is_ok())
+        .count()
+}
+
+/// The hash in the (lowercase) name of an image cooked from inside a model,
+/// `embedded-<16 hex digits>.axtex`, or `None` for any other file.
+fn embedded_hash(name: &str) -> Option<u64> {
+    let hex = name.strip_prefix(EMBEDDED_PREFIX)?.strip_suffix(".axtex")?;
+    (hex.len() == 16)
+        .then(|| u64::from_str_radix(hex, 16).ok())
+        .flatten()
 }
 
 /// The [`cache_stem`] of every file in the project, lowercase, leaving out

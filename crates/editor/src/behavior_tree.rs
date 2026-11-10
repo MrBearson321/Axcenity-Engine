@@ -108,6 +108,12 @@ impl BehaviorTreeStudio {
         self.current.as_deref()
     }
 
+    /// How far each graph drawn so far is zoomed.
+    #[cfg(test)]
+    pub fn view_zooms(&self) -> Vec<f32> {
+        self.views.values().map(|view| view.zoom).collect()
+    }
+
     /// Where the graph of the tree at `path` is looking, once it's drawn.
     #[cfg(test)]
     pub fn view(&self, path: &str) -> Option<&GraphView> {

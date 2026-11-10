@@ -14,7 +14,7 @@ use crate::widgets;
 pub(super) struct InputWindow {
     pub open: bool,
     /// The action the next key pressed is added to.
-    listening: Option<String>,
+    pub listening: Option<String>,
     /// The name typed for a new action, and whether it's an axis.
     new_action: String,
     new_axis: bool,
@@ -168,7 +168,13 @@ impl EditorApp {
                 })
             });
             match pressed {
-                Some(egui::Key::Escape) => self.input_settings.listening = None,
+                Some(egui::Key::Escape) => {
+                    // Taken, so it stops listening without closing the window.
+                    ctx.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    });
+                    self.input_settings.listening = None;
+                }
                 Some(key) => {
                     if let Some(key) = crate::play::script_key(key) {
                         edits.push(InputEdit::Add {
@@ -183,11 +189,9 @@ impl EditorApp {
         }
         let mut open = self.input_settings.open;
         let palette = theme::palette(ctx);
-        egui::Window::new("Input")
-            .open(&mut open)
-            .resizable(true)
-            .default_width(460.0)
-            .show(ctx, |ui| {
+        widgets::tool_window(icons::GAME_CONTROLLER, "Input")
+            .size(egui::vec2(460.0, 0.0))
+            .show(ctx, &mut open, |ui| {
                 ui.label(
                     egui::RichText::new(
                         "What each action is bound to, for the built-in characters, UI \

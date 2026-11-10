@@ -403,16 +403,8 @@ impl EditorApp {
                 items: Vec::new(),
             },
             &[
-                dialog::Button {
-                    icon: icons::X,
-                    label: "Cancel",
-                    kind: dialog::Kind::Plain,
-                },
-                dialog::Button {
-                    icon: icons::TRASH,
-                    label: "Delete",
-                    kind: dialog::Kind::Danger,
-                },
+                dialog::Button::new(icons::X, "Cancel", dialog::Kind::Plain),
+                dialog::Button::new(icons::TRASH, "Delete", dialog::Kind::Danger),
             ],
         );
         // Escape or a click outside the box means Cancel.

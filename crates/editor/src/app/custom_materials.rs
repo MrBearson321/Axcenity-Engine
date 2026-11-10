@@ -358,13 +358,10 @@ impl EditorApp {
         };
         let mut open = true;
         let mut create = false;
-        egui::Window::new("New Custom Material")
-            .id(egui::Id::new("new custom material"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(340.0)
-            .show(ctx, |ui| {
+        widgets::tool_window(crate::theme::icons::PALETTE, "New Custom Material")
+            .id("new custom material")
+            .fit(340.0)
+            .show(ctx, &mut open, |ui| {
                 egui::Grid::new("custom material maps")
                     .num_columns(3)
                     .spacing([8.0, 6.0])

@@ -345,7 +345,7 @@ pub(super) fn project_row(
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &link.name));
     let palette = theme::palette(ui.ctx());
     let hovered = ui.rect_contains_pointer(rect);
-    widgets::paint_hover(ui, rect, &response, false, 8.0);
+    widgets::paint_hover(ui, rect, &response, false, theme::radius::CARD);
     if hovered && !response.hovered() {
         // Over the ⋯ button: keep the row lit.
         ui.painter().rect_filled(rect, 8, palette.control_hover);

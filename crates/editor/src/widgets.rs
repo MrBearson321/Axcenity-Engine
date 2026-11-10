@@ -47,8 +47,53 @@ pub fn button(
         Role::Secondary => egui::Button::new(text),
         Role::Ghost => egui::Button::new(text).frame(false),
     }
-    .corner_radius(6)
-    .min_size(vec2(0.0, 28.0))
+    .corner_radius(theme::radius::CONTROL)
+    .min_size(vec2(0.0, theme::size::BUTTON_HEIGHT))
+}
+
+/// The name of a row in an inspector (Properties, the Material tab), with
+/// an optional icon button after it, such as ↺. The name stays where every
+/// other row's name is. When `changed` (the value differs from its default
+/// or its base) a thin accent bar marks the row in the gutter at its left:
+/// the one way every inspector shows a changed value. `name` adds the label.
+pub fn row_name<R>(
+    ui: &mut egui::Ui,
+    changed: bool,
+    name: impl FnOnce(&mut egui::Ui) -> R,
+    after: impl FnOnce(&mut egui::Ui),
+) -> R {
+    let row = ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let label = name(ui);
+        after(ui);
+        label
+    });
+    if changed {
+        changed_bar(ui, row.response.rect);
+    }
+    row.inner
+}
+
+/// The changed-value mark beside a row whose content is `row`: a 2-point
+/// accent bar in the gutter, 4 points left of it so it doesn't read as a
+/// text cursor.
+pub fn changed_bar(ui: &egui::Ui, row: Rect) {
+    let palette = theme::palette(ui.ctx());
+    let bar = Rect::from_min_max(
+        egui::pos2(row.left() - 6.0, row.top() + 2.0),
+        egui::pos2(row.left() - 4.0, row.bottom() - 2.0),
+    );
+    // The gutter is outside the row's own clip: paint on its layer, clipped
+    // only to the panel's sides.
+    let mut painter = ui.ctx().layer_painter(ui.layer_id());
+    painter.set_clip_rect(ui.clip_rect().expand2(vec2(8.0, 0.0)));
+    painter.rect_filled(bar, theme::radius::NONE, palette.accent);
+}
+
+/// The ↺ after a changed row's name: sets the value back. `tooltip` says to
+/// what. Returns whether it was clicked.
+pub fn reset_button(ui: &mut egui::Ui, tooltip: &str) -> bool {
+    icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, tooltip, false).clicked()
 }
 
 /// A square button with only an icon, which fades in a background when
@@ -62,7 +107,7 @@ pub fn icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, selected: bool)
     });
     if ui.is_rect_visible(rect) {
         let palette = theme::palette(ui.ctx());
-        paint_hover(ui, rect, &response, selected, 6.0);
+        paint_hover(ui, rect, &response, selected, theme::radius::CONTROL);
         let color = if !ui.is_enabled() {
             palette.text_muted
         } else if selected {
@@ -76,7 +121,7 @@ pub fn icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, selected: bool)
             rect.center(),
             egui::Align2::CENTER_CENTER,
             icon,
-            FontId::proportional(15.0),
+            FontId::proportional(theme::size::ICON_MEDIUM),
             color,
         );
     }
@@ -91,7 +136,7 @@ pub fn paint_hover(
     rect: Rect,
     response: &egui::Response,
     selected: bool,
-    radius: f32,
+    radius: u8,
 ) {
     let palette = theme::palette(ui.ctx());
     let hovered = response.hovered() && ui.is_enabled();
@@ -148,8 +193,8 @@ pub fn segmented_tips<T: Copy + PartialEq>(
     egui::Frame::new()
         .fill(palette.inset)
         .stroke(Stroke::new(1.0_f32, palette.border))
-        .corner_radius(7)
-        .inner_margin(egui::Margin::same(2))
+        .corner_radius(theme::radius::CARD)
+        .inner_margin(egui::Margin::same(theme::space::XXS as i8))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             ui.horizontal(|ui| {
@@ -186,15 +231,19 @@ pub fn segmented_tips<T: Copy + PartialEq>(
                     });
                     let t = theme::ease(ui.ctx(), response.id.with("on"), selected);
                     if t > 0.0 {
-                        ui.painter()
-                            .rect_filled(rect, 5, palette.control_active.gamma_multiply(t));
+                        ui.painter().rect_filled(
+                            rect,
+                            theme::radius::CONTROL,
+                            palette.control_active.gamma_multiply(t),
+                        );
                     } else if response.hovered() {
-                        ui.painter().rect_filled(rect, 5, palette.control);
+                        ui.painter()
+                            .rect_filled(rect, theme::radius::CONTROL, palette.control);
                     }
                     if response.has_focus() {
                         ui.painter().rect_stroke(
                             rect,
-                            5,
+                            theme::radius::CONTROL,
                             Stroke::new(1.0_f32, palette.accent),
                             egui::StrokeKind::Inside,
                         );
@@ -306,12 +355,13 @@ pub fn nav_item(
         } else {
             palette.control_hover
         };
-        ui.painter().rect_filled(rect, 6, fill.gamma_multiply(t));
+        ui.painter()
+            .rect_filled(rect, theme::radius::CONTROL, fill.gamma_multiply(t));
     }
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect,
-            6,
+            theme::radius::CONTROL,
             Stroke::new(1.0_f32, palette.accent),
             egui::StrokeKind::Inside,
         );
@@ -326,7 +376,7 @@ pub fn nav_item(
         rect.left_center() + vec2(18.0, 0.0),
         egui::Align2::CENTER_CENTER,
         icon,
-        FontId::proportional(15.0),
+        FontId::proportional(theme::size::ICON_MEDIUM),
         icon_color,
     );
     ui.painter().text(
@@ -376,7 +426,7 @@ pub fn search_field(
         response.rect.left_center() + vec2(13.0, 0.0),
         egui::Align2::CENTER_CENTER,
         icons::MAGNIFYING_GLASS,
-        FontId::proportional(13.0),
+        FontId::proportional(theme::size::ICON_SMALL),
         palette.text_weak,
     );
     if !text.is_empty() {
@@ -606,6 +656,192 @@ pub fn wordmark(
         palette.text_strong,
     );
     response
+}
+
+/// How a tool window is sized.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Sizing {
+    /// Opens at this size (height 0: as tall as its content) and the user
+    /// can drag its edges.
+    Resizable(egui::Vec2),
+    /// As big as its content, for short forms.
+    Fit(f32),
+    /// Always this size, for windows that lay out their own columns.
+    Fixed(egui::Vec2),
+}
+
+/// The open tool windows, back to front, each with the frame it was last
+/// drawn in: which one Escape closes. egui keeps its own order, but it
+/// keeps closed windows in it too.
+#[derive(Clone, Default)]
+struct ToolWindowStack(Vec<(egui::LayerId, u64)>);
+
+impl ToolWindowStack {
+    /// Notes `layer` drawn in `pass`, on top if it's new or `raised` (egui
+    /// put it in front, as a click does), or takes it out once it's closed.
+    fn raise(&mut self, layer: egui::LayerId, raised: bool, pass: u64, open: bool) {
+        let at = self.0.iter().position(|(entry, _)| *entry == layer);
+        if !open {
+            self.forget(layer);
+            return;
+        }
+        match at {
+            Some(at) if !raised => self.0[at].1 = pass,
+            Some(at) => {
+                self.0.remove(at);
+                self.0.push((layer, pass));
+            }
+            None => self.0.push((layer, pass)),
+        }
+    }
+
+    fn forget(&mut self, layer: egui::LayerId) {
+        self.0.retain(|(entry, _)| *entry != layer);
+    }
+
+    /// The front window drawn this frame or the last one (a window closed
+    /// by its own code, not through `show`, stops counting after a frame).
+    fn top(&self, pass: u64) -> Option<egui::LayerId> {
+        self.0
+            .iter()
+            .rev()
+            .find(|(_, drawn)| *drawn + 1 >= pass)
+            .map(|(layer, _)| *layer)
+    }
+}
+
+/// One of the editor's tool windows (Settings, Input, Find in Scripts…),
+/// so they all open, look and close the same way: an icon and a title in
+/// the heading font, no collapse arrow, centred and kept on the screen the
+/// first time, and Escape closes the window on top unless a text field, a
+/// menu or a question box wants that Escape. Build with `tool_window`.
+#[must_use]
+pub struct ToolWindow {
+    id: egui::Id,
+    title: String,
+    sizing: Sizing,
+    min_width: Option<f32>,
+}
+
+/// A tool window titled `title` with `icon` in front. Its id comes from the
+/// title (as egui's own windows do), so give `id` when the title changes.
+pub fn tool_window(icon: &str, title: &str) -> ToolWindow {
+    ToolWindow {
+        id: egui::Id::new(title),
+        title: theme::with_icon(icon, title),
+        sizing: Sizing::Resizable(vec2(420.0, 0.0)),
+        min_width: None,
+    }
+}
+
+impl ToolWindow {
+    pub fn id(mut self, id: impl std::hash::Hash) -> Self {
+        self.id = egui::Id::new(id);
+        self
+    }
+
+    /// Opens `size` big (a height of 0 fits the content); the user can
+    /// resize it.
+    pub fn size(mut self, size: egui::Vec2) -> Self {
+        self.sizing = Sizing::Resizable(size);
+        self
+    }
+
+    /// As big as its content, `width` wide, and not resizable.
+    pub fn fit(mut self, width: f32) -> Self {
+        self.sizing = Sizing::Fit(width);
+        self
+    }
+
+    /// Always exactly `size`.
+    pub fn fixed(mut self, size: egui::Vec2) -> Self {
+        self.sizing = Sizing::Fixed(size);
+        self
+    }
+
+    pub fn min_width(mut self, width: f32) -> Self {
+        self.min_width = Some(width);
+        self
+    }
+
+    /// Shows the window while `open`; the × and Escape clear it. Returns
+    /// what `add` returned, if the window was drawn.
+    pub fn show<R>(
+        self,
+        ctx: &egui::Context,
+        open: &mut bool,
+        add: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> Option<R> {
+        if !*open {
+            let layer = egui::LayerId::new(egui::Order::Middle, self.id);
+            ctx.data_mut(|data| {
+                data.get_temp_mut_or_default::<ToolWindowStack>(egui::Id::NULL)
+                    .forget(layer)
+            });
+            return None;
+        }
+        // Asked before drawing: a menu that Escape closes this frame still
+        // had it. A text field's focus is already gone (egui drops it on
+        // Escape before the frame starts), so that's from last frame.
+        let typing = self.id.with("typing");
+        let escape_is_taken = ctx.data(|data| data.get_temp(typing).unwrap_or(false))
+            || ctx.wants_keyboard_input()
+            || ctx.is_popup_open()
+            || egui::Popup::is_any_open(ctx)
+            || ctx.memory(|memory| memory.top_modal_layer().is_some());
+        let screen = ctx.screen_rect().shrink(theme::space::XL);
+        let clamp = |size: egui::Vec2| size.min(screen.size()).max(vec2(160.0, 0.0));
+        let mut window = egui::Window::new(self.title)
+            .id(self.id)
+            .open(open)
+            .collapsible(false)
+            .constrain(true)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(screen.center());
+        window = match self.sizing {
+            Sizing::Resizable(size) => {
+                let size = clamp(size);
+                let window = window.resizable(true).default_width(size.x);
+                if size.y > 0.0 {
+                    window.default_height(size.y)
+                } else {
+                    window
+                }
+            }
+            Sizing::Fit(width) => window
+                .resizable(false)
+                .default_width(clamp(vec2(width, 0.0)).x),
+            Sizing::Fixed(size) => window.resizable(false).fixed_size(clamp(size)),
+        };
+        if let Some(width) = self.min_width {
+            window = window.min_width(width);
+        }
+        let layer = egui::LayerId::new(egui::Order::Middle, self.id);
+        let shown = window.show(ctx, add);
+        let pass = theme::frame_number(ctx);
+        let raised = ctx.top_layer_id() == Some(layer);
+        let on_top = ctx.data_mut(|data| {
+            let stack = data.get_temp_mut_or_default::<ToolWindowStack>(egui::Id::NULL);
+            stack.raise(layer, raised, pass, shown.is_some() && *open);
+            stack.top(pass) == Some(layer)
+        });
+        let shown = shown?;
+        let typing_now = ctx.wants_keyboard_input();
+        ctx.data_mut(|data| data.insert_temp(typing, typing_now));
+        if on_top
+            && !escape_is_taken
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            *open = false;
+        }
+        if !*open {
+            ctx.data_mut(|data| {
+                data.get_temp_mut_or_default::<ToolWindowStack>(egui::Id::NULL)
+                    .forget(layer)
+            });
+        }
+        shown.inner
+    }
 }
 
 #[cfg(test)]

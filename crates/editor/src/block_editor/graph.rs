@@ -50,11 +50,6 @@ const NAME_GAP: f32 = 6.0;
 /// How near a pin a wire has to be let go to join it.
 const PIN_REACH: f32 = 14.0;
 
-const NODE_BODY: Color32 = Color32::from_rgb(30, 32, 40);
-const NODE_EDGE: Color32 = Color32::from_rgb(12, 13, 17);
-const PIN_TEXT: Color32 = Color32::from_rgb(214, 218, 228);
-const SELECTED: Color32 = Color32::from_rgb(255, 176, 46);
-
 /// Which mouth or follow-on an exec output is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Out {
@@ -436,7 +431,7 @@ fn measure_all(
         ui.painter().clone(),
         1.0,
         false,
-        NODE_BODY,
+        theme::canvas(ui.ctx()).node_body,
         egui::Id::new("graph measure"),
         context,
         variables,
@@ -611,16 +606,11 @@ fn show_graph_canvas(
     variables: &[String],
     add_clicked: bool,
 ) {
-    let dark = ui.visuals().dark_mode;
-    let background = if dark {
-        Color32::from_rgb(22, 24, 29)
-    } else {
-        Color32::from_rgb(236, 238, 242)
-    };
+    let colors = theme::canvas(ui.ctx());
     let mut canvas = ui.new_child(egui::UiBuilder::new().max_rect(rect));
     canvas.set_clip_rect(rect);
     let painter = canvas.painter_at(rect);
-    painter.rect_filled(rect, 0, background);
+    painter.rect_filled(rect, 0, colors.background);
 
     // The background: left-drag selects a box, right- or middle-drag pans,
     // a right-click opens the node menu. The wheel pans; Ctrl + wheel (or
@@ -656,11 +646,7 @@ fn show_graph_canvas(
 
     // A grid, which moves with the nodes.
     let spacing = 32.0 * z;
-    let line = if dark {
-        Color32::from_white_alpha(10)
-    } else {
-        Color32::from_black_alpha(14)
-    };
+    let line = colors.grid;
     let mut x = rect.left() + state.pan.x.rem_euclid(spacing);
     while x < rect.right() {
         painter.vline(x, rect.y_range(), Stroke::new(1.0_f32, line));
@@ -712,11 +698,7 @@ fn show_graph_canvas(
 
     // Wires, under the nodes. Exec wires are white, or dark on a light
     // canvas.
-    let exec_wire = if dark {
-        Color32::WHITE
-    } else {
-        Color32::from_gray(70)
-    };
+    let exec_wire = colors.wire;
     for ((from, out), to) in &wired.targets {
         if let (Some(start), Some(end)) = (
             pin_at(&Pin::ExecOut(*from, *out)),
@@ -740,7 +722,7 @@ fn show_graph_canvas(
         painter.clone(),
         z,
         state.menu.is_none(),
-        NODE_BODY,
+        colors.node_body,
         egui::Id::new(("graph", context.key)),
         context,
         variables,
@@ -1196,13 +1178,14 @@ fn draw_node(
     }
 
     let painter = drawer.painter.clone();
+    let colors = theme::canvas(ui.ctx());
     let corner = drawer.s(6.0);
     painter.rect_filled(
         rect.translate(vec2(0.0, drawer.s(3.0))),
         radius(corner),
         Color32::from_black_alpha(70),
     );
-    painter.rect_filled(rect, radius(corner), NODE_BODY);
+    painter.rect_filled(rect, radius(corner), colors.node_body);
     let header = Rect::from_min_size(rect.min, vec2(rect.width(), drawer.s(HEADER)));
     let mut fill = geometry.category.fill();
     if !runs {
@@ -1217,21 +1200,21 @@ fn draw_node(
             sw: 0,
             se: 0,
         },
-        fill.gamma_multiply(0.9),
+        colors.header(fill),
     );
     painter.text(
         pos2(header.left() + drawer.s(10.0), header.center().y),
         egui::Align2::LEFT_CENTER,
         &geometry.title,
         FontId::proportional(13.0 * z),
-        Color32::WHITE,
+        colors.header_text,
     );
     let outline = if highlighted {
-        Stroke::new(2.5 * z.max(0.8), ERROR_OUTLINE)
+        Stroke::new(2.5 * z.max(0.8), colors.error)
     } else if selected {
-        Stroke::new(2.0 * z.max(0.8), SELECTED)
+        Stroke::new(2.0 * z.max(0.8), colors.selected)
     } else {
-        Stroke::new(1.0_f32, NODE_EDGE)
+        Stroke::new(1.0_f32, colors.node_edge)
     };
     painter.rect_stroke(rect, radius(corner), outline, egui::StrokeKind::Outside);
 
@@ -1247,7 +1230,7 @@ fn draw_node(
                 Item::ExecIn => {
                     if let NodeRef::Block(block) = which {
                         let pin = Pin::ExecIn(*block);
-                        exec_pin(&painter, pin_at, z, wired.fed.contains(block));
+                        exec_pin(&painter, pin_at, z, wired.fed.contains(block), &colors);
                         pin_response(ui, drawer, &pin, pin_at, wire_held, events);
                     }
                 }
@@ -1262,14 +1245,14 @@ fn draw_node(
                     if let Some(Part::Slot(value, _)) = parts.get(*part) {
                         connected = !value.is_literal();
                     }
-                    value_pin(&painter, pin_at, z, pin_color(*kind), connected);
+                    value_pin(&painter, pin_at, z, pin_color(*kind), connected, &colors);
                     pin_response(ui, drawer, &pin, pin_at, wire_held, events);
                     painter.text(
                         pos2(text_x, middle),
                         egui::Align2::LEFT_CENTER,
                         *name,
                         drawer.font(),
-                        PIN_TEXT,
+                        colors.node_text,
                     );
                     if let Some(Part::Slot(value, kind)) = parts.get_mut(*part)
                         && value.is_literal()
@@ -1287,7 +1270,7 @@ fn draw_node(
                         egui::Align2::LEFT_CENTER,
                         *name,
                         drawer.font(),
-                        PIN_TEXT,
+                        colors.node_text,
                     );
                     if let Some(field) = parts.get_mut(*part) {
                         let size = drawer.part_size(ui, field);
@@ -1322,6 +1305,7 @@ fn draw_node(
                             pin_at,
                             z,
                             wired.targets.contains_key(&(*block, *out)),
+                            &colors,
                         );
                         pin_response(ui, drawer, &pin, pin_at, wire_held, events);
                         painter.text(
@@ -1329,14 +1313,21 @@ fn draw_node(
                             egui::Align2::RIGHT_CENTER,
                             *name,
                             drawer.font(),
-                            PIN_TEXT,
+                            colors.node_text,
                         );
                     }
                 }
                 Item::Output(kind) => {
                     if let NodeRef::Value(at) = which {
                         let pin = Pin::Output(at.clone());
-                        value_pin(&painter, pin_at, z, pin_color(*kind), !at.path.is_empty());
+                        value_pin(
+                            &painter,
+                            pin_at,
+                            z,
+                            pin_color(*kind),
+                            !at.path.is_empty(),
+                            &colors,
+                        );
                         pin_response(ui, drawer, &pin, pin_at, wire_held, events);
                     }
                 }
@@ -1373,7 +1364,10 @@ fn pin_response(
         drawer.painter.circle_stroke(
             at,
             reach,
-            Stroke::new(1.0_f32, Color32::from_white_alpha(90)),
+            Stroke::new(
+                1.0_f32,
+                theme::canvas(ui.ctx()).node_text.gamma_multiply(0.35),
+            ),
         );
     }
     if response.drag_started_by(egui::PointerButton::Primary) {
@@ -1394,7 +1388,7 @@ fn pin_response(
 }
 
 /// An exec pin: Unreal's white arrow, filled when it's wired.
-fn exec_pin(painter: &egui::Painter, at: Pos2, z: f32, connected: bool) {
+fn exec_pin(painter: &egui::Painter, at: Pos2, z: f32, connected: bool, colors: &theme::Canvas) {
     let s = |x: f32, y: f32| at + vec2(x * z, y * z);
     let points = vec![
         s(-5.0, -6.0),
@@ -1404,24 +1398,36 @@ fn exec_pin(painter: &egui::Painter, at: Pos2, z: f32, connected: bool) {
         s(-5.0, 6.0),
     ];
     let fill = if connected {
-        Color32::WHITE
+        colors.wire
     } else {
         Color32::TRANSPARENT
     };
     painter.add(Shape::convex_polygon(
         points,
         fill,
-        Stroke::new(1.5 * z.max(0.7), Color32::WHITE),
+        Stroke::new(1.5 * z.max(0.7), colors.wire),
     ));
 }
 
 /// A value pin: a circle in its type's colour, filled when it's wired.
-fn value_pin(painter: &egui::Painter, at: Pos2, z: f32, color: Color32, connected: bool) {
+fn value_pin(
+    painter: &egui::Painter,
+    at: Pos2,
+    z: f32,
+    color: Color32,
+    connected: bool,
+    colors: &theme::Canvas,
+) {
     let radius = PIN * z;
     if connected {
         painter.circle_filled(at, radius, color);
     } else {
-        painter.circle(at, radius, NODE_BODY, Stroke::new(1.5 * z.max(0.7), color));
+        painter.circle(
+            at,
+            radius,
+            colors.node_body,
+            Stroke::new(1.5 * z.max(0.7), color),
+        );
     }
 }
 

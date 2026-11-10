@@ -225,7 +225,7 @@ impl Job {
             }
             let kind = match file {
                 AssetFile::Model(_) => "model",
-                AssetFile::Texture(_) => "texture",
+                AssetFile::Texture(_) | AssetFile::LayerTexture(_) => "texture",
                 AssetFile::Material(_) => "material",
             };
             self.report(

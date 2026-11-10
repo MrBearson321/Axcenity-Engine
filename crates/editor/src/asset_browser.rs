@@ -26,6 +26,7 @@ use axcenity_core::FoliageSource;
 use eframe::egui;
 
 use crate::ambient_cg::GetTexture;
+use crate::dialog::{self, Button, Enter, Kind, Tone};
 use crate::global_assets;
 use crate::props::{PROPS, Prop};
 use crate::responsive;
@@ -1108,134 +1109,151 @@ impl AssetBrowser {
         let dialog = self.dialog.as_mut()?;
         let mut action = None;
         let mut close = false;
-        let modal = egui::Modal::new(egui::Id::new("asset dialog")).show(ctx, |ui| {
-            ui.set_width(360.0);
+        let ((), dismissed) = dialog::modal(ctx, "asset dialog", 380.0, |ui| {
+            let palette = theme::palette(ui.ctx());
             match dialog {
                 AssetDialog::Rename { path, name, error } => {
-                    ui.heading("Rename prefab");
-                    let response = ui.text_edit_singleline(name);
+                    dialog::header(
+                        ui,
+                        icons::PENCIL_SIMPLE,
+                        Tone::Question,
+                        "Rename prefab",
+                        None,
+                    );
+                    ui.add(dialog::text_field(name));
                     if let Some(problem) = error {
-                        ui.colored_label(ui.visuals().error_fg_color, problem.as_str());
+                        ui.colored_label(palette.error, problem.as_str());
                     }
-                    let enter =
-                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    ui.horizontal(|ui| {
-                        if ui.button("Rename").clicked() || enter {
-                            match check_prefab_rename(folder.as_deref(), path, name) {
-                                Ok(name) => {
-                                    action = Some(BrowserAction::RenamePrefab {
-                                        path: path.clone(),
-                                        name,
-                                    });
-                                    close = true;
-                                }
-                                Err(problem) => *error = Some(problem),
+                    let picked = dialog::buttons(
+                        ui,
+                        &[
+                            Button::cancel(),
+                            Button::new(icons::CHECK, "Rename", Kind::Main),
+                        ],
+                        Enter::FromField,
+                    );
+                    match picked {
+                        Some(1) => match check_prefab_rename(folder.as_deref(), path, name) {
+                            Ok(name) => {
+                                action = Some(BrowserAction::RenamePrefab {
+                                    path: path.clone(),
+                                    name,
+                                });
+                                close = true;
                             }
-                        }
-                        if ui.button("Cancel").clicked() {
-                            close = true;
-                        }
-                    });
+                            Err(problem) => *error = Some(problem),
+                        },
+                        Some(_) => close = true,
+                        None => {}
+                    }
                 }
                 AssetDialog::Move { from, to } => {
-                    ui.heading("Rename or move");
-                    ui.label(
-                        egui::RichText::new(format!("`{from}`"))
-                            .color(ui.visuals().weak_text_color()),
+                    let message = format!(
+                        "A new name, or a path under assets/ to move `{from}`. Every \
+                         Instance, script, material, prefab, level and data table that uses \
+                         it is changed to match, as one undo step."
                     );
-                    let response =
-                        ui.add(egui::TextEdit::singleline(to).desired_width(f32::INFINITY));
-                    ui.label(
-                        "A new name, or a path under assets/ to move it. Every Instance, \
-                         script, material, prefab, level and data table that uses it is \
-                         changed to match, as one undo step.",
+                    dialog::header(
+                        ui,
+                        icons::PENCIL_SIMPLE,
+                        Tone::Question,
+                        "Rename or move",
+                        Some(&message),
                     );
-                    let enter =
-                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    ui.horizontal(|ui| {
-                        let to = to.trim();
-                        // A bare name stays in its folder.
-                        let to = if to.contains('/') {
-                            to.to_owned()
-                        } else {
-                            match from.rsplit_once('/') {
-                                Some((folder, _)) => format!("{folder}/{to}"),
-                                None => to.to_owned(),
-                            }
-                        };
-                        let changed = !to.is_empty() && to != *from;
-                        if ui
-                            .add_enabled(changed, egui::Button::new("Rename"))
-                            .clicked()
-                            || (enter && changed)
-                        {
+                    ui.add(dialog::text_field(to));
+                    let target = to.trim();
+                    // A bare name stays in its folder.
+                    let target = if target.contains('/') {
+                        target.to_owned()
+                    } else {
+                        match from.rsplit_once('/') {
+                            Some((folder, _)) => format!("{folder}/{target}"),
+                            None => target.to_owned(),
+                        }
+                    };
+                    let changed = !target.is_empty() && target != *from;
+                    let picked = dialog::buttons(
+                        ui,
+                        &[
+                            Button::cancel(),
+                            Button::new(icons::CHECK, "Rename", Kind::Main).enabled(changed),
+                        ],
+                        Enter::FromField,
+                    );
+                    match picked {
+                        Some(1) => {
                             action = Some(BrowserAction::RenameAsset {
                                 from: from.clone(),
-                                to,
+                                to: target,
                             });
                             close = true;
                         }
-                        if ui.button("Cancel").clicked() {
-                            close = true;
-                        }
-                    });
+                        Some(_) => close = true,
+                        None => {}
+                    }
                 }
                 AssetDialog::Delete {
                     name,
                     files,
                     global,
                 } => {
-                    ui.heading(format!("Delete {name}?"));
-                    match files.as_slice() {
-                        [only] => {
-                            ui.label(format!("This deletes `{only}` from the project."));
-                        }
-                        files => {
-                            ui.label(format!(
-                                "This deletes {} files from the project:",
-                                files.len()
-                            ));
-                            egui::ScrollArea::vertical()
-                                .max_height(120.0)
-                                .show(ui, |ui| {
-                                    for file in files {
-                                        ui.label(
-                                            egui::RichText::new(file)
-                                                .size(theme::type_scale::SMALL)
-                                                .color(ui.visuals().weak_text_color()),
-                                        );
-                                    }
-                                });
-                        }
-                    }
-                    ui.label(
-                        "Anything that uses it shows it as missing (File > Check Assets lists \
-                         those). Undo puts the files back.",
+                    let mut message = match files.as_slice() {
+                        [only] => format!("This deletes `{only}` from the project."),
+                        files => format!("This deletes {} files from the project.", files.len()),
+                    };
+                    message.push_str(
+                        " Anything that uses it shows it as missing (File > Check Assets \
+                         lists those). Undo puts the files back.",
                     );
                     if *global {
-                        ui.label(
-                            "The global copy stays. Untick Global asset to take it out of \
+                        message.push_str(
+                            " The global copy stays. Untick Global asset to take it out of \
                              every project.",
                         );
                     }
-                    ui.horizontal(|ui| {
-                        if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
+                    dialog::header(
+                        ui,
+                        icons::TRASH,
+                        Tone::Danger,
+                        &format!("Delete {name}?"),
+                        Some(&message),
+                    );
+                    if files.len() > 1 {
+                        egui::ScrollArea::vertical()
+                            .max_height(120.0)
+                            .show(ui, |ui| {
+                                for file in files.iter() {
+                                    ui.label(
+                                        egui::RichText::new(file)
+                                            .size(theme::type_scale::SMALL)
+                                            .color(palette.text_weak),
+                                    );
+                                }
+                            });
+                    }
+                    let picked = dialog::buttons(
+                        ui,
+                        &[
+                            Button::cancel(),
+                            Button::new(icons::TRASH, "Delete", Kind::Danger),
+                        ],
+                        Enter::Main,
+                    );
+                    match picked {
+                        Some(1) => {
                             action = Some(BrowserAction::DeleteAssets {
                                 name: name.clone(),
                                 files: files.clone(),
                             });
                             close = true;
                         }
-                        if ui.button("Cancel").clicked() {
-                            close = true;
-                        }
-                    });
+                        Some(_) => close = true,
+                        None => {}
+                    }
                 }
             }
         });
-        if modal.should_close() {
-            close = true;
-        }
+        close |= dismissed;
         if close {
             self.dialog = None;
         }
@@ -1772,7 +1790,7 @@ fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, label)
     });
-    widgets::paint_hover(ui, rect, &response, false, 12.0);
+    widgets::paint_hover(ui, rect, &response, false, theme::radius::CARD);
     if selected {
         ui.painter().rect_filled(rect, 12.0, palette.control_active);
     }

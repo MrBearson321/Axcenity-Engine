@@ -58,6 +58,15 @@ pub struct Output {
     /// Kinds of line switched off with the filter buttons. Only what's
     /// shown changes; every line is kept.
     hidden: Vec<OutputKind>,
+    /// How many lines there were when the panel was last drawn: errors
+    /// after that haven't been seen.
+    seen: usize,
+    /// The frame (`theme::frame_number`) the panel was last drawn in.
+    drawn_pass: Option<u64>,
+    /// A line to scroll to the next time the panel is drawn.
+    reveal: Option<usize>,
+    /// The line last scrolled to, outlined so the eye finds it.
+    marked: Option<usize>,
 }
 
 impl Output {
@@ -85,6 +94,36 @@ impl Output {
     /// Removes every line.
     pub fn clear(&mut self) {
         self.lines.clear();
+        self.seen = 0;
+        self.reveal = None;
+        self.marked = None;
+    }
+
+    /// Errors added since the panel was last drawn, or 0 while it's
+    /// showing (drawn last frame), for a count on its tab.
+    pub fn unseen_errors(&self, ctx: &egui::Context) -> usize {
+        let showing = self
+            .drawn_pass
+            .is_some_and(|pass| pass + 1 >= theme::frame_number(ctx));
+        if showing {
+            return 0;
+        }
+        self.lines[self.seen.min(self.lines.len())..]
+            .iter()
+            .filter(|line| line.kind == OutputKind::Error)
+            .count()
+    }
+
+    /// Scrolls to the newest error (showing errors if they were filtered
+    /// out) the next time the panel is drawn.
+    pub fn reveal_last_error(&mut self) {
+        self.reveal = self
+            .lines
+            .iter()
+            .rposition(|line| line.kind == OutputKind::Error);
+        if self.reveal.is_some() {
+            self.hidden.retain(|kind| *kind != OutputKind::Error);
+        }
     }
 
     fn push(&mut self, kind: OutputKind, text: String) {
@@ -133,6 +172,13 @@ impl Output {
     /// clicked, to open the script there.
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<Location> {
         let palette = theme::palette(ui.ctx());
+        self.seen = self.lines.len();
+        self.drawn_pass = Some(theme::frame_number(ui.ctx()));
+        let reveal = self.reveal.take();
+        if reveal.is_some() {
+            self.marked = reveal;
+        }
+        let marked = self.marked;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for (kind, icon, color, name) in [
@@ -206,13 +252,14 @@ impl Output {
                         .color(palette.text_weak),
                     );
                 }
-                for line in self
+                for (index, line) in self
                     .lines
                     .iter()
-                    .filter(|line| !self.hidden.contains(&line.kind))
+                    .enumerate()
+                    .filter(|(_, line)| !self.hidden.contains(&line.kind))
                 {
                     let (icon, icon_color, color) = match line.kind {
-                        OutputKind::Info => (icons::INFO, palette.text_muted, palette.text),
+                        OutputKind::Info => (icons::INFO, palette.text_weak, palette.text),
                         OutputKind::Warning => (icons::WARNING, palette.warning, palette.warning),
                         OutputKind::Error => (icons::X_CIRCLE, palette.error, palette.error),
                         OutputKind::Command => {
@@ -221,7 +268,7 @@ impl Output {
                     };
                     let font = egui::TextStyle::Monospace.resolve(ui.style());
                     // The icon sits left of the text, which wraps beside it.
-                    ui.horizontal_top(|ui| {
+                    let row = ui.horizontal_top(|ui| {
                         ui.label(
                             egui::RichText::new(icon)
                                 .font(egui::FontId::proportional(font.size))
@@ -242,7 +289,7 @@ impl Output {
                                         &frame.text,
                                         &frame.location,
                                         font.clone(),
-                                        palette.text_muted,
+                                        palette.text_weak,
                                     ) {
                                         clicked = Some(location);
                                     }
@@ -250,6 +297,17 @@ impl Output {
                             }
                         });
                     });
+                    if reveal == Some(index) {
+                        ui.scroll_to_rect(row.response.rect, Some(egui::Align::Center));
+                    }
+                    if marked == Some(index) {
+                        ui.painter().rect_stroke(
+                            row.response.rect.expand(2.0),
+                            theme::radius::CONTROL,
+                            egui::Stroke::new(1.0_f32, palette.error),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
                 }
             });
         clicked
@@ -276,7 +334,7 @@ fn filter_toggle(
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     response
         .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, shown, icon));
-    widgets::paint_hover(ui, rect, &response, false, 5.0);
+    widgets::paint_hover(ui, rect, &response, false, theme::radius::CONTROL);
     let (icon_color, text_color) = if shown {
         (color, palette.text)
     } else {
@@ -442,5 +500,61 @@ mod tests {
         output.error("scripts/a.server.lua:2: boom");
         assert_eq!(output.lines()[0].location, None);
         assert_eq!(output.lines()[1].location.as_ref().unwrap().line, 2);
+    }
+}
+
+#[cfg(test)]
+mod unseen_tests {
+    use super::*;
+
+    fn draw(ctx: &egui::Context, output: &mut Output) {
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                output.show(ui);
+            });
+        });
+    }
+
+    fn hidden_frame(ctx: &egui::Context) {
+        let _ = ctx.run(Default::default(), |_| {});
+    }
+
+    #[test]
+    fn errors_while_the_panel_is_hidden_are_counted_until_it_shows() {
+        let ctx = theme::test_context();
+        let mut output = Output::default();
+        output.error("before");
+        draw(&ctx, &mut output);
+        // Showing: nothing to count, even for a new error.
+        output.error("while shown");
+        assert_eq!(output.unseen_errors(&ctx), 0);
+        draw(&ctx, &mut output);
+
+        // Hidden: errors (not warnings) count up.
+        hidden_frame(&ctx);
+        hidden_frame(&ctx);
+        output.error("a");
+        output.warning("w");
+        output.error("b");
+        assert_eq!(output.unseen_errors(&ctx), 2);
+        draw(&ctx, &mut output);
+        hidden_frame(&ctx);
+        hidden_frame(&ctx);
+        assert_eq!(output.unseen_errors(&ctx), 0);
+    }
+
+    #[test]
+    fn revealing_the_last_error_shows_errors_again_and_marks_it() {
+        let ctx = theme::test_context();
+        let mut output = Output::default();
+        output.error("first");
+        output.info("note");
+        output.error("last");
+        output.hidden.push(OutputKind::Error);
+        output.reveal_last_error();
+        assert!(!output.hidden.contains(&OutputKind::Error));
+        draw(&ctx, &mut output);
+        assert_eq!(output.marked, Some(2));
+        assert_eq!(output.reveal, None);
     }
 }

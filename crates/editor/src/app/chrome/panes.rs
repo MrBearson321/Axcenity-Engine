@@ -881,6 +881,7 @@ impl EditorApp {
         render_state: Option<&RenderState>,
     ) -> ViewportOutput {
         let ctx = ui.ctx().clone();
+        self.scene_drawn_pass = Some(theme::frame_number(&ctx));
         self.refresh_nav_mesh(&ctx);
         self.update_sequence_preview();
         // The game's particles and streaming, which its frame moves on, are

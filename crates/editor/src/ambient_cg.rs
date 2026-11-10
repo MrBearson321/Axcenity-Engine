@@ -22,6 +22,9 @@ use axcenity_assets::{
 };
 use eframe::egui;
 
+use crate::dialog;
+use crate::theme::icons;
+
 const PAGE: usize = 24;
 const RESOLUTIONS: [&str; 4] = ["1K", "2K", "4K", "8K"];
 const FORMATS: [&str; 2] = ["JPG", "PNG"];
@@ -145,11 +148,14 @@ impl GetTexture {
         let width = (screen.x - 64.0).clamp(280.0, 800.0);
         let height = (screen.y - 260.0).clamp(200.0, 600.0);
         let mut close = false;
-        let modal = egui::Modal::new(egui::Id::new("get texture")).show(ctx, |ui| {
-            ui.set_width(width);
-            ui.heading("Get texture");
-            ui.label("Materials from ambientCG. Saved files are CC0 and work offline.");
-            ui.add_space(4.0);
+        let ((), dismissed) = dialog::modal(ctx, "get texture", width, |ui| {
+            dialog::header(
+                ui,
+                icons::DOWNLOAD_SIMPLE,
+                dialog::Tone::Question,
+                "Get texture",
+                Some("Materials from ambientCG. Saved files are CC0 and work offline."),
+            );
             ui.horizontal_wrapped(|ui| {
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
@@ -177,14 +183,14 @@ impl GetTexture {
             }
             ui.add_space(4.0);
             self.results(ui, project, height);
-            ui.add_space(6.0);
-            if ui.button("Close").clicked() {
-                close = true;
-            }
+            close |= dialog::buttons(
+                ui,
+                &[dialog::Button::new(icons::X, "Close", dialog::Kind::Plain)],
+                dialog::Enter::Main,
+            )
+            .is_some();
         });
-        if modal.should_close() {
-            close = true;
-        }
+        close |= dismissed;
         if close {
             self.cancel.store(true, Ordering::Relaxed);
         }

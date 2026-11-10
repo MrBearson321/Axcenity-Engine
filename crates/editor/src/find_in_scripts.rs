@@ -251,11 +251,9 @@ impl FindWindow {
         let mut action = None;
         let mut open = self.open;
         let palette = theme::palette(ctx);
-        egui::Window::new("Find in Scripts")
-            .open(&mut open)
-            .resizable(true)
-            .default_width(460.0)
-            .show(ctx, |ui| {
+        widgets::tool_window(icons::MAGNIFYING_GLASS, "Find in Scripts")
+            .size(egui::vec2(460.0, 0.0))
+            .show(ctx, &mut open, |ui| {
                 let before = (self.query.clone(), self.options);
                 ui.horizontal(|ui| {
                     let field = widgets::search_field(ui, &mut self.query, "Find", 220.0);

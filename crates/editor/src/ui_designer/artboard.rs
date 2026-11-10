@@ -38,8 +38,8 @@ const FORMAT_BAR_WIDTH: f32 = 300.0;
 const FORMAT_BAR_HEIGHT: f32 = 28.0;
 /// The states editor's eye, over the artboard's top left corner, in points.
 const EYE_SIZE: egui::Vec2 = egui::vec2(160.0, 24.0);
-/// Guide lines, in a cyan that reads apart from the magenta snap lines.
-pub(super) const GUIDE_COLOR: egui::Color32 = egui::Color32::from_rgb(64, 200, 230);
+/// Ruler guides, in a cyan that reads apart from the magenta snap lines.
+pub(super) const GUIDE_COLOR: egui::Color32 = theme::overlay::GUIDE;
 
 /// Where the screen is drawn, and how design pixels map onto it.
 #[derive(Clone, Copy, Debug)]

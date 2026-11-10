@@ -6,7 +6,7 @@
 
 use super::*;
 
-use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, type_scale};
+use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, space, type_scale};
 use crate::widgets;
 use axcenity_render::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
@@ -101,16 +101,10 @@ impl EditorApp {
         }
         let mut open = true;
         let mut appearance = self.appearance.clone();
-        let screen = ctx.screen_rect();
-        egui::Window::new(theme::with_icon(icons::GEAR_SIX, "Settings"))
-            .id(egui::Id::new("settings window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .fixed_size(WINDOW_SIZE)
-            .default_pos(screen.center() - WINDOW_SIZE / 2.0)
-            .constrain(true)
-            .show(ctx, |ui| {
+        widgets::tool_window(icons::GEAR_SIX, "Settings")
+            .id("settings window")
+            .fixed(WINDOW_SIZE)
+            .show(ctx, &mut open, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(NAV_WIDTH);
@@ -135,7 +129,7 @@ impl EditorApp {
                         .show(ui, |ui| {
                             ui.set_min_height(WINDOW_SIZE.y);
                             ui.set_width(ui.available_width());
-                            ui.add_space(2.0);
+                            ui.add_space(space::XXS);
                             ui.vertical(|ui| match self.settings.page {
                                 SettingsPage::Appearance => appearance_page(ui, &mut appearance),
                                 SettingsPage::Typography => typography_page(ui, &mut appearance),
@@ -154,7 +148,7 @@ impl EditorApp {
                 });
             });
         self.set_appearance(ctx, appearance);
-        if !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        if !open {
             self.settings.open = false;
         }
     }
@@ -185,7 +179,7 @@ impl EditorApp {
         {
             self.layout.reset();
         }
-        ui.add_space(16.0);
+        ui.add_space(space::L);
         widgets::section_label(ui, "Viewport");
         ui.checkbox(
             &mut self.light_cones,
@@ -257,7 +251,7 @@ impl EditorApp {
             "Holds what's drawn to the current view, and outlines what's drawn and culled. \
              Not saved between runs.",
         );
-        ui.add_space(16.0);
+        ui.add_space(space::L);
         widgets::section_label(ui, "Ribbon");
         ui.label(
             egui::RichText::new(
@@ -309,7 +303,7 @@ fn appearance_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
             }
         }
     });
-    ui.add_space(16.0);
+    ui.add_space(space::L);
     widgets::section_label(ui, "Accent");
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
@@ -318,11 +312,11 @@ fn appearance_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
                 appearance.accent = accent;
             }
         }
-        ui.add_space(4.0);
+        ui.add_space(space::XS);
         let palette = theme::palette(ui.ctx());
         ui.label(egui::RichText::new(appearance.accent.label()).color(palette.text_secondary));
     });
-    ui.add_space(16.0);
+    ui.add_space(space::L);
     widgets::section_label(ui, "Interface scale");
     let options: Vec<(f32, Option<&str>, String)> = Appearance::UI_SCALES
         .iter()
@@ -355,7 +349,7 @@ fn typography_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         })
         .color(palette.text_secondary),
     );
-    ui.add_space(16.0);
+    ui.add_space(space::L);
     widgets::section_label(ui, "Code and Output");
     ui.add(
         egui::Slider::new(&mut appearance.code_font_size, Appearance::CODE_FONT_SIZES)
@@ -365,7 +359,7 @@ fn typography_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
     egui::Frame::new()
         .fill(palette.inset)
         .stroke(egui::Stroke::new(1.0_f32, palette.border))
-        .corner_radius(6)
+        .corner_radius(theme::radius::CARD)
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -381,7 +375,7 @@ fn typography_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
                     .color(palette.text_secondary),
             );
         });
-    ui.add_space(16.0);
+    ui.add_space(space::L);
     widgets::section_label(ui, "Interface font");
     ui.label(
         egui::RichText::new("Inter for the interface and JetBrains Mono for code, both built in.")
@@ -486,7 +480,7 @@ fn shortcuts_page(ui: &mut egui::Ui) {
                     ui.end_row();
                 }
             });
-        ui.add_space(12.0);
+        ui.add_space(space::M);
     }
 }
 
@@ -496,7 +490,7 @@ fn keycap(ui: &mut egui::Ui, keys: &str) {
     egui::Frame::new()
         .fill(palette.control)
         .stroke(egui::Stroke::new(1.0_f32, palette.border))
-        .corner_radius(4)
+        .corner_radius(theme::radius::CONTROL)
         .inner_margin(egui::Margin::symmetric(6, 1))
         .show(ui, |ui| {
             ui.label(
@@ -524,7 +518,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
         &Quality::ALL.map(|quality| (quality, None, quality.label())),
     );
     let preset = GraphicsSettings::preset(settings.quality);
-    ui.add_space(16.0);
+    ui.add_space(space::L);
     widgets::section_label(ui, "Overrides");
     egui::Grid::new("graphics overrides")
         .num_columns(2)
@@ -837,7 +831,7 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 ui.end_row();
             }
         });
-    ui.add_space(16.0);
+    ui.add_space(space::L);
     widgets::section_label(ui, "In use");
     let effective = settings.effective(capabilities);
     let shadows = match effective.shadow_quality.map() {
@@ -969,7 +963,7 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         )
         .color(palette.text_secondary),
     );
-    ui.add_space(16.0);
+    ui.add_space(space::L);
     widgets::section_label(ui, "Display");
     ui.horizontal(|ui| {
         ui.label("Steady frame rate");
@@ -994,7 +988,7 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         )
         .color(palette.text_secondary),
     );
-    ui.add_space(8.0);
+    ui.add_space(space::S);
     ui.checkbox(&mut appearance.hold_refresh, "Hold the refresh rate steady");
     ui.label(
         egui::RichText::new(
@@ -1004,7 +998,7 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         )
         .color(palette.text_secondary),
     );
-    ui.add_space(16.0);
+    ui.add_space(space::L);
     widgets::section_label(ui, "Readability");
     ui.label(
         egui::RichText::new(
@@ -1013,7 +1007,7 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         )
         .color(palette.text_secondary),
     );
-    ui.add_space(16.0);
+    ui.add_space(space::L);
     widgets::section_label(ui, "Keyboard");
     ui.label(
         egui::RichText::new(

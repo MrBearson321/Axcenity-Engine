@@ -989,16 +989,16 @@ impl Reader<'_> {
         let name = texture_name(texture);
         let cooked = if texture.content.is_empty() {
             texture_path(texture, self.folder).and_then(|path| {
-                cooked_texture(self.project(), self.folder, &slash_path(&path), None)
+                cooked_texture(self.in_project, self.folder, &slash_path(&path), None)
             })
         } else {
             self.embedded.get(&id).and_then(|file| {
                 let file = format!("{}/{file}", crate::import::TEXTURES_FOLDER);
-                cooked_texture(self.project(), self.folder, &file, Some(&texture.content))
+                cooked_texture(self.in_project, self.folder, &file, Some(&texture.content))
             })
         };
         if let Some(image) = cooked {
-            let image = Some(Arc::new(image));
+            let image = Some(image);
             self.images.insert(id, image.clone());
             return image;
         }

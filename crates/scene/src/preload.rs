@@ -14,6 +14,10 @@ pub enum AssetFile {
     Model(String),
     /// A map's texture file.
     Texture(String),
+    /// A TerrainLayer's map: the renderer reads its pixels to build the
+    /// terrain's texture arrays, so they're decoded ahead too (a cooked
+    /// texture otherwise decodes its file on the first frame that draws it).
+    LayerTexture(String),
     /// A part's `MaterialVariant`: the file, its bases and their maps.
     Material(String),
 }
@@ -21,7 +25,10 @@ pub enum AssetFile {
 impl AssetFile {
     pub fn path(&self) -> &str {
         match self {
-            Self::Model(path) | Self::Texture(path) | Self::Material(path) => path,
+            Self::Model(path)
+            | Self::Texture(path)
+            | Self::LayerTexture(path)
+            | Self::Material(path) => path,
         }
     }
 
@@ -32,6 +39,7 @@ impl AssetFile {
         match self {
             Self::Model(mesh_id) => assets.request_model(mesh_id),
             Self::Texture(path) => assets.request_texture(path),
+            Self::LayerTexture(path) => assets.request_texture_pixels(path),
             Self::Material(path) => assets.request_material(path),
         }
     }
@@ -45,6 +53,9 @@ impl AssetFile {
             }
             Self::Texture(path) => {
                 assets.texture(path);
+            }
+            Self::LayerTexture(path) => {
+                assets.texture_pixels_blocking(path);
             }
             Self::Material(path) => {
                 if let Some(material) = assets.material(path) {
@@ -95,10 +106,17 @@ pub fn asset_files(world: &World) -> Vec<AssetFile> {
                     add(AssetFile::Material(path));
                 }
             }
-            ClassName::SurfaceAppearance | ClassName::TerrainLayer => {
+            ClassName::SurfaceAppearance => {
                 for map in TEXTURE_MAP_PROPERTIES {
                     if let Some(path) = text(map) {
                         add(AssetFile::Texture(path));
+                    }
+                }
+            }
+            ClassName::TerrainLayer => {
+                for map in TEXTURE_MAP_PROPERTIES {
+                    if let Some(path) = text(map) {
+                        add(AssetFile::LayerTexture(path));
                     }
                 }
             }
@@ -146,6 +164,11 @@ mod tests {
             )
             .unwrap();
         world.set_parent(block, Some(workspace)).unwrap();
+        let layer = world.create(ClassName::TerrainLayer).unwrap();
+        world
+            .set_property(layer, "ColorMap", Value::String("moss.jpg".into()))
+            .unwrap();
+        world.set_parent(layer, Some(workspace)).unwrap();
         // Not drawn, so not read.
         let stored = world.create(ClassName::MeshPart).unwrap();
         world
@@ -161,6 +184,8 @@ mod tests {
                 AssetFile::Model("models/chair.glb".into()),
                 AssetFile::Texture("wood.png".into()),
                 AssetFile::Material("materials/brick.material.json".into()),
+                // Its pixels are read for the terrain's arrays.
+                AssetFile::LayerTexture("moss.jpg".into()),
             ]
         );
     }

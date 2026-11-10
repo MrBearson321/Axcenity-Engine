@@ -164,12 +164,9 @@ impl EditorApp {
         let mut open = true;
         let mut go = None;
         let title = window.asset.rsplit('/').next().unwrap_or(&window.asset);
-        egui::Window::new(format!("References to {title}"))
-            .id(egui::Id::new("asset references"))
-            .open(&mut open)
-            .resizable(true)
-            .default_width(420.0)
-            .show(ctx, |ui| {
+        widgets::tool_window(icons::MAGNIFYING_GLASS, &format!("References to {title}"))
+            .id("asset references")
+            .show(ctx, &mut open, |ui| {
                 ui.label(egui::RichText::new(&window.asset).color(palette.text_weak));
                 ui.add_space(4.0);
                 if window.list.is_empty() {

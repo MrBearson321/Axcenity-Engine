@@ -221,7 +221,7 @@ fn meter_row(
         });
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.add_space(indent);
-            ui.label(RichText::new(icon).color(palette.text_muted));
+            ui.label(RichText::new(icon).color(palette.text_weak));
             let label = ui.add(egui::Label::new(name).truncate());
             if let Some(hint) = hint {
                 label.on_hover_text(hint);

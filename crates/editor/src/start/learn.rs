@@ -126,7 +126,7 @@ fn learn_list(ui: &mut egui::Ui) -> Option<usize> {
         ("Start here", 0..START_HERE),
         ("More guides", START_HERE..TUTORIALS.len()),
     ] {
-        ui.add_space(24.0);
+        ui.add_space(theme::space::XL);
         widgets::section_label(ui, heading);
         ui.add_space(6.0);
         let card_width = card_width(ui);

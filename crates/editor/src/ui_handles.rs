@@ -49,7 +49,7 @@ const ROTATE_REACH: f32 = 9.0;
 const GUIDE_PAD: f32 = 4.0;
 /// Studio draws alignment guides in magenta, so they read apart from the
 /// blue selection outline.
-const GUIDE_COLOR: egui::Color32 = egui::Color32::from_rgb(232, 64, 176);
+const GUIDE_COLOR: egui::Color32 = crate::theme::overlay::SNAP;
 
 /// Which part of an element is grabbed: -1, 0 or 1 on each axis for the
 /// left (top) edge, neither, or the right (bottom) edge. [`Grip::BODY`],

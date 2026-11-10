@@ -1,4 +1,5 @@
 use super::*;
+use crate::dialog;
 
 /// The New state machine dialog, named after the followed object if
 /// there is one.
@@ -180,8 +181,9 @@ impl AnimationStudio {
         let mut open = None;
         let mut open_controller = None;
         let mut deleted = None;
-        let modal = egui::Modal::new(egui::Id::new("animation dialog")).show(ctx, |ui| {
-            ui.set_width(380.0);
+        let ((), dismissed) = dialog::modal(ctx, "animation dialog", 380.0, |ui| {
+            let error_color = theme::palette(ui.ctx()).error;
+            let close_button = [dialog::Button::new(icons::X, "Close", dialog::Kind::Plain)];
             match dialog {
                 Dialog::NewClip {
                     model,
@@ -189,20 +191,34 @@ impl AnimationStudio {
                     take,
                     name,
                 } => {
-                    ui.heading("New clip");
                     if self.files.models.is_empty() {
-                        ui.label("Import an FBX model with animation first.");
-                        if ui.button("Close").clicked() {
-                            close = true;
-                        }
+                        dialog::header(
+                            ui,
+                            icons::FILM_STRIP,
+                            dialog::Tone::Question,
+                            "New clip",
+                            Some("Import an FBX model with animation first."),
+                        );
+                        close |= dialog::buttons(ui, &close_button, dialog::Enter::Main).is_some();
                         return;
                     }
+                    dialog::header(
+                        ui,
+                        icons::FILM_STRIP,
+                        dialog::Tone::Question,
+                        "New clip",
+                        Some("A take from an imported model, saved as its own clip."),
+                    );
                     let before = *model;
                     egui::ComboBox::from_label("Model")
                         .selected_text(self.files.models[*model].rsplit('/').next().unwrap_or(""))
                         .show_ui(ui, |ui| {
                             for (index, path) in self.files.models.iter().enumerate() {
-                                ui.selectable_value(model, index, path.rsplit('/').next().unwrap_or(path));
+                                ui.selectable_value(
+                                    model,
+                                    index,
+                                    path.rsplit('/').next().unwrap_or(path),
+                                );
                             }
                         });
                     if *model != before {
@@ -230,103 +246,123 @@ impl AnimationStudio {
                             });
                             let valid = store::check_name(name);
                             if let Err(problem) = &valid {
-                                ui.colored_label(ui.visuals().error_fg_color, problem);
+                                ui.colored_label(error_color, problem);
                             }
-                            ui.horizontal(|ui| {
-                                if ui.add_enabled(valid.is_ok(), egui::Button::new("Make clip")).clicked() {
-                                    let source = &self.files.models[*model];
-                                    match store::new_clip(project, source, &list[*take], name.trim()) {
-                                        Ok(written) => {
-                                            output.info(format!("Made the clip `{}`.", written.path));
-                                            remember(
-                                                actions,
-                                                format!("Create {}", axcenity_anim::files::clip_name(&written.path)),
-                                                written.files,
-                                                None,
-                                            );
-                                            open = Some(written.path);
-                                        }
-                                        Err(err) => output.error(format!("Could not make the clip: {err}")),
+                            let picked = dialog::buttons(
+                                ui,
+                                &[
+                                    dialog::Button::cancel(),
+                                    dialog::Button::new(
+                                        icons::PLUS,
+                                        "Make clip",
+                                        dialog::Kind::Main,
+                                    )
+                                    .enabled(valid.is_ok()),
+                                ],
+                                dialog::Enter::FromField,
+                            );
+                            close |= picked == Some(0);
+                            if picked == Some(1) {
+                                let source = &self.files.models[*model];
+                                match store::new_clip(project, source, &list[*take], name.trim()) {
+                                    Ok(written) => {
+                                        output.info(format!("Made the clip `{}`.", written.path));
+                                        remember(
+                                            actions,
+                                            format!(
+                                                "Create {}",
+                                                axcenity_anim::files::clip_name(&written.path)
+                                            ),
+                                            written.files,
+                                            None,
+                                        );
+                                        open = Some(written.path);
                                     }
-                                    close = true;
+                                    Err(err) => {
+                                        output.error(format!("Could not make the clip: {err}"))
+                                    }
                                 }
-                                if ui.button("Cancel").clicked() {
-                                    close = true;
-                                }
-                            });
+                                close = true;
+                            }
                         }
                         Ok(_) => {
                             ui.label("That model has no takes.");
-                            if ui.button("Close").clicked() {
-                                close = true;
-                            }
+                            close |=
+                                dialog::buttons(ui, &close_button, dialog::Enter::Main).is_some();
                         }
                         Err(problem) => {
-                            ui.colored_label(ui.visuals().error_fg_color, problem.as_str());
-                            if ui.button("Close").clicked() {
-                                close = true;
-                            }
+                            ui.colored_label(error_color, problem.as_str());
+                            close |=
+                                dialog::buttons(ui, &close_button, dialog::Enter::Main).is_some();
                         }
                     }
                 }
                 Dialog::NewPropertyClip { name } => {
-                    ui.heading("New property clip");
-                    ui.label("Authored Position / Orientation / Size keys for Parts.");
+                    dialog::header(
+                        ui,
+                        icons::FILM_STRIP,
+                        dialog::Tone::Question,
+                        "New property clip",
+                        Some("Authored Position / Orientation / Size keys for Parts."),
+                    );
                     ui.horizontal(|ui| {
                         ui.label("Name");
                         ui.text_edit_singleline(name);
                     });
                     let valid = store::check_name(name);
                     if let Err(problem) = &valid {
-                        ui.colored_label(ui.visuals().error_fg_color, problem);
+                        ui.colored_label(error_color, problem);
                     }
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(valid.is_ok(), egui::Button::new("Make clip"))
-                            .clicked()
-                        {
-                            let file = property_editor::new_property_clip(1.5);
-                            match store::create_property_clip(project, name.trim(), &file) {
-                                Ok(written) => {
-                                    output.info(format!(
-                                        "Made the property clip `{}`.",
-                                        written.path
-                                    ));
-                                    remember(
-                                        actions,
-                                        format!(
-                                            "Create {}",
-                                            axcenity_anim::files::clip_name(&written.path)
-                                        ),
-                                        written.files,
-                                        None,
-                                    );
-                                    open = Some(written.path);
-                                }
-                                Err(err) => {
-                                    output.error(format!("Could not make the clip: {err}"))
-                                }
+                    let picked = dialog::buttons(
+                        ui,
+                        &[
+                            dialog::Button::cancel(),
+                            dialog::Button::new(icons::PLUS, "Make clip", dialog::Kind::Main)
+                                .enabled(valid.is_ok()),
+                        ],
+                        dialog::Enter::FromField,
+                    );
+                    close |= picked == Some(0);
+                    if picked == Some(1) {
+                        let file = property_editor::new_property_clip(1.5);
+                        match store::create_property_clip(project, name.trim(), &file) {
+                            Ok(written) => {
+                                output.info(format!("Made the property clip `{}`.", written.path));
+                                remember(
+                                    actions,
+                                    format!(
+                                        "Create {}",
+                                        axcenity_anim::files::clip_name(&written.path)
+                                    ),
+                                    written.files,
+                                    None,
+                                );
+                                open = Some(written.path);
                             }
-                            close = true;
+                            Err(err) => output.error(format!("Could not make the clip: {err}")),
                         }
-                        if ui.button("Cancel").clicked() {
-                            close = true;
-                        }
-                    });
+                        close = true;
+                    }
                 }
                 Dialog::NewController {
                     name,
                     with_clips,
                     assign,
                 } => {
-                    ui.heading("New state machine");
+                    dialog::header(
+                        ui,
+                        icons::FLOW_ARROW,
+                        dialog::Tone::Question,
+                        "New state machine",
+                        None,
+                    );
                     ui.horizontal(|ui| {
                         ui.label("Name");
                         ui.text_edit_singleline(name);
                     });
                     let valid = store::check_name(name);
                     if let Err(problem) = &valid {
-                        ui.colored_label(ui.visuals().error_fg_color, problem);
+                        ui.colored_label(error_color, problem);
                     }
                     let model_clips = subject
                         .map(|subject| subject.own_clips(&self.files))
@@ -335,179 +371,229 @@ impl AnimationStudio {
                         if !model_clips.is_empty() {
                             ui.checkbox(
                                 with_clips,
-                                format!("Add a state for each of {}'s {} clips", subject.name, model_clips.len()),
+                                format!(
+                                    "Add a state for each of {}'s {} clips",
+                                    subject.name,
+                                    model_clips.len()
+                                ),
                             );
                         }
                         ui.checkbox(assign, format!("Use it for {}'s Animator", subject.name));
                     } else {
                         ui.weak("Select a Part, Model or UI element first to give it this state machine and its clips.");
                     }
-                    ui.horizontal(|ui| {
-                        if ui.add_enabled(valid.is_ok(), egui::Button::new("Make state machine")).clicked() {
-                            let clips = if *with_clips { model_clips.clone() } else { Vec::new() };
-                            match store::new_controller(project, name.trim(), &clips) {
-                                Ok(written) => {
-                                    output.info(format!("Made the state machine `{}`.", written.path));
-                                    remember(
-                                        actions,
-                                        format!("Create {}", store::controller_name(&written.path)),
-                                        written.files,
-                                        None,
-                                    );
-                                    if let Some(subject) = subject
-                                        && *assign
-                                    {
-                                        actions.push(StudioAction::SetController {
-                                            part: subject.object,
-                                            animator: subject.animator,
-                                            path: written.path.clone(),
-                                        });
-                                    }
-                                    open_controller = Some((
-                                        written.path,
-                                        subject.and_then(|subject| subject.rigged_model(assets)),
-                                    ));
+                    let picked = dialog::buttons(
+                        ui,
+                        &[
+                            dialog::Button::cancel(),
+                            dialog::Button::new(
+                                icons::PLUS,
+                                "Make state machine",
+                                dialog::Kind::Main,
+                            )
+                            .enabled(valid.is_ok()),
+                        ],
+                        dialog::Enter::FromField,
+                    );
+                    close |= picked == Some(0);
+                    if picked == Some(1) {
+                        let clips = if *with_clips {
+                            model_clips.clone()
+                        } else {
+                            Vec::new()
+                        };
+                        match store::new_controller(project, name.trim(), &clips) {
+                            Ok(written) => {
+                                output.info(format!("Made the state machine `{}`.", written.path));
+                                remember(
+                                    actions,
+                                    format!("Create {}", store::controller_name(&written.path)),
+                                    written.files,
+                                    None,
+                                );
+                                if let Some(subject) = subject
+                                    && *assign
+                                {
+                                    actions.push(StudioAction::SetController {
+                                        part: subject.object,
+                                        animator: subject.animator,
+                                        path: written.path.clone(),
+                                    });
                                 }
-                                Err(err) => output.error(format!("Could not make the state machine: {err}")),
+                                open_controller = Some((
+                                    written.path,
+                                    subject.and_then(|subject| subject.rigged_model(assets)),
+                                ));
                             }
-                            close = true;
+                            Err(err) => {
+                                output.error(format!("Could not make the state machine: {err}"))
+                            }
                         }
-                        if ui.button("Cancel").clicked() {
-                            close = true;
-                        }
-                    });
+                        close = true;
+                    }
                 }
                 Dialog::Rename { path, name, error } => {
-                    ui.heading("Rename clip");
-                    ui.weak("State machines that play it are updated too.");
-                    let response = ui.text_edit_singleline(name);
+                    dialog::header(
+                        ui,
+                        icons::PENCIL_SIMPLE,
+                        dialog::Tone::Question,
+                        "Rename clip",
+                        Some("State machines that play it are updated too."),
+                    );
+                    ui.add(dialog::text_field(name));
                     if let Some(problem) = error {
-                        ui.colored_label(ui.visuals().error_fg_color, problem.as_str());
+                        ui.colored_label(error_color, problem.as_str());
                     }
-                    let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    ui.horizontal(|ui| {
-                        if ui.button("Rename").clicked() || enter {
-                            if let Some(record) =
-                                flush(&mut self.clip.doc, &mut self.machine.doc, project, output)
-                            {
-                                actions.push(record);
-                            }
-                            match store::rename_clip(project, path, name) {
-                                Ok(written) => {
-                                    output.info(format!("Renamed the clip to `{}`.", written.path));
-                                    remember(
-                                        actions,
-                                        format!("Rename {}", axcenity_anim::files::clip_name(path)),
-                                        written.files,
-                                        None,
-                                    );
-                                    if self.clip.doc.as_ref().is_some_and(|clip| clip.path() == path.as_str()) {
-                                        open = Some(written.path);
-                                    }
-                                    // The rename rewrote the open controller's file.
-                                    if let Some(controller) = &mut self.machine.doc
-                                        && let Ok(file) =
-                                            store::read_controller(project, &controller.path)
-                                    {
-                                        controller.reload(file);
-                                    }
-                                    close = true;
+                    let picked = dialog::buttons(
+                        ui,
+                        &[
+                            dialog::Button::cancel(),
+                            dialog::Button::new(icons::CHECK, "Rename", dialog::Kind::Main),
+                        ],
+                        dialog::Enter::FromField,
+                    );
+                    close |= picked == Some(0);
+                    if picked == Some(1) {
+                        if let Some(record) =
+                            flush(&mut self.clip.doc, &mut self.machine.doc, project, output)
+                        {
+                            actions.push(record);
+                        }
+                        match store::rename_clip(project, path, name) {
+                            Ok(written) => {
+                                output.info(format!("Renamed the clip to `{}`.", written.path));
+                                remember(
+                                    actions,
+                                    format!("Rename {}", axcenity_anim::files::clip_name(path)),
+                                    written.files,
+                                    None,
+                                );
+                                if self
+                                    .clip
+                                    .doc
+                                    .as_ref()
+                                    .is_some_and(|clip| clip.path() == path.as_str())
+                                {
+                                    open = Some(written.path);
                                 }
-                                Err(problem) => *error = Some(problem),
+                                // The rename rewrote the open controller's file.
+                                if let Some(controller) = &mut self.machine.doc
+                                    && let Ok(file) =
+                                        store::read_controller(project, &controller.path)
+                                {
+                                    controller.reload(file);
+                                }
+                                close = true;
                             }
+                            Err(problem) => *error = Some(problem),
                         }
-                        if ui.button("Cancel").clicked() {
-                            close = true;
-                        }
-                    });
+                    }
                 }
                 Dialog::RenameController { path, name, error } => {
-                    ui.heading("Rename state machine");
-                    ui.weak("Animators that use it are updated too.");
-                    let response = ui.text_edit_singleline(name);
+                    dialog::header(
+                        ui,
+                        icons::PENCIL_SIMPLE,
+                        dialog::Tone::Question,
+                        "Rename state machine",
+                        Some("Animators that use it are updated too."),
+                    );
+                    ui.add(dialog::text_field(name));
                     if let Some(problem) = error {
-                        ui.colored_label(ui.visuals().error_fg_color, problem.as_str());
+                        ui.colored_label(error_color, problem.as_str());
                     }
-                    let enter =
-                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    ui.horizontal(|ui| {
-                        if ui.button("Rename").clicked() || enter {
-                            if let Some(record) =
-                                flush(&mut self.clip.doc, &mut self.machine.doc, project, output)
-                            {
-                                actions.push(record);
-                            }
-                            let old = path.clone();
-                            match store::rename_controller(project, path, name) {
-                                Ok(written) => {
-                                    output.info(format!(
-                                        "Renamed the state machine to `{}`.",
-                                        written.path
-                                    ));
-                                    let rebind = (old.clone(), written.path.clone());
-                                    remember(
-                                        actions,
-                                        format!("Rename {}", store::controller_name(&old)),
-                                        written.files,
-                                        Some(rebind),
-                                    );
-                                    if let Some(controller) = &mut self.machine.doc
-                                        && controller.path == old
-                                    {
-                                        controller.path = written.path;
-                                    }
-                                    close = true;
+                    let picked = dialog::buttons(
+                        ui,
+                        &[
+                            dialog::Button::cancel(),
+                            dialog::Button::new(icons::CHECK, "Rename", dialog::Kind::Main),
+                        ],
+                        dialog::Enter::FromField,
+                    );
+                    close |= picked == Some(0);
+                    if picked == Some(1) {
+                        if let Some(record) =
+                            flush(&mut self.clip.doc, &mut self.machine.doc, project, output)
+                        {
+                            actions.push(record);
+                        }
+                        let old = path.clone();
+                        match store::rename_controller(project, path, name) {
+                            Ok(written) => {
+                                output.info(format!(
+                                    "Renamed the state machine to `{}`.",
+                                    written.path
+                                ));
+                                let rebind = (old.clone(), written.path.clone());
+                                remember(
+                                    actions,
+                                    format!("Rename {}", store::controller_name(&old)),
+                                    written.files,
+                                    Some(rebind),
+                                );
+                                if let Some(controller) = &mut self.machine.doc
+                                    && controller.path == old
+                                {
+                                    controller.path = written.path;
                                 }
-                                Err(problem) => *error = Some(problem),
+                                close = true;
                             }
+                            Err(problem) => *error = Some(problem),
                         }
-                        if ui.button("Cancel").clicked() {
-                            close = true;
-                        }
-                    });
+                    }
                 }
                 Dialog::Delete { path, users } => {
-                    ui.heading("Delete?");
-                    ui.label(format!("This deletes `{path}`. Undo puts it back."));
+                    let name = path.rsplit('/').next().unwrap_or(path);
+                    dialog::header(
+                        ui,
+                        icons::TRASH,
+                        dialog::Tone::Danger,
+                        &format!("Delete {name}?"),
+                        Some(&format!("This deletes `{path}`. Undo puts it back.")),
+                    );
                     if !users.is_empty() {
                         ui.colored_label(
-                            ui.visuals().warn_fg_color,
-                            format!("It's played by {}; their states will have no clip.", users.join(", ")),
+                            theme::palette(ui.ctx()).warning,
+                            format!(
+                                "It's played by {}; their states will have no clip.",
+                                users.join(", ")
+                            ),
                         );
                     }
-                    ui.horizontal(|ui| {
-                        if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
-                            if let Some(record) =
-                                flush(&mut self.clip.doc, &mut self.machine.doc, project, output)
-                            {
-                                actions.push(record);
-                            }
-                            match store::delete_asset(project, path) {
-                                Ok(files) => {
-                                    output.info(format!("Deleted `{path}`."));
-                                    let label = if path.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION)
-                                    {
+                    let picked = dialog::buttons(
+                        ui,
+                        &[
+                            dialog::Button::cancel(),
+                            dialog::Button::new(icons::TRASH, "Delete", dialog::Kind::Danger),
+                        ],
+                        dialog::Enter::Main,
+                    );
+                    close |= picked == Some(0);
+                    if picked == Some(1) {
+                        if let Some(record) =
+                            flush(&mut self.clip.doc, &mut self.machine.doc, project, output)
+                        {
+                            actions.push(record);
+                        }
+                        match store::delete_asset(project, path) {
+                            Ok(files) => {
+                                output.info(format!("Deleted `{path}`."));
+                                let label =
+                                    if path.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION) {
                                         format!("Delete {}", store::controller_name(path))
                                     } else {
                                         format!("Delete {}", axcenity_anim::files::clip_name(path))
                                     };
-                                    remember(actions, label, files, None);
-                                    deleted = Some(path.clone());
-                                }
-                                Err(err) => output.error(format!("Could not delete `{path}`: {err}")),
+                                remember(actions, label, files, None);
+                                deleted = Some(path.clone());
                             }
-                            close = true;
+                            Err(err) => output.error(format!("Could not delete `{path}`: {err}")),
                         }
-                        if ui.button("Cancel").clicked() {
-                            close = true;
-                        }
-                    });
+                        close = true;
+                    }
                 }
             }
         });
-        if modal.should_close() {
-            close = true;
-        }
+        close |= dismissed;
         if let Some(path) = deleted {
             self.close(&path);
         }

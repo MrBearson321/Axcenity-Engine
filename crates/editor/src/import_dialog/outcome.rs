@@ -402,7 +402,7 @@ impl ImportDialog {
                 "A number is added to a name that's taken. In the Assets panel, they're one folder.",
             )
             .size(theme::type_scale::SMALL)
-            .color(palette.text_muted),
+            .color(palette.text_weak),
         );
     }
 }

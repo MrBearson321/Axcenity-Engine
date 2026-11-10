@@ -168,6 +168,7 @@ pub(super) enum Command {
     Theme(ThemeChoice),
     Appearance,
     TogglePane(Pane),
+    ShowScene,
     ResetLayout,
     LightCones,
     ViewCube,
@@ -633,6 +634,14 @@ impl EditorApp {
             );
         }
         add(
+            Command::ShowScene,
+            "Show Scene",
+            "View › Panels",
+            &["Scene View"],
+            None,
+            Ok(()),
+        );
+        add(
             Command::ResetLayout,
             "Reset Layout",
             "View › Panels",
@@ -1022,6 +1031,7 @@ impl EditorApp {
                 self.settings.page = settings::SettingsPage::Appearance;
             }
             Command::TogglePane(pane) => self.layout.toggle(pane),
+            Command::ShowScene => self.layout.open(Pane::Scene),
             Command::ResetLayout => self.layout.reset(),
             Command::LightCones => self.light_cones = !self.light_cones,
             Command::ViewCube => self.view_cube = !self.view_cube,

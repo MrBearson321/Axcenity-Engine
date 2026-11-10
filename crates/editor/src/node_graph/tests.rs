@@ -453,3 +453,51 @@ fn the_editor_draws_with_errors_comments_and_every_node_kind() {
         );
     }
 }
+
+#[test]
+fn a_big_graph_opens_readable_on_its_start_and_frame_all_shows_all_of_it() {
+    // A long chain: far wider than the window at a readable zoom, with its
+    // event node in the middle of the list but at the left.
+    let mut graph = NodeGraph::default();
+    for n in 1..12 {
+        graph.add_node(
+            spec("show_page"),
+            [n as f32 * 260.0, (n % 3) as f32 * 120.0],
+        );
+    }
+    let start = graph.add_node(spec("button_activated"), [0.0, 0.0]);
+    let mut harness = Harness::new(graph);
+    assert!(harness.view.zoom >= OPEN_ZOOM, "{}", harness.view.zoom);
+    let canvas = harness.view.canvas;
+    let start_rect = harness.view.node_on_screen(start).unwrap();
+    assert!(
+        canvas.contains_rect(start_rect),
+        "the start node is in view"
+    );
+    assert!(
+        start_rect.left() - canvas.left() <= 41.0,
+        "no room left of the graph"
+    );
+
+    // Frame all fits every node, however small that makes them.
+    harness.view.frame_next = true;
+    harness.run(Vec::new());
+    assert!(harness.view.zoom < OPEN_ZOOM);
+    for (_, rect) in &harness.view.rects {
+        assert!(canvas.expand(1.0).contains_rect(*rect));
+    }
+}
+
+#[test]
+fn a_small_graph_opens_fitted_and_centred() {
+    let harness = Harness::new(two_nodes());
+    assert_eq!(harness.view.zoom, 1.0);
+    let both = harness
+        .view
+        .rects
+        .iter()
+        .map(|(_, rect)| *rect)
+        .reduce(|a, b| a.union(b))
+        .unwrap();
+    assert!((both.center().x - harness.view.canvas.center().x).abs() < 1.0);
+}

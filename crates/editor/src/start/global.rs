@@ -167,7 +167,7 @@ impl GlobalPage {
         ui.add_space(8.0);
         let cards = self.cards(&self.search.trim().to_lowercase());
         if cards.is_empty() {
-            ui.add_space(24.0);
+            ui.add_space(theme::space::XL);
             ui.vertical_centered(|ui| {
                 ui.label(
                     RichText::new(icons::GLOBE)
@@ -318,46 +318,41 @@ impl GlobalPage {
         let palette = theme::palette(ctx);
         let mut close = false;
         let mut removed = None;
-        let frame = egui::Frame::popup(&ctx.style())
-            .corner_radius(12)
-            .inner_margin(egui::Margin::same(20));
-        let modal = egui::Modal::new(egui::Id::new("remove global asset"))
-            .frame(frame)
-            .show(ctx, |ui| {
-                ui.set_width(400.0);
-                dialog_title(ui, &palette, "Remove from global assets?", None);
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(format!(
-                            "\"{}\" is deleted from global assets, so new projects won't have \
-                             it. Projects that already use it keep their own copy.",
-                            card.name
-                        ))
-                        .color(palette.text_secondary),
-                    )
-                    .wrap(),
-                );
-                error_line(ui, &palette, error.as_deref());
-                let (remove, cancel) =
-                    dialog_buttons(ui, &palette, ("Remove", Role::Danger, true), "Cancel");
-                if remove {
-                    let result = match &self.library {
-                        Some(library) => global_assets::remove(library, &card.entry.path),
-                        None => Err("there's no folder for global assets".to_owned()),
-                    };
-                    match result {
-                        Ok(_) => {
-                            removed = Some(card.name.clone());
-                            close = true;
-                        }
-                        Err(problem) => *error = Some(problem),
+        let ((), dismissed) = dialog::modal(ctx, "remove global asset", 400.0, |ui| {
+            let message = format!(
+                "\"{}\" is deleted from global assets, so new projects won't have it. \
+                 Projects that already use it keep their own copy.",
+                card.name
+            );
+            dialog::header(
+                ui,
+                icons::TRASH,
+                dialog::Tone::Danger,
+                "Remove from global assets?",
+                Some(&message),
+            );
+            error_line(ui, &palette, error.as_deref());
+            let (remove, cancel) = dialog_buttons(
+                ui,
+                (icons::TRASH, "Remove", dialog::Kind::Danger, true),
+                dialog::Enter::Main,
+            );
+            if remove {
+                let result = match &self.library {
+                    Some(library) => global_assets::remove(library, &card.entry.path),
+                    None => Err("there's no folder for global assets".to_owned()),
+                };
+                match result {
+                    Ok(_) => {
+                        removed = Some(card.name.clone());
+                        close = true;
                     }
+                    Err(problem) => *error = Some(problem),
                 }
-                close |= cancel;
-            });
-        if modal.should_close() {
-            close = true;
-        }
+            }
+            close |= cancel;
+        });
+        close |= dismissed;
         if let Some(name) = removed {
             self.notice = Some((false, format!("Removed {name} from global assets.")));
             self.scanned_at = None;

@@ -64,7 +64,7 @@ pub(crate) fn read(project: &Path, relative: &str, pick: &str) -> Option<Model> 
     if input.u64()? != build() {
         return None;
     }
-    decode(&mut input, project)
+    decode(&mut input, project, relative)
 }
 
 /// Keeps `model`, loaded from the project model `relative` (`bytes`) with
@@ -137,6 +137,10 @@ fn encode(model: &Model) -> Option<Vec<u8>> {
             ImageOrigin::CookedEmbedded { path, hash } => {
                 out.u8(2);
                 out.text(path);
+                out.u64(*hash);
+            }
+            ImageOrigin::InModel { hash } => {
+                out.u8(3);
                 out.u64(*hash);
             }
         }
@@ -455,7 +459,7 @@ impl Input<'_> {
     }
 }
 
-fn decode(input: &mut Input<'_>, project: &Path) -> Option<Model> {
+fn decode(input: &mut Input<'_>, project: &Path, relative: &str) -> Option<Model> {
     let image_count = input.count(6)?;
     let mut images = Vec::with_capacity(image_count);
     for _ in 0..image_count {
@@ -464,6 +468,15 @@ fn decode(input: &mut Input<'_>, project: &Path) -> Option<Model> {
             2 => {
                 let path = input.text()?;
                 cooked::cooked_embedded_by_hash(project, &path, input.u64()?)?
+            }
+            3 => {
+                // Shared with every other model using the same copy.
+                let hash = input.u64()?;
+                let file = input.optional_text()?;
+                images.push(cooked::cooked_in_model_by_hash(
+                    project, relative, hash, file,
+                )?);
+                continue;
             }
             _ => return None,
         };

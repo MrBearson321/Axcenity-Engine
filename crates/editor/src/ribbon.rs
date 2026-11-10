@@ -115,11 +115,11 @@ impl egui::Widget for RibbonButton<'_> {
             } else {
                 palette.control_hover.gamma_multiply(hover)
             };
-            painter.rect_filled(rect, 6, fill);
+            painter.rect_filled(rect, theme::radius::CONTROL, fill);
             if response.has_focus() {
                 painter.rect_stroke(
                     rect,
-                    6,
+                    theme::radius::CONTROL,
                     egui::Stroke::new(1.0_f32, palette.accent),
                     egui::StrokeKind::Inside,
                 );
@@ -203,7 +203,7 @@ pub fn group(ui: &mut egui::Ui, caption: &str, add_contents: impl FnOnce(&mut eg
             egui::Align2::CENTER_CENTER,
             caption,
             FontId::proportional(type_scale::CAPTION - 0.5),
-            palette.text_muted,
+            palette.text_weak,
         );
     });
 }

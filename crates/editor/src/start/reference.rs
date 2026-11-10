@@ -244,7 +244,7 @@ fn entry_row(ui: &mut egui::Ui, entry: &ApiEntry) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let name = entry.qualified_name();
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
-    widgets::paint_hover(ui, rect, &response, false, 8.0);
+    widgets::paint_hover(ui, rect, &response, false, theme::radius::CARD);
     let left = rect.left() + 12.0;
     ui.painter().text(
         pos2(left, rect.top() + 15.0),
@@ -392,7 +392,7 @@ fn entry_page(
             if members.is_empty() {
                 continue;
             }
-            ui.add_space(24.0);
+            ui.add_space(theme::space::XL);
             widgets::section_label(ui, plural(kind));
             ui.add_space(4.0);
             if let Some(member) = rows(ui, entries, &members) {

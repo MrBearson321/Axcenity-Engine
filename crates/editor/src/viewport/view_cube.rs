@@ -90,9 +90,9 @@ const FACES: [(Vec3, &str); 6] = [
 
 /// Red, green and blue for X, Y and Z, as on the Move handles.
 const AXES: [(Vec3, &str, egui::Color32); 3] = [
-    (Vec3::X, "X", egui::Color32::from_rgb(235, 65, 65)),
-    (Vec3::Y, "Y", egui::Color32::from_rgb(70, 205, 70)),
-    (Vec3::Z, "Z", egui::Color32::from_rgb(55, 125, 245)),
+    (Vec3::X, "X", theme::overlay::AXIS_X),
+    (Vec3::Y, "Y", theme::overlay::AXIS_Y),
+    (Vec3::Z, "Z", theme::overlay::AXIS_Z),
 ];
 
 /// Where the cube's light comes from, in the world: above, a little to the
