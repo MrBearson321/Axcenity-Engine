@@ -16,6 +16,7 @@
 
 use std::ffi::OsString;
 use std::fs;
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -24,8 +25,8 @@ use axcenity_assets::Assets;
 use axcenity_core::bench::{BenchRun, Laps};
 use axcenity_core::{ClassName, World};
 use axcenity_net::{GameInfo, Network};
-use axcenity_physics::Physics;
 use axcenity_script::{OutputKind, ScriptRuntime};
+use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
 const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--bench <frames>]\n\
                      example: cargo run -p axcenity-server -- examples/hello-part --port 47800";
@@ -162,7 +163,13 @@ fn main() -> Result<()> {
     }
     print_log(&mut network);
 
-    let mut physics = Physics::with_assets(assets.clone());
+    // The physics, and the characters, agents and animators the server
+    // leaves to players' devices, are made here with nothing to do yet.
+    let mut server = Server {
+        sim: Sim::new(world, scripts, assets),
+        network,
+    };
+    let schedule = Schedule::for_host(Hosts::SERVER);
     let mut bench = arguments
         .bench
         .map(|frames| BenchRun::new(BenchRun::DEFAULT_WARM_UP, frames));
@@ -175,23 +182,24 @@ fn main() -> Result<()> {
         };
         last = started;
         let mut laps = Laps::start();
-        frame(
-            &mut world,
-            &mut scripts,
-            &mut physics,
-            &mut network,
-            seconds,
-            &mut laps,
-        );
+        {
+            profiling::scope!("frame");
+            schedule.run(
+                &mut FrameCtx::new(seconds, Hosts::SERVER, &mut server),
+                &mut laps,
+            );
+        }
         profiling::finish_frame!();
-        for error in assets.take_errors() {
+        for error in server.sim.assets.take_errors() {
             eprintln!("error: {error}");
         }
         if let Some(bench) = &mut bench {
             if bench.record(&laps) {
                 let scene = axcenity_core::bench::scene_name(&project.folder);
                 print!("{}", bench.finish_text("server", &scene));
-                network.disconnect(&mut world, &mut scripts);
+                server
+                    .network
+                    .disconnect(&mut server.sim.world, &mut server.sim.scripts);
                 return Ok(());
             }
             continue;
@@ -202,52 +210,54 @@ fn main() -> Result<()> {
     }
 }
 
-/// One frame, in the frame order: network receive, players (their
-/// characters and respawns), scripts, physics, touches and Heartbeat,
-/// network send. Each player's device moves their character (Phase 66),
-/// which physics holds still here, as it does what they own; agents,
-/// animation and everything drawn belong to players' devices.
-fn frame(
-    world: &mut World,
-    scripts: &mut ScriptRuntime,
-    physics: &mut Physics,
-    network: &mut Network,
-    seconds: f64,
-    laps: &mut Laps,
-) {
-    profiling::scope!("frame");
-    network.receive(world, scripts, seconds);
-    // With no screen, a player here has nothing to load (Phase 80).
-    for (request, _) in network.take_viewer_requests() {
-        scripts.finish_stream_around(world, request);
+/// What the server does differently from the shared frame: it has the
+/// network and prints to the console. Each player's device moves their
+/// character (Phase 66), which physics holds still here, as it does what
+/// they own; agents, animation and everything drawn belong to players'
+/// devices.
+struct Server {
+    sim: Sim,
+    network: Network,
+}
+
+impl HostIo for Server {
+    fn sim(&mut self) -> &mut Sim {
+        &mut self.sim
     }
-    print_log(network);
-    laps.lap("Network");
-    scripts.step_players(world, seconds);
-    laps.lap("Input");
-    scripts.step(world, seconds);
-    scripts.stepped(world, seconds);
-    laps.lap("Scripts");
-    scripts.apply_shatters(world, physics);
-    physics.set_held(network.held_parts(world, scripts));
-    // Far from every player, physics sleeps (Phase 80).
-    physics.set_far_sleep(
-        axcenity_core::streaming::Settings::of(world)
-            .map(|settings| (network.player_focuses(world), settings.unload_radius())),
-    );
-    physics.step(world, seconds);
-    laps.lap("Physics");
-    let touches = physics.take_touches();
-    scripts.fire_touched(world, &touches);
-    let ends = physics.take_touch_ends();
-    scripts.fire_touch_ended(world, &ends);
-    scripts.fire_breaks(world, physics);
-    scripts.step_health(world, seconds);
-    scripts.heartbeat(world, seconds);
-    print_output(scripts);
-    laps.lap("Heartbeat");
-    network.send(world, scripts);
-    laps.lap("Network send");
+
+    fn net_receive(&mut self, seconds: f64) -> ControlFlow<()> {
+        let Sim { world, scripts, .. } = &mut self.sim;
+        self.network.receive(world, scripts, seconds);
+        // With no screen, a player here has nothing to load (Phase 80).
+        for (request, _) in self.network.take_viewer_requests() {
+            scripts.finish_stream_around(world, request);
+        }
+        print_log(&mut self.network);
+        ControlFlow::Continue(())
+    }
+
+    fn flush_output(&mut self) {
+        print_output(&mut self.sim.scripts);
+    }
+
+    fn prepare_physics(&mut self) {
+        let Sim {
+            world,
+            scripts,
+            physics,
+            ..
+        } = &mut self.sim;
+        physics.set_held(self.network.held_parts(world, scripts));
+        // Far from every player, physics sleeps (Phase 80).
+        physics.set_far_sleep(
+            axcenity_core::streaming::Settings::of(world)
+                .map(|settings| (self.network.player_focuses(world), settings.unload_radius())),
+        );
+    }
+
+    fn net_send(&mut self) {
+        self.network.send(&self.sim.world, &mut self.sim.scripts);
+    }
 }
 
 fn print_log(network: &mut Network) {
