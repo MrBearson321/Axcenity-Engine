@@ -73,6 +73,7 @@ mod http;
 mod humanoid;
 mod input;
 mod instance;
+mod lent;
 mod levels;
 mod localization;
 mod modules;
@@ -117,6 +118,7 @@ use axcenity_save::Saves;
 use mlua::Lua;
 
 use crate::context::Context;
+use crate::lent::with_world;
 
 pub use ability::{AbilityEvent, Blocked, tag_list};
 pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, GameCamera};
@@ -127,7 +129,8 @@ pub use definitions::{ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_de
 pub use edit::EditRuntime;
 pub use errors::error_message as error_text;
 pub use input::KeyEvent;
-pub use instance::{LuaInstance, world as lent_world, world_mut as lent_world_mut};
+pub use instance::LuaInstance;
+pub use lent::{WorldMut, WorldRef, world as lent_world, world_mut as lent_world_mut};
 pub use levels::Levels;
 pub use network::{LanGame, NetworkRequest};
 pub use prompt::ShownPrompt;
@@ -2361,23 +2364,6 @@ pub fn run_edit_command(world: &mut World, source: &str) -> Result<EditCommand, 
 /// Every global name a script has, for the Console's autocomplete.
 pub fn global_names() -> Vec<&'static str> {
     sandbox::global_names()
-}
-
-/// Lends `world` to Lua while `f` runs.
-///
-/// Lua callbacks can't borrow `world`, because Lua may keep those callbacks
-/// around for longer than this call. So the World itself is moved into Lua's
-/// "app data" (leaving an empty World behind), and moved back afterwards.
-///
-/// `impl FnOnce() -> R` means "any closure that can be called once and
-/// returns an R", so callers can pass `|| ...` with whatever result they need.
-fn with_world<R>(lua: &Lua, world: &mut World, f: impl FnOnce() -> R) -> R {
-    lua.set_app_data(std::mem::take(world));
-    let result = f();
-    *world = lua
-        .remove_app_data::<World>()
-        .expect("the World was lent to Lua above");
-    result
 }
 
 fn push_output(lua: &Lua, kind: OutputKind, text: String) {
