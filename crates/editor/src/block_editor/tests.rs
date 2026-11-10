@@ -310,10 +310,11 @@ fn run_editor(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &st
 #[test]
 fn blocks_drag_from_the_palette_and_snap_into_stacks() {
     let mut script = BlockScript::default();
-    // "when game starts", the palette's first block, onto the canvas.
+    // "when game starts", the palette's first block (under the search
+    // box), onto the canvas.
     run_editor(
         &mut script,
-        drag_frames(pos2(150.0, 117.0), pos2(700.0, 400.0)),
+        drag_frames(pos2(150.0, 117.0 + SEARCH_HEIGHT), pos2(700.0, 400.0)),
         "drag-hat",
     );
     assert_eq!(script.blocks.len(), 1, "{script:?}");
@@ -337,8 +338,8 @@ fn blocks_drag_from_the_palette_and_snap_into_stacks() {
         modifiers: Default::default(),
     };
     // Where the palette draws it then (Inter's line height sets the rows).
-    let wait_grab = pos2(110.0, 86.0);
-    let wait_palette_top_left = pos2(88.0, 66.0);
+    let wait_grab = pos2(110.0, 86.0 + SEARCH_HEIGHT);
+    let wait_palette_top_left = pos2(88.0, 66.0 + SEARCH_HEIGHT);
     let target =
         hat_top_left + vec2(0.0, CAP + ROW_HEIGHT + 10.0) + (wait_grab - wait_palette_top_left);
     let mut frames = vec![
@@ -394,5 +395,182 @@ fn rounded_corners_stay_between_their_edges() {
         points
             .iter()
             .all(|point| { (0.0..=10.0).contains(&point.x) && (0.0..=10.0).contains(&point.y) })
+    );
+}
+
+/// Every palette item the search finds for `search`, in a client script.
+fn found(search: &str) -> Vec<PaletteItem> {
+    let mut items = Vec::new();
+    for category in Category::ALL {
+        for item in palette(category, true, &[], &[]) {
+            if matches_search(&search_text(&item, category, &[]), search) {
+                items.push(item);
+            }
+        }
+    }
+    items
+}
+
+#[test]
+fn the_palette_search_finds_blocks_by_their_words_and_their_lua() {
+    let blocks = |search| {
+        found(search)
+            .into_iter()
+            .filter_map(|item| match item {
+                PaletteItem::Block(kind) => Some(*kind),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let everything = found("").len();
+    assert!(everything > 100, "an empty search shows the whole palette");
+    // By the words on the block, in any case and order.
+    assert!(
+        blocks("PLAY sound")
+            .iter()
+            .any(|kind| matches!(kind, BlockKind::PlaySound { .. }))
+    );
+    assert!(
+        blocks("touched when")
+            .iter()
+            .any(|kind| matches!(kind, BlockKind::WhenTouched { .. }))
+    );
+    // By the Lua it becomes, for someone who knows the Roblox-style name.
+    assert!(
+        blocks("Destroy")
+            .iter()
+            .any(|kind| matches!(kind, BlockKind::Destroy { .. }))
+    );
+    assert!(
+        found("Raycast")
+            .iter()
+            .any(|item| matches!(item, PaletteItem::Reporter(Expression::Raycast { .. })))
+    );
+    // A narrower search finds fewer, and nonsense finds nothing.
+    assert!(found("sound").len() < everything);
+    assert!(found("zzzz qqqq").is_empty());
+}
+
+#[test]
+fn searching_the_palette_shows_the_matches_and_they_drag_out() {
+    let mut script = BlockScript::default();
+    let search_box = pos2(CATEGORY_WIDTH + 120.0, TOOLBAR_HEIGHT + SEARCH_HEIGHT / 2.0);
+    let click = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    let mut frames = vec![
+        vec![egui::Event::PointerMoved(search_box)],
+        vec![click(search_box, true)],
+        vec![click(search_box, false)],
+        vec![egui::Event::Text("wait until".to_owned())],
+        Vec::new(),
+    ];
+    // The only match, "wait until", is first under its category's heading,
+    // where "when game starts" is with no search.
+    frames.extend(drag_frames(
+        pos2(110.0, 86.0 + SEARCH_HEIGHT),
+        pos2(700.0, 400.0),
+    ));
+    run_editor(&mut script, frames, "palette-search");
+    assert_eq!(script.blocks.len(), 1, "{script:?}");
+    let BlockKind::Unattached { body } = &script.blocks[0].kind else {
+        panic!("a loose stack: {script:?}");
+    };
+    assert!(
+        matches!(body[0].kind, BlockKind::WaitUntil { .. }),
+        "{script:?}"
+    );
+}
+
+#[test]
+fn hovering_a_palette_block_says_the_lua_it_becomes() {
+    let mut script = BlockScript::default();
+    let hat = pos2(150.0, 117.0 + SEARCH_HEIGHT);
+    // Held still long enough for the tooltip.
+    let frames = vec![
+        vec![egui::Event::PointerMoved(hat)],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    ];
+    let before = script.clone();
+    run_editor(&mut script, frames, "palette-hover");
+    assert_eq!(script, before, "hovering changes nothing");
+    assert_eq!(
+        palette::item_lua(&PaletteItem::Block(Box::new(BlockKind::WhenStarted {
+            body: Vec::new()
+        })))
+        .as_deref(),
+        Some("task.spawn(function()\nend)")
+    );
+}
+
+#[test]
+fn luau_blocks_fold_under_their_own_heading_but_stay_in_the_graph_menu() {
+    let (own, luau) = palette_parts(Category::Variables, true, &[], &[]);
+    let kinds = |items: &[PaletteItem]| {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                PaletteItem::Block(kind) => Some(kind.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(kinds(&own).iter().all(|kind| matches!(
+        **kind,
+        BlockKind::SetVariable { .. } | BlockKind::ChangeVariable { .. }
+    )));
+    assert!(
+        kinds(&luau)
+            .iter()
+            .any(|kind| matches!(**kind, BlockKind::Local { .. }))
+    );
+    // The graph's node menu and searches still offer every block.
+    assert_eq!(
+        palette(Category::Variables, true, &[], &[]).len(),
+        own.len() + luau.len()
+    );
+    assert!(!found("local").is_empty());
+
+    // In the palette: Variables, then open "Lua blocks", then drag
+    // "local name = 0" out.
+    let mut script = BlockScript::default();
+    let variables = pos2(
+        CATEGORY_WIDTH / 2.0,
+        TOOLBAR_HEIGHT + 8.0 + 56.0 * 6.0 + 27.0,
+    );
+    let heading = pos2(120.0, 291.0);
+    let click = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    let mut frames = Vec::new();
+    for at in [variables, heading] {
+        frames.extend([
+            vec![egui::Event::PointerMoved(at)],
+            vec![click(at, true)],
+            vec![click(at, false)],
+            Vec::new(),
+            Vec::new(),
+        ]);
+    }
+    frames.extend(drag_frames(pos2(110.0, 330.0), pos2(700.0, 400.0)));
+    run_editor(&mut script, frames, "palette-lua-blocks");
+    assert_eq!(script.blocks.len(), 1, "{script:?}");
+    let BlockKind::Unattached { body } = &script.blocks[0].kind else {
+        panic!("a loose stack: {script:?}");
+    };
+    assert!(
+        matches!(body[0].kind, BlockKind::Local { .. }),
+        "{script:?}"
     );
 }

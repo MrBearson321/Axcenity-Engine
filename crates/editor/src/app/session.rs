@@ -257,6 +257,7 @@ impl EditorApp {
                     script: script.clone(),
                     saved: script,
                     highlighted: None,
+                    undo: Default::default(),
                 }
             })
             .collect();
@@ -1059,6 +1060,7 @@ impl EditorApp {
                         })
                         .map(|document| {
                             document.script = document.saved.clone();
+                            document.undo.clear();
                             translate(&document.script)
                         });
                     match source {

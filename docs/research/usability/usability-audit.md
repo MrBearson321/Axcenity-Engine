@@ -125,7 +125,7 @@ Artboard, anchors, rulers, styles, rich text, an Event Graph and a Live Preview.
 
 ### A13. Block Coding Kit and scripting (*reviewed*)
 
-Block palette, a Graph view, scripts and LocalScripts with autocomplete (`.axcenity/axcenity.d.luau`), Find in Scripts, a searchable API reference on the start screen. The block editor has the lowest tooltip ratio of any big system (34 controls, 14 tooltips). Worth a dedicated pass later.
+Block palette, a Graph view, scripts and LocalScripts with autocomplete (`.axcenity/axcenity.d.luau`), Find in Scripts, a searchable API reference on the start screen. The block editor has the lowest tooltip ratio of any big system (34 controls, 14 tooltips). Its own pass is [block-editor.md](block-editor.md).
 
 ### A14. Script editor and debugging (*reviewed*)
 

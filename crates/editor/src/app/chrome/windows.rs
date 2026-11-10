@@ -219,7 +219,10 @@ impl EditorApp {
         // Over a property clip, K, Delete and Backspace are the dope sheet's;
         // over the Model Studio, its own single keys and Enter are.
         let studio = self.model_studio.has_pointer();
-        let animating = self.animation.wants_keys(ctx) || studio;
+        // Over a block script, Delete, Ctrl+D, F2 and the tools' keys would
+        // change the world out of sight, so they're left alone.
+        let blocks = self.block_tab_pointer.is_some();
+        let animating = self.animation.wants_keys(ctx) || studio || blocks;
         // The tools' single keys (1 to 5, F3X's letters) only while
         // editing, so a game gets every key. Escape goes back to Select; it
         // isn't taken, so it still closes a menu or stops the Constraint tool.
@@ -250,8 +253,8 @@ impl EditorApp {
                 toggle: !playing && !studio && input.consume_key(none, egui::Key::Enter),
                 // Taken before the viewport sees them, so Ctrl+D doesn't
                 // also fly the camera right.
-                duplicate: input.consume_shortcut(&DUPLICATE_SHORTCUT),
-                rename: input.consume_key(none, RENAME_KEY),
+                duplicate: !blocks && input.consume_shortcut(&DUPLICATE_SHORTCUT),
+                rename: !blocks && input.consume_key(none, RENAME_KEY),
                 delete: !animating
                     && (input.consume_key(none, egui::Key::Delete)
                         || (cfg!(target_os = "macos")

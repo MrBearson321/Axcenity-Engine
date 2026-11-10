@@ -188,6 +188,7 @@ impl EditorApp {
             }) {
                 document.script = script.clone();
                 document.saved = script;
+                document.undo.clear();
             }
             translation.source
         } else {

@@ -310,6 +310,7 @@ impl EditorApp {
                     script: blocks.clone(),
                     saved: blocks,
                     highlighted: None,
+                    undo: Default::default(),
                 });
             }
             if let Some(script) = project.scripts.iter_mut().find(|s| s.path == path) {

@@ -33,6 +33,9 @@ pub(super) struct MenuItem {
     pub(super) category: Category,
     pub(super) title: String,
     pub(super) item: PaletteItem,
+    /// What the search box finds it by: its title, and the words and Lua
+    /// the Blocks palette's search uses.
+    words: String,
 }
 
 pub(super) enum MenuChoice {
@@ -84,10 +87,16 @@ pub(super) fn menu_items(
                 PaletteItem::Reporter(expression) => value_names(expression).0,
                 PaletteItem::NewVariable => continue,
             };
+            let words = format!(
+                "{} {}",
+                title.to_lowercase(),
+                search_text(&item, category, context.objects)
+            );
             items.push(MenuItem {
                 category,
                 title,
                 item,
+                words,
             });
         }
     }
@@ -103,15 +112,10 @@ pub(super) fn show_menu(
     key: &str,
 ) -> MenuChoice {
     let mut choice = MenuChoice::Open;
-    let search = menu.search.to_lowercase();
     let matches: Vec<usize> = items
         .iter()
         .enumerate()
-        .filter(|(_, item)| {
-            search.is_empty()
-                || item.title.to_lowercase().contains(&search)
-                || item.category.name().to_lowercase().contains(&search)
-        })
+        .filter(|(_, item)| matches_search(&item.words, &menu.search))
         .map(|(index, _)| index)
         .collect();
     let area = egui::Area::new(egui::Id::new(("graph menu", key)))
@@ -160,7 +164,13 @@ pub(super) fn show_menu(
                                         .size(theme::type_scale::SMALL),
                                 );
                             }
-                            if ui.selectable_label(false, &item.title).clicked() {
+                            if ui
+                                .selectable_label(false, &item.title)
+                                .on_hover_ui(|ui| {
+                                    lua_hint(ui, "Click to add it.", item_lua(&item.item))
+                                })
+                                .clicked()
+                            {
                                 choice = MenuChoice::Pick(index);
                             }
                         }

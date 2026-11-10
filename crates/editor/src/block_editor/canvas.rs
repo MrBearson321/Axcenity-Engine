@@ -1,5 +1,8 @@
 use super::*;
 
+/// Above a loose stack: why it does nothing.
+pub(super) const LOOSE_NOTE: &str = "Not under an event block, so it doesn't run";
+
 /// The canvas with the script's stacks. Returns where dragged blocks can go.
 pub(super) fn show_canvas(
     ui: &mut egui::Ui,
@@ -96,6 +99,15 @@ pub(super) fn show_canvas(
         let at = origin + vec2(position[0], position[1]) * z;
         if matches!(block.kind, BlockKind::Unattached { .. }) {
             blocks.stack_spots.push((at, StackSpot::Above(index)));
+            // Loose blocks look like any others, so say they don't run (as
+            // the Graph view does for nodes wired to no event).
+            painter.text(
+                at + vec2(2.0, -4.0) * z,
+                egui::Align2::LEFT_BOTTOM,
+                LOOSE_NOTE,
+                FontId::proportional(11.0 * z),
+                ui.visuals().weak_text_color(),
+            );
         }
         let drawn = blocks.script(&mut canvas, block, at);
         if let Some(grab) = drawn.grabbed {

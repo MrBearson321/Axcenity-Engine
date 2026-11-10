@@ -173,3 +173,18 @@ Findings and plan: [model-studio.md](model-studio.md).
 
 **Tests**: `the_toolbar_fits_the_mode_and_rig_steps_say_why_they_wait` draws the tab without a GPU. Object mode shows Mesh and UV, and no Weights or Pose. Paint keeps UV but not Mesh, and Sculpt has neither. In Rig, a click on Weights with no bones stays in Bones and shows the note; after Add Humanoid the same click goes in and the note goes. `modes_that_need_a_mesh_or_bones_say_so` covers the rules, a group included. The tour (`TOUR_ONLY=studio`) has seven new states (20–26); `tour-23-studio-paint.png` and `tour-25-studio-rig.png` show one-row toolbars, and `tour-26-studio-weights.png` the rigged humanoid with Rig › Weights lit.
 
+## Block editor PR 1: undo, search and the Lua blocks (U20, BL1–BL6, BL8)
+
+Findings and plan: [block-editor.md](block-editor.md).
+
+**Changed**
+
+| ID | Problem | Change |
+|---|---|---|
+| BL1, BL2 | No undo in Blocks or Graph; Ctrl+Z over blocks undid a world edit out of sight, and Delete and Ctrl+D hit the part selected in 3D (so the Graph view's own Delete and Ctrl+D never worked in the editor) | Each block script keeps its own undo (100 steps); over its tab Ctrl+Z and Ctrl+Y are its, a drag or a typed number is one step, and the world's Delete, Ctrl+D, F2 and tool keys are left alone |
+| BL3, BL8 | No palette search; the node menu searched titles only | **Search blocks** above the palette (words, category or Lua); the node menu matches the same way |
+| BL4 | Palette blocks said nothing on hover | Hover says how to use it and shows the Lua it becomes; node menu items too |
+| BL5 | Luau-language blocks beside the beginner ones (three ways to set a variable) | Under a closed **Lua blocks** heading in each category; search and the node menu still find them |
+| BL6 | A loose stack silently didn't run | "Not under an event block, so it doesn't run" above it |
+
+**Tests**: `ctrl_z_over_blocks_undoes_the_blocks_not_the_world`, `delete_and_ctrl_d_over_blocks_leave_the_selected_part_alone`, `an_edit_over_several_frames_is_one_step`, `undo_stays_in_the_view_shown`, `the_palette_search_finds_blocks_by_their_words_and_their_lua`, `searching_the_palette_shows_the_matches_and_they_drag_out`, `hovering_a_palette_block_says_the_lua_it_becomes`, `luau_blocks_fold_under_their_own_heading_but_stay_in_the_graph_menu`. Snapshots: `palette-search.png`, `palette-hover.png`, `palette-lua-blocks.png`. `cargo test -p axcenity-editor` (on `main` before #42): 926 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`); clippy and fmt clean.
