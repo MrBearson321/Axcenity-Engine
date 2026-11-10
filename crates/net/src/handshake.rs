@@ -20,6 +20,7 @@
 
 use std::sync::OnceLock;
 
+use axcenity_core::ClassName;
 use serde::{Deserialize, Serialize};
 
 use crate::PROTOCOL_VERSION;
@@ -52,6 +53,9 @@ pub enum Message {
         /// The player's install's identity (Phase 64); 0 from an engine
         /// before it.
         user_id: u64,
+        /// The player's engine's [`class_defaults`] (roadmap M7); 0 from
+        /// an engine before it.
+        defaults: u64,
     },
     Welcome {
         you: Peer,
@@ -136,6 +140,8 @@ enum Greeting {
         password: Option<String>,
         #[serde(default)]
         user_id: u64,
+        #[serde(default)]
+        defaults: u64,
     },
     Refused {
         reason: String,
@@ -164,6 +170,7 @@ impl Message {
                 name,
                 password,
                 user_id,
+                defaults,
             } => Some(Greeting::Hello {
                 protocol: *protocol,
                 game: game.clone(),
@@ -171,6 +178,7 @@ impl Message {
                 name: name.clone(),
                 password: password.clone(),
                 user_id: *user_id,
+                defaults: *defaults,
             }),
             Message::Refused { reason } => Some(Greeting::Refused {
                 reason: reason.clone(),
@@ -199,6 +207,7 @@ impl Message {
                     name,
                     password,
                     user_id,
+                    defaults,
                 } => Message::Hello {
                     protocol,
                     game,
@@ -206,6 +215,7 @@ impl Message {
                     name,
                     password,
                     user_id,
+                    defaults,
                 },
                 Greeting::Refused { reason } => Message::Refused { reason },
             }),
@@ -214,6 +224,34 @@ impl Message {
             _ => None,
         }
     }
+}
+
+/// A fingerprint of every class's default properties in this engine
+/// (FNV-1a over their names and values). A replica makes each Instance
+/// with these and is sent only what differs (roadmap M7), so a player
+/// whose engine has other defaults is refused rather than shown a
+/// different world. The same on every machine for the same engine source.
+pub fn class_defaults() -> u64 {
+    static DEFAULTS: OnceLock<u64> = OnceLock::new();
+    *DEFAULTS.get_or_init(|| {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut add = |bytes: &[u8]| {
+            for &byte in bytes.iter().chain(&[0]) {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x0100_0000_01b3);
+            }
+        };
+        for class in ClassName::ALL {
+            add(class.as_str().as_bytes());
+            let mut properties = class.default_properties();
+            properties.sort_unstable_by_key(|(name, _)| *name);
+            for (name, value) in properties {
+                add(name.as_bytes());
+                add(format!("{value:?}").as_bytes());
+            }
+        }
+        hash
+    })
 }
 
 /// Which game this is, as the handshake compares it.
@@ -251,6 +289,7 @@ pub fn admit(hello: Option<&Message>, admission: &Admission) -> Result<(), Refus
         game,
         version,
         password,
+        defaults,
         ..
     }) = hello
     else {
@@ -270,6 +309,14 @@ pub fn admit(hello: Option<&Message>, admission: &Admission) -> Result<(), Refus
                 "refused a player using network protocol {protocol}; this server uses \
                  {PROTOCOL_VERSION}"
             ),
+        });
+    }
+    if *defaults != class_defaults() {
+        return Err(Refusal {
+            to_player: "The server's Axcenity makes Instances with other defaults than yours: \
+                        play the game with the same Axcenity version."
+                .to_owned(),
+            for_host: "refused a player whose Axcenity has other class defaults".to_owned(),
         });
     }
     if *game != ours.name {

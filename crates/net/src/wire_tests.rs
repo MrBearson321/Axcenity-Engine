@@ -70,6 +70,7 @@ fn every_message() -> Vec<Message> {
             name: "Ann".to_owned(),
             password: Some("moat".to_owned()),
             user_id: 42,
+            defaults: crate::handshake::class_defaults(),
         },
         Message::Welcome {
             you: peer.clone(),
@@ -150,6 +151,7 @@ fn hello_and_refused_stay_the_json_every_engine_reads() {
             name: "Ann".to_owned(),
             password: None,
             user_id: 42,
+            defaults: 0,
         })
     );
     // From before Phase 64: no user id.
@@ -361,4 +363,33 @@ fn the_motion_sender_sends_what_moved_and_keeps_track_when_parts_come_and_go() {
     let mut expected = vec![ids[1].to_bits(), ids[2].to_bits(), new.to_bits()];
     expected.sort_unstable();
     assert_eq!(settled_ids, expected);
+}
+
+#[test]
+fn a_player_whose_engine_has_other_class_defaults_is_refused() {
+    use crate::handshake::{Admission, admit, class_defaults};
+
+    let game = crate::GameInfo {
+        name: "Castle".to_owned(),
+        version: "1.0".to_owned(),
+    };
+    let admission = Admission {
+        game: &game,
+        password: None,
+        players: 1,
+        max_players: 8,
+    };
+    let hello = |defaults| Message::Hello {
+        protocol: crate::PROTOCOL_VERSION,
+        game: "Castle".to_owned(),
+        version: "1.0".to_owned(),
+        name: "Ann".to_owned(),
+        password: None,
+        user_id: 1,
+        defaults,
+    };
+    assert_ne!(class_defaults(), 0);
+    assert_eq!(admit(Some(&hello(class_defaults())), &admission), Ok(()));
+    let refusal = admit(Some(&hello(class_defaults() ^ 1)), &admission).unwrap_err();
+    assert!(refusal.to_player.contains("other defaults"), "{refusal:?}");
 }
