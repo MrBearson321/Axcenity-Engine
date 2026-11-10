@@ -4,6 +4,40 @@ What each usability PR changed, how it was checked, and what's left. The plan an
 
 All checks ran locally in the Linux cloud container (GitHub Actions is off on purpose; see the development policy). GPU drawing ran on lavapipe under `xvfb-run`.
 
+## Summary (all PRs)
+
+The plan's U1–U19 shipped in seven PRs, all merged. U20, the dedicated passes, is the only item left. No feature was removed or renamed. Everything rarely used is still one click or one filter away.
+
+| PR | Plan items | Findings fixed | Where |
+|---|---|---|---|
+| #31 | U1–U4 | AN1–AN4 | Animation Studio: Record is unmissable, unkeyed moves are named with Key it (K), the right empty-dope-sheet hint, parameter chips that never break mid-word |
+| #33 | U6–U9 | P1, P2, E2, N1 | Property descriptions on hover, Filter properties, Explorer Insert hover text, the Check Assets caption |
+| #35 | U10, U11 | P3, E1 | ↺ reset to default on changed properties, the Explorer filter, a Humanoid Idle/Walk/Run/Jump/Fall test |
+| #36 | U12–U14 | AN6, AN8 | Linked-clip settings are undo steps, "Try parameters", the Sequencer's keying and preview hints |
+| #38 | U16, U17 | P5, N3 | Edit ▸ Undo History, ClassName row only when filtered |
+| #39 | U18, U19 | N2, Terrain (A7) | Terrain tool names in a wide panel, one ribbon height across tabs |
+| #40 | U15 | P4 | Advanced section for rare properties (Paul's approved list) |
+
+**Workflows that changed.** These are the beginner flows the audit walked through. The per-PR tables below show each one step by step.
+- **Make a door swing** (Animation): the editor now says whether a move will be kept.
+- **Find and undo a change on a part**: Explorer filter, ↺ marks and one-click reset.
+- **Find one setting**: Filter properties, hover descriptions, and rare settings out of the way under Advanced.
+- **Undo several steps**: one click in Undo History.
+
+**Not changed, on purpose.**
+- **AN5:** the keying toolbar's terms already explain themselves on hover. Revisit only if they keep confusing people.
+- **AN7:** the repeated "Linked to …" lines are low-impact noise. Leave them for the Animation pass in U20.
+- **Guided tours, a second workspace system, renaming Roblox-familiar properties:** not planned (see the audit).
+
+**How it was checked.**
+- Each PR added tests for its change and ran `cargo test -p axcenity-editor` in the Linux cloud container. The suite grew from 902 to 916 passing tests.
+- `every_tutorial_sample_opens_and_plays_in_the_editor` failed in every run. It also fails on `main` in this container, and none of these PRs touch it.
+- Clippy (`-D warnings`) and fmt were clean on every PR.
+- UI changes were checked by looking at snapshot PNGs (`AXCENITY_SNAPSHOTS`).
+- Not checked here: Windows, or a real GPU instead of lavapipe. A short pass on Paul's PC over the flows above would cover that.
+
+**Left: U20.** The UI Designer, the Block editor and Model Studio were only *reviewed* in the audit, not inspected screen by screen. Each deserves its own pass with the same method: inspect, snapshot, plan, small PRs.
+
 ## PR 1: Animation Studio (U1–U4)
 
 **Changed**
