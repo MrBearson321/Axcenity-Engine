@@ -80,3 +80,95 @@ fn bench_build_2000_mesh_parts() {
     );
     assert!(assets.take_errors().is_empty());
 }
+
+/// 10,000 parts timed as hosts draw them (with a cache kept across frames),
+/// with no GPU: all still, then with 1% moved each frame. Set
+/// `AXCENITY_RETAINED_DRAW_LIST=off` to time building every frame from
+/// scratch instead of retained draw items.
+#[test]
+#[ignore = "benchmark: run with --release -- --ignored --nocapture"]
+fn bench_build_10000_parts() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let parts: Vec<_> = (0..10_000)
+        .map(|index| {
+            let part = world.create(ClassName::Part).unwrap();
+            world.set_parent(part, Some(workspace)).unwrap();
+            let (x, z) = ((index % 100) as f32, (index / 100) as f32);
+            world
+                .set_property(
+                    part,
+                    "Position",
+                    Value::Vector3(Vector3::new(x * 4.0 - 198.0, 1.0, z * 4.0 - 198.0)),
+                )
+                .unwrap();
+            part
+        })
+        .collect();
+    let assets = Assets::default();
+    let camera = Camera {
+        position: Vec3::new(0.0, 160.0, 260.0),
+        look_at: Vec3::new(0.0, 0.0, 20.0),
+        fov_y_degrees: 70.0,
+    };
+    let mut cache = TerrainCache::new();
+    let poses = Poses::new();
+    let build = |world: &World, cache: &mut TerrainCache| {
+        let start = Instant::now();
+        let list = build_draw_list_posed(world, &assets, camera, &poses, cache);
+        assert_eq!(list.items.len(), 10_000);
+        drop(list);
+        start.elapsed()
+    };
+    for _ in 0..WARM_UP_FRAMES {
+        build(&world, &mut cache);
+    }
+    let fastest_median = |times: &mut Vec<Vec<Duration>>| {
+        times
+            .iter_mut()
+            .map(|batch| {
+                batch.sort();
+                batch[BATCH_FRAMES / 2]
+            })
+            .min()
+            .unwrap()
+    };
+    let mut still: Vec<Vec<Duration>> = (0..BATCHES)
+        .map(|_| {
+            (0..BATCH_FRAMES)
+                .map(|_| build(&world, &mut cache))
+                .collect()
+        })
+        .collect();
+    let mut step = 0_usize;
+    let mut moving: Vec<Vec<Duration>> = (0..BATCHES)
+        .map(|_| {
+            (0..BATCH_FRAMES)
+                .map(|_| {
+                    for _ in 0..100 {
+                        step += 37;
+                        let part = parts[step % parts.len()];
+                        let height = 1.0 + (step % 7) as f32;
+                        world
+                            .set_property(
+                                part,
+                                "Position",
+                                Value::Vector3(Vector3::new(
+                                    (step % 100) as f32 * 4.0 - 198.0,
+                                    height,
+                                    (step % 97) as f32 * 4.0 - 198.0,
+                                )),
+                            )
+                            .unwrap();
+                    }
+                    build(&world, &mut cache)
+                })
+                .collect()
+        })
+        .collect();
+    println!(
+        "bench_build_10000_parts: still {:.3} ms, 1% moving {:.3} ms",
+        fastest_median(&mut still).as_secs_f64() * 1000.0,
+        fastest_median(&mut moving).as_secs_f64() * 1000.0
+    );
+}

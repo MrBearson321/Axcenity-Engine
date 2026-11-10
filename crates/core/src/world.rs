@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -304,8 +305,34 @@ pub struct World {
     /// The same for each service (see [`World::structure_version_of`]). A
     /// service nothing has moved in or out of yet isn't here.
     service_versions: FxHashMap<InstanceId, u64>,
+    /// Goes up each time an Instance moves among its parent's children (see
+    /// [`World::child_order_version`]).
+    child_order_version: u64,
     /// Which Instances in the game have each class and tag.
     index: Index,
+    /// Tells this World from every other (see [`World::identity`]).
+    identity: WorldIdentity,
+}
+
+/// Which [`World`] this is: a number no other World has, a copy included.
+///
+/// `Clone` is written by hand so that copying a World gives the copy a new
+/// number. Revisions are copied with the World, so without this a cache
+/// could take the same revision in two copies for the same contents.
+#[derive(Debug)]
+struct WorldIdentity(u64);
+
+impl WorldIdentity {
+    fn new() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl Clone for WorldIdentity {
+    fn clone(&self) -> Self {
+        Self::new()
+    }
 }
 
 /// The Instances below one Instance, parents before their children: see
@@ -432,7 +459,9 @@ impl World {
             master_volume: 1.0,
             structure_version: 0,
             service_versions: FxHashMap::default(),
+            child_order_version: 0,
             index: Index::default(),
+            identity: WorldIdentity::new(),
         }
     }
 
@@ -805,6 +834,21 @@ impl World {
         self.service_versions.get(&service).copied().unwrap_or(0)
     }
 
+    /// Goes up each time an Instance moves among its parent's children,
+    /// which [`structure_version`](Self::structure_version) doesn't count:
+    /// a reader that keeps the tree's order compares this as well.
+    pub fn child_order_version(&self) -> u64 {
+        self.child_order_version
+    }
+
+    /// A number that no other World has, a copy of this one included, and
+    /// that stays the same as this World is changed or moved. Caches keyed
+    /// by [`Instance::revision`] compare it, since a copy's Instances keep
+    /// their revisions and then go their own way.
+    pub fn identity(&self) -> u64 {
+        self.identity.0
+    }
+
     /// The child of `game` that `id` is, or is inside. `None` for `game`
     /// itself and anything not in the game.
     fn service_of(&self, id: InstanceId) -> Option<InstanceId> {
@@ -982,6 +1026,8 @@ impl World {
                 (true, false) => self.index_subtree(id, false),
                 _ => {}
             }
+        } else if new_parent.is_some() {
+            self.child_order_version += 1;
         }
 
         // Moving among the same parent's children isn't a change of Parent.

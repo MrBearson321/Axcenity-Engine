@@ -68,6 +68,8 @@ pub struct TerrainCache {
     pending: HashSet<ChunkId>,
     /// MeshParts' meshes, materials and skins, kept between frames (I8).
     pub(crate) meshes: crate::mesh_cache::MeshCache,
+    /// Instances' draw items, kept between frames (M4).
+    pub(crate) draw_cache: crate::retained::DrawCache,
 }
 
 impl Default for TerrainCache {
@@ -81,6 +83,7 @@ impl Default for TerrainCache {
             chunk_worker: None,
             pending: HashSet::new(),
             meshes: Default::default(),
+            draw_cache: crate::retained::DrawCache::new(crate::retained::on_by_default()),
         }
     }
 }
@@ -189,6 +192,26 @@ struct WeightsKey {
 impl TerrainCache {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// One that's thrown away after one frame, with nothing kept: there's
+    /// no later frame for retained draw items to help.
+    pub(crate) fn for_one_frame() -> Self {
+        let mut cache = Self::default();
+        cache.set_retained_draw_list(false);
+        cache
+    }
+
+    /// Whether Instances' draw items are kept between frames: `true` from
+    /// [`new`](Self::new) unless the environment variable
+    /// `AXCENITY_RETAINED_DRAW_LIST` is `off` or `0`.
+    pub fn retained_draw_list(&self) -> bool {
+        self.draw_cache.enabled()
+    }
+
+    /// Turns keeping Instances' draw items between frames on or off.
+    pub fn set_retained_draw_list(&mut self, on: bool) {
+        self.draw_cache = crate::retained::DrawCache::new(on);
     }
 
     /// Draws `data` in place of the Terrain `id`'s own (or its own again

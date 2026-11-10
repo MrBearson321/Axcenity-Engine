@@ -303,6 +303,33 @@ Each MeshPart used to make a new mesh for each primitive of its model every fram
 
 The player's `bench_2000_mesh_parts` keeps a `TerrainCache` across frames too now, as the hosts do; it wasn't run for this change (the container has only a software GPU).
 
+## Retained draw items (M4)
+
+Every frame used to walk the Workspace and work out every part's `DrawItem` from its properties, so the draw list cost grew with the world, not with what changed. Now the host's `TerrainCache` keeps a `DrawCache` (`scene/src/retained.rs`) holding each Instance's items between frames, and an Instance's items are made again only when something they were made from changes:
+
+- **The Instance itself**: its `revision`.
+- **What it reads from other Instances**: its SurfaceAppearance and light children, a Decal's part, and the Inventory whose `Equipped` puts a carried Tool in or out of the world. Their revisions are kept with the items. No other ancestor property is read while drawing, so editing a Model or Folder invalidates nothing.
+- **The tree**: a move in or out of the Workspace, or among a parent's children (`World::child_order_version`), lists the entries again in tree order and rechecks each one's children and character membership; the rest keep their items. A frame whose tree didn't change doesn't walk it.
+- **Everything at once**: another World (`World::identity`; a copy keeps its revisions), another or changed `Assets` (`Assets::generation`: loads, hot reloads, material edits, `forget`, the blueprint image) or a change in the bloom glow boost.
+
+Lights, reflection and light probes, ProjectedDecals, joints and animated MeshParts are still worked out each frame, and streaming's hidden set is checked each frame. Terrain, UI and particles are drawn as before. The output is the same `DrawList`; `render` doesn't change.
+
+**It's on by default.** `AXCENITY_RETAINED_DRAW_LIST=off` (or `0`) builds every frame from scratch instead, and `TerrainCache::set_retained_draw_list` does it from code. One-off `build_draw_list` calls (no cache passed) always build from scratch. `scene/src/retained_tests.rs` checks, over randomized worlds and edits, that each retained frame equals a from-scratch build item by item, plus one test per way a kept item could go stale.
+
+Cloud container (4 vCPU Xeon at 2.1 GHz, release build), times in milliseconds. The CPU benches are the fastest batch's median of 5 × 60 frames over three runs each, alternating off and on. S10k is the player's `--bench 300` under Xvfb on lavapipe, two runs each, alternating; its Render and frame numbers are software rasterization, so only the Draw list step says anything about a real machine.
+
+| | From scratch (off) | Retained (on) |
+|---|---|---|
+| `bench_build_10000_parts`, all still | 6.4 to 8.0 | 1.2 to 1.5 |
+| `bench_build_10000_parts`, 1% moving each frame | 6.1 to 7.1 | 1.42 to 1.45 |
+| `bench_build_2000_mesh_parts` | 0.94 to 0.99 | 0.36 |
+| S10k player, Draw list median | 12.9 | 4.3 to 4.4 |
+| S10k player, Draw list 95th percentile | 18.0 | 5.6 to 6.1 |
+| S10k player, frame median (lavapipe) | 128.9 to 129.5 | 118.9 to 120.1 |
+
+- **What's left when nothing changes is copying**: each frame still copies every kept `DrawItem` into the new list (a few hundred bytes and some `Arc` counts each), about 1.2 ms for 10,000 parts. S10k rebuilds about 1,100 Instances a frame (its falling drops, spinners and recolored blocks) on top of that.
+- **Next steps** (report section 5.2, not done yet): put still, anchored parts into spatial `ItemChunk`s so whole cells skip the copy and the renderer's LOD resolve, then remove the from-scratch path.
+
 ## Small dense patches (biome test projects)
 
 Nine 72 × 72-stud projects, about 35,000 painted models each (pebbles, litter, grass tufts) and two trees of 0.7 to 1 million triangles. Measured with `shoot_project` at 2560 × 1440, on the machine above (AMD Radeon RX 9070 XT, Vulkan), release build. The cells are the range over five of the projects and two cameras. Times are milliseconds; two runs of one view can differ by about 1.5 ms of GPU.
