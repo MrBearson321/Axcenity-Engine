@@ -10,6 +10,12 @@ authors.workspace = true
 name = "axcenity-test"
 path = "src/main.rs"
 
+# Runs benchmarks/baselines.json's scenes and compares them with this
+# machine's recorded numbers (docs/benchmarks.md, "Regression check").
+[[bin]]
+name = "axcenity-bench-check"
+path = "src/bench_check.rs"
+
 [dependencies]
 axcenity-assets.workspace = true
 axcenity-character.workspace = true
@@ -18,6 +24,7 @@ axcenity-project.workspace = true
 axcenity-script.workspace = true
 axcenity-sim.workspace = true
 profiling.workspace = true
+serde_json.workspace = true
 axcenity-workspace-hack.workspace = true
 
 [features]

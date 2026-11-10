@@ -17,6 +17,7 @@ mod asset_check;
 mod autocomplete;
 mod behavior_tree;
 mod block_editor;
+mod build_game;
 mod build_tools;
 mod color_palette;
 mod command_palette;
@@ -151,6 +152,10 @@ fn main() -> eframe::Result {
         };
         let cooked = cooking::cook_from_command_line(&PathBuf::from(folder));
         std::process::exit(if cooked { 0 } else { 1 });
+    }
+    if first.as_deref() == Some(build_game::BUILD_FLAG.as_ref()) {
+        let built = build_game::build_from_command_line(args);
+        std::process::exit(if built { 0 } else { 1 });
     }
     let (folder, handoff) = match first {
         Some(flag) if cfg!(debug_assertions) && flag == relaunch::RESUME_FLAG => {

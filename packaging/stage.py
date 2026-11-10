@@ -35,20 +35,17 @@ def stage(args: argparse.Namespace) -> None:
     copy_file(Path(args.editor), out / editor_name, executable=args.os != "windows")
     copy_file(Path(args.player_native), out / player_name, executable=args.os != "windows")
 
-    copy_file(
-        Path(args.player_windows),
-        out / "players" / "windows" / "axcenity-player.exe",
+    players = (
+        ("windows", args.player_windows, "axcenity-player.exe"),
+        ("macos", args.player_macos, "axcenity-player"),
+        ("linux", args.player_linux, "axcenity-player"),
     )
-    copy_file(
-        Path(args.player_macos),
-        out / "players" / "macos" / "axcenity-player",
-        executable=True,
-    )
-    copy_file(
-        Path(args.player_linux),
-        out / "players" / "linux" / "axcenity-player",
-        executable=True,
-    )
+    for os_name, source, name in players:
+        if source is None:
+            # Only a local check leaves one out (`--allow-missing-players`).
+            print(f"no {os_name} player: Build Game > For {os_name} won't work from this package")
+            continue
+        copy_file(Path(source), out / "players" / os_name / name, executable=os_name != "windows")
 
     shutil.copy2(ROOT / "LICENSE", out / "LICENSE")
     shutil.copy2(ROOT / "NOTICE", out / "NOTICE")
@@ -63,12 +60,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--os", required=True, choices=("windows", "macos", "linux"))
     p.add_argument("--editor", required=True, help="path to the host editor binary")
     p.add_argument("--player-native", required=True, help="path to the host player binary")
-    p.add_argument("--player-windows", required=True)
-    p.add_argument("--player-macos", required=True)
-    p.add_argument("--player-linux", required=True)
+    p.add_argument("--player-windows")
+    p.add_argument("--player-macos")
+    p.add_argument("--player-linux")
     p.add_argument("--out", required=True, help="directory to write the payload into")
+    p.add_argument(
+        "--allow-missing-players",
+        action="store_true",
+        help="leave out other-OS players that weren't given (local checks; releases ship all three)",
+    )
     return p
 
 
 if __name__ == "__main__":
-    stage(build_parser().parse_args())
+    parser = build_parser()
+    arguments = parser.parse_args()
+    if not arguments.allow_missing_players:
+        for flag in ("player_windows", "player_macos", "player_linux"):
+            if getattr(arguments, flag) is None:
+                parser.error(f"--{flag.replace('_', '-')} is required (or --allow-missing-players)")
+    stage(arguments)

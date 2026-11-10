@@ -146,6 +146,10 @@ regex = "1"
 # Reads zip archives (ambientCG texture downloads). Deflate only: that is
 # the method those archives use. MIT.
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Compresses each file in a built game (`.axgame`, roadmap M9). Builds the
+# zstd C library with `cc`, on every desktop OS. MIT (the crate) and BSD
+# (zstd).
+zstd = { version = "0.13", default-features = false }
 # HTTPS for the editor's texture catalog. rustls so no system TLS library
 # is required. MIT OR Apache-2.0.
 ureq = { version = "3", default-features = false, features = ["rustls"] }

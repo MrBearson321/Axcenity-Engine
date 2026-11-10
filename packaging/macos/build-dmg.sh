@@ -36,8 +36,10 @@ sed -e "s/__VERSION__/${VERSION}/g" -e "s/__SHORT_VERSION__/${SHORT_VERSION}/g" 
 
 cp -R "$STAGE/." "$MACOS/"
 cp "$STAGE/LICENSE" "$STAGE/NOTICE" "$STAGE/INSTALL.txt" "$RES/"
-chmod +x "$MACOS/axcenity-editor" "$MACOS/axcenity-player" \
-  "$MACOS/players/macos/axcenity-player" "$MACOS/players/linux/axcenity-player"
+# Other-OS players a local stage left out aren't there.
+for file in axcenity-editor axcenity-player players/macos/axcenity-player players/linux/axcenity-player; do
+  if [ -e "$MACOS/$file" ]; then chmod +x "$MACOS/$file"; fi
+done
 
 IDENTITY="-"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID Application"; then
