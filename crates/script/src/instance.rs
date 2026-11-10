@@ -5,8 +5,7 @@
 use axcenity_audio::SoundAction;
 use axcenity_core::{ClassName, EnumItem, INSTANCE_EVENTS, InstanceId, Parameter, Value, World};
 use mlua::{
-    AppDataRef, AppDataRefMut, FromLua, Function, IntoLua, Lua, MetaMethod, UserData,
-    UserDataMethods,
+    AppDataRef, AppDataRefMut, FromLua, Function, IntoLua, Lua, MetaMethod, Table, UserDataMethods,
 };
 
 use crate::camera::LuaCamera;
@@ -66,7 +65,52 @@ impl FromLua for LuaInstance {
     }
 }
 
-impl UserData for LuaInstance {
+/// The registry key of each VM's Instance cache (see `IntoLua` below).
+const INSTANCE_CACHE: &str = "axcenity.instances";
+
+impl IntoLua for LuaInstance {
+    /// One Instance is one userdata per VM, so scripts can use Instances as
+    /// table keys (`data[player]`) and compare them with `rawequal`, as in
+    /// Roblox (roadmap I2). The cache is weak-valued: once no script holds
+    /// an Instance's userdata, Lua collects it and the next read makes a new
+    /// one, which nothing can tell apart. It is keyed by the arena index
+    /// alone, because a Luau number can't hold all 64 bits of an ID; a newer
+    /// Instance in a reused slot replaces the entry, and the old userdata
+    /// keeps its own (stale) ID.
+    fn into_lua(self, lua: &Lua) -> mlua::Result<mlua::Value> {
+        let cache = instance_cache(lua)?;
+        let index = self.0.to_bits() as u32;
+        if let mlua::Value::UserData(data) = cache.raw_get::<mlua::Value>(index)?
+            && data
+                .borrow::<LuaInstance>()
+                .is_ok_and(|cached| *cached == self)
+        {
+            return Ok(mlua::Value::UserData(data));
+        }
+        let data = lua.create_any_userdata(self)?;
+        cache.raw_set(index, &data)?;
+        Ok(mlua::Value::UserData(data))
+    }
+}
+
+/// This VM's Instance cache, made on first use together with the Instance
+/// metatable, so every VM (server, client, edit, plugins) gets both.
+fn instance_cache(lua: &Lua) -> mlua::Result<Table> {
+    if let Some(cache) = lua.named_registry_value::<Option<Table>>(INSTANCE_CACHE)? {
+        return Ok(cache);
+    }
+    lua.register_userdata_type::<LuaInstance>(LuaInstance::add_methods)?;
+    let cache = lua.create_table()?;
+    let weak_values = lua.create_table()?;
+    weak_values.raw_set("__mode", "v")?;
+    cache.set_metatable(Some(weak_values))?;
+    lua.set_named_registry_value(INSTANCE_CACHE, &cache)?;
+    Ok(cache)
+}
+
+// Not `impl UserData`: that would bring mlua's `IntoLua`, which makes a new
+// userdata every time. The methods are registered in `instance_cache`.
+impl LuaInstance {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         // Methods are looked up before `__index` below, so they win over
         // properties and children with the same name.
