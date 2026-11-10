@@ -64,6 +64,8 @@ pub(crate) fn with_world<R>(lua: &Lua, world: &mut World, f: impl FnOnce() -> R)
     }
 
     install(lua);
+    // A script may connect to anything from here on.
+    world.watch_destroyed();
     let was_lent = {
         let mut slot = lua
             .app_data_mut::<LentWorld>()

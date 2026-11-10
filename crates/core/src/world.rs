@@ -275,6 +275,9 @@ pub struct World {
     sound_service: InstanceId,
     text_chat_service: InstanceId,
     changes: ChangeLog,
+    /// What was destroyed since the last [`World::take_destroyed`], once a
+    /// script runtime asked (see [`World::watch_destroyed`]).
+    destroyed: Option<Vec<InstanceId>>,
     /// Each Animator's live state (see [`AnimatorState`]), made the first
     /// time something asks for it.
     animators: FxHashMap<InstanceId, AnimatorState>,
@@ -417,6 +420,7 @@ impl World {
             sound_service,
             text_chat_service,
             changes: ChangeLog::default(),
+            destroyed: None,
             animators: FxHashMap::default(),
             property_animations: FxHashMap::default(),
             animation_tracks: FxHashMap::default(),
@@ -610,6 +614,32 @@ impl World {
     pub fn stop_recording_changes(&mut self) {
         self.changes.recording = false;
         self.changes.changes.clear();
+    }
+
+    /// Starts noting what's destroyed, for [`take_destroyed`](Self::take_destroyed).
+    /// Off until then, so a world that no script runs in (the one the editor
+    /// edits) doesn't collect IDs nobody reads. Calling it again does nothing.
+    pub fn watch_destroyed(&mut self) {
+        self.destroyed.get_or_insert_default();
+    }
+
+    pub fn is_watching_destroyed(&self) -> bool {
+        self.destroyed.is_some()
+    }
+
+    pub fn stop_watching_destroyed(&mut self) {
+        self.destroyed = None;
+    }
+
+    /// Removes and returns every Instance destroyed since the last call
+    /// (each one, not only the top of a destroyed tree). A destroyed Instance
+    /// isn't in the change log, so this is how the script runtime can drop
+    /// its handlers without looking at every handler.
+    pub fn take_destroyed(&mut self) -> Vec<InstanceId> {
+        self.destroyed
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     /// The number the next change will get. Something that starts listening
@@ -1090,6 +1120,11 @@ impl World {
         }
 
         self.set_parent(id, None)?;
+        if let Some(mut destroyed) = self.destroyed.take() {
+            destroyed.push(id);
+            destroyed.extend(self.descendants(id));
+            self.destroyed = Some(destroyed);
+        }
         for descendant in self.descendants(id) {
             self.instances.remove(descendant.0);
             self.animators.remove(&descendant);
