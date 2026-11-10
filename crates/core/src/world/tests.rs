@@ -924,6 +924,46 @@ fn a_replica_indexes_what_it_follows() {
 }
 
 #[test]
+fn the_workspace_remembers_what_moved() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let start = world.structure_version_of(workspace);
+    assert_eq!(world.workspace_moves_since(start), Some(Vec::new()));
+
+    let model = world.create(ClassName::Model).unwrap();
+    let inside = part_in(&mut world, model, "Inside");
+    world.set_parent(model, Some(workspace)).unwrap();
+    let storage = world.replicated_storage();
+    let elsewhere = part_in(&mut world, storage, "Elsewhere");
+    assert_eq!(world.workspace_moves_since(start), Some(vec![model]));
+
+    // Leaving the Workspace counts; moving outside it doesn't.
+    world.set_parent(inside, Some(storage)).unwrap();
+    world.set_parent(elsewhere, Some(model)).unwrap();
+    let middle = world.structure_version_of(workspace);
+    assert_eq!(
+        world.workspace_moves_since(start),
+        Some(vec![model, inside, elsewhere]),
+    );
+    world.destroy(model).unwrap();
+    assert_eq!(world.workspace_moves_since(middle), Some(vec![model]));
+
+    // A version the world never had is no help.
+    assert_eq!(world.workspace_moves_since(middle + 100), None);
+    // Nor is one too long ago, or a change to everything.
+    let mut flood = World::new();
+    let flood_start = flood.structure_version_of(flood.workspace());
+    for _ in 0..=WORKSPACE_MOVES_KEPT {
+        let workspace = flood.workspace();
+        part_in(&mut flood, workspace, "Part");
+    }
+    assert_eq!(flood.workspace_moves_since(flood_start), None);
+    let version = world.structure_version_of(workspace);
+    world.set_collision_groups(CollisionGroups::default());
+    assert_eq!(world.workspace_moves_since(version), None);
+}
+
+#[test]
 fn a_service_version_changes_only_with_its_own_tree() {
     let mut world = World::new();
     let (workspace, storage) = (world.workspace(), world.replicated_storage());

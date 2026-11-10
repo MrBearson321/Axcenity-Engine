@@ -5,7 +5,7 @@
 //! [`InstanceId`]s of its parent and children, and all access goes through
 //! [`World`], which owns every Instance in an [`Arena`].
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -247,6 +247,11 @@ pub struct RecordedChange {
     pub change: Change,
 }
 
+/// How many of its last moves the Workspace remembers for
+/// [`World::workspace_moves_since`]: more in one go, and reading everything
+/// again costs about the same.
+pub const WORKSPACE_MOVES_KEPT: usize = 4096;
+
 /// The changes since the last [`World::take_changes`]. Off until
 /// [`World::record_changes`], so a world that no script runs in (the one
 /// the editor edits) doesn't collect changes nobody reads.
@@ -301,6 +306,9 @@ pub struct World {
     /// The same for each service (see [`World::structure_version_of`]). A
     /// service nothing has moved in or out of yet isn't here.
     service_versions: FxHashMap<InstanceId, u64>,
+    /// What each of the Workspace's last structure versions was for (see
+    /// [`World::workspace_moves_since`]).
+    workspace_moves: VecDeque<Option<InstanceId>>,
     /// Which Instances in the game have each class and tag.
     index: Index,
 }
@@ -427,6 +435,7 @@ impl World {
             collision_groups: CollisionGroups::default(),
             master_volume: 1.0,
             structure_version: 0,
+            workspace_moves: VecDeque::new(),
             service_versions: FxHashMap::default(),
             index: Index::default(),
         }
@@ -500,6 +509,7 @@ impl World {
     fn collision_groups_changed(&mut self) {
         self.structure_version += 1;
         *self.service_versions.entry(self.workspace).or_default() += 1;
+        self.note_workspace_move(None);
     }
 
     /// `key`'s value in the active language, if the string table has one.
@@ -775,6 +785,35 @@ impl World {
         self.service_versions.get(&service).copied().unwrap_or(0)
     }
 
+    /// What moved in or out of a parent inside the Workspace (the top of
+    /// each move, oldest first) since [`structure_version_of`] the Workspace
+    /// was `version`, so a reader that keeps a copy of the Workspace's parts
+    /// can catch up without reading all of them. An Instance that's gone is
+    /// listed too, if it was the top of what was destroyed; what was inside
+    /// it isn't.
+    ///
+    /// `None` when the reader has to start over: `version` is older than
+    /// the last [`WORKSPACE_MOVES_KEPT`] moves, it's not a version this
+    /// world had, or the project's collision groups changed.
+    ///
+    /// [`structure_version_of`]: Self::structure_version_of
+    pub fn workspace_moves_since(&self, version: u64) -> Option<Vec<InstanceId>> {
+        let now = self.structure_version_of(self.workspace);
+        let count = usize::try_from(now.checked_sub(version)?).ok()?;
+        let first = self.workspace_moves.len().checked_sub(count)?;
+        self.workspace_moves.iter().skip(first).copied().collect()
+    }
+
+    /// Notes a change of the Workspace's structure version, for
+    /// [`workspace_moves_since`](Self::workspace_moves_since): what moved, or
+    /// `None` for a change that isn't one Instance's place.
+    fn note_workspace_move(&mut self, moved: Option<InstanceId>) {
+        if self.workspace_moves.len() == WORKSPACE_MOVES_KEPT {
+            self.workspace_moves.pop_front();
+        }
+        self.workspace_moves.push_back(moved);
+    }
+
     /// The child of `game` that `id` is, or is inside. `None` for `game`
     /// itself and anything not in the game.
     fn service_of(&self, id: InstanceId) -> Option<InstanceId> {
@@ -946,6 +985,9 @@ impl World {
             self.service_changed(old_top);
             if new_top != old_top {
                 self.service_changed(new_top);
+            }
+            if [old_top, new_top].contains(&Some(self.workspace)) {
+                self.note_workspace_move(Some(id));
             }
             match (old_top.is_some(), into_game) {
                 (false, true) => self.index_subtree(id, true),
