@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::cooked::{self, SourceStamp, content_hash, plain_name};
+use crate::cooked::{self, SourceStamp};
 
 /// One kind of cached file.
 pub(super) struct Cache {
@@ -111,11 +111,7 @@ impl Cache {
 
 /// The start of every cached file of the model file `relative`.
 fn prefix(relative: &str) -> String {
-    let relative = relative.replace('\\', "/");
-    let name = relative.rsplit('/').next().unwrap_or_default();
-    let name: String = plain_name(name).chars().take(64).collect();
-    let hash = content_hash(relative.to_lowercase().as_bytes());
-    format!("{name}-{hash:016x}-")
+    format!("{}-", cooked::cache_stem(relative))
 }
 
 #[cfg(test)]

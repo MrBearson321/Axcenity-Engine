@@ -40,6 +40,7 @@ mod light_probes;
 mod loading;
 mod material;
 mod model;
+mod orphaned;
 mod probe;
 mod reload;
 mod sky_image;
@@ -96,6 +97,7 @@ pub use model::{
     cached_meshes, cooked_models, list_objects, load_model, load_models, load_takes, lod_level,
     tangents, texture_roles,
 };
+pub use orphaned::remove_orphaned_copies;
 pub use probe::{
     PROBE_SUFFIX, PROBES_FOLDER, ProbeImage, decode_probe, encode_probe, is_probe_file, probe_path,
     read_probe, write_probe,
