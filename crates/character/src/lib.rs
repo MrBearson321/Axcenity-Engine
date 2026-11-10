@@ -742,14 +742,7 @@ pub fn character_parts(world: &World) -> Vec<InstanceId> {
 }
 
 fn controllers(world: &World) -> Vec<InstanceId> {
-    world
-        .descendants_iter(world.workspace())
-        .filter(|&id| {
-            world
-                .get(id)
-                .is_some_and(|instance| instance.class().is_character_controller())
-        })
-        .collect()
+    world.all_below(world.workspace(), ClassName::is_character_controller)
 }
 
 fn is_driver(world: &World, id: InstanceId) -> bool {

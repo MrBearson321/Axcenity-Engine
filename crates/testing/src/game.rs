@@ -1,23 +1,20 @@
 //! The test world: a copy of a game's level with both sides running, and
-//! no window or audio. Frames run steps 1 to 4 of the frame order
-//! (`docs/architecture/frame-loop.md`) at a fixed 60 a second, as the
-//! player does, then the render step's scripts and the game camera; there
-//! is nothing to draw.
+//! no window or audio. Frames run the test runner's steps of the shared
+//! schedule (`axcenity_sim`, `docs/architecture/frame-loop.md`) at a fixed
+//! 60 a second; there is nothing to draw.
 
 use std::path::PathBuf;
 
-use axcenity_anim::Animators;
 use axcenity_assets::Assets;
-use axcenity_character::{Controllers, MoveInput};
+use axcenity_character::MoveInput;
 use axcenity_core::bench::Laps;
 use axcenity_core::input::{Input, InputEvent, InputKind, InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, KeyCode, UserInputType, Value, World};
-use axcenity_nav::Agents;
-use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
 use axcenity_script::{
     CameraState, OutputKind, OutputLine, ScriptRuntime, TestReport, TestRequest,
 };
+use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
 /// Each frame is this long, so a run is the same on every computer.
 pub const FRAME_SECONDS: f64 = 1.0 / 60.0;
@@ -26,13 +23,9 @@ const VIEW_SIZE: (f32, f32) = (1280.0, 720.0);
 
 /// One level of a game, as a test sees it.
 pub struct TestGame {
-    pub world: World,
-    pub scripts: ScriptRuntime,
-    physics: Physics,
-    characters: Controllers,
-    agents: Agents,
-    animators: Animators,
-    assets: Assets,
+    pub sim: Sim,
+    /// The test runner's frame.
+    schedule: Schedule,
     /// What the test holds down, for the controllers.
     input: InputState,
     /// Input since the last frame, for LocalScripts.
@@ -45,6 +38,8 @@ pub struct TestGame {
     pub seconds: f64,
     /// The last frame's steps' times, for benchmarks (roadmap I1).
     pub laps: Laps,
+    #[cfg(debug_assertions)]
+    frames_since_index_check: u32,
 }
 
 /// What [`TestGame::start`] needs of a project's level.
@@ -68,33 +63,34 @@ impl TestGame {
     pub fn start(setup: GameSetup) -> Self {
         let assets = Assets::new(setup.folder);
         let mut game = TestGame {
-            world: setup.world,
-            scripts: ScriptRuntime::new(),
-            physics: Physics::with_assets(assets.clone()),
-            characters: Controllers::default(),
-            agents: Agents::default(),
-            animators: Animators::with_ground(axcenity_character::foot_ground),
-            assets,
+            sim: Sim::new(setup.world, ScriptRuntime::new(), assets),
+            schedule: Schedule::for_host(Hosts::TEST),
             input: InputState::default(),
             events: Vec::new(),
             output: Vec::new(),
             problem: None,
             seconds: 0.0,
             laps: Laps::start(),
+            #[cfg(debug_assertions)]
+            frames_since_index_check: 0,
         };
-        if let Err(err) = axcenity_project::load_starter_character(setup.folder, &mut game.world) {
+        if let Err(err) =
+            axcenity_project::load_starter_character(setup.folder, &mut game.sim.world)
+        {
             game.output.push(format!("warning: {err}"));
         }
-        game.scripts.set_assets(game.assets.clone());
-        game.scripts.set_save_folder(Some(setup.save_folder));
-        game.scripts.set_input_map(setup.input_map.clone());
+        game.sim.scripts.set_assets(game.sim.assets.clone());
+        game.sim.scripts.set_save_folder(Some(setup.save_folder));
+        game.sim.scripts.set_input_map(setup.input_map.clone());
         let (start, current, worlds) = setup.levels;
-        game.scripts.set_levels(start, current, worlds);
+        game.sim.scripts.set_levels(start, current, worlds);
         if setup.start_scripts {
-            game.animators.update(&mut game.world, &game.assets, 0.0);
+            game.sim
+                .animators
+                .update(&mut game.sim.world, &game.sim.assets, 0.0);
             for script in setup.scripts {
-                game.scripts.start_script(
-                    &mut game.world,
+                game.sim.scripts.start_script(
+                    &mut game.sim.world,
                     script.instance,
                     &script.path,
                     &script.source,
@@ -110,21 +106,23 @@ impl TestGame {
     /// from 1, or `None` to only collect them.
     pub fn start_spec(&mut self, runner: &str, path: &str, source: &str, selected: Option<usize>) {
         let script = self.spec_script(path);
-        self.scripts
-            .start_spec(&mut self.world, script, runner, path, source, selected);
+        self.sim
+            .scripts
+            .start_spec(&mut self.sim.world, script, runner, path, source, selected);
         self.collect_output();
     }
 
     /// The Script the spec runs as, named after its file.
     fn spec_script(&mut self, path: &str) -> InstanceId {
-        let parent = self.world.service(ClassName::ServerScriptService);
+        let parent = self.sim.world.service(ClassName::ServerScriptService);
         let script = self
+            .sim
             .world
             .create(ClassName::Script)
             .expect("a Script isn't a service");
         let name = path.rsplit('/').next().unwrap_or(path);
-        let _ = self.world.set_name(script, name);
-        let _ = self.world.set_parent(script, parent);
+        let _ = self.sim.world.set_name(script, name);
+        let _ = self.sim.world.set_parent(script, parent);
         script
     }
 
@@ -134,122 +132,41 @@ impl TestGame {
         profiling::scope!("frame");
         self.laps = Laps::start();
         let seconds = FRAME_SECONDS;
-        for request in self.scripts.take_test_requests() {
+        for request in self.sim.scripts.take_test_requests() {
             self.apply(request);
         }
         self.seconds += seconds;
 
-        // 1. Input: the controllers, then Humanoids, players, agents, then
-        //    the input for LocalScripts, ProximityPrompts and Tools.
-        let map = self.scripts.input_map();
-        let motion = if self.scripts.movement_locked(&self.world) {
-            MoveInput::default()
-        } else {
-            MoveInput::from_actions(&map, &self.input, [0.0, 0.0], 0.0, seconds as f32)
-        };
-        self.characters
-            .step(&mut self.world, &self.assets, motion, seconds as f32);
-        let seats: Vec<_> = self
-            .characters
-            .take_seat_changes()
-            .into_iter()
-            .map(|change| (change.controller, change.seated, change.seat))
-            .collect();
-        if !seats.is_empty() {
-            self.scripts.fire_seated(&mut self.world, &seats);
-        }
-        let landings = self.characters.take_landings();
-        if !landings.is_empty() {
-            self.scripts.fire_landed(&mut self.world, &landings);
-        }
-        self.scripts
-            .step_humanoids(&mut self.world, &self.characters, seconds);
-        self.scripts.step_players(&mut self.world, seconds);
-        self.laps.lap("Characters");
-        self.agents
-            .step(&mut self.world, &self.assets, seconds as f32);
-        for warning in self.agents.take_warnings() {
-            self.output.push(format!("warning: {warning}"));
-        }
-        self.laps.lap("Agents");
-        for sensed in self.agents.take_sensed() {
-            let sense = sensed.sense.as_str().to_owned();
-            self.scripts.fire_instance_event(
-                &mut self.world,
-                sensed.agent,
-                "PlayerSensed",
-                &[sense],
-            );
-        }
-        self.scripts.set_viewport_size(VIEW_SIZE.0, VIEW_SIZE.1);
-        self.scripts.set_camera(self.camera());
-        let events = std::mem::take(&mut self.events);
-        self.input.end_frame();
-        self.scripts.input_events(&mut self.world, &events);
-        self.scripts.step_prompts(&mut self.world, seconds);
-        self.scripts.step_tools(&mut self.world);
-        self.scripts.step_abilities(&mut self.world, seconds);
-        self.laps.lap("Input");
-
-        // 2. Tweens, waiting scripts (the spec too), then `Stepped`.
-        self.scripts.step(&mut self.world, seconds);
-        self.scripts.stepped(&mut self.world, seconds);
-        self.laps.lap("Scripts");
-
-        // 3. Physics, with the characters and agents held kinematic.
-        self.characters.keep_kinematic(&mut self.world);
-        self.agents.keep_kinematic(&mut self.world);
-        self.scripts
-            .apply_shatters(&mut self.world, &mut self.physics);
-        self.physics.step(&mut self.world, seconds);
-        self.laps.lap("Physics");
-
-        // 4. Touches, breaks, health, `Heartbeat`, then Animators and Tools.
-        //    There's no audio: sounds asked for are let go.
-        let touches = self.physics.take_touches();
-        self.scripts.fire_touched(&mut self.world, &touches);
-        let ends = self.physics.take_touch_ends();
-        self.scripts.fire_touch_ended(&mut self.world, &ends);
-        self.scripts.fire_breaks(&mut self.world, &mut self.physics);
-        self.scripts.step_health(&mut self.world, seconds);
-        self.scripts.heartbeat(&mut self.world, seconds);
-        self.laps.lap("Heartbeat");
-        self.scripts.take_sound_actions();
-        self.scripts.take_particle_emits();
-        let events = self
-            .animators
-            .update(&mut self.world, &self.assets, seconds);
-        for event in events {
-            let (animator, name, args) = event.script_event();
-            self.scripts
-                .fire_instance_event(&mut self.world, animator, name, &args);
-        }
-        for error in self.animators.take_errors() {
-            self.output.push(format!("error: {error}"));
-        }
-        self.scripts
-            .place_tools(&mut self.world, self.animators.poses());
-        self.scripts.take_level_loads();
-        self.scripts.take_loading_screen_removed();
-        self.laps.lap("Animation");
-
-        // Before a frame would be drawn: the render step, then the camera.
-        self.scripts.render_step(&mut self.world, seconds);
-        self.scripts.take_camera_move();
-        self.scripts.step_camera(&self.world, seconds);
+        // Each step's place and what it does: `axcenity_sim`. Taken out for
+        // the frame so the steps can have the whole game.
+        let schedule = std::mem::take(&mut self.schedule);
+        let mut laps = std::mem::take(&mut self.laps);
+        schedule.run(&mut FrameCtx::new(seconds, Hosts::TEST, self), &mut laps);
+        self.schedule = schedule;
+        self.laps = laps;
         self.collect_output();
         self.laps.lap("RenderStep");
+        // In debug builds, every game test also checks the class and tag
+        // index against the tree (it walks everything, so not every frame).
+        #[cfg(debug_assertions)]
+        {
+            self.frames_since_index_check += 1;
+            if self.frames_since_index_check == 60 {
+                self.frames_since_index_check = 0;
+                self.sim.world.check_index().expect("index out of date");
+            }
+        }
         profiling::finish_frame!();
     }
 
     /// What the spec told the host since the last call.
     pub fn take_reports(&mut self) -> Vec<TestReport> {
-        self.scripts.take_test_reports()
+        self.sim.scripts.take_test_reports()
     }
 
     /// The camera LocalScripts see: the character's when one has a body.
     fn camera(&self) -> CameraState {
-        match self.characters.view(&self.world) {
+        match self.sim.characters.view(&self.sim.world) {
             Some(view) => CameraState {
                 position: view.position,
                 orientation: view.orientation,
@@ -264,7 +181,7 @@ impl TestGame {
     fn apply(&mut self, request: TestRequest) {
         match request {
             TestRequest::Press { input, down } => {
-                match input_kind(&self.scripts.input_map(), &input, down) {
+                match input_kind(&self.sim.scripts.input_map(), &input, down) {
                     Some(kind) => {
                         let event = InputEvent::new(kind);
                         self.input.follow(&event);
@@ -276,18 +193,24 @@ impl TestGame {
                 }
             }
             TestRequest::Click(button) => {
-                self.scripts.activate_ui_button(&mut self.world, button);
+                self.sim
+                    .scripts
+                    .activate_ui_button(&mut self.sim.world, button);
             }
             TestRequest::Type { text_box, text } => {
                 let typed = self
+                    .sim
                     .world
                     .get(text_box)
                     .is_some_and(|instance| instance.class() == ClassName::TextBox);
                 if typed {
                     let _ = self
+                        .sim
                         .world
                         .set_property(text_box, "Text", Value::String(text));
-                    self.scripts.release_text_box(&mut self.world, text_box);
+                    self.sim
+                        .scripts
+                        .release_text_box(&mut self.sim.world, text_box);
                 } else {
                     self.fail("Test.type needs a TextBox".to_owned());
                 }
@@ -300,8 +223,42 @@ impl TestGame {
     }
 
     fn collect_output(&mut self) {
-        let lines = self.scripts.take_output();
+        let lines = self.sim.scripts.take_output();
         self.output.extend(lines.iter().map(output_text));
+    }
+}
+
+impl HostIo for TestGame {
+    fn sim(&mut self) -> &mut Sim {
+        &mut self.sim
+    }
+
+    /// The input map's actions in what the test holds down, or none while a
+    /// dialogue runs or a Sequence locks input.
+    fn character_motion(&mut self, seconds: f32) -> MoveInput {
+        let map = self.sim.scripts.input_map();
+        if self.sim.scripts.movement_locked(&self.sim.world) {
+            MoveInput::default()
+        } else {
+            MoveInput::from_actions(&map, &self.input, [0.0, 0.0], 0.0, seconds)
+        }
+    }
+
+    fn agent_warning(&mut self, warning: String) {
+        self.output.push(format!("warning: {warning}"));
+    }
+
+    fn frame_input(&mut self, _seconds: f64) -> Vec<InputEvent> {
+        self.sim.scripts.set_viewport_size(VIEW_SIZE.0, VIEW_SIZE.1);
+        let camera = self.camera();
+        self.sim.scripts.set_camera(camera);
+        let events = std::mem::take(&mut self.events);
+        self.input.end_frame();
+        events
+    }
+
+    fn animator_error(&mut self, error: String) {
+        self.output.push(format!("error: {error}"));
     }
 }
 

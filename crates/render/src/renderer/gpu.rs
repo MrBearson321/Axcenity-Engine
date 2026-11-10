@@ -240,6 +240,9 @@ pub(super) fn create_pipeline_for(
         }),
         multisample: wgpu::MultisampleState {
             count: samples,
+            // The depth fill's alpha is how much of the pixel it covers
+            // (`fs_depth_coverage`).
+            alpha_to_coverage_enabled: depth == DepthUse::Fill && samples > 1,
             ..Default::default()
         },
         fragment: Some(wgpu::FragmentState {

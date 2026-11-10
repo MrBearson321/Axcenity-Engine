@@ -921,3 +921,28 @@ fn far_parts_sleep_while_streaming_and_wake_when_something_comes_near() {
     }
     assert!(height(&world, near) < before);
 }
+
+#[test]
+fn a_weld_in_another_service_still_joins_and_parts_its_parts() {
+    let mut world = World::new();
+    let a = part(&mut world, Vector3::new(0.0, 5.0, 0.0), false);
+    let b = part(&mut world, Vector3::new(1.0, 5.0, 0.0), false);
+    let mut physics = Physics::new();
+    physics.step(&mut world, STEP_SECONDS);
+    assert_ne!(physics.parts[&a].body, physics.parts[&b].body);
+
+    // Nothing in the Workspace changes parent, so only `watched` can notice.
+    let weld = world.create(ClassName::WeldConstraint).unwrap();
+    let storage = world.replicated_storage();
+    world.set_parent(weld, Some(storage)).unwrap();
+    set(&mut world, weld, "Part0", Value::Instance(Some(a)));
+    set(&mut world, weld, "Part1", Value::Instance(Some(b)));
+    let workspace = world.structure_version_of(world.workspace());
+    physics.step(&mut world, STEP_SECONDS);
+    assert_eq!(world.structure_version_of(world.workspace()), workspace);
+    assert_eq!(physics.parts[&a].body, physics.parts[&b].body);
+
+    world.destroy(weld).unwrap();
+    physics.step(&mut world, STEP_SECONDS);
+    assert_ne!(physics.parts[&a].body, physics.parts[&b].body);
+}

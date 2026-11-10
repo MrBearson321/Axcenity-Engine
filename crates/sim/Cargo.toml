@@ -1,0 +1,21 @@
+[package]
+name = "axcenity-sim"
+description = "The Axcenity Engine's frame: the simulation state and the one data-driven step order every host runs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-anim.workspace = true
+axcenity-assets.workspace = true
+axcenity-character.workspace = true
+axcenity-core.workspace = true
+axcenity-nav.workspace = true
+axcenity-physics.workspace = true
+axcenity-script.workspace = true
+profiling.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true

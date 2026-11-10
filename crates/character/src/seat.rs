@@ -279,10 +279,7 @@ fn flag(world: &World, id: InstanceId, name: &str) -> bool {
 
 /// Every Seat in the Workspace.
 fn seats(world: &World) -> Vec<InstanceId> {
-    world
-        .descendants_iter(world.workspace())
-        .filter(|&id| world.get(id).is_some_and(|i| i.class().is_seat()))
-        .collect()
+    world.all_below(world.workspace(), ClassName::is_seat)
 }
 
 fn seat_in_workspace(world: &World, seat: InstanceId) -> bool {

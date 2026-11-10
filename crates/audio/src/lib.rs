@@ -388,10 +388,10 @@ fn emitter_position(world: &World, sound: InstanceId, fallback: [f32; 3]) -> [f3
 
 /// Every Sound in the game, wherever it is.
 fn sounds(world: &World) -> impl Iterator<Item = (InstanceId, &Instance)> {
+    // By ID: nothing about a Sound depends on the others'.
     world
-        .descendants_iter(world.root())
+        .all_of(ClassName::Sound)
         .filter_map(|id| Some((id, world.get(id)?)))
-        .filter(|(_, instance)| instance.class() == ClassName::Sound)
 }
 
 /// A sound that's playing or paused, with the settings it was last given.

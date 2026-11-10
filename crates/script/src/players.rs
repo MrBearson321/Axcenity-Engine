@@ -178,10 +178,9 @@ pub fn set_team(world: &mut World, player: InstanceId, team: Option<InstanceId>)
 /// Neutral ones.
 pub fn spawn_locations(world: &World, player: InstanceId) -> Vec<InstanceId> {
     let enabled: Vec<InstanceId> = world
-        .descendants_iter(world.workspace())
-        .filter(|&id| {
-            is_class(world, id, ClassName::SpawnLocation) && flag(world, id, "Enabled", true)
-        })
+        .all_below(world.workspace(), |class| class == ClassName::SpawnLocation)
+        .into_iter()
+        .filter(|&id| flag(world, id, "Enabled", true))
         .collect();
     let neutral = |id: InstanceId| flag(world, id, "Neutral", true);
     if let Some(team_color) =

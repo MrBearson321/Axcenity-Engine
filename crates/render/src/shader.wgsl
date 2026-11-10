@@ -478,18 +478,39 @@ fn fs_prefilled(in: VertexOut, @builtin(front_facing) front: bool) -> @location(
     return lit_pixel(in, facing, shaded, occlusion_texel, specular_texel);
 }
 
-// Draws a cut-out surface's depth before the scene is lit. What it cuts
-// out must match `standard_surface` and `fs_main`.
-@fragment
-fn fs_depth_only(in: VertexOut) -> @location(0) vec4<f32> {
+// A cut-out surface's opacity at this pixel, as `standard_surface` and
+// `fs_main` work it out.
+fn cut_out_opacity(in: VertexOut) -> f32 {
     let texel = textureSample(base_color_texture, material_sampler, in.uv);
     let opacity_texel = textureSample(opacity_texture, material_sampler, in.uv);
     let opacity_map = map_value(opacity_texel, maps.opacity, maps.invert.w);
-    let opacity = in.base_color.a * mix(texel.a, opacity_map, maps.settings.w);
-    if opacity < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
+    return in.base_color.a * mix(texel.a, opacity_map, maps.settings.w);
+}
+
+// Draws a cut-out surface's depth before the scene is lit, with one sample
+// per pixel. What it cuts out must match `standard_surface` and `fs_main`.
+@fragment
+fn fs_depth_only(in: VertexOut) -> @location(0) vec4<f32> {
+    if cut_out_opacity(in) < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
         discard;
     }
     return vec4<f32>(0.0);
+}
+
+// `fs_depth_only` when multisampled. MSAA smooths the edges of triangles,
+// not the holes a texture cuts in them, so the returned alpha says how much
+// of the pixel the surface covers and the GPU writes depth to that share of
+// its samples (alpha to coverage). The cut-off's edge is ramped over one
+// pixel, at the same place as `fs_depth_only`'s, so distant leaves don't thin
+// out. `fs_prefilled` then lights just the samples this left its depth in.
+@fragment
+fn fs_depth_coverage(in: VertexOut) -> @location(0) vec4<f32> {
+    let opacity = cut_out_opacity(in);
+    let coverage = (opacity - in.surface.z) / max(fwidth(opacity), 0.0001) + 0.5;
+    if coverage <= 0.0 || dithered_out(in.fade, in.clip_position.xy) {
+        discard;
+    }
+    return vec4<f32>(0.0, 0.0, 0.0, min(coverage, 1.0));
 }
 
 // The lit color of a pixel of a surface: `shaded`, its two remaining maps'

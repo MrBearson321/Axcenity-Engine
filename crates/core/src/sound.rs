@@ -276,12 +276,10 @@ pub struct Group {
 /// Every SoundGroup in the game, each parent before the groups inside it.
 pub fn groups(world: &World) -> Vec<Group> {
     world
-        .descendants_iter(world.root())
+        .all_below(world.root(), |class| class == ClassName::SoundGroup)
+        .into_iter()
         .filter_map(|id| {
             let instance = world.get(id)?;
-            if instance.class() != ClassName::SoundGroup {
-                return None;
-            }
             let parent = instance.parent().filter(|&parent| is_group(world, parent));
             Some(Group {
                 id,
@@ -390,13 +388,10 @@ pub struct Zone {
 /// (along X), and any other shape its box.
 pub fn zone_at(world: &World, point: Vector3) -> Option<Zone> {
     let mut best: Option<(f64, Zone)> = None;
-    for id in world.descendants_iter(world.workspace()) {
+    for id in world.all_below(world.workspace(), |class| class == ClassName::ReverbZone) {
         let Some(instance) = world.get(id) else {
             continue;
         };
-        if instance.class() != ClassName::ReverbZone {
-            continue;
-        }
         let Some(volume) = inside_volume(instance, point) else {
             continue;
         };

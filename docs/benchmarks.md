@@ -134,8 +134,58 @@ Same container, release build, S10k, main and the I7 branch run back to back: th
 
 Before, the navmesh fingerprint hashed every part, the 1,000 falling drops included, and formatted values as text: about 4 ms every frame, and a 110–120 ms rebuild every 0.5 s. Now unanchored parts aren't ground, and a `MeshBuilder` reads again only the parts that changed. What's left of the worst Agents frame (about 20–30 ms in the test runner and player) is S10k's 100 anchored spinners: turning, their corners cross column centres, so the mesh really changes and is put together again every 0.5 s (gathering, linking and numbering 200,000 cells; roadmap M13 moves that to a worker). Editor Play rarely rebuilt (worst 4 and 14 ms); its 1.5 ms median is the check, every frame once 0.5 s has passed, that nothing the mesh is made from changed, which a world where nothing anchored moves also pays.
 
+### Class and tag index (M2)
+
+Taken on 2026-11-10 on a Ryzen 9 9950X3D under Windows, release build, main (940fabc, with M1) and the M2 branch run alternately. Each run was pinned to the V-cache CCD: unpinned, other work on the machine moved main's frame median between 12.7 and 19.2 ms and the comparison was noise. Medians of the runs' medians, in milliseconds; the frame's range across runs is in brackets. Test runner and server: seven 600-frame runs. Player: three 300-frame runs.
+
+| Step | Test runner main | M2 | Server main | M2 | Player main | M2 |
+|---|---|---|---|---|---|---|
+| Characters | 1.104 | 0.986 | – | – | 1.345 | 1.285 |
+| Agents | 0.115 | 0.059 | – | – | 0.15 | 0.091 |
+| Input | 0.639 | 0.501 | 0.018 | 0.001 | 0.681 | 0.534 |
+| Scripts | 0.119 | 0.008 | 0.116 | 0.008 | 0.129 | 0.012 |
+| Physics | 3.719 | 3.469 | 3.645 | 3.487 | 4.002 | 3.912 |
+| Heartbeat | 0.81 | 0.763 | 0.788 | 0.759 | 0.836 | 0.793 |
+| Animation | 0.087 | 0.057 | – | – | 0.275 | 0.092 |
+| Draw list | – | – | – | – | 5.877 | 6.092 |
+| Network send | – | – | 0.3 | 0.272 | – | – |
+| Render | – | – | – | – | 1.98 | 2.028 |
+| **Frame, median** | **6.68** (6.52–7.15) | **5.91** (5.78–6.25) | **4.88** (4.73–6.22) | **4.65** (4.50–5.65) | **15.48** (15.06–16.68) | **15.26** (14.09–15.67) |
+
+About 12%, 5% and 1.5% off the frame (the player also draws, which M2 leaves alone). Each walk replaced cost a few tens of microseconds on 10,000 parts, so the gain comes from there being many of them: `Scripts` (per-frame Health, Humanoid, follower and prompt walks) falls by about 0.11 ms on every host, `Input` by 0.14 ms and `Animation` in the player by 0.18 ms. A world with few Instances gains almost nothing: on copies of six real projects (General Store Roadside, Abandoned Farmhouse, three biome patches, The Dimming; under 1 MB of `world.json` each, on all three hosts) every difference was within run-to-run noise, in both directions.
+
+### A Windows desktop with a real GPU
+
+Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table above): AMD Ryzen 9 9950X3D (16 cores), 62 GB of RAM, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Each host ran three times, 600 measured frames each; the table gives the median of the three runs' medians, and the worst frame seen in any run. The first player run was slower than the other two (Physics 14.3 ms against 5.4 ms); it came straight after the release build. Times are milliseconds.
+
+| Step | Test runner | Server | Editor Play | Player |
+|---|---|---|---|---|
+| Network | – | 0.008 | 0.002 | 0.009 |
+| Characters | 2.70 | – | 2.13 | 2.41 |
+| Agents | 0.32 (worst 13.6) | – | 1.17 (worst 2.7) | 0.35 (worst 12.6) |
+| Input | 0.86 | 0.018 | 0.80 | 0.88 |
+| Scripts | 0.12 | 0.12 | 0.12 | 0.14 |
+| Physics | 4.94 | 3.85 | 3.76 | 5.46 |
+| Heartbeat | 0.86 | 0.82 | 0.47 | 0.87 |
+| RenderStep | 0.002 | – | 0.003 | – |
+| Audio | – | – | 0.032 | – |
+| Animation | 0.12 | – | 0.12 | 0.32 |
+| Draw list | – | – | – | 8.38 |
+| UI | – | – | – | 0.038 |
+| Render | – | – | – | 2.69 |
+| Network send | – | 0.52 | 0.003 | – |
+| **Frame, median** | **10.0** | **5.4** | **8.7** | **21.5** |
+| Frame, mean | 10.5 | 5.5 | 8.9 | 22.1 |
+| Frame, 95th percentile | 13.3 | 6.9 | 10.9 | 25.0 |
+| Frame, worst | 34 | 13 | 27 | 51 |
+
+The player's first frame was 130 to 152 ms, and launch to first frame 3.3 s (7.0 s on the first run).
+
+- **The draw list is now the player's largest step**, and at 8.4 ms it doesn't shrink on a faster CPU: it is 8.1 ms on the cloud container, where physics is about 1.7× slower.
+- **Against the 3.3 ms in `rendering/performance.md`**: `bench_10000_parts` is 8.5 to 8.9 ms in `build_draw_list` here, so that figure is out of date. The roadmap's merges didn't cause it: 556b72b, the commit before them, is 8.0 to 8.8 ms on this machine, and each merge timed since is 7.4 to 8.9 ms. The rise came somewhere between the commit that added the render benchmarks and 556b72b.
+
 ### Calibrating against the rendering baseline
 
-The render benchmarks ran on the same container to relate it to the machine in [rendering/performance.md](rendering/performance.md). `bench_10000_parts` (edge view) took 8.6 ms in `build_draw_list` here, against 3.3 ms there, so this container's CPU is roughly 2.5× slower for this work; divide the table above by about 2.5 for a fast desktop CPU. `bench_project` on S10k: `build_draw_list` 9.4 ms and `ScenePipeline::draw` (CPU side) 3.7 ms from the spawn, 9.5 ms and 3.7 ms from the overview, 6,575 and 10,026 items drawn. GPU times on lavapipe (300–940 ms a frame) say nothing about a real GPU and are left out.
+The render benchmarks ran on the same container to relate it to the machine in [rendering/performance.md](rendering/performance.md). `bench_10000_parts` (edge view) took 8.6 ms in `build_draw_list` there, about the same as the desktop above; steps other than the draw list are about 1.5 to 2× slower on the container. Compare runs on one machine rather than scaling between them. `bench_project` on S10k: `build_draw_list` 9.4 ms and `ScenePipeline::draw` (CPU side) 3.7 ms from the spawn, 9.5 ms and 3.7 ms from the overview, 6,575 and 10,026 items drawn. GPU times on lavapipe (300–940 ms a frame) say nothing about a real GPU and are left out.
 
 Absolute numbers depend on the machine. Compare runs on one machine, and run the same commands before and after a change.

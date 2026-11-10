@@ -164,13 +164,14 @@ enum RelativeTo {
 }
 
 /// The enabled movers in `world` whose Attachment0 is on a part with a
-/// body, in ID order.
+/// body, in tree order.
 pub(crate) fn read(world: &World, parts: &BTreeMap<InstanceId, Body>) -> Vec<Mover> {
     world
-        .descendants_iter(world.workspace())
+        .all_below(world.workspace(), ClassName::is_mover)
+        .into_iter()
         .filter_map(|id| {
             let mover = world.get(id)?;
-            if !mover.class().is_mover() || mover.property("Enabled") != Some(&Value::Bool(true)) {
+            if mover.property("Enabled") != Some(&Value::Bool(true)) {
                 return None;
             }
             let end = |name| {

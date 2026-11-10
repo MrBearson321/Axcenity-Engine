@@ -337,7 +337,7 @@ impl Runner {
             if let Some(failure) = finished {
                 break failure.map(Failure::new);
             }
-            if !game.scripts.spec_running() {
+            if !game.sim.scripts.spec_running() {
                 // Stopped by an error the runner couldn't catch (the
                 // watchdog's), which the output has.
                 let error = game
