@@ -462,6 +462,8 @@ fn undo_history_jumps_back_and_forward_several_steps() {
     app.jump_in_history(10);
     assert_eq!(name(&app, 2), "Renamed2");
     assert!(app.history.redo_labels().is_empty());
+}
+
 /// Every ribbon tab is as tall as the tallest (Home, with its snapping
 /// grid), so the layout under it doesn't jump when tabs change.
 #[test]
