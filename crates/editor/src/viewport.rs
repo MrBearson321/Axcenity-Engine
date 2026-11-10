@@ -1298,59 +1298,22 @@ impl Viewport {
         });
         move_overlay::ghost_moving(&mut draw_list, &moving_parts(self.drag.as_ref(), world));
         draw_list.ui = ui_layout.draw_items.clone();
-        if let Some(inventory) = hotbar {
-            draw_list.ui.extend(axcenity_ui::hotbar_items(
-                world,
-                inventory,
-                stylesheets,
-                width,
-                height,
-            ));
-        }
-        draw_list.ui.extend(axcenity_ui::ability_bar_items(
+        // The hotbar, the ability bar, the quest tracker and dialogue box,
+        // the leaderboard, the chat window, then ProximityPrompts, drawn as
+        // the player draws them.
+        draw_list.ui.extend(axcenity_ui::overlay_items(
             world,
-            &ability_bar,
-            stylesheets,
-            width,
-            height,
-        ));
-        draw_list.ui.extend(axcenity_ui::quest_tracker_items(
-            world,
-            &quests,
-            stylesheets,
-            width,
-            height,
-        ));
-        if let Some(dialogue) = &dialogue {
-            draw_list.ui.extend(axcenity_ui::dialogue_box_items(
-                world,
-                dialogue,
-                stylesheets,
-                width,
-                height,
-            ));
-        }
-        if leaderboard {
-            draw_list.ui.extend(axcenity_ui::leaderboard_items(
-                world,
-                stylesheets,
-                width,
-                height,
-            ));
-        }
-        if let Some((lines, typing)) = &chat {
-            draw_list.ui.extend(axcenity_ui::chat_items(
-                world,
-                lines,
-                typing.as_deref(),
-                stylesheets,
-                width,
-                height,
-            ));
-        }
-        draw_list.ui.extend(axcenity_ui::prompt_items(
-            world,
-            &prompts,
+            &axcenity_ui::OverlayView {
+                inventory: hotbar,
+                abilities: &ability_bar,
+                quests: &quests,
+                dialogue: dialogue.as_ref(),
+                leaderboard,
+                chat: chat
+                    .as_ref()
+                    .map(|(lines, typing)| (lines.as_slice(), typing.as_deref())),
+                prompts: &prompts,
+            },
             stylesheets,
             &camera,
             width,
