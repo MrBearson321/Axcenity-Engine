@@ -87,6 +87,13 @@ const DROP_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
 /// that no longer exist do no harm: they simply never match a row again.
 pub struct Explorer {
     expanded: HashSet<InstanceId>,
+    /// Goes up each time a branch opens or closes, for `cache`.
+    expanded_version: u64,
+    /// The rows last drawn while not filtering, and what they were made
+    /// from: made again only when the tree or the open branches change.
+    /// Names are read from the world as rows are drawn, so a rename needs
+    /// nothing here.
+    cache: Option<RowCache>,
     /// A row to scroll into view on the next frame, after something was
     /// selected in the viewport.
     scroll_to: Option<InstanceId>,
@@ -101,6 +108,21 @@ pub struct Explorer {
     /// Where each row's name was drawn last frame, so tests can point at rows.
     #[cfg(test)]
     drawn: Vec<(InstanceId, egui::Rect)>,
+}
+
+/// What the cached rows were made from: the world (by identity), its
+/// structure and child order, and the open branches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RowKey {
+    world: u64,
+    structure: u64,
+    child_order: u64,
+    expanded: u64,
+}
+
+struct RowCache {
+    key: RowKey,
+    rows: Vec<Row>,
 }
 
 struct Renaming {
@@ -236,6 +258,8 @@ impl Explorer {
     pub fn new(world: &World) -> Self {
         Self {
             expanded: HashSet::from([world.root(), world.workspace()]),
+            expanded_version: 0,
+            cache: None,
             scroll_to: None,
             renaming: None,
             warnings: HashMap::new(),
@@ -273,7 +297,9 @@ impl Explorer {
     pub fn reveal(&mut self, world: &World, id: InstanceId) {
         let mut parent = world.get(id).and_then(|instance| instance.parent());
         while let Some(next) = parent {
-            self.expanded.insert(next);
+            if self.expanded.insert(next) {
+                self.expanded_version += 1;
+            }
             parent = world.get(next).and_then(|instance| instance.parent());
         }
         self.scroll_to = Some(id);
@@ -285,6 +311,41 @@ impl Explorer {
         // the branch was open: close it instead.
         if !self.expanded.insert(id) {
             self.expanded.remove(&id);
+        }
+        self.expanded_version += 1;
+    }
+
+    /// The rows to draw: [`rows`](Self::rows), from the cache when nothing
+    /// they're made from has changed. While filtering they're made every
+    /// frame, since names decide which rows there are. Give them back with
+    /// [`keep_rows`](Self::keep_rows).
+    fn take_rows(&mut self, world: &World) -> Vec<Row> {
+        if !self.filter.trim().is_empty() {
+            return self.rows(world);
+        }
+        let key = self.row_key(world);
+        match self.cache.take() {
+            Some(cache) if cache.key == key => cache.rows,
+            _ => self.rows(world),
+        }
+    }
+
+    /// Keeps the rows `take_rows` gave, unless they were filtered.
+    fn keep_rows(&mut self, world: &World, rows: Vec<Row>) {
+        if self.filter.trim().is_empty() {
+            self.cache = Some(RowCache {
+                key: self.row_key(world),
+                rows,
+            });
+        }
+    }
+
+    fn row_key(&self, world: &World) -> RowKey {
+        RowKey {
+            world: world.identity(),
+            structure: world.structure_version(),
+            child_order: world.child_order_version(),
+            expanded: self.expanded_version,
         }
     }
 
@@ -369,194 +430,201 @@ impl Explorer {
         crate::widgets::search_field(ui, &mut self.filter, "Filter", width)
             .on_hover_text("Show only what has this in its name or class, and what it's in");
         let filtering = !self.filter.trim().is_empty();
-        let rows = self.rows(world);
+        let rows = self.take_rows(world);
         if filtering && rows.is_empty() {
             ui.weak(format!("Nothing matches \"{}\".", self.filter.trim()));
         }
+        // Rows touch, so their highlights join into one column; `show_rows`
+        // reads the spacing from here.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let row_height = ui.spacing().interact_size.y;
         // Only scrolls up and down: long names end in "…" instead of
-        // running past the panel.
-        egui::ScrollArea::vertical()
-            .auto_shrink(false)
-            .show(ui, |ui| {
-                // Rows touch, so their highlights join into one column.
-                ui.spacing_mut().item_spacing.y = 0.0;
-                let row_height = ui.spacing().interact_size.y;
-                for row in rows {
-                    // Filled in once the row is drawn and its size is known, but
-                    // painted behind it.
-                    let background = ui.painter().add(egui::Shape::Noop);
-                    let is_selected = selected.contains(&row.id);
-                    let drawn = ui.horizontal(|ui| {
-                        ui.set_min_height(row_height);
-                        ui.add_space(4.0 + row.depth as f32 * INDENT);
-                        let arrow_sense = if row.has_children {
-                            egui::Sense::click()
-                        } else {
-                            egui::Sense::hover()
-                        };
-                        let (_, arrow) =
-                            ui.allocate_exact_size(egui::Vec2::splat(ARROW_SIZE), arrow_sense);
-                        if row.has_children {
-                            let caret = if row.expanded {
-                                icons::CARET_DOWN
-                            } else {
-                                icons::CARET_RIGHT
-                            };
-                            let color = if arrow.hovered() {
-                                palette.text_strong
-                            } else {
-                                palette.text_weak
-                            };
-                            ui.painter().text(
-                                arrow.rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                caret,
-                                egui::FontId::proportional(11.0),
-                                color,
-                            );
-                        }
-                        if arrow.clicked() {
-                            toggled = Some(row.id);
-                        }
-
-                        // `filter` keeps the rename only if it's for this row.
-                        if let Some(renaming) = self.renaming.as_mut().filter(|r| r.id == row.id) {
-                            if let Some(done) = rename_box(ui, renaming) {
-                                rename_done = Some(done);
-                            }
-                            return;
-                        }
-
-                        // Clicks select; dragging moves the row onto another.
-                        let icon = egui::RichText::new(row_icon(world, &row))
-                            .color(theme::class_color(row.class, ui.visuals()));
-                        // A branch shown only for what's below it is dimmed.
-                        let name = if row.matches {
-                            egui::RichText::new(row.name.as_str())
-                        } else {
-                            egui::RichText::new(row.name.as_str()).color(palette.text_weak)
-                        };
-                        // The class (when the name doesn't already say it) and
-                        // any warning keep their room after the name, unless the
-                        // row is too narrow for them; the name ends in "…".
-                        let warning = warning_badge(&self.warnings, world, &row);
-                        let spacing = ui.spacing().item_spacing.x;
-                        let class = (row.name != row.class.as_str()).then(|| {
-                            ui.painter().layout_no_wrap(
-                                row.class.as_str().to_owned(),
-                                egui::FontId::proportional(theme::type_scale::SMALL),
-                                palette.text_weak,
-                            )
-                        });
-                        let badge_room = if warning.is_some() {
-                            16.0 + spacing
-                        } else {
-                            0.0
-                        };
-                        let class_room = class.as_ref().map_or(0.0, |c| c.size().x + spacing);
-                        let room = ui.available_width() - badge_room;
-                        let class = class.filter(|_| room - class_room >= MIN_NAME_WIDTH);
-                        let name_room = if class.is_some() {
-                            room - class_room
-                        } else {
-                            room
-                        };
-                        // The row's background shows the selection and hover,
-                        // so the label itself has no frame.
-                        let label = ui
-                            .scope(|ui| {
-                                ui.set_max_width(name_room.max(ARROW_SIZE));
-                                ui.add(
-                                    egui::Button::new((icon, name))
-                                        .selected(is_selected)
-                                        .frame(false)
-                                        .truncate()
-                                        .sense(egui::Sense::click_and_drag()),
-                                )
-                            })
-                            .inner
-                            .on_hover_text(format!("{}\n{}", row.name, row.class.as_str()));
-                        #[cfg(test)]
-                        self.drawn.push((row.id, label.rect));
-                        // A right-click selects too, so the menu acts on what's selected.
-                        if label.secondary_clicked() {
-                            output.clicked = Some(row.id);
-                            output.keep_group = true;
-                        } else if label.clicked() {
-                            output.clicked = Some(row.id);
-                            output.modifiers = ui.input(|input| input.modifiers);
-                        }
-                        if scroll_to == Some(row.id) {
-                            label.scroll_to_me(Some(egui::Align::Center));
-                        }
-                        if let Some(class) = class {
-                            ui.label(class);
-                        }
-                        if row.has_children && label.double_clicked() {
-                            toggled = Some(row.id);
-                        }
-                        if let Some(text) = warning {
-                            ui.colored_label(ui.visuals().warn_fg_color, icons::WARNING)
-                                .on_hover_text(text);
-                        }
-                        if world.is_locked(row.id) {
-                            ui.weak(icons::LOCK)
-                                .on_hover_text("Locked: the viewport can't select or change it.");
-                        }
-                        if row.class.is_script() && label.double_clicked() {
-                            output.open = Some(row.id);
-                        }
-
-                        if !editable {
-                            label.context_menu(|ui| {
-                                if play_row_menu(ui, &row.name) {
-                                    output.action = Some(Action::KeepPlayChanges(row.id));
-                                }
-                            });
-                            return;
-                        }
-                        if tree::check_editable(world, row.id).is_ok() {
-                            label.dnd_set_drag_payload(DraggedRow(row.id));
-                        }
-                        if let Some(action) = drop_onto(ui, &label, world, dragged, row.id) {
-                            output.action = Some(action);
-                        }
-                        label.context_menu(|ui| match row_menu(ui, world, row.id) {
-                            Some(RowCommand::Rename) => start_rename = Some(row.id),
-                            Some(RowCommand::Open) => output.open = Some(row.id),
-                            Some(command) => output.action = command.action(row.id),
-                            None => {}
-                        });
-                    });
-                    // The row's full width: the selection or a hover fill, and
-                    // a faint guide for each level it's nested in.
-                    let clip = ui.clip_rect();
-                    let row_rect =
-                        egui::Rect::from_x_y_ranges(clip.x_range(), drawn.response.rect.y_range());
-                    let hovered = ui.rect_contains_pointer(row_rect) && dragged.is_none();
-                    let hover =
-                        theme::ease(ui.ctx(), egui::Id::new(("explorer row", row.id)), hovered);
-                    let fill = if is_selected {
-                        palette.accent_soft
+        // running past the panel. Only the rows on screen are laid out, so
+        // a row to reveal is scrolled to by its place in the list.
+        let mut area = egui::ScrollArea::vertical().auto_shrink(false);
+        if let Some(index) = scroll_to.and_then(|id| rows.iter().position(|row| row.id == id)) {
+            let view = ui.available_height();
+            let middle = index as f32 * row_height - (view - row_height) / 2.0;
+            area = area.vertical_scroll_offset(middle.max(0.0));
+        }
+        area.show_rows(ui, row_height, rows.len(), |ui, range| {
+            for row in &rows[range] {
+                // Read now, so a rename shows without remaking the rows.
+                let name = world
+                    .get(row.id)
+                    .map_or(row.name.as_str(), |instance| instance.name());
+                // Filled in once the row is drawn and its size is known, but
+                // painted behind it.
+                let background = ui.painter().add(egui::Shape::Noop);
+                let is_selected = selected.contains(&row.id);
+                let drawn = ui.horizontal(|ui| {
+                    ui.set_min_height(row_height);
+                    ui.add_space(4.0 + row.depth as f32 * INDENT);
+                    let arrow_sense = if row.has_children {
+                        egui::Sense::click()
                     } else {
-                        palette.control.gamma_multiply(hover)
+                        egui::Sense::hover()
                     };
-                    ui.painter().set(
-                        background,
-                        egui::Shape::rect_filled(row_rect.shrink2(egui::vec2(2.0, 0.0)), 4, fill),
-                    );
-                    let left = drawn.response.rect.left() + 4.0;
-                    for depth in 1..=row.depth {
-                        let x = left + (depth - 1) as f32 * INDENT + ARROW_SIZE / 2.0;
-                        ui.painter().vline(
-                            x.round() + 0.5,
-                            row_rect.y_range(),
-                            egui::Stroke::new(1.0_f32, palette.border),
+                    let (_, arrow) =
+                        ui.allocate_exact_size(egui::Vec2::splat(ARROW_SIZE), arrow_sense);
+                    if row.has_children {
+                        let caret = if row.expanded {
+                            icons::CARET_DOWN
+                        } else {
+                            icons::CARET_RIGHT
+                        };
+                        let color = if arrow.hovered() {
+                            palette.text_strong
+                        } else {
+                            palette.text_weak
+                        };
+                        ui.painter().text(
+                            arrow.rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            caret,
+                            egui::FontId::proportional(11.0),
+                            color,
                         );
                     }
-                }
-            });
+                    if arrow.clicked() {
+                        toggled = Some(row.id);
+                    }
 
+                    // `filter` keeps the rename only if it's for this row.
+                    if let Some(renaming) = self.renaming.as_mut().filter(|r| r.id == row.id) {
+                        if let Some(done) = rename_box(ui, renaming) {
+                            rename_done = Some(done);
+                        }
+                        return;
+                    }
+
+                    // Clicks select; dragging moves the row onto another.
+                    let icon = egui::RichText::new(row_icon(world, row))
+                        .color(theme::class_color(row.class, ui.visuals()));
+                    // A branch shown only for what's below it is dimmed.
+                    let label_text = if row.matches {
+                        egui::RichText::new(name)
+                    } else {
+                        egui::RichText::new(name).color(palette.text_weak)
+                    };
+                    // The class (when the name doesn't already say it) and
+                    // any warning keep their room after the name, unless the
+                    // row is too narrow for them; the name ends in "…".
+                    let warning = warning_badge(&self.warnings, world, row);
+                    let spacing = ui.spacing().item_spacing.x;
+                    let class = (name != row.class.as_str()).then(|| {
+                        ui.painter().layout_no_wrap(
+                            row.class.as_str().to_owned(),
+                            egui::FontId::proportional(theme::type_scale::SMALL),
+                            palette.text_weak,
+                        )
+                    });
+                    let badge_room = if warning.is_some() {
+                        16.0 + spacing
+                    } else {
+                        0.0
+                    };
+                    let class_room = class.as_ref().map_or(0.0, |c| c.size().x + spacing);
+                    let room = ui.available_width() - badge_room;
+                    let class = class.filter(|_| room - class_room >= MIN_NAME_WIDTH);
+                    let name_room = if class.is_some() {
+                        room - class_room
+                    } else {
+                        room
+                    };
+                    // The row's background shows the selection and hover,
+                    // so the label itself has no frame.
+                    let label = ui
+                        .scope(|ui| {
+                            ui.set_max_width(name_room.max(ARROW_SIZE));
+                            ui.add(
+                                egui::Button::new((icon, label_text))
+                                    .selected(is_selected)
+                                    .frame(false)
+                                    .truncate()
+                                    .sense(egui::Sense::click_and_drag()),
+                            )
+                        })
+                        .inner
+                        .on_hover_text(format!("{}\n{}", name, row.class.as_str()));
+                    #[cfg(test)]
+                    self.drawn.push((row.id, label.rect));
+                    // A right-click selects too, so the menu acts on what's selected.
+                    if label.secondary_clicked() {
+                        output.clicked = Some(row.id);
+                        output.keep_group = true;
+                    } else if label.clicked() {
+                        output.clicked = Some(row.id);
+                        output.modifiers = ui.input(|input| input.modifiers);
+                    }
+                    if let Some(class) = class {
+                        ui.label(class);
+                    }
+                    if row.has_children && label.double_clicked() {
+                        toggled = Some(row.id);
+                    }
+                    if let Some(text) = warning {
+                        ui.colored_label(ui.visuals().warn_fg_color, icons::WARNING)
+                            .on_hover_text(text);
+                    }
+                    if world.is_locked(row.id) {
+                        ui.weak(icons::LOCK)
+                            .on_hover_text("Locked: the viewport can't select or change it.");
+                    }
+                    if row.class.is_script() && label.double_clicked() {
+                        output.open = Some(row.id);
+                    }
+
+                    if !editable {
+                        label.context_menu(|ui| {
+                            if play_row_menu(ui, name) {
+                                output.action = Some(Action::KeepPlayChanges(row.id));
+                            }
+                        });
+                        return;
+                    }
+                    if tree::check_editable(world, row.id).is_ok() {
+                        label.dnd_set_drag_payload(DraggedRow(row.id));
+                    }
+                    if let Some(action) = drop_onto(ui, &label, world, dragged, row.id) {
+                        output.action = Some(action);
+                    }
+                    label.context_menu(|ui| match row_menu(ui, world, row.id) {
+                        Some(RowCommand::Rename) => start_rename = Some(row.id),
+                        Some(RowCommand::Open) => output.open = Some(row.id),
+                        Some(command) => output.action = command.action(row.id),
+                        None => {}
+                    });
+                });
+                // The row's full width: the selection or a hover fill, and
+                // a faint guide for each level it's nested in.
+                let clip = ui.clip_rect();
+                let row_rect =
+                    egui::Rect::from_x_y_ranges(clip.x_range(), drawn.response.rect.y_range());
+                let hovered = ui.rect_contains_pointer(row_rect) && dragged.is_none();
+                let hover = theme::ease(ui.ctx(), egui::Id::new(("explorer row", row.id)), hovered);
+                let fill = if is_selected {
+                    palette.accent_soft
+                } else {
+                    palette.control.gamma_multiply(hover)
+                };
+                ui.painter().set(
+                    background,
+                    egui::Shape::rect_filled(row_rect.shrink2(egui::vec2(2.0, 0.0)), 4, fill),
+                );
+                let left = drawn.response.rect.left() + 4.0;
+                for depth in 1..=row.depth {
+                    let x = left + (depth - 1) as f32 * INDENT + ARROW_SIZE / 2.0;
+                    ui.painter().vline(
+                        x.round() + 0.5,
+                        row_rect.y_range(),
+                        egui::Stroke::new(1.0_f32, palette.border),
+                    );
+                }
+            }
+        });
+
+        self.keep_rows(world, rows);
         // While filtering every branch shown is open, so there's nothing to toggle.
         if let Some(id) = toggled.filter(|_| !filtering) {
             self.toggle(id);

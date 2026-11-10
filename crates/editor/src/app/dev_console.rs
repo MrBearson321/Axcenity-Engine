@@ -63,7 +63,7 @@ impl EditorApp {
     /// an editor control has the keyboard. Outside Play it starts over.
     pub(super) fn type_dev_console(&mut self, events: &[egui::Event], editing: bool) -> bool {
         if self.play.is_none() {
-            let seen = self.output.lines().len();
+            let seen = self.output.total();
             self.dev = DevPlay {
                 seen,
                 ..DevPlay::default()
@@ -108,9 +108,7 @@ impl EditorApp {
 
     /// Moves the Output's new lines into the console's Log.
     fn feed_dev_console(&mut self) {
-        let lines = self.output.lines();
-        let start = self.dev.seen.min(lines.len());
-        for line in &lines[start..] {
+        for line in self.output.since(self.dev.seen) {
             let level = match line.kind {
                 OutputKind::Info => LogLevel::Info,
                 OutputKind::Warning => LogLevel::Warning,
@@ -120,7 +118,7 @@ impl EditorApp {
             };
             self.dev.console.log(level, None, line.text.clone());
         }
-        self.dev.seen = lines.len();
+        self.dev.seen = self.output.total();
     }
 
     /// Runs a line typed in the console's Commands tab.
