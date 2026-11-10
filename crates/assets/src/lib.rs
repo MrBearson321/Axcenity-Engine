@@ -91,9 +91,10 @@ pub use material::{
 };
 pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys,
-    MESH_CACHE_FOLDER, MapSlot, Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick,
-    Pose, Posed, PosedPrimitive, Primitive, Rig, Take, TextureRole, Track, cached_meshes,
-    list_objects, load_model, load_models, load_takes, lod_level, tangents, texture_roles,
+    MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER, MapSlot, Model, ModelError, ModelFormat, ModelMaterial,
+    ModelObject, Pick, Pose, Posed, PosedPrimitive, Primitive, Rig, Take, TextureRole, Track,
+    cached_meshes, cooked_models, list_objects, load_model, load_models, load_takes, lod_level,
+    tangents, texture_roles,
 };
 pub use probe::{
     PROBE_SUFFIX, PROBES_FOLDER, ProbeImage, decode_probe, encode_probe, is_probe_file, probe_path,
@@ -807,6 +808,11 @@ fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
     )?;
     let format = ModelFormat::of(&relative)
         .ok_or("MeshId must name a model file: a .gltf, .glb or .fbx file")?;
+    let relative_text = relative.to_string_lossy().replace('\\', "/");
+    let objects = mesh_id.split_once('#').map_or("", |(_, objects)| objects);
+    if let Some(model) = model::cooked_model::read(folder, &relative_text, objects) {
+        return Ok(model);
+    }
     let path = folder.join(&relative);
     let bytes = std::fs::read(&path).map_err(|err| match err.kind() {
         std::io::ErrorKind::NotFound => "the file isn't there".to_owned(),
@@ -815,12 +821,14 @@ fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
     let base = path.parent().unwrap_or(folder);
     let in_project = model::InProject {
         project: folder,
-        relative: &relative.to_string_lossy().replace('\\', "/"),
+        relative: &relative_text,
         bytes: &bytes,
     };
-    model::load_models_in(&bytes, base, Some(in_project), format, &[pick])
+    let model = model::load_models_in(&bytes, base, Some(in_project), format, &[pick])
         .map(|mut models| models.remove(0))
-        .map_err(|err| with_causes(&err))
+        .map_err(|err| with_causes(&err))?;
+    model::cooked_model::write(folder, &relative_text, objects, &bytes, &model);
+    Ok(model)
 }
 
 /// Reads the takes of the model file at `path` inside `folder`, or
@@ -939,7 +947,9 @@ pub fn read_texture(folder: &Path, path: &str) -> Result<Image, String> {
         std::io::ErrorKind::NotFound => "the file isn't there".to_owned(),
         _ => err.to_string(),
     })?;
-    let mut image = model::decode_image(&bytes, path)?;
+    let mut image = model::decode_image(&bytes, path)?.with_origin(model::ImageOrigin::File(
+        relative.to_string_lossy().replace('\\', "/"),
+    ));
     image.file = Some(path.to_owned());
     Ok(image)
 }

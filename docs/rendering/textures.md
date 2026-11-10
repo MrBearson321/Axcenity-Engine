@@ -29,4 +29,4 @@ The texture quality and the GPU's largest size skip the largest levels as they d
 
 ## Not done yet
 
-Offline levels of detail are done (the mesh cache, [models.md](models.md)). Stable asset IDs in sidecars are done too ([../editor/assets.md](../editor/assets.md)). The rest of L2 is still open: whole cooked models so a built game doesn't parse FBX or glTF at all, cooking right after an import or a file change rather than at the next open, and deleting cooked copies of files that are gone.
+Offline levels of detail are done (the mesh cache, [models.md](models.md)). Stable asset IDs in sidecars are done too ([../editor/assets.md](../editor/assets.md)), and so are whole cooked models ([models.md](models.md)). The rest of L2 is still open: BC5 normal maps, cooking right after an import or a file change rather than at the next open, and deleting cooked copies of files that are gone.

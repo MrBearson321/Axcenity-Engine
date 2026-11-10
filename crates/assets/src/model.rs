@@ -7,12 +7,14 @@
 //! file (1 glTF unit, or 1 meter in an FBX file, is 1 stud), which is the
 //! `Size` an imported MeshPart starts with.
 
+pub(crate) mod cooked_model;
 mod fbx;
 mod lod;
 mod lod_cache;
 mod maps;
 mod objects;
 mod rig;
+mod stamped;
 #[cfg(test)]
 mod test_rig;
 
@@ -39,6 +41,7 @@ use gltf::mesh::Mode;
 use objects::{Listed, Siblings};
 
 use crate::cooked::{self, CookedTexture};
+pub use cooked_model::{MODEL_CACHE_FOLDER, cooked_models};
 pub use lod_cache::{MESH_CACHE_FOLDER, cached_meshes};
 
 /// Nodes inside nodes deeper than this, or more node visits than
@@ -479,6 +482,24 @@ pub struct Image {
     /// folders). For an image embedded in the model, where importing
     /// copies it out to (`textures/…`). `None` if it has no file.
     pub file: Option<String>,
+    /// Where it came from in the project, so a cooked model can load it
+    /// again ([`cooked_model`]).
+    pub(crate) origin: ImageOrigin,
+}
+
+/// Where a model's image came from in its project.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ImageOrigin {
+    /// Made in memory, or decoded from bytes inside the model: a cooked
+    /// model can't load it again.
+    #[default]
+    Unknown,
+    /// The project file at this path (decoded, or its cooked copy).
+    File(String),
+    /// Embedded in the model, and taken from the cooked copy of the
+    /// project file at `path` (where importing copied it out to), made
+    /// from bytes with this hash.
+    CookedEmbedded { path: String, hash: u64 },
 }
 
 impl Image {
@@ -492,6 +513,7 @@ impl Image {
             cooked: None,
             source: None,
             file: None,
+            origin: ImageOrigin::Unknown,
         }
     }
 
@@ -505,7 +527,13 @@ impl Image {
             cooked: Some(cooked),
             source: Some(source),
             file: None,
+            origin: ImageOrigin::Unknown,
         }
+    }
+
+    /// The same image, noted as coming from `origin`.
+    pub(crate) fn with_origin(self, origin: ImageOrigin) -> Image {
+        Image { origin, ..self }
     }
 
     /// Different for every texture loaded.
@@ -657,9 +685,7 @@ fn cooked_texture(
     embedded: Option<&[u8]>,
 ) -> Option<Image> {
     let project = project?;
-    let mut relative = folder.strip_prefix(project).ok()?.to_path_buf();
-    relative.push(file);
-    let relative = relative.to_str()?.replace('\\', "/");
+    let relative = project_path(project, folder, file)?;
     let image = match embedded {
         Some(bytes) => cooked::cooked_embedded_image(project, &relative, bytes)?,
         None => cooked::cooked_image(project, &relative)?,
@@ -668,6 +694,23 @@ fn cooked_texture(
         file: Some(file.to_owned()),
         ..image
     })
+}
+
+/// The project path of `file`, relative to `folder` (a model's folder
+/// inside `project`), with `/` between folders.
+fn project_path(project: &Path, folder: &Path, file: &str) -> Option<String> {
+    let mut relative = folder.strip_prefix(project).ok()?.to_path_buf();
+    relative.push(file);
+    Some(relative.to_str()?.replace('\\', "/"))
+}
+
+/// Where an image decoded from `file` (relative to `folder`, a model's
+/// folder inside `project`) came from.
+fn file_origin(project: Option<&Path>, folder: &Path, file: Option<&str>) -> ImageOrigin {
+    project
+        .zip(file)
+        .and_then(|(project, file)| project_path(project, folder, file))
+        .map_or(ImageOrigin::Unknown, ImageOrigin::File)
 }
 
 /// Every take (animation timeline) in a model file's `bytes`, baked into
@@ -1509,8 +1552,15 @@ impl Reader<'_> {
                 .get(&image.index())
                 .map(|name| format!("{}/{name}", crate::import::TEXTURES_FOLDER)),
         };
+        let origin = match image.source() {
+            gltf::image::Source::Uri { uri, .. } if !uri.starts_with("data:") => {
+                file_origin(self.project(), self.folder, file.as_deref())
+            }
+            _ => ImageOrigin::Unknown,
+        };
         let decoded = Arc::new(Image {
             file,
+            origin,
             ..Image::new(data.width, data.height, rgba)
         });
         self.images.insert(image.index(), decoded.clone());
