@@ -548,6 +548,15 @@ impl Session {
             );
         });
         let (moved, physics_steps) = (host.moved, host.physics_steps);
+        // As in the player, sounds are heard from the camera drawn this
+        // frame, which the render step may have moved after audio.
+        if self.label.is_none() {
+            let listener = self.listener(moved.unwrap_or(camera));
+            self.audio.set_listener(axcenity_audio::Listener::from_view(
+                listener.position,
+                listener.orientation,
+            ));
+        }
         self.schedule = schedule;
         self.laps = laps;
         self.cost = Some(FrameCost::from_laps(
@@ -562,6 +571,15 @@ impl Session {
         let held = self.sim.scripts.pause().is_none()
             && self.sim.characters.view(&self.sim.world).is_some();
         Ok(if held { None } else { moved })
+    }
+
+    /// Where sounds are heard from: the camera shown, given the fly camera.
+    fn listener(&self, fly: CameraState) -> CameraState {
+        let shown = self.shown_camera(fly);
+        CameraState {
+            position: shown.position,
+            orientation: shown.orientation,
+        }
     }
 
     /// The camera scripts should see: the follow camera when a controller
@@ -872,15 +890,12 @@ impl HostIo for PlayHost<'_> {
     }
 
     /// Only the first device is heard: the others are the same game on
-    /// more players' devices.
+    /// more players' devices. The listener is where the camera is now;
+    /// [`Session::frame`] moves it once scripts have moved the camera.
     fn audio(&mut self) {
         let session = &mut *self.session;
-        let listener = session.shown_camera(self.moved.unwrap_or(self.camera));
-        let listener = CameraState {
-            position: listener.position,
-            orientation: listener.orientation,
-        };
         if session.label.is_none() {
+            let listener = session.listener(self.camera);
             session.apply_audio(listener, self.output);
         } else {
             drop(session.sim.scripts.take_sound_actions());

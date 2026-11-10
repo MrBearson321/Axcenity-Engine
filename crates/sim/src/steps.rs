@@ -90,8 +90,6 @@ pub(crate) static DRIFT: &[Drift] = &[
     // The server replaces shattered parts before asking which parts are
     // held still, where the other hosts ask first.
     Drift { host: Hosts::SERVER, step: "physics.shatters", after: "scripts.stepped" },
-    // Editor Play plays sounds after the render step.
-    Drift { host: Hosts::EDITOR_PLAY, step: "audio", after: "graphics.changed" },
 ];
 
 /// Where each host's benchmark steps end: `(step, benchmark step name)`.

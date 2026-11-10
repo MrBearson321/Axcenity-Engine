@@ -27,10 +27,9 @@ const PLAYER: &[&str] = &[
     "net.send",
 ];
 
-/// Exceptions the editor still has (each one is a line of `DRIFT`):
-/// - audio runs after the render step;
-/// - particles and streaming aren't steps at all: the Scene viewport does
-///   them while it draws (`crates/editor/src/viewport.rs`).
+/// Editor Play runs the player's order. Particles and streaming aren't
+/// its steps: the Scene viewport does them while it draws
+/// (`crates/editor/src/viewport.rs`), and it draws nothing in the frame.
 #[rustfmt::skip]
 const EDITOR_PLAY: &[&str] = &[
     "net.receive",
@@ -41,10 +40,10 @@ const EDITOR_PLAY: &[&str] = &[
     "physics.hold", "physics.kinematic", "physics.shatters", "physics.step",
     "touches.began", "touches.ended", "breaks", "health",
     "heartbeat",
+    "audio",
     "animators", "tools.place",
     "levels.loaded", "loading.screen",
     "render_step", "camera.move", "camera.follow", "graphics.changed",
-    "audio",
     "net.send",
 ];
 
@@ -84,7 +83,7 @@ fn the_player_runs_the_standard_order() {
 }
 
 #[test]
-fn the_editor_runs_the_player_order_but_for_its_listed_drift() {
+fn the_editor_runs_the_player_order_without_drawing() {
     assert_eq!(names(Hosts::EDITOR_PLAY), EDITOR_PLAY);
 }
 
@@ -156,9 +155,9 @@ fn every_host_laps_in_the_benchmark_step_names() {
             "Scripts",
             "Physics",
             "Heartbeat",
+            "Audio",
             "Animation",
             "RenderStep",
-            "Audio",
             "Network send"
         ]
     );
