@@ -243,3 +243,5 @@ U1–U4 are independent of U6–U9, so they ship as two PRs: **Animation Studio*
 ## E and F
 
 Implementation and verification are recorded in [verification.md](verification.md) as each PR lands.
+
+The design-system pass that follows this audit (visual language, shared components, layout, interaction states, accessibility and UI cost) is [design-system.md](design-system.md).
