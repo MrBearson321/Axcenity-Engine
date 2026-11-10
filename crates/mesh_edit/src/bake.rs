@@ -517,7 +517,7 @@ impl ColorSource {
                     }
                 } else if let Some(image) = &material.base_color_texture {
                     ColorSource::Map {
-                        pixels: Arc::new(image.rgba.clone()),
+                        pixels: Arc::new(image.rgba().to_vec()),
                         width: image.width,
                         height: image.height,
                         factor: material.base_color,

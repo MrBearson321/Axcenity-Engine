@@ -223,7 +223,7 @@ fn shrink(image: &Image) -> egui::ColorImage {
         for x in 0..w {
             let sx = (x * width / w).min(width - 1);
             let at = ((sy * width + sx) * 4) as usize;
-            match image.rgba.get(at..at + 4) {
+            match image.rgba().get(at..at + 4) {
                 Some(pixel) => rgba.extend_from_slice(pixel),
                 None => rgba.extend_from_slice(&[0, 0, 0, 255]),
             }

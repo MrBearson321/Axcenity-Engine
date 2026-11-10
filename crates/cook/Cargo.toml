@@ -1,0 +1,19 @@
+[package]
+name = "axcenity-cook"
+description = "Cooks a project's textures ahead of time (roadmap L2): mip levels, BC7-encoded, into .axcenity/imported. Editor only."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-assets.workspace = true
+intel_tex_2.workspace = true
+rayon.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+png.workspace = true

@@ -9,6 +9,7 @@ authors.workspace = true
 [dependencies]
 axcenity-anim.workspace = true
 axcenity-assets.workspace = true
+axcenity-cook.workspace = true
 axcenity-audio.workspace = true
 axcenity-blocks.workspace = true
 axcenity-character.workspace = true
@@ -38,6 +39,7 @@ log.workspace = true
 memory-stats.workspace = true
 image.workspace = true
 png.workspace = true
+rayon.workspace = true
 regex.workspace = true
 rfd.workspace = true
 serde.workspace = true

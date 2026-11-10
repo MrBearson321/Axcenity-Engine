@@ -529,7 +529,7 @@ fn brush_color(
     };
     let wrap = image.mode == ImageMode::Texture;
     let s = sample(
-        &image.image.rgba,
+        image.image.rgba(),
         image.image.width,
         image.image.height,
         uv,

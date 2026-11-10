@@ -201,7 +201,7 @@ pub fn lookup_from_strip(image: &Image) -> Result<ColorLookup, String> {
                 let x = blue * size + red;
                 let pixel = ((green * image.width + x) * 4) as usize;
                 rgb.extend(
-                    image.rgba[pixel..pixel + 3]
+                    image.rgba()[pixel..pixel + 3]
                         .iter()
                         .map(|&byte| f32::from(byte) / 255.0),
                 );
@@ -221,7 +221,7 @@ pub fn lookup_from_strip(image: &Image) -> Result<ColorLookup, String> {
 pub fn palette_from_image(image: &Image) -> (Palette, Option<String>) {
     let mut seen: Vec<[u8; 3]> = Vec::new();
     let mut more = false;
-    for pixel in image.rgba.as_chunks::<4>().0 {
+    for pixel in image.rgba().as_chunks::<4>().0 {
         let color = [pixel[0], pixel[1], pixel[2]];
         if pixel[3] == 0 || seen.contains(&color) {
             continue;

@@ -22,8 +22,8 @@ use super::maps::{self, Role};
 use super::objects::{self, Listed, Siblings};
 use super::{
     AlphaMode, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, MAX_NODE_DEPTH,
-    Model, ModelError, ModelMaterial, ModelObject, Pick, Primitive, Rig, Take, Track, decode_image,
-    fit, fit_matrix, missing, new_key, smooth_normals, want,
+    Model, ModelError, ModelMaterial, ModelObject, Pick, Primitive, Rig, Take, Track,
+    cooked_texture, decode_image, fit, fit_matrix, missing, new_key, smooth_normals, want,
 };
 
 /// Takes are baked at this many frames a second when the file doesn't say.
@@ -32,12 +32,18 @@ const DEFAULT_FRAME_RATE: f64 = 30.0;
 /// Reads an FBX file's `bytes`, making one model for each of `picks`.
 /// Textures that aren't embedded in it are read from `folder`, the folder
 /// the model is in.
-pub(super) fn load(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Model>, ModelError> {
+pub(super) fn load(
+    bytes: &[u8],
+    folder: &Path,
+    project: Option<&Path>,
+    picks: &[Pick],
+) -> Result<Vec<Model>, ModelError> {
     let scene = parse(bytes)?;
     let mut reader = Reader {
         animated: animated_nodes(&scene),
         joints: Vec::new(),
         folder,
+        project,
         images: HashMap::new(),
         materials: HashMap::new(),
         loose: loose_textures(&scene),
@@ -505,6 +511,8 @@ struct Reader<'a> {
     /// bind matrix (see [`super::Joint`]).
     joints: Vec<(u32, DMat4)>,
     folder: &'a Path,
+    /// The project folder, where cooked textures are looked for.
+    project: Option<&'a Path>,
     /// Textures decoded so far, by element ID, so shared ones decode once.
     /// `None` means it couldn't be, and was noted.
     images: HashMap<u32, Option<Arc<Image>>>,
@@ -789,13 +797,7 @@ impl Reader<'_> {
             .as_ref()
             .filter(|image| !same_as_base(image))
             .map(|image| {
-                let channel = if image
-                    .rgba
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .any(|pixel| pixel[3] < 255)
-                {
+                let channel = if image.has_alpha() {
                     Channel::Alpha
                 } else {
                     Channel::Red
@@ -979,6 +981,21 @@ impl Reader<'_> {
             return image.clone();
         }
         let name = texture_name(texture);
+        let cooked = if texture.content.is_empty() {
+            texture_path(texture, self.folder).and_then(|path| {
+                cooked_texture(self.project, self.folder, &slash_path(&path), None)
+            })
+        } else {
+            self.embedded.get(&id).and_then(|file| {
+                let file = format!("{}/{file}", crate::import::TEXTURES_FOLDER);
+                cooked_texture(self.project, self.folder, &file, Some(&texture.content))
+            })
+        };
+        if let Some(image) = cooked {
+            let image = Some(Arc::new(image));
+            self.images.insert(id, image.clone());
+            return image;
+        }
         let image = if texture.content.is_empty() {
             match texture_path(texture, self.folder) {
                 Some(path) => match std::fs::read(self.folder.join(&path)) {
@@ -1065,21 +1082,7 @@ fn texture_name(texture: &ufbx::Texture) -> String {
 /// bump (height) map: mostly blue (surfaces facing out), with red and
 /// green around the middle. A bump map is grey.
 fn looks_like_normal_map(image: &Image) -> bool {
-    let pixels = image.rgba.len() / 4;
-    // Every pixel of a small image, or about 4,096 spread over a big one.
-    let step = (pixels / 4096).max(1);
-    let mut sums = [0u64; 3];
-    let mut count = 0u64;
-    for pixel in image.rgba.as_chunks::<4>().0.iter().step_by(step) {
-        for (sum, &value) in sums.iter_mut().zip(pixel) {
-            *sum += u64::from(value);
-        }
-        count += 1;
-    }
-    if count == 0 {
-        return false;
-    }
-    let [red, green, blue] = sums.map(|sum| sum as f32 / count as f32);
+    let [red, green, blue, _] = image.sampled_average().map(f32::from);
     blue > 180.0 && (red - 128.0).abs() < 40.0 && (green - 128.0).abs() < 40.0
 }
 

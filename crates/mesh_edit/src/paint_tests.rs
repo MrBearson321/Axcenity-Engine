@@ -405,11 +405,11 @@ fn saving_flattens_each_map_to_a_png_named_by_its_role_that_the_glb_uses() {
         .base_color_texture
         .as_ref()
         .expect("base color map");
-    assert_eq!(color.rgba, set.map(MapKind::BaseColor).unwrap().flat());
+    assert_eq!(color.rgba(), set.map(MapKind::BaseColor).unwrap().flat());
     assert_eq!(material.base_color, [1.0; 4]);
     let rough = material.roughness_texture.as_ref().expect("roughness map");
     assert_eq!(rough.channel, axcenity_assets::Channel::Green);
-    let painted: Vec<u8> = rough.image.rgba.chunks(4).map(|p| p[1]).collect();
+    let painted: Vec<u8> = rough.image.rgba().chunks(4).map(|p| p[1]).collect();
     let wanted: Vec<u8> = set
         .map(MapKind::Roughness)
         .unwrap()
@@ -460,7 +460,7 @@ fn layers_go_through_the_sidecar_folder_hidden_and_all() {
     // And it's on the material again.
     let material = &reopened.objects[0].materials[0];
     assert_eq!(
-        material.base_color_texture.as_ref().unwrap().rgba,
+        material.base_color_texture.as_ref().unwrap().rgba(),
         after.map(MapKind::BaseColor).unwrap().flat()
     );
 }

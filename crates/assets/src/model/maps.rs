@@ -287,8 +287,7 @@ impl ModelMaterial {
                 }
             }
             Role::Opacity => {
-                let has_alpha = image.rgba.as_chunks::<4>().0.iter().any(|p| p[3] < 255);
-                self.opacity_texture = Some(channel(if has_alpha {
+                self.opacity_texture = Some(channel(if image.has_alpha() {
                     Channel::Alpha
                 } else {
                     Channel::Red
@@ -585,13 +584,7 @@ mod tests {
     }
 
     fn image(rgba: [u8; 4]) -> Arc<Image> {
-        Arc::new(Image {
-            key: super::super::new_key(),
-            width: 1,
-            height: 1,
-            rgba: rgba.to_vec(),
-            file: None,
-        })
+        Arc::new(Image::new(1, 1, rgba.to_vec()))
     }
 
     #[test]

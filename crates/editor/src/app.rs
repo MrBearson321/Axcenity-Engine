@@ -298,6 +298,11 @@ pub struct EditorApp {
     game_tests: crate::game_tests::GameTests,
     /// The editor's Lua plugins, their dock tabs and saved settings (Phase 54).
     plugins: crate::plugins::Plugins,
+    /// Whether opening a project starts cooking its textures (roadmap L2).
+    /// Only the real editor does; tests open projects without.
+    cook_textures: bool,
+    /// The open project's texture cooking, while it runs.
+    cooker: Option<crate::cooking::Cooker>,
     /// The last asset check, for the Asset Check panel.
     asset_check: AssetCheck,
     /// The Tags panel's rename box.
@@ -807,6 +812,8 @@ impl EditorApp {
             mixer: crate::mixer::Mixer::default(),
             game_tests: crate::game_tests::GameTests::default(),
             plugins: crate::plugins::Plugins::default(),
+            cook_textures: false,
+            cooker: None,
             asset_check: AssetCheck::default(),
             tags: crate::tags::TagsPanel::default(),
             tabs: ScriptTabs::default(),

@@ -11,6 +11,7 @@ mod ambient_occlusion;
 mod anti_aliasing;
 mod clouds;
 mod color_grading;
+mod cooked_textures;
 #[cfg(feature = "debug-views")]
 mod debug_views;
 mod decals;

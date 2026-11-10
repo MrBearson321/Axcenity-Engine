@@ -62,7 +62,15 @@ impl Uploader {
                     ),
                     Job::Texture { source, sizing } => Done::Texture(
                         source.key(),
-                        upload_texture(&device, &queue, &texture_bytes, source.as_ref(), sizing, 0),
+                        upload_texture(
+                            &device,
+                            &queue,
+                            &texture_bytes,
+                            source.as_ref(),
+                            sizing,
+                            0,
+                            true,
+                        ),
                     ),
                 };
                 if outbox.send(result).is_err() {

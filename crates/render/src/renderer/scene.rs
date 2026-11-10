@@ -2275,6 +2275,8 @@ impl ScenePipeline {
                         source.as_ref(),
                         sizing,
                         0,
+                        // UI images and terrain weights stay exact.
+                        !full,
                     ),
                     last_drawn: frame,
                 });

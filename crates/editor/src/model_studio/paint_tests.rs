@@ -69,7 +69,7 @@ fn rust_painted_from_the_view_shows_on_the_chair_and_each_stroke_is_one_undo_ste
         .base_color_texture
         .as_ref()
         .expect("the view draws the paint");
-    assert_eq!(texture.rgba, flat);
+    assert_eq!(texture.rgba(), flat);
 
     // Rough rust: the roughness map, a second step.
     studio.paint.map = MapKind::Roughness;

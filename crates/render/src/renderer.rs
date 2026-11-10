@@ -246,6 +246,9 @@ impl Renderer {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("axcenity device"),
+                // Cooked textures go up as BC7 where the GPU reads it
+                // (every desktop GPU); otherwise they're decoded.
+                required_features: adapter.features() & wgpu::Features::TEXTURE_COMPRESSION_BC,
                 ..Default::default()
             })
             .await

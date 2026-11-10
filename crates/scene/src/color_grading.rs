@@ -186,7 +186,7 @@ mod tests {
         let mut bytes = Vec::new();
         image::write_buffer_with_format(
             &mut std::io::Cursor::new(&mut bytes),
-            &image.rgba,
+            image.rgba(),
             image.width,
             image.height,
             image::ExtendedColorType::Rgba8,

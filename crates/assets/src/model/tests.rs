@@ -41,7 +41,7 @@ fn the_example_pyramid_loads_fitted_into_the_unit_cube() {
     assert_eq!(model.hull_points.len(), 5);
     let texture = primitive.material.base_color_texture.as_ref().unwrap();
     assert_eq!(
-        texture.rgba.len(),
+        texture.rgba().len(),
         texture.width as usize * texture.height as usize * 4
     );
 }
