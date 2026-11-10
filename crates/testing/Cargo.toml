@@ -11,14 +11,12 @@ name = "axcenity-test"
 path = "src/main.rs"
 
 [dependencies]
-axcenity-anim.workspace = true
 axcenity-assets.workspace = true
 axcenity-character.workspace = true
 axcenity-core.workspace = true
-axcenity-nav.workspace = true
-axcenity-physics.workspace = true
 axcenity-project.workspace = true
 axcenity-script.workspace = true
+axcenity-sim.workspace = true
 profiling.workspace = true
 axcenity-workspace-hack.workspace = true
 
