@@ -39,7 +39,7 @@ impl Surfaces {
         let mut terrains = Vec::new();
         let mut parts = Vec::new();
         let mut models: HashMap<String, Option<Arc<Model>>> = HashMap::new();
-        for id in world.descendants(world.workspace()) {
+        for id in world.descendants_iter(world.workspace()) {
             let Some(instance) = world.get(id) else {
                 continue;
             };

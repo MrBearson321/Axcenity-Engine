@@ -266,6 +266,80 @@ fn descendants_are_parents_first_in_child_order() {
     assert_eq!(world.descendants(workspace), vec![a, a1, b]);
 }
 
+/// The walk `descendants` did before `descendants_iter`: a stack of every
+/// child still to visit. The iterator must give exactly this order.
+fn descendants_by_stack(world: &World, id: InstanceId) -> Vec<InstanceId> {
+    let mut found = Vec::new();
+    let mut stack: Vec<InstanceId> = match world.get(id) {
+        Some(instance) => instance.children().iter().rev().copied().collect(),
+        None => return found,
+    };
+    while let Some(next) = stack.pop() {
+        if let Some(instance) = world.get(next) {
+            found.push(next);
+            stack.extend(instance.children().iter().rev().copied());
+        }
+    }
+    found
+}
+
+#[test]
+fn descendants_iter_matches_the_stack_walk() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    // Nested Models of different shapes: some with children after a nested
+    // one, some whose last child has children, and an empty one.
+    let mut models = vec![workspace];
+    for i in 0..60 {
+        let parent = models[(i * 7) % models.len()];
+        let model = world.create(ClassName::Model).unwrap();
+        world.set_parent(model, Some(parent)).unwrap();
+        for j in 0..(i % 4) {
+            part_in(&mut world, model, &format!("P{i}.{j}"));
+        }
+        models.push(model);
+    }
+    for id in std::iter::once(world.root()).chain(models.iter().copied()) {
+        let walked: Vec<InstanceId> = world.descendants_iter(id).collect();
+        assert_eq!(walked, descendants_by_stack(&world, id));
+        assert_eq!(walked, world.descendants(id));
+    }
+    // A leaf and a stale id have none.
+    let leaf = part_in(&mut world, workspace, "Leaf");
+    assert_eq!(world.descendants_iter(leaf).count(), 0);
+    world.destroy(leaf).unwrap();
+    assert_eq!(world.descendants_iter(leaf).count(), 0);
+}
+
+#[test]
+fn descendants_iter_walks_a_deep_chain_in_order() {
+    let mut world = World::new();
+    let mut chain = vec![world.workspace()];
+    for i in 0..5_000 {
+        let parent = *chain.last().unwrap();
+        chain.push(part_in(&mut world, parent, &format!("C{i}")));
+    }
+    let walked: Vec<InstanceId> = world.descendants_iter(world.workspace()).collect();
+    assert_eq!(walked, chain[1..]);
+}
+
+#[test]
+fn descendants_iter_keeps_no_positions_for_flat_or_last_child_trees() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    for i in 0..100 {
+        part_in(&mut world, workspace, &format!("Loose{i}"));
+    }
+    // Each level's only (so last) child has children of its own.
+    let mut parent = workspace;
+    for i in 0..10 {
+        parent = part_in(&mut world, parent, &format!("Nested{i}"));
+    }
+    let mut walk = world.descendants_iter(workspace);
+    assert_eq!(walk.by_ref().count(), 110);
+    assert_eq!(walk.parents.capacity(), 0, "nothing was allocated");
+}
+
 #[test]
 fn set_property_checks_name_and_type() {
     let mut world = World::new();

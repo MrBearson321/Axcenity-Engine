@@ -792,8 +792,7 @@ impl Physics {
         let (ragdolled, ragdoll_bodies) = ragdoll_parts(world);
         self.ragdoll_bodies = ragdoll_bodies;
         let current: BTreeMap<InstanceId, PartState> = world
-            .descendants(world.workspace())
-            .into_iter()
+            .descendants_iter(world.workspace())
             .filter(|id| !ragdolled.contains(id))
             .filter_map(|id| {
                 let mut state = PartState::read(world, id, &self.assets)?;
@@ -892,8 +891,7 @@ impl Physics {
         }
         self.synced = Some((world.structure_version(), self.held.clone()));
         self.watched = world
-            .descendants(world.root())
-            .into_iter()
+            .descendants_iter(world.root())
             .filter_map(|id| {
                 let instance = world.get(id)?;
                 matches!(
@@ -1365,15 +1363,15 @@ const RAGDOLL_ITERATIONS: usize = 16;
 /// the Ragdolls that are on.
 fn ragdoll_parts(world: &World) -> (HashSet<InstanceId>, HashSet<InstanceId>) {
     let (mut left, mut bodies) = (HashSet::new(), HashSet::new());
-    for id in world.descendants(world.workspace()) {
+    for id in world.descendants_iter(world.workspace()) {
         let Some(ragdoll) = world.get(id).filter(|i| i.class() == ClassName::Ragdoll) else {
             continue;
         };
         if ragdoll.property("Enabled").and_then(Value::as_bool) == Some(true) {
             left.extend(ragdoll.parent());
-            bodies.extend(world.descendants(id));
+            bodies.extend(world.descendants_iter(id));
         } else {
-            left.extend(world.descendants(id));
+            left.extend(world.descendants_iter(id));
         }
     }
     (left, bodies)

@@ -922,8 +922,8 @@ impl ScriptRuntime {
     /// respawn as. Its scripts' copies start when a copy goes in.
     fn adopt(&mut self, world: &mut World, player: InstanceId, character: InstanceId) {
         if let Ok(template) = world.duplicate(character) {
-            let originals = std::iter::once(character).chain(world.descendants(character));
-            let copies = std::iter::once(template).chain(world.descendants(template));
+            let originals = std::iter::once(character).chain(world.descendants_iter(character));
+            let copies = std::iter::once(template).chain(world.descendants_iter(template));
             for (original, copy) in originals.zip(copies) {
                 let code = self
                     .started

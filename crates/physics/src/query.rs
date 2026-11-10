@@ -63,7 +63,7 @@ impl<'a> Filter<'a> {
         for &id in &params.filter {
             if world.contains(id) {
                 listed.insert(id);
-                listed.extend(world.descendants(id));
+                listed.extend(world.descendants_iter(id));
             }
         }
         Self {
@@ -227,7 +227,7 @@ fn candidates(
     reach: Reach,
     mut visit: impl FnMut(InstanceId, &PartState, &Collider, bool),
 ) {
-    for id in world.descendants(world.workspace()) {
+    for id in world.descendants_iter(world.workspace()) {
         let Some(instance) = world.get(id) else {
             continue;
         };
@@ -578,7 +578,7 @@ pub struct ColliderOutline {
 /// including sensors. Does not create a physics world or change the tree.
 pub fn debug_colliders(world: &World, assets: &Assets) -> Vec<ColliderOutline> {
     let mut outlines = Vec::new();
-    for id in world.descendants(world.workspace()) {
+    for id in world.descendants_iter(world.workspace()) {
         let Some(state) = PartState::read(world, id, assets) else {
             continue;
         };
@@ -703,7 +703,7 @@ pub fn solids(world: &World, assets: &Assets, skip: &[InstanceId]) -> Vec<Solid>
             open_below,
         });
     };
-    for id in world.descendants(world.workspace()) {
+    for id in world.descendants_iter(world.workspace()) {
         if skip.contains(&id) {
             continue;
         }

@@ -153,7 +153,7 @@ pub fn add_methods<M: UserDataMethods<LuaInstance>>(methods: &mut M) {
     methods.add_method("GetDescendants", |lua, this, ()| {
         let world = world(lua)?;
         world.get(this.0).ok_or_else(destroyed)?;
-        Ok(instances(world.descendants(this.0)))
+        Ok(instances(world.descendants_iter(this.0)))
     });
     methods.add_method("IsA", |lua, this, class: String| {
         Ok(class_of(&*world(lua)?, this.0)?.is_a(&class))
@@ -172,12 +172,12 @@ pub fn add_methods<M: UserDataMethods<LuaInstance>>(methods: &mut M) {
         |lua, this, (class, recursive): (String, Option<bool>)| {
             let world = world(lua)?;
             let instance = world.get(this.0).ok_or_else(destroyed)?;
-            let candidates = if recursive.unwrap_or(false) {
-                world.descendants(this.0)
+            let is_a = |found: ClassName| found.is_a(&class);
+            Ok(if recursive.unwrap_or(false) {
+                first(&world, world.descendants_iter(this.0), is_a)
             } else {
-                instance.children().to_vec()
-            };
-            Ok(first(&world, candidates, |found| found.is_a(&class)))
+                first(&world, instance.children().iter().copied(), is_a)
+            })
         },
     );
     methods.add_method("FindFirstAncestor", |lua, this, name: String| {
@@ -286,8 +286,8 @@ fn clone(lua: &Lua, id: InstanceId) -> mlua::Result<LuaInstance> {
             .duplicate(id)
             .map_err(|err| mlua::Error::runtime(format!("can't clone: {err}")))?;
         // A copy's descendants come in the same order as the original's.
-        let originals = std::iter::once(id).chain(world.descendants(id));
-        let copies = std::iter::once(copy).chain(world.descendants(copy));
+        let originals = std::iter::once(id).chain(world.descendants_iter(id));
+        let copies = std::iter::once(copy).chain(world.descendants_iter(copy));
         let scripts: Vec<(InstanceId, InstanceId, ClassName)> = originals
             .zip(copies)
             .filter_map(|(original, copy)| {
@@ -325,7 +325,7 @@ pub fn destroy(lua: &Lua, id: InstanceId) -> mlua::Result<()> {
             )));
         }
         let mut going = vec![id];
-        going.extend(world.descendants(id));
+        going.extend(world.descendants_iter(id));
         going
     };
     // The editor's plugins: an Instance in the tree only leaves it, so the
@@ -367,7 +367,7 @@ pub fn destroy(lua: &Lua, id: InstanceId) -> mlua::Result<()> {
             return Ok(());
         }
         let mut going = vec![id];
-        going.extend(world.descendants(id));
+        going.extend(world.descendants_iter(id));
         (ancestors(&world, id)?, going)
     };
     for &ancestor in &ancestors {

@@ -84,14 +84,11 @@ fn find_screen_gui(world: &World, name: &str) -> Option<InstanceId> {
     if name.is_empty() {
         return None;
     }
-    world
-        .descendants(world.workspace())
-        .into_iter()
-        .find(|&id| {
-            world.get(id).is_some_and(|instance| {
-                instance.class() == ClassName::ScreenGui && instance.name() == name
-            })
+    world.descendants_iter(world.workspace()).find(|&id| {
+        world.get(id).is_some_and(|instance| {
+            instance.class() == ClassName::ScreenGui && instance.name() == name
         })
+    })
 }
 
 #[cfg(test)]

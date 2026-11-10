@@ -51,6 +51,7 @@ pub use value::{
     CFrame, Color3, EnumItem, PhysicalProperties, UDim, UDim2, Value, ValueKind, Vector2, Vector3,
 };
 pub use world::{
-    AttributeError, Change, Instance, InstanceId, MASTER_VOLUME_SETTING, MAX_ATTRIBUTE_NAME,
-    PropertyError, RecordedChange, STARTER_CHARACTER, TreeError, World, is_attribute_name,
+    AttributeError, Change, Descendants, Instance, InstanceId, MASTER_VOLUME_SETTING,
+    MAX_ATTRIBUTE_NAME, PropertyError, RecordedChange, STARTER_CHARACTER, TreeError, World,
+    is_attribute_name,
 };

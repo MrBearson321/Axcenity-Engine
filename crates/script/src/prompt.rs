@@ -210,8 +210,7 @@ fn exclusivity(world: &World, id: InstanceId) -> String {
 /// they need it) of `viewer`, nearest first.
 fn candidates(world: &World, assets: &Assets, viewer: &Viewer) -> Vec<Candidate> {
     let mut found: Vec<Candidate> = world
-        .descendants(world.workspace())
-        .into_iter()
+        .descendants_iter(world.workspace())
         .filter(|&id| {
             world
                 .get(id)

@@ -513,8 +513,8 @@ fn sync_tree<'a>(
                     continue;
                 };
                 let _ = world.set_parent(made, Some(copy));
-                let originals = std::iter::once(theirs).chain(source.descendants(theirs));
-                let copies = std::iter::once(made).chain(world.descendants(made));
+                let originals = std::iter::once(theirs).chain(source.descendants_iter(theirs));
+                let copies = std::iter::once(made).chain(world.descendants_iter(made));
                 for (theirs, ours) in originals.zip(copies) {
                     pairs.insert(theirs, ours);
                     nodes.push((ours, theirs, None));

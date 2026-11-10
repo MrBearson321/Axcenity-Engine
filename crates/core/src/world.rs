@@ -8,6 +8,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+use rustc_hash::FxHashMap;
+
 use crate::animation::{AnimationTrackState, AnimatorState, PropertyAnimationState};
 use crate::arena::{Arena, Id};
 use crate::class::ClassName;
@@ -269,14 +271,14 @@ pub struct World {
     changes: ChangeLog,
     /// Each Animator's live state (see [`AnimatorState`]), made the first
     /// time something asks for it.
-    animators: HashMap<InstanceId, AnimatorState>,
+    animators: FxHashMap<InstanceId, AnimatorState>,
     /// Each property Animation's live playback (see [`PropertyAnimationState`]).
-    property_animations: HashMap<InstanceId, PropertyAnimationState>,
+    property_animations: FxHashMap<InstanceId, PropertyAnimationState>,
     /// Each AnimationTrack's live playback, made by `LoadAnimation`.
-    animation_tracks: HashMap<InstanceId, AnimationTrackState>,
+    animation_tracks: FxHashMap<InstanceId, AnimationTrackState>,
     /// Each Terrain's heightfield and paint. Every Terrain has one, made
     /// with it. Shared with copies of the world until one changes it.
-    terrains: HashMap<InstanceId, Arc<TerrainData>>,
+    terrains: FxHashMap<InstanceId, Arc<TerrainData>>,
     /// The project's string table, shared with copies of the world.
     strings: Arc<StringTable>,
     /// The language bound UI text shows (see [`World::language`]).
@@ -291,6 +293,53 @@ pub struct World {
     /// [`World::structure_version`]).
     structure_version: u64,
 }
+
+/// The Instances below one Instance, parents before their children: see
+/// [`World::descendants_iter`].
+///
+/// It walks the child lists in place. Rather than a list of everything it
+/// will visit, it keeps one position per level it has gone down into, so it
+/// allocates nothing below a flat parent (such as a Workspace of loose parts)
+/// and only a few small entries for nested Models.
+#[derive(Clone)]
+pub struct Descendants<'a> {
+    world: &'a World,
+    /// What's left of the child list being walked now.
+    current: std::slice::Iter<'a, InstanceId>,
+    /// What's left of each enclosing child list, innermost last.
+    parents: Vec<std::slice::Iter<'a, InstanceId>>,
+}
+
+impl Iterator for Descendants<'_> {
+    type Item = InstanceId;
+
+    #[inline]
+    fn next(&mut self) -> Option<InstanceId> {
+        loop {
+            let Some(&id) = self.current.next() else {
+                // This list is done: carry on with the one around it.
+                self.current = self.parents.pop()?;
+                continue;
+            };
+            // A stale child is skipped, along with anything below it.
+            let Some(instance) = self.world.get(id) else {
+                continue;
+            };
+            if !instance.children.is_empty() {
+                // Go down into its children next, and come back to the rest
+                // of this list after them (if any is left: a last child's
+                // children just take its list's place).
+                let rest = std::mem::replace(&mut self.current, instance.children.iter());
+                if rest.len() > 0 {
+                    self.parents.push(rest);
+                }
+            }
+            return Some(id);
+        }
+    }
+}
+
+impl std::iter::FusedIterator for Descendants<'_> {}
 
 impl World {
     /// Creates a world with `game` and its services, in the order the
@@ -357,10 +406,10 @@ impl World {
             sound_service,
             text_chat_service,
             changes: ChangeLog::default(),
-            animators: HashMap::new(),
-            property_animations: HashMap::new(),
-            animation_tracks: HashMap::new(),
-            terrains: HashMap::new(),
+            animators: FxHashMap::default(),
+            property_animations: FxHashMap::default(),
+            animation_tracks: FxHashMap::default(),
+            terrains: FxHashMap::default(),
             strings: Arc::default(),
             language: String::new(),
             ui_settings: UiSettings::default(),
@@ -680,6 +729,7 @@ impl World {
         Some(id)
     }
 
+    #[inline]
     pub fn get(&self, id: InstanceId) -> Option<&Instance> {
         self.instances.get(id.0)
     }
@@ -889,7 +939,7 @@ impl World {
         }
         let mut copies = HashMap::new();
         let mut order = vec![id];
-        order.extend(source.descendants(id));
+        order.extend(source.descendants_iter(id));
         let mut root = None;
         for old in order {
             let instance = source.get(old).expect("descendants are alive");
@@ -1140,8 +1190,7 @@ impl World {
     /// Every Instance in the game (inside `game`) with the tag `tag`, in
     /// [`descendants`](Self::descendants) order.
     pub fn tagged(&self, tag: &str) -> Vec<InstanceId> {
-        self.descendants(self.root)
-            .into_iter()
+        self.descendants_iter(self.root)
             .filter(|&id| self.get(id).is_some_and(|instance| instance.has_tag(tag)))
             .collect()
     }
@@ -1149,7 +1198,7 @@ impl World {
     /// Every tag an Instance in the game has, sorted, with how many have it.
     pub fn all_tags(&self) -> BTreeMap<String, usize> {
         let mut tags = BTreeMap::new();
-        for id in self.descendants(self.root) {
+        for id in self.descendants_iter(self.root) {
             for tag in self.get(id).map(Instance::tags).unwrap_or_default() {
                 *tags.entry(tag.clone()).or_default() += 1;
             }
@@ -1169,8 +1218,7 @@ impl World {
 
     /// The first descendant of `ancestor` with this name, in [`descendants`](Self::descendants) order.
     pub fn find_first_descendant(&self, ancestor: InstanceId, name: &str) -> Option<InstanceId> {
-        self.descendants(ancestor)
-            .into_iter()
+        self.descendants_iter(ancestor)
             .find(|&id| self.get(id).is_some_and(|instance| instance.name == name))
     }
 
@@ -1191,20 +1239,29 @@ impl World {
 
     /// Every Instance below `id`, parents before their children.
     /// Empty if `id` is stale.
+    ///
+    /// This collects into a `Vec`. To only look through them, use
+    /// [`descendants_iter`](Self::descendants_iter), which doesn't allocate
+    /// one; keep this when the world changes while you go through the list.
     pub fn descendants(&self, id: InstanceId) -> Vec<InstanceId> {
-        let mut found = Vec::new();
-        // An explicit stack instead of recursion, so deep trees can't overflow it.
-        let mut stack: Vec<InstanceId> = match self.get(id) {
-            Some(instance) => instance.children.iter().rev().copied().collect(),
-            None => return found,
-        };
-        while let Some(next) = stack.pop() {
-            if let Some(instance) = self.get(next) {
-                found.push(next);
-                stack.extend(instance.children.iter().rev().copied());
-            }
+        self.descendants_iter(id).collect()
+    }
+
+    /// Every Instance below `id`, parents before their children, in the same
+    /// order as [`descendants`](Self::descendants), without collecting them.
+    /// Empty if `id` is stale.
+    ///
+    /// The iterator borrows the world, so it can't change while you walk.
+    #[inline]
+    pub fn descendants_iter(&self, id: InstanceId) -> Descendants<'_> {
+        Descendants {
+            world: self,
+            current: self
+                .get(id)
+                .map_or(&[][..], |instance| &instance.children[..])
+                .iter(),
+            parents: Vec::new(),
         }
-        found
     }
 
     /// A dotted path such as `Workspace.Block`, for messages. `game` itself is left out.

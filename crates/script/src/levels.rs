@@ -298,8 +298,7 @@ fn place_characters(lua: &Lua, world: &mut World, spawn: Option<&str>) {
     let kept = characters(world);
     let named = spawn.and_then(|name| {
         world
-            .descendants(workspace)
-            .into_iter()
+            .descendants_iter(workspace)
             .filter(|&id| {
                 !kept
                     .iter()

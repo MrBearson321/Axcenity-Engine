@@ -280,8 +280,7 @@ fn flag(world: &World, id: InstanceId, name: &str) -> bool {
 /// Every Seat in the Workspace.
 fn seats(world: &World) -> Vec<InstanceId> {
     world
-        .descendants(world.workspace())
-        .into_iter()
+        .descendants_iter(world.workspace())
         .filter(|&id| world.get(id).is_some_and(|i| i.class().is_seat()))
         .collect()
 }
@@ -403,7 +402,7 @@ fn rotate(orientation: Vector3, v: Vector3) -> Vector3 {
 /// state it's in (its starting state if it hasn't run yet).
 fn sit_animator(world: &World, assets: &Assets, id: InstanceId) -> Option<(InstanceId, String)> {
     let holder = world.get(id)?.parent()?;
-    world.descendants(holder).into_iter().find_map(|animator| {
+    world.descendants_iter(holder).find_map(|animator| {
         let instance = world.get(animator)?;
         if instance.class() != ClassName::Animator {
             return None;

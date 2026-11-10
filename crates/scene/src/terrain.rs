@@ -286,7 +286,7 @@ impl TerrainCache {
         self.take_finished_chunks();
         let background = self.streaming.settings().is_some();
         let mut seen = HashSet::new();
-        for id in world.descendants(world.workspace()) {
+        for id in world.descendants_iter(world.workspace()) {
             let Some(instance) = world.get(id) else {
                 continue;
             };
@@ -724,7 +724,7 @@ pub fn terrain_hit(
     skip: &[InstanceId],
 ) -> Option<(InstanceId, f32, Vec3)> {
     let mut nearest: Option<(InstanceId, f32, Vec3)> = None;
-    for id in world.descendants(world.workspace()) {
+    for id in world.descendants_iter(world.workspace()) {
         if skip.contains(&id) {
             continue;
         }

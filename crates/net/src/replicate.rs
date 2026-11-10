@@ -287,8 +287,7 @@ fn replicated(world: &World) -> (Vec<InstanceId>, Vec<InstanceId>) {
             // itself (Phase 74).
             inside.extend(
                 world
-                    .descendants(child)
-                    .into_iter()
+                    .descendants_iter(child)
                     .filter(|&id| !axcenity_core::spline::is_generated(world, id)),
             );
         }
@@ -674,7 +673,7 @@ pub fn apply(world: &mut World, update: &Update) -> Applied {
             instance.children().to_vec()
         };
         for id in removed {
-            applied.streamed_out.extend(world.descendants(id));
+            applied.streamed_out.extend(world.descendants_iter(id));
             if id != root {
                 applied.streamed_out.push(id);
             }
@@ -685,7 +684,7 @@ pub fn apply(world: &mut World, update: &Update) -> Applied {
         let root = InstanceId::from_bits(root);
         if world.contains(root) {
             applied.streamed_in.push(root);
-            applied.streamed_in.extend(world.descendants(root));
+            applied.streamed_in.extend(world.descendants_iter(root));
         }
     }
     for wire in &update.animators {

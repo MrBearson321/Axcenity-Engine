@@ -178,8 +178,7 @@ pub fn set_team(world: &mut World, player: InstanceId, team: Option<InstanceId>)
 /// Neutral ones.
 pub fn spawn_locations(world: &World, player: InstanceId) -> Vec<InstanceId> {
     let enabled: Vec<InstanceId> = world
-        .descendants(world.workspace())
-        .into_iter()
+        .descendants_iter(world.workspace())
         .filter(|&id| {
             is_class(world, id, ClassName::SpawnLocation) && flag(world, id, "Enabled", true)
         })
@@ -263,8 +262,8 @@ pub(crate) fn top_of(world: &World, spawn: InstanceId) -> Vector3 {
 /// the runtime to start once the copy is in the Workspace.
 fn copy_of(lua: &Lua, world: &mut World, template: InstanceId) -> Option<InstanceId> {
     let copy = world.duplicate(template).ok()?;
-    let originals = std::iter::once(template).chain(world.descendants(template));
-    let copies = std::iter::once(copy).chain(world.descendants(copy));
+    let originals = std::iter::once(template).chain(world.descendants_iter(template));
+    let copies = std::iter::once(copy).chain(world.descendants_iter(copy));
     let scripts: Vec<(InstanceId, InstanceId)> = originals
         .zip(copies)
         .filter(|&(original, _)| {
@@ -321,8 +320,7 @@ pub fn load_character(lua: &Lua, player: InstanceId) -> mlua::Result<InstanceId>
             == Some(true)
         {
             let controllers: Vec<InstanceId> = world
-                .descendants(character)
-                .into_iter()
+                .descendants_iter(character)
                 .filter(|&id| {
                     world
                         .get(id)

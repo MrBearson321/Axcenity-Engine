@@ -187,8 +187,7 @@ impl UiInteraction {
             return Vec::new();
         }
         world
-            .descendants(world.workspace())
-            .into_iter()
+            .descendants_iter(world.workspace())
             .filter(|id| laid.contains(id))
             .collect()
     }

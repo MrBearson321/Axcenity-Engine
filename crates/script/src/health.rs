@@ -288,7 +288,7 @@ impl Healths {
         };
         let mut healths = Vec::new();
         let mut zones = Vec::new();
-        for id in world.descendants(world.workspace()) {
+        for id in world.descendants_iter(world.workspace()) {
             match world.get(id).map(|instance| instance.class()) {
                 Some(ClassName::Health) => healths.push(id),
                 Some(ClassName::DamageZone) => zones.push(id),
@@ -364,7 +364,7 @@ pub fn fall_damage(world: &mut World, controller: InstanceId, speed: f64) -> Vec
 /// its MaxHealth.
 pub fn bind_bars(world: &mut World) {
     let mut bound = Vec::new();
-    for id in world.descendants(world.root()) {
+    for id in world.descendants_iter(world.root()) {
         let Some(bar) = world.get(id) else { continue };
         if bar.class() != ClassName::ProgressBar {
             continue;

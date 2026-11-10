@@ -232,8 +232,7 @@ impl Network {
             Session::Joined(_) => {
                 let mine = self.moved_here(world, scripts);
                 world
-                    .descendants(world.workspace())
-                    .into_iter()
+                    .descendants_iter(world.workspace())
                     .filter(|id| !mine.contains(id))
                     .filter(|&id| {
                         world.get(id).is_some_and(|i| {
@@ -989,8 +988,7 @@ impl Network {
             follow_levels(scripts, levels, false);
         }
         let terrains: Vec<InstanceId> = replica
-            .descendants(replica.root())
-            .into_iter()
+            .descendants_iter(replica.root())
             .filter(|&id| {
                 replica
                     .get(id)
@@ -1169,8 +1167,7 @@ pub(crate) fn character_position(world: &World, player: InstanceId) -> Option<Ve
         .or_else(|| world.find_first_child(character, "HumanoidRootPart"))
         .or_else(|| {
             world
-                .descendants(character)
-                .into_iter()
+                .descendants_iter(character)
                 .find(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
         })?;
     world.get(root)?.property("Position")?.as_vector3()
@@ -1243,19 +1240,16 @@ impl Network {
 /// The seat this device's character sits in.
 fn own_seat(world: &World, scripts: &ScriptRuntime) -> Option<InstanceId> {
     let character = character_of(world, scripts.local_player()?)?;
-    world
-        .descendants(world.workspace())
-        .into_iter()
-        .find(|&seat| {
-            world.get(seat).is_some_and(|s| {
-                matches!(s.class(), ClassName::Seat | ClassName::VehicleSeat)
-                    && s.property("Occupant")
-                        .and_then(Value::as_instance)
-                        .and_then(|controller| world.get(controller))
-                        .and_then(|controller| controller.parent())
-                        == Some(character)
-            })
+    world.descendants_iter(world.workspace()).find(|&seat| {
+        world.get(seat).is_some_and(|s| {
+            matches!(s.class(), ClassName::Seat | ClassName::VehicleSeat)
+                && s.property("Occupant")
+                    .and_then(Value::as_instance)
+                    .and_then(|controller| world.get(controller))
+                    .and_then(|controller| controller.parent())
+                    == Some(character)
         })
+    })
 }
 
 /// `Players.MaxPlayers`, at least 1.

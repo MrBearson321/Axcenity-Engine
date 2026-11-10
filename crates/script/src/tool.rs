@@ -239,8 +239,7 @@ fn front_of(world: &World, character: InstanceId, tool: InstanceId) -> Option<Ve
 /// The middle of the box round a Tool's parts, for one with no Handle.
 fn tool_middle(world: &World, tool: InstanceId) -> Vec3 {
     let parts: Vec<InstanceId> = world
-        .descendants(tool)
-        .into_iter()
+        .descendants_iter(tool)
         .filter(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
         .collect();
     bounds(world, &parts).map_or(Vec3::ZERO, |(min, max)| (min + max) * 0.5)
@@ -386,8 +385,7 @@ pub fn place_held(world: &mut World, assets: &Assets, poses: &Poses) {
 /// Every Inventory in the Workspace.
 fn inventories(world: &World) -> Vec<InstanceId> {
     world
-        .descendants(world.workspace())
-        .into_iter()
+        .descendants_iter(world.workspace())
         .filter(|&id| is_class(world, id, ClassName::Inventory))
         .collect()
 }
@@ -431,8 +429,7 @@ pub fn player_inventory(world: &World) -> Option<InstanceId> {
 /// [`EQUIPPED_PARAMETER`], set to whether a Tool is in hand.
 fn set_equipped_parameter(world: &mut World, character: InstanceId, on: bool) {
     let animator = world
-        .descendants(character)
-        .into_iter()
+        .descendants_iter(character)
         .find(|&id| is_class(world, id, ClassName::Animator) && tool_of(world, id).is_none());
     if let Some(live) = animator.and_then(|id| world.animator_mut(id))
         && let Some(Parameter::Bool(value)) = live.parameters.get_mut(EQUIPPED_PARAMETER)
@@ -538,8 +535,7 @@ impl Tools {
         }
         // Dropped Tools: in the Workspace, not in an Inventory or another Tool.
         let tools: Vec<(InstanceId, (Vec3, Vec3))> = world
-            .descendants(world.workspace())
-            .into_iter()
+            .descendants_iter(world.workspace())
             .filter(|&id| {
                 is_class(world, id, ClassName::Tool)
                     && world

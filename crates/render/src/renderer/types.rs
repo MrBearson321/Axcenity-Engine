@@ -2,6 +2,7 @@ use super::*;
 use crate::SURFACE_PARAMETERS;
 use crate::graphics::{PointShadowMapSize, SpotShadowMapSize};
 use glam::{Mat4, Vec3};
+use rustc_hash::FxHashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(super) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -847,7 +848,7 @@ pub(super) struct ScenePipeline {
     pub(super) ui_image_layout: wgpu::BindGroupLayout,
     pub(super) ui_sampler: wgpu::Sampler,
     /// One bind group per UI image texture. Dropped with the texture.
-    pub(super) ui_image_groups: HashMap<u64, wgpu::BindGroup>,
+    pub(super) ui_image_groups: FxHashMap<u64, wgpu::BindGroup>,
     pub(super) ui_buffer: wgpu::Buffer,
     pub(super) ui_capacity: usize,
     pub(super) font_system: FontSystem,
@@ -923,12 +924,12 @@ pub(super) struct ScenePipeline {
     pub(super) plain_material: GpuMaterial,
     /// Callers' meshes and textures, by key, and the materials using them.
     /// `textures` are sized by the texture quality.
-    pub(super) custom_meshes: HashMap<u64, Cached<GpuMesh>>,
-    pub(super) textures: HashMap<u64, Cached<GpuTexture>>,
+    pub(super) custom_meshes: FxHashMap<u64, Cached<GpuMesh>>,
+    pub(super) textures: FxHashMap<u64, Cached<GpuTexture>>,
     /// Textures that keep their full size whatever the texture quality: UI
     /// images, and terrain weights (which say where each layer is painted).
-    pub(super) full_textures: HashMap<u64, Cached<GpuTexture>>,
-    pub(super) materials: HashMap<MaterialKey, Cached<GpuMaterial>>,
+    pub(super) full_textures: FxHashMap<u64, Cached<GpuTexture>>,
+    pub(super) materials: FxHashMap<MaterialKey, Cached<GpuMaterial>>,
     /// Terrain chunks' pipeline, layer textures and bindings.
     pub(super) terrain: terrain::TerrainPass,
     /// How many frames have been drawn, to tell what wasn't drawn lately.

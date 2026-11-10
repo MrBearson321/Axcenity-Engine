@@ -412,8 +412,7 @@ pub(crate) struct Body {
 /// the rig's bones with a [`BONE_ATTACHMENT`] in it, in the rig's order.
 pub(crate) fn bodies(world: &World, ragdoll: InstanceId, rig: &Rig) -> Vec<Body> {
     let mut found: Vec<Body> = world
-        .descendants(ragdoll)
-        .into_iter()
+        .descendants_iter(ragdoll)
         .filter_map(|part| {
             let instance = world.get(part)?;
             if !instance.class().is_base_part() {
@@ -443,8 +442,7 @@ pub fn ragdoll_of(world: &World, part: InstanceId) -> Option<InstanceId> {
 /// without its namespace (`Head` finds `mixamorig:Head`).
 pub fn body_of(world: &World, ragdoll: InstanceId, bone: &str) -> Option<InstanceId> {
     let parts: Vec<InstanceId> = world
-        .descendants(ragdoll)
-        .into_iter()
+        .descendants_iter(ragdoll)
         .filter(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
         .collect();
     let named = |exact: bool| {

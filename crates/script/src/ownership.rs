@@ -146,8 +146,7 @@ fn character_position(world: &World, player: InstanceId) -> Option<Vector3> {
         .and_then(Value::as_instance)
         .or_else(|| {
             world
-                .descendants(character)
-                .into_iter()
+                .descendants_iter(character)
                 .find(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
         })?;
     world.get(root)?.property("Position")?.as_vector3()
@@ -174,8 +173,7 @@ pub fn owned_parts(
 ) -> BTreeMap<InstanceId, Vec<InstanceId>> {
     let mut ownership = shared.0.borrow_mut();
     let parts: Vec<InstanceId> = world
-        .descendants(world.workspace())
-        .into_iter()
+        .descendants_iter(world.workspace())
         .filter(|&id| world.get(id).is_some_and(|i| i.class().is_base_part()))
         .collect();
     let unanchored: Vec<InstanceId> = parts

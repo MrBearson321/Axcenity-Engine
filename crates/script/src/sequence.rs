@@ -285,8 +285,7 @@ impl Sequences {
         if !self.started {
             self.started = true;
             let auto: Vec<InstanceId> = world
-                .descendants(world.root())
-                .into_iter()
+                .descendants_iter(world.root())
                 .filter(|&id| {
                     world
                         .get(id)
