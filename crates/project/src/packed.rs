@@ -368,8 +368,12 @@ fn add_cooked_textures(root: &Path, files: &mut Vec<PackFile>) -> Result<(), Pac
         } else if axcenity_assets::ModelFormat::of(Path::new(name)).is_some() {
             cooked.extend(axcenity_assets::cached_meshes(root, name));
             cooked.extend(axcenity_assets::cooked_models(root, name));
+            cooked.extend(axcenity_assets::embedded_cooked_files(root, name));
         }
     }
+    // Models that embed the same image share its cooked copy.
+    cooked.sort();
+    cooked.dedup();
     for name in cooked {
         let path = root.join(&name);
         files.push(PackFile::read(name, &path)?);
@@ -621,6 +625,53 @@ mod tests {
         assert_eq!(fs::read(output.join("ui/Title.ttf")).unwrap(), [4, 5]);
         fs::remove_dir_all(source).unwrap();
         fs::remove_dir_all(output).unwrap();
+    }
+
+    #[test]
+    fn a_built_game_carries_a_models_maps_cooked_in_place_and_the_player_reads_them() {
+        let project = temp_folder("embedded");
+        fs::create_dir_all(project.join("assets/models")).unwrap();
+        fs::write(project.join(crate::MANIFEST_FILE), "{}").unwrap();
+        let model = "assets/models/Helmet.glb";
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/hello-pbr/assets/models/DamagedHelmet/DamagedHelmet.glb"),
+            project.join(model),
+        )
+        .unwrap();
+        let bytes = fs::read(project.join(model)).unwrap();
+        let images =
+            axcenity_assets::embedded_files(&bytes, axcenity_assets::ModelFormat::Gltf).unwrap();
+        let (_, image) = &images[0];
+        let cooked = axcenity_assets::CookedTexture {
+            format: axcenity_assets::CookedFormat::Bc7,
+            width: 4,
+            height: 4,
+            levels: vec![vec![1; 16], vec![2; 16], vec![3; 16]],
+            has_alpha: false,
+            average: [0; 4],
+        };
+        axcenity_assets::write_embedded_cooked(&project, image, &cooked).unwrap();
+        let stamp = axcenity_assets::SourceStamp::of(&project.join(model), &bytes);
+        let hash = axcenity_assets::content_hash(image);
+        axcenity_assets::mark_embedded_cooked(&project, model, stamp, true, &[hash]).unwrap();
+        let copies = axcenity_assets::embedded_cooked_files(&project, model);
+        assert_eq!(copies.len(), 2, "the copy and the model's note: {copies:?}");
+
+        let unpacked = temp_folder("embedded-unpacked");
+        let _ = fs::remove_dir_all(&unpacked);
+        unpack_game(&pack_game(&project).unwrap(), &unpacked).unwrap();
+        assert_eq!(
+            axcenity_assets::embedded_cooked_files(&unpacked, model),
+            copies
+        );
+        // Matched by the image's bytes, so unpacking's new times don't matter.
+        assert_eq!(
+            axcenity_assets::embedded_cooked_format(&unpacked, image),
+            Some(axcenity_assets::CookedFormat::Bc7)
+        );
+        let _ = fs::remove_dir_all(project);
+        let _ = fs::remove_dir_all(unpacked);
     }
 
     #[test]

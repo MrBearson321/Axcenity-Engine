@@ -476,8 +476,8 @@ pub struct Image {
     pixels: OnceLock<Vec<u8>>,
     /// Its mip levels in a GPU format, when the file was cooked.
     cooked: Option<CookedTexture>,
-    /// The file to decode the pixels from, for a cooked image.
-    source: Option<PathBuf>,
+    /// Where to decode the pixels from, for a cooked image.
+    source: Option<PixelSource>,
     /// Its file, relative to the model's folder (with `/` between
     /// folders). For an image embedded in the model, where importing
     /// copies it out to (`textures/…`). `None` if it has no file.
@@ -500,6 +500,40 @@ pub(crate) enum ImageOrigin {
     /// project file at `path` (where importing copied it out to), made
     /// from bytes with this hash.
     CookedEmbedded { path: String, hash: u64 },
+    /// Embedded in the model being loaded, and taken from its own cooked
+    /// copy (see [`cooked::embedded_cooked_path`]), made from bytes with
+    /// this hash.
+    InModel { hash: u64 },
+}
+
+/// Where a cooked image's pixels are decoded from, if something asks.
+#[derive(Clone, Debug)]
+pub(crate) enum PixelSource {
+    /// An image file.
+    File(PathBuf),
+    /// The embedded image whose bytes have this hash, in the model file.
+    InModel { model: PathBuf, hash: u64 },
+}
+
+impl PixelSource {
+    /// The image's encoded bytes and a name for its decoder.
+    fn bytes(&self) -> Option<(Vec<u8>, String)> {
+        match self {
+            PixelSource::File(path) => Some((
+                std::fs::read(path).ok()?,
+                path.to_string_lossy().into_owned(),
+            )),
+            PixelSource::InModel { model, hash } => {
+                let bytes = std::fs::read(model).ok()?;
+                let format = ModelFormat::of(model)?;
+                embedded_files(&bytes, format)
+                    .ok()?
+                    .into_iter()
+                    .find(|(_, content)| cooked::content_hash(content) == *hash)
+                    .map(|(name, content)| (content, name))
+            }
+        }
+    }
 }
 
 impl Image {
@@ -518,7 +552,7 @@ impl Image {
     }
 
     /// A cooked texture, its pixels decoded from `source` if asked for.
-    pub(crate) fn from_cooked(cooked: CookedTexture, source: PathBuf) -> Image {
+    pub(crate) fn from_cooked(cooked: CookedTexture, source: PixelSource) -> Image {
         Image {
             key: new_key(),
             width: cooked.width,
@@ -547,9 +581,9 @@ impl Image {
     /// so the size always matches).
     pub fn rgba(&self) -> &[u8] {
         self.pixels.get_or_init(|| {
-            let decoded = self.source.as_ref().and_then(|path| {
-                let bytes = std::fs::read(path).ok()?;
-                decode_image(&bytes, &path.to_string_lossy()).ok()
+            let decoded = self.source.as_ref().and_then(|source| {
+                let (bytes, name) = source.bytes()?;
+                decode_image(&bytes, &name).ok()
             });
             match decoded {
                 Some(image) if (image.width, image.height) == (self.width, self.height) => {
@@ -679,21 +713,30 @@ pub(crate) fn load_models_in(
 /// texture `embedded` in the model, `file` is where importing copied it out
 /// to, and the copy must have been made from those bytes.
 fn cooked_texture(
-    project: Option<&Path>,
+    in_project: Option<InProject<'_>>,
     folder: &Path,
     file: &str,
     embedded: Option<&[u8]>,
-) -> Option<Image> {
-    let project = project?;
+) -> Option<Arc<Image>> {
+    let in_project = in_project?;
+    let project = in_project.project;
     let relative = project_path(project, folder, file)?;
-    let image = match embedded {
-        Some(bytes) => cooked::cooked_embedded_image(project, &relative, bytes)?,
-        None => cooked::cooked_image(project, &relative)?,
+    let named = |image: Image| {
+        Arc::new(Image {
+            file: Some(file.to_owned()),
+            ..image
+        })
     };
-    Some(Image {
-        file: Some(file.to_owned()),
-        ..image
-    })
+    match embedded {
+        // Copied out by importing and cooked as a file, or else cooked
+        // from inside the model (a model dropped into `assets/` by hand).
+        Some(bytes) => cooked::cooked_embedded_image(project, &relative, bytes)
+            .map(named)
+            .or_else(|| {
+                cooked::cooked_in_model(project, in_project.relative, bytes, Some(file.to_owned()))
+            }),
+        None => cooked::cooked_image(project, &relative).map(named),
+    }
 }
 
 /// The project path of `file`, relative to `folder` (a model's folder
@@ -755,9 +798,9 @@ pub(crate) fn files_used(
 }
 
 /// The image files embedded in a model, as file names and bytes, for
-/// copying out to its `textures` folder on import (see [`Image::file`]).
-/// Their bytes are copied as they are.
-pub(crate) fn embedded_files(
+/// copying out to its `textures` folder on import (see [`Image::file`])
+/// and for cooking them in place. Their bytes are as they are.
+pub fn embedded_files(
     bytes: &[u8],
     format: ModelFormat,
 ) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
@@ -1487,12 +1530,20 @@ impl Reader<'_> {
 
     /// `image` from its cooked copy, if it has a current one: a file it
     /// names, or the file importing copied an embedded image out to.
-    fn cooked_image(&self, image: &gltf::Image) -> Option<Image> {
+    fn cooked_image(&self, image: &gltf::Image) -> Option<Arc<Image>> {
         match image.source() {
             gltf::image::Source::Uri { uri, .. } if !uri.starts_with("data:") => {
-                cooked_texture(self.project(), self.folder, &percent_decode(uri)?, None)
+                cooked_texture(self.in_project, self.folder, &percent_decode(uri)?, None)
             }
-            gltf::image::Source::Uri { .. } => None,
+            gltf::image::Source::Uri { uri, .. } => {
+                let bytes = data_uri(uri)?;
+                let file = format!(
+                    "{}/{}",
+                    crate::import::TEXTURES_FOLDER,
+                    self.embedded.get(&image.index())?
+                );
+                cooked_texture(self.in_project, self.folder, &file, Some(&bytes))
+            }
             gltf::image::Source::View { view, .. } => {
                 let bytes = self
                     .buffers
@@ -1503,7 +1554,7 @@ impl Reader<'_> {
                     crate::import::TEXTURES_FOLDER,
                     self.embedded.get(&image.index())?
                 );
-                cooked_texture(self.project(), self.folder, &file, Some(bytes))
+                cooked_texture(self.in_project, self.folder, &file, Some(bytes))
             }
         }
     }
@@ -1519,7 +1570,7 @@ impl Reader<'_> {
                 .buffers
                 .get(view.buffer().index())
                 .and_then(|buffer| buffer.get(view.offset()..view.offset() + view.length()))
-                .map(embedded_key),
+                .map(|bytes| embedded_key(self.project(), bytes)),
             gltf::image::Source::Uri { .. } => None,
         };
         if let Some(shared) = embedded.and_then(shared_embedded) {
@@ -1527,7 +1578,6 @@ impl Reader<'_> {
             return Ok(shared);
         }
         if let Some(cooked) = self.cooked_image(image) {
-            let cooked = Arc::new(cooked);
             self.images.insert(image.index(), cooked.clone());
             if let Some(key) = embedded {
                 share_embedded(key, &cooked);
@@ -1571,16 +1621,19 @@ impl Reader<'_> {
     }
 }
 
-/// Decoded embedded images still in use, by their encoded bytes. Weak, so
-/// an image goes when the last model using it does.
+/// Decoded embedded images still in use, by their project and encoded
+/// bytes. Weak, so an image goes when the last model using it does. Only
+/// shared within a project: a cooked image reads its pixels back from its
+/// own project's files, which another project may not have.
 static EMBEDDED_IMAGES: LazyLock<Mutex<HashMap<EmbeddedKey, Weak<Image>>>> =
     LazyLock::new(Default::default);
 
 type EmbeddedKey = (usize, u64);
 
-fn embedded_key(bytes: &[u8]) -> EmbeddedKey {
+fn embedded_key(project: Option<&Path>, bytes: &[u8]) -> EmbeddedKey {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    project.hash(&mut hasher);
     bytes.hash(&mut hasher);
     (bytes.len(), hasher.finish())
 }

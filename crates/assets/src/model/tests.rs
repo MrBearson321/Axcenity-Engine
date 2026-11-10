@@ -399,12 +399,16 @@ fn a_gltf_materials_extras_say_how_it_moves_in_the_wind() {
 #[test]
 fn the_same_embedded_texture_in_two_models_is_one_image() {
     let bytes = checker_png();
-    let shared = embedded_key(&bytes);
+    let project = Path::new("project");
+    let shared = embedded_key(Some(project), &bytes);
     let image = Arc::new(Image::new(2, 2, vec![255; 16]));
     share_embedded(shared, &image);
     let found = shared_embedded(shared).expect("still in use");
     assert!(Arc::ptr_eq(&found, &image));
-    assert!(shared_embedded(embedded_key(b"other bytes")).is_none());
+    assert!(shared_embedded(embedded_key(Some(project), b"other bytes")).is_none());
+    // Not with another project: a cooked image reads its own project's files.
+    let elsewhere = embedded_key(Some(Path::new("other project")), &bytes);
+    assert!(shared_embedded(elsewhere).is_none());
     // It's let go with the last model that used it.
     drop((image, found));
     assert!(shared_embedded(shared).is_none());
