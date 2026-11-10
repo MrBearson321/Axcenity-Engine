@@ -57,6 +57,13 @@ impl PropertyDoc {
             let Some(target) = target_path(world, root, id) else {
                 continue;
             };
+            // What plays the clip isn't something it moves: an Animator or
+            // Animation shows only if a track keys it.
+            if matches!(instance.class(), ClassName::Animator | ClassName::Animation)
+                && !self.file.tracks.iter().any(|t| t.target == target)
+            {
+                continue;
+            }
             ui.horizontal(|ui| {
                 ui.add_space(depth as f32 * 12.0);
                 let text = format!(

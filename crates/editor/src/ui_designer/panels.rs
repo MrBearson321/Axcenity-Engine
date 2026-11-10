@@ -23,6 +23,9 @@ use crate::style_panel;
 use crate::theme;
 use crate::widgets;
 
+/// Hierarchy rows being dragged: the elements they move.
+struct HierarchyRows(Vec<InstanceId>);
+
 /// The narrowest a palette cell gets, in points.
 const PALETTE_CELL: f32 = 88.0;
 /// The side of an anchor picker cell, in points.
@@ -175,7 +178,10 @@ impl UiDesigner {
     }
 
     /// The ScreenGui and everything in it. A click selects; a double-click
-    /// on text types over it on the artboard.
+    /// on text types over it on the artboard. Dragging a row (or the rows
+    /// selected with it) onto a container's row moves it in, keeping where
+    /// it is on screen; onto any other row, into the container that row is
+    /// in. The row it would go into is outlined while dragging.
     pub(super) fn hierarchy(
         &mut self,
         ui: &mut egui::Ui,
@@ -189,14 +195,30 @@ impl UiDesigner {
         let rows = hierarchy(scene.world, gui);
         let order: Vec<InstanceId> = rows.iter().map(|&(id, _)| id).collect();
         let chosen = self.chosen(scene, gui);
+        // What a drag is carrying, and the row under the pointer.
+        let carried = egui::DragAndDrop::payload::<HierarchyRows>(ui.ctx());
+        let mut drop_onto = None;
+        let mut row_rects = Vec::new();
         for (id, depth) in rows {
             let Some(instance) = scene.world.get(id) else {
                 continue;
             };
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), row_height),
-                egui::Sense::click(),
-            );
+            let sense = if scene.editing && id != gui {
+                egui::Sense::click_and_drag()
+            } else {
+                egui::Sense::click()
+            };
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), row_height), sense);
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    true,
+                    scene.selected == Some(id),
+                    instance.name(),
+                )
+            });
+            row_rects.push((id, rect));
             let selected = scene.selected == Some(id) || chosen.contains(&id);
             widgets::paint_hover(ui, rect, &response, selected, 4.0);
             let indent = 6.0 + depth as f32 * 12.0;
@@ -244,11 +266,49 @@ impl UiDesigner {
                 self.start_typing(scene, id);
             }
             if scene.editing && id != gui {
+                // The rows selected with it go along.
+                let moving = if chosen.contains(&id) && chosen.len() > 1 {
+                    order
+                        .iter()
+                        .copied()
+                        .filter(|row| chosen.contains(row))
+                        .collect()
+                } else {
+                    vec![id]
+                };
+                response.dnd_set_drag_payload(HierarchyRows(moving));
+            }
+            if carried.is_some() && response.contains_pointer() {
+                drop_onto = Some(id);
+            }
+            if scene.editing && id != gui {
                 response.context_menu(|ui| {
                     super::order::menu_items(ui, scene.world, scene.stylesheets, id, actions);
                     self.selection_menu_items(ui, scene, gui, id, actions);
                 });
             }
+        }
+        let (Some(carried), Some(onto)) = (carried, drop_onto) else {
+            return;
+        };
+        let Some(target) = super::hierarchy_drop_target(scene.world, gui, &carried.0, onto) else {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::NoDrop);
+            return;
+        };
+        if let Some(&(_, rect)) = row_rects.iter().find(|&&(id, _)| id == target) {
+            ui.painter().rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(1.5_f32, palette.accent),
+                egui::StrokeKind::Inside,
+            );
+        }
+        if ui.input(|input| input.pointer.any_released()) {
+            egui::DragAndDrop::clear_payload(ui.ctx());
+            actions.push(DesignerAction::MoveInto {
+                ids: carried.0.clone(),
+                parent: target,
+            });
         }
     }
 
@@ -601,9 +661,10 @@ fn anchor_picker(
     let (Some(position), Some(size)) = (udim2("Position"), udim2("Size")) else {
         return;
     };
-    let Some((_, in_flow)) = placement(world, scene.stylesheets, gui, id) else {
+    let Some((placed, in_flow)) = placement(world, scene.stylesheets, gui, id) else {
         return;
     };
+    place_numbers(ui, scene, id, (position, size), placed, in_flow, actions);
     if in_flow {
         ui.weak("Its parent's flex layout places it, so it has no anchor.");
         return;
@@ -665,6 +726,131 @@ fn anchor_picker(
     {
         actions.push(action);
     }
+}
+
+/// X, Y, W and H in design pixels: where the element's top left is from
+/// its parent's, and its size, as on the artboard's rulers. Typing or
+/// dragging a number moves or resizes it, keeping its anchor (the offsets
+/// are worked out again, as pinning does). A flex child has only W and H;
+/// a size its stylesheet sets is greyed, saying where it's set.
+fn place_numbers(
+    ui: &mut egui::Ui,
+    scene: &DesignerScene,
+    id: InstanceId,
+    (position, size): (axcenity_core::UDim2, axcenity_core::UDim2),
+    placed: Placement,
+    in_flow: bool,
+    actions: &mut Vec<DesignerAction>,
+) {
+    let tidy = |value: f32| (value * 10.0).round() / 10.0;
+    let width_axis = crate::ui_handles::Axis::of(scene.world, id, scene.stylesheets, "width");
+    let height_axis = crate::ui_handles::Axis::of(scene.world, id, scene.stylesheets, "height");
+    // (label, value now, hover, whether it can be changed, axis 0 or 1, a size?)
+    let fields = [
+        (
+            "X",
+            placed.start[0],
+            "Left edge, in design pixels from its parent's left",
+            !in_flow,
+            0,
+            false,
+        ),
+        (
+            "Y",
+            placed.start[1],
+            "Top edge, in design pixels from its parent's top",
+            !in_flow,
+            1,
+            false,
+        ),
+        (
+            "W",
+            placed.size[0],
+            "Width, in design pixels",
+            true,
+            0,
+            true,
+        ),
+        (
+            "H",
+            placed.size[1],
+            "Height, in design pixels",
+            true,
+            1,
+            true,
+        ),
+    ];
+    ui.horizontal_wrapped(|ui| {
+        for (label, now, hover, movable, axis, resize) in fields {
+            let css = match (resize, axis) {
+                (true, 0) => &width_axis,
+                (true, _) => &height_axis,
+                _ => &crate::ui_handles::Axis::Size,
+            };
+            let set_by_css = match css {
+                crate::ui_handles::Axis::Size => None,
+                crate::ui_handles::Axis::Css(declaration)
+                | crate::ui_handles::Axis::Locked(declaration) => Some(declaration),
+            };
+            let enabled = movable && set_by_css.is_none();
+            let hover = match set_by_css {
+                Some(declaration) => format!(
+                    "Its stylesheet sets this ({} {{ {}: {} }}). Change it under Style, or \
+                     drag its handle on the artboard.",
+                    declaration.selector, declaration.property, declaration.value
+                ),
+                None if !movable => {
+                    "Its parent's flex layout places it, so it can't be moved here.".to_owned()
+                }
+                None => hover.to_owned(),
+            };
+            let mut value = tidy(now);
+            let response = ui
+                .add_enabled(
+                    enabled,
+                    egui::DragValue::new(&mut value)
+                        .prefix(format!("{label} "))
+                        .speed(1.0)
+                        .max_decimals(1)
+                        .range(if resize {
+                            0.0..=f32::MAX
+                        } else {
+                            f32::MIN..=f32::MAX
+                        }),
+                )
+                .on_hover_text(&hover)
+                .on_disabled_hover_text(&hover);
+            // Named for screen readers (and tests) by its letter.
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::DragValue, enabled, label)
+            });
+            if response.changed() && value != tidy(now) {
+                let anchor = anchor_of(
+                    if axis == 0 { position.x } else { position.y },
+                    if axis == 0 { size.x } else { size.y },
+                );
+                let (start, length) = if resize {
+                    (placed.start[axis], value)
+                } else {
+                    (value, placed.size[axis])
+                };
+                let (along, across) =
+                    super::anchors::anchor_axis(anchor, start, length, placed.parent[axis]);
+                let (mut position, mut size) = (position, size);
+                if axis == 0 {
+                    (position.x, size.x) = (along, across);
+                } else {
+                    (position.y, size.y) = (along, across);
+                }
+                actions.push(DesignerAction::Place {
+                    id,
+                    position,
+                    size,
+                    resize,
+                });
+            }
+        }
+    });
 }
 
 /// An anchor on one axis in words: `40%`, or `30% to 70%` when stretched.

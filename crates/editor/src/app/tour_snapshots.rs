@@ -57,6 +57,19 @@ fn find(app: &EditorApp, name: &str) -> InstanceId {
     app.world.find_first_descendant(root, name).expect(name)
 }
 
+/// The service of `class` under the DataModel, such as Lighting.
+fn service(app: &EditorApp, class: ClassName) -> InstanceId {
+    let root = app.world.root();
+    app.world
+        .get(root)
+        .unwrap()
+        .children()
+        .iter()
+        .copied()
+        .find(|&id| app.world.get(id).is_some_and(|i| i.class() == class))
+        .expect("the service")
+}
+
 fn select(app: &mut EditorApp, id: InstanceId) {
     app.selection = vec![id];
     app.selected = Some(id);
@@ -105,6 +118,43 @@ fn editor_tour_snapshots() {
     }
     run("04-assets", Some("hello-part"), &|app| {
         app.layout.open(Pane::Assets)
+    });
+    // The systems the audit only reviewed (A8-A17), for their own pass.
+    run("60-script-editor", Some("hello-script"), &|app| {
+        app.open_script("scripts/greet.server.lua", Some(1))
+    });
+    run("61-lighting", Some("hello-lights"), &|app| {
+        let lighting = service(app, ClassName::Lighting);
+        select(app, lighting)
+    });
+    run("62-sound", Some("hello-audio"), &|app| {
+        let id = find(app, "Music");
+        select(app, id)
+    });
+    run("63-mixer", Some("hello-mixer"), &|app| {
+        app.layout.open(Pane::Mixer)
+    });
+    run("64-collision-groups", Some("hello-physics"), &|app| {
+        app.collision_groups.open = true
+    });
+    run("65-physics-part", Some("hello-physics"), &|app| {
+        let part = first_child(app);
+        select(app, part)
+    });
+    run("66-settings", Some("hello-part"), &|app| {
+        app.settings.open = true
+    });
+    run("67-version-history", Some("hello-part"), &|app| {
+        app.version_history.open = true
+    });
+    run("68-input", Some("hello-part"), &|app| {
+        app.input_settings.open = true
+    });
+    run("69-tests", Some("hello-part"), &|app| {
+        app.layout.open(Pane::Tests)
+    });
+    run("70-profiler", Some("hello-part"), &|app| {
+        app.layout.open(Pane::Profiler)
     });
     run("10-anim-empty", Some("hello-animation"), &|app| {
         app.layout.open(Pane::Animation)

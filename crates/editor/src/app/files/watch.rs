@@ -76,6 +76,13 @@ impl EditorApp {
             self.output.error(error);
         }
         self.asset_browser.file_changed(path);
+        // An imported, new, edited or deleted texture or model: cook it
+        // (and give it an asset ID) now rather than at the next open.
+        if axcenity_assets::takes_asset_id(path)
+            && let Some(cooker) = &self.cooker
+        {
+            cooker.cook_again();
+        }
         if axcenity_assets::is_data_table(path)
             && let Some(folder) = self.project.as_ref().map(|project| project.folder.clone())
         {

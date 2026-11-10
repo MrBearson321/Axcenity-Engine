@@ -26,7 +26,7 @@ The plan's U1–U19 shipped in seven PRs, all merged. U20, the dedicated passes,
 
 **Not changed, on purpose.**
 - **AN5:** the keying toolbar's terms already explain themselves on hover. Revisit only if they keep confusing people.
-- **AN7:** the repeated "Linked to …" lines are low-impact noise. Leave them for the Animation pass in U20.
+- **AN7** was left here as low-impact noise, then done in a follow-up: see "AN7: the outline and drawer say each thing once" below.
 - **Guided tours, a second workspace system, renaming Roblox-familiar properties:** not planned (see the audit).
 
 **How it was checked.**
@@ -37,6 +37,8 @@ The plan's U1–U19 shipped in seven PRs, all merged. U20, the dedicated passes,
 - Not checked here: Windows, or a real GPU instead of lavapipe. A short pass on Paul's PC over the flows above would cover that.
 
 **Left: U20.** The UI Designer, the Block editor and Model Studio were only *reviewed* in the audit, not inspected screen by screen. Each deserves its own pass with the same method: inspect, snapshot, plan, small PRs.
+
+**Then: the reviewed systems.** The other systems the audit only reviewed got a screenshot pass of their own: [reviewed-systems.md](reviewed-systems.md) (findings RS1–RS4). Changed: selecting Lighting no longer makes an undo step and an unsaved mark (a slider wrote its rounded value back each frame); the Input and Collision Groups windows' edits, Restore defaults included, are undo steps; the Mixer's output meter is **Output**, not a second **Master**. Tests: `showing_the_properties_of_anything_in_the_examples_changes_nothing` (`app/properties_show_tests.rs`; fails without the fix), `restore_defaults_in_the_input_window_undoes_and_redoes` and `removing_a_collision_group_undoes_with_its_pairs` (`app/settings_undo_tests.rs`), and `the_mixer_draws_the_group_tree_in_a_narrow_column` (Output drawn, Master once). Tour shots 60–70.
 
 ## PR 1: Animation Studio (U1–U4)
 
@@ -204,6 +206,19 @@ Findings and plan: [block-editor.md](block-editor.md).
 **Tests**: `retopology_and_bake_stay_folded_until_used` (closed at first, a click opens and closes it, a reference opens it), `the_mesh_menu_says_why_its_operations_are_greyed` (the note in Object mode, shading and Bridge Edge Loops listed, no note in Edit mode), `paint_warns_when_faces_share_texture_space_and_one_click_fixes_it` (a New cube warns; a click on Smart UV Project clears it as one undo step and stays in Paint; undo brings it back; an object with no uvs says so), and `every_ribbon_and_menu_command_can_be_run_from_the_palette` with the new button. Tour shots: `tour-21-studio-object.png` (the closed fold), `tour-27-studio-paint-new-cube.png` (the warning and its button), `tour-03-ribbon-Model.png` (the Models group).
 
 
+## AN7: the outline and drawer say each thing once
+
+Follow-up to the Animation PRs, for the one audit finding they left (A2, AN7).
+
+| Workflow | Before | After |
+|---|---|---|
+| Read a character's state machine in the outline | Under every state, "🔗 Linked to noodle.fbx · Armature|Wave", the same file each time | "🔗 Wave": the take that state plays. The whole badge is on hover, and in full in the clip's own toolbar |
+| Pick what to key in a property clip's drawer | The Animator and its Animation listed as **Objects** beside the parts that move | Only what the clip can move; an Animator or Animation shows only if a track keys it |
+
+**Why**: Unity's Animator window and Godot's AnimationTree name states by their motion and keep the source asset in the inspector, and Unity's Animation window lists only animatable children **[R§1]**. Saying the file once leaves the take, the part that differs between rows, readable in a narrow outline.
+
+**Tests**: `the_outline_names_a_linked_clip_by_its_take_alone` (`animation.rs`), `the_drawer_lists_what_the_clip_moves_not_its_animator` (`app/anim_drawer_tests.rs`; fails without the change). Tour shot 11 checked.
+
 ## UI Designer PR 1: beginner-first inspector (U20, UD1–UD4)
 
 Findings and plan: [ui-designer.md](ui-designer.md).
@@ -230,3 +245,15 @@ Merged as #48. Findings and plan: [ui-designer.md](ui-designer.md).
 | UD8 | "No CSS styles this element yet" | "No CSS rule styles this element yet" |
 
 **Tests**: `delete_on_the_right_click_menu_deletes_as_one_undo_step`, `rename_on_the_right_click_menu_types_over_the_name_in_the_inspector`, `the_empty_designer_says_what_a_screen_gui_is_and_makes_one` (`app/ui_designer_menu_tests.rs`). Snapshots of the empty tab and the menu. `cargo test -p axcenity-editor`: only the known cloud failure; clippy and fmt clean.
+
+## UI Designer PR 3: move into frames from the Hierarchy, X/Y/W/H (U20, UD9–UD10)
+
+The two items the UI Designer pass left for later. Findings and plan: [ui-designer.md](ui-designer.md).
+
+| ID | Problem | Change |
+|---|---|---|
+| UD9 | An element couldn't be moved into another Frame from the designer; the Explorer could, but the element then jumped, as its `Position` counted from the new parent's corner | Drag Hierarchy rows onto a container's row (or any row, for the container it's in): they move in and stay where they are on screen, keeping their anchors. The target row is outlined; a drop that can't go there shows the no-drop cursor. One undo step |
+| UD10 | No X, Y, width and height in design pixels | **X**, **Y**, **W**, **H** at the top of **Position & anchor**; a flex child has only W and H; a CSS-set size is greyed with the rule named |
+
+**Tests**: `app/ui_designer_move_tests.rs` (three tests, see ui-designer.md). Tour shot 47 checked. `cargo test -p axcenity-editor`: 943 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`); clippy and fmt clean. Not checked on Windows or a real GPU.
+
