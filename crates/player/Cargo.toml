@@ -12,6 +12,7 @@ axcenity-assets.workspace = true
 axcenity-audio.workspace = true
 axcenity-character.workspace = true
 axcenity-core.workspace = true
+axcenity-gameplay.workspace = true
 axcenity-nav.workspace = true
 axcenity-net.workspace = true
 axcenity-physics.workspace = true

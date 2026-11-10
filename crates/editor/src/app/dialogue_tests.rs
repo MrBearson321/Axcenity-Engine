@@ -67,6 +67,6 @@ fn the_tab_follows_the_farmers_prompt_and_a_new_dialogue_saves_and_goes_on_it() 
     // Saved with the project, ready to run.
     assert!(app.save());
     let text = std::fs::read_to_string(folder.join(made)).unwrap();
-    assert!(axcenity_script::dialogue::Dialogue::from_json(&text).is_ok());
+    assert!(axcenity_gameplay::dialogue::Dialogue::from_json(&text).is_ok());
     assert!(!app.unsaved());
 }

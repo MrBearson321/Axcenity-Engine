@@ -540,8 +540,8 @@ fn get_service_finds_services_and_lists_them_for_a_wrong_name() {
         output[1].ends_with(
             "there is no service named \"Teamz\"; choose from Workspace, Players, Lighting, \
              ReplicatedStorage, ServerScriptService, ServerStorage, StarterPlayer, Teams, SoundService, TextChatService, CollectionService, \
-             ContentProvider, ContextActionService, DataService, DialogueService, GuiService, HttpService, LevelService, \
-             LocalizationService, NetworkService, PhysicsService, QuestService, ReplicatedFirst, RunService, \
+             ContentProvider, ContextActionService, DataService, GuiService, HttpService, LevelService, \
+             LocalizationService, NetworkService, PhysicsService, ReplicatedFirst, RunService, \
              SaveService, TweenService, UserGameSettings, UserInputService"
         ),
         "{}",

@@ -438,8 +438,6 @@ fn described_fields_and_methods_exist() {
         ("GuiService", "game:GetService('GuiService')"),
         ("HttpService", "game:GetService('HttpService')"),
         ("DataService", "game:GetService('DataService')"),
-        ("DialogueService", "game:GetService('DialogueService')"),
-        ("QuestService", "game:GetService('QuestService')"),
         ("ConsoleService", "game:GetService('ConsoleService')"),
         (
             "DataTable",

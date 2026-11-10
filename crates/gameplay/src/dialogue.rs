@@ -39,11 +39,10 @@ use mlua::{
     Function, IntoLua, Lua, MetaMethod, Table, Thread, UserData, UserDataFields, UserDataMethods,
 };
 
-use crate::instance::{LuaInstance, world, world_mut};
+use axcenity_script::system;
+use axcenity_script::{LuaInstance, Side, lent_world as world, lent_world_mut as world_mut};
+
 use crate::quest::{self, QuestState, translated, with_quests};
-use crate::sandbox::{ScriptIds, environment};
-use crate::scheduler;
-use crate::sides::Side;
 
 /// A dialogue's file ending.
 pub const DIALOGUE_SUFFIX: &str = ".dialogue.json";
@@ -460,7 +459,7 @@ fn shared(lua: &Lua) -> mlua::Result<SharedDialogues> {
 }
 
 fn report(lua: &Lua, path: &str, message: impl fmt::Display) {
-    crate::push_output(lua, crate::OutputKind::Error, format!("{path}: {message}"));
+    system::report(lua, format!("{path}: {message}"));
 }
 
 /// The local player: the Player whose Character is the player character,
@@ -819,18 +818,11 @@ fn act(lua: &Lua, running: &Running, node: &Node) -> Result<(), String> {
 /// Runs a node's Lua in a script's environment with `player`, `character`
 /// and `speaker`. It can't wait.
 fn run_code<R: mlua::FromLuaMulti>(lua: &Lua, running: &Running, code: &str) -> Result<R, String> {
-    let (ids, character) = {
+    let character = {
         let world = world(lua).map_err(|err| err.to_string())?;
-        (
-            ScriptIds {
-                game: world.root(),
-                workspace: world.workspace(),
-                script: world.root(),
-            },
-            axcenity_character::player_character(&world),
-        )
+        axcenity_character::player_character(&world)
     };
-    let env = environment(lua, ids).map_err(|err| err.to_string())?;
+    let env = system::engine_environment(lua).map_err(|err| err.to_string())?;
     let set = |name: &str, id: Option<InstanceId>| env.raw_set(name, to_lua(id));
     set("script", None)
         .and_then(|()| set("player", running.player))
@@ -843,10 +835,8 @@ fn run_code<R: mlua::FromLuaMulti>(lua: &Lua, running: &Running, code: &str) -> 
         .set_mode(mlua::chunk::ChunkMode::Text)
         .set_environment(env)
         .into_function()
-        .map_err(|err| crate::errors::error_message(&err))?;
-    function
-        .call(())
-        .map_err(|err| crate::errors::error_message(&err))
+        .map_err(|err| system::error_message(&err))?;
+    function.call(()).map_err(|err| system::error_message(&err))
 }
 
 /// What dialogues do through the scripting API: give items, play voices
@@ -914,15 +904,7 @@ fn helper(lua: &Lua, name: &str, args: impl mlua::IntoLuaMulti) -> Result<(), St
     let table = match lua.app_data_ref::<Helpers>() {
         Some(helpers) => helpers.0.clone(),
         None => {
-            let ids = {
-                let world = world(lua).map_err(|err| err.to_string())?;
-                ScriptIds {
-                    game: world.root(),
-                    workspace: world.workspace(),
-                    script: world.root(),
-                }
-            };
-            let env = environment(lua, ids).map_err(|err| err.to_string())?;
+            let env = system::engine_environment(lua).map_err(|err| err.to_string())?;
             let table: Table = lua
                 .load(HELPERS)
                 .set_name("=[engine]")
@@ -936,7 +918,7 @@ fn helper(lua: &Lua, name: &str, args: impl mlua::IntoLuaMulti) -> Result<(), St
     let function: Function = table.raw_get(name).map_err(|err| err.to_string())?;
     function
         .call::<()>(args)
-        .map_err(|err| crate::errors::error_message(&err))
+        .map_err(|err| system::error_message(&err))
 }
 
 /// Goes on from the line shown, or picks the selected choice.
@@ -1171,9 +1153,9 @@ fn start_function(lua: &Lua) -> mlua::Result<Function> {
             };
             let path = path.to_string_lossy();
             let player = player_of(lua);
-            let script = scheduler::running_script(lua);
-            let side = lua.app_data_ref::<Side>().map_or(Side::Server, |side| *side);
-            crate::debugger::waiting(lua, &thread);
+            let script = system::running_script(lua);
+            let side = system::side(lua);
+            system::waiting(lua, &thread);
             let ending = start(
                 lua,
                 &path,
@@ -1208,7 +1190,7 @@ fn start_function(lua: &Lua) -> mlua::Result<Function> {
 pub(crate) fn resume_finished(lua: &Lua, side: Side, finished: &[Finished]) {
     for done in finished {
         for (thread, script, _) in done.waiting.iter().filter(|(_, _, s)| *s == side) {
-            scheduler::resume_as(lua, thread, done.ending.clone(), *script);
+            system::resume_as(lua, thread, done.ending.clone(), *script);
         }
     }
 }

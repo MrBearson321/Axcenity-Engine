@@ -239,12 +239,12 @@ impl Session {
     /// The active quests (Phase 77), for the quest tracker the viewport
     /// draws.
     pub fn quest_tracker(&self) -> Vec<axcenity_core::dialogue::QuestView> {
-        self.sim.scripts.quest_tracker(&self.sim.world)
+        axcenity_gameplay::quest_tracker(&self.sim.scripts, &self.sim.world)
     }
 
     /// What the dialogue box shows while a dialogue runs (Phase 77).
     pub fn dialogue_view(&self) -> Option<axcenity_core::dialogue::DialogueView> {
-        self.sim.scripts.dialogue_view(&self.sim.world)
+        axcenity_gameplay::dialogue_view(&self.sim.scripts, &self.sim.world)
     }
 
     /// Whether the viewport draws the default leaderboard (Phase 47): Tab

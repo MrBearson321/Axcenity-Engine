@@ -1107,7 +1107,7 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 /// `"Players"`, or `"UserInputService"`, `"ContextActionService"` or
 /// `"UserGameSettings"` (LocalScripts only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`, `"LevelService"`,
 /// `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"HttpService"`,
-/// `"DataService"`, `"DialogueService"`, `"QuestService"`, `"ConsoleService"` or
+/// `"DataService"`, `"ConsoleService"` or
 /// `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
@@ -1141,8 +1141,6 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "HttpService" => return LuaHttpService.into_lua(lua),
             "ContentProvider" => return LuaContentProvider.into_lua(lua),
             "DataService" => return LuaDataService.into_lua(lua),
-            "DialogueService" => return crate::dialogue::LuaDialogueService.into_lua(lua),
-            "QuestService" => return crate::quest::LuaQuestService.into_lua(lua),
             "ConsoleService" => return crate::console_service::LuaConsoleService.into_lua(lua),
             "PhysicsService" => return crate::query::LuaPhysicsService.into_lua(lua),
             "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
@@ -1170,14 +1168,12 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     "ContentProvider",
                     "ContextActionService",
                     "DataService",
-                    "DialogueService",
                     "GuiService",
                     "HttpService",
                     "LevelService",
                     "LocalizationService",
                     "NetworkService",
                     "PhysicsService",
-                    "QuestService",
                     "ReplicatedFirst",
                     "RunService",
                     "SaveService",

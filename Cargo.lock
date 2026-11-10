@@ -654,6 +654,7 @@ dependencies = [
  "axcenity-character",
  "axcenity-cook",
  "axcenity-core",
+ "axcenity-gameplay",
  "axcenity-mesh-edit",
  "axcenity-nav",
  "axcenity-net",
@@ -696,10 +697,15 @@ dependencies = [
 name = "axcenity-gameplay"
 version = "0.1.0"
 dependencies = [
+ "axcenity-assets",
+ "axcenity-character",
  "axcenity-core",
+ "axcenity-save",
  "axcenity-script",
  "axcenity-workspace-hack",
+ "glam 0.34.3",
  "mlua",
+ "serde_json",
 ]
 
 [[package]]
@@ -770,6 +776,7 @@ dependencies = [
  "axcenity-audio",
  "axcenity-character",
  "axcenity-core",
+ "axcenity-gameplay",
  "axcenity-mesh-edit",
  "axcenity-nav",
  "axcenity-net",

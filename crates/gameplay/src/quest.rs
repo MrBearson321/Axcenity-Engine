@@ -29,9 +29,8 @@ use axcenity_core::{InstanceId, Value, World};
 use axcenity_save::Saves;
 use mlua::{Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
-use crate::events::{LuaSignal, Owner};
-use crate::instance::world;
-use crate::save::saves;
+use axcenity_script::lent_world as world;
+use axcenity_script::system::{self, saves};
 
 /// The data table quests are rows of.
 pub const QUESTS_TABLE: &str = "quests";
@@ -334,8 +333,7 @@ impl QuestContext<'_> {
 
     /// Reach objectives whose part the player character is in.
     pub fn step(&mut self, world: &World) {
-        let Some(middle) = crate::prompt::Viewer::find(world, None).map(|viewer| viewer.position)
-        else {
+        let Some(middle) = system::player_middle(world) else {
             return;
         };
         let needs_check = active(self.saves).iter().any(|key| {
@@ -465,9 +463,8 @@ pub struct LuaQuestService;
 impl UserData for LuaQuestService {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         for event in ["QuestStarted", "QuestProgressed", "QuestCompleted"] {
-            fields.add_field_method_get(event, move |_, _| {
-                Ok(LuaSignal::named(Owner::QuestService, event))
-            });
+            fields
+                .add_field_method_get(event, move |_, _| Ok(system::signal("QuestService", event)));
         }
     }
 
