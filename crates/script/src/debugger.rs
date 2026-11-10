@@ -38,7 +38,6 @@ use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::ffi::CStr;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use mlua::chunk::Compiler;
 use mlua::{Function, Lua, MultiValue, Table, Thread, Value, VmState, ffi};
 
 use crate::{OutputKind, push_output, scheduler};
@@ -143,7 +142,7 @@ struct Stop {
 /// are compiled with their local names.
 pub fn install(lua: &Lua) -> mlua::Result<()> {
     lua.set_app_data(Debugger::default());
-    lua.set_compiler(Compiler::new().set_debug_level(2));
+    lua.set_compiler(crate::sandbox::compiler().set_debug_level(2));
     set_step_hook(lua)
 }
 

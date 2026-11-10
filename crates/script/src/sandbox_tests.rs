@@ -94,7 +94,7 @@ fn the_string_metatable_is_locked() {
 }
 
 #[test]
-fn changing_string_functions_only_changes_your_own_copy() {
+fn the_libraries_are_read_only_as_in_luau() {
     let mut world = World::new();
     let mut runtime = ScriptRuntime::new();
     start(
@@ -102,19 +102,46 @@ fn changing_string_functions_only_changes_your_own_copy() {
         &mut world,
         "scripts/a.server.lua",
         r#"
-        string.upper = function() return "hacked" end
-        print(("a"):upper(), string.upper("a"))
+        print(pcall(function() string.upper = function() return "hacked" end end))
+        print(pcall(function() math.sqrt = nil end))
+        print(pcall(function() os.exit = function() end end))
+        print(("a"):upper(), string.upper("a"), math.sqrt(16), table.isfrozen(math))
+        "#,
+    );
+    let output = lines(&mut runtime);
+    for line in &output[..3] {
+        assert!(
+            line.starts_with("false\t") && line.contains("attempt to modify a readonly table"),
+            "{output:?}"
+        );
+    }
+    assert_eq!(output[3], "A\tA\t4\ttrue");
+}
+
+#[test]
+fn a_script_can_still_replace_a_library_with_its_own_table() {
+    // `_G` and plain globals are the script's own, so a script may swap
+    // in its own `math`, and calls through the name use it.
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/a.server.lua",
+        r#"
+        local real = math
+        math = setmetatable({ sqrt = function() return "mine" end }, { __index = real })
+        typeof = function() return "also mine" end
+        print(math.sqrt(16), math.floor(2.5), typeof(1))
         "#,
     );
     start(
         &mut runtime,
         &mut world,
         "scripts/b.server.lua",
-        r#"print(("b"):upper(), string.upper("b"))"#,
+        "print(math.sqrt(16), typeof(Vector3.new()))",
     );
-    // Script `a` broke only its own `string.upper`; the method form uses
-    // the engine's hidden copy, and script `b` is untouched.
-    assert_eq!(lines(&mut runtime), ["A\thacked", "B\tB"]);
+    assert_eq!(lines(&mut runtime), ["mine\t2\talso mine", "4\tVector3"]);
 }
 
 #[test]
@@ -326,7 +353,7 @@ fn a_local_script_cannot_reach_the_servers_globals() {
         &mut runtime,
         &mut world,
         "scripts/a.server.lua",
-        "secret = 1\n_G.secret = 1\nmath.secret = 1",
+        "secret = 1\n_G.secret = 1\nmath = { secret = 1 }",
     );
     start(
         &mut runtime,
@@ -568,4 +595,24 @@ fn a_module_can_wait_while_loading_and_other_scripts_wait_for_it() {
         runtime.step(&mut world, 1.0 / 60.0);
     }
     assert_eq!(lines(&mut runtime), ["a\tready", "b\tready"]);
+}
+
+#[test]
+fn luau_builtins_the_sandbox_replaces_or_leaves_out_stay_that_way() {
+    // Script environments are `safeenv`, so Luau runs its builtins without
+    // looking them up; `sandbox::compiler` turns that off for these.
+    let output = output_of(
+        r#"
+        print(typeof(workspace), typeof(Vector3.new()))
+        print(pcall(function() return unpack({ 1, 2 }) end))
+        print(pcall(function() return vector.create(1, 2, 3) end))
+        print(pcall(function() return integer.create(1) end))
+        print(pcall(function() return setmetatable({}, { __gc = function() end }) end))
+        "#,
+    );
+    assert_eq!(output[0], "Instance\tVector3");
+    for line in &output[1..] {
+        assert!(line.starts_with("false\t"), "{output:?}");
+    }
+    assert!(output[4].contains("__gc isn't supported"), "{output:?}");
 }

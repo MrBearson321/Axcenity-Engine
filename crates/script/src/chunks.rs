@@ -10,6 +10,11 @@
 //! that doesn't compile goes through mlua's text path, so its syntax error
 //! reads exactly as before.
 //!
+//! A script whose first lines hold the `--!native` comment (or with an
+//! `@native` function) is also compiled to machine code when it loads (Luau's native code generation,
+//! roadmap L3); every other chunk runs in the interpreter as before. See
+//! [`wants_native`].
+//!
 //! The cache is per thread (each host runs its scripts on one thread) and
 //! holds at most [`MAX_BYTES`] of source and bytecode, dropping the oldest
 //! entries first.
@@ -19,7 +24,7 @@ use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use mlua::chunk::{ChunkMode, Compiler};
+use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Table};
 use rustc_hash::{FxHashMap, FxHasher};
 
@@ -95,7 +100,7 @@ fn bytecode(source: &str, debug_level: u8) -> Option<Rc<[u8]>> {
     if found.is_some() {
         return found;
     }
-    let bytecode: Rc<[u8]> = Compiler::new()
+    let bytecode: Rc<[u8]> = crate::sandbox::compiler()
         .set_debug_level(debug_level)
         .compile(source)
         .ok()?
@@ -128,10 +133,73 @@ fn bytecode(source: &str, debug_level: u8) -> Option<Rc<[u8]>> {
     Some(bytecode)
 }
 
+/// Whether `source` asks for native code: a `--!native` hot comment in its
+/// header, before the first line of code, as Luau reads it (comments and
+/// blank lines may come before it, `--!strict` too, code may not), or a
+/// function marked `@native`.
+///
+/// Luau compiles only the `@native` functions of a script without the
+/// header, but mlua's code generator call has no option for that, so such
+/// a script is compiled whole. Native code runs the same as the
+/// interpreter; the difference is only compile time and memory.
+pub fn wants_native(source: &str) -> bool {
+    native_header(source) || source.contains("@native")
+}
+
+fn native_header(source: &str) -> bool {
+    let mut rest = source.trim_start_matches('\u{feff}');
+    loop {
+        rest = rest.trim_start();
+        let Some(comment) = rest.strip_prefix("--") else {
+            return false;
+        };
+        if let Some(close) = long_bracket_close(comment) {
+            // A block comment `--[[ ... ]]` (or `--[==[ ... ]==]`).
+            let Some(end) = comment.find(&close) else {
+                return false;
+            };
+            rest = &comment[end + close.len()..];
+            continue;
+        }
+        let line_end = comment.find('\n').unwrap_or(comment.len());
+        let line = &comment[..line_end];
+        // Luau trims only the end of a hot comment, so `--! native` and
+        // `--!native please` don't count.
+        if line.strip_prefix('!').map(str::trim_end) == Some("native") {
+            return true;
+        }
+        rest = &comment[line_end..];
+    }
+}
+
+/// The closing bracket of a long bracket that opens `text` (`[[` or
+/// `[==[`), if it does: `]]` or `]==]`.
+fn long_bracket_close(text: &str) -> Option<String> {
+    let after = text.strip_prefix('[')?;
+    let level = after.bytes().take_while(|&byte| byte == b'=').count();
+    after[level..].strip_prefix('[')?;
+    Some(format!("]{}]", "=".repeat(level)))
+}
+
 /// Compiles `source` (the file `path`) into a function that runs in `env`,
 /// reusing the bytecode of an earlier load of the same source. Its errors
 /// read `path:line: message`.
+///
+/// A `--!native` script ([`wants_native`]) is compiled to machine code as
+/// it loads, unless the debugger is installed: the debugger steps through
+/// lines with Luau's hooks, which only the interpreter runs.
 pub fn load(lua: &Lua, path: &str, source: &str, env: Table) -> mlua::Result<Function> {
+    let native = wants_native(source) && !crate::debugger::is_installed(lua);
+    if !native {
+        return load_with(lua, path, source, env);
+    }
+    lua.enable_jit(true);
+    let function = load_with(lua, path, source, env);
+    lua.enable_jit(false);
+    function
+}
+
+fn load_with(lua: &Lua, path: &str, source: &str, env: Table) -> mlua::Result<Function> {
     // The `@` tells Lua this is a file path, so messages read `path:line:`.
     let name = format!("@{path}");
     match bytecode(source, debug_level(lua)) {

@@ -272,7 +272,7 @@ fn server_and_client_contexts_do_not_share_lua_globals() {
         r#"
         score = 10
         _G.level = 2
-        string.shout = string.upper
+        string = { shout = string.upper }
         "#,
     );
     start(

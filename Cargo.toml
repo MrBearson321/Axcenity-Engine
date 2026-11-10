@@ -88,8 +88,10 @@ log = "0.4"
 # project thumbnails. (The editor gets PNG decoding through eframe.)
 png = "0.18"
 # Luau, compiled from source (the `luau0-src` crate, MIT) so no system Lua is
-# needed on any OS. Building it needs a C++ compiler.
-mlua = { version = "0.12", features = ["luau"] }
+# needed on any OS. Building it needs a C++ compiler. `luau-jit` builds
+# Luau's native code generator (x86-64 and AArch64; elsewhere scripts stay
+# interpreted); only `--!native` scripts use it (roadmap L3).
+mlua = { version = "0.12", features = ["luau", "luau-jit"] }
 # Pins the Luau sources `mlua` builds. mlua-sys 0.13.0 reads bytecode up to
 # version 11; luau0-src 0.22.1 (Luau 0.744) writes version 13, so mlua takes
 # every compiled chunk for source text and can't load it. Raise this only

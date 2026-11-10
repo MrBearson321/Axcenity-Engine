@@ -567,7 +567,7 @@ fn scripts_cannot_see_each_others_globals() {
         &mut runtime,
         &mut world,
         "scripts/a.server.lua",
-        "secret = 42\n_G.shared = 1\nmath.extra = 1\nprint = nil\nVector3.new = nil",
+        "secret = 42\n_G.shared = 1\nmath = { extra = 1 }\nprint = nil\nVector3.new = nil",
     );
     run(
         &mut runtime,

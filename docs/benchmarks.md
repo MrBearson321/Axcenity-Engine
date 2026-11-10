@@ -387,6 +387,22 @@ The linux cloud container above, release build, `axcenity-server target/s10k --b
 - **The replication diff** skips a part whose only change was its motion (`revision_without_motion`) and compares what did change in place, so the 1,000 falling parts no longer each copy all their properties every frame.
 - With no players, the server's frame is unchanged (Network send 0.65 vs 0.70, Physics 7.7 vs 7.7 over six alternating runs, within noise).
 
+### Fast builtins and native code (L3)
+
+`cargo test -p axcenity-script --release --lib -- --ignored bench_native --nocapture` starts one script per case and times it (best of five), with and without `--!native`. Cloud container, two runs, milliseconds; "main" is the same case before this change (no `safeenv`, see [scripting/sandbox.md](scripting/sandbox.md#fast-builtins-roadmap-l3)):
+
+| Case | main | interpreted | `--!native` |
+|---|---|---|---|
+| numbers: 3M × `math.sin(i) * math.sqrt(i)` | 384–387 | 124–127 | 62–63 |
+| fib(27), recursive | 26–27 | 28 | 22–24 |
+| tables: fill and `ipairs` 300k | 18–20 | 12 | 9 |
+| Vector3: 200k `v + Vector3.new(1, 0, 0) * 0.5` | 169–179 | 176–178 | 182–183 |
+| Instance reads: 100k `p.Position.X` | 64–65 | 70 | 72–73 |
+
+- **Most of the gain is `safeenv`, not native code.** Without it Luau treats every script's environment as possibly patched, so it looks each `math.sin` up and calls it through the C API, and native code bails out to the interpreter at each such call (that's why `--!native` alone measured 0.99× on "numbers"). With it, builtins run in place, and native code inlines them.
+- **Engine calls don't speed up.** Vector3 math and Instance reads are mlua userdata calls either way (the Vector3 row allocates a userdata per result); native code can't inline them. That cost is what a native `vector` Vector3 would remove ([research/native-vector-check.md](research/native-vector-check.md)).
+- **S10k doesn't move**: its 200 scripts mostly read and write Instances. Three alternating 600-frame runs each, medians: test runner frame 10.29 → 10.15 ms, Heartbeat 1.38 → 1.38; server frame 8.32 → 8.23, Heartbeat 1.33 → 1.36; Scripts 0.015–0.02 ms on both. `bench_member_access` moved 0–12% faster (a `part.Position` read 468 → 447 ns), within this container's noise.
+
 ### Calibrating against the rendering baseline
 
 The render benchmarks ran on the same container to relate it to the machine in [rendering/performance.md](rendering/performance.md). `bench_10000_parts` (edge view) took 8.6 ms in `build_draw_list` there, about the same as the desktop above; steps other than the draw list are about 1.5 to 2× slower on the container. Compare runs on one machine rather than scaling between them. `bench_project` on S10k: `build_draw_list` 9.4 ms and `ScenePipeline::draw` (CPU side) 3.7 ms from the spawn, 9.5 ms and 3.7 ms from the overview, 6,575 and 10,026 items drawn. GPU times on lavapipe (300–940 ms a frame) say nothing about a real GPU and are left out.

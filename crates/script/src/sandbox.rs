@@ -12,6 +12,7 @@
 //! metatable in Lua, so [`lock_string_metatable`] hides it from scripts.
 
 use axcenity_core::InstanceId;
+use mlua::chunk::Compiler;
 use mlua::{Function, Lua, Table, Value};
 
 use crate::{api, errors, modules, task, types, watchdog};
@@ -55,6 +56,73 @@ const UNSAFE_LIBRARY_FUNCTIONS: &[(&str, &str)] = &[("string", "dump")];
 
 /// The parts of `os` that only read the clock. The rest (`execute`, `remove`,
 /// `exit`, `getenv`, ...) reaches outside the game.
+/// Luau builtins whose global the sandbox replaces (`setmetatable` and
+/// `typeof` are the engine's own) or leaves out (`unpack`, and the `vector`
+/// and `integer` libraries). Script environments are `safeenv` (see
+/// [`environment`]), so Luau would otherwise run its own built-in version
+/// of these for a call such as `typeof(x)` without looking the name up.
+const DISABLED_BUILTINS: &[&str] = &[
+    "setmetatable",
+    "typeof",
+    "unpack",
+    "vector.create",
+    "vector.magnitude",
+    "vector.normalize",
+    "vector.cross",
+    "vector.dot",
+    "vector.floor",
+    "vector.ceil",
+    "vector.abs",
+    "vector.sign",
+    "vector.clamp",
+    "vector.min",
+    "vector.max",
+    "vector.lerp",
+    "integer.add",
+    "integer.sub",
+    "integer.mod",
+    "integer.mul",
+    "integer.div",
+    "integer.idiv",
+    "integer.udiv",
+    "integer.rem",
+    "integer.urem",
+    "integer.min",
+    "integer.max",
+    "integer.neg",
+    "integer.create",
+    "integer.clamp",
+    "integer.band",
+    "integer.bor",
+    "integer.bxor",
+    "integer.bnot",
+    "integer.btest",
+    "integer.bswap",
+    "integer.lt",
+    "integer.le",
+    "integer.ult",
+    "integer.ule",
+    "integer.gt",
+    "integer.ge",
+    "integer.ugt",
+    "integer.uge",
+    "integer.lshift",
+    "integer.rshift",
+    "integer.arshift",
+    "integer.lrotate",
+    "integer.rrotate",
+    "integer.countrz",
+    "integer.countlz",
+    "integer.extract",
+    "integer.tonumber",
+];
+
+/// The Luau compiler every script and console command is compiled with:
+/// Luau's builtins on, except [`DISABLED_BUILTINS`].
+pub fn compiler() -> Compiler {
+    Compiler::new().set_disabled_builtins(DISABLED_BUILTINS.iter().copied())
+}
+
 const SAFE_OS_FUNCTIONS: &[&str] = &["clock", "date", "difftime", "time"];
 
 /// What `getmetatable` gives for a string, as in Roblox.
@@ -249,6 +317,10 @@ pub fn environment(lua: &Lua, ids: ScriptIds) -> mlua::Result<Table> {
                 copy.raw_set(name, function)?;
             }
         }
+        // Read-only, as Luau's own libraries are: a call such as
+        // `math.sqrt(x)` runs Luau's builtin directly, so a script that
+        // replaced `math.sqrt` in its copy wouldn't get its own function.
+        copy.set_readonly(true);
         env.raw_set(library, copy)?;
     }
 
@@ -257,6 +329,7 @@ pub fn environment(lua: &Lua, ids: ScriptIds) -> mlua::Result<Table> {
     for &name in SAFE_OS_FUNCTIONS {
         safe_os.raw_set(name, os.raw_get::<Value>(name)?)?;
     }
+    safe_os.set_readonly(true);
     env.raw_set("os", safe_os)?;
 
     // `_G` is the script's own globals, not a table shared between scripts.
@@ -264,5 +337,15 @@ pub fn environment(lua: &Lua, ids: ScriptIds) -> mlua::Result<Table> {
 
     api::install(lua, &env, ids)?;
     env.raw_set("task", shared.task.library(lua)?)?;
+    // `safeenv` lets Luau call its builtins (`math.sqrt`, `string.sub`,
+    // `type`, ...) directly instead of looking them up and calling them
+    // through the C API, about 3x faster for numeric code, and it's what
+    // lets native code (`--!native`) run them inline. Luau assumes the
+    // environment's builtins are the real ones: true here, as the
+    // libraries are read-only and `compiler` turns off the builtins the
+    // sandbox replaces or leaves out. A script that reassigns a builtin
+    // global by name (`typeof = f`) still gets its own: Luau's compiler
+    // sees the assignment and calls it normally.
+    env.set_safeenv(true);
     Ok(env)
 }
