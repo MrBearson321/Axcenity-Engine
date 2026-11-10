@@ -36,7 +36,9 @@ Installer pictures (NSIS header/sidebar, DMG background) come from `python packa
 
 ## Cutting a release
 
-1. Main is green on [.github/workflows/ci.yml](../../.github/workflows/ci.yml).
+GitHub Actions is intentionally turned off ([development policy](../development-policy.md#continuous-integration)), and that includes the Release workflow. Turn **Release** back on in the repository's Actions settings for the release, and off again after.
+
+1. Main passes the local platform checks on Windows and Linux (`scripts/check-platform.ps1`, `scripts/check-platform.sh`; [development.md](../development.md)), and on macOS too if the release ships a macOS build that should be checked.
 2. Push a tag, or run **Actions > Release** and type the version without `v`:
 
    ```bash

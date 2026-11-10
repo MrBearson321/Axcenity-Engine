@@ -1,5 +1,7 @@
 # Phase 3: Package and refactoring strategy (Axcenity Engine)
 
+> **Superseded in part (2026-11-10).** These are working notes; the report (`../engine-modernization-report.md`) is the maintained version. Paul's answers to the open questions changed several verdicts here: GitHub Actions is intentionally off (M10 and every "CI gate" or "nightly" step are deferred or become local checks), cross-machine determinism is not a requirement, mobile and web are deferred (ASTC and wasm don't matter for now), Luau's native `vector` is not chosen for Vector3 until its type identity and interop are verified, and internet-hosted dedicated servers (M11) are deferred. See `../../development-policy.md`.
+
 Date 2026-11-10. Inputs: `phase1-runtime.md` (R), `phase1-sim.md` (S), `phase1-tools.md` (T), `phase2-engine-facts.md` (EF),
 `phase2-benchmark.md` (B), root `Cargo.toml`, `Cargo.lock`. Repo paths are relative to `/home/user/axcenity-engine`, crate paths to `crates/`.
 

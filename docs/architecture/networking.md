@@ -15,6 +15,7 @@ Hosting, joining and finding games (Milestone 14). Phase 63 is the transport, ho
 - Channel 0 is reliable-ordered, channel 1 unreliable (`Channel`). The unreliable channel carries motion (below).
 - The loopback can emulate a worse network (`Conditions`: `latency` added to each packet each way, give or take `jitter`, and the share `loss` dropped; `Server::emulate`, `Network::emulate`). `Network::stats` gives each connection's round trip, loss and bytes a second (renet's numbers), and the bytes sent over a loopback.
 - Netcode runs unsecured: there's no account service to hand out connect tokens, so packets aren't encrypted. This is enough for direct-address and LAN play, which is all there is (no relay or matchmaking).
+- Scope: local multiplayer, the server/client architecture and testing in controlled environments (loopback, LAN, a local `axcenity-server`) come first. Internet-hosted dedicated servers are a future objective: deployment, hosting, server management and secure netcode (roadmap M11) wait until the multiplayer systems are mature ([development policy](../development-policy.md#dedicated-servers-and-hosting)).
 - Netcode's protocol id is the same for every game and version. Games and versions are told apart by the handshake, which can say why it refuses; netcode would drop the packets silently.
 - A server listens on IPv4 (`0.0.0.0`), and joining prefers an address's IPv4 form.
 

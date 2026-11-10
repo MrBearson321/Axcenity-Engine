@@ -23,6 +23,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Cutscene sequences, the Sequence Instance, the Sequencer tab | [project/sequences.md](project/sequences.md) |
 | Platforms or file access | [architecture/portability.md](architecture/portability.md) |
 | Build speed, test commands, or nextest settings | [development.md](development.md) |
+| Scope and priorities: CI (off on purpose), target platforms, determinism, the Vector3 caveat, dedicated hosting, and the development policy | [development-policy.md](development-policy.md) |
 | Whole-frame benchmarks, the S10k scene, `--bench`, profiler spans and Tracy | [benchmarks.md](benchmarks.md) |
 | The editor window, ribbon, or theme | [editor/shell.md](editor/shell.md) |
 | Selection or Properties | [editor/selection.md](editor/selection.md) |
