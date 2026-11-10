@@ -117,9 +117,9 @@ pub(crate) static LAPS: &[(Hosts, &[(&str, &str)])] = &[
         ("scripts.stepped", "Scripts"),
         ("physics.step", "Physics"),
         ("heartbeat", "Heartbeat"),
-        ("graphics.changed", "RenderStep"),
         ("audio", "Audio"),
-        ("tools.place", "Animation"),
+        ("loading.screen", "Animation"),
+        ("graphics.changed", "RenderStep"),
         ("net.send", "Network send"),
     ]),
     (Hosts::SERVER, &[

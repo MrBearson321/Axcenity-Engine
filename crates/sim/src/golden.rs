@@ -193,3 +193,52 @@ fn inserting_after_a_missing_step_is_a_bug() {
     let extra = schedule.steps()[0];
     schedule.insert_after("nowhere", extra);
 }
+
+/// The schedule as the Markdown table in `docs/architecture/frame-loop.md`:
+/// each standard step, its stage and the hosts that run it.
+fn frame_table() -> String {
+    let hosts = [
+        Hosts::PLAYER,
+        Hosts::EDITOR_PLAY,
+        Hosts::SERVER,
+        Hosts::TEST,
+    ]
+    .map(names);
+    let mut table = String::from(
+        "| Step | Stage | Player | Editor Play | Server | Test runner |\n\
+         |---|---|:-:|:-:|:-:|:-:|\n",
+    );
+    for step in Schedule::standard().steps() {
+        let runs = hosts
+            .iter()
+            .map(|names| {
+                if names.contains(&step.name) {
+                    "✓"
+                } else {
+                    ""
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        table.push_str(&format!(
+            "| `{}` | {:?} | {runs} |\n",
+            step.name, step.stage
+        ));
+    }
+    table
+}
+
+#[test]
+fn the_frame_loop_doc_lists_the_schedule() {
+    let doc = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/architecture/frame-loop.md"
+    ))
+    .unwrap()
+    .replace("\r\n", "\n");
+    let table = frame_table();
+    assert!(
+        doc.contains(&table),
+        "docs/architecture/frame-loop.md's step table is out of date; put this in its place:\n\n{table}"
+    );
+}
