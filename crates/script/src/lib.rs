@@ -2476,6 +2476,8 @@ mod dialogue_tests;
 #[cfg(test)]
 mod health_tests;
 #[cfg(test)]
+mod instance_identity_tests;
+#[cfg(test)]
 mod joint_tests;
 #[cfg(test)]
 mod mover_tests;
