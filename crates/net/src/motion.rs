@@ -16,9 +16,9 @@
 //! and shows them [`DELAY`] behind the newest, between two of them, so
 //! parts move smoothly whatever arrives when.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
-use axcenity_core::{InstanceId, MOTION_PROPERTIES, Value, Vector3, World};
+use axcenity_core::{Instance, InstanceId, MOTION_PROPERTIES, Value, Vector3, World};
 
 use crate::replicate::{Op, WireChange};
 use crate::wire::WireValue;
@@ -59,7 +59,10 @@ pub struct PartState {
 
 impl PartState {
     pub fn of(world: &World, id: InstanceId) -> Option<PartState> {
-        let instance = world.get(id)?;
+        world.get(id).map(PartState::of_instance)
+    }
+
+    fn of_instance(instance: &Instance) -> PartState {
         let vector = |name| {
             instance
                 .property(name)
@@ -76,11 +79,11 @@ impl PartState {
                 .round()
                 .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16
         };
-        Some(PartState {
+        PartState {
             position: [position(p.x), position(p.y), position(p.z)],
             orientation: [angle(o.x), angle(o.y), angle(o.z)],
             velocity: [velocity(v.x), velocity(v.y), velocity(v.z)],
-        })
+        }
     }
 
     pub fn position(&self) -> Vector3 {
@@ -195,6 +198,9 @@ struct Tracked {
     sent: PartState,
     /// What it was last frame.
     seen: PartState,
+    /// The part's [`Instance::motion_revision`] when `seen` was read: the
+    /// same number means it hasn't moved since, so it isn't read again.
+    motion: u64,
     /// Seconds since it last moved.
     still: f64,
     /// Whether the player has it exactly (from its creation, or settled).
@@ -203,9 +209,34 @@ struct Tracked {
     priority: f64,
 }
 
+impl Tracked {
+    /// A part the player has exactly as it is now.
+    fn of(instance: &Instance) -> Tracked {
+        let state = PartState::of_instance(instance);
+        Tracked {
+            sent: state,
+            seen: state,
+            motion: instance.motion_revision(),
+            still: 0.0,
+            exact: true,
+            priority: 0.0,
+        }
+    }
+}
+
 /// One player's motion: what they have of each part, and their budget.
+///
+/// It runs every frame for every player over every part they have, so it
+/// keeps the parts in the order it's given them, with what the player has
+/// of each beside it: while that list stays the same (most frames) it
+/// looks nothing up, and a part that hasn't moved (most parts) costs a
+/// revision check (roadmap M7).
 pub struct MotionSender {
-    parts: BTreeMap<InstanceId, Tracked>,
+    /// The parts the player has, as last given.
+    ids: Vec<InstanceId>,
+    /// What the player has of each of `ids`, in the same order; `None` for
+    /// one not tracked yet.
+    parts: Vec<Option<Tracked>>,
     /// Bytes they may still be sent.
     budget: f64,
     rate: f64,
@@ -215,30 +246,31 @@ impl MotionSender {
     /// For a player who has `world`'s parts as they are now (just sent a
     /// snapshot), with a budget of `rate` bytes a second.
     pub fn new(world: &World, parts: &[InstanceId], rate: f64) -> MotionSender {
-        let mut sender = MotionSender {
-            parts: BTreeMap::new(),
+        MotionSender {
+            ids: parts.to_vec(),
+            parts: parts
+                .iter()
+                .map(|&id| world.get(id).map(Tracked::of))
+                .collect(),
             budget: 0.0,
             rate,
-        };
-        for &id in parts {
-            sender.track(world, id);
         }
-        sender
     }
 
-    fn track(&mut self, world: &World, id: InstanceId) {
-        if let Some(state) = PartState::of(world, id) {
-            self.parts.insert(
-                id,
-                Tracked {
-                    sent: state,
-                    seen: state,
-                    still: 0.0,
-                    exact: true,
-                    priority: 0.0,
-                },
-            );
+    /// Makes `parts` the parts the player has, keeping what they have of
+    /// those they had.
+    fn keep(&mut self, parts: &[InstanceId]) {
+        if parts == self.ids.as_slice() {
+            return;
         }
+        let mut had: HashMap<InstanceId, Tracked> = self
+            .ids
+            .drain(..)
+            .zip(self.parts.drain(..))
+            .filter_map(|(id, tracked)| Some((id, tracked?)))
+            .collect();
+        self.ids = parts.to_vec();
+        self.parts = parts.iter().map(|id| had.remove(id)).collect();
     }
 
     /// This frame's motion for the player: `parts` are the parts they
@@ -255,18 +287,24 @@ impl MotionSender {
         seconds: f64,
         time: f64,
     ) -> (Vec<Vec<u8>>, Vec<Op>) {
-        let present: BTreeSet<InstanceId> = parts.iter().copied().collect();
-        self.parts.retain(|id, _| present.contains(id));
+        self.keep(parts);
         self.budget = (self.budget + self.rate * seconds).min(self.rate * BUDGET_BURST);
-        let mut due = Vec::new();
+        // Each out-of-date part's place in `parts`, with its priority.
+        let mut due: Vec<(usize, f64)> = Vec::new();
         let mut settled = Vec::new();
-        for &id in parts {
-            let Some(tracked) = self.parts.get_mut(&id) else {
-                self.track(world, id);
+        for (index, (&id, slot)) in self.ids.iter().zip(&mut self.parts).enumerate() {
+            let Some(instance) = world.get(id) else {
                 continue;
             };
-            let Some(now) = PartState::of(world, id) else {
+            let Some(tracked) = slot else {
+                *slot = Some(Tracked::of(instance));
                 continue;
+            };
+            let now = if instance.motion_revision() == tracked.motion {
+                tracked.seen
+            } else {
+                tracked.motion = instance.motion_revision();
+                PartState::of_instance(instance)
             };
             if skip.contains(&id) {
                 tracked.sent = now;
@@ -294,20 +332,18 @@ impl MotionSender {
                     1.0 / (1.0 + distance(focus, now.position()) / 64.0)
                 });
                 tracked.priority += (now.distance(&tracked.sent) + 0.05) * nearness;
-                due.push(id);
+                due.push((index, tracked.priority));
             }
         }
-        due.sort_by(|a, b| {
-            let priority = |id| self.parts[id].priority;
-            priority(b).total_cmp(&priority(a))
-        });
+        // Highest first; ties keep the parts' order (a stable sort).
+        due.sort_by(|(_, a), (_, b)| b.total_cmp(a));
         let mut packets = Vec::new();
         let mut motion = Motion {
             time,
             parts: Vec::new(),
         };
         let per_packet = (MAX_PACKET_BYTES - HEADER_BYTES) / ENTRY_BYTES;
-        for id in due {
+        for (index, _) in due {
             let cost = ENTRY_BYTES as f64
                 + if motion.parts.is_empty() {
                     HEADER_BYTES as f64
@@ -318,10 +354,10 @@ impl MotionSender {
                 break;
             }
             self.budget -= cost;
-            let tracked = self.parts.get_mut(&id).expect("due parts are tracked");
+            let tracked = self.parts[index].as_mut().expect("due parts are tracked");
             tracked.sent = tracked.seen;
             tracked.priority = 0.0;
-            motion.parts.push((id.to_bits(), tracked.seen));
+            motion.parts.push((self.ids[index].to_bits(), tracked.seen));
             if motion.parts.len() == per_packet {
                 packets.push(motion.to_bytes());
                 motion.parts.clear();

@@ -105,6 +105,13 @@ impl Instance {
         self.revision
     }
 
+    /// How many times a BasePart's motion ([`MOTION_PROPERTIES`]) changed:
+    /// the same number means it hasn't moved (roadmap M7).
+    #[inline]
+    pub fn motion_revision(&self) -> u64 {
+        self.motion_revision
+    }
+
     /// Its [`revision`](Self::revision) without the changes to a BasePart's
     /// motion ([`MOTION_PROPERTIES`]). The same number means everything but
     /// its motion is as it was, so a moving part that changed nothing else

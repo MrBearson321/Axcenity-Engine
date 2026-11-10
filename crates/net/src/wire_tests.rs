@@ -295,3 +295,70 @@ fn a_part_that_only_moves_sends_no_change_but_its_other_changes_still_go() {
     );
     assert!(replicator.frame(&world).is_empty());
 }
+
+#[test]
+fn the_motion_sender_sends_what_moved_and_keeps_track_when_parts_come_and_go() {
+    use std::collections::BTreeSet;
+
+    use crate::motion::{Motion, MotionSender, SETTLE_TIME};
+
+    let mut world = parts(3);
+    let ids: Vec<_> = world
+        .get(world.workspace())
+        .unwrap()
+        .children()
+        .iter()
+        .copied()
+        .filter(|&id| world.get(id).unwrap().class() == ClassName::Part)
+        .collect();
+    let mut sender = MotionSender::new(&world, &ids, 1.0e6);
+    let skip = BTreeSet::new();
+    let sent = |packets: Vec<Vec<u8>>| -> Vec<u64> {
+        packets
+            .iter()
+            .flat_map(|bytes| Motion::from_bytes(bytes).unwrap().parts)
+            .map(|(id, _)| id)
+            .collect()
+    };
+    let step = 1.0 / 60.0;
+    let (packets, settled) = sender.frame(&world, &ids, None, &skip, step, 0.0);
+    assert!(sent(packets).is_empty() && settled.is_empty());
+
+    let move_to = |world: &mut World, id, x: f32| {
+        world
+            .set_property(id, "Position", Value::Vector3(Vector3::new(x, 2.0, 0.0)))
+            .unwrap();
+    };
+    move_to(&mut world, ids[1], 50.0);
+    let (packets, _) = sender.frame(&world, &ids, None, &skip, step, 0.1);
+    assert_eq!(sent(packets), vec![ids[1].to_bits()]);
+
+    // Part 0 goes, a new part comes: the new one is tracked as the player
+    // has it, part 2 keeps what the player has of it.
+    let new = world.create(ClassName::Part).unwrap();
+    world.set_parent(new, Some(world.workspace())).unwrap();
+    let now = vec![ids[1], ids[2], new];
+    move_to(&mut world, ids[2], 70.0);
+    let (packets, _) = sender.frame(&world, &now, None, &skip, step, 0.2);
+    assert_eq!(sent(packets), vec![ids[2].to_bits()]);
+    move_to(&mut world, new, 90.0);
+    let (packets, _) = sender.frame(&world, &now, None, &skip, step, 0.3);
+    assert_eq!(sent(packets), vec![new.to_bits()]);
+
+    // Once still for SETTLE_TIME, each moved part goes once more, exactly.
+    let mut settled_ids = Vec::new();
+    let mut time = 0.3;
+    while time < 0.3 + SETTLE_TIME + 0.1 {
+        time += step;
+        let (packets, settled) = sender.frame(&world, &now, None, &skip, step, time);
+        assert!(sent(packets).is_empty());
+        settled_ids.extend(settled.iter().map(|op| match op {
+            Op::Change(change) => change.id,
+            other => panic!("{other:?}"),
+        }));
+    }
+    settled_ids.sort_unstable();
+    let mut expected = vec![ids[1].to_bits(), ids[2].to_bits(), new.to_bits()];
+    expected.sort_unstable();
+    assert_eq!(settled_ids, expected);
+}
