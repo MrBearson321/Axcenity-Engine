@@ -355,6 +355,26 @@ The player's first frame was 130 to 152 ms, and launch to first frame 3.3 s (7.0
 - **The draw list is now the player's largest step**, and at 8.4 ms it doesn't shrink on a faster CPU: it is 8.1 ms on the cloud container, where physics is about 1.7× slower. Retained draw items (M4) cut it to about a third on S10k: 12.9 to 4.3–4.4 ms median on the cloud container (see [rendering/performance.md](rendering/performance.md)).
 - **Against the 3.3 ms in `rendering/performance.md`**: `bench_10000_parts` is 8.5 to 8.9 ms in `build_draw_list` here, so that figure is out of date. The roadmap's merges didn't cause it: 556b72b, the commit before them, is 8.0 to 8.8 ms on this machine, and each merge timed since is 7.4 to 8.9 ms. The rise came somewhere between the commit that added the render benchmarks and 556b72b.
 
+#### Before and after the roadmap, same desktop (2026-11-10)
+
+`300bbb5` against `5cb8302` (M1 to M7, M13, M14, L2 parts 1 to 7 merged). Release builds, each run pinned to the V-cache CCD (CPUs 0–15) with nothing else building, the two builds alternating, one uncounted warm-up round, then three. Medians of the runs' medians in milliseconds; the startup columns are the player's. The projects are copies of the owner's, cooked with `axcenity-editor --cook` for the after runs (the before build ignores cooked copies). Test runner and server ran 600 frames on S10k and 300 on the projects; the player 300.
+
+| Host and scene | Frame before | Frame after | First frame before → after | Launch to assets in before → after |
+|---|---|---|---|---|
+| Test runner, S10k | 7.71 | 5.03 | | |
+| Server, S10k | 5.13 | 3.82 | | |
+| Player, S10k | 14.93 | 8.73 | 129 → 127 | 3,880 → 3,754 |
+| Test runner, Abandoned Farmhouse | 0.53 | 0.25 | | |
+| Player, Abandoned Farmhouse | 4.77 | **5.50** | **1,054 → 4,517** | **4,692 → 6,207** |
+| Test runner, General Store Roadside | 1.81 | 0.094 | | |
+| Player, General Store Roadside | 6.99 | 4.40 | 1,076 → 1,251 | 2,428 → 2,476 |
+| Test runner, Temperate Wet Patch | 28.97 | 0.048 | | |
+| Player, Temperate Wet Patch | 47.80 | 5.52 | 1,796 → 1,003 | 3,099 → 2,265 |
+
+- **Everything got faster except Abandoned Farmhouse in the player.** Its startup is the M5 trade-off above: textures now land on the first frame, and L2 was to take that work out. It doesn't yet for this project, because its 29 `.glb` files embed their 4K maps and `--cook` only cooks an embedded map that an import copied out to a file, so neither its textures nor its models are cooked (31 loose files cooked in 3 s; first frame 3.2–4.3 s uncooked, 4.0–4.2 s cooked). Its steady frame is also 0.7 ms slower, not yet explained.
+- **Editor Play and M1** (the possible 5.9% slowdown measured on the cloud container): `bench_project_play` on S10k, `4da1528` (before M1) against `1832da8` (M1's merge), seven alternating pinned rounds of 600 frames. The frame's median is 5.99 ms before and 5.09 ms after (ranges 5.05–6.48 and 4.57–5.22), Physics 3.34 → 2.29 ms, and the worst frame 13.8–17.2 → 5.9–6.9 ms. M1 made editor Play faster, not slower.
+- **`bench_project` and `shoot_project` drew cooked textures uncooked** until their device asked for BC compression (`bench_gpu` in `player/src/bench_tests.rs`); a cooked hello-character now takes 0.2 s for its first 24 frames instead of 1.2 s. Numbers from those tools on cooked projects before that fix are the uncooked path's.
+
 ### The mouse's ray and mesh hulls (Input)
 
 A 16-core Ryzen 9 9950X3D desktop, each run pinned to the V-cache CCD, release build, 300 frames, main and this change run alternately: three runs of the test runner, two of the player, medians of the runs' medians. Milliseconds.
