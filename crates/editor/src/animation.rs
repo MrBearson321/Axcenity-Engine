@@ -360,8 +360,36 @@ impl Badge {
         }
     }
 
+    /// The short form for the outline's rows, where every state of one
+    /// model would repeat the same file: a linked clip names only its take
+    /// (the file is on hover, and in the clip's toolbar).
+    fn short_text(&self) -> String {
+        match self {
+            Badge::Linked { take, .. } => {
+                let take = take.rsplit('|').next().unwrap_or(take);
+                format!("{} {take}", icons::LINK)
+            }
+            _ => self.text(),
+        }
+    }
+
     /// The badge as a small, weak label that shortens to fit.
     fn show(&self, ui: &mut egui::Ui) {
+        self.label(ui, self.text());
+    }
+
+    /// [`Self::show`] in its short form, for the outline (the whole badge
+    /// on hover).
+    fn show_short(&self, ui: &mut egui::Ui) {
+        let short = self.short_text();
+        let full = self.text();
+        let response = self.label(ui, short.clone());
+        if short != full {
+            response.on_hover_text(full);
+        }
+    }
+
+    fn label(&self, ui: &mut egui::Ui, text: String) -> egui::Response {
         let palette = theme::palette(ui.ctx());
         let color = match self {
             Badge::Missing => palette.warning,
@@ -369,12 +397,12 @@ impl Badge {
         };
         ui.add(
             egui::Label::new(
-                egui::RichText::new(self.text())
+                egui::RichText::new(text)
                     .size(theme::type_scale::SMALL)
                     .color(color),
             )
             .truncate(),
-        );
+        )
     }
 }
 
@@ -1142,6 +1170,17 @@ fn empty_state(ui: &mut egui::Ui, animatable: Option<&(InstanceId, String)>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_outline_names_a_linked_clip_by_its_take_alone() {
+        let linked = Badge::Linked {
+            file: "noodle.fbx".into(),
+            take: "Armature|Wave".into(),
+        };
+        assert_eq!(linked.short_text(), format!("{} Wave", icons::LINK));
+        assert!(linked.text().contains("Linked to noodle.fbx · Wave"));
+        assert_eq!(Badge::Keyed.short_text(), Badge::Keyed.text());
+    }
 
     /// Every piece of text drawn in `shapes`.
     fn texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {

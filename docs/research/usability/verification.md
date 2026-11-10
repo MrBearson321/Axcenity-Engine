@@ -26,7 +26,7 @@ The plan's U1–U19 shipped in seven PRs, all merged. U20, the dedicated passes,
 
 **Not changed, on purpose.**
 - **AN5:** the keying toolbar's terms already explain themselves on hover. Revisit only if they keep confusing people.
-- **AN7:** the repeated "Linked to …" lines are low-impact noise. Leave them for the Animation pass in U20.
+- **AN7** was left here as low-impact noise, then done in a follow-up: see "AN7: the outline and drawer say each thing once" below.
 - **Guided tours, a second workspace system, renaming Roblox-familiar properties:** not planned (see the audit).
 
 **How it was checked.**
@@ -203,6 +203,19 @@ Findings and plan: [block-editor.md](block-editor.md).
 
 **Tests**: `retopology_and_bake_stay_folded_until_used` (closed at first, a click opens and closes it, a reference opens it), `the_mesh_menu_says_why_its_operations_are_greyed` (the note in Object mode, shading and Bridge Edge Loops listed, no note in Edit mode), `paint_warns_when_faces_share_texture_space_and_one_click_fixes_it` (a New cube warns; a click on Smart UV Project clears it as one undo step and stays in Paint; undo brings it back; an object with no uvs says so), and `every_ribbon_and_menu_command_can_be_run_from_the_palette` with the new button. Tour shots: `tour-21-studio-object.png` (the closed fold), `tour-27-studio-paint-new-cube.png` (the warning and its button), `tour-03-ribbon-Model.png` (the Models group).
 
+
+## AN7: the outline and drawer say each thing once
+
+Follow-up to the Animation PRs, for the one audit finding they left (A2, AN7).
+
+| Workflow | Before | After |
+|---|---|---|
+| Read a character's state machine in the outline | Under every state, "🔗 Linked to noodle.fbx · Armature|Wave", the same file each time | "🔗 Wave": the take that state plays. The whole badge is on hover, and in full in the clip's own toolbar |
+| Pick what to key in a property clip's drawer | The Animator and its Animation listed as **Objects** beside the parts that move | Only what the clip can move; an Animator or Animation shows only if a track keys it |
+
+**Why**: Unity's Animator window and Godot's AnimationTree name states by their motion and keep the source asset in the inspector, and Unity's Animation window lists only animatable children **[R§1]**. Saying the file once leaves the take, the part that differs between rows, readable in a narrow outline.
+
+**Tests**: `the_outline_names_a_linked_clip_by_its_take_alone` (`animation.rs`), `the_drawer_lists_what_the_clip_moves_not_its_animator` (`app/anim_drawer_tests.rs`; fails without the change). Tour shot 11 checked.
 
 ## UI Designer PR 1: beginner-first inspector (U20, UD1–UD4)
 

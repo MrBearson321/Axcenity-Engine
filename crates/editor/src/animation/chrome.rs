@@ -353,7 +353,7 @@ impl AnimationStudio {
                     match &first {
                         Some(path) => {
                             let response = response.on_hover_text(path);
-                            self.badge(path).show(ui);
+                            self.badge(path).show_short(ui);
                             if response.clicked() {
                                 go = Some(Go::State(state.clone(), path.clone()));
                             }
@@ -389,7 +389,7 @@ impl AnimationStudio {
             }
             let response = response.on_hover_text(&animation.clip);
             ui.indent(("outline animation", animation.id), |ui| {
-                self.badge(&animation.clip).show(ui);
+                self.badge(&animation.clip).show_short(ui);
             });
             if response.clicked() {
                 go = Some(Go::Animation(animation.clip.clone()));
