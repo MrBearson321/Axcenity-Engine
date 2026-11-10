@@ -4,7 +4,9 @@
 //! base colors, normal maps, and "surface" (roughness, metalness, ambient
 //! occlusion and height packed into R, G, B and A). Arrays need every slice
 //! the same size, so each layer's maps are resized on the CPU to the
-//! largest one's size (a power of two, at most [`MAX_LAYER_SIZE`]). That
+//! largest one's size (a power of two, at most [`MAX_LAYER_SIZE`]): each
+//! texture once however many maps use it, all of them in parallel (with
+//! rayon), and their mipmaps too. That
 //! happens once per set of textures, not when a color or tiling changes:
 //! those go in a small uniform buffer, rewritten in place.
 //!
@@ -17,6 +19,7 @@ use std::collections::hash_map::Entry;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use bytemuck::{Pod, Zeroable};
+use rayon::prelude::*;
 
 use crate::draw_list::{ChannelMap, TerrainLayers, TerrainSurface, TerrainView, TextureSource};
 
@@ -462,33 +465,62 @@ fn create_arrays(
         .unwrap_or(4);
     let max = device.limits().max_texture_dimension_2d.min(MAX_LAYER_SIZE);
     let size = (largest.clamp(4, max).next_power_of_two().min(max) >> skipped_levels).max(4);
-    let slices = layers.len().max(1);
-    let mut albedo = Vec::with_capacity(slices);
-    let mut normal = Vec::with_capacity(slices);
-    let mut surface = Vec::with_capacity(slices);
+    // Each texture resized once, however many maps use it (a packed
+    // roughness, metalness and occlusion map is three), and all of them at
+    // once: at 2048² each, this was most of a first frame.
+    let mut sources: HashMap<u64, &dyn TextureSource> = HashMap::new();
     for layer in &layers {
-        albedo.push(match &layer.base_color_texture {
-            Some(texture) => resized(texture.as_ref(), size),
-            None => vec![255; (size * size * 4) as usize],
-        });
-        normal.push(match &layer.normal {
-            Some(map) => resized(map.texture.as_ref(), size),
-            None => [128, 128, 255, 255].repeat((size * size) as usize),
-        });
-        let channel = |map: &Option<ChannelMap>, default: u8| match map {
-            Some(map) => channel_of(map, size),
-            None => vec![default; (size * size) as usize],
-        };
-        let (rough, metal) = (
-            channel(&layer.roughness_map, 255),
-            channel(&layer.metalness_map, 255),
-        );
-        let (occlusion, height) = (channel(&layer.occlusion, 255), channel(&layer.height, 128));
-        surface.push(
-            (0..(size * size) as usize)
+        let maps = [
+            layer.base_color_texture.as_ref(),
+            layer.normal.as_ref().map(|map| &map.texture),
+            layer.roughness_map.as_ref().map(|map| &map.texture),
+            layer.metalness_map.as_ref().map(|map| &map.texture),
+            layer.occlusion.as_ref().map(|map| &map.texture),
+            layer.height.as_ref().map(|map| &map.texture),
+        ];
+        for texture in maps.into_iter().flatten() {
+            sources.entry(texture.key()).or_insert(texture.as_ref());
+        }
+    }
+    let resized_maps: HashMap<u64, Vec<u8>> = sources
+        .into_par_iter()
+        .map(|(key, texture)| (key, resized(texture, size)))
+        .collect();
+    let of = |texture: &dyn TextureSource| &resized_maps[&texture.key()];
+    let slices: Vec<_> = layers
+        .par_iter()
+        .map(|layer| {
+            let albedo = match &layer.base_color_texture {
+                Some(texture) => of(texture.as_ref()).clone(),
+                None => vec![255; (size * size * 4) as usize],
+            };
+            let normal = match &layer.normal {
+                Some(map) => of(map.texture.as_ref()).clone(),
+                None => [128, 128, 255, 255].repeat((size * size) as usize),
+            };
+            let channel = |map: &Option<ChannelMap>, default: u8| match map {
+                Some(map) => channel_of(map, of(map.texture.as_ref())),
+                None => vec![default; (size * size) as usize],
+            };
+            let (rough, metal) = (
+                channel(&layer.roughness_map, 255),
+                channel(&layer.metalness_map, 255),
+            );
+            let (occlusion, height) = (channel(&layer.occlusion, 255), channel(&layer.height, 128));
+            let surface: Vec<u8> = (0..(size * size) as usize)
                 .flat_map(|i| [rough[i], metal[i], occlusion[i], height[i]])
-                .collect(),
-        );
+                .collect();
+            (albedo, normal, surface)
+        })
+        .collect();
+    let slice_count = layers.len().max(1);
+    let mut albedo = Vec::with_capacity(slice_count);
+    let mut normal = Vec::with_capacity(slice_count);
+    let mut surface = Vec::with_capacity(slice_count);
+    for (color, normals, values) in slices {
+        albedo.push(color);
+        normal.push(normals);
+        surface.push(values);
     }
     if layers.is_empty() {
         albedo.push(vec![255; (size * size * 4) as usize]);
@@ -518,7 +550,7 @@ fn create_array(
     srgb: bool,
 ) -> (wgpu::Texture, wgpu::TextureView, u64) {
     let levels: Vec<_> = slices
-        .iter()
+        .par_iter()
         .map(|pixels| mip_levels(size, size, pixels))
         .collect();
     let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -609,10 +641,11 @@ pub(super) fn resized(texture: &dyn TextureSource, size: u32) -> Vec<u8> {
     out
 }
 
-/// One channel of a map, resized, inverted if it says so.
-fn channel_of(map: &ChannelMap, size: u32) -> Vec<u8> {
+/// One channel of `map`'s texture, already `resized`, inverted if the map
+/// says so.
+fn channel_of(map: &ChannelMap, resized: &[u8]) -> Vec<u8> {
     let channel = map.channel as usize;
-    resized(map.texture.as_ref(), size)
+    resized
         .as_chunks::<4>()
         .0
         .iter()
@@ -684,7 +717,8 @@ pub(super) mod tests {
             channel: Channel::Red,
             invert: true,
         };
-        assert_eq!(channel_of(&map, 2), vec![255, 55, 55, 255]);
+        let pixels = resized(map.texture.as_ref(), 2);
+        assert_eq!(channel_of(&map, &pixels), vec![255, 55, 55, 255]);
     }
 
     #[test]
