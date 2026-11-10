@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
 # Builds .deb, .rpm, .pkg.tar.zst, .tar.gz and AppImage from a staged payload.
-# Usage: build-packages.sh <version> <repo-root> <staged-payload> <out-dir>
+# Usage: build-packages.sh <version> <repo-root> <staged-payload> <out-dir> [formats]
+# formats: any of "deb rpm archlinux tar appimage" (default: all). deb, rpm
+# and archlinux need nfpm; appimage needs appimagetool. A local check
+# (scripts/check-packages.py) asks only for the ones whose tools it finds.
 set -euo pipefail
 
 VERSION="${1:?version}"
 ROOT="${2:?repo root}"
 STAGE="${3:?staged payload}"
 OUT="${4:?output directory}"
+FORMATS=" ${5:-deb rpm archlinux tar appimage} "
+wants() { [[ "$FORMATS" == *" $1 "* ]]; }
+
+# The executables in a payload (other-OS players a local stage left out
+# aren't there). The Windows player needs no mark.
+mark_executables() {
+  local dir="$1" file
+  for file in axcenity-editor axcenity-player players/macos/axcenity-player players/linux/axcenity-player; do
+    if [ -e "$dir/$file" ]; then chmod +x "$dir/$file"; fi
+  done
+}
 
 if [[ "$VERSION" == *-* ]]; then
   NFPM_VERSION="${VERSION%%-*}"
@@ -38,22 +52,28 @@ PY
 
 FILE_STEM="AxcenityEditor-${VERSION}-linux-x86_64"
 
-nfpm package --config "$ROOT/packaging/linux/.generated/nfpm.yaml" \
+wants deb && nfpm package --config "$ROOT/packaging/linux/.generated/nfpm.yaml" \
   --packager deb --target "$OUT/${FILE_STEM}.deb"
-nfpm package --config "$ROOT/packaging/linux/.generated/nfpm.yaml" \
+wants rpm && nfpm package --config "$ROOT/packaging/linux/.generated/nfpm.yaml" \
   --packager rpm --target "$OUT/${FILE_STEM}.rpm"
-nfpm package --config "$ROOT/packaging/linux/.generated/nfpm.yaml" \
+wants archlinux && nfpm package --config "$ROOT/packaging/linux/.generated/nfpm.yaml" \
   --packager archlinux --target "$OUT/${FILE_STEM}.pkg.tar.zst"
 
 # Portable tree: extract and run ./axcenity-editor.
-TAR_DIR="$OUT/${FILE_STEM}"
-rm -rf "$TAR_DIR"
-mkdir -p "$TAR_DIR"
-cp -a "$STAGE/." "$TAR_DIR/"
-chmod +x "$TAR_DIR/axcenity-editor" "$TAR_DIR/axcenity-player" \
-  "$TAR_DIR/players/macos/axcenity-player" "$TAR_DIR/players/linux/axcenity-player"
-tar -C "$OUT" -czf "$OUT/${FILE_STEM}.tar.gz" "$(basename "$TAR_DIR")"
-rm -rf "$TAR_DIR"
+if wants tar; then
+  TAR_DIR="$OUT/${FILE_STEM}"
+  rm -rf "$TAR_DIR"
+  mkdir -p "$TAR_DIR"
+  cp -a "$STAGE/." "$TAR_DIR/"
+  mark_executables "$TAR_DIR"
+  tar -C "$OUT" -czf "$OUT/${FILE_STEM}.tar.gz" "$(basename "$TAR_DIR")"
+  rm -rf "$TAR_DIR"
+fi
+
+if ! wants appimage; then
+  echo "linux packages in $OUT"
+  exit 0
+fi
 
 # AppImage: editor and players beside each other under usr/bin.
 APPDIR="$OUT/AppDir"
@@ -61,8 +81,7 @@ rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" \
   "$APPDIR/usr/share/icons/hicolor/256x256/apps" "$APPDIR/usr/share/doc/axcenity-editor"
 cp -a "$STAGE/." "$APPDIR/usr/bin/"
-chmod +x "$APPDIR/usr/bin/axcenity-editor" "$APPDIR/usr/bin/axcenity-player" \
-  "$APPDIR/usr/bin/players/macos/axcenity-player" "$APPDIR/usr/bin/players/linux/axcenity-player"
+mark_executables "$APPDIR/usr/bin"
 cp "$ROOT/packaging/linux/AppRun" "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"
 cp "$ROOT/packaging/linux/.generated/axcenity-editor-256.png" "$APPDIR/axcenity-editor.png"
