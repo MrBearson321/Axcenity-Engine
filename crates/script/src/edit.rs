@@ -100,7 +100,8 @@ impl EditRuntime {
     /// Moves the clock on by `seconds` and resumes the coroutines that
     /// are due (`task.wait`, `task.delay`).
     pub fn step(&self, world: &mut World, seconds: f64) {
-        self.context.step(world, Vec::new(), seconds);
+        let destroyed = world.take_destroyed();
+        self.context.step(world, Vec::new(), seconds, &destroyed);
     }
 
     /// True while a coroutine waits for [`step`](Self::step).

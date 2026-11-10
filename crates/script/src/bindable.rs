@@ -41,13 +41,33 @@ pub fn callback_member(class: ClassName, key: &str) -> Option<&'static str> {
 pub struct Callbacks(BTreeMap<(InstanceId, &'static str), (Function, Option<InstanceId>)>);
 
 impl Callbacks {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     /// Drops the callbacks `script` set.
     pub fn forget_script(&mut self, script: InstanceId) {
         self.0.retain(|_, (_, owner)| *owner != Some(script));
     }
 
-    /// Drops the callbacks of Instances that no longer exist.
-    pub fn forget(&mut self, exists: impl Fn(InstanceId) -> bool) {
+    /// Drops the callbacks of `instance`.
+    pub fn forget_instance(&mut self, instance: InstanceId) {
+        // `""` sorts before every member's name.
+        let keys: Vec<(InstanceId, &'static str)> = self
+            .0
+            .range((instance, "")..)
+            .map(|(key, _)| *key)
+            .take_while(|(other, _)| *other == instance)
+            .collect();
+        for key in keys {
+            self.0.remove(&key);
+        }
+    }
+
+    /// Drops the callbacks of every Instance that doesn't exist, for when
+    /// the whole World was replaced and nothing says what's gone.
+    pub fn forget_missing_instances(&mut self, exists: impl Fn(InstanceId) -> bool) {
         self.0.retain(|(instance, _), _| exists(*instance));
     }
 }
