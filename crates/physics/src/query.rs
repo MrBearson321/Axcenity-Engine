@@ -693,38 +693,45 @@ impl Solid {
 /// in `skip`. Does not create a physics world or change the tree.
 pub fn solids(world: &World, assets: &Assets, skip: &[InstanceId]) -> Vec<Solid> {
     let mut solids = Vec::new();
-    let mut add = |instance, collider: rapier3d::prelude::Collider, open_below| {
+    for id in world.descendants_iter(world.workspace()) {
+        if !skip.contains(&id) {
+            solids.extend(part_solids(world, assets, id));
+        }
+    }
+    solids
+}
+
+/// The solid colliders of one Part, MeshPart or Terrain, as [`solids`]
+/// gives them: none for a sensor (`CanCollide` off) or anything else.
+pub fn part_solids(world: &World, assets: &Assets, id: InstanceId) -> Vec<Solid> {
+    let mut solids = Vec::new();
+    let mut add = |collider: rapier3d::prelude::Collider, open_below| {
         let aabb = collider.compute_aabb();
         solids.push(Solid {
-            instance,
+            instance: id,
             min: to_vector3(aabb.mins),
             max: to_vector3(aabb.maxs),
             collider,
             open_below,
         });
     };
-    for id in world.descendants_iter(world.workspace()) {
-        if skip.contains(&id) {
-            continue;
-        }
-        let Some(state) = PartState::read(world, id, assets) else {
-            continue;
-        };
-        let pose = state.pose();
-        if state.can_collide {
-            let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
-            collider.set_position(pose);
-            add(id, collider, matches!(state.shape, Form::Terrain(_)));
-        }
-        if let Form::Terrain(terrain) = &state.shape {
-            // Colliding foliage is solid even when the ground isn't.
-            for (local, form, form_size) in
-                shapes::foliage_forms(&terrain.data, to_vec3(state.size), assets)
-            {
-                let mut collider = shapes::collider(&form, form_size);
-                collider.set_position(pose * local);
-                add(id, collider, false);
-            }
+    let Some(state) = PartState::read(world, id, assets) else {
+        return solids;
+    };
+    let pose = state.pose();
+    if state.can_collide {
+        let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
+        collider.set_position(pose);
+        add(collider, matches!(state.shape, Form::Terrain(_)));
+    }
+    if let Form::Terrain(terrain) = &state.shape {
+        // Colliding foliage is solid even when the ground isn't.
+        for (local, form, form_size) in
+            shapes::foliage_forms(&terrain.data, to_vec3(state.size), assets)
+        {
+            let mut collider = shapes::collider(&form, form_size);
+            collider.set_position(pose * local);
+            add(collider, false);
         }
     }
     solids

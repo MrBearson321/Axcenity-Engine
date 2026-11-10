@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use axcenity_core::{ClassName, InstanceId};
+use axcenity_core::{ClassName, InstanceId, Value};
 
 use super::*;
 

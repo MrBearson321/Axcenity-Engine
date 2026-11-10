@@ -65,7 +65,8 @@ mod vehicles;
 pub use mass::Mass;
 pub use query::{
     CastShape, ColliderOutline, Column, QueryParams, RayHit, Solid, cast_ray, cast_ray_excluding,
-    debug_colliders, parts_in_box, parts_in_part, parts_in_radius, raycast, shapecast, solids,
+    debug_colliders, part_solids, parts_in_box, parts_in_part, parts_in_radius, raycast, shapecast,
+    solids,
 };
 pub use shapes::prepare_precise;
 
