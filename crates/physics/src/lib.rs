@@ -241,6 +241,10 @@ struct Body {
     welded: bool,
     /// Its Instance's revision when `seen` was last compared with it.
     revision: u64,
+    /// True once its pose was written while its body slept: a body can
+    /// fall asleep in any of a frame's steps, so the first write-back after
+    /// that still copies where it came to rest.
+    settled: bool,
 }
 
 /// The properties of a part that physics cares about.
@@ -559,8 +563,8 @@ impl Physics {
     }
 
     /// Frame step 3: catches up with script changes, then runs as many fixed
-    /// steps as fit in the time passed (0 to N), writing positions back to
-    /// `world` after each one. Returns how many steps ran.
+    /// steps as fit in the time passed (0 to N), and writes positions back to
+    /// `world` once after the last one. Returns how many steps ran.
     pub fn step(&mut self, world: &mut World, seconds: f64) -> u32 {
         profiling::scope!("Physics::step");
         self.stats = SyncStats::default();
@@ -576,6 +580,7 @@ impl Physics {
         // `max` also turns NaN into 0, so a bad time can't stop physics forever.
         self.unsimulated_seconds += seconds.max(0.0);
         let mut steps = 0;
+        let mut wheels = BTreeMap::new();
         while self.unsimulated_seconds + STEP_TOLERANCE >= STEP_SECONDS {
             if steps == MAX_STEPS_PER_FRAME {
                 self.unsimulated_seconds = 0.0;
@@ -603,18 +608,19 @@ impl Physics {
                 &mut self.rapier,
                 &mut self.joints,
             ));
-            self.write_to_world(world);
-            vehicles::place_wheels(
-                world,
-                &mut self.parts,
-                &mut self.rapier.bodies,
-                &self.vehicles,
-            );
+            vehicles::place_wheels(&mut self.rapier.bodies, &self.vehicles, &mut wheels);
             self.find_touches();
             self.shatter_hit_parts(world, &before);
             fracture::age(world, &mut self.debris, STEP_SECONDS);
             self.unsimulated_seconds = (self.unsimulated_seconds - STEP_SECONDS).max(0.0);
             steps += 1;
+        }
+        // Once per frame, not per step: scripts and the renderer only see
+        // where things are after the last step, so the steps before it
+        // needn't convert and write every moving part.
+        if steps > 0 {
+            self.write_to_world(world);
+            vehicles::write_wheels(world, &mut self.parts, &wheels);
         }
         steps
     }
@@ -784,6 +790,9 @@ impl Physics {
         if impacts.is_empty() {
             return;
         }
+        // Shattering reads where the part is and how fast it moves, which
+        // the world only has after a write-back.
+        self.write_to_world(world);
         for (part, impact) in impacts {
             let fracture = self.breakables[&part].fracture;
             let Some(debris) = fracture::shatter(
@@ -971,8 +980,16 @@ fn write_part(world: &mut World, id: InstanceId, part: &mut Body, body: &RigidBo
         part.seen.spin = spin;
         let _ = world.set_property(id, "AssemblyAngularVelocity", Value::Vector3(spin));
     }
-    if !body.is_dynamic() || body.is_sleeping() {
+    if !body.is_dynamic() {
         return;
+    }
+    if body.is_sleeping() {
+        if part.settled {
+            return;
+        }
+        part.settled = true;
+    } else {
+        part.settled = false;
     }
     let pose = if part.root {
         *body.position()

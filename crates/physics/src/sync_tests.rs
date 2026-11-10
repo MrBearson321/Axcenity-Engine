@@ -454,3 +454,73 @@ fn changing_gravity_wakes_what_slept_under_the_old_one() {
     }
     assert!(height(&world, block) > 1.0, "gravity pulls it up now");
 }
+
+fn revision(world: &World, id: InstanceId) -> u64 {
+    world.get(id).map_or(0, Instance::revision)
+}
+
+fn position(world: &World, id: InstanceId) -> Vector3 {
+    world
+        .get(id)
+        .and_then(|part| part.property("Position"))
+        .and_then(Value::as_vector3)
+        .unwrap()
+}
+
+#[test]
+fn a_frame_of_many_steps_writes_each_part_once() {
+    let mut world = World::new();
+    let falling = part(&mut world, Vector3::new(0.0, 50.0, 0.0), false);
+    let mut physics = Physics::new();
+    physics.step(&mut world, STEP_SECONDS);
+
+    let before = (revision(&world, falling), height(&world, falling));
+    let steps = physics.step(&mut world, 3.0 * STEP_SECONDS);
+    assert_eq!(steps, 3);
+    assert!(height(&world, falling) < before.1, "it should be falling");
+    // Its Position and AssemblyLinearVelocity change, once each: not three
+    // times, once per step.
+    assert_eq!(revision(&world, falling) - before.0, 2);
+}
+
+#[test]
+fn one_long_frame_lands_where_short_frames_do() {
+    let make = || {
+        let mut world = World::new();
+        let (_, block) = block_on_a_floor(&mut world, 0.0);
+        let falling = part(&mut world, Vector3::new(0.3, 6.0, 0.2), false);
+        (world, block, falling)
+    };
+    let (mut short, block, falling) = make();
+    let (mut long, _, _) = make();
+    let (mut short_physics, mut long_physics) = (Physics::new(), Physics::new());
+    for _ in 0..12 {
+        for _ in 0..4 {
+            short_physics.step(&mut short, STEP_SECONDS);
+        }
+        long_physics.step(&mut long, 4.0 * STEP_SECONDS);
+        for id in [block, falling] {
+            assert_eq!(position(&short, id), position(&long, id));
+        }
+    }
+}
+
+#[test]
+fn a_body_that_falls_asleep_in_a_long_frame_is_written_where_it_rests() {
+    let mut world = World::new();
+    let (_, block) = block_on_a_floor(&mut world, 0.0);
+    let falling = part(&mut world, Vector3::new(0.3, 3.0, 0.2), false);
+    let mut physics = Physics::new();
+    for _ in 0..100 {
+        physics.step(&mut world, 10.0 * STEP_SECONDS);
+        if asleep(&physics, falling) && asleep(&physics, block) {
+            break;
+        }
+    }
+    assert!(asleep(&physics, falling), "it came to rest");
+    for id in [block, falling] {
+        let body = &physics.rapier.bodies[physics.parts[&id].body];
+        let rest = to_vector3(body.position().translation);
+        assert_eq!(position(&world, id), rest);
+    }
+}

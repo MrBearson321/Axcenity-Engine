@@ -530,6 +530,7 @@ impl Physics {
                 seen: state,
                 welded,
                 revision: 0,
+                settled: false,
             };
             self.attach_foliage(id, &mut part);
             self.parts.insert(id, part);
