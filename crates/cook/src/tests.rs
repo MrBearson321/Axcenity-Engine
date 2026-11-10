@@ -123,6 +123,12 @@ fn cooking_a_project_writes_copies_that_assets_then_loads() {
 
     let stopped = AtomicBool::new(true);
     assert_eq!(cook_project(&folder, &stopped, |_, _| {}).cooked, 0);
+
+    // Deleted: its cooked copy goes at the next cook.
+    fs::remove_file(folder.join(path)).unwrap();
+    let gone = cook_project(&folder, &stop, |_, _| {});
+    assert_eq!(gone.removed, 1, "{gone:?}");
+    assert!(!axcenity_assets::cooked_path(&folder, path).exists());
     let _ = fs::remove_dir_all(folder);
 }
 

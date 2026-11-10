@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use axcenity_assets::{
     CookedFormat, CookedTexture, SourceStamp, TEXTURE_EXTENSIONS, decode_texture, has_alpha,
-    is_cooked, safe_path, sampled_average, write_cooked,
+    is_cooked, remove_orphaned_copies, safe_path, sampled_average, write_cooked,
 };
 use intel_tex_2::{RgbaSurface, bc7};
 use rayon::prelude::*;
@@ -216,17 +216,23 @@ pub struct Report {
     pub skipped: usize,
     /// Textures that couldn't be cooked, and why.
     pub failed: Vec<(String, String)>,
+    /// Cached copies deleted because their source file is gone.
+    pub removed: usize,
 }
 
-/// Cooks every texture under `project`'s `assets/` that has no current
-/// cooked copy, calling `progress` with each path and its outcome. Stops
-/// between textures once `stop` is set.
+/// Deletes the cached copies of files that are gone, then cooks every
+/// texture under `project`'s `assets/` that has no current cooked copy,
+/// calling `progress` with each path and its outcome. Stops between
+/// textures once `stop` is set.
 pub fn cook_project(
     project: &Path,
     stop: &AtomicBool,
     mut progress: impl FnMut(&str, &Outcome),
 ) -> Report {
-    let mut report = Report::default();
+    let mut report = Report {
+        removed: remove_orphaned_copies(project),
+        ..Report::default()
+    };
     for relative in texture_files(project) {
         if stop.load(Ordering::Relaxed) {
             break;
