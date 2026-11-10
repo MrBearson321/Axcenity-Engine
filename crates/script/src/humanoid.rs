@@ -10,12 +10,13 @@
 //! it works out from the pieces every frame and fires `StateChanged` for.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use axcenity_anim::read_state_machine;
 use axcenity_assets::Assets;
 use axcenity_character::Controllers;
 use axcenity_core::{ClassName, InstanceId, PlayRequest, Value, Vector3, World};
-use axcenity_nav::{MeshBuilder, NavMesh, NavSettings, Refresh};
+use axcenity_nav::{NavMesh, SharedNavMesh};
 use mlua::{FromLua, Function, Lua};
 
 use crate::health::{self, HealthEvent};
@@ -49,9 +50,6 @@ const ARRIVE: f32 = 0.5;
 const CORNER: f32 = 0.3;
 /// A walk to a part plans again once the part has moved this far.
 const REPLAN: f32 = 1.0;
-/// What the mesh is built from is read again at most this often (seconds),
-/// as agents' is.
-const REBUILD_SECONDS: f32 = 0.5;
 
 /// What a Humanoid's character is doing: `Enum.HumanoidStateType`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -579,11 +577,6 @@ impl Walk {
     }
 }
 
-struct Built {
-    builder: MeshBuilder,
-    age: f32,
-}
-
 /// What the runtime keeps between frames for every Humanoid.
 #[derive(Default)]
 pub struct Humanoids {
@@ -594,7 +587,11 @@ pub struct Humanoids {
     /// standing.
     playing: HashMap<InstanceId, Option<&'static str>>,
     feet: HashMap<InstanceId, Vector3>,
-    built: Option<Built>,
+    /// The navigation mesh walks plan on: the game's one mesh once the
+    /// host shares it ([`Self::share_nav_mesh`]), until then one of its
+    /// own, whose clock this steps.
+    nav: SharedNavMesh,
+    nav_shared: bool,
 }
 
 fn across(a: Vector3, b: Vector3) -> f32 {
@@ -633,18 +630,16 @@ impl Humanoids {
         }
     }
 
-    fn mesh(&mut self, world: &World, assets: &Assets, dt: f32) -> &NavMesh {
-        let built = self.built.get_or_insert_with(|| Built {
-            builder: MeshBuilder::new(NavSettings::default()),
-            // Old enough to build at once.
-            age: REBUILD_SECONDS,
-        });
-        built.age += dt;
-        if built.age >= REBUILD_SECONDS && built.builder.update(world, assets) != Refresh::Unchanged
-        {
-            built.age = 0.0;
-        }
-        built.builder.mesh()
+    /// Plans walks on `nav`, the mesh the game's NavigationAgents walk
+    /// on, instead of building one of its own (roadmap item M13). Its
+    /// owner steps its clock.
+    pub fn share_nav_mesh(&mut self, nav: SharedNavMesh) {
+        self.nav = nav;
+        self.nav_shared = true;
+    }
+
+    fn mesh(&self, world: &World, assets: &Assets) -> Arc<NavMesh> {
+        self.nav.refresh(world, assets).mesh
     }
 
     /// Frame step 1, after the controllers: makes missing pieces, walks
@@ -663,6 +658,9 @@ impl Humanoids {
         } else {
             0.0
         };
+        if !self.nav_shared {
+            self.nav.advance(dt);
+        }
         let humanoids: Vec<InstanceId> =
             world.all_below(world.workspace(), |class| class == ClassName::Humanoid);
         self.walks.retain(|id, _| humanoids.contains(id));
@@ -782,7 +780,7 @@ impl Humanoids {
             .planned_for
             .is_none_or(|planned| across(planned, goal) > REPLAN);
         if replan {
-            let path = self.mesh(world, assets, dt).find_path(feet, goal);
+            let path = self.mesh(world, assets).find_path(feet, goal);
             let walk = self.walks.get_mut(&humanoid).expect("checked above");
             match path {
                 Ok(corners) => {
