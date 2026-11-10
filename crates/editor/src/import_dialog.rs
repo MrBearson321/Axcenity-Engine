@@ -21,6 +21,7 @@ use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use crate::anim_import::AnimationImport;
+use crate::dialog;
 use crate::surface::MaterialMaps;
 use crate::theme::{self, icons};
 use crate::widgets;
@@ -77,9 +78,11 @@ impl Tab {
 const DIALOG_WIDTH: f32 = 960.0;
 /// The least room left between the dialog and the window's edges.
 const WINDOW_GAP: f32 = 16.0;
-/// Room kept under the body for the separators and the buttons (the
+/// Room kept under the body for the separator and the buttons (the
 /// summary above them is measured).
-const FOOTER_HEIGHT: f32 = 52.0;
+const FOOTER_HEIGHT: f32 = 60.0;
+/// The line saying what stops Import, when something does.
+const PROBLEM_HEIGHT: f32 = 22.0;
 /// The tallest the body (preview and tab) gets, so it doesn't fill a big
 /// window with empty space.
 const BODY_HEIGHT: f32 = 560.0;
@@ -388,39 +391,41 @@ impl ImportDialog {
         render_state: Option<&RenderState>,
     ) -> Option<Answer> {
         let mut answer = None;
-        let frame = egui::Frame::popup(&ctx.style());
         // The frame's margins and outline, around the contents.
-        let edges = frame.total_margin().sum();
+        let edges = dialog::frame(ctx).total_margin().sum();
         let room = ctx.screen_rect().size() - egui::Vec2::splat(2.0 * WINDOW_GAP) - edges;
-        let modal = egui::Modal::new(egui::Id::new("import model"))
-            .frame(frame)
-            .show(ctx, |ui| {
-                let width = room.x.clamp(260.0, DIALOG_WIDTH);
-                ui.set_width(width);
-                self.header(ui);
-                let summary = self.summary_galley(ui, width);
-                let body_height =
-                    (room.y - ui.min_rect().height() - FOOTER_HEIGHT - summary.size().y)
-                        .clamp(80.0, BODY_HEIGHT);
-                if self.package.is_some() {
-                    // Nothing to preview: the tab has the whole width.
-                    egui::ScrollArea::vertical()
-                        .id_salt("import package")
-                        .max_height(body_height)
-                        .auto_shrink([false, true])
-                        .show(ui, |ui| self.tab_body(ui));
-                } else if width >= SIDE_BY_SIDE_FROM {
-                    self.side_by_side(ui, render_state, body_height);
-                } else {
-                    self.stacked(ui, render_state, body_height);
-                }
-                ui.separator();
-                ui.label(summary);
-                ui.add_space(2.0);
-                self.buttons = Some(self.footer(ui, &mut answer));
-            });
+        let width = room.x.clamp(260.0, DIALOG_WIDTH);
+        // Whether to keep room for the problem line (the footer asks again,
+        // after the tabs' edits).
+        let problem = self.problem().is_some();
+        let ((), dismissed) = dialog::modal(ctx, "import model", width, |ui| {
+            self.header(ui);
+            let summary = self.summary_galley(ui, width);
+            let problem_height = if problem { PROBLEM_HEIGHT } else { 0.0 };
+            let body_height = (room.y
+                - ui.min_rect().height()
+                - FOOTER_HEIGHT
+                - problem_height
+                - summary.size().y)
+                .clamp(80.0, BODY_HEIGHT);
+            if self.package.is_some() {
+                // Nothing to preview: the tab has the whole width.
+                egui::ScrollArea::vertical()
+                    .id_salt("import package")
+                    .max_height(body_height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| self.tab_body(ui));
+            } else if width >= SIDE_BY_SIDE_FROM {
+                self.side_by_side(ui, render_state, body_height);
+            } else {
+                self.stacked(ui, render_state, body_height);
+            }
+            ui.separator();
+            ui.label(summary);
+            self.footer(ui, &mut answer);
+        });
         // Escape or a click outside the box means Cancel.
-        if answer.is_none() && modal.should_close() {
+        if answer.is_none() && dismissed {
             answer = Some(Answer::Cancel);
         }
         answer
@@ -428,17 +433,17 @@ impl ImportDialog {
 
     /// The title, what the file holds, and the tabs.
     fn header(&mut self, ui: &mut egui::Ui) {
-        let palette = theme::palette(ui.ctx());
         let file_name = self
             .file
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
-        ui.heading(format!("Import {file_name}"));
-        ui.label(
-            egui::RichText::new(self.holds())
-                .size(theme::type_scale::SMALL)
-                .color(palette.text_weak),
+        dialog::header(
+            ui,
+            icons::DOWNLOAD_SIMPLE,
+            dialog::Tone::Question,
+            &format!("Import {file_name}"),
+            Some(&self.holds()),
         );
         let tabs = self.tabs();
         if tabs.len() > 1 {
@@ -639,47 +644,40 @@ impl ImportDialog {
         }
     }
 
-    /// Cancel at the left, Import at the right. Returns where the row is.
-    fn footer(&mut self, ui: &mut egui::Ui, answer: &mut Option<Answer>) -> egui::Rect {
+    /// What stops Import, if anything, over Cancel and Import at the
+    /// bottom right.
+    fn footer(&mut self, ui: &mut egui::Ui, answer: &mut Option<Answer>) {
         let palette = theme::palette(ui.ctx());
         let problem = self.problem();
-        ui.horizontal(|ui| {
-            if ui
-                .add(widgets::button(
-                    widgets::Role::Ghost,
-                    None,
-                    "Cancel",
-                    &palette,
-                ))
-                .clicked()
-            {
-                *answer = Some(Answer::Cancel);
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Added right to left: Import is at the far right.
-                let import = ui
-                    .add_enabled(
-                        problem.is_none(),
-                        widgets::button(
-                            widgets::Role::Primary,
-                            Some(icons::DOWNLOAD_SIMPLE),
-                            "Import",
-                            &palette,
-                        ),
-                    )
-                    .on_hover_text("Import now, with the choices as they are on every tab.")
-                    .on_disabled_hover_text(problem.clone().unwrap_or_default());
-                self.import_button = Some(import.rect);
-                if import.clicked() {
-                    *answer = Some(Answer::Import);
-                }
-                if let Some(problem) = &problem {
-                    ui.label(egui::RichText::new(problem).color(palette.warning));
-                }
-            });
-        })
-        .response
-        .rect
+        let problem = problem.as_deref();
+        if let Some(problem) = problem {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(theme::with_icon(icons::WARNING, problem))
+                        .color(palette.warning),
+                )
+                .truncate(),
+            );
+        }
+        let row = dialog::button_row(
+            ui,
+            &[
+                dialog::Button::cancel(),
+                dialog::Button::new(icons::DOWNLOAD_SIMPLE, "Import", dialog::Kind::Main)
+                    .enabled(problem.is_none())
+                    .tooltip(
+                        problem.unwrap_or("Import now, with the choices as they are on every tab."),
+                    ),
+            ],
+            dialog::Enter::Main,
+        );
+        self.import_button = Some(row.rects[1]);
+        self.buttons = Some(row.rects[0].union(row.rects[1]));
+        match row.picked {
+            Some(0) => *answer = Some(Answer::Cancel),
+            Some(_) => *answer = Some(Answer::Import),
+            None => {}
+        }
     }
 }
 

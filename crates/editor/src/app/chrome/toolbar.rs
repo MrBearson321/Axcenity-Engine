@@ -1,6 +1,10 @@
 use super::ribbon_menus::{insert_hint, insert_items, insert_menu};
 use super::*;
 
+/// Why the scene tools are greyed out.
+const SCENE_HIDDEN: &str = "These act on the Scene View: show it (Show Scene, before these \
+                            tools) to use them.";
+
 impl EditorApp {
     /// The ribbon under the menu bar: Play and Stop, the tools, the snapping
     /// settings, then buttons that insert each primitive and each kind of script.
@@ -33,14 +37,38 @@ impl EditorApp {
                 let tallest: f32 = ui.data(|d| d.get_temp(tallest_id)).unwrap_or(0.0);
                 ui.set_min_height(tallest);
                 let top = ui.min_rect().top();
+                let scene = self.scene_shown(ui.ctx());
                 egui::ScrollArea::horizontal().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
+                        // Show Scene goes before the first greyed-out group,
+                        // where it's seen however narrow the window is.
+                        let mut offered = scene;
                         for (index, &group) in groups.iter().enumerate() {
                             if index > 0 {
                                 ui.add(egui::Separator::default().vertical().spacing(10.0));
                             }
-                            self.ribbon_group(ui, group, &mut clicks);
+                            if !offered && group.needs_scene() {
+                                offered = true;
+                                let show = ui
+                                    .add(RibbonButton::new(icons::CUBE_FOCUS, "Show Scene"))
+                                    .on_hover_text("Show the Scene View, to use its tools");
+                                if show.clicked() {
+                                    self.layout.open(Pane::Scene);
+                                }
+                                ui.add(egui::Separator::default().vertical().spacing(10.0));
+                            }
+                            if scene || !group.needs_scene() {
+                                self.ribbon_group(ui, group, &mut clicks);
+                            } else {
+                                // Acting on a scene that isn't shown would
+                                // change the world out of sight.
+                                ui.add_enabled_ui(false, |ui| {
+                                    self.ribbon_group(ui, group, &mut clicks);
+                                })
+                                .response
+                                .on_disabled_hover_text(SCENE_HIDDEN);
+                            }
                         }
                     });
                 });
@@ -125,6 +153,13 @@ impl EditorApp {
                 self.toggle_tool(*tool);
             }
         }
+    }
+
+    /// Whether a Scene View showed last frame (docked, split or in its own
+    /// window). The ribbon's scene tools and their keys need one.
+    pub(in crate::app) fn scene_shown(&self, ctx: &egui::Context) -> bool {
+        self.scene_drawn_pass
+            .is_some_and(|frame| frame + 1 >= theme::frame_number(ctx))
     }
 
     /// Picks `tool`, or, if it's already picked, goes back to Select: a

@@ -30,6 +30,9 @@ fn chrome_frame(
         ..Default::default()
     };
     ctx.run(input, |ctx| {
+        // Nothing fills the Scene's place here: count it as shown, so the
+        // ribbon's Scene tools can be pressed as in a whole frame.
+        app.scene_drawn_pass = Some(theme::frame_number(ctx));
         egui::TopBottomPanel::top("menu bar").show(ctx, |ui| {
             app.menu_bar(ui);
         });

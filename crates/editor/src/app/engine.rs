@@ -277,7 +277,11 @@ impl EditorApp {
     }
 
     /// Acts on the Relaunch offer's buttons.
-    pub(super) fn follow_offer(&mut self, click: toast::OfferClick) {
+    pub(super) fn follow_offer(&mut self, click: toast::Clicks) {
+        if click.show_console {
+            self.layout.open(crate::layout::Pane::Console);
+            self.output.reveal_last_error();
+        }
         if click.accepted {
             self.relaunch();
         } else if click.dismissed {
@@ -302,7 +306,7 @@ impl EditorApp {
                  trees, data tables or materials. Save those first, then Relaunch.",
             );
             self.toasts
-                .error("Save the Event Graph or behavior tree first.");
+                .warning("Save the Event Graph or behavior tree first.");
             return;
         }
         let written = relaunch::handoff_root()

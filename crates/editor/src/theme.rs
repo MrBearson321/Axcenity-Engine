@@ -533,6 +533,13 @@ impl Canvas {
     }
 }
 
+/// A count that goes up once per frame of the whole editor, the same in
+/// its floating windows (each OS window has its own pass count): for "was
+/// this drawn last frame?".
+pub fn frame_number(ctx: &egui::Context) -> u64 {
+    ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT)
+}
+
 /// The graph canvas colours of the theme showing now.
 pub fn canvas(ctx: &egui::Context) -> Canvas {
     Canvas::new(&palette(ctx))

@@ -95,12 +95,9 @@ impl EditorApp {
         let backup = axcenity_project::backup_settings(&folder);
         let mut asks = Vec::new();
         let mut open = self.version_history.open;
-        egui::Window::new("Version History")
-            .open(&mut open)
-            .resizable(true)
-            .default_width(760.0)
-            .default_height(520.0)
-            .show(ctx, |ui| {
+        widgets::tool_window(icons::CLOCK_COUNTER_CLOCKWISE, "Version History")
+            .size(egui::vec2(760.0, 520.0))
+            .show(ctx, &mut open, |ui| {
                 ui.weak(
                     "Each save keeps the world, levels, scripts and styles. A checkpoint is \
                      a save with a message that's never dropped. Assets and the project \
@@ -200,16 +197,12 @@ impl EditorApp {
                 items: Vec::new(),
             },
             &[
-                dialog::Button {
-                    icon: icons::X,
-                    label: "Cancel",
-                    kind: dialog::Kind::Plain,
-                },
-                dialog::Button {
-                    icon: icons::CLOCK_COUNTER_CLOCKWISE,
-                    label: "Restore",
-                    kind: dialog::Kind::Main,
-                },
+                dialog::Button::new(icons::X, "Cancel", dialog::Kind::Plain),
+                dialog::Button::new(
+                    icons::CLOCK_COUNTER_CLOCKWISE,
+                    "Restore",
+                    dialog::Kind::Main,
+                ),
             ],
         );
         match outcome {

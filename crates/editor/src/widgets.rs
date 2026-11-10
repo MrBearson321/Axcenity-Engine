@@ -658,6 +658,192 @@ pub fn wordmark(
     response
 }
 
+/// How a tool window is sized.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Sizing {
+    /// Opens at this size (height 0: as tall as its content) and the user
+    /// can drag its edges.
+    Resizable(egui::Vec2),
+    /// As big as its content, for short forms.
+    Fit(f32),
+    /// Always this size, for windows that lay out their own columns.
+    Fixed(egui::Vec2),
+}
+
+/// The open tool windows, back to front, each with the frame it was last
+/// drawn in: which one Escape closes. egui keeps its own order, but it
+/// keeps closed windows in it too.
+#[derive(Clone, Default)]
+struct ToolWindowStack(Vec<(egui::LayerId, u64)>);
+
+impl ToolWindowStack {
+    /// Notes `layer` drawn in `pass`, on top if it's new or `raised` (egui
+    /// put it in front, as a click does), or takes it out once it's closed.
+    fn raise(&mut self, layer: egui::LayerId, raised: bool, pass: u64, open: bool) {
+        let at = self.0.iter().position(|(entry, _)| *entry == layer);
+        if !open {
+            self.forget(layer);
+            return;
+        }
+        match at {
+            Some(at) if !raised => self.0[at].1 = pass,
+            Some(at) => {
+                self.0.remove(at);
+                self.0.push((layer, pass));
+            }
+            None => self.0.push((layer, pass)),
+        }
+    }
+
+    fn forget(&mut self, layer: egui::LayerId) {
+        self.0.retain(|(entry, _)| *entry != layer);
+    }
+
+    /// The front window drawn this frame or the last one (a window closed
+    /// by its own code, not through `show`, stops counting after a frame).
+    fn top(&self, pass: u64) -> Option<egui::LayerId> {
+        self.0
+            .iter()
+            .rev()
+            .find(|(_, drawn)| *drawn + 1 >= pass)
+            .map(|(layer, _)| *layer)
+    }
+}
+
+/// One of the editor's tool windows (Settings, Input, Find in Scripts…),
+/// so they all open, look and close the same way: an icon and a title in
+/// the heading font, no collapse arrow, centred and kept on the screen the
+/// first time, and Escape closes the window on top unless a text field, a
+/// menu or a question box wants that Escape. Build with `tool_window`.
+#[must_use]
+pub struct ToolWindow {
+    id: egui::Id,
+    title: String,
+    sizing: Sizing,
+    min_width: Option<f32>,
+}
+
+/// A tool window titled `title` with `icon` in front. Its id comes from the
+/// title (as egui's own windows do), so give `id` when the title changes.
+pub fn tool_window(icon: &str, title: &str) -> ToolWindow {
+    ToolWindow {
+        id: egui::Id::new(title),
+        title: theme::with_icon(icon, title),
+        sizing: Sizing::Resizable(vec2(420.0, 0.0)),
+        min_width: None,
+    }
+}
+
+impl ToolWindow {
+    pub fn id(mut self, id: impl std::hash::Hash) -> Self {
+        self.id = egui::Id::new(id);
+        self
+    }
+
+    /// Opens `size` big (a height of 0 fits the content); the user can
+    /// resize it.
+    pub fn size(mut self, size: egui::Vec2) -> Self {
+        self.sizing = Sizing::Resizable(size);
+        self
+    }
+
+    /// As big as its content, `width` wide, and not resizable.
+    pub fn fit(mut self, width: f32) -> Self {
+        self.sizing = Sizing::Fit(width);
+        self
+    }
+
+    /// Always exactly `size`.
+    pub fn fixed(mut self, size: egui::Vec2) -> Self {
+        self.sizing = Sizing::Fixed(size);
+        self
+    }
+
+    pub fn min_width(mut self, width: f32) -> Self {
+        self.min_width = Some(width);
+        self
+    }
+
+    /// Shows the window while `open`; the × and Escape clear it. Returns
+    /// what `add` returned, if the window was drawn.
+    pub fn show<R>(
+        self,
+        ctx: &egui::Context,
+        open: &mut bool,
+        add: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> Option<R> {
+        if !*open {
+            let layer = egui::LayerId::new(egui::Order::Middle, self.id);
+            ctx.data_mut(|data| {
+                data.get_temp_mut_or_default::<ToolWindowStack>(egui::Id::NULL)
+                    .forget(layer)
+            });
+            return None;
+        }
+        // Asked before drawing: a menu that Escape closes this frame still
+        // had it. A text field's focus is already gone (egui drops it on
+        // Escape before the frame starts), so that's from last frame.
+        let typing = self.id.with("typing");
+        let escape_is_taken = ctx.data(|data| data.get_temp(typing).unwrap_or(false))
+            || ctx.wants_keyboard_input()
+            || ctx.is_popup_open()
+            || egui::Popup::is_any_open(ctx)
+            || ctx.memory(|memory| memory.top_modal_layer().is_some());
+        let screen = ctx.screen_rect().shrink(theme::space::XL);
+        let clamp = |size: egui::Vec2| size.min(screen.size()).max(vec2(160.0, 0.0));
+        let mut window = egui::Window::new(self.title)
+            .id(self.id)
+            .open(open)
+            .collapsible(false)
+            .constrain(true)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(screen.center());
+        window = match self.sizing {
+            Sizing::Resizable(size) => {
+                let size = clamp(size);
+                let window = window.resizable(true).default_width(size.x);
+                if size.y > 0.0 {
+                    window.default_height(size.y)
+                } else {
+                    window
+                }
+            }
+            Sizing::Fit(width) => window
+                .resizable(false)
+                .default_width(clamp(vec2(width, 0.0)).x),
+            Sizing::Fixed(size) => window.resizable(false).fixed_size(clamp(size)),
+        };
+        if let Some(width) = self.min_width {
+            window = window.min_width(width);
+        }
+        let layer = egui::LayerId::new(egui::Order::Middle, self.id);
+        let shown = window.show(ctx, add);
+        let pass = theme::frame_number(ctx);
+        let raised = ctx.top_layer_id() == Some(layer);
+        let on_top = ctx.data_mut(|data| {
+            let stack = data.get_temp_mut_or_default::<ToolWindowStack>(egui::Id::NULL);
+            stack.raise(layer, raised, pass, shown.is_some() && *open);
+            stack.top(pass) == Some(layer)
+        });
+        let shown = shown?;
+        let typing_now = ctx.wants_keyboard_input();
+        ctx.data_mut(|data| data.insert_temp(typing, typing_now));
+        if on_top
+            && !escape_is_taken
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            *open = false;
+        }
+        if !*open {
+            ctx.data_mut(|data| {
+                data.get_temp_mut_or_default::<ToolWindowStack>(egui::Id::NULL)
+                    .forget(layer)
+            });
+        }
+        shown.inner
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -223,11 +223,14 @@ impl EditorApp {
         // change the world out of sight, so they're left alone.
         let blocks = self.block_tab_pointer.is_some();
         let animating = self.animation.wants_keys(ctx) || studio || blocks;
+        // With no Scene View showing, a tool picked by its key would act on
+        // a scene the user can't see, as its ribbon button would.
+        let scene = self.scene_shown(ctx);
         // The tools' single keys (1 to 5, F3X's letters) only while
         // editing, so a game gets every key. Escape goes back to Select; it
         // isn't taken, so it still closes a menu or stops the Constraint tool.
         let tool_key = |input: &mut egui::InputState| {
-            if playing || animating {
+            if playing || animating || !scene {
                 return None;
             }
             Tool::ALL

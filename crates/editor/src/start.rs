@@ -29,6 +29,7 @@ use learn::{Learn, LearnAction, SampleState};
 use pages::*;
 use reference::Reference;
 
+use crate::dialog;
 use crate::theme::{self, Palette, icons, type_scale};
 use crate::widgets::{self, Role};
 
@@ -676,14 +677,11 @@ impl StartScreen {
         if self.page == Page::Projects {
             self.page = Page::Learn;
         }
-        egui::Window::new(theme::with_icon(icons::BOOK_OPEN, "Learn"))
-            .id(egui::Id::new("learn window"))
-            .open(open)
-            .default_size(vec2(480.0, 640.0))
+        widgets::tool_window(icons::BOOK_OPEN, "Learn")
+            .id("learn window")
+            .size(vec2(480.0, 640.0))
             .min_width(300.0)
-            .collapsible(false)
-            .resizable(true)
-            .show(ctx, |ui| {
+            .show(ctx, open, |ui| {
                 let mut page = self.page;
                 widgets::segmented(
                     ui,
@@ -762,62 +760,51 @@ pub fn tutorial_samples() -> Vec<&'static str> {
 /// The About box: the logo, the version, and the licences of what's built in.
 /// Returns false once it's closed.
 pub fn about(ctx: &egui::Context, brand: &Brand) -> bool {
-    let palette = theme::palette(ctx);
-    let mut close = false;
-    let frame = egui::Frame::popup(&ctx.style())
-        .corner_radius(12)
-        .inner_margin(egui::Margin::same(24));
-    let modal = egui::Modal::new(egui::Id::new("about"))
-        .frame(frame)
-        .show(ctx, |ui| {
-            ui.set_width(ABOUT_WIDTH);
-            ui.vertical_centered(|ui| {
-                let texture = brand.wordmark();
-                let size = texture.size_vec2();
-                let height = WORDMARK_WIDTH * size.y / size.x;
-                ui.add_space(8.0);
-                ui.add(
-                    egui::Image::new(texture)
-                        .tint(palette.text_strong)
-                        .fit_to_exact_size(vec2(WORDMARK_WIDTH, height)),
-                );
-                ui.add_space(12.0);
-                ui.label(
-                    RichText::new(format!("Axcenity Engine {}", env!("CARGO_PKG_VERSION")))
-                        .family(theme::heading_family())
-                        .size(type_scale::HEADING)
-                        .color(palette.text_strong),
-                );
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new("A 3D game engine and editor, scripted with Luau and blocks.")
-                        .color(palette.text_secondary),
-                );
-                ui.label(RichText::new("Licensed under Apache-2.0.").color(palette.text_secondary));
-                ui.add_space(12.0);
-                ui.label(
-                    RichText::new(
-                        "Fonts: Inter, Montserrat, JetBrains Mono, Roboto, Poppins, Nunito, \
-                         Oswald, Bebas Neue, Bangers, Lobster, Press Start 2P and Lora (SIL \
-                         Open Font License 1.1). Icons: Phosphor (MIT). Built with egui, wgpu, \
-                         Rapier and Lua.",
-                    )
-                    .size(type_scale::SMALL)
-                    .color(palette.text_weak),
-                );
-                ui.add_space(16.0);
-                if ui
-                    .add(
-                        widgets::button(Role::Secondary, None, "Close", &palette)
-                            .min_size(vec2(84.0, 30.0)),
-                    )
-                    .clicked()
-                {
-                    close = true;
-                }
-            });
+    let (close, dismissed) = dialog::modal(ctx, "about", ABOUT_WIDTH, |ui| {
+        let palette = theme::palette(ui.ctx());
+        dialog::header(
+            ui,
+            icons::INFO,
+            dialog::Tone::Question,
+            "About Axcenity",
+            Some(&format!("Version {}", env!("CARGO_PKG_VERSION"))),
+        );
+        ui.vertical_centered(|ui| {
+            let texture = brand.wordmark();
+            let size = texture.size_vec2();
+            let height = WORDMARK_WIDTH * size.y / size.x;
+            ui.add_space(8.0);
+            ui.add(
+                egui::Image::new(texture)
+                    .tint(palette.text_strong)
+                    .fit_to_exact_size(vec2(WORDMARK_WIDTH, height)),
+            );
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new("A 3D game engine and editor, scripted with Luau and blocks.")
+                    .color(palette.text_secondary),
+            );
+            ui.label(RichText::new("Licensed under Apache-2.0.").color(palette.text_secondary));
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new(
+                    "Fonts: Inter, Montserrat, JetBrains Mono, Roboto, Poppins, Nunito, \
+                     Oswald, Bebas Neue, Bangers, Lobster, Press Start 2P and Lora (SIL \
+                     Open Font License 1.1). Icons: Phosphor (MIT). Built with egui, wgpu, \
+                     Rapier and Lua.",
+                )
+                .size(type_scale::SMALL)
+                .color(palette.text_weak),
+            );
         });
-    !(close || modal.should_close())
+        dialog::buttons(
+            ui,
+            &[dialog::Button::new(icons::X, "Close", dialog::Kind::Plain)],
+            dialog::Enter::Main,
+        )
+        .is_some()
+    });
+    !(close || dismissed)
 }
 
 #[cfg(test)]

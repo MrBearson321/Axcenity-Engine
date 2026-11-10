@@ -384,6 +384,9 @@ pub struct EditorApp {
     /// The block script whose tab is under the mouse, set as it's drawn:
     /// Ctrl+Z and Ctrl+Y are its then, and the world's keys aren't taken.
     block_tab_pointer: Option<String>,
+    /// The frame (`theme::frame_number`) a Scene View was last drawn in:
+    /// the ribbon's scene tools and their keys work only while one shows.
+    scene_drawn_pass: Option<u64>,
     /// The UI Designer tab's view of a ScreenGui.
     ui_designer: UiDesigner,
     /// The Terrain panel's tools, settings, previews and work under way.
@@ -512,12 +515,44 @@ fn in_panel_memory(ui: &mut egui::Ui, pane: Pane, add: impl FnOnce(&mut egui::Ui
     ui.advance_cursor_after_rect(rect);
 }
 
+/// The Console's tab title with how many errors came since it was last
+/// shown, in the error colour.
+fn console_title(pane: Pane, errors: usize, color: egui::Color32) -> egui::WidgetText {
+    let mut job = egui::text::LayoutJob::default();
+    let font = egui::FontId::new(theme::type_scale::BODY - 0.5, theme::medium_family());
+    job.append(
+        &theme::with_icon(pane.icon(), pane.label()),
+        0.0,
+        egui::TextFormat {
+            font_id: font.clone(),
+            // The tab's own colour, idle or active.
+            color: egui::Color32::PLACEHOLDER,
+            ..Default::default()
+        },
+    );
+    job.append(
+        &format!("{} {errors}", icons::WARNING_CIRCLE),
+        6.0,
+        egui::TextFormat {
+            font_id: font,
+            color,
+            ..Default::default()
+        },
+    );
+    job.into()
+}
+
 impl egui_dock::TabViewer for DockViewer<'_> {
     type Tab = Pane;
 
     fn title(&mut self, pane: &mut Pane) -> egui::WidgetText {
         match pane {
             Pane::Script(id) => self.app.tabs.title(*id, &self.visuals),
+            // New errors while the Console isn't showing: counted on its tab.
+            Pane::Console if self.app.output.unseen_errors(&self.ctx) > 0 => {
+                let errors = self.app.output.unseen_errors(&self.ctx);
+                console_title(*pane, errors, theme::palette(&self.ctx).error)
+            }
             Pane::Plugin(id) => egui::RichText::new(theme::with_icon(
                 icons::PUZZLE_PIECE,
                 &self.app.plugin_pane_title(*id),
@@ -852,6 +887,7 @@ impl EditorApp {
             sequencer: Default::default(),
             model_studio: Default::default(),
             block_tab_pointer: None,
+            scene_drawn_pass: None,
             ui_designer: UiDesigner::default(),
             terrain: TerrainStudio::default(),
             layout: Layout::default(),
@@ -1606,6 +1642,8 @@ mod dev_console_tests;
 #[cfg(test)]
 mod dialogue_tests;
 #[cfg(test)]
+mod feedback_tests;
+#[cfg(test)]
 mod find_tests;
 #[cfg(test)]
 mod fracture_tests;
@@ -1640,11 +1678,15 @@ mod posing_tests;
 #[cfg(test)]
 mod prefab_tests;
 #[cfg(test)]
+mod scene_tools_tests;
+#[cfg(test)]
 mod spline_content_tests;
 #[cfg(test)]
 mod spline_tests;
 #[cfg(test)]
 mod template_tests;
+#[cfg(test)]
+mod tool_window_tests;
 #[cfg(test)]
 mod tour_snapshots;
 

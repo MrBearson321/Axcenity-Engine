@@ -1239,21 +1239,9 @@ impl EditorApp {
                 items,
             },
             &[
-                dialog::Button {
-                    icon: icons::X,
-                    label: "Cancel",
-                    kind: dialog::Kind::Plain,
-                },
-                dialog::Button {
-                    icon: icons::TRASH,
-                    label: "Don't Save",
-                    kind: dialog::Kind::Plain,
-                },
-                dialog::Button {
-                    icon: icons::FLOPPY_DISK,
-                    label: "Save",
-                    kind: dialog::Kind::Main,
-                },
+                dialog::Button::new(icons::X, "Cancel", dialog::Kind::Plain),
+                dialog::Button::new(icons::TRASH, "Don't Save", dialog::Kind::Plain),
+                dialog::Button::new(icons::FLOPPY_DISK, "Save", dialog::Kind::Main),
             ],
         );
         let answer = outcome.map(|outcome| match outcome {
