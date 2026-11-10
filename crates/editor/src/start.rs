@@ -440,7 +440,7 @@ impl StartScreen {
             ui.label(
                 RichText::new("Apache-2.0")
                     .size(type_scale::CAPTION)
-                    .color(palette.text_muted),
+                    .color(palette.text_weak),
             );
         });
         settings.clicked()

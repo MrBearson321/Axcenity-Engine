@@ -277,6 +277,12 @@ struct ShaderDraft {
 }
 
 impl MaterialStudio {
+    /// How far each graph drawn so far is zoomed.
+    #[cfg(test)]
+    pub fn view_zooms(&self) -> Vec<f32> {
+        self.graph_views.values().map(|view| view.zoom).collect()
+    }
+
     pub fn unsaved(&self) -> bool {
         self.documents.iter().any(MaterialDocument::unsaved)
     }
@@ -643,7 +649,7 @@ impl MaterialStudio {
                         let color = if error_line == Some(line as u32) {
                             palette.error
                         } else {
-                            palette.text_muted
+                            palette.text_weak
                         };
                         ui.add(
                             egui::Label::new(
@@ -1011,15 +1017,16 @@ fn short_name(path: &str) -> String {
         .to_owned()
 }
 
-/// A value's name, marked when this material sets it.
+/// A value's name, marked as changed (`widgets::changed_bar`, as in
+/// Properties) when this material sets it.
 fn value_label(ui: &mut egui::Ui, name: &str, set: bool) -> egui::Response {
     let palette = theme::palette(ui.ctx());
+    let label = ui.label(egui::RichText::new(name).color(palette.text_secondary));
     if set {
-        ui.label(egui::RichText::new(format!("● {name}")).color(palette.accent))
-            .on_hover_text("Set by this material")
+        widgets::changed_bar(ui, label.rect);
+        label.on_hover_text("Set by this material; ↺ leaves it to the base")
     } else {
-        ui.label(egui::RichText::new(name).color(palette.text_secondary))
-            .on_hover_text("From its base (or the default material)")
+        label.on_hover_text("From its base (or the default material)")
     }
 }
 

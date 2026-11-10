@@ -162,7 +162,7 @@ impl LevelsPanel {
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     let icon = if start { icons::FLAG } else { icons::STACK };
-                    ui.label(RichText::new(icon).color(palette.text_muted));
+                    ui.label(RichText::new(icon).color(palette.text_weak));
                     let text = if open {
                         RichText::new(name).strong().color(palette.accent_text)
                     } else {

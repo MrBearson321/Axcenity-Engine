@@ -245,7 +245,7 @@ fn row_ui(
     if selected || response.hovered() {
         ui.painter().rect_filled(
             rect,
-            4,
+            theme::radius::CONTROL,
             if selected {
                 palette.accent_soft
             } else {
@@ -293,7 +293,7 @@ fn row_ui(
         let room = right - title.right() - 12.0;
         let galley = ui
             .painter()
-            .layout(entry.detail.clone(), small, palette.text_muted, room);
+            .layout(entry.detail.clone(), small, palette.text_weak, room);
         let mut job = (*galley.job).clone();
         job.wrap.max_rows = 1;
         job.wrap.break_anywhere = true;
@@ -304,7 +304,7 @@ fn row_ui(
                 rect.center().y - galley.size().y / 2.0,
             ),
             galley,
-            palette.text_muted,
+            palette.text_weak,
         );
     }
     let response = if entry.enabled || entry.disabled.is_empty() {

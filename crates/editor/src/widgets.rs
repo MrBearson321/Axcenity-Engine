@@ -47,8 +47,53 @@ pub fn button(
         Role::Secondary => egui::Button::new(text),
         Role::Ghost => egui::Button::new(text).frame(false),
     }
-    .corner_radius(6)
-    .min_size(vec2(0.0, 28.0))
+    .corner_radius(theme::radius::CONTROL)
+    .min_size(vec2(0.0, theme::size::BUTTON_HEIGHT))
+}
+
+/// The name of a row in an inspector (Properties, the Material tab), with
+/// an optional icon button after it, such as ↺. The name stays where every
+/// other row's name is. When `changed` (the value differs from its default
+/// or its base) a thin accent bar marks the row in the gutter at its left:
+/// the one way every inspector shows a changed value. `name` adds the label.
+pub fn row_name<R>(
+    ui: &mut egui::Ui,
+    changed: bool,
+    name: impl FnOnce(&mut egui::Ui) -> R,
+    after: impl FnOnce(&mut egui::Ui),
+) -> R {
+    let row = ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let label = name(ui);
+        after(ui);
+        label
+    });
+    if changed {
+        changed_bar(ui, row.response.rect);
+    }
+    row.inner
+}
+
+/// The changed-value mark beside a row whose content is `row`: a 2-point
+/// accent bar in the gutter, 4 points left of it so it doesn't read as a
+/// text cursor.
+pub fn changed_bar(ui: &egui::Ui, row: Rect) {
+    let palette = theme::palette(ui.ctx());
+    let bar = Rect::from_min_max(
+        egui::pos2(row.left() - 6.0, row.top() + 2.0),
+        egui::pos2(row.left() - 4.0, row.bottom() - 2.0),
+    );
+    // The gutter is outside the row's own clip: paint on its layer, clipped
+    // only to the panel's sides.
+    let mut painter = ui.ctx().layer_painter(ui.layer_id());
+    painter.set_clip_rect(ui.clip_rect().expand2(vec2(8.0, 0.0)));
+    painter.rect_filled(bar, theme::radius::NONE, palette.accent);
+}
+
+/// The ↺ after a changed row's name: sets the value back. `tooltip` says to
+/// what. Returns whether it was clicked.
+pub fn reset_button(ui: &mut egui::Ui, tooltip: &str) -> bool {
+    icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, tooltip, false).clicked()
 }
 
 /// A square button with only an icon, which fades in a background when
@@ -62,7 +107,7 @@ pub fn icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, selected: bool)
     });
     if ui.is_rect_visible(rect) {
         let palette = theme::palette(ui.ctx());
-        paint_hover(ui, rect, &response, selected, 6.0);
+        paint_hover(ui, rect, &response, selected, theme::radius::CONTROL);
         let color = if !ui.is_enabled() {
             palette.text_muted
         } else if selected {
@@ -76,7 +121,7 @@ pub fn icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, selected: bool)
             rect.center(),
             egui::Align2::CENTER_CENTER,
             icon,
-            FontId::proportional(15.0),
+            FontId::proportional(theme::size::ICON_MEDIUM),
             color,
         );
     }
@@ -91,7 +136,7 @@ pub fn paint_hover(
     rect: Rect,
     response: &egui::Response,
     selected: bool,
-    radius: f32,
+    radius: u8,
 ) {
     let palette = theme::palette(ui.ctx());
     let hovered = response.hovered() && ui.is_enabled();
@@ -148,8 +193,8 @@ pub fn segmented_tips<T: Copy + PartialEq>(
     egui::Frame::new()
         .fill(palette.inset)
         .stroke(Stroke::new(1.0_f32, palette.border))
-        .corner_radius(7)
-        .inner_margin(egui::Margin::same(2))
+        .corner_radius(theme::radius::CARD)
+        .inner_margin(egui::Margin::same(theme::space::XXS as i8))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             ui.horizontal(|ui| {
@@ -186,15 +231,19 @@ pub fn segmented_tips<T: Copy + PartialEq>(
                     });
                     let t = theme::ease(ui.ctx(), response.id.with("on"), selected);
                     if t > 0.0 {
-                        ui.painter()
-                            .rect_filled(rect, 5, palette.control_active.gamma_multiply(t));
+                        ui.painter().rect_filled(
+                            rect,
+                            theme::radius::CONTROL,
+                            palette.control_active.gamma_multiply(t),
+                        );
                     } else if response.hovered() {
-                        ui.painter().rect_filled(rect, 5, palette.control);
+                        ui.painter()
+                            .rect_filled(rect, theme::radius::CONTROL, palette.control);
                     }
                     if response.has_focus() {
                         ui.painter().rect_stroke(
                             rect,
-                            5,
+                            theme::radius::CONTROL,
                             Stroke::new(1.0_f32, palette.accent),
                             egui::StrokeKind::Inside,
                         );
@@ -306,12 +355,13 @@ pub fn nav_item(
         } else {
             palette.control_hover
         };
-        ui.painter().rect_filled(rect, 6, fill.gamma_multiply(t));
+        ui.painter()
+            .rect_filled(rect, theme::radius::CONTROL, fill.gamma_multiply(t));
     }
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect,
-            6,
+            theme::radius::CONTROL,
             Stroke::new(1.0_f32, palette.accent),
             egui::StrokeKind::Inside,
         );
@@ -326,7 +376,7 @@ pub fn nav_item(
         rect.left_center() + vec2(18.0, 0.0),
         egui::Align2::CENTER_CENTER,
         icon,
-        FontId::proportional(15.0),
+        FontId::proportional(theme::size::ICON_MEDIUM),
         icon_color,
     );
     ui.painter().text(
@@ -376,7 +426,7 @@ pub fn search_field(
         response.rect.left_center() + vec2(13.0, 0.0),
         egui::Align2::CENTER_CENTER,
         icons::MAGNIFYING_GLASS,
-        FontId::proportional(13.0),
+        FontId::proportional(theme::size::ICON_SMALL),
         palette.text_weak,
     );
     if !text.is_empty() {

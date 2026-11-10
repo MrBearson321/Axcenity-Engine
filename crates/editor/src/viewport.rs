@@ -89,10 +89,10 @@ const POPUP_SECONDS: f64 = 1.0;
 const POPUP_FADE_SECONDS: f64 = 0.4;
 /// The selection box: a bright blue, like Studio's, that stands out against
 /// the sky and most part colors.
-const SELECTION_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
+const SELECTION_COLOR: egui::Color32 = crate::theme::overlay::SELECTED;
 const SELECTION_WIDTH: f32 = 2.0;
 /// The outline of parts about to be placed.
-const PREVIEW_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 196, 64);
+const PREVIEW_COLOR: egui::Color32 = crate::theme::overlay::PREVIEW;
 /// A light's icon, in points, the same size however far away the light is.
 const LIGHT_ICON_RADIUS: f32 = 13.0;
 /// Hide terrain collider chunks farther than this from the camera.
@@ -104,7 +104,7 @@ const SENSOR_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 180, 60);
 const BOUNDS_COLOR: egui::Color32 = egui::Color32::from_rgb(180, 120, 255);
 /// Script raycasts and the point they hit.
 const RAY_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 220, 80);
-const RAY_HIT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 90, 90);
+const RAY_HIT_COLOR: egui::Color32 = crate::theme::overlay::WARNING;
 /// Spatial sound sources.
 const EMITTER_COLOR: egui::Color32 = egui::Color32::from_rgb(90, 200, 255);
 const EMITTER_ICON_RADIUS: f32 = 11.0;
@@ -115,7 +115,7 @@ const NAV_EDGE_COLOR: egui::Color32 = egui::Color32::from_rgb(40, 230, 210);
 /// The culling overlay: bounds drawn (green) and culled (red), and the
 /// frozen view's edges out to `FROZEN_VIEW_LENGTH` studs.
 const CULL_DRAWN_COLOR: egui::Color32 = egui::Color32::from_rgb(110, 230, 120);
-const CULL_CULLED_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 90, 90);
+const CULL_CULLED_COLOR: egui::Color32 = crate::theme::overlay::WARNING;
 const FROZEN_VIEW_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 220, 80);
 const FROZEN_VIEW_LENGTH: f32 = 60.0;
 /// The Agent Paths overlay: what's left of each agent's path.

@@ -120,7 +120,7 @@ impl UiDesigner {
                 ui.spacing_mut().item_spacing.x = gap;
                 for &(what, name) in row {
                     let (rect, response) = ui.allocate_exact_size(cell, sense);
-                    widgets::paint_hover(ui, rect, &response, false, 6.0);
+                    widgets::paint_hover(ui, rect, &response, false, theme::radius::CARD);
                     ui.painter().rect_stroke(
                         rect,
                         6.0,
@@ -131,7 +131,7 @@ impl UiDesigner {
                     let color = if scene.editing {
                         palette.text
                     } else {
-                        palette.text_muted
+                        palette.text_weak
                     };
                     let galley = widgets::elided(
                         ui,
@@ -220,7 +220,7 @@ impl UiDesigner {
             });
             row_rects.push((id, rect));
             let selected = scene.selected == Some(id) || chosen.contains(&id);
-            widgets::paint_hover(ui, rect, &response, selected, 4.0);
+            widgets::paint_hover(ui, rect, &response, selected, theme::radius::CONTROL);
             let indent = 6.0 + depth as f32 * 12.0;
             let text = theme::with_icon(theme::class_icon(instance.class()), instance.name());
             // Not drawn on the artboard: by its eye, or not the page shown.
@@ -231,7 +231,7 @@ impl UiDesigner {
                 text,
                 egui::FontId::proportional(theme::type_scale::BODY),
                 if off {
-                    palette.text_muted
+                    palette.text_weak
                 } else if selected {
                     palette.text_strong
                 } else {
@@ -682,7 +682,7 @@ fn anchor_picker(
                             egui::vec2(ANCHOR_CELL, ANCHOR_CELL),
                             egui::Sense::click(),
                         );
-                        widgets::paint_hover(ui, rect, &response, chosen, 3.0);
+                        widgets::paint_hover(ui, rect, &response, chosen, theme::radius::CONTROL);
                         paint_pin_icon(ui.painter(), rect.shrink(5.0), x, y, &palette, chosen);
                         let response = response.on_hover_text(format!(
                             "Pin to the {} and the {}",

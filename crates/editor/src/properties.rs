@@ -656,7 +656,7 @@ pub fn show(
         .auto_shrink(false)
         .show(ui, |ui| {
             let Some((id, instance)) = selected.and_then(|id| Some((id, world.get(id)?))) else {
-                ui.add_space(24.0);
+                ui.add_space(theme::space::XL);
                 ui.vertical_centered(|ui| {
                     ui.label(
                         egui::RichText::new(icons::CURSOR_CLICK)
@@ -1251,19 +1251,22 @@ fn field_name_with_pin(
         return None;
     };
     let mut clicked = None;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        let tooltip = if kept {
-            "Kept: Stop copies this value into the world you're editing, as one undo step. \
-             Click to let it go at Stop."
-        } else {
-            "Changed during Play. Click to keep this value after Stop."
-        };
-        if crate::widgets::icon_button(ui, icons::PUSH_PIN, tooltip, kept).clicked() {
-            clicked = Some(!kept);
-        }
-        described_name(ui, class, name);
-    });
+    let tooltip = if kept {
+        "Kept: Stop copies this value into the world you're editing, as one undo step. \
+         Click to let it go at Stop."
+    } else {
+        "Changed during Play. Click to keep this value after Stop."
+    };
+    crate::widgets::row_name(
+        ui,
+        false,
+        |ui| described_name(ui, class, name),
+        |ui| {
+            if crate::widgets::icon_button(ui, icons::PUSH_PIN, tooltip, kept).clicked() {
+                clicked = Some(!kept);
+            }
+        },
+    );
     clicked
 }
 
@@ -1273,20 +1276,21 @@ fn resettable(default: &Value) -> bool {
     !matches!(default, Value::Instance(_))
 }
 
-/// A changed property's name, after a ↺ that sets it back to its class's
-/// default (one undo step, like any edit). Returns whether ↺ was clicked.
+/// A changed property's name, marked as changed, with a ↺ after it that
+/// sets it back to its class's default (one undo step, like any edit).
+/// Returns whether ↺ was clicked.
 fn field_name_with_reset(ui: &mut egui::Ui, class: ClassName, name: &str, default: &Value) -> bool {
     let mut clicked = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        let tooltip = match default_text(default) {
-            Some(text) => format!("Changed. Click to reset it to the default, {text}."),
-            None => "Changed. Click to reset it to the default.".to_owned(),
-        };
-        clicked = crate::widgets::icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, &tooltip, false)
-            .clicked();
-        described_name(ui, class, name);
-    });
+    let tooltip = match default_text(default) {
+        Some(text) => format!("Changed. Click to reset it to the default, {text}."),
+        None => "Changed. Click to reset it to the default.".to_owned(),
+    };
+    crate::widgets::row_name(
+        ui,
+        true,
+        |ui| described_name(ui, class, name),
+        |ui| clicked = crate::widgets::reset_button(ui, &tooltip),
+    );
     clicked
 }
 
@@ -1313,21 +1317,12 @@ fn default_text(value: &Value) -> Option<String> {
 }
 
 /// An overridden property's name in a placed prefab copy: bold, with a ↺
-/// that sets it back to the prefab's value, and Apply to prefab on a
-/// right-click.
+/// after it that sets it back to the prefab's value, and Apply to prefab on
+/// a right-click.
 fn override_name(ui: &mut egui::Ui, name: &str) -> Option<Edit> {
     let mut edit = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        let revert = crate::widgets::icon_button(
-            ui,
-            icons::ARROW_COUNTER_CLOCKWISE,
-            "Revert to the prefab's value",
-            false,
-        );
-        if revert.clicked() {
-            edit = Some(Edit::RevertOverride(name.to_owned()));
-        }
         let palette = theme::palette(ui.ctx());
         let label = ui
             .add(
@@ -1351,6 +1346,9 @@ fn override_name(ui: &mut egui::Ui, name: &str) -> Option<Edit> {
                 edit = Some(Edit::ApplyOverride(name.to_owned()));
             }
         });
+        if crate::widgets::reset_button(ui, "Revert to the prefab's value") {
+            edit = Some(Edit::RevertOverride(name.to_owned()));
+        }
     });
     edit
 }

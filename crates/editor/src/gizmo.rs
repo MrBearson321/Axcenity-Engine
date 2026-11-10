@@ -56,7 +56,7 @@ const ARROW_HALF_WIDTH: f32 = 6.0;
 const BALL_RADIUS: f32 = 6.0;
 const LINE_WIDTH: f32 = 3.0;
 /// The handle under the mouse, or being dragged.
-const HIGHLIGHT: egui::Color32 = egui::Color32::from_rgb(255, 215, 0);
+const HIGHLIGHT: egui::Color32 = crate::theme::overlay::HOVER;
 /// Rays this close to parallel with a handle's line can't say where along
 /// it the mouse is.
 const PARALLEL: f32 = 1e-3;
@@ -294,9 +294,9 @@ impl Axis {
     /// Red, green and blue for X, Y and Z, as in most 3D tools.
     fn color(self) -> egui::Color32 {
         match self {
-            Axis::X => egui::Color32::from_rgb(235, 65, 65),
-            Axis::Y => egui::Color32::from_rgb(70, 205, 70),
-            Axis::Z => egui::Color32::from_rgb(55, 125, 245),
+            Axis::X => crate::theme::overlay::AXIS_X,
+            Axis::Y => crate::theme::overlay::AXIS_Y,
+            Axis::Z => crate::theme::overlay::AXIS_Z,
         }
     }
 

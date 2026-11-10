@@ -18,8 +18,8 @@ use crate::screen::Screen;
 const CURVE_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 170, 60);
 const EDITING_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 210, 90);
 const POINT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 255, 255);
-const SELECTED_POINT_COLOR: egui::Color32 = egui::Color32::from_rgb(90, 200, 255);
-const HANDLE_COLOR: egui::Color32 = egui::Color32::from_rgb(200, 140, 255);
+const SELECTED_POINT_COLOR: egui::Color32 = crate::theme::overlay::SELECTED;
+const HANDLE_COLOR: egui::Color32 = crate::theme::overlay::HANDLE;
 /// How near the mouse must be to a point's handle or a curve, in points.
 pub const GRAB_POINTS: f32 = 8.0;
 /// How far apart the curve is sampled for drawing and clicking, in studs.

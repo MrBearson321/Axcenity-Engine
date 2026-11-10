@@ -328,9 +328,9 @@ impl GraphView {
         let size = ui.available_size();
         let (rect, canvas) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         self.rect = rect;
-        let visuals = ui.visuals().clone();
+        let colors = crate::theme::canvas(ui.ctx());
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, visuals.extreme_bg_color);
+        painter.rect_filled(rect, 0.0, colors.background);
         let z = self.zoom;
         let pointer = ui.input(|input| input.pointer.latest_pos());
 
@@ -351,7 +351,7 @@ impl GraphView {
                 self.offset += pointer - after;
             }
         }
-        draw_grid(&painter, rect, self.offset, z, &visuals);
+        draw_grid(&painter, rect, self.offset, z);
 
         // Something dragged over the graph: a parameter chip (onto the
         // nearest wire) or a clip (to make a state).
@@ -386,11 +386,11 @@ impl GraphView {
             let chosen = selected == Selected::Transition(*index)
                 || chip_target.is_some_and(|(target, _)| target == *index);
             let color = if chosen {
-                SELECTED
+                colors.selected
             } else if active {
-                LIVE
+                colors.live
             } else {
-                WIRE
+                colors.wire
             };
             let width = if chosen { 3.0 } else { 2.0 } * z.max(0.7);
             draw_wire(
@@ -410,7 +410,7 @@ impl GraphView {
                 &painter,
                 points,
                 &sample_wire(points),
-                ENTRY_WIRE,
+                colors.live,
                 2.0 * z.max(0.7),
                 false,
             );
@@ -424,7 +424,7 @@ impl GraphView {
                 &painter,
                 points,
                 &sample_wire(points),
-                SELECTED,
+                colors.selected,
                 2.0 * z.max(0.7),
                 false,
             );
@@ -656,7 +656,7 @@ impl GraphView {
             painter.rect_stroke(
                 rect.shrink(1.0),
                 0.0,
-                Stroke::new(2.0_f32, SELECTED),
+                Stroke::new(2.0_f32, colors.selected),
                 egui::StrokeKind::Inside,
             );
             hint(

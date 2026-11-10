@@ -345,7 +345,7 @@ fn state_of(result: &TestResult) -> TestState {
 /// The icon and its colour for a state.
 fn state_icon(state: &TestState, palette: &theme::Palette) -> (&'static str, egui::Color32) {
     match state {
-        TestState::NotRun => (icons::CIRCLE, palette.text_muted),
+        TestState::NotRun => (icons::CIRCLE, palette.text_weak),
         TestState::Queued => (icons::HOURGLASS, palette.text_weak),
         TestState::Passed => (icons::CHECK_CIRCLE, palette.success),
         TestState::Failed(_) => (icons::X_CIRCLE, palette.error),

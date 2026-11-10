@@ -66,15 +66,38 @@ const COMMENT_HEADER: f32 = 26.0;
 const PIN_REACH: f32 = 14.0;
 const MIN_ZOOM: f32 = 0.25;
 const MAX_ZOOM: f32 = 2.0;
+/// The least a graph opens at, so its text reads without zooming in. A
+/// bigger graph opens on its start node instead of all of it.
+const OPEN_ZOOM: f32 = 0.8;
 /// Below this zoom, values show as text rather than boxes to type in.
 const WIDGETS_ZOOM: f32 = 0.55;
 pub const TOOLBAR_HEIGHT: f32 = 34.0;
 
-const NODE_BODY: Color32 = Color32::from_rgb(30, 32, 40);
-const NODE_EDGE: Color32 = Color32::from_rgb(12, 13, 17);
-const PIN_TEXT: Color32 = Color32::from_rgb(214, 218, 228);
-const SELECTED: Color32 = Color32::from_rgb(255, 176, 46);
-const ERROR: Color32 = Color32::from_rgb(232, 72, 72);
+/// Where a graph starts: its first event or root node, else its top left
+/// node.
+fn start_node(graph: &NodeGraph, library: &dyn NodeLibrary) -> Option<u32> {
+    let at = |node: &&GraphNode| (node.position[0], node.position[1]);
+    let first = |nodes: Vec<&GraphNode>| {
+        nodes
+            .into_iter()
+            .min_by(|a, b| {
+                at(a)
+                    .partial_cmp(&at(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|node| node.id)
+    };
+    let starts: Vec<&GraphNode> = graph
+        .nodes
+        .iter()
+        .filter(|node| {
+            library
+                .spec(&node.kind)
+                .is_some_and(|spec| matches!(spec.category, "Events" | "Root"))
+        })
+        .collect();
+    first(starts).or_else(|| first(graph.nodes.iter().collect()))
+}
 
 /// A node category's header colour.
 pub fn category_color(category: &str) -> Color32 {
@@ -330,6 +353,9 @@ pub struct GraphView {
     before: Option<NodeGraph>,
     /// Fit every node into view on the next frame.
     frame_next: bool,
+    /// Whether the graph has been framed since it opened: the first time,
+    /// it never zooms out past [`OPEN_ZOOM`].
+    opened: bool,
     /// Every pin on screen last frame: the pin, whether it's an output,
     /// and where.
     pins: Vec<(PinRef, bool, Pos2)>,
@@ -355,6 +381,7 @@ impl Default for GraphView {
             notice: None,
             before: None,
             frame_next: true,
+            opened: false,
             pins: Vec::new(),
             rects: Vec::new(),
             canvas: Rect::NOTHING,
@@ -548,17 +575,12 @@ impl GraphView {
         add_clicked: bool,
     ) -> bool {
         let ctx = ui.ctx().clone();
-        let dark = ui.visuals().dark_mode;
-        let background = if dark {
-            Color32::from_rgb(22, 24, 29)
-        } else {
-            Color32::from_rgb(236, 238, 242)
-        };
+        let colors = theme::canvas(&ctx);
         self.canvas = rect;
         let mut canvas = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         canvas.set_clip_rect(rect);
         let painter = canvas.painter_at(rect);
-        painter.rect_filled(rect, 0, background);
+        painter.rect_filled(rect, 0, colors.background);
 
         let shapes: BTreeMap<u32, NodeShape> = graph
             .nodes
@@ -571,7 +593,11 @@ impl GraphView {
             .collect();
         if self.frame_next {
             self.frame_next = false;
-            self.fit(rect, graph, &shapes);
+            let start = (!self.opened)
+                .then(|| start_node(graph, context.library))
+                .flatten();
+            self.fit(rect, graph, &shapes, start);
+            self.opened = true;
         }
 
         let back = canvas.interact(
@@ -605,11 +631,7 @@ impl GraphView {
 
         // A grid, which moves with the nodes.
         let spacing = 32.0 * z;
-        let line = if dark {
-            Color32::from_white_alpha(10)
-        } else {
-            Color32::from_black_alpha(14)
-        };
+        let line = colors.grid;
         let mut x = rect.left() + self.pan.x.rem_euclid(spacing);
         while x < rect.right() {
             painter.vline(x, rect.y_range(), Stroke::new(1.0_f32, line));
@@ -660,11 +682,7 @@ impl GraphView {
         }
 
         // Wires, under the nodes.
-        let exec_wire = if dark {
-            Color32::WHITE
-        } else {
-            Color32::from_gray(70)
-        };
+        let exec_wire = colors.wire;
         for wire in &graph.wires {
             let (Some(start), Some(end)) = (
                 self.pin_on_screen(&wire.from, true),
@@ -729,6 +747,7 @@ impl GraphView {
                 images: context.images,
                 variables: &variables,
                 key: context.key,
+                colors,
             };
             draw_node(
                 &mut scaled,
@@ -1030,7 +1049,16 @@ impl GraphView {
     }
 
     /// Fits every node and comment into `rect`.
-    fn fit(&mut self, rect: Rect, graph: &NodeGraph, shapes: &BTreeMap<u32, NodeShape>) {
+    /// Fits every node into view; or, when the graph is opening (`start`
+    /// is its start node), fits it only down to [`OPEN_ZOOM`] and shows its
+    /// start if it doesn't fit.
+    fn fit(
+        &mut self,
+        rect: Rect,
+        graph: &NodeGraph,
+        shapes: &BTreeMap<u32, NodeShape>,
+        start: Option<u32>,
+    ) {
         let nodes = graph.nodes.iter().filter_map(|node| {
             let shape = shapes.get(&node.id)?;
             Some(Rect::from_min_size(
@@ -1050,10 +1078,45 @@ impl GraphView {
             return;
         };
         let room = (rect.size() - Vec2::splat(80.0)).max(vec2(1.0, 1.0));
-        self.zoom = (room.x / area.width().max(1.0))
+        let fitted = (room.x / area.width().max(1.0))
             .min(room.y / area.height().max(1.0))
             .clamp(MIN_ZOOM, 1.0);
+        self.zoom = fitted;
         self.pan = rect.size() * 0.5 - area.center().to_vec2() * self.zoom;
+        let start = start.and_then(|id| {
+            let node = graph.nodes.iter().find(|node| node.id == id)?;
+            let size = shapes.get(&id)?.size;
+            Some(Rect::from_min_size(
+                pos2(node.position[0], node.position[1]),
+                size,
+            ))
+        });
+        if let Some(start) = start
+            && fitted < OPEN_ZOOM
+        {
+            // Too big to read whole: its top left corner, or, if the start
+            // node isn't in that, the start node in the middle (without
+            // empty room before the graph's first nodes).
+            let z = OPEN_ZOOM;
+            self.zoom = z;
+            let corner = Vec2::splat(40.0) - area.min.to_vec2() * z;
+            let centred = rect.size() * 0.5 - start.center().to_vec2() * z;
+            let shown = |pan: f32, min: f32, max: f32, size: f32| {
+                pan + min * z >= 0.0 && pan + max * z <= size
+            };
+            self.pan = vec2(
+                if shown(corner.x, start.min.x, start.max.x, rect.width()) {
+                    corner.x
+                } else {
+                    centred.x.min(corner.x)
+                },
+                if shown(corner.y, start.min.y, start.max.y, rect.height()) {
+                    corner.y
+                } else {
+                    centred.y.min(corner.y)
+                },
+            );
+        }
     }
 
     /// Draws the comments and handles their titles and corners.
@@ -1066,6 +1129,7 @@ impl GraphView {
         to_screen: impl Fn(Pos2) -> Pos2,
     ) {
         let z = self.zoom;
+        let colors = theme::canvas(canvas.ctx());
         let painter = canvas.painter().clone();
         let down = canvas.input(|i| i.pointer.primary_down());
         if !down {
@@ -1079,23 +1143,15 @@ impl GraphView {
             );
             let header = Rect::from_min_size(area.min, vec2(area.width(), COMMENT_HEADER * z));
             let selected = self.selected_comments.contains(&comment.id);
-            painter.rect_filled(
-                area,
-                6.0 * z,
-                Color32::from_rgba_unmultiplied(120, 130, 150, 40),
-            );
-            painter.rect_filled(
-                header,
-                6.0 * z,
-                Color32::from_rgba_unmultiplied(120, 130, 150, 90),
-            );
+            painter.rect_filled(area, 6.0 * z, colors.comment_fill);
+            painter.rect_filled(header, 6.0 * z, colors.comment_header);
             painter.rect_stroke(
                 area,
                 6.0 * z,
                 if selected {
-                    Stroke::new(2.0_f32, SELECTED)
+                    Stroke::new(2.0_f32, colors.selected)
                 } else {
-                    Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(160, 170, 190, 90))
+                    Stroke::new(1.0_f32, colors.comment_edge)
                 },
                 egui::StrokeKind::Inside,
             );
@@ -1121,7 +1177,7 @@ impl GraphView {
                     egui::Align2::LEFT_CENTER,
                     &comment.text,
                     FontId::proportional(14.0 * z),
-                    PIN_TEXT,
+                    colors.comment_text,
                 );
             }
             if !context.editable {
@@ -1170,7 +1226,7 @@ impl GraphView {
                     corner.right_top() + vec2(-3.0, 3.0),
                     corner.left_bottom() + vec2(3.0, -3.0),
                 ],
-                Stroke::new(1.0_f32, PIN_TEXT),
+                Stroke::new(1.0_f32, colors.comment_text),
             );
             if resize.drag_started() {
                 self.comment_drag = Some(CommentDrag::Resize(comment.id));

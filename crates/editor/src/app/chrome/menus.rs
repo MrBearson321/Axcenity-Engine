@@ -719,7 +719,7 @@ fn undo_history(ui: &mut egui::Ui, history: &crate::history::History) -> Option<
     let palette = theme::palette(ui.ctx());
     for (index, label) in redo.iter().enumerate().take(HISTORY_ROWS).rev() {
         let text = egui::RichText::new(theme::with_icon(icons::ARROW_CLOCKWISE, label))
-            .color(palette.text_muted);
+            .color(palette.text_weak);
         if ui
             .button(text)
             .on_hover_text("Undone. Click to redo every step up to this one.")

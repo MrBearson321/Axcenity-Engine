@@ -257,3 +257,30 @@ The two items the UI Designer pass left for later. Findings and plan: [ui-design
 
 **Tests**: `app/ui_designer_move_tests.rs` (three tests, see ui-designer.md). Tour shot 47 checked. `cargo test -p axcenity-editor`: 943 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`); clippy and fmt clean. Not checked on Windows or a real GPU.
 
+
+## Design system Phase 1: finish the tokens (V1, V9–V13)
+
+Plan and findings: [design-system.md](design-system.md). Approved by Paul with Phases 1–5 on 2026-11-10.
+
+| ID | What changed | Files |
+|---|---|---|
+| V11 (DS17) | `theme::radius` (`NONE` 0, `CONTROL` 4, `CARD` 6), `theme::space` (2–24), `theme::size` (icons 13/15/18, row per density, button height). Buttons, fields, ribbon buttons, palette rows and segmented items use `CONTROL`; the question box (was 12), its icon tile and item list, toasts (were 8), the segmented frame (7) and Settings' preview use `CARD`; the dock, windows and menus `NONE`. `paint_hover` takes a token | `theme.rs`, `widgets.rs`, `dialog.rs`, `toast.rs`, `command_palette.rs`, `ribbon.rs`, `layout.rs`, `app/settings.rs`, `paint_hover` callers |
+| V1 (DS11) | `theme::Canvas` from the palette (background, grid, node body and edge, node text, header text, wire, labels, comments, selected = accent, error, live, warning). The Material, UI Event Graph, Behavior Tree and Dialogue graphs (`node_graph`), the block Graph view and the Animation graph read it; their copied constants are gone. Light theme: white nodes and dark text on the light canvas; comment titles readable. `Canvas::header` darkens a category colour until its white title is 4.5:1 | `theme.rs`, `node_graph.rs`, `node_graph/draw.rs`, `block_editor/graph.rs`, `animation/graph.rs`, `animation/graph/draw.rs` |
+| V12 (DS10) | `theme::overlay`: one selection blue, hover gold, previews, attachments, handles, warnings, measurements, axes. Each overlay file points at it | `theme.rs`, `viewport.rs`, `gizmo.rs`, `viewport/view_cube.rs`, `viewport/move_overlay.rs`, `constraints.rs`, `splines.rs`, `ui_handles.rs`, `ui_designer/artboard.rs`, `model_studio/view.rs` |
+| V13 (DS24) | 20 readable uses of `text_muted` moved to `text_weak` (AA): Output info icons and stack frames, Explorer class labels and dimmed branches, Console completions, Levels icons, Import note, palette menu paths, Mixer icons, Redo history, UI Designer hierarchy and pages, the start screen's licence, test and plugin states, ribbon captions, Material line numbers | those files |
+| V9 (DS7) | `widgets::row_name` and `widgets::changed_bar`: a changed row keeps its name in its column and colour and gets a 2-point accent bar in the gutter. Properties' ↺, Play's pin and the prefab's ↺ now follow the name instead of pushing it right; the Material tab's "● name" in accent became the same bar | `widgets.rs`, `properties.rs`, `material_editor.rs` |
+| V10 (DS12) | A graph opens fitted but never below 80%; a bigger one opens on its start node (first event or root) with no empty room before it. Frame all still fits everything | `node_graph.rs` |
+
+**Differs from the plan, on purpose.**
+- *Guide colour (V12).* The UI Designer's cyan guides are the ones placed from its rulers; the magenta lines are snap lines, in the UI Designer and the viewport alike. Making both magenta would have merged two meanings, so there are two tokens, `overlay::SNAP` (magenta) and `overlay::GUIDE` (cyan), and every snap line is already magenta.
+- *Changed-value mark (V9).* The Style section and the UI Designer inspector don't show changed values at all, so only Properties and the Material tab use the mark. ↺ stays where each already had room: after the name in Properties (many of its controls fill the row) and at the row's end in the Material tab.
+- *Graph level of detail (V10).* Not done: with graphs opening at 80% or more, small text only appears when the user zooms out themselves. Left for Phase 6.
+- *Kept on `text_muted`* (disabled, placeholder or decoration): disabled ribbon, palette and nav items; Output's off filters; the Console's hint; empty-state icons (Assets, Mixer, Tags, Properties, Tests, Plugins, Global Assets, Import, UI image); breadcrumb carets; the diff's "…"; ruler ticks; the dock's close-tab glyph; Settings' and Learn's drawn pictures; the loader.
+
+**What's preserved.** No feature, control or shortcut was removed. Selection outlines in the viewport keep their blue; graph category and pin colours keep their hues; the dark graph look is unchanged apart from orange selection becoming the accent.
+
+**Tests.** New: `shared_pieces_use_only_the_three_corner_radii`, `graph_text_meets_wcag_aa_on_nodes_and_on_every_header` (every accent, both themes, every category and a 216-colour sweep for headers), `overlay_colours_are_written_only_in_the_theme`, `a_big_graph_opens_readable_on_its_start_and_frame_all_shows_all_of_it`, `a_small_graph_opens_fitted_and_centred`, `every_graph_editor_opens_its_example_at_a_readable_zoom` (Material, Behavior Tree, Dialogue; it fails at 49% without the change). `cargo test -p axcenity-editor`: 959 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`, no audio device); clippy and fmt clean. Tour in dark, light and compact before and after. Not checked on Windows or a real GPU.
+
+**Left.** The rest of the screens still write their own radii and spacing; they move onto the tokens as later phases touch them. Graph level of detail (above).
+
+**Next.** Phase 2: errors stay until seen (V2), the Console tab counts new errors (V3), scene-only ribbon tools disabled while the Scene isn't shown (V4), `tool_window` (V14), modals on the dialog frame (V15).

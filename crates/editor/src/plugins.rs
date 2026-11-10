@@ -281,7 +281,7 @@ pub fn show(ui: &mut egui::Ui, plugins: &Plugins, project: Option<&Path>) -> Opt
                     ui.label(RichText::new(about).small().color(palette.text_weak));
                     let status = match (&entry.running, enabled) {
                         (Some(_), _) => None,
-                        (None, false) => Some(("Off", palette.text_muted)),
+                        (None, false) => Some(("Off", palette.text_weak)),
                         (None, true) => Some(("Not running", palette.warning)),
                     };
                     if let Some((text, color)) = status {

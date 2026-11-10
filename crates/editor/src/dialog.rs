@@ -4,9 +4,9 @@
 //! main button; Escape or a click outside cancels. The box fades in (see
 //! `theme::MOTION_SECONDS`).
 
-use eframe::egui::{self, CornerRadius, FontId, RichText, Stroke, vec2};
+use eframe::egui::{self, FontId, RichText, Stroke, vec2};
 
-use crate::theme::{self, icons, type_scale};
+use crate::theme::{self, icons, space, type_scale};
 use crate::widgets::{self, Role};
 
 /// How a button looks.
@@ -70,7 +70,7 @@ pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Opti
         Tone::Question => palette.accent,
     };
     let frame = egui::Frame::popup(&ctx.style())
-        .corner_radius(12)
+        .corner_radius(theme::radius::CARD)
         .inner_margin(egui::Margin::same(20));
     let modal = egui::Modal::new(egui::Id::new(question.id))
         .frame(frame)
@@ -78,7 +78,7 @@ pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Opti
             ui.set_width(WIDTH);
             ui.horizontal_top(|ui| {
                 icon_tile(ui, question.icon, accent);
-                ui.add_space(4.0);
+                ui.add_space(space::XS);
                 ui.vertical(|ui| {
                     ui.label(
                         RichText::new(question.title)
@@ -89,7 +89,7 @@ pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Opti
                             .extra_letter_spacing(theme::TITLE_TRACKING)
                             .color(palette.text_strong),
                     );
-                    ui.add_space(2.0);
+                    ui.add_space(space::XXS);
                     ui.add(
                         egui::Label::new(
                             RichText::new(question.message).color(palette.text_secondary),
@@ -103,8 +103,8 @@ pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Opti
                 egui::Frame::new()
                     .fill(palette.inset)
                     .stroke(Stroke::new(1.0_f32, palette.border))
-                    .corner_radius(8)
-                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .corner_radius(theme::radius::CONTROL)
+                    .inner_margin(space::margin(space::M, space::S))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         for (icon, text) in question.items.iter().take(6) {
@@ -142,12 +142,12 @@ pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Opti
 fn icon_tile(ui: &mut egui::Ui, icon: &str, accent: egui::Color32) {
     let (rect, _) = ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::hover());
     ui.painter()
-        .rect_filled(rect, CornerRadius::same(8), accent.gamma_multiply(0.14));
+        .rect_filled(rect, theme::radius::CARD, accent.gamma_multiply(0.14));
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         icon,
-        FontId::proportional(19.0),
+        FontId::proportional(theme::size::ICON_LARGE),
         accent,
     );
 }

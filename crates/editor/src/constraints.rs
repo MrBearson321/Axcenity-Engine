@@ -36,10 +36,10 @@ const AXIS_POINTS: f32 = 18.0;
 /// The radius of an Attachment's gizmo ring, in points.
 const RING_POINTS: f32 = 5.0;
 
-const ATTACHMENT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 196, 64);
-const SELECTED_ATTACHMENT_COLOR: egui::Color32 = egui::Color32::from_rgb(90, 200, 255);
-const X_AXIS_COLOR: egui::Color32 = egui::Color32::from_rgb(235, 80, 70);
-const Y_AXIS_COLOR: egui::Color32 = egui::Color32::from_rgb(110, 210, 90);
+const ATTACHMENT_COLOR: egui::Color32 = crate::theme::overlay::ATTACHMENT;
+const SELECTED_ATTACHMENT_COLOR: egui::Color32 = crate::theme::overlay::SELECTED;
+const X_AXIS_COLOR: egui::Color32 = crate::theme::overlay::AXIS_X;
+const Y_AXIS_COLOR: egui::Color32 = crate::theme::overlay::AXIS_Y;
 const WELD_COLOR: egui::Color32 = egui::Color32::from_rgb(120, 220, 255);
 const DISABLED_WELD_COLOR: egui::Color32 = egui::Color32::from_rgb(150, 150, 150);
 const JOINT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 150, 60);
