@@ -710,6 +710,7 @@ impl Assets {
         loading::reread_loads(&mut shared, |key| {
             key.file() == file || key.kind == Kind::Material
         });
+        shared.generation += 1;
     }
 
     /// Forgets every model, texture, probe bake, take and material that couldn't be
@@ -729,6 +730,7 @@ impl Assets {
             .materials
             .retain(|_, material| material.as_ref().is_some_and(|resolved| !resolved.broken));
         loading::reread_loads(&mut shared, |_| true);
+        shared.generation += 1;
     }
 
     /// Removes and returns the loading errors since the last call, one line

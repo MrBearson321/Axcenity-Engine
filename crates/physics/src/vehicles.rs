@@ -416,16 +416,19 @@ pub(crate) fn place_wheels(
                 to_vector3(pose.translation),
                 quat_to_orientation(pose.rotation),
             );
-            let Some(seen) = parts.get_mut(&part).map(|body| &mut body.seen) else {
+            let Some(wheel_part) = parts.get_mut(&part) else {
                 continue;
             };
+            let seen = &mut wheel_part.seen;
             if seen.position == position && seen.orientation == orientation {
                 continue;
             }
             seen.position = position;
             seen.orientation = orientation;
-            let _ = world.set_property(part, "Position", Value::Vector3(position));
-            let _ = world.set_property(part, "Orientation", Value::Vector3(orientation));
+            crate::own_write(world, part, &mut wheel_part.revision, |world| {
+                let _ = world.set_property(part, "Position", Value::Vector3(position));
+                let _ = world.set_property(part, "Orientation", Value::Vector3(orientation));
+            });
             if let Some(body) = bodies.get_mut(handle) {
                 body.set_position(pose, false);
             }

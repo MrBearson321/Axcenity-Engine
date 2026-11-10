@@ -9,7 +9,9 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use axcenity_assets::{Assets, Model};
-use axcenity_core::{FoliageSource, PartType, PhysicalProperties, TerrainData, Vector3};
+use axcenity_core::{
+    FoliageSource, InstanceId, PartType, PhysicalProperties, TerrainData, Vector3, World,
+};
 use rapier3d::geometry::Array2;
 use rapier3d::glamx::{Quat, Vec3};
 use rapier3d::math::Pose;
@@ -39,6 +41,25 @@ pub enum Form {
     Mesh(Option<Arc<Model>>, Fidelity),
     /// A Terrain's heightfield, stretched to its `Size`.
     Terrain(TerrainShape),
+}
+
+impl Form {
+    /// True if the Instance `id` this was read from may collide differently
+    /// now without having changed itself: a model loaded again
+    /// (`assets_changed`) or a Terrain's data edited.
+    pub(crate) fn outdated(&self, world: &World, id: InstanceId, assets_changed: bool) -> bool {
+        match self {
+            Form::Primitive(_) => false,
+            Form::Mesh(..) => assets_changed,
+            Form::Terrain(terrain) => {
+                assets_changed
+                    || world.terrain(id).is_none_or(|data| {
+                        data.uid() != terrain.data.uid()
+                            || data.revision() != terrain.data.revision()
+                    })
+            }
+        }
+    }
 }
 
 /// How closely a model's collider follows it: a UnionOperation's
