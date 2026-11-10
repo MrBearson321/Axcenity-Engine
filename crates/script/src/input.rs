@@ -20,7 +20,7 @@ use mlua::{
 
 use crate::events::{self, LuaSignal, Owner};
 use crate::types::{EnumType, LuaEnumItem, LuaVector2, LuaVector3, type_name};
-use crate::{push_error, save, scheduler};
+use crate::{save, scheduler};
 
 /// A key going down or coming back up, as the host reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -370,10 +370,7 @@ fn call_action(lua: &Lua, input: LuaInputObject) {
         return;
     };
     let state = LuaEnumItem::find(EnumType::UserInputState, input.state.as_str());
-    match lua.create_thread(handler) {
-        Ok(thread) => scheduler::resume_as(lua, &thread, (name, state, input), script),
-        Err(err) => push_error(lua, &err),
-    }
+    crate::handler_threads::run(lua, handler, (name, state, input), script);
 }
 
 fn input_type(kind: UserInputType) -> Option<LuaEnumItem> {

@@ -216,6 +216,12 @@ impl Scheduler {
     }
 }
 
+/// Whether `thread` has a task waiting (`task.wait`, `task.delay`, ...).
+pub fn is_waiting(lua: &Lua, thread: &Thread) -> bool {
+    lua.app_data_ref::<Scheduler>()
+        .is_some_and(|scheduler| scheduler.by_thread.contains_key(&thread_key(thread)))
+}
+
 /// Identifies a coroutine while it's held somewhere, as a `Thread` in
 /// [`Waiting`] is.
 fn thread_key(thread: &Thread) -> usize {
