@@ -207,6 +207,17 @@ pub struct LevelState {
 }
 
 impl Update {
+    /// Its size on the wire as a snapshot message, in bytes (for
+    /// benchmarks: it encodes a copy).
+    pub fn encoded_len(&self) -> usize {
+        crate::Message::Snapshot {
+            you: 0,
+            update: self.clone(),
+        }
+        .to_bytes()
+        .len()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty()
             && self.levels.is_none()
