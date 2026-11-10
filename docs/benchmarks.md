@@ -265,6 +265,25 @@ Physics fell by about 22% on the test runner and 18% on the server (29% and 28% 
 
 The real projects (General Store Roadside, Abandoned Farmhouse, The Dimming, the biome patches) weren't run for M3: they're on the Windows desktop, not in the container.
 
+### UI layout (M14)
+
+S10k has no GUI, so the UI is timed on its own: `cargo test -p axcenity-ui --release --test bench_inventory_ui -- --ignored --nocapture` lays out a 500-element inventory (a ScreenGui with a titled panel and a ScrollingFrame of 10 rows of 10 slots, each an icon, a count, a name and a Use button; 499 elements shown) styled by a 16-rule stylesheet with custom properties, descendant selectors and `:hover`/`:active` rules, with the pointer moving over the slots. No GPU. Same cloud container, main (7f29f1a) and the branch built into one target folder and run alternately, three runs each; medians of 5 batches of 60 frames, milliseconds:
+
+| | main | M14 |
+|---|---|---|
+| `layout_ui` (one pass) | 12.8–13.5 | 1.88–1.90 |
+| `UiInteraction::layout` (a player frame) | 27.3–28.2 | 3.58–3.66 |
+| Editor Play frame (hit-test layout, then `UiInteraction::layout`) | 53.4–55.8 | 3.60–3.69 |
+
+What the profile (Callgrind) showed, and what changed:
+
+- **The cascade was 88% of a frame.** Every element matched every rule against itself and each of its ancestors (for the custom properties it inherits), every time its styles were read: twice a pass for a container, as a child and as a parent. Each selector was also matched once per declaration of its rule rather than once per rule, and every match looked up `Interactable`, `Value` and the Tool's Inventory even for selectors with no `:disabled` or `:checked`. Now a `StyleCache` keeps each element's matched styles for the frame, an element inherits its parent's cached custom properties (shared, not copied, until it sets its own), a rule's selectors are matched once, and a state is looked up only when a selector asks for it.
+- **A frame is two passes**: one with nothing hovered, to find what the pointer is over, then one with `:hover` and `:active`. They share the cache; the second rematches only the hovered and pressed elements and their subtrees. The first pass's boxes and text were painted and thrown away; now it isn't painted. Transitions ease an element once a frame however often its styles are read.
+- **Editor Play laid the UI out four times a frame**: `layout_ui_interactive` with no pointer for its click hit tests (itself two identical passes), then `UiInteraction::layout`. `layout_ui_interactive` now stops after one pass when nothing is hovered or pressed, and the viewport calls `UiInteraction::hit_layout`, which `layout` reuses as its first pass, so editor Play costs what the player does.
+- **Taffy was small** (about 5% of the frame after the rest): one `TaffyTree` per thread is cleared and reused for each container instead of a new one each time. Style lookups use Fx hashing, and border property names aren't formatted per element.
+
+What's left is about evenly split between painting (text and boxes from CSS values, which are strings resolved on each read), Taffy, transitions and building the frame's styles. Nothing is kept between frames, so a retained layout (relayout only what changed, as M4 does for the draw list) is the next step if a game's UI needs it. The player's `UI` and `Draw list` steps on S10k don't change, as it has no GUI.
+
 ### A Windows desktop with a real GPU
 
 Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table above): AMD Ryzen 9 9950X3D (16 cores), 62 GB of RAM, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Each host ran three times, 600 measured frames each; the table gives the median of the three runs' medians, and the worst frame seen in any run. The first player run was slower than the other two (Physics 14.3 ms against 5.4 ms); it came straight after the release build. Times are milliseconds.

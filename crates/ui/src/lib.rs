@@ -62,13 +62,16 @@ use axcenity_render::{
     UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign,
 };
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use taffy::prelude::*;
 
 pub use style::{
     CssDeclaration, RuleSet, SUPPORTED_PROPERTIES, StyleWarning, Stylesheet, applied_declaration,
     applied_declarations, has_rule, own_rules, parse_stylesheet, rule_declaration, rule_sets,
 };
-use style::{PseudoClasses, ResolvedStyles, resolve_styles, resolve_variables};
+use style::{
+    PseudoClasses, ResolvedStyles, StyleCache, resolve_styles, resolve_variables, shared_styles,
+};
 
 /// A rectangle in physical pixels, from the top left of the screen.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -384,6 +387,8 @@ pub fn layout_ui_interactive(
     camera: Option<&Camera>,
 ) -> UiLayout {
     let focused = input.focused;
+    // Both passes share their matched styles (M14).
+    let styles = StyleCache::default();
     let base = layout_ui_with_pseudo(
         world,
         width,
@@ -391,6 +396,7 @@ pub fn layout_ui_interactive(
         stylesheets,
         PseudoClasses {
             focused,
+            styles: Some(&styles),
             ..PseudoClasses::default()
         },
         camera,
@@ -398,6 +404,10 @@ pub fn layout_ui_interactive(
     );
     let hovered = input.pointer.and_then(|[x, y]| base.hover_target(x, y));
     let active = input.pressed.filter(|button| hovered == Some(*button));
+    // Nothing hovered or pressed: the second pass would be the first again.
+    if hovered.is_none() && active.is_none() {
+        return base;
+    }
     let mut layout = layout_ui_with_pseudo(
         world,
         width,
@@ -407,6 +417,7 @@ pub fn layout_ui_interactive(
             hovered,
             active,
             focused,
+            styles: Some(&styles),
             ..PseudoClasses::default()
         },
         camera,
@@ -447,6 +458,15 @@ pub(crate) fn layout_ui_with_pseudo(
     if width == 0 || height == 0 {
         return layout;
     }
+    // Each element's styles are matched once in a pass (M14), or once a
+    // frame when the caller shares a cache between passes.
+    let own_cache = StyleCache::default();
+    let cache = pseudo.styles.unwrap_or(&own_cache);
+    cache.begin(world, &pseudo);
+    let pseudo = PseudoClasses {
+        styles: Some(cache),
+        ..pseudo
+    };
     // A plugin's dock tab: just its ScreenGui, wherever that is.
     if let Some(only) = guis.only {
         if enabled_screen_gui(world, only) {
@@ -1092,6 +1112,11 @@ pub(crate) struct Inherited {
     pub(crate) clip: Option<UiClip>,
 }
 
+thread_local! {
+    /// The Taffy tree [`layout_children`] reuses (see there).
+    static LAYOUT_TREE: std::cell::RefCell<TaffyTree<()>> = std::cell::RefCell::new(TaffyTree::new());
+}
+
 /// Lays out the UI children of `parent` inside `bounds` with Taffy.
 ///
 /// Outside a flex container, children are absolutely positioned: scale is a
@@ -1133,7 +1158,7 @@ pub(crate) fn layout_children(
         return;
     }
 
-    let parent_styles = resolve_styles(world, parent, stylesheets, pseudo);
+    let parent_styles = shared_styles(world, parent, stylesheets, pseudo);
     let flow_children =
         css_property(&parent_styles, "display").is_some_and(|display| display == "flex");
     let mut root_style = Style {
@@ -1159,74 +1184,84 @@ pub(crate) fn layout_children(
             - resolve(padding.bottom, bounds.width),
     };
 
-    let styles: Vec<ResolvedStyles> = children
+    let styles: Vec<Rc<ResolvedStyles>> = children
         .iter()
-        .map(|&id| resolve_styles(world, id, stylesheets, pseudo))
+        .map(|&id| shared_styles(world, id, stylesheets, pseudo))
         .collect();
-    let mut tree = TaffyTree::<()>::new();
-    let nodes: Vec<_> = children
-        .iter()
-        .zip(&styles)
-        .map(|(&id, styles)| {
-            let instance = world.get(id).expect("filtered children are live");
-            let position = ui_property(instance, "Position");
-            let size = ui_property(instance, "Size");
-            let hidden = css_property(styles, "display").is_some_and(|display| display == "none");
-            let node_style = Style {
-                position: if flow_children {
-                    Position::Relative
-                } else {
-                    Position::Absolute
-                },
-                inset: if flow_children {
-                    Rect::auto()
-                } else {
-                    Rect {
-                        left: LengthPercentageAuto::Percent(finite(position.x.scale)),
-                        top: LengthPercentageAuto::Percent(finite(position.y.scale)),
-                        right: LengthPercentageAuto::Auto,
-                        bottom: LengthPercentageAuto::Auto,
-                    }
-                },
-                // With `aspect-ratio`, the width decides the height.
-                aspect_ratio: css_aspect_ratio(styles),
-                size: Size {
-                    width: css_dimension(styles, "width")
-                        .unwrap_or_else(|| udim_length(size.x, container.width)),
-                    height: if css_aspect_ratio(styles).is_some() {
-                        Dimension::Auto
+    // One Taffy tree per thread, cleared for each container instead of
+    // made new (M14). Each child's box is copied out before the children
+    // are placed, since placing lays out their own children with it.
+    let boxes = LAYOUT_TREE.with_borrow_mut(|tree| {
+        tree.clear();
+        let nodes: Vec<_> = children
+            .iter()
+            .zip(&styles)
+            .map(|(&id, styles)| {
+                let instance = world.get(id).expect("filtered children are live");
+                let position = ui_property(instance, "Position");
+                let size = ui_property(instance, "Size");
+                let hidden =
+                    css_property(styles, "display").is_some_and(|display| display == "none");
+                let node_style = Style {
+                    position: if flow_children {
+                        Position::Relative
                     } else {
-                        css_dimension(styles, "height")
-                            .unwrap_or_else(|| udim_length(size.y, container.height))
+                        Position::Absolute
                     },
-                },
-                flex_grow: css_number(styles, "flex-grow").unwrap_or(0.0).max(0.0),
-                margin: css_margin(styles),
-                display: if hidden || !visible(instance) {
-                    Display::None
-                } else {
-                    Display::Flex
-                },
-                ..Style::default()
-            };
-            tree.new_leaf(node_style)
-                .expect("a UI node can be added to a fresh Taffy tree")
-        })
-        .collect();
-    let root = tree
-        .new_with_children(root_style, &nodes)
-        .expect("UI nodes form a valid Taffy tree");
-    tree.compute_layout(
-        root,
-        Size {
-            width: AvailableSpace::Definite(bounds.width),
-            height: AvailableSpace::Definite(bounds.height),
-        },
-    )
-    .expect("the UI root has definite dimensions");
+                    inset: if flow_children {
+                        Rect::auto()
+                    } else {
+                        Rect {
+                            left: LengthPercentageAuto::Percent(finite(position.x.scale)),
+                            top: LengthPercentageAuto::Percent(finite(position.y.scale)),
+                            right: LengthPercentageAuto::Auto,
+                            bottom: LengthPercentageAuto::Auto,
+                        }
+                    },
+                    // With `aspect-ratio`, the width decides the height.
+                    aspect_ratio: css_aspect_ratio(styles),
+                    size: Size {
+                        width: css_dimension(styles, "width")
+                            .unwrap_or_else(|| udim_length(size.x, container.width)),
+                        height: if css_aspect_ratio(styles).is_some() {
+                            Dimension::Auto
+                        } else {
+                            css_dimension(styles, "height")
+                                .unwrap_or_else(|| udim_length(size.y, container.height))
+                        },
+                    },
+                    flex_grow: css_number(styles, "flex-grow").unwrap_or(0.0).max(0.0),
+                    margin: css_margin(styles),
+                    display: if hidden || !visible(instance) {
+                        Display::None
+                    } else {
+                        Display::Flex
+                    },
+                    ..Style::default()
+                };
+                tree.new_leaf(node_style)
+                    .expect("a UI node can be added to a fresh Taffy tree")
+            })
+            .collect();
+        let root = tree
+            .new_with_children(root_style, &nodes)
+            .expect("UI nodes form a valid Taffy tree");
+        tree.compute_layout(
+            root,
+            Size {
+                width: AvailableSpace::Definite(bounds.width),
+                height: AvailableSpace::Definite(bounds.height),
+            },
+        )
+        .expect("the UI root has definite dimensions");
+        nodes
+            .iter()
+            .map(|&node| *tree.layout(node).expect("each child has a computed layout"))
+            .collect::<Vec<_>>()
+    });
 
     for index in z_order(world, &children, &styles) {
-        let (id, styles, node) = (children[index], &styles[index], nodes[index]);
+        let (id, styles, layout) = (children[index], &styles[index], &boxes[index]);
         let Some(instance) = world.get(id) else {
             continue;
         };
@@ -1236,7 +1271,6 @@ pub(crate) fn layout_children(
         }
         let opacity =
             inherited.opacity * css_number(styles, "opacity").unwrap_or(1.0).clamp(0.0, 1.0);
-        let layout = tree.layout(node).expect("each child has a computed layout");
         let position = ui_property(instance, "Position");
         let (offset_x, offset_y) = if flow_children {
             (0.0, 0.0)
@@ -1263,14 +1297,18 @@ pub(crate) fn layout_children(
 
 /// The order `children` are drawn in, as indices into it: lowest
 /// [`z_index`] first, and equal ones in tree order, so the last is on top.
-fn z_order(world: &World, children: &[InstanceId], styles: &[ResolvedStyles]) -> Vec<usize> {
+fn z_order(
+    world: &World,
+    children: &[InstanceId],
+    styles: &[impl AsRef<ResolvedStyles>],
+) -> Vec<usize> {
     let z: Vec<f64> = children
         .iter()
         .zip(styles)
         .map(|(&id, styles)| {
             world
                 .get(id)
-                .map_or(1.0, |instance| z_index(instance, styles))
+                .map_or(1.0, |instance| z_index(instance, styles.as_ref()))
         })
         .collect();
     let mut order: Vec<usize> = (0..children.len()).collect();
@@ -1414,18 +1452,21 @@ fn place_element(
         turn: None,
         track: None,
     });
-    paint_instance(
-        world,
-        instance,
-        rect,
-        styles,
-        inherited.opacity,
-        // A TextBox being typed in has a ring in its text colour, unless a
-        // `:focus` rule styles it.
-        pseudo.focused == Some(id) && !style::focus_rule_applies(world, id, stylesheets, pseudo),
-        &mut out.draw_items,
-        &mut out.warnings,
-    );
+    if !pseudo.unpainted {
+        paint_instance(
+            world,
+            instance,
+            rect,
+            styles,
+            inherited.opacity,
+            // A TextBox being typed in has a ring in its text colour, unless a
+            // `:focus` rule styles it.
+            pseudo.focused == Some(id)
+                && !style::focus_rule_applies(world, id, stylesheets, pseudo),
+            &mut out.draw_items,
+            &mut out.warnings,
+        );
+    }
     if instance.class().is_value_widget() {
         let opacity = inherited.opacity;
         out.elements[elements].track =
@@ -1445,7 +1486,7 @@ fn place_element(
     };
     let canvas = scroll.map_or(rect, |scroll| scroll.canvas_rect(rect));
     layout_children(world, id, canvas, out, stylesheets, children, pseudo);
-    if let Some(scroll) = &scroll {
+    if let Some(scroll) = scroll.as_ref().filter(|_| !pseudo.unpainted) {
         scroll::paint_bars(
             world,
             id,

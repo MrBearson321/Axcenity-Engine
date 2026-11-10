@@ -795,6 +795,42 @@ const AWAY: UiInput = UiInput {
     on_top: None,
 };
 
+/// A host that hit-tests with `hit_layout` before `layout` (the editor's
+/// viewport) gets the same frame as one that only calls `layout`, and a
+/// world changed in between isn't drawn from the stale hit layout (M14).
+#[test]
+fn a_hit_layout_before_layout_draws_the_same_frame() {
+    let (mut world, button, sheets) = play_button(
+        "#play { background-color: #808080 } #play:hover { background-color: #00ff00 }",
+    );
+    let frame = |layout: &UiLayout| format!("{:?} {:?}", layout.draw_items, layout.elements);
+
+    let mut plain = UiInteraction::default();
+    let expected = plain.layout(&world, (640, 480), &sheets, OVER, None, 0.016);
+    let mut hit_first = UiInteraction::default();
+    let hit = hit_first.hit_layout(&world, (640, 480), &sheets, OVER, None);
+    assert_eq!(hit.hit_button(80.0, 24.0), Some(button));
+    assert_eq!(hit.hovered, None, "nothing is hovered in a hit layout");
+    let got = hit_first.layout(&world, (640, 480), &sheets, OVER, None, 0.016);
+    assert_eq!(background(&got).color, [0.0, 1.0, 0.0, 1.0]);
+    assert_eq!(got.hovered, Some(button));
+    assert_eq!(frame(&got), frame(&expected));
+
+    // The button moves after the hit test: the frame shows where it went.
+    let _ = hit_first.hit_layout(&world, (640, 480), &sheets, AWAY, None);
+    world
+        .set_property(
+            button,
+            "Position",
+            Value::UDim2(UDim2::new(0.0, 300.0, 0.0, 200.0)),
+        )
+        .unwrap();
+    let moved = hit_first.layout(&world, (640, 480), &sheets, AWAY, None, 0.016);
+    let fresh = UiInteraction::default().layout(&world, (640, 480), &sheets, AWAY, None, 0.016);
+    assert_eq!(moved.element(button).unwrap().rect.x, 300.0);
+    assert_eq!(frame(&moved), frame(&fresh));
+}
+
 #[test]
 fn a_disabled_button_shows_its_disabled_style_and_takes_no_hover_or_click() {
     let (mut world, button, sheets) = play_button(

@@ -1055,17 +1055,11 @@ impl Viewport {
             focused: focused_text,
             on_top: loading_screen,
         };
-        let base_layout = axcenity_ui::layout_ui_interactive(
-            world,
-            width,
-            height,
-            stylesheets,
-            axcenity_ui::UiInput {
-                pointer: None,
-                ..input
-            },
-            Some(&camera),
-        );
+        // What a click lands on: the UI with nothing hovered. `self.ui.layout`
+        // below reuses it as its first pass (M14).
+        let base_layout =
+            self.ui
+                .hit_layout(world, (width, height), stylesheets, input, Some(&camera));
         // The game hears every click; one on its UI is `gameProcessedEvent`.
         let game_input = if tool.is_none() {
             let events = ui.input(|input| input.events.clone());
