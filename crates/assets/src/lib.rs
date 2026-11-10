@@ -30,6 +30,7 @@
 //! Every file is read from inside the project folder ([`safe_path`]), so a
 //! world file or script can't make the engine read anything else.
 
+mod asset_id;
 mod color_grading;
 mod cooked;
 mod data_table;
@@ -50,6 +51,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use loading::{Kind, LoadKey};
 
+pub use asset_id::{
+    AssetId, IMPORT_SUFFIX, KNOWN_IDS_FILE, asset_ids, encode_import_file, give_asset_ids,
+    id_files, import_path, is_import_file, moved_assets, read_asset_id, takes_asset_id,
+};
 pub use color_grading::{
     ColorLookup, LOOKUP_EXTENSIONS, MAX_LOOKUP_SIZE, MAX_PALETTE_COLORS, PROJECT_GRADING_FOLDER,
     Palette, lookup_from_strip, palette_from_image, parse_cube, read_color_lookup, read_palette,

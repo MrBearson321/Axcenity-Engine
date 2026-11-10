@@ -547,7 +547,7 @@ impl EditorApp {
     /// Deletes `files` (paths from the project folder), the own files of
     /// the assets called `name`, as one undo step. The step keeps each
     /// file's bytes, so undo puts models and pictures back too. Folders
-    /// left empty go.
+    /// left empty go, and so do the files' asset ID sidecars.
     pub(super) fn delete_assets(&mut self, name: &str, files: &[String]) {
         let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
             return;
@@ -555,6 +555,12 @@ impl EditorApp {
         if self.playing() {
             return;
         }
+        let sidecars = files
+            .iter()
+            .map(|path| axcenity_assets::import_path(path))
+            .filter(|sidecar| !files.contains(sidecar) && folder.join(sidecar).is_file());
+        let files: Vec<String> = files.iter().cloned().chain(sidecars).collect();
+        let files = &files[..];
         let mut blobs = Vec::new();
         for path in files {
             match std::fs::read(folder.join(path)) {

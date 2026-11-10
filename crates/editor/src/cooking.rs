@@ -1,6 +1,8 @@
 //! Cooking the open project's textures in the background (roadmap L2).
 //!
-//! When a project opens, a thread cooks every texture under `assets/` that
+//! When a project opens, a thread first gives each imported file under
+//! `assets/` an asset ID if it has none (a sidecar next to it,
+//! `axcenity_assets::give_asset_ids`), then cooks every texture that
 //! has no current cooked copy (`axcenity_cook::cook_project`), on fewer
 //! threads than the machine has so editing stays smooth. What it cooks is
 //! used the next time each texture loads: the next Play run's new textures,
@@ -37,6 +39,11 @@ impl Cooker {
                     .num_threads(threads)
                     .thread_name(|index| format!("texture cooking {index}"))
                     .build();
+                match axcenity_assets::give_asset_ids(&folder) {
+                    Ok(0) => {}
+                    Ok(given) => log::info!("gave {given} assets IDs in {}", folder.display()),
+                    Err(err) => log::warn!("couldn't give assets IDs: {err}"),
+                }
                 let run = || {
                     cook_project(&folder, &flag, |path, outcome| {
                         if let Outcome::Failed(reason) = outcome {

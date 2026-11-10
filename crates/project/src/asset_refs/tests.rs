@@ -167,6 +167,24 @@ fn a_rename_moves_the_file_and_every_reference() {
 }
 
 #[test]
+fn a_renamed_file_takes_its_sidecar_and_asset_id_along() {
+    let (folder, world, _) = project("rename-id");
+    axcenity_assets::give_asset_ids(&folder).unwrap();
+    let id = axcenity_assets::read_asset_id(&folder, WOOD).unwrap();
+    let to = "assets/textures/oak.png";
+    let plan = plan_rename(&folder, &world, None, WOOD, to).unwrap();
+    let after = |path: &str| {
+        plan.files
+            .iter()
+            .find(|w| w.path == path)
+            .map(|w| w.after.clone())
+    };
+    assert_eq!(after(&axcenity_assets::import_path(WOOD)), Some(None));
+    let moved = after(&axcenity_assets::import_path(to)).flatten().unwrap();
+    assert_eq!(moved, axcenity_assets::encode_import_file(id));
+}
+
+#[test]
 fn a_rename_refuses_a_taken_name_another_ending_and_leaving_assets() {
     let (folder, world, _) = project("refuse");
     let plan = |to: &str| plan_rename(&folder, &world, None, WOOD, to).unwrap_err();

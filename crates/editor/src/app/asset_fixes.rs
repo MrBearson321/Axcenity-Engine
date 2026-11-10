@@ -61,7 +61,8 @@ impl EditorApp {
             project::check_assets_in_level(&project.folder, &self.world, project.level.as_deref());
         let files = project::list_project_files(&project.folder);
         let ignored = project::read_ignored(&project.folder);
-        self.asset_check.set(report, &files, ignored);
+        let moved = axcenity_assets::moved_assets(&project.folder);
+        self.asset_check.set(report, &files, &moved, ignored);
     }
 
     pub(super) fn select_finding_owner(&mut self, owner: &str) {

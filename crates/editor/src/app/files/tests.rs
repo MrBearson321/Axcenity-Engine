@@ -1416,3 +1416,21 @@ fn a_model_imported_with_weld_parts_ticked_is_welded_to_its_largest_part() {
     assert!(!app.world.contains(model) || app.world.get(model).unwrap().parent().is_none());
     let _ = fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn deleting_a_model_deletes_its_asset_id_and_undo_brings_both_back() {
+    let folder = copy_of_example("hello-part", "delete-asset-id");
+    let mut app = EditorApp::new(Some(&folder));
+    let model = "assets/models/CityPropsCollection.fbx";
+    axcenity_assets::give_asset_ids(&folder).unwrap();
+    let id = axcenity_assets::read_asset_id(&folder, model).expect("an ID");
+    let sidecar = folder.join(axcenity_assets::import_path(model));
+
+    app.delete_assets("CityPropsCollection", &[model.to_owned()]);
+    assert!(!folder.join(model).exists());
+    assert!(!sidecar.exists());
+    app.undo();
+    assert!(folder.join(model).is_file());
+    assert_eq!(axcenity_assets::read_asset_id(&folder, model), Some(id));
+    let _ = fs::remove_dir_all(&folder);
+}

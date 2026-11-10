@@ -4,7 +4,7 @@
 //! Delete file, Ignore). Running it does not write the project; a fix is
 //! applied by the app as one undo step. The player has no such panel.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use axcenity_project::{AssetKind, Finding, FindingKind, Ignored, Report};
@@ -66,12 +66,22 @@ impl AssetCheck {
     }
 
     /// A new scan of the project whose files are `files`, with the
-    /// findings in `ignored` hidden.
-    pub fn set(&mut self, report: Report, files: &[String], ignored: Vec<Ignored>) {
+    /// findings in `ignored` hidden. A file `moved` outside the editor
+    /// (found by its asset ID) is suggested before one found by name.
+    pub fn set(
+        &mut self,
+        report: Report,
+        files: &[String],
+        moved: &BTreeMap<String, String>,
+        ignored: Vec<Ignored>,
+    ) {
         self.suggestions = report
             .findings
             .iter()
-            .map(|finding| axcenity_project::suggestion(finding, files))
+            .map(|finding| {
+                axcenity_project::moved_suggestion(finding, moved)
+                    .or_else(|| axcenity_project::suggestion(finding, files))
+            })
             .collect();
         self.choices = [
             AssetKind::Model,
