@@ -22,6 +22,10 @@ pub(super) enum Texels {
     /// BC7 blocks from a cooked texture ([`TextureSource::bc7_levels`]):
     /// 16 bytes for each 4×4 pixels.
     Bc7,
+    /// BC5 blocks from a cooked normal map ([`TextureSource::bc5_levels`]):
+    /// red and green only, 16 bytes for each 4×4 pixels. Never a color, so
+    /// its "sRGB" view is a plain one.
+    Bc5,
 }
 
 impl Texels {
@@ -29,6 +33,7 @@ impl Texels {
         match self {
             Texels::Rgba8 => TEXTURE_FORMAT,
             Texels::Bc7 => wgpu::TextureFormat::Bc7RgbaUnorm,
+            Texels::Bc5 => wgpu::TextureFormat::Bc5RgUnorm,
         }
     }
 
@@ -37,6 +42,7 @@ impl Texels {
         match self {
             Texels::Rgba8 => TEXTURE_SRGB_FORMAT,
             Texels::Bc7 => wgpu::TextureFormat::Bc7RgbaUnormSrgb,
+            Texels::Bc5 => wgpu::TextureFormat::Bc5RgUnorm,
         }
     }
 
@@ -45,7 +51,7 @@ impl Texels {
         let (width, height) = self.stored_size(width, height);
         match self {
             Texels::Rgba8 => u64::from(width) * u64::from(height) * 4,
-            Texels::Bc7 => u64::from(width / 4) * u64::from(height / 4) * 16,
+            Texels::Bc7 | Texels::Bc5 => u64::from(width / 4) * u64::from(height / 4) * 16,
         }
     }
 
@@ -54,7 +60,7 @@ impl Texels {
     pub(super) fn stored_size(self, width: u32, height: u32) -> (u32, u32) {
         match self {
             Texels::Rgba8 => (width, height),
-            Texels::Bc7 => (width.next_multiple_of(4), height.next_multiple_of(4)),
+            Texels::Bc7 | Texels::Bc5 => (width.next_multiple_of(4), height.next_multiple_of(4)),
         }
     }
 
@@ -63,7 +69,7 @@ impl Texels {
     pub(super) fn can_start_at(self, width: u32, height: u32) -> bool {
         match self {
             Texels::Rgba8 => true,
-            Texels::Bc7 => width.is_multiple_of(4) && height.is_multiple_of(4),
+            Texels::Bc7 | Texels::Bc5 => width.is_multiple_of(4) && height.is_multiple_of(4),
         }
     }
 
@@ -479,7 +485,8 @@ pub(super) struct MapsUniform {
     /// Normal map scale (0: none), green's sign, occlusion strength (0:
     /// none), and 1 if opacity has its own map.
     pub(super) settings: [f32; 4],
-    /// 1 if there's a specular map, then unused.
+    /// 1 if there's a specular map, 1 if the normal map is BC5 (blue
+    /// worked out from red and green), then unused.
     pub(super) specular: [f32; 4],
     /// Turns texture coordinates, read in the vertex shader: the columns of
     /// a 2×2 matrix (the material's rotation times its scale).

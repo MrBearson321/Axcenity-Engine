@@ -724,7 +724,8 @@ pub(super) fn upload_buffers(
 /// levels, or any wider or taller than `max_size`, and then without
 /// `dropped` more (see [`create_texture`]), or `None` (with a warning) if
 /// it has no pixels or the wrong number of them. A cooked texture
-/// ([`TextureSource::bc7_levels`]) goes up as its BC7 blocks when `blocks`
+/// ([`TextureSource::bc7_levels`], or a normal map's
+/// [`TextureSource::bc5_levels`]) goes up as its blocks when `blocks`
 /// allows it and the GPU reads them.
 pub(super) fn upload_texture(
     device: &wgpu::Device,
@@ -740,14 +741,26 @@ pub(super) fn upload_texture(
         && device
             .features()
             .contains(wgpu::Features::TEXTURE_COMPRESSION_BC)
-        && let Some(texture) = create_bc7_texture(
+        && let Some(texture) = create_block_texture(
             device,
             queue,
             bytes,
             (width, height, source.bc7_levels()),
             sizing,
             dropped,
+            Texels::Bc7,
         )
+        .or_else(|| {
+            create_block_texture(
+                device,
+                queue,
+                bytes,
+                (width, height, source.bc5_levels()),
+                sizing,
+                dropped,
+                Texels::Bc5,
+            )
+        })
     {
         return Some(texture);
     }
@@ -769,19 +782,20 @@ pub(super) fn upload_texture(
     ))
 }
 
-/// Uploads cooked BC7 `levels` (largest first, at `width`×`height`, down to
-/// 1×1) as they are, sized like [`create_texture`], or `None` if there are
-/// none, they don't match the size, or no level that fits starts with
-/// whole 4×4 blocks (the RGBA path takes those).
-fn create_bc7_texture(
+/// Uploads cooked `levels` in the block format `texels` (largest first, at
+/// `width`×`height`, down to 1×1) as they are, sized like
+/// [`create_texture`], or `None` if there are none, they don't match the
+/// size, or no level that fits starts with whole 4×4 blocks (the RGBA path
+/// takes those).
+fn create_block_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     bytes: &GpuBytes,
     (width, height, levels): (u32, u32, &[Vec<u8>]),
     (skipped_levels, max_size): (u32, u32),
     dropped: u32,
+    texels: Texels,
 ) -> Option<GpuTexture> {
-    let texels = Texels::Bc7;
     let full = (width, height, levels.len() as u32);
     let whole = width > 0
         && height > 0

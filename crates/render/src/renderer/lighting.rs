@@ -1225,7 +1225,12 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
         ],
         specular: [
             used(maps.specular.is_some() && shading[0] == SHADING_STANDARD),
-            0.0,
+            // A BC5 normal map has no blue: the shader works it out.
+            used(
+                maps.normal
+                    .as_ref()
+                    .is_some_and(|map| !map.texture.bc5_levels().is_empty()),
+            ),
             0.0,
             0.0,
         ],

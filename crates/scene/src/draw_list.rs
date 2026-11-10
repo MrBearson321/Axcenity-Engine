@@ -1026,10 +1026,11 @@ fn has_texture_maps(material: &Material) -> bool {
 /// gives that value alone (factor 1). An empty map leaves what `material`
 /// already had.
 fn overlay_appearance(material: &mut Material, appearance: &Instance, assets: &Assets) {
-    let texture_of = |name| {
+    let image_of = |name| {
         let path = appearance.property(name).and_then(Value::as_str)?;
-        assets.texture(path).map(|image| texture(&image))
+        assets.texture(path)
     };
+    let texture_of = |name| image_of(name).map(|image| texture(&image));
     let number = |name, default: f32| {
         appearance
             .property(name)
@@ -1060,9 +1061,9 @@ fn overlay_appearance(material: &mut Material, appearance: &Instance, assets: &A
     if let Some(image) = texture_of("ColorMap") {
         material.base_color_texture = Some(image);
     }
-    if let Some(image) = texture_of("NormalMap") {
+    if let Some(image) = image_of("NormalMap") {
         material.maps.normal = Some(NormalMap {
-            texture: image,
+            texture: normal_texture(&image),
             scale: number("NormalStrength", 1.0),
             flip_green: flag("NormalMapDirectX"),
         });
@@ -1232,10 +1233,11 @@ fn visibility(instance: &Instance) -> f32 {
 /// roughness then take the material's own values); one it sets gives the
 /// value alone. Its textures come from `assets`.
 fn surface_material(file: &ModelMaterial, appearance: &Instance, assets: &Assets) -> Material {
-    let texture_of = |name| {
+    let image_of = |name| {
         let path = appearance.property(name).and_then(Value::as_str)?;
-        assets.texture(path).map(|image| texture(&image))
+        assets.texture(path)
     };
+    let texture_of = |name| image_of(name).map(|image| texture(&image));
     let number = |name, default: f32| {
         appearance
             .property(name)
@@ -1267,8 +1269,8 @@ fn surface_material(file: &ModelMaterial, appearance: &Instance, assets: &Assets
     }
     material.base_color_texture = texture_of("ColorMap");
     let maps = &mut material.maps;
-    maps.normal = texture_of("NormalMap").map(|texture| NormalMap {
-        texture,
+    maps.normal = image_of("NormalMap").map(|image| NormalMap {
+        texture: normal_texture(&image),
         scale: number("NormalStrength", 1.0),
         flip_green: flag("NormalMapDirectX"),
     });
@@ -1381,7 +1383,7 @@ fn model_material(material: &ModelMaterial) -> Material {
         alpha_cutoff,
         maps: TextureMaps {
             normal: material.normal_texture.as_ref().map(|image| NormalMap {
-                texture: texture(image),
+                texture: normal_texture(image),
                 scale: material.normal_scale,
                 flip_green: material.normal_flip_green,
             }),
@@ -1406,6 +1408,18 @@ fn model_material(material: &ModelMaterial) -> Material {
 /// A model's image, handed to the renderer without copying it.
 pub(crate) fn texture(image: &Arc<Image>) -> Arc<dyn TextureSource> {
     Arc::new(ImageTexture(image.clone()))
+}
+
+/// A model's image used as a normal map: its BC5 levels when it was cooked
+/// as one (under a key of its own, since they hold only red and green),
+/// otherwise the same texture as [`texture`].
+pub(crate) fn normal_texture(image: &Arc<Image>) -> Arc<dyn TextureSource> {
+    match image.cooked() {
+        Some(cooked) if cooked.format == axcenity_assets::CookedFormat::Bc5 => {
+            Arc::new(NormalTexture(image.clone()))
+        }
+        _ => texture(image),
+    }
 }
 
 /// A project image as a texture the renderer can draw, for particles.
@@ -1532,6 +1546,29 @@ impl TextureSource for ImageTexture {
     }
 }
 
+/// A model's normal map cooked as BC5. Anywhere else the same image is an
+/// [`ImageTexture`], decoded to RGBA: BC5 has no blue or alpha.
+struct NormalTexture(Arc<Image>);
+
+/// Mixed into a [`NormalTexture`]'s key, so the renderer keeps its BC5
+/// copy apart from the image's RGBA one.
+const NORMAL_KEY: u64 = 0x6e6f_726d_616c_0b05;
+
+impl TextureSource for NormalTexture {
+    fn key(&self) -> u64 {
+        self.0.key() ^ NORMAL_KEY
+    }
+    fn size(&self) -> (u32, u32) {
+        (self.0.width, self.0.height)
+    }
+    fn rgba(&self) -> &[u8] {
+        self.0.rgba()
+    }
+    fn bc5_levels(&self) -> &[Vec<u8>] {
+        self.0.cooked().map_or(&[], |cooked| &cooked.levels)
+    }
+}
+
 /// How much to stretch the 1×1×1 mesh. Balls stay round and cylinders stay
 /// circular, whatever their `Size`: they use the smallest size that fits.
 fn mesh_scale(shape: PartType, size: Vec3) -> Vec3 {
@@ -1565,6 +1602,41 @@ mod tests {
             world.set_property(part, name, value).unwrap();
         }
         part
+    }
+
+    #[test]
+    fn a_normal_map_cooked_as_bc5_is_handed_over_as_bc5_only_as_a_normal_map() {
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-scene-bc5-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("assets")).unwrap();
+        let path = "assets/Stone_Normal.png";
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([128, 128, 255, 255]))
+            .save(folder.join(path))
+            .unwrap();
+        let bytes = std::fs::read(folder.join(path)).unwrap();
+        let cooked = axcenity_assets::CookedTexture {
+            format: axcenity_assets::CookedFormat::Bc5,
+            width: 4,
+            height: 4,
+            levels: vec![vec![128; 16]; 3],
+            has_alpha: false,
+            average: [128, 128, 255, 255],
+        };
+        let stamp = axcenity_assets::SourceStamp::of(&folder.join(path), &bytes);
+        axcenity_assets::write_cooked(&folder, path, stamp, &cooked).unwrap();
+        let image = Assets::new(&folder).texture_blocking(path).unwrap();
+        assert!(image.cooked().is_some());
+
+        let normal = normal_texture(&image);
+        assert_eq!(normal.bc5_levels().len(), 3);
+        assert!(normal.bc7_levels().is_empty());
+        // Anywhere else, the same image is decoded: BC5 has no blue.
+        let color = texture(&image);
+        assert!(color.bc5_levels().is_empty() && color.bc7_levels().is_empty());
+        assert_ne!(normal.key(), color.key(), "kept apart on the GPU");
+        assert_eq!(color.rgba(), [128, 128, 255, 255].repeat(16));
+        let _ = std::fs::remove_dir_all(folder);
     }
 
     #[test]

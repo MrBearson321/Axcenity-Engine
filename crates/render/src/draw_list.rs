@@ -1437,6 +1437,15 @@ pub trait TextureSource: Send + Sync {
     fn bc7_levels(&self) -> &[Vec<u8>] {
         &[]
     }
+    /// A normal map's mip levels made ahead in BC5 blocks, red and green
+    /// only, like [`bc7_levels`](Self::bc7_levels) otherwise. Blue is
+    /// worked out from them when drawn (`MapsUniform::specular`'s y), so
+    /// give these only for a texture used as a [`NormalMap`], with a key of
+    /// its own. Uploaded like BC7 levels, which come first if both are
+    /// given.
+    fn bc5_levels(&self) -> &[Vec<u8>] {
+        &[]
+    }
 }
 
 // So `Shape` and `Material` can derive `Debug`, which needs every field to

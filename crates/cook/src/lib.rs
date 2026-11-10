@@ -1,7 +1,8 @@
 //! Cooking a project's textures ahead of time (roadmap L2).
 //!
 //! A texture file is decoded, halved down to 1×1 with the renderer's box
-//! filter, and each level BC7-encoded with Intel's ISPC compressor. The
+//! filter, and each level BC7-encoded with Intel's ISPC compressor (a
+//! normal map, by its file name, BC5: its red and green). The
 //! result goes into `.axcenity/imported/textures/` (see
 //! [`axcenity_assets::cooked_path`]), where `Assets` finds it the next time
 //! the texture loads: a file read and a quarter-size upload instead of a
@@ -16,10 +17,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axcenity_assets::{
-    CookedFormat, CookedTexture, SourceStamp, TEXTURE_EXTENSIONS, decode_texture, has_alpha,
-    is_cooked, safe_path, sampled_average, write_cooked,
+    CookedFormat, CookedTexture, MapSlot, SourceStamp, TEXTURE_EXTENSIONS, cooked_format,
+    decode_texture, has_alpha, safe_path, sampled_average, texture_roles, write_cooked,
 };
-use intel_tex_2::{RgbaSurface, bc7};
+use intel_tex_2::{RgSurface, RgbaSurface, bc5, bc7};
 use rayon::prelude::*;
 
 /// Rows of blocks encoded together, a job for one thread.
@@ -29,6 +30,31 @@ const BLOCK_ROWS_PER_JOB: u32 = 16;
 /// or `None` if the size isn't whole 4×4 blocks (a BC7 texture must start
 /// with whole blocks; such textures stay RGBA). Uses rayon's threads.
 pub fn cook_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<CookedTexture> {
+    cook_as(CookedFormat::Bc7, width, height, rgba)
+}
+
+/// Cooks the normal map `rgba` into BC5 mip levels of its red and green
+/// (blue is worked out from them when drawn), or `None` if the size isn't
+/// whole 4×4 blocks, like [`cook_rgba`].
+pub fn cook_normal_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<CookedTexture> {
+    cook_as(CookedFormat::Bc5, width, height, rgba)
+}
+
+/// The format the texture file `relative` is cooked into: BC5 for a file
+/// whose name says it's a normal map (`Rock_Normal.png`, `T_Bench_N.png`;
+/// [`texture_roles`]), BC7 for everything else.
+pub fn format_for(relative: &str) -> CookedFormat {
+    let roles = texture_roles(relative);
+    if let [role] = roles.as_slice()
+        && role.slot == MapSlot::Normal
+    {
+        CookedFormat::Bc5
+    } else {
+        CookedFormat::Bc7
+    }
+}
+
+fn cook_as(format: CookedFormat, width: u32, height: u32, rgba: &[u8]) -> Option<CookedTexture> {
     let whole = width > 0
         && height > 0
         && width.is_multiple_of(4)
@@ -37,24 +63,24 @@ pub fn cook_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<CookedTexture> 
     if !whole {
         return None;
     }
-    let alpha = has_alpha(rgba);
-    let settings = if alpha {
-        bc7::alpha_very_fast_settings()
-    } else {
-        bc7::opaque_very_fast_settings()
+    let alpha = format == CookedFormat::Bc7 && has_alpha(rgba);
+    let encoder = match format {
+        CookedFormat::Bc7 if alpha => Encoder::Bc7(bc7::alpha_very_fast_settings()),
+        CookedFormat::Bc7 => Encoder::Bc7(bc7::opaque_very_fast_settings()),
+        CookedFormat::Bc5 => Encoder::Bc5,
     };
     let mut levels = Vec::with_capacity(CookedTexture::level_count(width, height));
     let mut level = (width, height, rgba.to_vec());
     loop {
         let (level_width, level_height, pixels) = &level;
-        levels.push(encode_level(&settings, *level_width, *level_height, pixels));
+        levels.push(encode_level(&encoder, *level_width, *level_height, pixels));
         if (*level_width, *level_height) == (1, 1) {
             break;
         }
         level = half_size(*level_width, *level_height, pixels);
     }
     Some(CookedTexture {
-        format: CookedFormat::Bc7,
+        format,
         width,
         height,
         levels,
@@ -63,9 +89,16 @@ pub fn cook_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<CookedTexture> 
     })
 }
 
-/// One level's BC7 blocks. A level that isn't whole blocks (the smallest
-/// ones) is padded by repeating its last row and column.
-fn encode_level(settings: &bc7::EncodeSettings, width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+/// How a level's blocks are made.
+enum Encoder {
+    Bc7(bc7::EncodeSettings),
+    /// Red and green only.
+    Bc5,
+}
+
+/// One level's blocks. A level that isn't whole blocks (the smallest ones)
+/// is padded by repeating its last row and column.
+fn encode_level(encoder: &Encoder, width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     let (padded_width, padded_height) = (width.next_multiple_of(4), height.next_multiple_of(4));
     let padded;
     let pixels = if (padded_width, padded_height) == (width, height) {
@@ -82,13 +115,31 @@ fn encode_level(settings: &bc7::EncodeSettings, width: u32, height: u32, rgba: &
         .par_chunks_mut(block_row_bytes * BLOCK_ROWS_PER_JOB as usize)
         .zip(pixels.par_chunks(row_bytes * job_rows))
         .for_each(|(out, rows)| {
-            let surface = RgbaSurface {
-                width: padded_width,
-                height: (rows.len() / row_bytes) as u32,
-                stride: padded_width * 4,
-                data: rows,
-            };
-            bc7::compress_blocks_into(settings, &surface, out);
+            let rows_high = (rows.len() / row_bytes) as u32;
+            match encoder {
+                Encoder::Bc7(settings) => {
+                    let surface = RgbaSurface {
+                        width: padded_width,
+                        height: rows_high,
+                        stride: padded_width * 4,
+                        data: rows,
+                    };
+                    bc7::compress_blocks_into(settings, &surface, out);
+                }
+                Encoder::Bc5 => {
+                    let red_green: Vec<u8> = rows
+                        .chunks_exact(4)
+                        .flat_map(|pixel| [pixel[0], pixel[1]])
+                        .collect();
+                    let surface = RgSurface {
+                        width: padded_width,
+                        height: rows_high,
+                        stride: padded_width * 2,
+                        data: &red_green,
+                    };
+                    bc5::compress_blocks_into(&surface, out);
+                }
+            }
         });
     blocks
 }
@@ -159,7 +210,12 @@ pub fn cook_file(project: &Path, relative: &str) -> Outcome {
         Ok(image) => image,
         Err(reason) => return Outcome::Failed(reason),
     };
-    let Some(cooked) = cook_rgba(image.width, image.height, image.rgba()) else {
+    let Some(cooked) = cook_as(
+        format_for(relative),
+        image.width,
+        image.height,
+        image.rgba(),
+    ) else {
         return Outcome::NotBlockSized;
     };
     match write_cooked(project, relative, stamp, &cooked) {
@@ -231,7 +287,9 @@ pub fn cook_project(
         if stop.load(Ordering::Relaxed) {
             break;
         }
-        if is_cooked(project, &relative) {
+        // Current, and in the format it's cooked into now (normal maps
+        // cooked as BC7 before BC5 are cooked again).
+        if cooked_format(project, &relative) == Some(format_for(&relative)) {
             report.current += 1;
             continue;
         }

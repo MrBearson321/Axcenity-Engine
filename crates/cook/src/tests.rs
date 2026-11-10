@@ -181,3 +181,57 @@ fn a_models_embedded_textures_load_from_their_cooked_copies() {
     assert_eq!(again.primitives[0].indices, model.primitives[0].indices);
     let _ = fs::remove_dir_all(folder);
 }
+
+#[test]
+fn a_normal_map_by_its_name_cooks_into_bc5_of_its_red_and_green() {
+    assert_eq!(format_for("assets/rock/Rock_Normal.png"), CookedFormat::Bc5);
+    assert_eq!(format_for("assets/T_Bench_N.png"), CookedFormat::Bc5);
+    assert_eq!(
+        format_for("assets/rock/Rock_BaseColor.png"),
+        CookedFormat::Bc7
+    );
+    assert_eq!(format_for("assets/rock/rock_ORM.png"), CookedFormat::Bc7);
+    assert_eq!(format_for("assets/sign.png"), CookedFormat::Bc7);
+
+    let cooked = cook_normal_rgba(16, 8, &gradient(16, 8, 255)).expect("whole blocks");
+    assert_eq!(cooked.format, CookedFormat::Bc5);
+    assert_eq!(cooked.levels.len(), 5);
+    for (level, bytes) in cooked.levels.iter().enumerate() {
+        let (width, height) = cooked.level_size(level);
+        assert_eq!(bytes.len(), CookedFormat::Bc5.level_bytes(width, height));
+    }
+    assert!(!cooked.has_alpha, "BC5 keeps no alpha");
+    // A flat block: each of red's and green's BC4 halves starts with its
+    // two ends, here the same value.
+    let flat = cook_normal_rgba(4, 4, &[100, 200, 255, 255].repeat(16)).unwrap();
+    let block = &flat.levels[0];
+    assert_eq!((block[0], block[1]), (100, 100));
+    assert_eq!((block[8], block[9]), (200, 200));
+}
+
+#[test]
+fn cooking_a_project_cooks_normal_maps_as_bc5_and_redoes_older_bc7_copies() {
+    let folder = project("normals");
+    let path = "assets/textures/stone/Stone_Normal.png";
+    write_png(&folder.join(path), 16, 16, &gradient(16, 16, 255));
+    // Cooked as BC7 by an older editor.
+    let bytes = fs::read(folder.join(path)).unwrap();
+    let stamp = SourceStamp::of(&folder.join(path), &bytes);
+    let old = cook_rgba(16, 16, &gradient(16, 16, 255)).unwrap();
+    axcenity_assets::write_cooked(&folder, path, stamp, &old).unwrap();
+    assert_eq!(
+        axcenity_assets::cooked_format(&folder, path),
+        Some(CookedFormat::Bc7)
+    );
+
+    let stop = AtomicBool::new(false);
+    let report = cook_project(&folder, &stop, |_, _| {});
+    assert_eq!((report.cooked, report.current), (1, 0), "{report:?}");
+    assert_eq!(
+        axcenity_assets::cooked_format(&folder, path),
+        Some(CookedFormat::Bc5)
+    );
+    let again = cook_project(&folder, &stop, |_, _| {});
+    assert_eq!((again.cooked, again.current), (0, 1));
+    let _ = fs::remove_dir_all(folder);
+}
