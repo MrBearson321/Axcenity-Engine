@@ -10,6 +10,7 @@ authors.workspace = true
 axcenity-core.workspace = true
 axcenity-script.workspace = true
 log.workspace = true
+postcard.workspace = true
 renet.workspace = true
 renet_netcode.workspace = true
 serde.workspace = true

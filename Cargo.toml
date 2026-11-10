@@ -118,6 +118,11 @@ meshopt = "0.7"
 # Rust, on every OS. Upgrade the two together.
 renet = "2"
 renet_netcode = "2"
+# The multiplayer wire (roadmap M7), MIT OR Apache-2.0: reliable messages,
+# snapshots and RemoteEvent payloads as compact binary serde instead of
+# JSON. Only `use-std`, which brings `cobs` (MIT OR Apache-2.0); not its
+# default `heapless` support, which nothing here uses.
+postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 # Spreads a frame's draw planning over the CPU's threads (MIT OR Apache-2.0).
 rayon = "1.10"
 # A quicker hash than std's for the renderer's per-frame maps, whose keys

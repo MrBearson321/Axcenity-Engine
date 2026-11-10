@@ -384,6 +384,7 @@ impl Join {
                 name: name.to_owned(),
                 password,
                 user_id,
+                defaults: crate::handshake::class_defaults(),
             },
             asked: None,
             state: JoinState::Asking,

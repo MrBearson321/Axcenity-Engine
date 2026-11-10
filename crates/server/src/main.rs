@@ -1,4 +1,4 @@
-//! `axcenity-server <game> [--port <port>] [--password <text>] [--bench <frames>]`: a
+//! `axcenity-server <game> [--port <port>] [--password <text>] [--bench <frames> [--bench-clients <n>]]`: a
 //! dedicated server (Phase 63). It loads a project folder or a `.axgame`,
 //! runs the game's Scripts (never its LocalScripts: it has no player of
 //! its own) and physics at 60 frames a second with no window, audio or
@@ -12,7 +12,10 @@
 //!
 //! `--bench <frames>` runs frames back to back at a fixed 1/60 s, without
 //! waiting, prints each step's times after a warm-up and quits (roadmap
-//! I1, `docs/development/benchmarks.md`).
+//! I1, `docs/benchmarks.md`). `--bench-clients <n>` hosts in memory
+//! instead and joins `n` loopback players that read everything sent to
+//! them, so the bench measures replication to `n` players (roadmap M7);
+//! measuring starts once they all have their snapshot.
 
 use std::ffi::OsString;
 use std::fs;
@@ -24,11 +27,11 @@ use anyhow::{Context, Result, bail};
 use axcenity_assets::Assets;
 use axcenity_core::bench::{BenchRun, Laps};
 use axcenity_core::{ClassName, World};
-use axcenity_net::{GameInfo, Network};
+use axcenity_net::{Client, GameInfo, Join, Network, SessionEvent};
 use axcenity_script::{OutputKind, ScriptRuntime};
 use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
-const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--bench <frames>]\n\
+const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--bench <frames> [--bench-clients <n>]]\n\
                      example: cargo run -p axcenity-server -- examples/hello-part --port 47800";
 
 /// Each frame is this long.
@@ -42,6 +45,9 @@ struct Arguments {
     password: Option<String>,
     /// `--bench <frames>`: measure that many frames, print them and quit.
     bench: Option<usize>,
+    /// `--bench-clients <n>`: loopback players to replicate to while
+    /// measuring.
+    bench_clients: usize,
 }
 
 impl Arguments {
@@ -77,11 +83,25 @@ impl Arguments {
                     };
                     parsed.bench = Some(frames);
                 }
+                "--bench-clients" => {
+                    let clients = arguments
+                        .next()
+                        .and_then(|clients| clients.to_str()?.parse::<usize>().ok());
+                    let Some(clients) = clients else {
+                        bail!(
+                            "--bench-clients takes how many players to join, such as 8\n\n{USAGE}"
+                        );
+                    };
+                    parsed.bench_clients = clients;
+                }
                 "--help" | "-h" => bail!("{USAGE}"),
                 _ if text.starts_with("--") => bail!("unknown option `{text}`\n\n{USAGE}"),
                 _ if parsed.game.is_none() => parsed.game = Some(PathBuf::from(argument)),
                 _ => bail!("only one game can be served at a time\n\n{USAGE}"),
             }
+        }
+        if parsed.bench_clients > 0 && parsed.bench.is_none() {
+            bail!("--bench-clients only goes with --bench\n\n{USAGE}");
         }
         Ok(parsed)
     }
@@ -148,19 +168,26 @@ fn main() -> Result<()> {
         print_output(&mut scripts);
     }
 
-    let mut network = Network::new(GameInfo {
+    let game_info = GameInfo {
         name: project.manifest.name.clone(),
         version: project.manifest.version.clone(),
-    });
-    if let Err(reason) = network.host(
-        &mut world,
-        &mut scripts,
-        arguments.port,
-        arguments.password,
-        false,
-    ) {
-        bail!("{reason}");
-    }
+    };
+    let mut network = Network::new(game_info.clone());
+    let mut bench_clients = if arguments.bench_clients > 0 {
+        let first = network.host_in_memory(&mut world, &mut scripts, false);
+        BenchClients::join(&mut network, first, &game_info, arguments.bench_clients)
+    } else {
+        if let Err(reason) = network.host(
+            &mut world,
+            &mut scripts,
+            arguments.port,
+            arguments.password,
+            false,
+        ) {
+            bail!("{reason}");
+        }
+        BenchClients::default()
+    };
     print_log(&mut network);
 
     // The physics, and the characters, agents and animators the server
@@ -194,9 +221,11 @@ fn main() -> Result<()> {
             eprintln!("error: {error}");
         }
         if let Some(bench) = &mut bench {
-            if bench.record(&laps) {
+            let ready = bench_clients.frame(&server.network);
+            if ready && bench.record(&laps) {
                 let scene = axcenity_core::bench::scene_name(&project.folder);
                 print!("{}", bench.finish_text("server", &scene));
+                bench_clients.report(&server.network);
                 server
                     .network
                     .disconnect(&mut server.sim.world, &mut server.sim.scripts);
@@ -260,6 +289,129 @@ impl HostIo for Server {
     }
 }
 
+/// `--bench-clients`: loopback players, each reading everything the
+/// server sends them as a player's device would, so the bench pays for
+/// replicating to them. The bench's warm-up starts once every client has
+/// its snapshot. Their own reading isn't in the frame's steps; it's
+/// reported on its own.
+#[derive(Default)]
+struct BenchClients {
+    joins: Vec<Join>,
+    /// Which clients have their snapshot, or gave up.
+    done: Vec<bool>,
+    /// Frames until every client had its snapshot.
+    joining_frames: Option<usize>,
+    /// Frames since then.
+    frames: usize,
+    /// Bytes sent to every client by the end of the warm-up.
+    warm_up_bytes: Option<u64>,
+    /// The biggest snapshot message a client got, in bytes.
+    snapshot_bytes: usize,
+    /// Time spent receiving and decoding on the clients' side, after the
+    /// warm-up.
+    reading: Duration,
+    /// Server frames so far.
+    seen: usize,
+}
+
+impl BenchClients {
+    fn join(network: &mut Network, first: Client, game: &GameInfo, count: usize) -> BenchClients {
+        let mut clients = vec![first];
+        clients.extend((1..count).filter_map(|_| network.connect_loopback()));
+        let joins: Vec<Join> = clients
+            .into_iter()
+            .enumerate()
+            .map(|(index, client)| {
+                Join::start(
+                    client,
+                    game,
+                    &format!("Bench{}", index + 1),
+                    None,
+                    index as u64 + 1,
+                )
+            })
+            .collect();
+        BenchClients {
+            done: vec![false; joins.len()],
+            joins,
+            ..BenchClients::default()
+        }
+    }
+
+    /// After each server frame: the clients take in what arrived. True once
+    /// every client has its snapshot (always, with no clients).
+    fn frame(&mut self, network: &Network) -> bool {
+        if self.joins.is_empty() {
+            return true;
+        }
+        self.seen += 1;
+        let started = Instant::now();
+        for (join, done) in self.joins.iter_mut().zip(&mut self.done) {
+            for event in join.update(FRAME) {
+                match event {
+                    SessionEvent::Snapshot { update, .. } => {
+                        self.snapshot_bytes = self.snapshot_bytes.max(update.encoded_len());
+                        *done = true;
+                    }
+                    SessionEvent::Failed(reason) => {
+                        eprintln!("bench client: {reason}");
+                        *done = true;
+                    }
+                    _ => {}
+                }
+            }
+            join.flush();
+        }
+        if self.joining_frames.is_none() {
+            if !self.done.iter().all(|&done| done) {
+                return false;
+            }
+            self.joining_frames = Some(self.seen);
+        }
+        self.frames += 1;
+        if self.frames > BenchRun::DEFAULT_WARM_UP {
+            self.reading += started.elapsed();
+        } else if self.frames == BenchRun::DEFAULT_WARM_UP {
+            self.warm_up_bytes = Some(bytes_sent(network));
+        }
+        true
+    }
+
+    fn report(&self, network: &Network) {
+        if self.joins.is_empty() {
+            return;
+        }
+        let measured = self.frames.saturating_sub(BenchRun::DEFAULT_WARM_UP).max(1);
+        let warm_up = self.warm_up_bytes.unwrap_or(0);
+        let after = bytes_sent(network).saturating_sub(warm_up);
+        let joined = self
+            .joins
+            .iter()
+            .filter(|join| join.you().is_some() && !join.is_over())
+            .count();
+        println!(
+            "bench clients: {joined} of {} still in; snapshot {} bytes, all in after {} frames; \
+             {} bytes sent by the end of the warm-up, then {:.0} bytes a frame to all; \
+             clients read for {:.3} ms a frame",
+            self.joins.len(),
+            self.snapshot_bytes,
+            self.joining_frames.unwrap_or(0),
+            warm_up,
+            after as f64 / measured as f64,
+            self.reading.as_secs_f64() * 1000.0 / measured as f64,
+        );
+    }
+}
+
+/// Every byte the server has sent its loopback players.
+fn bytes_sent(network: &Network) -> u64 {
+    network
+        .stats()
+        .iter()
+        .filter_map(|stats| stats.loopback_bytes_sent)
+        .sum()
+}
+
 fn print_log(network: &mut Network) {
     for line in network.take_log() {
         eprintln!("{line}");
@@ -300,6 +452,7 @@ mod tests {
                 port: Some(4000),
                 password: Some("moat".to_owned()),
                 bench: None,
+                bench_clients: 0,
             }
         );
     }
@@ -318,5 +471,13 @@ mod tests {
         );
         let err = parse(&["castle", "--bench", "0"]).unwrap_err();
         assert!(err.to_string().contains("--bench takes"), "{err}");
+    }
+
+    #[test]
+    fn bench_clients_go_with_bench() {
+        let parsed = parse(&["castle", "--bench", "600", "--bench-clients", "8"]).unwrap();
+        assert_eq!(parsed.bench_clients, 8);
+        let err = parse(&["castle", "--bench-clients", "8"]).unwrap_err();
+        assert!(err.to_string().contains("only goes with --bench"), "{err}");
     }
 }

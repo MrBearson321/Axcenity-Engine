@@ -66,7 +66,20 @@ pub struct Instance {
     /// Goes up each time its name, parent, properties, attributes or tags
     /// change (see [`Instance::revision`]).
     revision: u64,
+    /// How many of those changes were a BasePart's motion (see
+    /// [`Instance::revision_without_motion`]).
+    motion_revision: u64,
 }
+
+/// A BasePart's motion: the properties physics writes every step while it
+/// moves. Readers that send or keep motion on its own (replication) skip
+/// them, and [`Instance::revision_without_motion`] doesn't count them.
+pub const MOTION_PROPERTIES: [&str; 4] = [
+    "Position",
+    "Orientation",
+    "AssemblyLinearVelocity",
+    "AssemblyAngularVelocity",
+];
 
 impl Instance {
     fn new(class: ClassName) -> Self {
@@ -80,6 +93,7 @@ impl Instance {
             tags: Vec::new(),
             prefab: None,
             revision: 0,
+            motion_revision: 0,
         }
     }
 
@@ -89,6 +103,22 @@ impl Instance {
     #[inline]
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// How many times a BasePart's motion ([`MOTION_PROPERTIES`]) changed:
+    /// the same number means it hasn't moved (roadmap M7).
+    #[inline]
+    pub fn motion_revision(&self) -> u64 {
+        self.motion_revision
+    }
+
+    /// Its [`revision`](Self::revision) without the changes to a BasePart's
+    /// motion ([`MOTION_PROPERTIES`]). The same number means everything but
+    /// its motion is as it was, so a moving part that changed nothing else
+    /// isn't read again by replication (roadmap M7).
+    #[inline]
+    pub fn revision_without_motion(&self) -> u64 {
+        self.revision - self.motion_revision
     }
 
     #[inline]
@@ -1296,6 +1326,9 @@ impl World {
         *slot = value;
         if !changed.is_empty() {
             instance.revision += 1;
+            if class.is_base_part() && MOTION_PROPERTIES.contains(&key) {
+                instance.motion_revision += 1;
+            }
         }
 
         if let Some(material) = material {

@@ -1,6 +1,8 @@
 //! The game's data on the wire (Phase 64): property values, and the
-//! RemoteEvent and RemoteFunction messages scripts send, as JSON next to
-//! the handshake's messages.
+//! RemoteEvent and RemoteFunction messages scripts send, encoded with the
+//! handshake's messages (postcard since roadmap M7; see `handshake`). Every
+//! type here keeps serde's plain layout: no skipped fields and no tags
+//! inside, which postcard can't read back.
 //!
 //! An Instance is its network ID ([`InstanceId::to_bits`]): a replica
 //! keeps the server's Instances at their own IDs, so the number names the
@@ -15,7 +17,6 @@ use serde::{Deserialize, Serialize};
 
 /// A property or attribute value.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value")]
 pub enum WireValue {
     Bool(bool),
     Number(f64),
@@ -147,7 +148,6 @@ impl WireValue {
 
 /// One argument of a remote message (a [`RemoteValue`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value")]
 pub enum WireArg {
     Nil,
     Bool(bool),
@@ -230,7 +230,6 @@ impl WireArg {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum WireKind {
     Event,
     Invoke {
