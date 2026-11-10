@@ -2045,7 +2045,7 @@ fn steady_frames_are_presented_on_a_fixed_grid() {
 }
 
 /// Every piece of text drawn in `output`, with where it was drawn.
-fn drawn_texts(output: &egui::FullOutput) -> Vec<(String, egui::Pos2)> {
+pub(super) fn drawn_texts(output: &egui::FullOutput) -> Vec<(String, egui::Pos2)> {
     fn walk(shape: &egui::Shape, found: &mut Vec<(String, egui::Pos2)>) {
         match shape {
             egui::Shape::Text(text) => found.push((

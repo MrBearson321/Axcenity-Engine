@@ -179,7 +179,12 @@ impl AnimationStudio {
                     preview.show(ui, render_state, assets, posed, height);
                     return;
                 }
-                ui.strong("Parameters");
+                // Not the "Parameters" beside the graph, which defines them:
+                // these only try values in the preview.
+                ui.strong("Try parameters").on_hover_text(
+                    "Set these to watch the preview follow the wires. They only change the \
+                     preview: in the game, scripts and blocks set them.",
+                );
                 egui::ScrollArea::vertical()
                     .id_salt("live parameters")
                     .show(ui, |ui| controller.live_controls(ui));

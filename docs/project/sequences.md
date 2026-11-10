@@ -39,7 +39,7 @@ The **Sequence** Instance (`script/src/sequence.rs`): `SequenceId` (the file), `
 
 - The Animation tab's pieces: its timeline (playhead, events, frame ticks) and the property editor's dope sheet and Curves view (`PropertyDoc`) over the sequence's keys. **Add track** and **Key selected** (K) key the Explorer's selection as the preview shows it; **Key camera** keys `@Camera` where the Scene view's camera is.
 - Under the timeline, a row per track kind; **Add section** adds one at the playhead, bound to the Explorer's selection (or by its first tag, with **Bind by tag**). Drag a section to move it or its ends to resize it, and set the picked one below.
-- **Preview** (on when a sequence opens) shows the sequence at the playhead in the Scene view without Play: a copy of the world, rebuilt when the edit history or the sequence changes, applied, posed by its own Animators and seen from the camera cut, with no tools. Its Sounds play while the preview plays, not while scrubbing. The tab closing, or Play, hides it.
+- **Preview** (on when a sequence opens) shows the sequence at the playhead in the Scene view without Play: a copy of the world, rebuilt when the edit history or the sequence changes, applied, posed by its own Animators and seen from the camera cut, with no tools; while it's on, a line above the keys says to turn Preview off to move things and then key them (K), and an empty dope sheet says the same (`PropertyDoc::sequence`; test `the_sequencer_says_to_turn_the_preview_off_to_move_things`). Its Sounds play while the preview plays, not while scrubbing. The tab closing, or Play, hides it.
 - Each change is written to the file once the mouse is let go, as one undo step ("Edit Intro"); undo and redo show the file as it is.
 
 ## Blocks

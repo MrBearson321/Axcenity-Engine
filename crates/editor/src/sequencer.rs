@@ -173,6 +173,7 @@ impl SequenceDoc {
         let written = file.to_json();
         let mut keys = PropertyDoc::open(path.clone(), file.keyed_clip());
         keys.new_keys = Default::default();
+        keys.sequence = true;
         Self {
             path,
             file,
@@ -813,6 +814,14 @@ impl Sequencer {
                     .sort_by(|a, b| a.time.total_cmp(&b.time));
             }
         });
+        // The preview's Scene view has no tools: say how to change a pose.
+        if self.preview_on && scene.editable {
+            ui.weak(theme::with_icon(
+                icons::EYE,
+                "Previewing: the Scene view shows the sequence and can't be edited. Turn \
+                 Preview off to move things, then key them (K).",
+            ));
+        }
         let focus = scene
             .picked
             .as_ref()

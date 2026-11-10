@@ -4,7 +4,7 @@
 
 use axcenity_anim::sequence::{OVERLAY_NAME, SequenceFile};
 
-use super::tests::{copy_of_example, play_for};
+use super::tests::{copy_of_example, drawn_texts, play_for};
 use super::*;
 use crate::sequencer::Row;
 
@@ -238,5 +238,46 @@ fn the_tab_and_the_preview_draw() {
             },
         );
     }
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// The Sequencer's preview has no tools, so it says how to change a pose:
+/// above the keys while previewing, and in an empty dope sheet.
+#[test]
+fn the_sequencer_says_to_turn_the_preview_off_to_move_things() {
+    let folder = copy_of_example("hello-cutscene", "sequencer-hints");
+    let mut app = EditorApp::new(Some(&folder));
+    app.new_sequence("Outro");
+    let ctx = crate::theme::test_context();
+    let texts = |app: &mut EditorApp| {
+        let mut output = None;
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 700.0),
+                )),
+                ..Default::default()
+            };
+            output = Some(ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.sequencer_pane(ui));
+            }));
+        }
+        drawn_texts(&output.unwrap())
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect::<Vec<_>>()
+    };
+    let has = |texts: &[String], part: &str| texts.iter().any(|t| t.contains(part));
+    assert!(app.sequencer.preview_on);
+    let shown = texts(&mut app);
+    assert!(has(&shown, "Turn Preview off to move things"), "{shown:?}");
+    assert!(
+        has(&shown, "with Preview off, select something"),
+        "{shown:?}"
+    );
+    app.sequencer.preview_on = false;
+    let shown = texts(&mut app);
+    assert!(!has(&shown, "Turn Preview off"), "{shown:?}");
     let _ = std::fs::remove_dir_all(&folder);
 }
