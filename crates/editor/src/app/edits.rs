@@ -1050,6 +1050,10 @@ impl EditorApp {
     /// Undoes the last step, unless a handle is being dragged or the game
     /// is playing (undo would change a world that isn't on screen).
     pub(super) fn undo(&mut self) {
+        // Over a block script, Ctrl+Z undoes in its blocks.
+        if self.step_block_script(true) {
+            return;
+        }
         // Over the Event Graph, Ctrl+Z undoes in the graph.
         if self.ui_designer.graph_has_pointer() && !self.playing() && self.undo_graph() {
             return;
@@ -1108,6 +1112,9 @@ impl EditorApp {
     }
 
     pub(super) fn redo(&mut self) {
+        if self.step_block_script(false) {
+            return;
+        }
         if self.ui_designer.graph_has_pointer() && !self.playing() && self.redo_graph() {
             return;
         }

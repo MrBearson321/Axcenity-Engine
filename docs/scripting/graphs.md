@@ -15,12 +15,12 @@ The Graph view: a block script shown as Unreal Blueprint-style nodes and wires. 
 
 ## Editing
 
-- Right-click the canvas, or **Add node**, for the searchable node menu (every palette block and reporter, by category). Dropping a wire on the canvas opens it filtered to nodes that fit the wire, and the new node is wired to it.
+- Right-click the canvas, or **Add node**, for the searchable node menu (every palette block and reporter, by category). It searches as the Blocks palette does (titles, the blocks' words and their Lua), and hovering an item shows the Lua it becomes. Dropping a wire on the canvas opens it filtered to nodes that fit the wire, and the new node is wired to it.
 - Drag from a pin to another to wire them; it works from either end. Alt-click a pin, or right-click it > Break link, to break its wires.
 - An exec input takes one wire: wiring an output to a node moves that node and the blocks after it there (they're a stack), and leaves what was wired to the output before loose. A wire that would loop back into its own chain is refused, with a note at the bottom of the canvas; use a loop node instead.
 - A value node feeds one input. Wiring a loose value node moves it into the input; wiring one that's already wired copies it. That runs the same as Unreal's fan-out, since a value node is worked out again wherever it's used. A wire into an input that doesn't fit is refused (a condition needs a red true-or-false value).
 - Right-click a call, local, return or table-of-arguments node for **Add Input** and **Remove Last Input**.
-- Click a node to select it (Shift or Ctrl adds), left-drag the background for a box, drag a node to move the selection. Delete or Backspace deletes the selected nodes, Ctrl+D duplicates them; right-click a node for Duplicate and Delete. Deleting a node keeps what it was wired to, loose.
+- Click a node to select it (Shift or Ctrl adds), left-drag the background for a box, drag a node to move the selection. Delete or Backspace deletes the selected nodes, Ctrl+D duplicates them; right-click a node for Duplicate and Delete. Deleting a node keeps what it was wired to, loose. Ctrl+Z and Ctrl+Y undo and redo while the mouse is over the graph ([blocks.md](blocks.md)).
 - Right- or middle-drag (or the wheel) pans; Ctrl + wheel or pinching zooms. **Clean up** lays every node out again.
 
 ## Layout and file

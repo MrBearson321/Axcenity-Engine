@@ -350,6 +350,7 @@ impl EditorApp {
                     {
                         document.script = script.clone();
                         document.saved = script;
+                        document.undo.clear();
                     }
                     if let Some(file) = project.scripts.iter_mut().find(|file| file.path == path) {
                         file.source = source.clone();
@@ -368,6 +369,7 @@ impl EditorApp {
                         script: script.clone(),
                         saved: script,
                         highlighted: None,
+                        undo: Default::default(),
                     });
                 }
                 self.output

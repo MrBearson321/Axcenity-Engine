@@ -1,7 +1,8 @@
 //! The block editor: Scratch-style blocks on a canvas.
 //!
 //! On the left are the categories (Events, Control, Motion, ...) and a
-//! palette of their blocks; on the right, the script's canvas. Drag a block
+//! palette of their blocks, with a search box and each category's Luau
+//! blocks folded under "Lua blocks"; on the right, the script's canvas. Drag a block
 //! from the palette onto the canvas, or next to a stack, where it snaps
 //! into place. Dragging a block takes the blocks under it along, as in
 //! Scratch, and dropping blocks on the palette deletes them. Reporters (the
@@ -1941,6 +1942,10 @@ struct State {
     new_variable: Option<String>,
     /// Variables made with "Make a Variable" that no block uses yet.
     variables: Vec<String>,
+    /// Typed in the palette's search box: only matching blocks are shown.
+    search: String,
+    /// Categories whose "Lua blocks" are opened in the palette.
+    luau_open: Vec<Category>,
 }
 
 impl Default for State {
@@ -1954,6 +1959,8 @@ impl Default for State {
             drag: None,
             new_variable: None,
             variables: Vec::new(),
+            search: String::new(),
+            luau_open: Vec::new(),
         }
     }
 }
@@ -2157,7 +2164,7 @@ fn show_categories(ui: &mut egui::Ui, rect: Rect, state: &mut State) {
                 Sense::click(),
             )
             .on_hover_cursor(CursorIcon::PointingHand);
-        if category == state.category {
+        if category == state.category && state.search.is_empty() {
             ui.painter().rect_filled(
                 item.shrink(3.0),
                 6,
@@ -2184,6 +2191,8 @@ fn show_categories(ui: &mut egui::Ui, rect: Rect, state: &mut State) {
         if response.clicked() {
             state.category = category;
             state.scroll_to = Some(category);
+            // A category shows all its blocks, not just the ones searched for.
+            state.search.clear();
         }
         y += 56.0;
     }

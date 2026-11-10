@@ -26,6 +26,7 @@ mod asset_fixes;
 mod asset_refs;
 mod assets;
 mod behavior_trees;
+mod block_undo;
 mod chrome;
 mod collision_groups;
 mod command_palette;
@@ -375,6 +376,9 @@ pub struct EditorApp {
     sequencer: crate::sequencer::Sequencer,
     /// The Model Studio tab (Phase 55).
     model_studio: crate::model_studio::ModelStudio,
+    /// The block script whose tab is under the mouse, set as it's drawn:
+    /// Ctrl+Z and Ctrl+Y are its then, and the world's keys aren't taken.
+    block_tab_pointer: Option<String>,
     /// The UI Designer tab's view of a ScreenGui.
     ui_designer: UiDesigner,
     /// The Terrain panel's tools, settings, previews and work under way.
@@ -612,6 +616,8 @@ struct BlockDocument {
     script: BlockScript,
     saved: BlockScript,
     highlighted: Option<u64>,
+    /// Its own undo and redo, for Ctrl+Z over its tab.
+    undo: block_undo::BlockUndo,
 }
 
 /// The keys the editor's settings are saved under (see [`EditorApp::load_settings`]).
@@ -838,6 +844,7 @@ impl EditorApp {
             materials: Default::default(),
             sequencer: Default::default(),
             model_studio: Default::default(),
+            block_tab_pointer: None,
             ui_designer: UiDesigner::default(),
             terrain: TerrainStudio::default(),
             layout: Layout::default(),
@@ -1213,6 +1220,7 @@ impl EditorApp {
         // Set again if the Model Studio is drawn under the mouse this frame;
         // a closed or hidden tab mustn't keep the keys.
         self.model_studio.forget_pointer();
+        self.block_tab_pointer = None;
 
         // During Play, run a game frame before anything is drawn, so every
         // panel shows the world as it is now. Then ask for the next frame
@@ -1576,6 +1584,8 @@ mod asset_refs_tests;
 mod attribute_tests;
 #[cfg(test)]
 mod behavior_tree_tests;
+#[cfg(test)]
+mod block_undo_tests;
 #[cfg(test)]
 mod camera_tests;
 #[cfg(test)]

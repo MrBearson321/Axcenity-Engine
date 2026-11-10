@@ -18,6 +18,20 @@ pub(super) fn palette(
     objects: &[ObjectInfo],
     variables: &[String],
 ) -> Vec<PaletteItem> {
+    let (mut items, luau) = palette_parts(category, client, objects, variables);
+    items.extend(luau);
+    items
+}
+
+/// [`palette`]'s blocks in two lists: the category's own, then the blocks
+/// for Luau itself (`local`, `while`, a `:Connect` …), which the Blocks
+/// palette folds away under "Lua blocks" until opened.
+pub(super) fn palette_parts(
+    category: Category,
+    client: bool,
+    objects: &[ObjectInfo],
+    variables: &[String],
+) -> (Vec<PaletteItem>, Vec<PaletteItem>) {
     let first = |filter: Filter| {
         objects
             .iter()
@@ -681,8 +695,9 @@ pub(super) fn palette(
         ],
     };
     // The blocks for Luau itself come after each category's own.
+    let mut luau = Vec::new();
     match category {
-        Category::Events => items.extend([
+        Category::Events => luau.extend([
             block(BlockKind::RunScript { body: Vec::new() }),
             block(BlockKind::OnSignal {
                 signal: name("workspace.ChildAdded"),
@@ -697,7 +712,7 @@ pub(super) fn palette(
                 body: Vec::new(),
             }),
         ]),
-        Category::Control => items.extend([
+        Category::Control => luau.extend([
             block(BlockKind::DefineFunction {
                 name: "myFunction".to_owned(),
                 local: true,
@@ -734,7 +749,7 @@ pub(super) fn palette(
                 values: vec![name("value")],
             }),
         ]),
-        Category::Variables => items.extend([
+        Category::Variables => luau.extend([
             block(BlockKind::Local {
                 names: "name".to_owned(),
                 values: vec![number(0.0)],
@@ -753,13 +768,86 @@ pub(super) fn palette(
     }
     // Keyboard and button blocks only work on the player's side.
     if !client {
-        items.retain(|item| match item {
-            PaletteItem::Block(kind) => !kind.client_only(),
-            PaletteItem::Reporter(expression) => !expression.client_only(),
-            PaletteItem::NewVariable => true,
-        });
+        for list in [&mut items, &mut luau] {
+            list.retain(|item| match item {
+                PaletteItem::Block(kind) => !kind.client_only(),
+                PaletteItem::Reporter(expression) => !expression.client_only(),
+                PaletteItem::NewVariable => true,
+            });
+        }
     }
-    items
+    (items, luau)
+}
+
+/// The height of the search box above the palette's blocks.
+pub(super) const SEARCH_HEIGHT: f32 = 40.0;
+
+/// What a palette item is found by when searching: the words on it, its
+/// category and the Lua it becomes, in lower case.
+pub(super) fn search_text(
+    item: &PaletteItem,
+    category: Category,
+    objects: &[ObjectInfo],
+) -> String {
+    let mut words = vec![category.name().to_owned()];
+    fn add_labels(words: &mut Vec<String>, parts: &[Part]) {
+        for part in parts {
+            if let Part::Label(text) = part {
+                words.push(text.clone());
+            }
+        }
+    }
+    match item {
+        PaletteItem::Block(kind) => {
+            words.extend(item_lua(item));
+            let mut kind = (**kind).clone();
+            for section in sections(&mut kind, objects) {
+                if let Section::Row(parts) = &section {
+                    add_labels(&mut words, parts);
+                }
+            }
+        }
+        PaletteItem::Reporter(expression) => {
+            words.extend(item_lua(item));
+            let mut expression = expression.clone();
+            add_labels(&mut words, &reporter_parts(&mut expression, objects));
+        }
+        PaletteItem::NewVariable => words.push("make a variable".to_owned()),
+    }
+    words.join(" ").to_lowercase()
+}
+
+/// Whether every word typed in the search box is in `text` (from
+/// [`search_text`]).
+pub(super) fn matches_search(text: &str, search: &str) -> bool {
+    search
+        .split_whitespace()
+        .all(|word| text.contains(&word.to_lowercase()))
+}
+
+/// The Lua a palette block becomes, on its own.
+fn block_lua(kind: &BlockKind) -> Option<String> {
+    axcenity_blocks::block_lua(&Block::new(kind.clone()), true).ok()
+}
+
+/// The Lua a palette item becomes, on its own.
+pub(super) fn item_lua(item: &PaletteItem) -> Option<String> {
+    match item {
+        PaletteItem::Block(kind) => block_lua(kind),
+        PaletteItem::Reporter(expression) => axcenity_blocks::expression_lua(expression, true).ok(),
+        PaletteItem::NewVariable => None,
+    }
+}
+
+/// A palette or node menu item's tooltip: `how` to use it, then the Lua
+/// it becomes, so a beginner sees what it does and learns the Lua too.
+pub(super) fn lua_hint(ui: &mut egui::Ui, how: &str, lua: Option<String>) {
+    ui.set_max_width(380.0);
+    ui.label(format!("{how} It becomes this Lua:"));
+    if let Some(lua) = lua {
+        let job = lua_syntax::layout_job(&lua, FontId::monospace(12.0), ui.visuals());
+        ui.add(egui::Label::new(job));
+    }
 }
 
 pub(super) fn show_palette(
@@ -776,19 +864,63 @@ pub(super) fn show_palette(
         rect.y_range(),
         ui.visuals().widgets.noninteractive.bg_stroke,
     );
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    child.set_clip_rect(rect);
+    // The search box, then the blocks under it.
+    let search_rect = Rect::from_min_size(rect.min, vec2(rect.width(), SEARCH_HEIGHT));
+    let mut search_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(search_rect.shrink2(vec2(12.0, 8.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    let search_box = search_ui
+        .add(
+            egui::TextEdit::singleline(&mut state.search)
+                .id(egui::Id::new(("block search", context.key)))
+                .hint_text(theme::with_icon(icons::MAGNIFYING_GLASS, "Search blocks"))
+                .desired_width(f32::INFINITY),
+        )
+        .on_hover_text(
+            "Finds blocks by their words or the Lua they become, such as \"sound\" or \"Destroy\"",
+        );
+    if search_box.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        state.search.clear();
+    }
+    let list_rect = Rect::from_min_max(pos2(rect.left(), search_rect.bottom()), rect.max);
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list_rect));
+    child.set_clip_rect(list_rect);
     let scroll_to = state.scroll_to.take();
     let mut new_variable = state.new_variable.take();
     let mut made = None;
     let mut started = None;
+    let search = state.search.trim().to_owned();
     egui::ScrollArea::vertical()
-        .id_salt(("block palette", context.key))
+        .id_salt(("block palette", context.key, search.is_empty()))
         .auto_shrink(false)
         .show(&mut child, |ui| {
             ui.add_space(8.0);
+            let mut found = false;
             for category in Category::ALL {
-                let items = palette(category, context.client, context.objects, variables);
+                let (mut items, mut luau) =
+                    palette_parts(category, context.client, context.objects, variables);
+                if !search.is_empty() {
+                    for list in [&mut items, &mut luau] {
+                        list.retain(|item| {
+                            matches_search(&search_text(item, category, context.objects), &search)
+                        });
+                    }
+                    if items.is_empty() && luau.is_empty() {
+                        continue;
+                    }
+                    found = true;
+                }
+                // The Luau blocks under their own heading, folded unless
+                // opened or searched for.
+                let mut rows: Vec<Option<PaletteItem>> = items.into_iter().map(Some).collect();
+                if !luau.is_empty() {
+                    rows.push(None);
+                    if !search.is_empty() || state.luau_open.contains(&category) {
+                        rows.extend(luau.into_iter().map(Some));
+                    }
+                }
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
                     let (dot, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
@@ -804,7 +936,20 @@ pub(super) fn show_palette(
                     }
                 });
                 ui.add_space(6.0);
-                for item in items {
+                for row in rows {
+                    let Some(item) = row else {
+                        if luau_heading(ui, category, state, !search.is_empty()) {
+                            if let Some(at) =
+                                state.luau_open.iter().position(|open| *open == category)
+                            {
+                                state.luau_open.remove(at);
+                            } else {
+                                state.luau_open.push(category);
+                            }
+                        }
+                        ui.add_space(8.0);
+                        continue;
+                    };
                     ui.horizontal(|ui| {
                         ui.add_space(14.0);
                         match item {
@@ -822,7 +967,14 @@ pub(super) fn show_palette(
                                     } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                                         made = Some(String::new());
                                     }
-                                } else if ui.button("Make a Variable").clicked() {
+                                } else if ui
+                                    .button("Make a Variable")
+                                    .on_hover_text(
+                                        "Names a value the whole script can read and change, \
+                                         such as a score. Its blocks appear below.",
+                                    )
+                                    .clicked()
+                                {
                                     new_variable = Some(String::new());
                                 }
                             }
@@ -846,6 +998,15 @@ pub(super) fn show_palette(
                 }
                 ui.add_space(14.0);
             }
+            if !search.is_empty() && !found {
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(12.0);
+                    ui.weak(format!(
+                        "No blocks match \"{search}\". Try another word, or a word from the Lua."
+                    ));
+                });
+            }
         });
     if let Some(name) = made {
         new_variable = None;
@@ -858,6 +1019,37 @@ pub(super) fn show_palette(
     if started.is_some() {
         state.drag = started;
     }
+}
+
+/// The heading over a category's Luau blocks, which opens and folds them.
+/// Returns true if it was clicked.
+fn luau_heading(ui: &mut egui::Ui, category: Category, state: &State, searching: bool) -> bool {
+    let open = searching || state.luau_open.contains(&category);
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        let arrow = if open {
+            icons::CARET_DOWN
+        } else {
+            icons::CARET_RIGHT
+        };
+        let response = ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new(format!("{arrow} Lua blocks"))
+                        .size(theme::type_scale::SMALL),
+                )
+                .frame(false),
+            )
+            .on_hover_text(
+                "Blocks for Lua itself: local, while, for, a function, a :Connect. \
+                 They write exactly the Lua they say. The blocks above do the common \
+                 things more simply; these are for scripts switched from Code, or \
+                 when you know the Lua you want.",
+            );
+        // While searching they're shown anyway.
+        response.clicked() && !searching
+    })
+    .inner
 }
 
 /// A block in the palette, which can be dragged out. Returns the drag if
@@ -890,7 +1082,9 @@ pub(super) fn palette_block(
         vec2(drawn.width, drawn.height + TAB_DEPTH)
     };
     let (rect, response) = ui.allocate_exact_size(size, Sense::drag());
-    let response = response.on_hover_cursor(CursorIcon::Grab);
+    let response = response
+        .on_hover_cursor(CursorIcon::Grab)
+        .on_hover_ui(|ui| lua_hint(ui, "Drag it onto the canvas.", block_lua(&kind)));
     let mut painter = BlockPainter::new(
         ui.painter().clone(),
         1.0,
@@ -936,7 +1130,15 @@ pub(super) fn palette_reporter(
     );
     let size = painter.reporter_size(ui, &mut expression);
     let (rect, response) = ui.allocate_exact_size(size, Sense::drag());
-    let response = response.on_hover_cursor(CursorIcon::Grab);
+    let response = response
+        .on_hover_cursor(CursorIcon::Grab)
+        .on_hover_ui(|ui| {
+            lua_hint(
+                ui,
+                "Drag it into a slot of the same shape.",
+                axcenity_blocks::expression_lua(&expression, true).ok(),
+            )
+        });
     let mut painter = painter;
     painter.reporter(ui, &mut expression.clone(), rect.min, egui::Id::NULL, None);
     if response.drag_started()

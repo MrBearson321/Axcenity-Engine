@@ -1077,6 +1077,11 @@ impl EditorApp {
             if let Some(folder) = &folder {
                 self.add_table_names(folder, &mut objects);
             }
+            if ui.rect_contains_pointer(ui.max_rect()) {
+                self.block_tab_pointer = Some(path.clone());
+            }
+            // An edit is over once nothing is held or typed (`BlockUndo`).
+            let busy = ctx.wants_keyboard_input() || ctx.input(|input| input.pointer.any_down());
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show_inside(ui, |ui| {
@@ -1086,6 +1091,7 @@ impl EditorApp {
                             .iter_mut()
                             .find(|document| document.path == path)
                     }) {
+                        let before = document.script.clone();
                         let context = block_editor::BlockContext {
                             key: &path,
                             client: axcenity_project::script_class(&path) == ClassName::LocalScript,
@@ -1100,6 +1106,7 @@ impl EditorApp {
                         if changed {
                             document.highlighted = None;
                         }
+                        document.undo.track(before, &document.script, busy);
                     }
                 });
             if changed {
