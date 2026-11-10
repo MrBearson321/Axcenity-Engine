@@ -417,6 +417,22 @@ Queries now keep each part's bounding ball between rays (`physics::query::Worksp
 
 Every query benefits the same way (`workspace:Raycast`, `Spherecast`, `GetPartBoundsInBox`, ...). After this, S10k has no stage left where splitting work across threads is the clear next step on a 4-core machine: Physics is rapier's own (already parallel), Heartbeat is one Luau VM, and the player's draw list became retained in M4. L4 stays open for an 8+ core measurement.
 
+### Property access after M2, M4 and L4 (L1's gate)
+
+L1 (per-class property slots, `Prop` IDs) is to be built only if property access still dominates once M2 and M4 are in. Callgrind over whole test-runner frames on S10k (`--toggle-collect='*TestGame*frame*'`, `--bench 20`, after the L4 query bounds), share of the frame's instructions:
+
+| Where | Share |
+|---|---|
+| `Physics::step` in all (rapier's solver and broad phase 27%, `sync_from_world` 11.5%, `write_to_world` 12.9%) | 58% |
+| Agents (the navmesh refresh's `MeshBuilder::look`, every 0.5 s) | 19% |
+| `fire_changes` (scripts' property-changed signals, `Touched`) | 11% |
+| Characters | 5% |
+| `World::set_property`, inclusive (change log and revisions too) | 7.8% |
+| `Instance::property`, inclusive | 3.9% |
+| String compares under those two (`memcmp` and `BTreeMap` search on names) | about 9% |
+
+So looking properties up by name costs about a tenth of the frame: real, but not dominant, and what slots would save is at most that tenth, for a change across ~500 call sites. **L1 is not worth building now.** Re-measure when a scene is found where property reads dominate (a script-heavy game rather than S10k's physics pile).
+
 ### Calibrating against the rendering baseline
 
 The render benchmarks ran on the same container to relate it to the machine in [rendering/performance.md](rendering/performance.md). `bench_10000_parts` (edge view) took 8.6 ms in `build_draw_list` there, about the same as the desktop above; steps other than the draw list are about 1.5 to 2× slower on the container. Compare runs on one machine rather than scaling between them. `bench_project` on S10k: `build_draw_list` 9.4 ms and `ScenePipeline::draw` (CPU side) 3.7 ms from the spawn, 9.5 ms and 3.7 ms from the overview, 6,575 and 10,026 items drawn. GPU times on lavapipe (300–940 ms a frame) say nothing about a real GPU and are left out.
