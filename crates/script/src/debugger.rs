@@ -147,6 +147,11 @@ pub fn install(lua: &Lua) -> mlua::Result<()> {
     set_step_hook(lua)
 }
 
+/// Whether [`install`] ran, so scripts compile with local names.
+pub fn is_installed(lua: &Lua) -> bool {
+    lua.app_data_ref::<Debugger>().is_some()
+}
+
 /// Replaces every breakpoint. Does nothing without the debugger.
 pub fn set_breakpoints(lua: &Lua, breakpoints: &Breakpoints) {
     if let Some(mut debugger) = lua.app_data_mut::<Debugger>() {
