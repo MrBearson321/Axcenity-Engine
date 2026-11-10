@@ -38,6 +38,8 @@ The plan's U1–U19 shipped in seven PRs, all merged. U20, the dedicated passes,
 
 **Left: U20.** The UI Designer, the Block editor and Model Studio were only *reviewed* in the audit, not inspected screen by screen. Each deserves its own pass with the same method: inspect, snapshot, plan, small PRs.
 
+**Then: the reviewed systems.** The other systems the audit only reviewed got a screenshot pass of their own: [reviewed-systems.md](reviewed-systems.md) (findings RS1–RS4). Changed: selecting Lighting no longer makes an undo step and an unsaved mark (a slider wrote its rounded value back each frame); the Input and Collision Groups windows' edits, Restore defaults included, are undo steps; the Mixer's output meter is **Output**, not a second **Master**. Tests: `showing_the_properties_of_anything_in_the_examples_changes_nothing` (`app/properties_show_tests.rs`; fails without the fix), `restore_defaults_in_the_input_window_undoes_and_redoes` and `removing_a_collision_group_undoes_with_its_pairs` (`app/settings_undo_tests.rs`), and `the_mixer_draws_the_group_tree_in_a_narrow_column` (Output drawn, Master once). Tour shots 60–70.
+
 ## PR 1: Animation Studio (U1–U4)
 
 **Changed**

@@ -1,5 +1,5 @@
 //! The Mixer panel (Phase 52): the SoundGroups as a tree, each with a live
-//! level meter and Mute and Solo buttons, under the master level. Meters
+//! level meter and Mute and Solo buttons, under the game's whole output. Meters
 //! move and the buttons work during Play; they change what's heard, never
 //! the world, and Stop clears them. Levels come from the Play session's
 //! `GameAudio::take_levels`, and mute and solo go back with
@@ -96,12 +96,17 @@ impl Mixer {
         }
         let row_height = ui.spacing().interact_size.y;
         let master = self.master;
+        // Not "Master": that's what most games call their top SoundGroup,
+        // which is listed below it.
         meter_row(
             ui,
             row_height,
             0.0,
             icons::SPEAKER_HIGH,
-            "Master",
+            (
+                "Output",
+                Some("Everything the game plays, after all its SoundGroups"),
+            ),
             master,
             |_| {},
         );
@@ -120,7 +125,7 @@ impl Mixer {
                         row_height,
                         depth as f32 * INDENT,
                         icons::FADERS,
-                        &group.name,
+                        (&group.name, None),
                         level,
                         |ui| {
                             ui.add_enabled_ui(playing, |ui| {
@@ -184,7 +189,7 @@ fn meter_row(
     height: f32,
     indent: f32,
     icon: &str,
-    name: &str,
+    (name, hint): (&str, Option<&str>),
     level_db: f32,
     buttons: impl FnOnce(&mut egui::Ui),
 ) {
@@ -217,7 +222,10 @@ fn meter_row(
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.add_space(indent);
             ui.label(RichText::new(icon).color(palette.text_muted));
-            ui.add(egui::Label::new(name).truncate());
+            let label = ui.add(egui::Label::new(name).truncate());
+            if let Some(hint) = hint {
+                label.on_hover_text(hint);
+            }
         });
     });
 }
@@ -312,9 +320,14 @@ mod tests {
             };
             shown = format!("{:?}", ctx.run(input, &mut draw).shapes);
         }
-        for name in ["Master", "Music", "SFX"] {
+        for name in ["Output", "Master", "Music", "SFX"] {
             assert!(shown.contains(name), "{name} isn't drawn");
         }
+        assert_eq!(
+            shown.matches("\"Master\"").count(),
+            shown.matches("\"Music\"").count(),
+            "the whole output isn't called Master as well as the Master group"
+        );
         if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from) {
             crate::snapshot::snapshot(
                 &folder.join("panel-mixer.png"),

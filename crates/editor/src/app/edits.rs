@@ -1173,6 +1173,8 @@ impl EditorApp {
             self.output
                 .error(format!("Could not restore a project file: {err}"));
         }
+        // The Input and Collision Groups windows' files, read again.
+        self.reload_project_settings(&files);
         // A level's start or name changed back or again (Phase 48).
         if files
             .iter()
@@ -1189,6 +1191,40 @@ impl EditorApp {
             &mut self.output,
         );
         self.asset_browser.refresh();
+    }
+
+    /// After undo or redo wrote `input.json` or `collision-groups.json`
+    /// back, the project's input map or the world's collision groups as
+    /// the file now says (no file is the default).
+    fn reload_project_settings(&mut self, files: &[crate::animation::store::FileDiff]) {
+        for file in files {
+            if file.path == axcenity_project::INPUT_FILE
+                && let Some(project) = &mut self.project
+            {
+                project.input_map = match file.after.as_deref() {
+                    None => Default::default(),
+                    Some(text) => match axcenity_project::parse_input_map(text) {
+                        Ok(map) => map,
+                        Err(err) => {
+                            self.output.error(format!("Input: {err}."));
+                            continue;
+                        }
+                    },
+                };
+            } else if file.path == axcenity_project::COLLISION_GROUPS_FILE {
+                let groups = match file.after.as_deref() {
+                    None => Default::default(),
+                    Some(text) => match axcenity_project::parse_collision_groups(text) {
+                        Ok(groups) => groups,
+                        Err(err) => {
+                            self.output.error(format!("Collision groups: {err}."));
+                            continue;
+                        }
+                    },
+                };
+                self.world.set_collision_groups(groups);
+            }
+        }
     }
 
     /// Records clip, controller or prefab file changes as one undo step.

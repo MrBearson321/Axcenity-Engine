@@ -1653,6 +1653,8 @@ mod level_tests;
 #[cfg(test)]
 mod model_studio_tests;
 #[cfg(test)]
+mod properties_show_tests;
+#[cfg(test)]
 mod ragdoll_tests;
 #[cfg(test)]
 mod relaunch_tests;
@@ -1660,6 +1662,8 @@ mod relaunch_tests;
 mod rig_tests;
 #[cfg(test)]
 mod sequencer_tests;
+#[cfg(test)]
+mod settings_undo_tests;
 #[cfg(test)]
 mod solid_tests;
 #[cfg(test)]
