@@ -113,6 +113,22 @@ impl EditorApp {
             ));
             return;
         }
+        // Textures the background cooking hasn't reached yet are cooked
+        // now, so the game ships every texture ready for the GPU.
+        let report = axcenity_cook::cook_project(
+            &folder,
+            &std::sync::atomic::AtomicBool::new(false),
+            |_, _| {},
+        );
+        if report.cooked > 0 {
+            self.output
+                .info(format!("Cooked {} textures for the build.", report.cooked));
+        }
+        for (path, reason) in &report.failed {
+            self.output.warning(format!(
+                "The texture `{path}` ships as it is (it couldn't be cooked: {reason})."
+            ));
+        }
         let game = match project::pack_game(&folder) {
             Ok(game) => game,
             Err(err) => {

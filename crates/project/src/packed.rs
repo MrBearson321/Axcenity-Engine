@@ -39,12 +39,15 @@ pub enum PackError {
 
 /// Packs the runtime files of a project into one portable game file.
 ///
-/// Editor settings and unrelated documents are excluded. Block JSON is
+/// Editor settings and unrelated documents are excluded. Textures go with
+/// their current cooked copies (`.axcenity/imported/textures/`, roadmap L2),
+/// so the game uploads them as they are instead of decoding them. Block JSON is
 /// translated into Lua in the archive so an exported player only needs the
 /// normal script loader.
 pub fn pack_game(folder: &Path) -> Result<Vec<u8>, PackError> {
     let mut files = Vec::new();
     collect_runtime_files(folder, folder, &mut files)?;
+    add_cooked_textures(folder, &mut files)?;
     files.sort_by(|a, b| a.0.cmp(&b.0));
     if files.len() > MAX_FILES {
         return Err(PackError::TooManyFiles);
@@ -205,6 +208,36 @@ fn collect_runtime_files(
         }
     }
     Ok(())
+}
+
+/// Adds the current cooked copy of each texture in `files`, at the same
+/// place in the project, so the player finds it (it checks the copy against
+/// the texture's bytes, since unpacking gives every file a new time).
+fn add_cooked_textures(root: &Path, files: &mut Vec<(String, Vec<u8>)>) -> Result<(), PackError> {
+    let textures: Vec<String> = files
+        .iter()
+        .map(|(name, _)| name)
+        .filter(|name| name.starts_with("assets/") && is_texture_file(name))
+        .filter(|name| axcenity_assets::is_cooked(root, name))
+        .cloned()
+        .collect();
+    for name in textures {
+        let path = axcenity_assets::cooked_path(root, &name);
+        let contents = fs::read(&path).map_err(|source| PackError::Read { path, source })?;
+        files.push((axcenity_assets::cooked_relative_path(&name), contents));
+        if files.len() > MAX_FILES {
+            return Err(PackError::TooManyFiles);
+        }
+    }
+    Ok(())
+}
+
+fn is_texture_file(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(_, extension)| {
+        axcenity_assets::TEXTURE_EXTENSIONS
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(extension))
+    })
 }
 
 fn include_runtime_file(root: &Path, path: &Path) -> bool {
@@ -396,6 +429,45 @@ mod tests {
         assert_eq!(fs::read(output.join("ui/Title.ttf")).unwrap(), [4, 5]);
         fs::remove_dir_all(source).unwrap();
         fs::remove_dir_all(output).unwrap();
+    }
+
+    #[test]
+    fn a_built_game_carries_current_cooked_textures_and_the_player_reads_them() {
+        let project = temp_folder("cooked");
+        fs::create_dir_all(project.join("assets/textures")).unwrap();
+        fs::write(project.join(crate::MANIFEST_FILE), "{}").unwrap();
+        let fresh = "assets/textures/fresh.png";
+        let stale = "assets/textures/stale.png";
+        for name in [fresh, stale] {
+            fs::write(project.join(name), name.as_bytes()).unwrap();
+        }
+        let cooked = axcenity_assets::CookedTexture {
+            format: axcenity_assets::CookedFormat::Bc7,
+            width: 4,
+            height: 4,
+            levels: vec![vec![1; 16], vec![2; 16], vec![3; 16]],
+            has_alpha: false,
+            average: [0; 4],
+        };
+        let stamp =
+            |name: &str| axcenity_assets::SourceStamp::of(&project.join(name), name.as_bytes());
+        axcenity_assets::write_cooked(&project, fresh, stamp(fresh), &cooked).unwrap();
+        // Cooked from bytes the file no longer has.
+        let mut old = stamp(stale);
+        old.hash ^= 1;
+        old.modified ^= 1;
+        axcenity_assets::write_cooked(&project, stale, old, &cooked).unwrap();
+
+        let game = pack_game(&project).unwrap();
+        let unpacked = temp_folder("cooked-unpacked");
+        let _ = fs::remove_dir_all(&unpacked);
+        unpack_game(&game, &unpacked).unwrap();
+        // Unpacked files are newer: the copy is matched by the texture's bytes.
+        let read = axcenity_assets::read_cooked(&unpacked, fresh).expect("packed and current");
+        assert_eq!(read.levels, cooked.levels);
+        assert!(!axcenity_assets::cooked_path(&unpacked, stale).exists());
+        let _ = fs::remove_dir_all(project);
+        let _ = fs::remove_dir_all(unpacked);
     }
 
     #[test]
