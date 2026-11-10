@@ -206,7 +206,6 @@ fn a_normal_map_by_its_name_cooks_into_bc5_of_its_red_and_green() {
         let (width, height) = cooked.level_size(level);
         assert_eq!(bytes.len(), CookedFormat::Bc5.level_bytes(width, height));
     }
-    assert!(!cooked.has_alpha, "BC5 keeps no alpha");
     // A flat block: each of red's and green's BC4 halves starts with its
     // two ends, here the same value.
     let flat = cook_normal_rgba(4, 4, &[100, 200, 255, 255].repeat(16)).unwrap();
@@ -276,7 +275,10 @@ fn a_models_embedded_textures_are_cooked_in_place_when_it_wasnt_imported() {
     let cooked = Assets::new(&folder).model_blocking(model).expect("loads");
     let image = map(&cooked);
     assert!(image.cooked().is_some(), "from its cooked copy");
-    assert!(image.rgba() == pixels, "decoded from inside the model if asked");
+    assert!(
+        image.rgba() == pixels,
+        "decoded from inside the model if asked"
+    );
     // Every map cooked, so the whole model is kept, and read back with
     // the same cooked maps.
     assert_eq!(axcenity_assets::cooked_models(&folder, model).len(), 1);
@@ -295,4 +297,102 @@ fn a_models_embedded_textures_are_cooked_in_place_when_it_wasnt_imported() {
         assert!(!folder.join(copy).exists(), "{copy}");
     }
     let _ = fs::remove_dir_all(folder);
+}
+
+/// Each map of each primitive: its slot, channel, whether it's cooked, and
+/// what it holds.
+fn maps_of(model: &axcenity_assets::Model) -> Vec<(String, bool, bool, Vec<u8>)> {
+    let mut maps = Vec::new();
+    for (index, primitive) in model.primitives.iter().enumerate() {
+        let material = &primitive.material;
+        let channel = |slot: &str, map: &Option<axcenity_assets::ChannelTexture>| {
+            map.as_ref().map(|map| {
+                (
+                    format!("{slot} {:?} {}", map.channel, map.invert),
+                    map.image.clone(),
+                )
+            })
+        };
+        let plain = |slot: &str, image: &Option<std::sync::Arc<axcenity_assets::Image>>| {
+            image.as_ref().map(|image| (slot.to_owned(), image.clone()))
+        };
+        let all = [
+            plain("color", &material.base_color_texture),
+            plain("normal", &material.normal_texture),
+            channel("metalness", &material.metalness_texture),
+            channel("roughness", &material.roughness_texture),
+            channel("occlusion", &material.occlusion_texture),
+            plain("emissive", &material.emissive_texture),
+            channel("opacity", &material.opacity_texture),
+            plain("specular", &material.specular_texture),
+        ];
+        for (slot, image) in all.into_iter().flatten() {
+            maps.push((
+                format!("{index} {slot} {}x{}", image.width, image.height),
+                image.cooked().is_some(),
+                image.has_alpha(),
+                image.rgba().to_vec(),
+            ));
+        }
+    }
+    maps
+}
+
+#[test]
+fn a_model_with_embedded_maps_loads_the_same_cooked_as_uncooked() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    for (example, name) in [
+        (
+            "hello-pbr/assets/models/DamagedHelmet/DamagedHelmet.glb",
+            "Helmet.glb",
+        ),
+        ("primitives/assets/models/AWP.glb", "AWP.glb"),
+        // Its image is a `data:` URI.
+        ("hello-mesh/assets/models/pyramid.gltf", "pyramid.gltf"),
+        // An FBX with its maps inside.
+        (
+            "hello-character/assets/models/Walking/Walking.fbx",
+            "Walking.fbx",
+        ),
+    ] {
+        let folder = project(&format!("parity-{name}"));
+        let model = format!("assets/models/{name}");
+        fs::create_dir_all(folder.join("assets/models")).unwrap();
+        fs::copy(examples.join(example), folder.join(&model)).unwrap();
+        let uncooked = Assets::new(&folder).model_blocking(&model).expect("loads");
+        let before = maps_of(&uncooked);
+        assert!(!before.is_empty(), "{name} has maps");
+        drop(uncooked);
+
+        let stop = AtomicBool::new(false);
+        let report = cook_project(&folder, &stop, |_, _| {});
+        assert!(report.failed.is_empty(), "{name}: {report:?}");
+        let cooked = Assets::new(&folder).model_blocking(&model).expect("loads");
+        let after = maps_of(&cooked);
+        assert_eq!(after.len(), before.len(), "{name}: the same maps");
+        for (old, new) in before.iter().zip(&after) {
+            assert_eq!(old.0, new.0, "{name}: the same slots, channels and sizes");
+            assert!(!old.1, "{name} {}: uncooked first", old.0);
+            let (width, height) = old
+                .0
+                .rsplit(' ')
+                .next()
+                .and_then(|size| size.split_once('x'))
+                .map(|(w, h)| (w.parse::<u32>().unwrap(), h.parse::<u32>().unwrap()))
+                .unwrap();
+            let whole_blocks = width % 4 == 0 && height % 4 == 0;
+            assert_eq!(
+                new.1, whole_blocks,
+                "{name} {}: cooked when it can be",
+                old.0
+            );
+            assert_eq!(old.2, new.2, "{name} {}: the same alpha", old.0);
+            assert!(old.3 == new.3, "{name} {}: the same pixels", old.0);
+        }
+        assert_eq!(cooked.primitives.len(), {
+            let again = Assets::new(&folder).model_blocking(&model).unwrap();
+            again.primitives.len()
+        });
+        let _ = fs::remove_dir_all(folder);
+    }
 }

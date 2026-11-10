@@ -66,7 +66,9 @@ fn cook_as(format: CookedFormat, width: u32, height: u32, rgba: &[u8]) -> Option
     if !whole {
         return None;
     }
-    let alpha = format == CookedFormat::Bc7 && has_alpha(rgba);
+    // Kept for BC5 too, though its blocks hold no alpha: it's what the
+    // source has, and loading reads it without decoding (parity).
+    let alpha = has_alpha(rgba);
     let encoder = match format {
         CookedFormat::Bc7 if alpha => Encoder::Bc7(bc7::alpha_very_fast_settings()),
         CookedFormat::Bc7 => Encoder::Bc7(bc7::opaque_very_fast_settings()),

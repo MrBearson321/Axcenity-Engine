@@ -1565,7 +1565,7 @@ impl Reader<'_> {
                 .buffers
                 .get(view.buffer().index())
                 .and_then(|buffer| buffer.get(view.offset()..view.offset() + view.length()))
-                .map(embedded_key),
+                .map(|bytes| embedded_key(self.project(), bytes)),
             gltf::image::Source::Uri { .. } => None,
         };
         if let Some(shared) = embedded.and_then(shared_embedded) {
@@ -1617,16 +1617,19 @@ impl Reader<'_> {
     }
 }
 
-/// Decoded embedded images still in use, by their encoded bytes. Weak, so
-/// an image goes when the last model using it does.
+/// Decoded embedded images still in use, by their project and encoded
+/// bytes. Weak, so an image goes when the last model using it does. Only
+/// shared within a project: a cooked image reads its pixels back from its
+/// own project's files, which another project may not have.
 static EMBEDDED_IMAGES: LazyLock<Mutex<HashMap<EmbeddedKey, Weak<Image>>>> =
     LazyLock::new(Default::default);
 
 type EmbeddedKey = (usize, u64);
 
-fn embedded_key(bytes: &[u8]) -> EmbeddedKey {
+fn embedded_key(project: Option<&Path>, bytes: &[u8]) -> EmbeddedKey {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    project.hash(&mut hasher);
     bytes.hash(&mut hasher);
     (bytes.len(), hasher.finish())
 }
