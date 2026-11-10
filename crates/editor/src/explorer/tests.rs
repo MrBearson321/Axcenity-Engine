@@ -405,3 +405,108 @@ fn revealing_a_deep_part_opens_every_branch_above_it() {
     assert!(!rows.iter().find(|row| row.id == wheel).unwrap().expanded);
     assert_eq!(explorer.scroll_to, Some(wheel));
 }
+
+#[test]
+fn the_filter_shows_what_matches_and_the_branches_above_it() {
+    let mut world = World::new();
+    let make = |world: &mut World, class, name: &str, parent| {
+        let id = world.create(class).unwrap();
+        world.set_name(id, name).unwrap();
+        world.set_parent(id, Some(parent)).unwrap();
+        id
+    };
+    let workspace = world.workspace();
+    let car = make(&mut world, ClassName::Model, "Car", workspace);
+    let wheel = make(&mut world, ClassName::Part, "Front Wheel", car);
+    make(&mut world, ClassName::Part, "Door", car);
+    let light = make(&mut world, ClassName::PointLight, "Headlight", wheel);
+    make(&mut world, ClassName::Part, "Floor", workspace);
+    let mut explorer = Explorer::new(&world);
+    // Car is closed, so its parts aren't shown.
+    assert!(!outline(&explorer, &world).contains(&"      Front Wheel".to_owned()));
+
+    // Case and spaces don't matter, and closed branches open.
+    explorer.filter = " frontwheel ".to_owned();
+    assert_eq!(
+        outline(&explorer, &world),
+        ["Game", "  Workspace", "    Car", "      Front Wheel"].map(str::to_owned)
+    );
+    // Only the match is drawn bright; the branches above it are dimmed.
+    let bright: Vec<bool> = explorer
+        .rows(&world)
+        .iter()
+        .map(|row| row.matches)
+        .collect();
+    assert_eq!(bright, [false, false, false, true]);
+
+    // A class matches too.
+    explorer.filter = "PointLight".to_owned();
+    let rows = explorer.rows(&world);
+    assert_eq!(rows.last().map(|row| row.id), Some(light));
+    assert!(rows.last().unwrap().matches);
+
+    // Nothing matching shows nothing, and a cleared filter puts back the
+    // branches as they were.
+    explorer.filter = "zzz".to_owned();
+    assert!(explorer.rows(&world).is_empty());
+    explorer.filter.clear();
+    assert!(!explorer.rows(&world).iter().any(|row| row.id == wheel));
+}
+
+#[test]
+fn clicking_an_arrow_while_filtering_leaves_the_branches_alone() {
+    let world = demo_world();
+    let ctx = crate::theme::test_context();
+    let click_workspace_arrow = |explorer: &mut Explorer| {
+        frame(&ctx, explorer, &world, Vec::new());
+        let name = explorer
+            .drawn
+            .iter()
+            .find(|(id, _)| *id == world.workspace())
+            .unwrap()
+            .1;
+        // The arrow is just left of the name.
+        let arrow = name.left_center() - egui::vec2(ARROW_SIZE / 2.0 + 2.0, 0.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: arrow,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [
+            vec![egui::Event::PointerMoved(arrow)],
+            vec![press(true)],
+            vec![press(false)],
+        ] {
+            frame(&ctx, explorer, &world, events);
+        }
+    };
+    let mut explorer = Explorer::new(&world);
+    explorer.filter = "pad".to_owned();
+    click_workspace_arrow(&mut explorer);
+    assert!(explorer.expanded.contains(&world.workspace()));
+    // The same click without a filter closes it.
+    explorer.filter.clear();
+    click_workspace_arrow(&mut explorer);
+    assert!(!explorer.expanded.contains(&world.workspace()));
+}
+
+#[test]
+fn snapshot_of_the_filter() {
+    let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") else {
+        return;
+    };
+    let world = demo_world();
+    let mut explorer = Explorer::new(&world);
+    explorer.filter = "pad".to_owned();
+    crate::snapshot::snapshot(
+        &std::path::PathBuf::from(folder).join("explorer-filter.png"),
+        egui::vec2(260.0, 220.0),
+        vec![Vec::new(); 3],
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = explorer.show(ui, &world, &[], true);
+            });
+        },
+    );
+}

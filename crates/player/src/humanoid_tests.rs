@@ -445,3 +445,76 @@ fn a_model_with_only_the_pieces_works_the_same_as_one_with_a_humanoid() {
         );
     }
 }
+
+#[test]
+fn a_humanoid_plays_its_animators_idle_walk_run_jump_and_fall_states() {
+    let folder =
+        std::env::temp_dir().join(format!("axcenity-humanoid-states-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    // The states Insert ▸ Character's state machine has, with empty clips.
+    let states: Vec<String> = ["Idle", "Walk", "Run", "Jump", "Fall", "Sit"]
+        .iter()
+        .map(|name| {
+            format!(
+                r#"{{ "name": "{name}", "motion": {{ "clip": "" }}, "speed": 1.0, "position": [0.0, 0.0] }}"#
+            )
+        })
+        .collect();
+    std::fs::write(
+        folder.join("hero.statemachine.json"),
+        format!(
+            r#"{{ "format_version": 2, "default_state": "Idle", "states": [{}] }}"#,
+            states.join(", ")
+        ),
+    )
+    .unwrap();
+    let mut world = World::new();
+    floor(&mut world);
+    character(&mut world, "Player", -20.0, 20.0);
+    let (npc, _) = character(&mut world, "NPC", 0.0, 0.0);
+    make(&mut world, ClassName::Humanoid, "Humanoid", npc, Vec::new());
+    let body = world.find_first_child(npc, "Body").unwrap();
+    let animator = make(
+        &mut world,
+        ClassName::Animator,
+        "Animator",
+        body,
+        vec![(
+            "StateMachine",
+            Value::String("hero.statemachine.json".to_owned()),
+        )],
+    );
+    let mut game = Game::new(world, Assets::new(&folder));
+    // Each state the Animator plays, in order, without repeats.
+    let mut played: Vec<String> = Vec::new();
+    let mut watch = |game: &mut Game, frames: usize| {
+        for _ in 0..frames {
+            game.frame();
+            let now = game.world.animator(animator).unwrap().current_state.clone();
+            if played.last() != Some(&now) {
+                played.push(now);
+            }
+        }
+    };
+    watch(&mut game, 20);
+    // Walking 15 studs at WalkSpeed, then standing.
+    game.run("workspace.NPC.Humanoid:MoveTo(Vector3.new(0, 0, -15))");
+    watch(&mut game, 120);
+    // Running back at RunSpeed.
+    game.run(
+        r#"
+        workspace.NPC.ThirdPersonController.Movement = "Run"
+        workspace.NPC.Humanoid:MoveTo(Vector3.new(0, 0, 15))
+        "#,
+    );
+    watch(&mut game, 120);
+    game.run("workspace.NPC.Humanoid:Jump()");
+    watch(&mut game, 120);
+    assert_eq!(
+        played,
+        [
+            "Idle", "Walk", "Idle", "Run", "Idle", "Jump", "Fall", "Idle"
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}

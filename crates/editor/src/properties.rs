@@ -5,11 +5,14 @@
 //! the user made, and the app applies it, which keeps the panel easy to test
 //! and gives one place to notice unsaved changes.
 
+use std::collections::HashMap;
+
 use axcenity_core::{
     CFrame, ClassName, Color3, EnumItem, Instance, InstanceId, Material, PartType, ParticleType,
     PhysicalProperties, TextureChannel, ToneMapping, UDim2, Value, Vector2, Vector3, World,
     is_attribute_name,
 };
+
 use eframe::egui;
 
 use crate::history::Field;
@@ -776,6 +779,13 @@ pub fn show(
                         .map(|place| place.here().properties)
                         .unwrap_or_default(),
                 };
+                // What a new one of its class starts with, to offer ↺ on
+                // what differs (not during Play, whose changes go at Stop).
+                let defaults: HashMap<&str, Value> = if playing {
+                    HashMap::new()
+                } else {
+                    instance.class().default_properties().into_iter().collect()
+                };
                 for mut group in sections(instance) {
                     group.properties.retain(|(name, _)| shows(group.title, name));
                     if group.properties.is_empty() {
@@ -785,9 +795,17 @@ pub fn show(
                     section(ui, group.title, open, true, |ui| {
                         for (name, value) in group.properties {
                             let field = Field::Property(name);
+                            let reset = defaults
+                                .get(name)
+                                .filter(|default| resettable(default) && **default != value)
+                                .filter(|_| !locked || name == "Locked");
                             if overridden.contains(name) {
                                 if let Some(made) = override_name(ui, name) {
                                     edit = Some(made);
+                                }
+                            } else if let Some(default) = reset {
+                                if field_name_with_reset(ui, class, name, default) {
+                                    edit = Some(Edit::Property(name, default.clone()));
                                 }
                             } else if let Some(keep) =
                                 field_name_with_pin(ui, class, name, pin(field))
@@ -1136,6 +1154,51 @@ fn field_name_with_pin(
         described_name(ui, class, name);
     });
     clicked
+}
+
+/// Whether a property holding `default` gets ↺ when it's changed: not one
+/// that points at another Instance, which the game or a picker sets.
+fn resettable(default: &Value) -> bool {
+    !matches!(default, Value::Instance(_))
+}
+
+/// A changed property's name, after a ↺ that sets it back to its class's
+/// default (one undo step, like any edit). Returns whether ↺ was clicked.
+fn field_name_with_reset(ui: &mut egui::Ui, class: ClassName, name: &str, default: &Value) -> bool {
+    let mut clicked = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let tooltip = match default_text(default) {
+            Some(text) => format!("Changed. Click to reset it to the default, {text}."),
+            None => "Changed. Click to reset it to the default.".to_owned(),
+        };
+        clicked = crate::widgets::icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, &tooltip, false)
+            .clicked();
+        described_name(ui, class, name);
+    });
+    clicked
+}
+
+/// A default short enough to say in a tooltip.
+fn default_text(value: &Value) -> Option<String> {
+    let number = |n: f64| {
+        let text = format!("{n:.3}");
+        text.trim_end_matches('0').trim_end_matches('.').to_owned()
+    };
+    match value {
+        Value::Bool(on) => Some(if *on { "on" } else { "off" }.to_owned()),
+        Value::Number(n) => Some(number(*n)),
+        Value::String(text) if text.is_empty() => Some("empty".to_owned()),
+        Value::String(text) if text.chars().count() <= 24 => Some(format!("\"{text}\"")),
+        Value::Vector3(v) => Some(format!(
+            "{}, {}, {}",
+            number(f64::from(v.x)),
+            number(f64::from(v.y)),
+            number(f64::from(v.z))
+        )),
+        Value::EnumItem(item) => Some(item.item.clone()),
+        _ => None,
+    }
 }
 
 /// An overridden property's name in a placed prefab copy: bold, with a ↺
@@ -2523,6 +2586,138 @@ mod decal_section_tests {
             }
         }
         found
+    }
+
+    /// Draws the Properties panel for `id` with `filter` typed, clicks the
+    /// first ↺ it shows, and returns the edit made, or `None` when there's
+    /// no ↺.
+    fn click_reset(world: &World, id: InstanceId, filter: &str, playing: bool) -> Option<Edit> {
+        fn find(shape: &egui::Shape, at: &mut Option<egui::Pos2>) {
+            match shape {
+                egui::Shape::Text(text)
+                    if at.is_none() && text.galley.text() == icons::ARROW_COUNTER_CLOCKWISE =>
+                {
+                    *at = Some(text.visual_bounding_rect().center());
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| find(s, at)),
+                _ => {}
+            }
+        }
+        let ctx = crate::theme::test_context();
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("properties filter"), filter.to_owned()));
+        let frame = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(300.0, 2000.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut edit = None;
+            let output = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    edit = show(ui, world, Some(id), playing, &[], 1, |_| {});
+                });
+            });
+            let mut at = None;
+            for clipped in &output.shapes {
+                find(&clipped.shape, &mut at);
+            }
+            (at, edit)
+        };
+        frame(Vec::new());
+        let (at, _) = frame(Vec::new());
+        let at = at?;
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![egui::Event::PointerMoved(at)]);
+        frame(vec![press(true)]);
+        frame(vec![press(false)]).1
+    }
+
+    /// A property that differs from its class's default gets ↺, which sets
+    /// the default back; one that doesn't, a locked one and one during Play
+    /// get none.
+    #[test]
+    fn a_changed_property_resets_to_its_default_with_one_click() {
+        let mut world = World::new();
+        let part = world.create(ClassName::Part).unwrap();
+        let default = ClassName::Part
+            .default_properties()
+            .into_iter()
+            .find(|(name, _)| *name == "Transparency")
+            .unwrap()
+            .1;
+        assert_eq!(click_reset(&world, part, "transparency", false), None);
+
+        world
+            .set_property(part, "Transparency", Value::Number(0.5))
+            .unwrap();
+        assert_eq!(
+            click_reset(&world, part, "transparency", false),
+            Some(Edit::Property("Transparency", default))
+        );
+        // Play's changes are kept or dropped at Stop, not reset.
+        assert_eq!(click_reset(&world, part, "transparency", true), None);
+        // Only Locked can be changed on something locked.
+        world
+            .set_property(part, "Locked", Value::Bool(true))
+            .unwrap();
+        assert_eq!(click_reset(&world, part, "transparency", false), None);
+        assert_eq!(
+            click_reset(&world, part, "locked", false),
+            Some(Edit::Property("Locked", Value::Bool(false)))
+        );
+
+        // With AXCENITY_SNAPSHOTS: a moved, half-clear part with the mouse
+        // over Transparency's ↺.
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            world
+                .set_property(part, "Locked", Value::Bool(false))
+                .unwrap();
+            world
+                .set_property(
+                    part,
+                    "Position",
+                    Value::Vector3(Vector3::new(4.0, 2.0, 0.0)),
+                )
+                .unwrap();
+            let mut frames = vec![Vec::new(); 6];
+            frames[0].push(egui::Event::PointerMoved(egui::pos2(21.0, 427.0)));
+            crate::snapshot::snapshot(
+                &std::path::PathBuf::from(folder).join("properties-reset.png"),
+                egui::vec2(300.0, 560.0),
+                frames,
+                |ctx| {
+                    ctx.data_mut(|d| {
+                        d.insert_temp(egui::Id::new("properties filter"), String::new())
+                    });
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let _ = show(ui, &world, Some(part), false, &[], 1, |_| {});
+                    });
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn defaults_are_said_briefly() {
+        assert_eq!(default_text(&Value::Number(0.25)).as_deref(), Some("0.25"));
+        assert_eq!(default_text(&Value::Number(16.0)).as_deref(), Some("16"));
+        assert_eq!(default_text(&Value::Bool(true)).as_deref(), Some("on"));
+        assert_eq!(
+            default_text(&Value::Vector3(Vector3::new(4.0, 1.0, 2.0))).as_deref(),
+            Some("4, 1, 2")
+        );
+        assert_eq!(
+            default_text(&Value::String(String::new())).as_deref(),
+            Some("empty")
+        );
     }
 
     /// Typing in Filter properties leaves only the rows whose names match

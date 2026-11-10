@@ -37,3 +37,39 @@ Steps and clicks are unchanged; what changed is that the editor now says which m
 **Regressions looked for**: the Animation tab still fits 600×400, 260×900 and 1100×600 (`the_animation_tab_says_where_you_are_and_fits_any_shape`) and a 260-point column (`every_panel_fits_a_narrow_column_and_a_short_strip`); posing, IK, imported-clip and Sequencer tests pass unchanged (the Sequencer reuses the dope sheet and keeps the old hint, since it has no Record).
 
 **Left for later**: U12 (undo for linked-clip settings), U13 (two panels both called Parameters), U14 (the same feedback in the Sequencer).
+
+## PR 2: Properties and Explorer (U6–U9)
+
+**Changed**
+
+| ID | Problem | Change |
+|---|---|---|
+| U6 (P1) | Property names explained nothing | Hovering a name shows what it does, from the descriptions scripts' autocomplete uses (`axcenity_script::property_description`) |
+| U7 (P2) | No way to find one property among dozens | **Filter properties** under the header: case and spaces ignored, section titles and attributes match too, sections held open, "No properties match" when none do |
+| U8 (E1) | The Explorer's Insert menu didn't explain its items, the ribbon's did | Same hover text as the ribbon (`explorer::insert_hint`) |
+| U9 (N1) | Check Assets was an unlabelled magnifier | Captioned "Check Assets" |
+
+**Tests**: `common_properties_say_what_they_do`, `the_filter_ignores_case_and_spaces`, `filter_properties_shows_only_matching_rows` (with `properties-filter.png` and `properties-description.png`). `cargo test -p axcenity-editor`: 903 passed, with only the known cloud failure; `-p axcenity-script`: all passed; clippy and fmt clean.
+
+## PR 3: Reset to default, Explorer filter, Humanoid animation test (U10, U11)
+
+**Changed**
+
+| ID | Problem | Change |
+|---|---|---|
+| U10 (P3) | No way to tell a changed value from a default, and no reset | A changed property has ↺ before its name; hovering says the default, clicking sets it back as one undo step. Not during Play, not on locked Instances (except `Locked`), not on Instance references |
+| U11 (E2) | A big tree had no filter | **Filter** at the top of the Explorer: matching names or classes with the branches above them open and dimmed; clearing it restores the branches as they were |
+| — | Paul asked whether character animation works; nothing tested a Humanoid's Idle/Walk/Run switching | `a_humanoid_plays_its_animators_idle_walk_run_jump_and_fall_states`: an NPC walks, runs and jumps, and its Animator goes Idle → Walk → Idle → Run → Idle → Jump → Fall → Idle |
+
+**Workflow checked: find and undo a change on a part (beginner)**
+
+| Step | Before | After |
+|---|---|---|
+| Find the part in a big Workspace | Open branches one by one | Type part of its name in Filter |
+| See what was changed on it | Remember the defaults | ↺ marks each changed property |
+| Put one back | Look up the default, type it | Click ↺ (hover first to see the default) |
+
+**Tests**: `the_filter_shows_what_matches_and_the_branches_above_it`, `clicking_an_arrow_while_filtering_leaves_the_branches_alone`, `snapshot_of_the_filter` (`explorer-filter.png`), `a_changed_property_resets_to_its_default_with_one_click` (`properties-reset.png`), `defaults_are_said_briefly`, and the Humanoid test above. Full-suite results are in the PR.
+
+**Left for later**: U12–U14 (next PR), then U15–U20.
+

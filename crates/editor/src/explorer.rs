@@ -95,6 +95,9 @@ pub struct Explorer {
     /// The hover text of the warning badge after each script that uses an API
     /// from the other side. The app fills it in each frame.
     pub warnings: HashMap<InstanceId, String>,
+    /// The text in Filter: while it isn't blank, only the Instances whose
+    /// name or class has it in them show, with the branches above them.
+    pub filter: String,
     /// Where each row's name was drawn last frame, so tests can point at rows.
     #[cfg(test)]
     drawn: Vec<(InstanceId, egui::Rect)>,
@@ -223,6 +226,9 @@ pub struct Row {
     pub depth: usize,
     pub has_children: bool,
     pub expanded: bool,
+    /// False for a row shown only because something below it matches the
+    /// filter; it's drawn dimmed.
+    pub matches: bool,
 }
 
 impl Explorer {
@@ -233,6 +239,7 @@ impl Explorer {
             scroll_to: None,
             renaming: None,
             warnings: HashMap::new(),
+            filter: String::new(),
             #[cfg(test)]
             drawn: Vec::new(),
         }
@@ -282,10 +289,19 @@ impl Explorer {
     }
 
     /// The visible rows, top to bottom: every Instance whose ancestors are
-    /// all open, with children in their stored order.
+    /// all open, with children in their stored order. While [`filter`]
+    /// isn't blank, every Instance that matches it instead, with all the
+    /// branches above it open whether or not they were.
+    ///
+    /// [`filter`]: Self::filter
     pub fn rows(&self, world: &World) -> Vec<Row> {
         let mut rows = Vec::new();
-        self.add_rows(world, world.root(), 0, &mut rows);
+        let filter = self.filter.trim();
+        if filter.is_empty() {
+            self.add_rows(world, world.root(), 0, &mut rows);
+        } else {
+            add_matching_rows(world, world.root(), 0, filter, &mut rows);
+        }
         rows
     }
 
@@ -295,20 +311,17 @@ impl Explorer {
             return;
         };
         let expanded = self.expanded.contains(&id);
-        // A UnionOperation's parts are kept inside it for Separate, out of
-        // sight (Phase 50), and what a SplineMesh or SplineScatter makes is
-        // made again from its settings (Phase 74).
-        let union = instance.class() == ClassName::UnionOperation
-            || axcenity_core::spline::is_generator(instance.class());
+        let hides_children = hides_children(instance.class());
         rows.push(Row {
             id,
             name: instance.name().to_string(),
             class: instance.class(),
             depth,
-            has_children: !union && !instance.children().is_empty(),
+            has_children: !hides_children && !instance.children().is_empty(),
             expanded,
+            matches: true,
         });
-        if union {
+        if hides_children {
             return;
         }
         if expanded {
@@ -352,6 +365,14 @@ impl Explorer {
         #[cfg(test)]
         self.drawn.clear();
         let palette = theme::palette(ui.ctx());
+        let width = (ui.available_width() - crate::widgets::SEARCH_FIELD_MARGINS).max(60.0);
+        crate::widgets::search_field(ui, &mut self.filter, "Filter", width)
+            .on_hover_text("Show only what has this in its name or class, and what it's in");
+        let filtering = !self.filter.trim().is_empty();
+        let rows = self.rows(world);
+        if filtering && rows.is_empty() {
+            ui.weak(format!("Nothing matches \"{}\".", self.filter.trim()));
+        }
         // Only scrolls up and down: long names end in "…" instead of
         // running past the panel.
         egui::ScrollArea::vertical()
@@ -360,7 +381,7 @@ impl Explorer {
                 // Rows touch, so their highlights join into one column.
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let row_height = ui.spacing().interact_size.y;
-                for row in self.rows(world) {
+                for row in rows {
                     // Filled in once the row is drawn and its size is known, but
                     // painted behind it.
                     let background = ui.painter().add(egui::Shape::Noop);
@@ -409,6 +430,12 @@ impl Explorer {
                         // Clicks select; dragging moves the row onto another.
                         let icon = egui::RichText::new(row_icon(world, &row))
                             .color(theme::class_color(row.class, ui.visuals()));
+                        // A branch shown only for what's below it is dimmed.
+                        let name = if row.matches {
+                            egui::RichText::new(row.name.as_str())
+                        } else {
+                            egui::RichText::new(row.name.as_str()).color(palette.text_muted)
+                        };
                         // The class (when the name doesn't already say it) and
                         // any warning keep their room after the name, unless the
                         // row is too narrow for them; the name ends in "…".
@@ -440,7 +467,7 @@ impl Explorer {
                             .scope(|ui| {
                                 ui.set_max_width(name_room.max(ARROW_SIZE));
                                 ui.add(
-                                    egui::Button::new((icon, row.name.as_str()))
+                                    egui::Button::new((icon, name))
                                         .selected(is_selected)
                                         .frame(false)
                                         .truncate()
@@ -530,7 +557,8 @@ impl Explorer {
                 }
             });
 
-        if let Some(id) = toggled {
+        // While filtering every branch shown is open, so there's nothing to toggle.
+        if let Some(id) = toggled.filter(|_| !filtering) {
             self.toggle(id);
         }
         if let Some(id) = start_rename {
@@ -547,6 +575,52 @@ impl Explorer {
         }
         output
     }
+}
+
+/// A UnionOperation's parts are kept inside it for Separate, out of sight
+/// (Phase 50), and what a SplineMesh or SplineScatter makes is made again
+/// from its settings (Phase 74), so their children have no rows.
+fn hides_children(class: ClassName) -> bool {
+    class == ClassName::UnionOperation || axcenity_core::spline::is_generator(class)
+}
+
+/// Adds `id`'s row and its children's if it or anything below it matches
+/// `filter`, by name or class (case and spaces ignored). Returns whether it
+/// added any.
+fn add_matching_rows(
+    world: &World,
+    id: InstanceId,
+    depth: usize,
+    filter: &str,
+    rows: &mut Vec<Row>,
+) -> bool {
+    let Some(instance) = world.get(id) else {
+        return false;
+    };
+    let matches = properties::matches_filter(instance.name(), filter)
+        || properties::matches_filter(instance.class().as_str(), filter);
+    let at = rows.len();
+    rows.push(Row {
+        id,
+        name: instance.name().to_string(),
+        class: instance.class(),
+        depth,
+        has_children: false,
+        expanded: true,
+        matches,
+    });
+    let mut below = false;
+    if !hides_children(instance.class()) {
+        for &child in instance.children() {
+            below |= add_matching_rows(world, child, depth + 1, filter, rows);
+        }
+    }
+    if !matches && !below {
+        rows.truncate(at);
+        return false;
+    }
+    rows[at].has_children = below;
+    true
 }
 
 /// The icon in front of `row`'s name: its class's, or for a part its shape's,
