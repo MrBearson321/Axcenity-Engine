@@ -125,6 +125,16 @@ pub const PALETTE: [(Insertable, &str); 13] = [
 /// The scale modes, as the toolbar names them.
 pub const SCALE_MODES: [&str; 3] = ["Fixed", "Fit", "Scale"];
 
+/// What each scale mode does, on hover in the toolbar.
+const SCALE_MODE_TIPS: [&str; 3] = [
+    "Fixed: laid out at the window's own size, in screen pixels, unscaled: smaller on \
+     big screens",
+    "Fit: scaled to fit the design size inside the screen, with empty bars on screens \
+     of another shape",
+    "Scale: scaled with the screen and fills it, keeping anchored elements against \
+     their edges. Best for most games",
+];
+
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 8.0;
 /// The space left around the artboard when it's fitted into view, in points.
@@ -180,6 +190,8 @@ pub enum DesignerAction {
     },
     /// Duplicates the selection (as Ctrl+D does).
     Duplicate,
+    /// Delete the selection, as the Delete key does (one undo step).
+    Delete,
     /// Pastes copied elements into `parent`, with fresh `Id`s and copies
     /// of their own rules, as one undo step.
     Paste {
@@ -416,6 +428,9 @@ pub struct UiDesigner {
     /// direction.
     guide_drag: Option<(Option<usize>, bool)>,
     text_editing: Option<TextEditing>,
+    /// The element whose Name the inspector focuses next frame, all
+    /// selected, to type over (the right-click menu's Rename).
+    renaming: Option<InstanceId>,
     /// The project's font families, and the font list they were read from.
     project_fonts: Option<(usize, Vec<String>)>,
     /// The states editor's tab: which state the inspector edits.
@@ -511,6 +526,7 @@ impl Default for UiDesigner {
             guides: HashMap::new(),
             guide_drag: None,
             text_editing: None,
+            renaming: None,
             project_fonts: None,
             state: UiState::Normal,
             show_state: true,
@@ -834,7 +850,13 @@ impl UiDesigner {
             self.anchor_drag = None;
             self.rotate_drag = None;
             self.live = None;
-            ui.label("There's no ScreenGui to design yet.");
+            ui.add_space(8.0);
+            ui.heading(theme::with_icon(icons::LAYOUT, "UI Designer"));
+            ui.label(
+                "Lay out the game's 2D interface here: menus, buttons, a health bar. It lives \
+                 in a ScreenGui, a layer drawn over the game, and there isn't one yet.",
+            );
+            ui.add_space(4.0);
             if ui
                 .add_enabled(
                     scene.editing,
@@ -1014,7 +1036,7 @@ impl UiDesigner {
                 responsive::room_for(ui, 170.0);
                 let mut mode = scale_mode(world, gui);
                 let options = SCALE_MODES.map(|mode| (mode, None, mode));
-                if widgets::segmented(ui, &mut mode, &options) {
+                if widgets::segmented_tips(ui, &mut mode, &options, &SCALE_MODE_TIPS).0 {
                     actions.push(DesignerAction::ScaleMode(gui, mode));
                 }
                 // The design size: typed, dragged or picked.

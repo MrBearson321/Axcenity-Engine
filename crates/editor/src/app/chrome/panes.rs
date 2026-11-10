@@ -252,6 +252,7 @@ impl EditorApp {
                     self.paste_style(ids, declarations)
                 }
                 DesignerAction::Duplicate => self.duplicate_selected(),
+                DesignerAction::Delete => self.delete_selected(),
                 DesignerAction::Paste { parent, clipboard } => self.paste_ui(parent, clipboard),
                 DesignerAction::DesignSize { gui, width, height } => {
                     let Some(name) = self.world.get(gui).map(|i| i.name().to_owned()) else {

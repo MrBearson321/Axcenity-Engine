@@ -168,7 +168,7 @@ pub fn show(
             let declarations = axcenity_ui::applied_declarations(world, id, stylesheets);
             if declarations.is_empty() {
                 ui.weak(
-                    "No CSS styles this element yet. Add a style below: it goes in a rule for \
+                    "No CSS rule styles this element yet. Add a style below: it goes in a rule for \
                      this element only. Drag its handles in the viewport to move and size it.",
                 );
             }
