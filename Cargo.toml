@@ -31,6 +31,7 @@ axcenity-render-types = { path = "crates/render-types" }
 axcenity-save = { path = "crates/save" }
 axcenity-scene = { path = "crates/scene" }
 axcenity-script = { path = "crates/script" }
+axcenity-sim = { path = "crates/sim" }
 axcenity-terrain = { path = "crates/terrain" }
 axcenity-testing = { path = "crates/testing" }
 axcenity-ui = { path = "crates/ui" }

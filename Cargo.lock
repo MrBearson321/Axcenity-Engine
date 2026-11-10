@@ -899,6 +899,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "axcenity-sim"
+version = "0.1.0"
+dependencies = [
+ "axcenity-anim",
+ "axcenity-assets",
+ "axcenity-character",
+ "axcenity-core",
+ "axcenity-nav",
+ "axcenity-physics",
+ "axcenity-script",
+ "axcenity-workspace-hack",
+ "profiling",
+]
+
+[[package]]
 name = "axcenity-terrain"
 version = "0.1.0"
 dependencies = [
@@ -915,14 +930,12 @@ dependencies = [
 name = "axcenity-testing"
 version = "0.1.0"
 dependencies = [
- "axcenity-anim",
  "axcenity-assets",
  "axcenity-character",
  "axcenity-core",
- "axcenity-nav",
- "axcenity-physics",
  "axcenity-project",
  "axcenity-script",
+ "axcenity-sim",
  "axcenity-workspace-hack",
  "profiling",
 ]
