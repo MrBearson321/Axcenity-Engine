@@ -39,6 +39,7 @@ use axcenity_render::glam::Vec3;
 use axcenity_render::{Capabilities, GraphicsSettings, Renderer};
 use axcenity_scene::{FlyCamera, MoveKeys, UiFrame};
 use axcenity_script::{CameraState, CameraView, GameCamera, OutputKind, ScriptRuntime};
+use axcenity_sim::Sim;
 use axcenity_ui::{
     LoadingGui, LogLevel, LogSide, NavKey, UiCursor, UiEvent, UiInput, UiInteraction,
 };
@@ -291,7 +292,8 @@ fn main() -> Result<()> {
     app.preload = Some(preload);
     event_loop.run_app(&mut app)?;
     // Tell the other players this one is gone.
-    app.network.disconnect(&mut app.world, &mut app.scripts);
+    app.network
+        .disconnect(&mut app.sim.world, &mut app.sim.scripts);
 
     // Errors inside the event loop can't use `?`, so they're stored and reported here.
     match app.error {
@@ -579,18 +581,11 @@ struct App {
     loading_gui: Option<LoadingGui>,
     /// How the loading screen goes, for each level loaded (Phase 48).
     loading_screen: axcenity_project::LoadingScreen,
-    world: World,
+    /// The world, scripts, physics, characters, agents, animators and assets.
+    sim: Sim,
     stylesheets: Vec<axcenity_ui::Stylesheet>,
-    /// Runs the scripts, and keeps the ones paused by `task.wait`.
-    scripts: ScriptRuntime,
     /// Audio output and handles, created only when a script first plays a sound.
     audio: GameAudio,
-    /// Simulates the unanchored parts.
-    physics: Physics,
-    /// Walks a character and owns the camera when one is present.
-    characters: Controllers,
-    /// Walks NavigationAgents along their paths.
-    agents: Agents,
     /// Mouse look, in pixels, for the character camera. Right and down are positive.
     look_dx: f32,
     look_dy: f32,
@@ -604,11 +599,6 @@ struct App {
     /// `RequestStreamAroundAsync` calls waiting for their region: each
     /// request, and how many seconds it may still wait (Phase 80).
     region_waits: Vec<(u64, f64)>,
-    /// Plays the Animators (state machines, AnimationTracks and played
-    /// Animations), posing skeletons and setting keyed properties.
-    animators: Animators,
-    /// The project's models, for MeshParts.
-    assets: Assets,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     /// The player's data for this game (saves and `graphics.json`), if
@@ -707,18 +697,15 @@ impl App {
             splash: splash::Splash::new(),
             loading_gui: None,
             loading_screen: axcenity_project::LoadingScreen::default(),
-            world,
+            sim: Sim {
+                animators,
+                ..Sim::new(world, scripts, assets)
+            },
             stylesheets,
-            scripts,
             audio: GameAudio::default(),
-            physics: Physics::with_assets(assets.clone()),
-            characters: Controllers::default(),
-            agents: Agents::default(),
             particles: axcenity_scene::Particles::new(),
             terrain: axcenity_scene::TerrainCache::new(),
             region_waits: Vec::new(),
-            animators,
-            assets,
             window: None,
             renderer: None,
             data_folder: None,
@@ -770,13 +757,15 @@ impl App {
     /// simulates.
     fn follow_server(&mut self) {
         self.following = true;
-        self.physics = Physics::with_assets(self.assets.clone());
-        self.characters = Controllers::default();
-        self.agents = Agents::default();
+        self.sim.physics = Physics::with_assets(self.sim.assets.clone());
+        self.sim.characters = Controllers::default();
+        self.sim.agents = Agents::default();
         self.particles = axcenity_scene::Particles::new();
         self.terrain = axcenity_scene::TerrainCache::new();
-        self.animators = Animators::with_ground(axcenity_character::foot_ground);
-        self.animators.update(&mut self.world, &self.assets, 0.0);
+        self.sim.animators = Animators::with_ground(axcenity_character::foot_ground);
+        self.sim
+            .animators
+            .update(&mut self.sim.world, &self.sim.assets, 0.0);
         self.text_focus = None;
         self.ui_pressed_button = None;
     }
@@ -789,7 +778,7 @@ impl App {
     /// wheel since the last frame. None while a TextBox is typed in or a
     /// Sequence locks input (Phase 51).
     fn controller_input(&mut self, seconds: f32) -> MoveInput {
-        self.input.map = self.scripts.input_map();
+        self.input.map = self.sim.scripts.input_map();
         let look = [self.look_dx, self.look_dy];
         let zoom = self.zoom;
         self.look_dx = 0.0;
@@ -797,7 +786,7 @@ impl App {
         self.zoom = 0.0;
         if self.text_focus.is_some()
             || self.chat_typing.is_some()
-            || self.scripts.movement_locked(&self.world)
+            || self.sim.scripts.movement_locked(&self.sim.world)
         {
             return MoveInput::default();
         }
@@ -813,11 +802,11 @@ impl App {
     }
 
     fn follow_level_loads(&mut self) {
-        if self.scripts.take_level_loads().is_empty() {
+        if self.sim.scripts.take_level_loads().is_empty() {
             return;
         }
         let shown = LoadingGui::start(
-            &mut self.world,
+            &mut self.sim.world,
             &self.loading_screen.screen_gui,
             self.loading_screen.min_seconds,
             false,
@@ -836,7 +825,7 @@ impl App {
     /// The camera to draw and to hand to scripts: the follow camera when a
     /// third-person controller has a body, otherwise the fly camera.
     fn script_camera(&self) -> CameraState {
-        match self.characters.view(&self.world) {
+        match self.sim.characters.view(&self.sim.world) {
             Some(view) => CameraState {
                 position: view.position,
                 orientation: view.orientation,
@@ -858,20 +847,20 @@ impl App {
     /// Far from the camera and every other player, physics sleeps while
     /// streaming is on (Phase 80).
     fn set_far_physics_sleep(&mut self) {
-        let far = axcenity_core::streaming::Settings::of(&self.world).map(|settings| {
+        let far = axcenity_core::streaming::Settings::of(&self.sim.world).map(|settings| {
             let at = self.shown_camera().position;
             let mut focuses = vec![axcenity_core::Vector3::new(at.x, at.y, at.z)];
-            focuses.extend(self.network.player_focuses(&self.world));
+            focuses.extend(self.network.player_focuses(&self.sim.world));
             (focuses, settings.unload_radius())
         });
-        self.physics.set_far_sleep(far);
+        self.sim.physics.set_far_sleep(far);
     }
 
     /// World streaming on this screen (Phase 80): what's in range of the
     /// camera, regions scripts asked for, and answering those once what's
     /// around them is on the GPU.
     fn step_streaming(&mut self, focus: Vec3, seconds: f64) {
-        self.terrain.streaming.step(&self.world, focus, seconds);
+        self.terrain.streaming.step(&self.sim.world, focus, seconds);
         let on = self.terrain.streaming.settings().is_some();
         if let Some(renderer) = &mut self.renderer {
             renderer.set_background_uploads(on);
@@ -889,7 +878,9 @@ impl App {
             *left -= seconds;
             let ready = *left < REGION_WAIT_SECONDS - 2.0 * seconds && loaded;
             if ready || *left <= 0.0 {
-                self.scripts.finish_stream_around(&mut self.world, *request);
+                self.sim
+                    .scripts
+                    .finish_stream_around(&mut self.sim.world, *request);
                 false
             } else {
                 true
@@ -902,20 +893,25 @@ impl App {
     /// camera flies (unless a controller or a script holds the view), and
     /// LocalScripts see the camera and the window's size.
     fn begin_camera(&mut self, seconds: f32, size: (u32, u32)) {
-        if self.characters.view(&self.world).is_none() && !self.scripts.camera_scripted() {
+        if self.sim.characters.view(&self.sim.world).is_none()
+            && !self.sim.scripts.camera_scripted()
+        {
             self.camera.update(&self.keys, seconds);
         }
         let seen = self.script_camera();
-        self.scripts.set_viewport_size(size.0 as f32, size.1 as f32);
-        self.scripts.set_camera(seen);
+        self.sim
+            .scripts
+            .set_viewport_size(size.0 as f32, size.1 as f32);
+        self.sim.scripts.set_camera(seen);
     }
 
     /// Just before step 6 draws: LocalScripts' functions bound with
     /// `BindToRenderStep` run in priority order, then `RenderStepped`
     /// fires, so what they move (the camera too) is drawn this frame.
     fn render_step(&mut self, seconds: f32) {
-        self.scripts
-            .render_step(&mut self.world, f64::from(seconds));
+        self.sim
+            .scripts
+            .render_step(&mut self.sim.world, f64::from(seconds));
     }
 
     /// Before drawing: a LocalScript's move of a Custom camera goes to the
@@ -923,14 +919,17 @@ impl App {
     /// Follow or Track camera follows its subject, which physics and
     /// animation have moved, and shakes move on.
     fn end_camera(&mut self, seconds: f32) {
-        if self.characters.view(&self.world).is_none()
-            && let Some(view) = self.scripts.take_camera_move()
+        if self.sim.characters.view(&self.sim.world).is_none()
+            && let Some(view) = self.sim.scripts.take_camera_move()
         {
             self.camera.set_view(view.position, view.orientation);
         } else {
-            let _ = self.scripts.take_camera_move();
+            let _ = self.sim.scripts.take_camera_move();
         }
-        self.game_camera = self.scripts.step_camera(&self.world, f64::from(seconds));
+        self.game_camera = self
+            .sim
+            .scripts
+            .step_camera(&self.sim.world, f64::from(seconds));
     }
 
     fn process_ui_mouse_events(&mut self, size: (u32, u32)) {
@@ -941,7 +940,7 @@ impl App {
                 continue;
             }
             let layout = axcenity_ui::layout_ui_interactive(
-                &self.world,
+                &self.sim.world,
                 size.0,
                 size.1,
                 &self.stylesheets,
@@ -969,7 +968,10 @@ impl App {
                 // A press on a ScrollingFrame's bar drags the bar instead,
                 // and one on a widget (or an open Dropdown's list) changes it.
                 if let Some(pointer) = in_window
-                    && self.ui.press(&self.world, pointer).apply(&mut self.world)
+                    && self
+                        .ui
+                        .press(&self.sim.world, pointer)
+                        .apply(&mut self.sim.world)
                 {
                     self.ui_pressed_button = None;
                     self.ui_mouse_taken = true;
@@ -995,10 +997,12 @@ impl App {
             } else {
                 if let Some(button) = self.ui_pressed_button
                     && self.ui_pressed_button == hit
-                    && self.ui.activate(&self.world, button)
+                    && self.ui.activate(&self.sim.world, button)
                 {
-                    self.scripts.activate_ui_button(&mut self.world, button);
-                    print_output(&mut self.scripts);
+                    self.sim
+                        .scripts
+                        .activate_ui_button(&mut self.sim.world, button);
+                    print_output(&mut self.sim.scripts);
                 }
                 self.ui_pressed_button = None;
                 self.ui_mouse_down = false;
@@ -1010,15 +1014,18 @@ impl App {
                 // list, and over one of its options picks it.
                 let _ = self
                     .ui
-                    .release(&self.world, in_window)
-                    .apply(&mut self.world);
+                    .release(&self.sim.world, in_window)
+                    .apply(&mut self.sim.world);
             }
         }
         // A held press scrolls a ScrollingFrame by its bar, or by its content
         // once it has moved far enough; then the button it began on won't fire.
         if self.ui_mouse_down
             && let Some(pointer) = self.pointer
-            && self.ui.drag(&self.world, pointer).apply(&mut self.world)
+            && self
+                .ui
+                .drag(&self.sim.world, pointer)
+                .apply(&mut self.sim.world)
         {
             self.ui_pressed_button = None;
         }
@@ -1030,7 +1037,7 @@ impl App {
     /// controller's Confirm or Back finishes.
     fn process_ui_navigation(&mut self, seconds: f32) {
         let mut keys = std::mem::take(&mut self.nav_keys);
-        keys.extend(self.input.poll_pads(&self.ui, &self.world, seconds));
+        keys.extend(self.input.poll_pads(&self.ui, &self.sim.world, seconds));
         for key in keys {
             if let Some(id) = self.text_focus {
                 if matches!(key, NavKey::Confirm | NavKey::Back) {
@@ -1038,8 +1045,13 @@ impl App {
                 }
                 continue;
             }
-            let typing = navigate_ui(&mut self.ui, &mut self.world, &mut self.scripts, key);
-            print_output(&mut self.scripts);
+            let typing = navigate_ui(
+                &mut self.ui,
+                &mut self.sim.world,
+                &mut self.sim.scripts,
+                key,
+            );
+            print_output(&mut self.sim.scripts);
             if let Some(id) = typing {
                 self.focus_text(id);
             }
@@ -1051,8 +1063,10 @@ impl App {
             return;
         }
         if let Some(previous) = self.text_focus.take() {
-            self.scripts.release_text_box(&mut self.world, previous);
-            print_output(&mut self.scripts);
+            self.sim
+                .scripts
+                .release_text_box(&mut self.sim.world, previous);
+            print_output(&mut self.sim.scripts);
         }
         self.text_focus = Some(id);
         self.keys = MoveKeys::default();
@@ -1101,7 +1115,7 @@ impl App {
         let Some(window) = &self.window else {
             return self.pointer;
         };
-        let (behavior, icon) = self.scripts.mouse();
+        let (behavior, icon) = self.sim.scripts.mouse();
         let (lock, visible) = input::cursor_mode(behavior, icon, self.looking);
         if (behavior, icon) != self.mouse {
             self.mouse = (behavior, icon);
@@ -1119,8 +1133,8 @@ impl App {
 
     fn blur_text(&mut self, id: InstanceId) {
         self.text_focus = None;
-        self.scripts.release_text_box(&mut self.world, id);
-        print_output(&mut self.scripts);
+        self.sim.scripts.release_text_box(&mut self.sim.world, id);
+        print_output(&mut self.sim.scripts);
     }
 
     fn type_text(&mut self, event: &winit::event::KeyEvent) {
@@ -1148,7 +1162,7 @@ impl App {
         let Some(command) = command else {
             return;
         };
-        if axcenity_ui::edit_text_box(&mut self.world, id, command)
+        if axcenity_ui::edit_text_box(&mut self.sim.world, id, command)
             == axcenity_ui::TextOutcome::Finished
         {
             self.blur_text(id);
@@ -1167,7 +1181,7 @@ impl App {
             PhysicalKey::Code(KeyCode::Escape) => self.chat_typing = None,
             PhysicalKey::Code(KeyCode::Enter | KeyCode::NumpadEnter) => {
                 let line = self.chat_typing.take().unwrap_or_default();
-                self.scripts.send_chat(&line);
+                self.sim.scripts.send_chat(&line);
             }
             PhysicalKey::Code(KeyCode::Backspace) => {
                 line.pop();
@@ -1294,11 +1308,11 @@ impl ApplicationHandler for App {
                 let folder = self.data_folder.as_deref();
                 let capabilities = *renderer.capabilities();
                 // A LocalScript may have changed them as it started.
-                let settings = match self.scripts.take_graphics_change() {
+                let settings = match self.sim.scripts.take_graphics_change() {
                     Some(change) => graphics::changed(folder, change, &capabilities),
                     None => graphics::start(folder, &capabilities),
                 };
-                self.scripts.set_graphics(&settings, &capabilities);
+                self.sim.scripts.set_graphics(&settings, &capabilities);
                 set_graphics(&mut renderer, &settings);
                 self.renderer = Some(renderer);
             }
@@ -1365,7 +1379,7 @@ impl ApplicationHandler for App {
                     }
                 } else if pressed
                     && key == Some(KeyCode::Slash)
-                    && axcenity_ui::chat_enabled(&self.world)
+                    && axcenity_ui::chat_enabled(&self.sim.world)
                 {
                     // `/` opens the chat (Phase 67).
                     self.chat_typing = Some(String::new());
@@ -1383,7 +1397,7 @@ impl ApplicationHandler for App {
                     if pressed
                         && let Some(key) = script
                         && let Some(nav) = axcenity_ui::nav_key(&self.input.map, key, shift)
-                        && self.ui.takes(&self.world, nav)
+                        && self.ui.takes(&self.sim.world, nav)
                     {
                         self.nav_keys.push(nav);
                         self.push_key(key, true, true);
@@ -1425,10 +1439,10 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 let scrolled = self.pointer.is_some_and(|pointer| {
                     self.ui
-                        .wheel(&self.world, pointer, wheel_pixels(delta))
-                        .apply(&mut self.world)
+                        .wheel(&self.sim.world, pointer, wheel_pixels(delta))
+                        .apply(&mut self.sim.world)
                 });
-                if !scrolled && !tool_in_hand(&self.scripts, &self.world) {
+                if !scrolled && !tool_in_hand(&self.sim.scripts, &self.sim.world) {
                     self.zoom += wheel_notches(delta);
                 }
                 self.input.push(InputEvent {
@@ -1478,15 +1492,19 @@ impl ApplicationHandler for App {
                 // What the UI did last frame and this click: MouseEnter,
                 // MouseLeave and buttons' sounds.
                 let events = self.ui.take_events();
-                let sounds = fire_ui_events(&mut self.scripts, &mut self.world, events);
+                let sounds = fire_ui_events(&mut self.sim.scripts, &mut self.sim.world, events);
                 self.ui_sounds.extend(sounds);
 
                 // Assets changed on disk (`--watch`) are swapped in first,
                 // so this frame's steps use them.
                 if let Some(watcher) = &self.watcher {
                     let paths = watcher.changes();
-                    let lines =
-                        watch::reload(&paths, &self.assets, &mut self.animators, &mut self.audio);
+                    let lines = watch::reload(
+                        &paths,
+                        &self.sim.assets,
+                        &mut self.sim.animators,
+                        &mut self.audio,
+                    );
                     for line in lines {
                         logs::line(LogLevel::Info, None, &line);
                     }
@@ -1494,10 +1512,13 @@ impl ApplicationHandler for App {
 
                 // 0. Network receive: what scripts asked of NetworkService
                 //    last frame, then who joined or left (Phase 63).
-                self.network
-                    .receive(&mut self.world, &mut self.scripts, f64::from(seconds));
+                self.network.receive(
+                    &mut self.sim.world,
+                    &mut self.sim.scripts,
+                    f64::from(seconds),
+                );
                 print_network_log(&mut self.network);
-                print_output(&mut self.scripts);
+                print_output(&mut self.sim.scripts);
                 // `Player:Kick` on this device's player ends the game.
                 if let Some(reason) = self.network.take_kicked() {
                     logs::line(
@@ -1508,10 +1529,10 @@ impl ApplicationHandler for App {
                     event_loop.exit();
                     return;
                 }
-                if !axcenity_ui::chat_enabled(&self.world) {
+                if !axcenity_ui::chat_enabled(&self.sim.world) {
                     self.chat_typing = None;
                 }
-                if self.scripts.is_client_only() && !self.following {
+                if self.sim.scripts.is_client_only() && !self.following {
                     self.follow_server();
                 }
                 // A device following a server only runs its LocalScripts:
@@ -1529,65 +1550,101 @@ impl ApplicationHandler for App {
                 // character takes input, and other devices move their own
                 // (Phase 66). A device following a server moves only its
                 // own character.
-                let others = self.network.other_characters(&self.world, &self.scripts);
-                self.characters
-                    .set_players(self.scripts.local_player(), others);
+                let others = self
+                    .network
+                    .other_characters(&self.sim.world, &self.sim.scripts);
+                self.sim
+                    .characters
+                    .set_players(self.sim.scripts.local_player(), others);
                 self.network.set_running(motion.run);
                 if !simulates {
-                    self.characters
-                        .step(&mut self.world, &self.assets, motion, seconds);
-                    fire_seated(&mut self.scripts, &mut self.world, &mut self.characters);
+                    self.sim.characters.step(
+                        &mut self.sim.world,
+                        &self.sim.assets,
+                        motion,
+                        seconds,
+                    );
+                    fire_seated(
+                        &mut self.sim.scripts,
+                        &mut self.sim.world,
+                        &mut self.sim.characters,
+                    );
                 }
                 if simulates {
-                    self.characters
-                        .step(&mut self.world, &self.assets, motion, seconds);
-                    fire_seated(&mut self.scripts, &mut self.world, &mut self.characters);
-                    fire_landed(&mut self.scripts, &mut self.world, &mut self.characters);
+                    self.sim.characters.step(
+                        &mut self.sim.world,
+                        &self.sim.assets,
+                        motion,
+                        seconds,
+                    );
+                    fire_seated(
+                        &mut self.sim.scripts,
+                        &mut self.sim.world,
+                        &mut self.sim.characters,
+                    );
+                    fire_landed(
+                        &mut self.sim.scripts,
+                        &mut self.sim.world,
+                        &mut self.sim.characters,
+                    );
                     //    Then Humanoids: MoveTo, states and dying (Phase 46).
-                    self.scripts.step_humanoids(
-                        &mut self.world,
-                        &self.characters,
+                    self.sim.scripts.step_humanoids(
+                        &mut self.sim.world,
+                        &self.sim.characters,
                         f64::from(seconds),
                     );
                     //    Then players: their first character, respawns and
                     //    spawn ForceFields (Phase 47).
-                    self.scripts
-                        .step_players(&mut self.world, f64::from(seconds));
+                    self.sim
+                        .scripts
+                        .step_players(&mut self.sim.world, f64::from(seconds));
                     watch.lap("Characters");
                     // Then navigation agents, toward their destinations.
-                    self.agents.step(&mut self.world, &self.assets, seconds);
+                    self.sim
+                        .agents
+                        .step(&mut self.sim.world, &self.sim.assets, seconds);
                     watch.lap("Agents");
-                    for warning in self.agents.take_warnings() {
+                    for warning in self.sim.agents.take_warnings() {
                         logs::line(LogLevel::Warning, None, &format!("warning: {warning}"));
                     }
-                    fire_sensed(&mut self.scripts, &mut self.world, &mut self.agents);
+                    fire_sensed(
+                        &mut self.sim.scripts,
+                        &mut self.sim.world,
+                        &mut self.sim.agents,
+                    );
                 }
-                print_output(&mut self.scripts);
+                print_output(&mut self.sim.scripts);
                 self.begin_camera(seconds, (size.width, size.height));
                 let pointer = self.apply_cursor((size.width, size.height));
                 let events = self.input.take_events(pointer);
-                self.scripts.input_events(&mut self.world, &events);
+                self.sim.scripts.input_events(&mut self.sim.world, &events);
                 //    Then ProximityPrompts and ClickDetectors, by that input,
                 //    then Tools: pickups, the hotbar, Drop and Primary.
                 if simulates {
-                    self.scripts
-                        .step_prompts(&mut self.world, f64::from(seconds));
-                    self.scripts.step_tools(&mut self.world);
+                    self.sim
+                        .scripts
+                        .step_prompts(&mut self.sim.world, f64::from(seconds));
+                    self.sim.scripts.step_tools(&mut self.sim.world);
                 }
                 //    Then Abilities' keys, on every device (Phase 76).
-                self.scripts
-                    .step_abilities(&mut self.world, f64::from(seconds));
-                print_output(&mut self.scripts);
+                self.sim
+                    .scripts
+                    .step_abilities(&mut self.sim.world, f64::from(seconds));
+                print_output(&mut self.sim.scripts);
 
                 watch.lap("Input");
 
                 // 2. Resume scripts whose wait is over (and due `task.delay`s).
                 //    Game time is the sum of the (capped) frame times, so a
                 //    long pause doesn't make every waiting script fire at once.
-                self.scripts.step(&mut self.world, f64::from(seconds));
+                self.sim
+                    .scripts
+                    .step(&mut self.sim.world, f64::from(seconds));
                 //    Then `RunService.Stepped`, before physics.
-                self.scripts.stepped(&mut self.world, f64::from(seconds));
-                print_output(&mut self.scripts);
+                self.sim
+                    .scripts
+                    .stepped(&mut self.sim.world, f64::from(seconds));
+                print_output(&mut self.sim.scripts);
 
                 watch.lap("Scripts");
 
@@ -1596,22 +1653,27 @@ impl ApplicationHandler for App {
                 //    after scripts, so a script cannot drop the character
                 //    for this step. Other parts keep their gravity.
                 // Parts another device moves are held still here.
-                let held = self.network.held_parts(&self.world, &self.scripts);
-                self.physics.set_held(held);
+                let held = self.network.held_parts(&self.sim.world, &self.sim.scripts);
+                self.sim.physics.set_held(held);
                 self.set_far_physics_sleep();
                 if !simulates && self.network.simulates_physics() {
                     // An assembly the server gave this device (a car it
                     // drives) is simulated here; the server does the rest.
-                    self.physics.step(&mut self.world, f64::from(seconds));
-                    let _ = self.physics.take_touches();
-                    let _ = self.physics.take_touch_ends();
+                    self.sim
+                        .physics
+                        .step(&mut self.sim.world, f64::from(seconds));
+                    let _ = self.sim.physics.take_touches();
+                    let _ = self.sim.physics.take_touch_ends();
                 }
                 if simulates {
-                    self.characters.keep_kinematic(&mut self.world);
-                    self.agents.keep_kinematic(&mut self.world);
-                    self.scripts
-                        .apply_shatters(&mut self.world, &mut self.physics);
-                    self.physics.step(&mut self.world, f64::from(seconds));
+                    self.sim.characters.keep_kinematic(&mut self.sim.world);
+                    self.sim.agents.keep_kinematic(&mut self.sim.world);
+                    self.sim
+                        .scripts
+                        .apply_shatters(&mut self.sim.world, &mut self.sim.physics);
+                    self.sim
+                        .physics
+                        .step(&mut self.sim.world, f64::from(seconds));
                     watch.lap("Physics");
 
                     // 4. Fire `Touched` for parts that started touching
@@ -1619,26 +1681,33 @@ impl ApplicationHandler for App {
                     //    that moved), `TouchEnded` for those that stopped,
                     //    then `RunService.Heartbeat`. Handlers that wait
                     //    carry on in step 2.
-                    let touches = self.physics.take_touches();
-                    self.scripts.fire_touched(&mut self.world, &touches);
-                    let ends = self.physics.take_touch_ends();
-                    self.scripts.fire_touch_ended(&mut self.world, &ends);
+                    let touches = self.sim.physics.take_touches();
+                    self.sim.scripts.fire_touched(&mut self.sim.world, &touches);
+                    let ends = self.sim.physics.take_touch_ends();
+                    self.sim
+                        .scripts
+                        .fire_touch_ended(&mut self.sim.world, &ends);
                     //    Then `Broken` and `Shattered`, for joints and parts
                     //    that broke.
-                    self.scripts.fire_breaks(&mut self.world, &mut self.physics);
+                    self.sim
+                        .scripts
+                        .fire_breaks(&mut self.sim.world, &mut self.sim.physics);
                     //    Then damage zones and regeneration, and health bars
                     //    follow their Health.
-                    self.scripts
-                        .step_health(&mut self.world, f64::from(seconds));
+                    self.sim
+                        .scripts
+                        .step_health(&mut self.sim.world, f64::from(seconds));
                 }
-                self.scripts.heartbeat(&mut self.world, f64::from(seconds));
-                print_output(&mut self.scripts);
+                self.sim
+                    .scripts
+                    .heartbeat(&mut self.sim.world, f64::from(seconds));
+                print_output(&mut self.sim.scripts);
                 watch.lap("Heartbeat");
                 let heard = listener_of_view(self.shown_view());
                 apply_audio(
-                    &mut self.scripts,
-                    &mut self.world,
-                    &self.assets,
+                    &mut self.sim.scripts,
+                    &mut self.sim.world,
+                    &self.sim.assets,
                     &mut self.audio,
                     heard,
                     std::mem::take(&mut self.ui_sounds),
@@ -1650,34 +1719,41 @@ impl ApplicationHandler for App {
                         .as_ref()
                         .is_some_and(|renderer| renderer.capabilities().compute_shaders),
                 );
-                for (emitter, count) in self.scripts.take_particle_emits() {
-                    self.particles.emit(&self.world, emitter, count);
+                for (emitter, count) in self.sim.scripts.take_particle_emits() {
+                    self.particles.emit(&self.sim.world, emitter, count);
                 }
-                self.particles.update(&self.world, seconds);
+                self.particles.update(&self.sim.world, seconds);
                 // Animators move on and pose their models, after scripts
                 // asked for states and physics moved the parts.
-                let events =
-                    self.animators
-                        .update(&mut self.world, &self.assets, f64::from(seconds));
+                let events = self.sim.animators.update(
+                    &mut self.sim.world,
+                    &self.sim.assets,
+                    f64::from(seconds),
+                );
                 for event in events {
                     let (animator, name, args) = event.script_event();
-                    self.scripts
-                        .fire_instance_event(&mut self.world, animator, name, &args);
+                    self.sim.scripts.fire_instance_event(
+                        &mut self.sim.world,
+                        animator,
+                        name,
+                        &args,
+                    );
                 }
-                print_output(&mut self.scripts);
-                for error in self.animators.take_errors() {
+                print_output(&mut self.sim.scripts);
+                for error in self.sim.animators.take_errors() {
                     logs::line(LogLevel::Error, None, &format!("error: {error}"));
                 }
                 // Tools in hand follow the posed hands.
-                self.scripts
-                    .place_tools(&mut self.world, self.animators.poses());
-                print_output(&mut self.scripts);
+                self.sim
+                    .scripts
+                    .place_tools(&mut self.sim.world, self.sim.animators.poses());
+                print_output(&mut self.sim.scripts);
 
                 // A level loaded this frame shows the loading screen again.
                 self.follow_level_loads();
                 // The loading screen goes once its time is up and, when the
                 // game waits for one, a LocalScript has said it's ready.
-                let ready = self.scripts.take_loading_screen_removed();
+                let ready = self.sim.scripts.take_loading_screen_removed();
                 if ready {
                     self.splash.release();
                 }
@@ -1686,7 +1762,7 @@ impl ApplicationHandler for App {
                 self.splash.set_loading(loading_assets);
                 if let Some(loading) = &mut self.loading_gui {
                     loading.set_assets_loading(loading_assets);
-                    loading.advance(&mut self.world, seconds, ready);
+                    loading.advance(&mut self.sim.world, seconds, ready);
                 }
 
                 watch.lap("Animation");
@@ -1697,11 +1773,11 @@ impl ApplicationHandler for App {
                 // 6. Build and render, from the camera scripts left, after
                 //    the render step's bound functions and `RenderStepped`.
                 self.render_step(seconds);
-                print_output(&mut self.scripts);
+                print_output(&mut self.sim.scripts);
                 self.end_camera(seconds);
                 // A LocalScript's graphics change (`UserGameSettings`) is
                 // saved and drawn from this frame.
-                if let Some(change) = self.scripts.take_graphics_change()
+                if let Some(change) = self.sim.scripts.take_graphics_change()
                     && let Some(renderer) = &mut self.renderer
                 {
                     let capabilities = *renderer.capabilities();
@@ -1716,8 +1792,8 @@ impl ApplicationHandler for App {
 
                 let (mut draw_list, ui_layout) =
                     axcenity_scene::build_draw_list_with_ui_interaction(
-                        &self.world,
-                        &self.assets,
+                        &self.sim.world,
+                        &self.sim.assets,
                         render_camera,
                         ui_size,
                         &self.stylesheets,
@@ -1731,13 +1807,16 @@ impl ApplicationHandler for App {
                             },
                             seconds,
                         },
-                        self.animators.poses(),
+                        self.sim.animators.poses(),
                         &mut self.terrain,
                     );
                 watch.lap("Draw list");
                 self.note_ui_warnings(&ui_layout.warnings);
                 // The UI's cursor, else a ClickDetector's under the mouse.
-                let cursor = match (ui_layout.cursor, self.scripts.click_cursor(&self.world)) {
+                let cursor = match (
+                    ui_layout.cursor,
+                    self.sim.scripts.click_cursor(&self.sim.world),
+                ) {
                     (UiCursor::Default, Some(name)) => name.parse().unwrap_or(CursorIcon::Pointer),
                     (cursor, _) => cursor_icon(cursor),
                 };
@@ -1749,9 +1828,9 @@ impl ApplicationHandler for App {
                 }
                 // The hotbar, the leaderboard, then ProximityPrompts that
                 // show, over the rest of the UI.
-                if let Some(inventory) = self.scripts.player_inventory(&self.world) {
+                if let Some(inventory) = self.sim.scripts.player_inventory(&self.sim.world) {
                     draw_list.ui.extend(axcenity_ui::hotbar_items(
-                        &self.world,
+                        &self.sim.world,
                         inventory,
                         &self.stylesheets,
                         size.width,
@@ -1759,26 +1838,26 @@ impl ApplicationHandler for App {
                     ));
                 }
                 // The ability bar (Phase 76), with its cooldown sweeps.
-                let abilities = self.scripts.ability_bar(&self.world);
+                let abilities = self.sim.scripts.ability_bar(&self.sim.world);
                 draw_list.ui.extend(axcenity_ui::ability_bar_items(
-                    &self.world,
+                    &self.sim.world,
                     &abilities,
                     &self.stylesheets,
                     size.width,
                     size.height,
                 ));
                 // The quest tracker and the dialogue box (Phase 77).
-                let quests = self.scripts.quest_tracker(&self.world);
+                let quests = self.sim.scripts.quest_tracker(&self.sim.world);
                 draw_list.ui.extend(axcenity_ui::quest_tracker_items(
-                    &self.world,
+                    &self.sim.world,
                     &quests,
                     &self.stylesheets,
                     size.width,
                     size.height,
                 ));
-                if let Some(dialogue) = self.scripts.dialogue_view(&self.world) {
+                if let Some(dialogue) = self.sim.scripts.dialogue_view(&self.sim.world) {
                     draw_list.ui.extend(axcenity_ui::dialogue_box_items(
-                        &self.world,
+                        &self.sim.world,
                         &dialogue,
                         &self.stylesheets,
                         size.width,
@@ -1787,9 +1866,9 @@ impl ApplicationHandler for App {
                 }
                 // The leaderboard (each Player's `leaderstats`), unless Tab
                 // hid it.
-                if self.scripts.leaderboard_shown() {
+                if self.sim.scripts.leaderboard_shown() {
                     draw_list.ui.extend(axcenity_ui::leaderboard_items(
-                        &self.world,
+                        &self.sim.world,
                         &self.stylesheets,
                         size.width,
                         size.height,
@@ -1797,13 +1876,14 @@ impl ApplicationHandler for App {
                 }
                 // The chat window (Phase 67), at the bottom left.
                 let lines: Vec<(Option<String>, String)> = self
+                    .sim
                     .scripts
                     .chat_lines()
                     .into_iter()
                     .map(|line| (line.from, line.text))
                     .collect();
                 draw_list.ui.extend(axcenity_ui::chat_items(
-                    &self.world,
+                    &self.sim.world,
                     &lines,
                     self.chat_typing.as_deref(),
                     &self.stylesheets,
@@ -1811,14 +1891,14 @@ impl ApplicationHandler for App {
                     size.height,
                 ));
                 draw_list.ui.extend(prompt_items(
-                    &self.world,
-                    self.scripts.shown_prompts(),
+                    &self.sim.world,
+                    self.sim.scripts.shown_prompts(),
                     &self.stylesheets,
                     &render_camera,
                     size,
                 ));
                 self.particles
-                    .draw(&mut draw_list, &self.world, &self.assets);
+                    .draw(&mut draw_list, &self.sim.world, &self.sim.assets);
                 self.particles.add_weather(&mut draw_list);
                 self.shader_time += seconds;
                 draw_list.time = self.shader_time;
@@ -1857,12 +1937,12 @@ impl ApplicationHandler for App {
                     ));
                 }
                 // Models that couldn't be loaded, by physics or for drawing.
-                for error in self.assets.take_errors() {
+                for error in self.sim.assets.take_errors() {
                     logs::line(LogLevel::Error, None, &format!("error: {error}"));
                 }
                 // Network send: after the frame's scripts, physics and UI
                 // layout, before rendering.
-                self.network.send(&self.world, &mut self.scripts);
+                self.network.send(&self.sim.world, &mut self.sim.scripts);
                 watch.lap("UI");
                 // `|| ...` is a closure: a small function the renderer calls at the right moment.
                 let window = self
@@ -1916,8 +1996,8 @@ impl ApplicationHandler for App {
         }
         let (dx, dy) = (dx as f32, dy as f32);
         self.input.add_motion(dx, dy);
-        if self.looking && !self.scripts.camera_scripted() {
-            if self.characters.view(&self.world).is_some() {
+        if self.looking && !self.sim.scripts.camera_scripted() {
+            if self.sim.characters.view(&self.sim.world).is_some() {
                 self.look_dx += dx;
                 self.look_dy += dy;
             } else {

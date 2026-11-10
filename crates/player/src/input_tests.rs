@@ -56,20 +56,24 @@ impl App {
     /// One frame's input and character step, as the frame loop runs them,
     /// then scripts, the kinematic hold and physics.
     fn input_frame(&mut self) {
-        self.input.map = self.scripts.input_map();
+        self.input.map = self.sim.scripts.input_map();
         let motion = self.input.motion_input([0.0, 0.0], 0.0, FRAME);
-        self.characters
-            .step(&mut self.world, &self.assets, motion, FRAME);
+        self.sim
+            .characters
+            .step(&mut self.sim.world, &self.sim.assets, motion, FRAME);
         let events = self.input.take_events(self.pointer);
-        self.scripts.input_events(&mut self.world, &events);
-        self.scripts.step(&mut self.world, f64::from(FRAME));
-        self.characters.keep_kinematic(&mut self.world);
-        self.physics.step(&mut self.world, f64::from(FRAME));
-        self.scripts.heartbeat(&mut self.world, f64::from(FRAME));
+        self.sim.scripts.input_events(&mut self.sim.world, &events);
+        self.sim.scripts.step(&mut self.sim.world, f64::from(FRAME));
+        self.sim.characters.keep_kinematic(&mut self.sim.world);
+        self.sim.physics.step(&mut self.sim.world, f64::from(FRAME));
+        self.sim
+            .scripts
+            .heartbeat(&mut self.sim.world, f64::from(FRAME));
     }
 
     fn output(&mut self) -> Vec<String> {
-        self.scripts
+        self.sim
+            .scripts
             .take_output()
             .into_iter()
             .map(|line| line.text)
@@ -78,11 +82,13 @@ impl App {
 
     fn body_height(&self) -> f32 {
         let model = self
+            .sim
             .world
-            .find_first_child(self.world.workspace(), "Character")
+            .find_first_child(self.sim.world.workspace(), "Character")
             .unwrap();
-        let body = self.world.find_first_child(model, "Body").unwrap();
-        self.world
+        let body = self.sim.world.find_first_child(model, "Body").unwrap();
+        self.sim
+            .world
             .get(body)
             .unwrap()
             .property("Position")
@@ -112,29 +118,36 @@ impl App {
     /// Swaps the character's ThirdPersonController for a FirstPersonController.
     fn first_person(&mut self) {
         let model = self
+            .sim
             .world
-            .find_first_child(self.world.workspace(), "Character")
+            .find_first_child(self.sim.world.workspace(), "Character")
             .unwrap();
         let third = self
+            .sim
             .world
             .find_first_child(model, "ThirdPersonController")
             .unwrap();
-        self.world.destroy(third).unwrap();
-        let first = self.world.create(ClassName::FirstPersonController).unwrap();
-        self.world.set_parent(first, Some(model)).unwrap();
-        self.characters = Controllers::default();
+        self.sim.world.destroy(third).unwrap();
+        let first = self
+            .sim
+            .world
+            .create(ClassName::FirstPersonController)
+            .unwrap();
+        self.sim.world.set_parent(first, Some(model)).unwrap();
+        self.sim.characters = Controllers::default();
     }
 }
 
 #[test]
 fn a_local_script_gets_the_click_and_a_click_on_a_text_button_is_game_processed() {
     let (mut app, _) = open("hello-menu", None);
-    let script = app.world.create(ClassName::LocalScript).unwrap();
-    app.world
-        .set_parent(script, Some(app.world.starter_player_scripts()))
+    let script = app.sim.world.create(ClassName::LocalScript).unwrap();
+    app.sim
+        .world
+        .set_parent(script, Some(app.sim.world.starter_player_scripts()))
         .unwrap();
-    app.scripts.start_script(
-        &mut app.world,
+    app.sim.scripts.start_script(
+        &mut app.sim.world,
         script,
         "clicks.client.lua",
         r#"
@@ -147,7 +160,7 @@ fn a_local_script_gets_the_click_and_a_click_on_a_text_button_is_game_processed(
     );
     let size = (1280, 720);
     let layout = axcenity_ui::layout_ui_interactive(
-        &app.world,
+        &app.sim.world,
         size.0,
         size.1,
         &app.stylesheets,
@@ -155,8 +168,9 @@ fn a_local_script_gets_the_click_and_a_click_on_a_text_button_is_game_processed(
         None,
     );
     let play = app
+        .sim
         .world
-        .find_first_descendant(app.world.workspace(), "Play")
+        .find_first_descendant(app.sim.world.workspace(), "Play")
         .unwrap();
     let rect = layout.element(play).unwrap().rect;
     let on_play = [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0];
@@ -202,12 +216,13 @@ fn rebinding_jump_to_e_in_the_input_map_makes_both_controllers_jump_on_e() {
 fn a_scripts_rebind_changes_what_the_controller_jumps_on_at_once() {
     let (mut app, _) = open("hello-character", None);
     assert!(app.jumps_on(KeyCode::Space));
-    let script = app.world.create(ClassName::LocalScript).unwrap();
-    app.world
-        .set_parent(script, Some(app.world.starter_player_scripts()))
+    let script = app.sim.world.create(ClassName::LocalScript).unwrap();
+    app.sim
+        .world
+        .set_parent(script, Some(app.sim.world.starter_player_scripts()))
         .unwrap();
-    app.scripts.start_script(
-        &mut app.world,
+    app.sim.scripts.start_script(
+        &mut app.sim.world,
         script,
         "rebind.client.lua",
         "game:GetService('UserInputService'):RebindAction('Jump', {Enum.KeyCode.J})",
@@ -224,7 +239,7 @@ fn a_gamepads_left_stick_walks_the_character_and_its_a_button_jumps_with_no_scri
     let mut pad = |app: &mut App, kind: InputKind| {
         let mut events = [InputEvent::new(kind)];
         let map = app.input.map.clone();
-        let keys = pads.update(&app.ui, &app.world, &map, &mut events, FRAME);
+        let keys = pads.update(&app.ui, &app.sim.world, &map, &mut events, FRAME);
         assert!(
             keys.is_empty(),
             "nothing in this game takes focus: {keys:?}"
@@ -235,12 +250,14 @@ fn a_gamepads_left_stick_walks_the_character_and_its_a_button_jumps_with_no_scri
         app.input_frame();
     }
     let model = app
+        .sim
         .world
-        .find_first_child(app.world.workspace(), "Character")
+        .find_first_child(app.sim.world.workspace(), "Character")
         .unwrap();
-    let body = app.world.find_first_child(model, "Body").unwrap();
+    let body = app.sim.world.find_first_child(model, "Body").unwrap();
     let at = |app: &App| {
-        app.world
+        app.sim
+            .world
             .get(body)
             .unwrap()
             .property("Position")

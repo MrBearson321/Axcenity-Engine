@@ -753,6 +753,7 @@ dependencies = [
  "axcenity-save",
  "axcenity-scene",
  "axcenity-script",
+ "axcenity-sim",
  "axcenity-ui",
  "axcenity-workspace-hack",
  "env_logger",
