@@ -251,6 +251,32 @@ impl EditorApp {
                 DesignerAction::PasteStyle { ids, declarations } => {
                     self.paste_style(ids, declarations)
                 }
+                DesignerAction::MoveInto { ids, parent } => self.move_ui_into(ids, parent),
+                DesignerAction::Place {
+                    id,
+                    position,
+                    size,
+                    resize,
+                } => {
+                    let Some(name) = self.world.get(id).map(|i| i.name().to_owned()) else {
+                        continue;
+                    };
+                    let (key, label) = if resize {
+                        ("Size", format!("Resize {name}"))
+                    } else {
+                        ("Position", format!("Move {name}"))
+                    };
+                    // Sealed when the drag or the typing ends.
+                    self.change(
+                        id,
+                        history::Field::Property(key),
+                        label,
+                        vec![
+                            Edit::Property("Position", Value::UDim2(position)),
+                            Edit::Property("Size", Value::UDim2(size)),
+                        ],
+                    );
+                }
                 DesignerAction::Duplicate => self.duplicate_selected(),
                 DesignerAction::Delete => self.delete_selected(),
                 DesignerAction::Paste { parent, clipboard } => self.paste_ui(parent, clipboard),

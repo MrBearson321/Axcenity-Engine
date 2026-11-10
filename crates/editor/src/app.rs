@@ -1584,6 +1584,8 @@ mod accessibility_tests;
 #[cfg(test)]
 mod agent_tests;
 #[cfg(test)]
+mod anim_drawer_tests;
+#[cfg(test)]
 mod asset_fix_tests;
 #[cfg(test)]
 mod asset_refs_tests;
@@ -1651,6 +1653,8 @@ mod level_tests;
 #[cfg(test)]
 mod model_studio_tests;
 #[cfg(test)]
+mod properties_show_tests;
+#[cfg(test)]
 mod ragdoll_tests;
 #[cfg(test)]
 mod relaunch_tests;
@@ -1658,6 +1662,8 @@ mod relaunch_tests;
 mod rig_tests;
 #[cfg(test)]
 mod sequencer_tests;
+#[cfg(test)]
+mod settings_undo_tests;
 #[cfg(test)]
 mod solid_tests;
 #[cfg(test)]
@@ -1668,6 +1674,8 @@ mod strings_tests;
 mod tests;
 #[cfg(test)]
 mod ui_designer_menu_tests;
+#[cfg(test)]
+mod ui_designer_move_tests;
 #[cfg(test)]
 mod ui_designer_tests;
 #[cfg(test)]

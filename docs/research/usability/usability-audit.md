@@ -69,7 +69,7 @@ The tab is capable and mostly well-explained: the breadcrumb (Hero ▸ State Mac
 | AN4 | **State machine parameter chips break letter by letter** in the side column: "Wave" and "Hop" render as "Wav/e" and "H/o/p" stacked vertically (seen in `tour-11-anim-noodle`). The chip's label wraps to the space left on the row. | Medium | Every state machine with 3+ parameters | Unreadable | Unreadable |
 | AN5 | Jargon in the keying toolbar: **Dope sheet**, **Key selected**, **New keys: Smooth**, **Add track**. Each already explains itself on hover, so no change now; revisit only if the terms keep confusing people. | Low | Often | Must hover to learn | None |
 | AN6 | A linked (take) clip's settings (range, loop, speed, events) aren't undo steps; only Revert puts the file back. Keyed clips are fully undoable. | Medium | Sometimes | Inconsistent safety net | Same |
-| AN7 | The outline repeats "Linked to noodle.fbx · …" under every state; the drawer lists the Animator and Animation Instances as "Objects" next to the parts that actually move. | Low | Often | Noise | None |
+| AN7 | The outline repeats "Linked to noodle.fbx · …" under every state; the drawer lists the Animator and Animation Instances as "Objects" next to the parts that actually move. *(Done in a follow-up: the outline names the take only; the drawer leaves them out.)* | Low | Often | Noise | None |
 | AN8 | Two different panels are both titled **Parameters** in the state-machine view: the definitions beside the graph and the live values under the preview. | Low | Every state machine | Which one do I edit? | None |
 
 ### A3. Scene hierarchy, Explorer and object management (*inspected*)

@@ -22,8 +22,8 @@ Severity as in the audit: **High** blocks or misleads a beginner in a common tas
 | UD6 | With no ScreenGui the tab says "There's no ScreenGui to design yet." A beginner isn't told what a ScreenGui is (a screen of 2D interface over the game). | Medium | D5 |
 | UD7 | The toolbar's **Fixed · Fit · Scale** has no label or hover text; what each does is said only after picking Fixed or Fit (the note under the toolbar). | Low | D6 |
 | UD8 | Style (CSS)'s empty text reads "No CSS styles this element yet" (a word missing). Shared with Properties. | Low | D7 |
-| UD9 | An element can't be moved into another Frame from the designer: an artboard drag moves it inside its parent and the Hierarchy has no drag and drop, so it takes the Explorer. | Medium | Later (D8) |
-| UD10 | No X, Y, width and height in design pixels in the designer's inspector (Properties has `Position` and `Size` as UDim2). Handles, arrow-key nudges and the size label cover most needs. | Low | Later |
+| UD9 | An element can't be moved into another Frame from the designer: an artboard drag moves it inside its parent and the Hierarchy has no drag and drop, so it takes the Explorer. | Medium | D8 |
+| UD10 | No X, Y, width and height in design pixels in the designer's inspector (Properties has `Position` and `Size` as UDim2). Handles, arrow-key nudges and the size label cover most needs. | Low | D9 |
 
 **Keep** (no change needed): the Elements palette (drag, or click to add to the selected frame, with hover text saying so); rulers, guides and snapping with magenta lines; the anchor grid and diamonds, which say in words what the element is pinned to; Styles' tiles; Code & animation's **When** buttons, which write and open the handler; the Event Graph with Live Preview and its "Ready to run" status; Strings and Pages, whose empty states say what they're for and offer the next step; the Preview screen picker; the Fixed and Fit notes with **Use Scale**; undo on every edit. **Remove:** nothing. Every section serves a real workflow; the problem is order and density, not surplus.
 
@@ -44,7 +44,8 @@ Severity as in the audit: **High** blocks or misleads a beginner in a common tas
 | D5 | The empty state says what a ScreenGui is | UD6 | S | Very low | #48 |
 | D6 | Hover text on Fixed, Fit and Scale | UD7 | S | Very low | #48 |
 | D7 | Style (CSS)'s empty text | UD8 | S | Very low | #48 |
-| D8 | Drag a Hierarchy row onto a container to move it in, keeping where it is on screen | UD9 | M | Medium: reparenting rewrites `Position` | later |
+| D8 | Drag a Hierarchy row onto a container to move it in, keeping where it is on screen | UD9 | M | Medium: reparenting rewrites `Position` | PR 3 |
+| D9 | **X**, **Y**, **W** and **H** in design pixels at the top of the anchor section (renamed **Position & anchor**), keeping the anchor | UD10 | S | Low: writes the same `Position` and `Size` as pinning | PR 3 |
 
 ## Verification
 
@@ -70,3 +71,16 @@ Tests (`app/ui_inspector_tests.rs`): `the_inspector_lists_everyday_sections_firs
 | Pick a scale mode | Three bare words | Each says on hover what it does |
 
 Tests: `app/ui_designer_menu_tests.rs` (see the verification report).
+
+### PR 3: move into frames from the Hierarchy, and X, Y, W, H (D8, D9)
+
+| Workflow | Before | After |
+|---|---|---|
+| Put a label that's already on screen into a panel Frame | Open the Explorer, drag it there, then find it jumped (its `Position` now counts from the Frame's corner) and drag it back | Drag its row onto the Frame's row in the Hierarchy (the Frame's row is outlined): it goes in and stays exactly where it was. One undo step |
+| Move a Frame with what's selected with it | One at a time in the Explorer | Drag one of the selected rows: they all go, and what's inside one of them goes along inside it |
+| Place a button exactly 40 px from the left | Drag with the size label, or work out a `UDim2` in Properties | Type 40 in **X** under **Position & anchor**; pinned to the right, it stays pinned to the right |
+
+**Why this way**: Unity's hierarchy, Godot's scene dock and Roblox's Explorer all reparent by dragging a row, and Unity's RectTransform keeps the world position by default when it does **[R§2, §3]**: a beginner expects a move in the list not to move it on screen. The numbers follow Unity's RectTransform and Figma, which show X, Y, W and H beside the anchor preset; the anchor stays the user's choice and the offsets are worked out for it, the same rule the anchor grid already uses.
+
+Tests (`app/ui_designer_move_tests.rs`): `moving_an_element_into_a_frame_keeps_it_where_it_is_on_screen` (a real drag of the Title row onto the Card row: Title is in Card, at the same place on the artboard, its Position now 400, 200; one undo puts it back with its old Position), `a_drop_on_an_element_that_isnt_a_frame_goes_into_its_frame_and_a_frame_cant_go_in_itself` (drop targets, and a Frame moved with its child), `x_y_w_and_h_move_and_resize_in_design_pixels_keeping_the_anchor` (X typed on a right-pinned Frame keeps it pinned right with its left edge at 300; W typed keeps the left edge; one undo each). Tour shot 47 shows the new row.
+
