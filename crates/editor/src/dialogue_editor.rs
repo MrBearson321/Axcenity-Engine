@@ -88,6 +88,12 @@ pub fn check(graph: &NodeGraph) -> Result<(), Vec<DialogueError>> {
 }
 
 impl DialogueStudio {
+    /// How far each graph drawn so far is zoomed.
+    #[cfg(test)]
+    pub fn view_zooms(&self) -> Vec<f32> {
+        self.views.values().map(|view| view.zoom).collect()
+    }
+
     pub fn unsaved(&self) -> bool {
         self.documents.iter().any(DialogueDocument::unsaved)
     }

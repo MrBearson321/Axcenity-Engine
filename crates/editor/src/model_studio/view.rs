@@ -671,7 +671,7 @@ pub(super) fn knife_point(
 
 /// The tools' lines, points and circle, and the 3D cursor.
 fn paint_extras(painter: &egui::Painter, screen: &Screen, extras: &Extras, accent: egui::Color32) {
-    let tool = egui::Color32::from_rgb(255, 210, 60);
+    let tool = crate::theme::overlay::PREVIEW;
     for &[a, b] in &extras.lines {
         if let Some(segment) = screen.line(a, b) {
             painter.line_segment(segment, egui::Stroke::new(2.0_f32, tool));

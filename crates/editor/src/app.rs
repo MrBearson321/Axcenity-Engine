@@ -1612,6 +1612,8 @@ mod fracture_tests;
 #[cfg(test)]
 mod game_tests_tests;
 #[cfg(test)]
+mod graph_zoom_tests;
+#[cfg(test)]
 mod health_tests;
 #[cfg(test)]
 mod hot_patch_tests;

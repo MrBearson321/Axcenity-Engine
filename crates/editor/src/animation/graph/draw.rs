@@ -6,36 +6,23 @@ use axcenity_anim::{ANY_STATE, StateMachineFile};
 use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Shape, Stroke, Vec2, vec2};
 
 use super::{Node, ParameterKind, STATE, words};
-use crate::theme::icons;
+use crate::theme::{self, icons};
 
 /// A node's title band, at zoom 1.
 pub(super) const HEADER: f32 = 24.0;
 const PIN: f32 = 5.0;
 
-pub(super) const SELECTED: Color32 = Color32::from_rgb(255, 176, 46);
-pub(super) const LIVE: Color32 = Color32::from_rgb(90, 210, 120);
-pub(super) const WIRE: Color32 = Color32::from_rgb(200, 204, 214);
-pub(super) const ENTRY_WIRE: Color32 = Color32::from_rgb(110, 190, 130);
-const NODE_BODY: Color32 = Color32::from_rgb(30, 32, 40);
-const NODE_EDGE: Color32 = Color32::from_rgb(12, 13, 17);
-const PIN_TEXT: Color32 = Color32::from_rgb(214, 218, 228);
-const LABEL_FILL: Color32 = Color32::from_rgb(40, 43, 54);
-const NEVER: Color32 = Color32::from_rgb(236, 150, 90);
+// Node kinds' header colours: content colours, the same in both themes.
+// Everything else comes from `theme::canvas`.
 const DEFAULT_HEADER: Color32 = Color32::from_rgb(196, 118, 40);
 const STATE_HEADER: Color32 = Color32::from_rgb(64, 92, 140);
 const ANY_HEADER: Color32 = Color32::from_rgb(40, 140, 150);
 const ENTRY_HEADER: Color32 = Color32::from_rgb(58, 140, 82);
 
 /// The grid behind the graph, so panning reads as movement.
-pub(super) fn draw_grid(
-    painter: &egui::Painter,
-    rect: Rect,
-    offset: Vec2,
-    zoom: f32,
-    visuals: &egui::Visuals,
-) {
+pub(super) fn draw_grid(painter: &egui::Painter, rect: Rect, offset: Vec2, zoom: f32) {
     let step = 40.0 * zoom;
-    let grid = Stroke::new(1.0_f32, visuals.weak_text_color().gamma_multiply(0.15));
+    let grid = Stroke::new(1.0_f32, theme::canvas(painter.ctx()).grid);
     let mut x = rect.left() + offset.x.rem_euclid(step);
     while x < rect.right() {
         painter.line_segment(
@@ -164,6 +151,7 @@ pub(super) fn draw_node(painter: &egui::Painter, look: NodeLook) {
         zoom: z,
         ..
     } = look;
+    let colors = theme::canvas(painter.ctx());
     let corner = 6.0 * z;
     let title_font = FontId::proportional(13.0 * z.clamp(0.7, 1.5));
     let body_font = FontId::proportional(11.0 * z.clamp(0.7, 1.5));
@@ -190,10 +178,11 @@ pub(super) fn draw_node(painter: &egui::Painter, look: NodeLook) {
         Node::Any => (ANY_HEADER, format!("{} {ANY_STATE}", icons::ASTERISK)),
         Node::Entry => (ENTRY_HEADER, format!("{} Entry", icons::SIGN_IN)),
     };
+    let header = colors.header(header);
     let clipped = painter.with_clip_rect(painter.clip_rect().intersect(rect.expand(2.0)));
     match node {
         Node::State(index) => {
-            painter.rect_filled(rect, corner, NODE_BODY);
+            painter.rect_filled(rect, corner, colors.node_body);
             let band = Rect::from_min_size(rect.min, vec2(rect.width(), HEADER * z));
             let r = corner.round().clamp(0.0, 255.0) as u8;
             painter.rect_filled(
@@ -211,7 +200,7 @@ pub(super) fn draw_node(painter: &egui::Painter, look: NodeLook) {
                 egui::Align2::LEFT_CENTER,
                 &title,
                 title_font,
-                Color32::WHITE,
+                colors.header_text,
             );
             let body_y = band.bottom() + (rect.bottom() - band.bottom()) * 0.5;
             let icon = match &file.states[index].motion {
@@ -224,14 +213,14 @@ pub(super) fn draw_node(painter: &egui::Painter, look: NodeLook) {
                 egui::Align2::LEFT_CENTER,
                 format!("{icon} {}", plays(&file.states[index].motion)),
                 body_font,
-                PIN_TEXT,
+                colors.node_text,
             );
             if let Some(progress) = look.playing {
                 let bar = Rect::from_min_size(
                     Pos2::new(rect.left(), rect.bottom() - 3.0 * z),
                     vec2(rect.width() * progress.clamp(0.0, 1.0), 3.0 * z),
                 );
-                painter.rect_filled(bar, 0.0, LIVE);
+                painter.rect_filled(bar, 0.0, colors.live);
             }
             pin(
                 painter,
@@ -253,7 +242,7 @@ pub(super) fn draw_node(painter: &egui::Painter, look: NodeLook) {
                 egui::Align2::LEFT_CENTER,
                 &title,
                 body_font,
-                Color32::WHITE,
+                colors.header_text,
             );
             pin(
                 painter,
@@ -264,13 +253,13 @@ pub(super) fn draw_node(painter: &egui::Painter, look: NodeLook) {
         }
     }
     let outline = if look.selected {
-        Stroke::new(2.0 * z.max(0.8), SELECTED)
+        Stroke::new(2.0 * z.max(0.8), colors.selected)
     } else if look.playing.is_some() {
-        Stroke::new(2.0 * z.max(0.8), LIVE)
+        Stroke::new(2.0 * z.max(0.8), colors.live)
     } else if look.hovered {
-        Stroke::new(1.5_f32, Color32::WHITE.gamma_multiply(0.6))
+        Stroke::new(1.5_f32, colors.node_text.gamma_multiply(0.6))
     } else {
-        Stroke::new(1.0_f32, NODE_EDGE)
+        Stroke::new(1.0_f32, colors.node_edge)
     };
     painter.rect_stroke(rect, corner, outline, egui::StrokeKind::Outside);
 }
@@ -284,14 +273,15 @@ pub(super) fn state_pin_y(rect: Rect, zoom: f32) -> f32 {
 /// A pin: a circle, filled when it's wired.
 fn pin(painter: &egui::Painter, at: Pos2, z: f32, wired: bool) {
     let radius = PIN * z;
+    let colors = theme::canvas(painter.ctx());
     if wired {
-        painter.circle_filled(at, radius, PIN_TEXT);
+        painter.circle_filled(at, radius, colors.node_text);
     } else {
         painter.circle(
             at,
             radius,
-            NODE_BODY,
-            Stroke::new(1.5 * z.max(0.7), PIN_TEXT),
+            colors.node_body,
+            Stroke::new(1.5 * z.max(0.7), colors.node_text),
         );
     }
 }
@@ -305,13 +295,14 @@ pub(super) fn draw_label(
     z: f32,
     selected: bool,
 ) -> Rect {
+    let colors = theme::canvas(painter.ctx());
     let never = words::never(transition);
     let color = if never {
-        NEVER
+        colors.warning
     } else if transition.generated {
-        PIN_TEXT.gamma_multiply(0.7)
+        colors.node_text_weak
     } else {
-        PIN_TEXT
+        colors.node_text
     };
     let galley = painter.layout_no_wrap(
         words::when_words(transition),
@@ -319,13 +310,13 @@ pub(super) fn draw_label(
         color,
     );
     let rect = Rect::from_center_size(at, galley.size() + vec2(12.0, 6.0) * z.clamp(0.7, 1.4));
-    painter.rect_filled(rect, rect.height() * 0.5, LABEL_FILL);
+    painter.rect_filled(rect, rect.height() * 0.5, colors.label_fill);
     let edge = if selected {
-        Stroke::new(1.5_f32, SELECTED)
+        Stroke::new(1.5_f32, colors.selected)
     } else if never {
-        Stroke::new(1.0_f32, NEVER)
+        Stroke::new(1.0_f32, colors.warning)
     } else {
-        Stroke::new(1.0_f32, NODE_EDGE)
+        Stroke::new(1.0_f32, colors.node_edge)
     };
     painter.rect_stroke(rect, rect.height() * 0.5, edge, egui::StrokeKind::Outside);
     painter.galley(rect.center() - galley.size() * 0.5, galley, color);
@@ -363,7 +354,7 @@ pub(super) fn hint(painter: &egui::Painter, rect: Rect, text: &str) {
         egui::Align2::LEFT_TOP,
         text,
         FontId::proportional(12.0),
-        SELECTED,
+        theme::canvas(painter.ctx()).selected,
     );
 }
 
@@ -388,6 +379,7 @@ pub(super) fn draw_guide(painter: &egui::Painter, rect: Rect, file: &StateMachin
     // fit a narrow graph.
     let width = (rect.width() - 20.0).clamp(80.0, 300.0);
     let wrap = width - 20.0;
+    let colors = theme::canvas(painter.ctx());
     let font = FontId::proportional(12.0);
     // A short graph shows only the next step, so the card doesn't cover it.
     let short = rect.height() < GUIDE_IN_FULL;
@@ -399,7 +391,7 @@ pub(super) fn draw_guide(painter: &egui::Painter, rect: Rect, file: &StateMachin
             "Make it work in three steps".to_owned()
         },
         FontId::proportional(12.5),
-        Color32::WHITE,
+        colors.node_text_strong,
         wrap,
     );
     let galleys: Vec<_> = steps
@@ -413,9 +405,9 @@ pub(super) fn draw_guide(painter: &egui::Painter, rect: Rect, file: &StateMachin
                 format!("{}", n + 1)
             };
             let color = if *done {
-                PIN_TEXT.gamma_multiply(0.6)
+                colors.node_text_weak
             } else {
-                PIN_TEXT
+                colors.node_text
             };
             // The short card's title already numbers its one step.
             let line = if short {
@@ -431,17 +423,27 @@ pub(super) fn draw_guide(painter: &egui::Painter, rect: Rect, file: &StateMachin
         Pos2::new(rect.right() - width - 10.0, rect.top() + 10.0),
         vec2(width, height),
     );
-    painter.rect_filled(panel, 6.0, LABEL_FILL.gamma_multiply(0.85));
+    painter.rect_filled(
+        panel,
+        theme::radius::CARD,
+        colors.label_fill.gamma_multiply(0.92),
+    );
+    painter.rect_stroke(
+        panel,
+        theme::radius::CARD,
+        Stroke::new(1.0_f32, colors.node_edge),
+        egui::StrokeKind::Inside,
+    );
     let mut y = panel.top() + 8.0;
     y += title.size().y + 6.0;
     painter.galley(
         Pos2::new(panel.left() + 10.0, panel.top() + 8.0),
         title,
-        Color32::WHITE,
+        colors.node_text_strong,
     );
     for galley in galleys {
         let height = galley.size().y;
-        painter.galley(Pos2::new(panel.left() + 10.0, y), galley, PIN_TEXT);
+        painter.galley(Pos2::new(panel.left() + 10.0, y), galley, colors.node_text);
         y += height + 4.0;
     }
 }

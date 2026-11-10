@@ -212,7 +212,7 @@ impl Output {
                     .filter(|line| !self.hidden.contains(&line.kind))
                 {
                     let (icon, icon_color, color) = match line.kind {
-                        OutputKind::Info => (icons::INFO, palette.text_muted, palette.text),
+                        OutputKind::Info => (icons::INFO, palette.text_weak, palette.text),
                         OutputKind::Warning => (icons::WARNING, palette.warning, palette.warning),
                         OutputKind::Error => (icons::X_CIRCLE, palette.error, palette.error),
                         OutputKind::Command => {
@@ -242,7 +242,7 @@ impl Output {
                                         &frame.text,
                                         &frame.location,
                                         font.clone(),
-                                        palette.text_muted,
+                                        palette.text_weak,
                                     ) {
                                         clicked = Some(location);
                                     }
@@ -276,7 +276,7 @@ fn filter_toggle(
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     response
         .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, shown, icon));
-    widgets::paint_hover(ui, rect, &response, false, 5.0);
+    widgets::paint_hover(ui, rect, &response, false, theme::radius::CONTROL);
     let (icon_color, text_color) = if shown {
         (color, palette.text)
     } else {

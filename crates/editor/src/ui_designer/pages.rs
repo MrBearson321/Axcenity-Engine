@@ -261,7 +261,7 @@ impl UiDesigner {
         } else if shown {
             palette.text_secondary
         } else {
-            palette.text_muted
+            palette.text_weak
         };
         ui.painter().text(
             rect.center(),
@@ -398,7 +398,7 @@ impl UiDesigner {
                 ui.label(
                     egui::RichText::new(page_count(world, gui))
                         .small()
-                        .color(palette.text_muted),
+                        .color(palette.text_weak),
                 );
                 ui.add_space(6.0);
                 response

@@ -43,6 +43,96 @@ pub mod type_scale {
     pub const CAPTION: f32 = 10.5;
 }
 
+/// Corner radii, in points. There are only three, so shapes that mean the
+/// same thing look the same everywhere.
+pub mod radius {
+    /// Panels, tabs, windows and menus: square and flat.
+    pub const NONE: u8 = 0;
+    /// Fields, buttons, chips and list highlights.
+    pub const CONTROL: u8 = 4;
+    /// Cards, toasts, popovers and dialogs.
+    pub const CARD: u8 = 6;
+    /// Every radius the editor's shared pieces may use.
+    #[cfg(test)]
+    pub const ALL: [u8; 3] = [NONE, CONTROL, CARD];
+}
+
+/// Spacing steps, in points, on the 2-point grid most of the editor already
+/// follows. Use these for `add_space` and margins instead of new numbers.
+pub mod space {
+    pub const XXS: f32 = 2.0;
+    pub const XS: f32 = 4.0;
+    pub const S: f32 = 8.0;
+    pub const M: f32 = 12.0;
+    pub const L: f32 = 16.0;
+    pub const XL: f32 = 24.0;
+
+    /// A margin of `x` points left and right and `y` above and below,
+    /// for frames: `space::margin(space::M, space::S)`.
+    pub fn margin(x: f32, y: f32) -> eframe::egui::Margin {
+        eframe::egui::Margin::symmetric(x as i8, y as i8)
+    }
+}
+
+/// Sizes of icons and rows, in points.
+pub mod size {
+    use super::Density;
+
+    /// Icons inside small text, such as badges and captions.
+    pub const ICON_SMALL: f32 = 13.0;
+    /// Icons beside body text and on icon buttons.
+    pub const ICON_MEDIUM: f32 = 15.0;
+    /// Icons in headers and empty states.
+    pub const ICON_LARGE: f32 = 18.0;
+    /// Main buttons ([`crate::widgets::button`]).
+    pub const BUTTON_HEIGHT: f32 = 28.0;
+
+    /// The height of a list or form row at a density, the same as egui's
+    /// `interact_size.y` after [`super::apply`].
+    pub fn row(density: Density) -> f32 {
+        match density {
+            Density::Comfortable => 24.0,
+            Density::Compact => 20.0,
+        }
+    }
+}
+
+/// Colours of guides, selection and handles drawn over 3D or UI content.
+/// They don't follow the theme: they sit on scenes, skies and pictures and
+/// have to read on any of them. One meaning, one colour, in the viewport,
+/// Model Studio, splines, Constraints and the UI Designer.
+pub mod overlay {
+    use eframe::egui::Color32;
+
+    /// What's selected in a 3D view: outlines, picked points and attachments.
+    pub const SELECTED: Color32 = Color32::from_rgb(25, 160, 255);
+    /// The gizmo handle or point under the pointer.
+    pub const HOVER: Color32 = Color32::from_rgb(255, 215, 0);
+    /// Snap and alignment lines, shown while something is dragged into
+    /// line, in the viewport and the UI Designer alike.
+    pub const SNAP: Color32 = Color32::from_rgb(232, 64, 176);
+    /// Guides the user placed from the UI Designer's rulers: a cyan that
+    /// reads apart from the magenta snap lines that land on them.
+    pub const GUIDE: Color32 = Color32::from_rgb(64, 200, 230);
+    /// What a tool will do if you click: a Part being placed, a loop cut
+    /// or knife line in Model Studio.
+    pub const PREVIEW: Color32 = Color32::from_rgb(255, 196, 64);
+    /// Attachments and other points Parts are joined at, while not selected.
+    pub const ATTACHMENT: Color32 = Color32::from_rgb(255, 196, 64);
+    /// Handles that shape something (spline tangents and similar).
+    pub const HANDLE: Color32 = Color32::from_rgb(200, 140, 255);
+    /// Something wrong or blocked, such as a ray that hit or a seam.
+    pub const WARNING: Color32 = Color32::from_rgb(255, 90, 90);
+    /// Measurements and their numbers.
+    pub const MEASURE: Color32 = Color32::from_rgb(245, 245, 248);
+    /// The plate behind numbers drawn over the scene.
+    pub const LABEL_BACK: Color32 = Color32::from_rgb(30, 30, 33);
+    /// The X, Y and Z axes: the gizmo, the view cube and joint axes.
+    pub const AXIS_X: Color32 = Color32::from_rgb(235, 65, 65);
+    pub const AXIS_Y: Color32 = Color32::from_rgb(70, 205, 70);
+    pub const AXIS_Z: Color32 = Color32::from_rgb(55, 125, 245);
+}
+
 /// The light or dark theme, or whichever the system uses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThemeChoice {
@@ -343,6 +433,129 @@ impl Palette {
     }
 }
 
+/// The colours of node-graph canvases (Material, UI Event Graph, Behavior
+/// Tree, Dialogue, block Graph view and Animation state machines), built from
+/// the [`Palette`] so graphs follow the theme and select in the accent like
+/// every panel beside them. Category and pin colours are content and stay
+/// the same in both themes; [`Canvas::header`] darkens a category colour
+/// enough for white header text.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Canvas {
+    pub background: Color32,
+    /// Grid lines, which move with the nodes.
+    pub grid: Color32,
+    pub node_body: Color32,
+    pub node_edge: Color32,
+    /// Text and pin labels on node bodies.
+    pub node_text: Color32,
+    /// Titles on canvas cards, such as the Animation graph's guide.
+    pub node_text_strong: Color32,
+    /// Quieter text on node bodies, such as an unconnected pin's name.
+    pub node_text_weak: Color32,
+    /// Text on category headers, which are always saturated colours.
+    pub header_text: Color32,
+    /// Execution and transition wires.
+    pub wire: Color32,
+    /// The pill behind a label on a wire.
+    pub label_fill: Color32,
+    /// Comment boxes behind nodes.
+    pub comment_fill: Color32,
+    pub comment_header: Color32,
+    pub comment_edge: Color32,
+    pub comment_text: Color32,
+    /// Selected nodes, wires and comments: the accent.
+    pub selected: Color32,
+    pub error: Color32,
+    /// What's running now (the live state of an Animator).
+    pub live: Color32,
+    pub warning: Color32,
+}
+
+impl Canvas {
+    pub fn new(p: &Palette) -> Self {
+        let rgb = Color32::from_rgb;
+        if p.dark {
+            Self {
+                background: rgb(22, 24, 29),
+                grid: Color32::from_white_alpha(10),
+                node_body: rgb(30, 32, 40),
+                node_edge: rgb(12, 13, 17),
+                node_text: rgb(214, 218, 228),
+                node_text_strong: Color32::WHITE,
+                node_text_weak: rgb(150, 154, 166),
+                header_text: Color32::WHITE,
+                wire: rgb(200, 204, 214),
+                label_fill: rgb(40, 43, 54),
+                comment_fill: Color32::from_rgba_unmultiplied(120, 130, 150, 40),
+                comment_header: Color32::from_rgba_unmultiplied(120, 130, 150, 90),
+                comment_edge: Color32::from_rgba_unmultiplied(160, 170, 190, 90),
+                comment_text: rgb(214, 218, 228),
+                selected: p.accent,
+                error: p.error,
+                live: p.success,
+                warning: p.warning,
+            }
+        } else {
+            Self {
+                background: rgb(236, 238, 242),
+                grid: Color32::from_black_alpha(14),
+                node_body: Color32::WHITE,
+                node_edge: rgb(196, 199, 207),
+                node_text: p.text,
+                node_text_strong: p.text_strong,
+                node_text_weak: p.text_weak,
+                header_text: Color32::WHITE,
+                wire: rgb(70, 72, 80),
+                label_fill: Color32::WHITE,
+                comment_fill: Color32::from_rgba_unmultiplied(110, 120, 140, 30),
+                comment_header: Color32::from_rgba_unmultiplied(110, 120, 140, 56),
+                comment_edge: Color32::from_rgba_unmultiplied(110, 120, 140, 120),
+                comment_text: p.text,
+                selected: p.accent,
+                error: p.error,
+                live: p.success,
+                warning: p.warning,
+            }
+        }
+    }
+
+    /// The fill of a node's header in a category's colour: a little darker,
+    /// and darker still for light colours (Scratch's yellow), until its
+    /// white title is readable (WCAG AA, 4.5:1) in both themes.
+    pub fn header(&self, category: Color32) -> Color32 {
+        let mut t = 0.12;
+        let mut fill = mix(category, Color32::BLACK, t);
+        while contrast(self.header_text, fill) < 4.5 && t < 1.0 {
+            t += 0.04;
+            fill = mix(category, Color32::BLACK, t);
+        }
+        fill
+    }
+}
+
+/// The graph canvas colours of the theme showing now.
+pub fn canvas(ctx: &egui::Context) -> Canvas {
+    Canvas::new(&palette(ctx))
+}
+
+/// The WCAG contrast ratio of two colours, from 1 (the same) to 21 (black
+/// on white). Text needs 4.5 (AA), large text and outlines 3.
+pub fn contrast(a: Color32, b: Color32) -> f32 {
+    let luminance = |c: Color32| {
+        let linear = |x: u8| {
+            let x = f32::from(x) / 255.0;
+            if x <= 0.04045 {
+                x / 12.92
+            } else {
+                ((x + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+    };
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
 /// `a` moved toward `b` by `t` (0 to 1), channel by channel.
 pub fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     let channel = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
@@ -514,7 +727,7 @@ fn set_sizes(style: &mut egui::Style, appearance: &Appearance) {
         Density::Comfortable => {
             spacing.item_spacing = egui::vec2(8.0, 6.0);
             spacing.button_padding = egui::vec2(10.0, 4.0);
-            spacing.interact_size.y = 24.0;
+            spacing.interact_size.y = size::row(Density::Comfortable);
             spacing.menu_margin = egui::Margin::same(6);
             spacing.window_margin = egui::Margin::same(16);
             spacing.indent = 16.0;
@@ -522,7 +735,7 @@ fn set_sizes(style: &mut egui::Style, appearance: &Appearance) {
         Density::Compact => {
             spacing.item_spacing = egui::vec2(6.0, 3.0);
             spacing.button_padding = egui::vec2(7.0, 2.0);
-            spacing.interact_size.y = 20.0;
+            spacing.interact_size.y = size::row(Density::Compact);
             spacing.menu_margin = egui::Margin::same(4);
             spacing.window_margin = egui::Margin::same(12);
             spacing.indent = 13.0;
@@ -652,17 +865,16 @@ fn visuals(p: &Palette) -> egui::Visuals {
         shadow(6, 18, 24)
     };
     // Panels, windows and menus are square and flat.
-    v.window_corner_radius = CornerRadius::ZERO;
-    v.menu_corner_radius = CornerRadius::ZERO;
+    v.window_corner_radius = CornerRadius::same(radius::NONE);
+    v.menu_corner_radius = CornerRadius::same(radius::NONE);
     v.collapsing_header_frame = false;
     v.indent_has_left_vline = false;
     v.striped = false;
     v.slider_trailing_fill = true;
     v.handle_shape = egui::style::HandleShape::Circle;
 
-    // Small: fields and checkboxes stay square-cornered enough to read as
-    // boxes. Buttons the editor draws itself round a little more.
-    let radius = CornerRadius::same(4);
+    // Fields, checkboxes and buttons share one small corner.
+    let corner = CornerRadius::same(radius::CONTROL);
     let w = &mut v.widgets;
     w.noninteractive.bg_fill = p.panel;
     w.noninteractive.weak_bg_fill = p.panel;
@@ -684,11 +896,11 @@ fn visuals(p: &Palette) -> egui::Visuals {
         state.weak_bg_fill = fill;
         state.bg_stroke = Stroke::new(1.0_f32, outline);
         state.fg_stroke = Stroke::new(1.0_f32, text);
-        state.corner_radius = radius;
+        state.corner_radius = corner;
         // No growing on hover: it shifts edges by a pixel and looks jittery.
         state.expansion = 0.0;
     }
-    w.noninteractive.corner_radius = radius;
+    w.noninteractive.corner_radius = corner;
     v
 }
 
@@ -1163,23 +1375,6 @@ mod tests {
         });
     }
 
-    /// WCAG relative luminance and contrast ratio.
-    fn contrast(a: Color32, b: Color32) -> f32 {
-        let luminance = |c: Color32| {
-            let linear = |x: u8| {
-                let x = f32::from(x) / 255.0;
-                if x <= 0.04045 {
-                    x / 12.92
-                } else {
-                    ((x + 0.055) / 1.055).powf(2.4)
-                }
-            };
-            0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
-        };
-        let (la, lb) = (luminance(a), luminance(b));
-        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
-    }
-
     #[test]
     fn text_and_every_accent_meet_wcag_aa_in_both_themes() {
         for dark in [true, false] {
@@ -1200,6 +1395,189 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The arguments of each call to `function(` in `source`, split at
+    /// top-level commas.
+    fn call_arguments<'a>(source: &'a str, function: &str) -> Vec<Vec<&'a str>> {
+        let mut calls = Vec::new();
+        for (start, _) in source.match_indices(function) {
+            let open = start + function.len();
+            let (mut depth, mut from, mut arguments) = (1, open, Vec::new());
+            for (offset, c) in source[open..].char_indices() {
+                let at = open + offset;
+                match c {
+                    '(' | '[' | '{' => depth += 1,
+                    ')' | ']' | '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            arguments.push(source[from..at].trim());
+                            break;
+                        }
+                    }
+                    ',' if depth == 1 => {
+                        arguments.push(source[from..at].trim());
+                        from = at + 1;
+                    }
+                    _ => {}
+                }
+            }
+            calls.push(arguments);
+        }
+        calls
+    }
+
+    #[test]
+    fn shared_pieces_use_only_the_three_corner_radii() {
+        let sources = [
+            ("widgets.rs", include_str!("widgets.rs")),
+            ("dialog.rs", include_str!("dialog.rs")),
+            ("toast.rs", include_str!("toast.rs")),
+            ("command_palette.rs", include_str!("command_palette.rs")),
+            ("layout.rs", include_str!("layout.rs")),
+            ("ribbon.rs", include_str!("ribbon.rs")),
+        ];
+        // Which argument is the radius, for each way of giving one.
+        let calls = [
+            (".corner_radius(", 0),
+            ("CornerRadius::same(", 0),
+            ("rect_filled(", 1),
+            ("rect_stroke(", 1),
+            ("paint_hover(", 4),
+        ];
+        let mut checked = 0;
+        for (file, source) in sources {
+            for (function, index) in calls {
+                for arguments in call_arguments(source, function) {
+                    let Some(argument) = arguments.get(index) else {
+                        continue;
+                    };
+                    checked += 1;
+                    // A number written in place of a token must at least be
+                    // one of the tokens' values.
+                    let number = argument
+                        .trim_end_matches("_f32")
+                        .trim_end_matches("_u8")
+                        .parse::<f32>();
+                    if let Ok(number) = number {
+                        assert!(
+                            radius::ALL.iter().any(|&r| f32::from(r) == number),
+                            "{file}: {function}...{argument}) isn't a radius token"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(checked > 20, "only {checked} radii found");
+        for dark in [true, false] {
+            let v = visuals(&Palette::new(dark, Accent::Blue));
+            assert_eq!(
+                v.widgets.inactive.corner_radius,
+                CornerRadius::same(radius::CONTROL)
+            );
+            assert_eq!(v.window_corner_radius, CornerRadius::same(radius::NONE));
+        }
+    }
+
+    #[test]
+    fn graph_text_meets_wcag_aa_on_nodes_and_on_every_header() {
+        for dark in [true, false] {
+            for accent in Accent::ALL {
+                let c = Canvas::new(&Palette::new(dark, accent));
+                let label = format!("{accent:?}, dark {dark}");
+                for text in [c.node_text, c.node_text_strong, c.node_text_weak] {
+                    assert!(contrast(text, c.node_body) >= 4.5, "{label}");
+                    assert!(contrast(text, c.label_fill) >= 4.5, "{label}");
+                }
+                assert!(contrast(c.warning, c.label_fill) >= 4.5, "{label}");
+                assert!(contrast(c.comment_text, c.background) >= 4.5, "{label}");
+                // Outlines and wires: 3:1 against the canvas.
+                for line in [c.selected, c.wire, c.error] {
+                    assert!(contrast(line, c.background) >= 3.0, "{label}");
+                }
+                // Every graph category, and any other colour a header
+                // could be (block categories, state kinds).
+                for name in [
+                    "Events",
+                    "Actions",
+                    "Flow",
+                    "Conditions",
+                    "Data",
+                    "Variables",
+                    "Output",
+                    "Inputs",
+                    "Textures",
+                    "Color",
+                    "Noise",
+                    "Other",
+                ] {
+                    let fill = c.header(crate::node_graph::category_color(name));
+                    assert!(contrast(c.header_text, fill) >= 4.5, "{label} {name}");
+                }
+                for r in (0..=255).step_by(51) {
+                    for g in (0..=255).step_by(51) {
+                        for b in (0..=255).step_by(51) {
+                            let fill = c.header(Color32::from_rgb(r, g, b));
+                            assert!(contrast(c.header_text, fill) >= 4.5, "{r} {g} {b}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn overlay_colours_are_written_only_in_the_theme() {
+        let sources = [
+            ("viewport.rs", include_str!("viewport.rs")),
+            (
+                "viewport/move_overlay.rs",
+                include_str!("viewport/move_overlay.rs"),
+            ),
+            (
+                "viewport/view_cube.rs",
+                include_str!("viewport/view_cube.rs"),
+            ),
+            ("gizmo.rs", include_str!("gizmo.rs")),
+            ("splines.rs", include_str!("splines.rs")),
+            ("constraints.rs", include_str!("constraints.rs")),
+            ("ui_handles.rs", include_str!("ui_handles.rs")),
+            (
+                "ui_designer/artboard.rs",
+                include_str!("ui_designer/artboard.rs"),
+            ),
+            (
+                "ui_designer/rulers.rs",
+                include_str!("ui_designer/rulers.rs"),
+            ),
+            ("model_studio/view.rs", include_str!("model_studio/view.rs")),
+        ];
+        let tokens = [
+            overlay::SELECTED,
+            overlay::HOVER,
+            overlay::SNAP,
+            overlay::GUIDE,
+            overlay::PREVIEW,
+            overlay::ATTACHMENT,
+            overlay::HANDLE,
+            overlay::WARNING,
+            overlay::MEASURE,
+            overlay::LABEL_BACK,
+            overlay::AXIS_X,
+            overlay::AXIS_Y,
+            overlay::AXIS_Z,
+        ];
+        for (file, source) in sources {
+            for color in tokens {
+                let written = format!("from_rgb({}, {}, {})", color.r(), color.g(), color.b());
+                assert!(
+                    !source.contains(&written),
+                    "{file} writes {written}: use theme::overlay"
+                );
+            }
+        }
+        // The ruler guides and the snap lines that land on them differ.
+        assert!(contrast(overlay::GUIDE, overlay::SNAP) > 1.5);
     }
 
     #[test]

@@ -9,7 +9,7 @@
 
 use eframe::egui::{self, FontId};
 
-use crate::theme::{self, icons, type_scale};
+use crate::theme::{self, icons, space, type_scale};
 
 /// How long a toast stays, and how long it takes to come and go, in seconds.
 const SHOWN_SECONDS: f64 = 2.4;
@@ -116,8 +116,8 @@ impl Toasts {
                 .fixed_pos(egui::pos2(screen.right() - 16.0, bottom))
                 .show(ctx, |ui| {
                     egui::Frame::popup(ui.style())
-                        .inner_margin(egui::Margin::symmetric(12, 8))
-                        .corner_radius(8)
+                        .inner_margin(space::margin(space::M, space::S))
+                        .corner_radius(theme::radius::CARD)
                         .show(ui, |ui| {
                             ui.set_max_width(360.0);
                             ui.horizontal(|ui| {
@@ -148,8 +148,8 @@ impl Toasts {
                 .fixed_pos(egui::pos2(screen.right() - 16.0, bottom))
                 .show(ctx, |ui| {
                     egui::Frame::popup(ui.style())
-                        .inner_margin(egui::Margin::symmetric(12, 8))
-                        .corner_radius(8)
+                        .inner_margin(space::margin(space::M, space::S))
+                        .corner_radius(theme::radius::CARD)
                         .show(ui, |ui| {
                             ui.set_width(300.0);
                             ui.horizontal(|ui| {
@@ -203,8 +203,8 @@ impl Toasts {
                 .show(ctx, |ui| {
                     ui.set_opacity(opacity);
                     egui::Frame::popup(ui.style())
-                        .inner_margin(egui::Margin::symmetric(12, 8))
-                        .corner_radius(8)
+                        .inner_margin(space::margin(space::M, space::S))
+                        .corner_radius(theme::radius::CARD)
                         .show(ui, |ui| {
                             ui.set_max_width(360.0);
                             ui.horizontal(|ui| {

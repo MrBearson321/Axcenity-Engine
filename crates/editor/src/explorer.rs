@@ -434,7 +434,7 @@ impl Explorer {
                         let name = if row.matches {
                             egui::RichText::new(row.name.as_str())
                         } else {
-                            egui::RichText::new(row.name.as_str()).color(palette.text_muted)
+                            egui::RichText::new(row.name.as_str()).color(palette.text_weak)
                         };
                         // The class (when the name doesn't already say it) and
                         // any warning keep their room after the name, unless the
@@ -445,7 +445,7 @@ impl Explorer {
                             ui.painter().layout_no_wrap(
                                 row.class.as_str().to_owned(),
                                 egui::FontId::proportional(theme::type_scale::SMALL),
-                                palette.text_muted,
+                                palette.text_weak,
                             )
                         });
                         let badge_room = if warning.is_some() {

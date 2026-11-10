@@ -505,14 +505,14 @@ pub fn style(
     pixels_per_point: f32,
 ) -> egui_dock::Style {
     let mut dock = egui_dock::Style::from_egui(style);
-    let radius = egui::CornerRadius::ZERO;
+    let radius = egui::CornerRadius::same(theme::radius::NONE);
     dock.dock_area_padding = None;
     dock.main_surface_border_stroke = egui::Stroke::NONE;
 
     dock.tab_bar.bg_fill = palette.app_bg;
     dock.tab_bar.height = TAB_BAR_HEIGHT;
     dock.tab_bar.hline_color = palette.border;
-    dock.tab_bar.corner_radius = egui::CornerRadius::ZERO;
+    dock.tab_bar.corner_radius = egui::CornerRadius::same(theme::radius::NONE);
 
     let tab = |bg_fill, text_color, outline_color| egui_dock::TabInteractionStyle {
         bg_fill,
@@ -541,7 +541,7 @@ pub fn style(
     dock.tab.minimum_width = Some(72.0);
     dock.tab.tab_body.bg_fill = palette.panel;
     dock.tab.tab_body.stroke = egui::Stroke::NONE;
-    dock.tab.tab_body.corner_radius = egui::CornerRadius::ZERO;
+    dock.tab.tab_body.corner_radius = egui::CornerRadius::same(theme::radius::NONE);
     dock.tab.tab_body.inner_margin = egui::Margin::symmetric(8, 6);
 
     dock.buttons.close_tab_color = palette.text_muted;
@@ -564,7 +564,8 @@ pub fn style(
     dock.overlay.button_border_stroke = egui::Stroke::new(1.0_f32, palette.border_strong);
     dock.overlay.hovered_leaf_highlight.color = palette.accent.gamma_multiply(0.08);
     dock.overlay.hovered_leaf_highlight.stroke = egui::Stroke::new(1.0_f32, palette.accent);
-    dock.overlay.hovered_leaf_highlight.corner_radius = egui::CornerRadius::ZERO;
+    dock.overlay.hovered_leaf_highlight.corner_radius =
+        egui::CornerRadius::same(theme::radius::NONE);
     dock
 }
 

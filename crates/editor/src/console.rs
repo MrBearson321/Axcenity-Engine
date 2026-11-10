@@ -392,7 +392,7 @@ impl Console {
                 egui::Label::new(
                     egui::RichText::new(text)
                         .font(egui::TextStyle::Monospace.resolve(ui.style()))
-                        .color(palette.text_muted),
+                        .color(palette.text_weak),
                 )
                 .wrap(),
             );

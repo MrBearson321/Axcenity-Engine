@@ -13,12 +13,12 @@ use eframe::egui::{self, Color32, Stroke, pos2, vec2};
 use crate::screen::Screen;
 use crate::snapping::points::{DragKind, DragReport, PointKind, SnapPoint};
 
-const GUIDE_COLOR: Color32 = Color32::from_rgb(245, 245, 248);
+const GUIDE_COLOR: Color32 = crate::theme::overlay::MEASURE;
 const TARGET_COLOR: Color32 = Color32::from_rgb(235, 235, 240);
 const ATTACHMENT_COLOR: Color32 = Color32::from_rgb(110, 240, 140);
 const RING_COLOR: Color32 = Color32::from_rgb(255, 214, 40);
 const MIDDLE_COLOR: Color32 = Color32::from_rgb(90, 190, 255);
-const NUMBER_BACK: Color32 = Color32::from_rgb(30, 30, 33);
+const NUMBER_BACK: Color32 = crate::theme::overlay::LABEL_BACK;
 
 /// How far the guide line reaches each way, in studs.
 const GUIDE_REACH: f32 = 4000.0;

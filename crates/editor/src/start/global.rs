@@ -167,7 +167,7 @@ impl GlobalPage {
         ui.add_space(8.0);
         let cards = self.cards(&self.search.trim().to_lowercase());
         if cards.is_empty() {
-            ui.add_space(24.0);
+            ui.add_space(theme::space::XL);
             ui.vertical_centered(|ui| {
                 ui.label(
                     RichText::new(icons::GLOBE)

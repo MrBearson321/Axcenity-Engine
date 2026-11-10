@@ -226,7 +226,7 @@ pub(super) fn template_card(ui: &mut egui::Ui, template: Template, width: f32) -
         tile.center(),
         egui::Align2::CENTER_CENTER,
         template_icon(template),
-        FontId::proportional(18.0),
+        FontId::proportional(theme::size::ICON_LARGE),
         theme::mix(palette.text_secondary, palette.text_strong, hover),
     );
     let left = tile.right() + 12.0;

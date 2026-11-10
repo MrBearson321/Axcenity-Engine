@@ -1772,7 +1772,7 @@ fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, label)
     });
-    widgets::paint_hover(ui, rect, &response, false, 12.0);
+    widgets::paint_hover(ui, rect, &response, false, theme::radius::CARD);
     if selected {
         ui.painter().rect_filled(rect, 12.0, palette.control_active);
     }
