@@ -1,12 +1,10 @@
 //! Instances as Lua values. A Lua Instance only holds an [`InstanceId`];
 //! every read and write looks the Instance up in the World, which is lent to
-//! Lua while scripts run (see `with_world` in `lib.rs`).
+//! Lua while scripts run (see `lent.rs`).
 
 use axcenity_audio::SoundAction;
 use axcenity_core::{ClassName, EnumItem, INSTANCE_EVENTS, InstanceId, Parameter, Value, World};
-use mlua::{
-    AppDataRef, AppDataRefMut, FromLua, Function, IntoLua, Lua, MetaMethod, Table, UserDataMethods,
-};
+use mlua::{FromLua, Function, IntoLua, Lua, MetaMethod, Table, UserDataMethods};
 
 use crate::camera::LuaCamera;
 use crate::cframe::LuaCFrame;
@@ -31,20 +29,7 @@ use crate::user_settings::LuaUserGameSettings;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LuaInstance(pub InstanceId);
 
-/// The World, for reading. Only fails if called while no script is running.
-pub fn world(lua: &Lua) -> mlua::Result<AppDataRef<'_, World>> {
-    lua.app_data_ref::<World>().ok_or_else(no_world)
-}
-
-/// The World, for changing. Drop the returned guard before calling back into
-/// Lua, because the World can't be borrowed twice at once.
-pub fn world_mut(lua: &Lua) -> mlua::Result<AppDataRefMut<'_, World>> {
-    lua.app_data_mut::<World>().ok_or_else(no_world)
-}
-
-fn no_world() -> mlua::Error {
-    mlua::Error::runtime("the game world can only be used while scripts are running")
-}
+pub use crate::lent::{world, world_mut};
 
 pub(crate) fn destroyed() -> mlua::Error {
     mlua::Error::runtime("this Instance has been destroyed")

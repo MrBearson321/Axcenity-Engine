@@ -50,6 +50,8 @@ impl Context {
         watchdog::install(&lua).expect("setting a hook only fails when out of memory");
         // Which side this is, for `sides::check`.
         lua.set_app_data(side);
+        // The slot `with_world` lends the World through.
+        crate::lent::install(&lua);
         lua.set_app_data(Output::default());
         lua.set_app_data(crate::SoundActions::default());
         lua.set_app_data(crate::ParticleEmits::default());
