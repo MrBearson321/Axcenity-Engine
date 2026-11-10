@@ -104,8 +104,7 @@ impl Play {
         let mut devices = Vec::new();
         if clients > 1 {
             let Session { sim, network, .. } = &mut first;
-            let mut loopback =
-                Some(network.host_in_memory(&mut sim.world, &mut sim.scripts, true));
+            let mut loopback = Some(network.host_in_memory(&mut sim.world, &mut sim.scripts, true));
             network.emulate(settings.conditions);
             devices.push(first);
             // The code each client starts again on the server's world.
