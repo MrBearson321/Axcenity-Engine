@@ -218,9 +218,12 @@ fn importing_a_model_copies_it_and_inserts_a_mesh_part_in_one_undo_step() {
 }
 
 /// Every file under `folder` with its bytes.
+/// The project's files, without `.axcenity/` (this computer's caches,
+/// such as the simpler copies loading a model keeps).
 fn files_and_bytes(folder: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
     files_under(folder)
         .into_iter()
+        .filter(|path| !path.starts_with(".axcenity/"))
         .map(|path| {
             let bytes = fs::read(folder.join(&path)).unwrap();
             (path, bytes)

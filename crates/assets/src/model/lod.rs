@@ -7,9 +7,12 @@
 //! matched to its primitives by material. Otherwise each big enough
 //! primitive is simplified with meshoptimizer to half, then a quarter, of
 //! its triangles when it's loaded, and kept with the model in the cache.
+//! A project's model also keeps them on disk ([`super::lod_cache`]), so
+//! loading it again doesn't simplify again.
 
-use super::Primitive;
-use super::new_key;
+use super::lod_cache::{self, Levels};
+use super::{InProject, Primitive, new_key};
+use crate::cooked::ContentHasher;
 
 /// How many simpler copies a primitive can have.
 pub(super) const LEVELS: u8 = 2;
@@ -51,9 +54,13 @@ pub(super) fn full_path(path: &str) -> Option<&str> {
 }
 
 /// Splits `primitives` into the full model's and their simpler copies, and
-/// gives each full one its copies: the file's own, or simplified ones.
+/// gives each full one its copies: the file's own, or simplified ones
+/// (from the mesh cache, for a model `in_project` that has them there).
 /// The primitives must already be fitted, so all of them are placed alike.
-pub(super) fn attach(primitives: Vec<Primitive>) -> Vec<Primitive> {
+pub(super) fn attach(
+    primitives: Vec<Primitive>,
+    in_project: Option<InProject<'_>>,
+) -> Vec<Primitive> {
     let (mut full, copies): (Vec<Primitive>, Vec<Primitive>) = primitives
         .into_iter()
         .partition(|primitive| primitive.level == 0);
@@ -76,16 +83,83 @@ pub(super) fn attach(primitives: Vec<Primitive>) -> Vec<Primitive> {
         // A level the file skipped (it has `_LOD2` but no `_LOD1`) is left
         // out, so each copy is simpler than the last.
         primitive.lods.retain(|copy| !copy.indices.is_empty());
-        if primitive.lods.is_empty() {
-            primitive.lods = simplified(primitive);
+    }
+    let simplify: Vec<usize> = (0..full.len())
+        .filter(|&index| {
+            full[index].lods.is_empty() && full[index].indices.len() / 3 >= MIN_TRIANGLES
+        })
+        .collect();
+    if simplify.is_empty() {
+        return full;
+    }
+    let cache = in_project.map(|at| (at, key(simplify.iter().map(|&index| &full[index]))));
+    let corners: Vec<usize> = simplify
+        .iter()
+        .map(|&index| full[index].positions.len())
+        .collect();
+    let levels = match cache.and_then(|(at, key)| lod_cache::read(at, key, &corners)) {
+        Some(levels) => levels,
+        None => {
+            let levels: Levels = simplify
+                .iter()
+                .map(|&index| simplified(&full[index]))
+                .collect();
+            if let Some((at, key)) = cache {
+                lod_cache::write(at, key, &levels);
+            }
+            levels
         }
+    };
+    for (index, levels) in simplify.into_iter().zip(levels) {
+        let primitive = &full[index];
+        let lods = levels
+            .iter()
+            .map(|indices| primitive.with_triangles(indices))
+            .collect();
+        full[index].lods = lods;
     }
     full
 }
 
-/// Copies of `primitive` simplified to [`TARGETS`] of its triangles, each
-/// kept only if it saves enough on the one before.
-fn simplified(primitive: &Primitive) -> Vec<Primitive> {
+/// What the simplified copies of `primitives` depend on: the settings
+/// above and each one's corners, normals, texture coordinates and
+/// triangles. Their mesh cache file is found by it.
+fn key<'a>(primitives: impl Iterator<Item = &'a Primitive>) -> u64 {
+    // Bump to make every cached copy stale, when simplifying changes in a
+    // way the settings below don't show.
+    const VERSION: u32 = 1;
+    let mut hasher = ContentHasher::new(u64::from(VERSION));
+    for (target, max_error) in TARGETS.into_iter().zip(MAX_ERRORS) {
+        hasher.pair(target.to_bits(), max_error.to_bits());
+    }
+    hasher.pair(MIN_SAVING.to_bits(), MIN_TRIANGLES as u32);
+    hasher.pair(NORMAL_WEIGHT.to_bits(), UV_WEIGHT.to_bits());
+    for primitive in primitives {
+        hasher.pair(
+            primitive.positions.len() as u32,
+            primitive.indices.len() as u32,
+        );
+        hasher.pair(primitive.normals.len() as u32, primitive.uvs.len() as u32);
+        let floats = primitive
+            .positions
+            .iter()
+            .chain(&primitive.normals)
+            .flatten()
+            .chain(primitive.uvs.iter().flatten());
+        let mut floats = floats.map(|value| value.to_bits());
+        while let Some(low) = floats.next() {
+            hasher.pair(low, floats.next().unwrap_or(0));
+        }
+        for pair in primitive.indices.chunks(2) {
+            hasher.pair(pair[0], pair.get(1).copied().unwrap_or(0));
+        }
+    }
+    hasher.finish()
+}
+
+/// `primitive`'s triangles simplified to [`TARGETS`] of them, as lists of
+/// its corners, each kept only if it saves enough on the one before.
+fn simplified(primitive: &Primitive) -> Vec<Vec<u32>> {
     let triangles = primitive.indices.len() / 3;
     if triangles < MIN_TRIANGLES {
         return Vec::new();
@@ -136,7 +210,7 @@ fn simplified(primitive: &Primitive) -> Vec<Primitive> {
             break;
         }
         last = kept;
-        lods.push(primitive.with_triangles(&indices));
+        lods.push(indices);
     }
     lods
 }
@@ -281,7 +355,7 @@ mod tests {
     fn a_big_primitive_gets_copies_with_half_then_a_quarter_of_its_triangles() {
         let grid = wavy_grid(40);
         let triangles = grid.indices.len() / 3;
-        let [full] = attach(vec![grid]).try_into().ok().unwrap();
+        let [full] = attach(vec![grid], None).try_into().ok().unwrap();
         assert_eq!(full.lods.len(), 2);
         let counts: Vec<usize> = full
             .lods
@@ -313,10 +387,79 @@ mod tests {
     }
 
     #[test]
+    fn a_project_model_keeps_its_copies_in_the_mesh_cache() {
+        let project =
+            std::env::temp_dir().join(format!("axcenity-lod-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        let model = project.join("assets/models/grid.glb");
+        std::fs::create_dir_all(model.parent().unwrap()).unwrap();
+        std::fs::write(&model, b"model").unwrap();
+        let at = InProject {
+            project: &project,
+            relative: "assets/models/grid.glb",
+            bytes: b"model",
+        };
+        let cached = || lod_cache::cached_meshes(&project, "assets/models/grid.glb");
+        let triangles = |primitive: &Primitive| -> Vec<Vec<u32>> {
+            let lods = primitive.lods.iter();
+            lods.map(|copy| copy.indices.clone()).collect()
+        };
+
+        let [made] = attach(vec![wavy_grid(40)], Some(at))
+            .try_into()
+            .ok()
+            .unwrap();
+        assert_eq!(made.lods.len(), 2);
+        assert_eq!(cached().len(), 1, "simplifying writes the cache");
+        let file = project.join(&cached()[0]);
+        let written = std::fs::metadata(&file).unwrap().modified().unwrap();
+
+        let [read] = attach(vec![wavy_grid(40)], Some(at))
+            .try_into()
+            .ok()
+            .unwrap();
+        assert_eq!(triangles(&read), triangles(&made), "read back the same");
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().modified().unwrap(),
+            written
+        );
+
+        // Another pick of the same file has its own; a damaged one is
+        // simplified again and rewritten.
+        attach(vec![wavy_grid(30)], Some(at));
+        assert_eq!(cached().len(), 2);
+        std::fs::write(&file, b"AXLOD").unwrap();
+        let [again] = attach(vec![wavy_grid(40)], Some(at))
+            .try_into()
+            .ok()
+            .unwrap();
+        assert_eq!(triangles(&again), triangles(&made));
+        assert!(std::fs::read(&file).unwrap().len() > 5);
+
+        // Once the model file changes, its old copies aren't shipped, and
+        // the next write clears them away.
+        std::fs::write(&model, b"edited").unwrap();
+        assert!(cached().is_empty());
+        let edited = InProject {
+            bytes: b"edited",
+            ..at
+        };
+        attach(vec![wavy_grid(20)], Some(edited));
+        assert_eq!(cached().len(), 1);
+        assert_eq!(
+            std::fs::read_dir(project.join(lod_cache::MESH_CACHE_FOLDER))
+                .unwrap()
+                .count(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(&project);
+    }
+
+    #[test]
     fn a_small_primitive_is_not_simplified() {
         let grid = wavy_grid(8);
         assert!(grid.indices.len() / 3 < MIN_TRIANGLES);
-        assert!(attach(vec![grid])[0].lods.is_empty());
+        assert!(attach(vec![grid], None)[0].lods.is_empty());
     }
 
     #[test]

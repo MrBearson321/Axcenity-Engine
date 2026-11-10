@@ -85,10 +85,10 @@ pub use material::{
     write_material_file,
 };
 pub use model::{
-    AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, MapSlot,
-    Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
-    Primitive, Rig, Take, TextureRole, Track, list_objects, load_model, load_models, load_takes,
-    lod_level, tangents, texture_roles,
+    AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys,
+    MESH_CACHE_FOLDER, MapSlot, Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick,
+    Pose, Posed, PosedPrimitive, Primitive, Rig, Take, TextureRole, Track, cached_meshes,
+    list_objects, load_model, load_models, load_takes, lod_level, tangents, texture_roles,
 };
 pub use probe::{
     PROBE_SUFFIX, PROBES_FOLDER, ProbeImage, decode_probe, encode_probe, is_probe_file, probe_path,
@@ -802,13 +802,18 @@ fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
     )?;
     let format = ModelFormat::of(&relative)
         .ok_or("MeshId must name a model file: a .gltf, .glb or .fbx file")?;
-    let path = folder.join(relative);
+    let path = folder.join(&relative);
     let bytes = std::fs::read(&path).map_err(|err| match err.kind() {
         std::io::ErrorKind::NotFound => "the file isn't there".to_owned(),
         _ => err.to_string(),
     })?;
     let base = path.parent().unwrap_or(folder);
-    model::load_models_in(&bytes, base, Some(folder), format, &[pick])
+    let in_project = model::InProject {
+        project: folder,
+        relative: &relative.to_string_lossy().replace('\\', "/"),
+        bytes: &bytes,
+    };
+    model::load_models_in(&bytes, base, Some(in_project), format, &[pick])
         .map(|mut models| models.remove(0))
         .map_err(|err| with_causes(&err))
 }

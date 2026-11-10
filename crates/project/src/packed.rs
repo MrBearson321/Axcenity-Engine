@@ -41,7 +41,9 @@ pub enum PackError {
 ///
 /// Editor settings and unrelated documents are excluded. Textures go with
 /// their current cooked copies (`.axcenity/imported/textures/`, roadmap L2),
-/// so the game uploads them as they are instead of decoding them. Block JSON is
+/// so the game uploads them as they are instead of decoding them, and
+/// models with their cached simpler copies (`.axcenity/imported/meshes/`),
+/// so the game doesn't simplify them again. Block JSON is
 /// translated into Lua in the archive so an exported player only needs the
 /// normal script loader.
 pub fn pack_game(folder: &Path) -> Result<Vec<u8>, PackError> {
@@ -214,17 +216,18 @@ fn collect_runtime_files(
 /// place in the project, so the player finds it (it checks the copy against
 /// the texture's bytes, since unpacking gives every file a new time).
 fn add_cooked_textures(root: &Path, files: &mut Vec<(String, Vec<u8>)>) -> Result<(), PackError> {
-    let textures: Vec<String> = files
-        .iter()
-        .map(|(name, _)| name)
-        .filter(|name| name.starts_with("assets/") && is_texture_file(name))
-        .filter(|name| axcenity_assets::is_cooked(root, name))
-        .cloned()
-        .collect();
-    for name in textures {
-        let path = axcenity_assets::cooked_path(root, &name);
+    let mut cooked: Vec<String> = Vec::new();
+    for (name, _) in files.iter().filter(|(name, _)| name.starts_with("assets/")) {
+        if is_texture_file(name) && axcenity_assets::is_cooked(root, name) {
+            cooked.push(axcenity_assets::cooked_relative_path(name));
+        } else if axcenity_assets::ModelFormat::of(Path::new(name)).is_some() {
+            cooked.extend(axcenity_assets::cached_meshes(root, name));
+        }
+    }
+    for name in cooked {
+        let path = root.join(&name);
         let contents = fs::read(&path).map_err(|source| PackError::Read { path, source })?;
-        files.push((axcenity_assets::cooked_relative_path(&name), contents));
+        files.push((name, contents));
         if files.len() > MAX_FILES {
             return Err(PackError::TooManyFiles);
         }
@@ -466,6 +469,62 @@ mod tests {
         let read = axcenity_assets::read_cooked(&unpacked, fresh).expect("packed and current");
         assert_eq!(read.levels, cooked.levels);
         assert!(!axcenity_assets::cooked_path(&unpacked, stale).exists());
+        let _ = fs::remove_dir_all(project);
+        let _ = fs::remove_dir_all(unpacked);
+    }
+
+    #[test]
+    fn a_built_game_carries_its_models_cached_simpler_copies() {
+        let model = "assets/models/CityPropsCollection.fbx";
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/hello-mesh")
+            .join(model);
+        let project = temp_folder("mesh-cache");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("assets/models")).unwrap();
+        fs::write(project.join(crate::MANIFEST_FILE), "{}").unwrap();
+        fs::copy(&source, project.join(model)).unwrap();
+        let cached = |folder: &Path| -> Vec<String> {
+            let Ok(entries) = fs::read_dir(folder.join(axcenity_assets::MESH_CACHE_FOLDER)) else {
+                return Vec::new();
+            };
+            let mut names: Vec<String> = entries
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        };
+        // Loading it in the editor simplifies it and keeps the copies.
+        let assets = axcenity_assets::Assets::new(&project);
+        let made = assets.model_blocking(model).expect("loads");
+        assert!(
+            made.primitives
+                .iter()
+                .any(|primitive| !primitive.lods.is_empty())
+        );
+        assert_eq!(cached(&project).len(), 1);
+
+        let unpacked = temp_folder("mesh-cache-unpacked");
+        let _ = fs::remove_dir_all(&unpacked);
+        unpack_game(&pack_game(&project).unwrap(), &unpacked).unwrap();
+        assert_eq!(cached(&unpacked), cached(&project));
+        // The game reads them: it writes nothing new, and gets the same copies.
+        let file = unpacked
+            .join(axcenity_assets::MESH_CACHE_FOLDER)
+            .join(&cached(&unpacked)[0]);
+        let shipped = fs::metadata(&file).unwrap().modified().unwrap();
+        let read = axcenity_assets::Assets::new(&unpacked)
+            .model_blocking(model)
+            .expect("loads");
+        assert_eq!(fs::metadata(&file).unwrap().modified().unwrap(), shipped);
+        let lods = |model: &axcenity_assets::Model| -> Vec<usize> {
+            let primitives = model.primitives.iter();
+            primitives
+                .flat_map(|primitive| primitive.lods.iter().map(|copy| copy.indices.len()))
+                .collect()
+        };
+        assert_eq!(lods(&read), lods(&made));
         let _ = fs::remove_dir_all(project);
         let _ = fs::remove_dir_all(unpacked);
     }
