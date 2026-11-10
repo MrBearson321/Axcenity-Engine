@@ -193,6 +193,22 @@ pub enum DesignerAction {
         ids: Vec<InstanceId>,
         declarations: Vec<(String, String)>,
     },
+    /// Moves these into `parent`, from dragging Hierarchy rows onto it:
+    /// each stays where it is on screen (see [`placed_in`]), as one undo
+    /// step.
+    MoveInto {
+        ids: Vec<InstanceId>,
+        parent: InstanceId,
+    },
+    /// The inspector's X, Y, W or H typed or dragged: `id`'s new
+    /// `Position` and `Size` (`resize` for W and H). Every frame of one
+    /// drag or one number typed makes one undo step.
+    Place {
+        id: InstanceId,
+        position: UDim2,
+        size: UDim2,
+        resize: bool,
+    },
     /// Duplicates the selection (as Ctrl+D does).
     Duplicate,
     /// Delete the selection, as the Delete key does (one undo step).
@@ -690,6 +706,111 @@ pub fn anchor_action(
     }
     let (position, size) = anchors::pin(placement, position, size, Some(x), Some(y));
     Some(DesignerAction::Anchor { id, position, size })
+}
+
+/// `id`'s `Position` and `Size` once it's moved into `parent` (in the same
+/// ScreenGui `gui`), so it stays where it is on the artboard: each axis
+/// keeps its anchor (see `anchors.rs`), with its offsets worked out again
+/// from the new parent's corner. An axis whose size CSS sets keeps its
+/// `Size`. `None` when it isn't on the artboard.
+pub fn placed_in(
+    world: &World,
+    stylesheets: &[Stylesheet],
+    gui: InstanceId,
+    id: InstanceId,
+    parent: InstanceId,
+) -> Option<(UDim2, UDim2)> {
+    let instance = world.get(id)?;
+    let position = instance.property("Position").and_then(Value::as_udim2)?;
+    let size = instance.property("Size").and_then(Value::as_udim2)?;
+    let screen = axcenity_ui::design_size(world, gui);
+    let layout = axcenity_ui::layout_artboard(world, gui, stylesheets, screen, 1.0, [0.0, 0.0]);
+    let element = layout.element(id)?;
+    let per_unit = element.pixels_per_unit.max(1e-4);
+    // As `panels::placement` does: the ScreenGui is the whole screen.
+    let target = layout.element(parent).filter(|_| parent != gui).map_or(
+        axcenity_ui::UiRect {
+            x: 0.0,
+            y: 0.0,
+            width: screen.0 as f32,
+            height: screen.1 as f32,
+        },
+        |parent| parent.rect,
+    );
+    let rect = element.rect;
+    let axis = |position: axcenity_core::UDim, size: axcenity_core::UDim, start, length, along| {
+        anchors::anchor_axis(
+            anchors::anchor_of(position, size),
+            start / per_unit,
+            length / per_unit,
+            along / per_unit,
+        )
+    };
+    let (x, width) = axis(
+        position.x,
+        size.x,
+        rect.x - target.x,
+        rect.width,
+        target.width,
+    );
+    let (y, height) = axis(
+        position.y,
+        size.y,
+        rect.y - target.y,
+        rect.height,
+        target.height,
+    );
+    let sized_by_size = |property| {
+        matches!(
+            crate::ui_handles::Axis::of(world, id, stylesheets, property),
+            crate::ui_handles::Axis::Size
+        )
+    };
+    let width = if sized_by_size("width") {
+        width
+    } else {
+        size.x
+    };
+    let height = if sized_by_size("height") {
+        height
+    } else {
+        size.y
+    };
+    Some((
+        UDim2 { x, y },
+        UDim2 {
+            x: width,
+            y: height,
+        },
+    ))
+}
+
+/// Whether a flex layout places `id` in its parent, so its `Position`
+/// doesn't count.
+pub fn in_flow(world: &World, stylesheets: &[Stylesheet], gui: InstanceId, id: InstanceId) -> bool {
+    panels::placement(world, stylesheets, gui, id).is_some_and(|(_, in_flow)| in_flow)
+}
+
+/// Where a Hierarchy row dragged onto the row of `onto` goes: into `onto`
+/// if it's a container, else into the container `onto` is in. `None` when
+/// none of `moving` can go there (into itself or something inside it, or
+/// where they all are already).
+pub fn hierarchy_drop_target(
+    world: &World,
+    gui: InstanceId,
+    moving: &[InstanceId],
+    onto: InstanceId,
+) -> Option<InstanceId> {
+    let target = container_for(world, gui, Some(onto));
+    moving
+        .iter()
+        .any(|&id| {
+            id != gui
+                && target != id
+                && !world.is_descendant_of(target, id)
+                && world.get(id).and_then(|i| i.parent()) != Some(target)
+        })
+        .then_some(target)
 }
 
 /// Anchors `id` back at its parent's top left, not stretched, where it is

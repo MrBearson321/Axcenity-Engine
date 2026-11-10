@@ -1669,6 +1669,8 @@ mod tests;
 #[cfg(test)]
 mod ui_designer_menu_tests;
 #[cfg(test)]
+mod ui_designer_move_tests;
+#[cfg(test)]
 mod ui_designer_tests;
 #[cfg(test)]
 mod ui_graph_tests;
