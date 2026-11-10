@@ -31,6 +31,12 @@ pub(super) const FADE_FRAMES: u64 = 12;
 /// The share of an item's cull distance it fades out over, at the far end.
 const CULL_FADE: f32 = 0.1;
 
+/// The share of an item's cull distance it casts a shadow to. A pebble's or
+/// a grass tuft's shadow is lost among the others well before the plant is,
+/// and there are thousands of them in every shadow view: ambient occlusion
+/// keeps them seated on the ground past this.
+const SHADOW_REACH: f32 = 0.35;
+
 /// An item not drawn for this many frames has its level forgotten.
 const FORGET_FRAMES: u64 = 600;
 
@@ -260,6 +266,7 @@ fn resolve_item<'a>(
         }
         let fade = (item.cull_distance - distance) / (item.cull_distance * CULL_FADE);
         draw.fade = fade.min(OPAQUE);
+        draw.casts_shadow &= distance <= item.cull_distance * SHADOW_REACH;
     }
     let Shape::Mesh(source) = &item.shape else {
         part.draws.push(draw);
@@ -354,6 +361,36 @@ mod tests {
         assert_eq!(lod_level(threshold * 1.2, Some(1), 2), 0);
         // A big jump goes straight to the level for its size.
         assert_eq!(lod_level(0.01, Some(0), 2), 2);
+    }
+
+    #[test]
+    fn a_plant_stops_casting_a_shadow_well_before_it_stops_being_drawn() {
+        let camera = Camera {
+            position: glam::Vec3::ZERO,
+            look_at: glam::Vec3::NEG_Z,
+            fov_y_degrees: 70.0,
+        };
+        let casts = |distance: f32, cull_distance: f32| {
+            let item = DrawItem {
+                shape: Shape::Block,
+                transform: glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -distance)),
+                material: Default::default(),
+                uv_tile: 0.0,
+                casts_shadow: true,
+                id: 0,
+                cull_distance,
+                skin: None,
+                sway: None,
+                decal_role: Default::default(),
+            };
+            let mut part = Part::default();
+            resolve_item(&FxHashMap::default(), &item, &camera, 0, &mut part);
+            part.draws.first().map(|draw| draw.casts_shadow)
+        };
+        assert_eq!(casts(20.0, 100.0), Some(true), "near");
+        assert_eq!(casts(50.0, 100.0), Some(false), "drawn with no shadow");
+        assert_eq!(casts(150.0, 100.0), None, "past its cull distance");
+        assert_eq!(casts(5000.0, 0.0), Some(true), "no cull distance: always");
     }
 
     #[test]

@@ -888,13 +888,28 @@ dependencies = [
  "axcenity-assets",
  "axcenity-core",
  "axcenity-net",
- "axcenity-physics",
  "axcenity-project",
  "axcenity-save",
  "axcenity-script",
+ "axcenity-sim",
  "axcenity-workspace-hack",
  "env_logger",
  "log",
+ "profiling",
+]
+
+[[package]]
+name = "axcenity-sim"
+version = "0.1.0"
+dependencies = [
+ "axcenity-anim",
+ "axcenity-assets",
+ "axcenity-character",
+ "axcenity-core",
+ "axcenity-nav",
+ "axcenity-physics",
+ "axcenity-script",
+ "axcenity-workspace-hack",
  "profiling",
 ]
 
@@ -915,14 +930,12 @@ dependencies = [
 name = "axcenity-testing"
 version = "0.1.0"
 dependencies = [
- "axcenity-anim",
  "axcenity-assets",
  "axcenity-character",
  "axcenity-core",
- "axcenity-nav",
- "axcenity-physics",
  "axcenity-project",
  "axcenity-script",
+ "axcenity-sim",
  "axcenity-workspace-hack",
  "profiling",
 ]

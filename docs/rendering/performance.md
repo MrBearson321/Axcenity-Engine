@@ -302,3 +302,20 @@ Each MeshPart used to make a new mesh for each primitive of its model every fram
 | CPU `build_draw_list`, 2,000 helmets | 1.84 to 1.90 | 0.90 to 0.99 |
 
 The player's `bench_2000_mesh_parts` keeps a `TerrainCache` across frames too now, as the hosts do; it wasn't run for this change (the container has only a software GPU).
+
+## Small dense patches (biome test projects)
+
+Nine 72 × 72-stud projects, about 35,000 painted models each (pebbles, litter, grass tufts) and two trees of 0.7 to 1 million triangles. Measured with `shoot_project` at 2560 × 1440, on the machine above (AMD Radeon RX 9070 XT, Vulkan), release build. The cells are the range over five of the projects and two cameras. Times are milliseconds; two runs of one view can differ by about 1.5 ms of GPU.
+
+| Ultra | Before | After |
+|---|---|---|
+| Shadow casters drawn (all views) | 66,800 to 96,500 | 38,300 to 66,600 |
+| CPU `ScenePipeline::draw` | 9.3 to 10.4 | 8.0 to 8.8 |
+| GPU frame | 14.3 to 20.1 | 14.4 to 19.6 |
+
+At High, after these changes, the GPU frame is 10.0 to 15.9.
+
+- **Shadow reach (`SHADOW_REACH`, `renderer/lod.rs`).** An item with a cull distance casts only to 35% of it. Most of the casters were pebbles and tufts drawn into every cascade. The pictures from both cameras are the same to the eye.
+- **Cut-out edges (`fs_depth_coverage`).** Alpha to coverage on the depth fill (see Anti-aliasing in [shadows.md](shadows.md)) costs up to about 1 ms of GPU here, which is about what the shadow reach saves, so the GPU frame is unchanged while the edges are smooth.
+- **Simpler meshes for shadows were tried and removed.** Drawing shadows two levels of detail down saved about 1 ms, added 36 to 54 MB of mesh memory and visibly changed how the trees shaded themselves and the ground.
+- **Game logic isn't the cost**: `Session::frame` is 0.4 ms in `bench_project_play`. What's left is triangles. The two trees are 1.7 million triangles in up to seven passes, about half of the frame's, so a project's first saving is lighter tree models.

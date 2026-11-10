@@ -140,8 +140,38 @@ Taken on 2026-11-10 on a Ryzen 9 9950X3D under Windows, release build, main and 
 
 About 11%, 8% and 6% off the frame. Each walk replaced cost a few tens of microseconds on 10,000 parts, so the gain comes from there being many of them: `Scripts` (per-frame Health, Humanoid, follower and prompt walks) falls by about 0.11 ms on every host. A world with few Instances gains almost nothing. On copies of six real projects (General Store Roadside, Abandoned Farmhouse, three biome patches, The Dimming; under 1 MB of `world.json` each, on all three hosts) every difference was within run-to-run noise, in both directions.
 
+### A Windows desktop with a real GPU
+
+Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table above): AMD Ryzen 9 9950X3D (16 cores), 62 GB of RAM, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Each host ran three times, 600 measured frames each; the table gives the median of the three runs' medians, and the worst frame seen in any run. The first player run was slower than the other two (Physics 14.3 ms against 5.4 ms); it came straight after the release build. Times are milliseconds.
+
+| Step | Test runner | Server | Editor Play | Player |
+|---|---|---|---|---|
+| Network | – | 0.008 | 0.002 | 0.009 |
+| Characters | 2.70 | – | 2.13 | 2.41 |
+| Agents | 0.32 (worst 13.6) | – | 1.17 (worst 2.7) | 0.35 (worst 12.6) |
+| Input | 0.86 | 0.018 | 0.80 | 0.88 |
+| Scripts | 0.12 | 0.12 | 0.12 | 0.14 |
+| Physics | 4.94 | 3.85 | 3.76 | 5.46 |
+| Heartbeat | 0.86 | 0.82 | 0.47 | 0.87 |
+| RenderStep | 0.002 | – | 0.003 | – |
+| Audio | – | – | 0.032 | – |
+| Animation | 0.12 | – | 0.12 | 0.32 |
+| Draw list | – | – | – | 8.38 |
+| UI | – | – | – | 0.038 |
+| Render | – | – | – | 2.69 |
+| Network send | – | 0.52 | 0.003 | – |
+| **Frame, median** | **10.0** | **5.4** | **8.7** | **21.5** |
+| Frame, mean | 10.5 | 5.5 | 8.9 | 22.1 |
+| Frame, 95th percentile | 13.3 | 6.9 | 10.9 | 25.0 |
+| Frame, worst | 34 | 13 | 27 | 51 |
+
+The player's first frame was 130 to 152 ms, and launch to first frame 3.3 s (7.0 s on the first run).
+
+- **The draw list is now the player's largest step**, and at 8.4 ms it doesn't shrink on a faster CPU: it is 8.1 ms on the cloud container, where physics is about 1.7× slower.
+- **Against the 3.3 ms in `rendering/performance.md`**: `bench_10000_parts` is 8.5 to 8.9 ms in `build_draw_list` here, so that figure is out of date. The roadmap's merges didn't cause it: 556b72b, the commit before them, is 8.0 to 8.8 ms on this machine, and each merge timed since is 7.4 to 8.9 ms. The rise came somewhere between the commit that added the render benchmarks and 556b72b.
+
 ### Calibrating against the rendering baseline
 
-The render benchmarks ran on the same container to relate it to the machine in [rendering/performance.md](rendering/performance.md). `bench_10000_parts` (edge view) took 8.6 ms in `build_draw_list` here, against 3.3 ms there, so this container's CPU is roughly 2.5× slower for this work; divide the table above by about 2.5 for a fast desktop CPU. `bench_project` on S10k: `build_draw_list` 9.4 ms and `ScenePipeline::draw` (CPU side) 3.7 ms from the spawn, 9.5 ms and 3.7 ms from the overview, 6,575 and 10,026 items drawn. GPU times on lavapipe (300–940 ms a frame) say nothing about a real GPU and are left out.
+The render benchmarks ran on the same container to relate it to the machine in [rendering/performance.md](rendering/performance.md). `bench_10000_parts` (edge view) took 8.6 ms in `build_draw_list` there, about the same as the desktop above; steps other than the draw list are about 1.5 to 2× slower on the container. Compare runs on one machine rather than scaling between them. `bench_project` on S10k: `build_draw_list` 9.4 ms and `ScenePipeline::draw` (CPU side) 3.7 ms from the spawn, 9.5 ms and 3.7 ms from the overview, 6,575 and 10,026 items drawn. GPU times on lavapipe (300–940 ms a frame) say nothing about a real GPU and are left out.
 
 Absolute numbers depend on the machine. Compare runs on one machine, and run the same commands before and after a change.
