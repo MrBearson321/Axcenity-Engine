@@ -1,7 +1,8 @@
 //! Model ▸ Build ▸ Collision Groups: the project's collision groups
 //! (`collision-groups.json`). Groups are added by name and removed with
 //! their ×; a matrix of checkboxes says which pairs collide. Changes are
-//! written at once, like the Input window, and the next Play uses them.
+//! written at once, like the Input window, and the next Play uses them;
+//! each is an undo step.
 //! A part joins a group through its `CollisionGroup` property.
 
 use axcenity_core::{CollisionGroups, DEFAULT_GROUP};
@@ -44,10 +45,17 @@ pub(super) fn edited(groups: &CollisionGroups, edit: GroupEdit) -> Result<Collis
 
 impl EditorApp {
     /// Makes `edit` to the world's collision groups and writes
-    /// `collision-groups.json`.
+    /// `collision-groups.json`, as one undo step (undo writes the file back;
+    /// `apply_history_texts` reads it again).
     pub(super) fn edit_collision_groups(&mut self, edit: GroupEdit) {
         let Some(project) = &self.project else {
             return;
+        };
+        let label = match &edit {
+            GroupEdit::Add(name) => format!("Add collision group {}", name.trim()),
+            GroupEdit::Remove(name) => format!("Remove collision group {name}"),
+            GroupEdit::SetCollidable(a, b, true) => format!("Let {a} and {b} collide"),
+            GroupEdit::SetCollidable(a, b, false) => format!("Stop {a} and {b} colliding"),
         };
         let groups = match edited(self.world.collision_groups(), edit) {
             Ok(groups) => groups,
@@ -56,13 +64,26 @@ impl EditorApp {
                 return;
             }
         };
-        match axcenity_project::save_collision_groups(&project.folder, &groups) {
-            Ok(()) => self.world.set_collision_groups(groups),
-            Err(err) => self.output.error(format!(
+        let path = project.folder.join(axcenity_project::COLLISION_GROUPS_FILE);
+        let before = std::fs::read_to_string(&path).ok();
+        if let Err(err) = axcenity_project::save_collision_groups(&project.folder, &groups) {
+            self.output.error(format!(
                 "Could not save the collision groups: {}",
                 files::chain(&err)
-            )),
+            ));
+            return;
         }
+        self.world.set_collision_groups(groups);
+        let after = std::fs::read_to_string(&path).ok();
+        self.history.record_files(
+            &mut self.world,
+            label,
+            vec![history::TextChange {
+                path: axcenity_project::COLLISION_GROUPS_FILE.to_owned(),
+                before,
+                after,
+            }],
+        );
     }
 
     /// Model ▸ Build ▸ Collision Groups.

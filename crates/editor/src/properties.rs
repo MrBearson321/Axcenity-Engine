@@ -1819,10 +1819,12 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             )
             .changed()
             .then_some(Value::Number(number)),
+        // `Edits`, not `Always`: `Always` writes the value back every frame,
+        // rounded to one decimal, so just showing it was an undo step.
         Value::Number(mut number) if name == "GeographicLatitude" => ui
             .add(
                 egui::Slider::new(&mut number, -90.0..=90.0)
-                    .clamping(egui::SliderClamping::Always)
+                    .clamping(egui::SliderClamping::Edits)
                     .suffix("°")
                     .max_decimals(1),
             )

@@ -94,10 +94,19 @@ pub(super) fn edited(map: &InputMap, edit: InputEdit) -> Result<InputMap, String
 }
 
 impl EditorApp {
-    /// Makes `edit` to the project's input map and writes `input.json`.
+    /// Makes `edit` to the project's input map and writes `input.json`, as
+    /// one undo step (undo writes the file back; `apply_history_texts`
+    /// reads it again).
     pub(super) fn edit_input_map(&mut self, edit: InputEdit) {
         let Some(project) = &mut self.project else {
             return;
+        };
+        let label = match &edit {
+            InputEdit::Add { action, .. } => format!("Add an input to {action}"),
+            InputEdit::Remove { action, .. } => format!("Remove an input from {action}"),
+            InputEdit::AddAction { name, .. } => format!("Add input action {name}"),
+            InputEdit::RemoveAction(name) => format!("Remove input action {name}"),
+            InputEdit::Reset => "Restore default input".to_owned(),
         };
         let map = match edited(&project.input_map, edit) {
             Ok(map) => map,
@@ -106,13 +115,28 @@ impl EditorApp {
                 return;
             }
         };
+        let path = project.folder.join(axcenity_project::INPUT_FILE);
+        let before = std::fs::read_to_string(&path).ok();
         match axcenity_project::save_input_map(&project.folder, &map) {
             Ok(()) => project.input_map = map,
-            Err(err) => self.output.error(format!(
-                "Could not save the input map: {}",
-                files::chain(&err)
-            )),
+            Err(err) => {
+                self.output.error(format!(
+                    "Could not save the input map: {}",
+                    files::chain(&err)
+                ));
+                return;
+            }
         }
+        let after = std::fs::read_to_string(&path).ok();
+        self.history.record_files(
+            &mut self.world,
+            label,
+            vec![history::TextChange {
+                path: axcenity_project::INPUT_FILE.to_owned(),
+                before,
+                after,
+            }],
+        );
     }
 
     /// File ▸ Input…
