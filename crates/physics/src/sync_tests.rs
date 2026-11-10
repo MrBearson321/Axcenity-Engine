@@ -269,3 +269,188 @@ fn a_new_collision_group_table_is_applied_to_every_part() {
     physics.step(&mut world, STEP_SECONDS);
     assert!(physics.sync_stats().full_sync);
 }
+
+fn asleep(physics: &Physics, id: InstanceId) -> bool {
+    physics.rapier.bodies[physics.parts[&id].body].is_sleeping()
+}
+
+/// A floor, and a block resting on it at `x`. Returns them, floor first.
+fn block_on_a_floor(world: &mut World, x: f32) -> (InstanceId, InstanceId) {
+    let floor = part(world, Vector3::new(x, -0.5, 0.0), true);
+    set(
+        world,
+        floor,
+        "Size",
+        Value::Vector3(Vector3::new(10.0, 1.0, 10.0)),
+    );
+    let block = part(world, Vector3::new(x, 0.5, 0.0), false);
+    (floor, block)
+}
+
+/// Steps until nothing moves any more.
+fn settle(physics: &mut Physics, world: &mut World) {
+    for _ in 0..300 {
+        physics.step(world, STEP_SECONDS);
+    }
+}
+
+#[test]
+fn a_resting_body_stays_asleep_while_nothing_touches_it() {
+    let mut world = World::new();
+    let (_, block) = block_on_a_floor(&mut world, 0.0);
+    let mut physics = Physics::new();
+    settle(&mut physics, &mut world);
+    assert!(asleep(&physics, block), "it came to rest");
+    for _ in 0..120 {
+        physics.step(&mut world, STEP_SECONDS);
+        assert!(asleep(&physics, block));
+        assert_eq!(physics.sync_stats().parts_read, 0);
+    }
+}
+
+#[test]
+fn a_change_elsewhere_does_not_wake_a_resting_body() {
+    let mut world = World::new();
+    let (_, block) = block_on_a_floor(&mut world, 0.0);
+    let far = part(&mut world, Vector3::new(500.0, 0.0, 0.0), true);
+    let mut physics = Physics::new();
+    settle(&mut physics, &mut world);
+    assert!(asleep(&physics, block));
+
+    for i in 0..30 {
+        set(
+            &mut world,
+            far,
+            "Position",
+            Value::Vector3(Vector3::new(500.0 + i as f32, 0.0, 0.0)),
+        );
+        part(
+            &mut world,
+            Vector3::new(800.0 + 5.0 * i as f32, 0.0, 0.0),
+            true,
+        );
+        physics.step(&mut world, STEP_SECONDS);
+        assert!(asleep(&physics, block));
+    }
+}
+
+#[test]
+fn moving_a_part_wakes_what_rests_on_it_but_not_a_distant_stack() {
+    let mut world = World::new();
+    let (floor, block) = block_on_a_floor(&mut world, 0.0);
+    let (_, distant) = block_on_a_floor(&mut world, 200.0);
+    let mut physics = Physics::new();
+    settle(&mut physics, &mut world);
+    assert!(asleep(&physics, block) && asleep(&physics, distant));
+
+    // The floor drops away from under the block.
+    set(
+        &mut world,
+        floor,
+        "Position",
+        Value::Vector3(Vector3::new(0.0, -50.0, 0.0)),
+    );
+    physics.step(&mut world, STEP_SECONDS);
+    assert!(!asleep(&physics, block), "it lost what it rested on");
+    assert!(asleep(&physics, distant));
+    let (before, resting) = (height(&world, block), height(&world, distant));
+    for _ in 0..10 {
+        physics.step(&mut world, STEP_SECONDS);
+    }
+    assert!(height(&world, block) < before, "it falls");
+    assert_eq!(height(&world, distant), resting);
+}
+
+#[test]
+fn removing_a_part_wakes_what_rests_on_it_but_not_a_distant_stack() {
+    let mut world = World::new();
+    let (floor, block) = block_on_a_floor(&mut world, 0.0);
+    let (_, distant) = block_on_a_floor(&mut world, 200.0);
+    let mut physics = Physics::new();
+    settle(&mut physics, &mut world);
+
+    world.destroy(floor).unwrap();
+    physics.step(&mut world, STEP_SECONDS);
+    assert!(!asleep(&physics, block));
+    assert!(asleep(&physics, distant));
+}
+
+#[test]
+fn an_anchored_part_put_inside_a_sleeping_body_wakes_it() {
+    let mut world = World::new();
+    let (_, block) = block_on_a_floor(&mut world, 0.0);
+    let wall = part(&mut world, Vector3::new(100.0, 0.5, 0.0), true);
+    let mut physics = Physics::new();
+    settle(&mut physics, &mut world);
+    assert!(asleep(&physics, block));
+
+    set(
+        &mut world,
+        wall,
+        "Position",
+        Value::Vector3(Vector3::new(0.0, 1.0, 0.0)),
+    );
+    physics.step(&mut world, STEP_SECONDS);
+    assert!(!asleep(&physics, block));
+}
+
+#[test]
+fn a_new_anchored_part_inside_a_sleeping_body_wakes_it() {
+    let mut world = World::new();
+    let (_, block) = block_on_a_floor(&mut world, 0.0);
+    let mut physics = Physics::new();
+    settle(&mut physics, &mut world);
+
+    part(&mut world, Vector3::new(0.0, 1.0, 0.0), true);
+    physics.step(&mut world, STEP_SECONDS);
+    assert!(!asleep(&physics, block));
+}
+
+#[test]
+fn a_joint_to_a_moved_body_wakes_the_body_on_its_other_end() {
+    let mut world = World::new();
+    let (floor_a, a) = block_on_a_floor(&mut world, 0.0);
+    let (_, b) = block_on_a_floor(&mut world, 20.0);
+    let attachment = |world: &mut World, parent: InstanceId| {
+        let id = world.create(ClassName::Attachment).unwrap();
+        world.set_parent(id, Some(parent)).unwrap();
+        id
+    };
+    let (one, two) = (attachment(&mut world, a), attachment(&mut world, b));
+    let rope = world.create(ClassName::RopeConstraint).unwrap();
+    world.set_parent(rope, Some(world.workspace())).unwrap();
+    set(&mut world, rope, "Attachment0", Value::Instance(Some(one)));
+    set(&mut world, rope, "Attachment1", Value::Instance(Some(two)));
+    set(&mut world, rope, "Enabled", Value::Bool(true));
+    set(&mut world, rope, "Length", Value::Number(30.0));
+    let mut physics = Physics::new();
+    settle(&mut physics, &mut world);
+    assert!(asleep(&physics, a) && asleep(&physics, b));
+
+    set(
+        &mut world,
+        floor_a,
+        "Position",
+        Value::Vector3(Vector3::new(0.0, -50.0, 0.0)),
+    );
+    physics.step(&mut world, STEP_SECONDS);
+    assert!(!asleep(&physics, a) && !asleep(&physics, b));
+}
+
+#[test]
+fn changing_gravity_wakes_what_slept_under_the_old_one() {
+    let mut world = World::new();
+    let (_, block) = block_on_a_floor(&mut world, 0.0);
+    let mut physics = Physics::new();
+    settle(&mut physics, &mut world);
+    assert!(asleep(&physics, block));
+
+    let workspace = world.workspace();
+    set(&mut world, workspace, "Gravity", Value::Number(-196.2));
+    physics.step(&mut world, STEP_SECONDS);
+    assert!(!asleep(&physics, block));
+    for _ in 0..30 {
+        physics.step(&mut world, STEP_SECONDS);
+    }
+    assert!(height(&world, block) > 1.0, "gravity pulls it up now");
+}

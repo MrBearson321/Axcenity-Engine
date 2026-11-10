@@ -158,15 +158,14 @@ pub(crate) fn is_breakable_weld(constraint: &Instance) -> bool {
     constraint.class() == ClassName::WeldConstraint && Strength::of(constraint).breaks()
 }
 
-/// Makes, updates and removes joints to match the enabled constraints.
-/// Returns true if anything changed.
+/// Makes, updates and removes joints to match the enabled constraints,
+/// waking the bodies of each one that changed.
 pub(crate) fn sync(
     world: &World,
     rapier: &mut PhysicsWorld,
     parts: &BTreeMap<InstanceId, Body>,
     joints: &mut BTreeMap<InstanceId, Joint>,
-) -> bool {
-    let mut changed = false;
+) {
     let mut wanted = BTreeMap::new();
     for id in constraints(world) {
         let constraint = world.get(id).expect("listed");
@@ -200,7 +199,6 @@ pub(crate) fn sync(
         if !keep {
             // Its body may be gone already, taking the joint with it.
             rapier.impulse_joints.remove(joint.handle, true);
-            changed = true;
         }
         keep
     });
@@ -213,7 +211,6 @@ pub(crate) fn sync(
                         live.data = described.data;
                     }
                     joint.built = described.data;
-                    changed = true;
                 }
                 // A servo or winch that starts (again) starts from here.
                 let (old, new) = (joint.drive, described.drive);
@@ -247,11 +244,9 @@ pub(crate) fn sync(
                         strength,
                     },
                 );
-                changed = true;
             }
         }
     }
-    changed
 }
 
 /// After a step: removes each joint that held with more than its

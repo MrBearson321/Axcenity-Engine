@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
 use rapier3d::glamx::Vec3;
 use rapier3d::math::Pose;
-use rapier3d::prelude::{RigidBodyBuilder, RigidBodyHandle, RigidBodyType};
+use rapier3d::prelude::{Collider, QueryFilter, RigidBodyBuilder, RigidBodyHandle, RigidBodyType};
 
 use crate::shapes::{self, Form};
 use crate::{
@@ -50,13 +50,8 @@ struct Touched {
     old_welds: Vec<(InstanceId, InstanceId)>,
 }
 
-/// What a sync changed, for waking and for the movers.
-#[derive(Default)]
-struct Applied {
-    /// Bodies a script moved, threw or otherwise changed.
-    moved: HashSet<RigidBodyHandle>,
-    anything_changed: bool,
-}
+/// Bodies a script moved, threw or otherwise changed.
+type Moved = HashSet<RigidBodyHandle>;
 
 impl Physics {
     /// Adds new Parts, removes ones that left the Workspace or were
@@ -66,19 +61,19 @@ impl Physics {
         profiling::scope!("Physics::sync");
         // Before the reads: a model that arrives during them is read again.
         let generation = self.assets.generation();
-        let applied = match self.touched_by_tree_changes(world) {
+        let moved = match self.touched_by_tree_changes(world) {
             Some(touched) => self.sync_changes(world, touched, generation),
             None => self.sync_everything(world),
         };
         self.assets_generation = generation;
-        self.finish_sync(world, applied);
+        self.finish_sync(world, moved);
         #[cfg(any(test, debug_assertions))]
         self.verify_sync(world);
     }
 
     /// Reads all of the Workspace again, when the moves since the last sync
     /// aren't known.
-    fn sync_everything(&mut self, world: &World) -> Applied {
+    fn sync_everything(&mut self, world: &World) -> Moved {
         let (ragdolled, ragdoll_bodies) = ragdoll_parts(world);
         self.ragdoll_bodies = ragdoll_bodies;
         let synced = Synced {
@@ -96,10 +91,10 @@ impl Physics {
             .chain(self.parts.keys().copied())
             .collect();
         self.stats.full_sync = true;
-        let mut applied = Applied::default();
-        self.sync_assemblies(world, &scope, &synced, &mut applied);
+        let mut moved = Moved::new();
+        self.sync_assemblies(world, &scope, &synced, &mut moved);
         self.synced = Some(synced);
-        applied
+        moved
     }
 
     /// What changed in the tree since the last sync, and notes it as seen.
@@ -167,7 +162,7 @@ impl Physics {
 
     /// Catches up with `touched` and with every part whose Instance changed
     /// since the last sync.
-    fn sync_changes(&mut self, world: &World, mut touched: Touched, generation: u64) -> Applied {
+    fn sync_changes(&mut self, world: &World, mut touched: Touched, generation: u64) -> Moved {
         let assets_changed = generation != self.assets_generation;
         // Parts that keep their body. Welded ones are rebuilt with their
         // assemblies instead, so the welds hold them where they are now.
@@ -200,22 +195,21 @@ impl Physics {
             }
         }
 
-        let mut applied = Applied::default();
+        let mut moved = Moved::new();
         if !touched.parts.is_empty() {
             let synced = self.synced.take().expect("a sync without one started over");
             let scope = whole_assemblies(touched.parts, &synced.welds, &touched.old_welds);
             changed.retain(|(id, ..)| !scope.contains(id));
-            self.sync_assemblies(world, &scope, &synced, &mut applied);
+            self.sync_assemblies(world, &scope, &synced, &mut moved);
             self.synced = Some(synced);
         }
-        applied.anything_changed |= !changed.is_empty();
         for (id, state, revision) in changed {
-            self.apply_part_change(id, state, false, &mut applied);
+            self.apply_part_change(id, state, false, &mut moved);
             if let Some(part) = self.parts.get_mut(&id) {
                 part.revision = revision;
             }
         }
-        applied
+        moved
     }
 
     /// Brings the assemblies of `scope` up to date, which has every part in
@@ -226,7 +220,7 @@ impl Physics {
         world: &World,
         scope: &BTreeSet<InstanceId>,
         synced: &Synced,
-        applied: &mut Applied,
+        moved: &mut Moved,
     ) {
         let workspace = world.workspace();
         let current: BTreeMap<InstanceId, PartState> = scope
@@ -282,15 +276,16 @@ impl Physics {
             let Some(part) = self.parts.remove(&id) else {
                 continue;
             };
-            // `true` also removes the body's colliders. Welded parts share a
+            // What it was holding up has to notice. Welded parts share a
             // body, so it may be gone already.
+            self.wake_touching(part.body);
+            // `true` also removes the body's colliders.
             self.rapier.remove_body_with_colliders(part.body, true);
             self.owners.remove(&part.collider);
             for handle in part.foliage {
                 self.owners.remove(&handle);
             }
             old.insert(id, part.seen);
-            applied.anything_changed = true;
         }
         // A part that comes back (moved into the Workspace again) touches anew.
         if !gone.is_empty() {
@@ -302,7 +297,6 @@ impl Physics {
             if rebuild {
                 self.build_assembly(members, *root, &current, &old);
                 self.stats.bodies_built += 1;
-                applied.anything_changed = true;
                 continue;
             }
             let welded = members.len() > 1;
@@ -313,8 +307,7 @@ impl Physics {
                     continue;
                 }
                 let weightless = welded && !part.root && state.massless;
-                self.apply_part_change(*id, state.clone(), weightless, applied);
-                applied.anything_changed = true;
+                self.apply_part_change(*id, state.clone(), weightless, moved);
             }
         }
 
@@ -332,28 +325,91 @@ impl Physics {
         id: InstanceId,
         state: PartState,
         weightless: bool,
-        applied: &mut Applied,
+        moved: &mut Moved,
     ) {
         let mut part = self.parts.remove(&id).expect("just found");
         self.owners.remove(&part.collider);
         for handle in &part.foliage {
             self.owners.remove(handle);
         }
+        // What it was touching where it was, then what it touches now.
+        self.wake_touching(part.body);
         self.apply_change(&mut part, state, weightless);
-        applied.moved.insert(part.body);
+        self.wake_overlapping(part.body);
+        moved.insert(part.body);
         self.owners.insert(part.collider, id);
         self.attach_foliage(id, &mut part);
         self.parts.insert(id, part);
     }
 
+    /// Wakes `body` and everything in contact with or jointed to it, which
+    /// may have lost what it was resting on. A sleeping part's contacts
+    /// stay in place, so a sleeping stack is found this way too: waking one
+    /// of its bodies wakes all of them.
+    fn wake_touching(&mut self, handle: RigidBodyHandle) {
+        let Some(body) = self.rapier.bodies.get(handle) else {
+            return;
+        };
+        let mut wake = vec![handle];
+        for &collider in body.colliders() {
+            let contacts = self
+                .rapier
+                .contact_pairs_with(collider)
+                .filter(|pair| pair.has_any_active_contact())
+                .map(|pair| (pair.collider1, pair.collider2));
+            let overlaps = self
+                .rapier
+                .intersection_pairs_with(collider)
+                .filter(|&(_, _, _, _, intersecting)| intersecting)
+                .map(|(one, _, two, _, _)| (one, two));
+            for (one, two) in contacts.chain(overlaps) {
+                let other = if one == collider { two } else { one };
+                wake.extend(self.rapier.colliders.get(other).and_then(Collider::parent));
+            }
+        }
+        for (one, two, ..) in self.rapier.impulse_joints.attached_joints(handle) {
+            wake.push(if one == handle { two } else { one });
+        }
+        for body in wake {
+            self.rapier.wake_up(body, true);
+        }
+    }
+
+    /// Wakes whatever `body` overlaps where it is now. rapier does that
+    /// for moving bodies, but not for an anchored one a script put there.
+    fn wake_overlapping(&mut self, handle: RigidBodyHandle) {
+        let Some(body) = self.rapier.bodies.get(handle) else {
+            return;
+        };
+        let pose = *body.position();
+        let mut wake = Vec::new();
+        for &collider in body.colliders() {
+            let Some(collider) = self.rapier.colliders.get(collider) else {
+                continue;
+            };
+            // The body may have just been moved: where the collider will be
+            // at the next step, which rapier hasn't worked out yet.
+            let at = pose
+                * collider
+                    .position_wrt_parent()
+                    .copied()
+                    .unwrap_or(Pose::IDENTITY);
+            let filter = QueryFilter::default().exclude_rigid_body(handle);
+            wake.extend(
+                self.rapier
+                    .intersect_shape(at, collider.shape(), filter)
+                    .filter_map(|(_, other)| other.parent()),
+            );
+        }
+        for body in wake {
+            self.rapier.wake_up(body, true);
+        }
+    }
+
     /// The end of every sync: joints, movers, vehicles and waking.
-    fn finish_sync(&mut self, world: &World, applied: Applied) {
-        let Applied {
-            moved,
-            mut anything_changed,
-        } = applied;
+    fn finish_sync(&mut self, world: &World, moved: Moved) {
         // Joints go between the bodies just made, so they come after them.
-        anything_changed |= joints::sync(world, &mut self.rapier, &self.parts, &mut self.joints);
+        joints::sync(world, &mut self.rapier, &self.parts, &mut self.joints);
         // Movers act on those bodies too, read again every frame since
         // they keep no state.
         self.movers = movers::read(world, &self.parts);
@@ -361,14 +417,6 @@ impl Physics {
         self.vehicles = vehicles::read(world, &self.parts, &self.rapier.bodies, &self.rolling);
         self.rolling.retain(|id, _| world.contains(*id));
         self.breakables = fracture::breakables(world, &self.parts);
-
-        // Parts at rest "sleep" and stop being simulated. If a script moved
-        // or removed something, a sleeping part may have lost what it was
-        // resting on, so wake everything and let it settle again. Simple, and
-        // cheap enough for v1 scene sizes.
-        if anything_changed {
-            self.rapier.wake_up_all(true);
-        }
     }
 
     /// True if the parts `members`, with this `root`, already make up one
@@ -486,6 +534,7 @@ impl Physics {
             self.attach_foliage(id, &mut part);
             self.parts.insert(id, part);
         }
+        self.wake_overlapping(body);
     }
 
     /// Parents colliding foliage colliders to a terrain body, replacing any

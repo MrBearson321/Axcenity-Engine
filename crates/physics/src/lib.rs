@@ -519,7 +519,10 @@ impl Physics {
             return;
         }
         let radius_squared = radius * radius;
-        for (handle, body) in self.rapier.bodies.iter_mut() {
+        // Read first: `get_mut` tells rapier the body changed.
+        let mut wake = Vec::new();
+        let mut far = Vec::new();
+        for (handle, body) in self.rapier.bodies.iter() {
             if !body.is_dynamic() {
                 continue;
             }
@@ -529,10 +532,19 @@ impl Physics {
                 x * x + y * y + z * z <= radius_squared
             });
             if near {
-                if self.far_asleep.remove(&handle) {
-                    body.wake_up(true);
+                if self.far_asleep.contains(&handle) {
+                    wake.push(handle);
                 }
             } else if !body.is_sleeping() {
+                far.push(handle);
+            }
+        }
+        for handle in wake {
+            self.far_asleep.remove(&handle);
+            self.rapier.wake_up(handle, true);
+        }
+        for handle in far {
+            if let Some(body) = self.rapier.bodies.get_mut(handle) {
                 body.sleep();
                 self.far_asleep.insert(handle);
             }
@@ -555,7 +567,11 @@ impl Physics {
         self.sync_from_world(world);
         self.sleep_far_bodies();
         let wind = global_wind(world);
-        self.rapier.gravity = Vec3::new(0.0, -gravity(world), 0.0);
+        let gravity = Vec3::new(0.0, -gravity(world), 0.0);
+        if gravity != self.rapier.gravity {
+            self.rapier.gravity = gravity;
+            self.rapier.wake_up_all(true);
+        }
 
         // `max` also turns NaN into 0, so a bad time can't stop physics forever.
         self.unsimulated_seconds += seconds.max(0.0);
@@ -808,10 +824,15 @@ impl Physics {
     /// in case its WindAffected was just turned off or the wind stopped.
     /// Each welded part pushes its assembly by its own faces.
     fn blow(&mut self, wind: Vec3) {
+        // Read first: `get_mut` tells rapier the body changed, and looking
+        // at every body costs the step more than these forces do.
         for part in self.parts.values() {
-            if let Some(body) = self.rapier.bodies.get_mut(part.body)
-                && body.is_dynamic()
-            {
+            let pushed = self
+                .rapier
+                .bodies
+                .get(part.body)
+                .is_some_and(|body| body.is_dynamic() && body.user_force() != Vec3::ZERO);
+            if pushed && let Some(body) = self.rapier.bodies.get_mut(part.body) {
                 body.reset_forces(false);
             }
         }
@@ -819,10 +840,13 @@ impl Physics {
             return;
         }
         for part in self.parts.values() {
+            if !part.seen.wind_affected {
+                continue;
+            }
             let Some(body) = self.rapier.bodies.get_mut(part.body) else {
                 continue;
             };
-            if !body.is_dynamic() || !part.seen.wind_affected {
+            if !body.is_dynamic() {
                 continue;
             }
             let size = part.seen.size;
