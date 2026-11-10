@@ -44,6 +44,43 @@ fn a_tilted_blocks_edge_over_the_sky_is_smoothed_by_msaa_and_fxaa_and_stepped_wi
 }
 
 #[test]
+fn the_holes_a_texture_cuts_are_smoothed_by_msaa_and_stepped_without() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut list = tilted_block();
+    list.items[0].material.base_color_texture = Some(Arc::new(HalfCut));
+    list.items[0].material.alpha_cutoff = 0.5;
+    let size = 64;
+    let in_between = |mode| {
+        let mut renderer = TextureRenderer::new(&device, &queue, size, size);
+        renderer.set_graphics(&with_anti_aliasing(mode));
+        assert_eq!(renderer.graphics().anti_aliasing, mode);
+        renderer.render(&list).unwrap();
+        let pixels = renderer.read_pixels();
+        // The middle of the face, where only the texture's edge passes: the
+        // block's own outline is smoothed by MSAA anyway.
+        let middle = (27..37).flat_map(|y| (27..37).map(move |x| (x, y)));
+        let values: Vec<u8> = middle
+            .map(|(x, y): (u32, u32)| pixels[((y * size + x) * 4) as usize])
+            .collect();
+        assert!(
+            values.iter().any(|&value| value > 245) && values.iter().any(|&value| value < 10),
+            "{mode:?}: the edge passes through the middle: {values:?}"
+        );
+        values
+            .iter()
+            .filter(|value| (10..=245).contains(*value))
+            .count()
+    };
+    use crate::AntiAliasing::{Msaa4, Off};
+    assert_eq!(in_between(Off), 0, "hard steps");
+    let msaa = in_between(Msaa4);
+    assert!(msaa >= 4, "MSAA 4× blends the cut's edge: {msaa}");
+}
+
+#[test]
 fn every_kind_of_item_draws_the_same_with_each_anti_aliasing() {
     let Some((device, queue)) = test_device() else {
         eprintln!("skipped: no graphics adapter on this machine");
