@@ -1094,14 +1094,28 @@ impl GraphView {
         if let Some(start) = start
             && fitted < OPEN_ZOOM
         {
-            // Too big to read whole: the start node in the middle, without
-            // empty room before the graph's first nodes.
+            // Too big to read whole: its top left corner, or, if the start
+            // node isn't in that, the start node in the middle (without
+            // empty room before the graph's first nodes).
             let z = OPEN_ZOOM;
             self.zoom = z;
-            let mut pan = rect.size() * 0.5 - start.center().to_vec2() * z;
-            pan.x = pan.x.min(40.0 - area.min.x * z);
-            pan.y = pan.y.min(40.0 - area.min.y * z);
-            self.pan = pan;
+            let corner = Vec2::splat(40.0) - area.min.to_vec2() * z;
+            let centred = rect.size() * 0.5 - start.center().to_vec2() * z;
+            let shown = |pan: f32, min: f32, max: f32, size: f32| {
+                pan + min * z >= 0.0 && pan + max * z <= size
+            };
+            self.pan = vec2(
+                if shown(corner.x, start.min.x, start.max.x, rect.width()) {
+                    corner.x
+                } else {
+                    centred.x.min(corner.x)
+                },
+                if shown(corner.y, start.min.y, start.max.y, rect.height()) {
+                    corner.y
+                } else {
+                    centred.y.min(corner.y)
+                },
+            );
         }
     }
 

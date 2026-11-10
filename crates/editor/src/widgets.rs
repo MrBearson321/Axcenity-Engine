@@ -75,17 +75,18 @@ pub fn row_name<R>(
 }
 
 /// The changed-value mark beside a row whose content is `row`: a 2-point
-/// accent bar in the gutter just left of it.
+/// accent bar in the gutter, 4 points left of it so it doesn't read as a
+/// text cursor.
 pub fn changed_bar(ui: &egui::Ui, row: Rect) {
     let palette = theme::palette(ui.ctx());
     let bar = Rect::from_min_max(
-        egui::pos2(row.left() - 5.0, row.top() + 3.0),
-        egui::pos2(row.left() - 3.0, row.bottom() - 3.0),
+        egui::pos2(row.left() - 6.0, row.top() + 2.0),
+        egui::pos2(row.left() - 4.0, row.bottom() - 2.0),
     );
     // The gutter is outside the row's own clip: paint on its layer, clipped
     // only to the panel's sides.
     let mut painter = ui.ctx().layer_painter(ui.layer_id());
-    painter.set_clip_rect(ui.clip_rect().expand2(vec2(6.0, 0.0)));
+    painter.set_clip_rect(ui.clip_rect().expand2(vec2(8.0, 0.0)));
     painter.rect_filled(bar, theme::radius::NONE, palette.accent);
 }
 
