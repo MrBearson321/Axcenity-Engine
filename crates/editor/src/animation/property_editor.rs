@@ -158,6 +158,9 @@ pub struct PropertyDoc {
     pub sheet: egui::Rect,
     /// The easing keys made from now on get.
     pub new_keys: NewKeys,
+    /// Whether the tab's Record is on, set by its owner each frame, so an
+    /// empty dope sheet says the right next step.
+    pub recording: bool,
 }
 
 impl PropertyDoc {
@@ -178,6 +181,7 @@ impl PropertyDoc {
             snap: true,
             fps: 30.0,
             gesture: None,
+            recording: false,
             new_event: "Opened".to_owned(),
             show_curves: false,
             curve_view: CurveView::default(),
@@ -318,6 +322,21 @@ impl PropertyDoc {
             (time * 1000.0).round() / 1000.0
         };
         time.clamp(0.0, self.file.duration.max(0.0))
+    }
+
+    /// Whether something moved in the preview isn't keyed yet: it shows
+    /// until the playhead moves or Play starts, then it's dropped.
+    pub fn unkeyed(&self) -> bool {
+        !self.pending.is_empty() && !self.playing && self.playhead == self.pending_at
+    }
+
+    /// What an empty dope sheet or Curves view says to do first.
+    pub fn empty_hint(&self) -> &'static str {
+        if self.recording {
+            "No tracks yet: select something in the preview and move it. Record keys it."
+        } else {
+            "No tracks yet: select something in the preview, move it, and press K."
+        }
     }
 
     /// Something was moved in the preview: with `record`, it's keyed at the

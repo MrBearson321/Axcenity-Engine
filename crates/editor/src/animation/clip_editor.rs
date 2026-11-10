@@ -287,6 +287,12 @@ impl ClipDoc {
         }
     }
 
+    /// Whether a bone turned in the preview isn't keyed yet: it shows until
+    /// the playhead moves or Play starts, then it's dropped.
+    pub fn unkeyed(&self) -> bool {
+        !self.pending.is_empty() && !self.playing && self.playhead == self.pending_at
+    }
+
     /// The preview model's skeleton at the playhead, with bones turned but
     /// not yet keyed on top, or why there isn't one.
     pub fn pose(&mut self, assets: &Assets) -> Result<Posing, String> {

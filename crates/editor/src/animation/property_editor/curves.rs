@@ -335,7 +335,7 @@ impl PropertyDoc {
             painter.text(
                 area.left_center(),
                 egui::Align2::LEFT_CENTER,
-                "No tracks yet: select something in the preview, move it, and press K.",
+                self.empty_hint(),
                 egui::FontId::proportional(12.0),
                 palette.text_weak,
             );

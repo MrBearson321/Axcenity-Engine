@@ -79,15 +79,19 @@ impl AnimationStudio {
                     .auto_shrink(false)
                     .show(ui, |ui| {
                         let height = (ui.available_width() * 0.75).clamp(160.0, 320.0);
-                        events.extend(self.clip_preview(
-                            ui,
-                            assets,
-                            render_state,
-                            stylesheets,
-                            problem.as_deref(),
-                            height,
-                            output,
-                        ));
+                        let shown = ui.scope(|ui| {
+                            self.clip_preview(
+                                ui,
+                                assets,
+                                render_state,
+                                stylesheets,
+                                problem.as_deref(),
+                                height,
+                                output,
+                            )
+                        });
+                        self.recording_frame(ui, shown.response.rect);
+                        events.extend(shown.inner);
                         egui::CollapsingHeader::new(self.drawer_title())
                             .id_salt("clip drawer stacked")
                             .icon(widgets::chevron)
@@ -150,6 +154,7 @@ impl AnimationStudio {
                     height,
                     output,
                 ));
+                self.recording_frame(ui, ui.max_rect());
             });
         }
         if convert && let Some(path) = self.clip_path() {
@@ -481,6 +486,7 @@ impl AnimationStudio {
     /// property clip's dope sheet. Returns true if Convert to keys was
     /// pressed.
     pub(super) fn clip_timeline(&mut self, ui: &mut egui::Ui, assets: &Assets) -> bool {
+        self.key_status(ui, assets);
         match &mut self.clip.doc {
             Some(Clip::Take(doc)) => {
                 doc.timeline(ui);
@@ -491,6 +497,7 @@ impl AnimationStudio {
             }
             Some(Clip::Property(doc)) => {
                 let focus = self.clip.objects.focus();
+                doc.recording = self.clip.record;
                 if doc.keys(ui, focus.as_ref())
                     && let Some(focus) = &focus
                 {
@@ -500,6 +507,83 @@ impl AnimationStudio {
                 false
             }
             None => false,
+        }
+    }
+
+    /// A red frame around the preview while Record is on, so it's plain
+    /// that moving something there sets keys (as Unity tints its timeline).
+    fn recording_frame(&self, ui: &egui::Ui, rect: egui::Rect) {
+        let read_only = matches!(&self.clip.doc, Some(Clip::Property(doc)) if doc.read_only);
+        if !self.clip.record || self.clip.doc.is_none() || read_only {
+            return;
+        }
+        let color = theme::palette(ui.ctx()).error;
+        ui.painter().rect_stroke(
+            rect,
+            4,
+            egui::Stroke::new(2.0_f32, color),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    /// One line above the timeline saying what moving something in the
+    /// preview does now: with Record on, that it sets a key (in red, like
+    /// the frame around the preview); with it off and a move not keyed yet,
+    /// that moving the playhead drops it, with a button that keys it. A
+    /// read-only clip, or Record off with nothing moved, shows nothing.
+    pub(super) fn key_status(&mut self, ui: &mut egui::Ui, assets: &Assets) {
+        let palette = theme::palette(ui.ctx());
+        let (playhead, unkeyed) = match &self.clip.doc {
+            Some(Clip::Take(doc)) => (doc.playhead, doc.unkeyed()),
+            Some(Clip::Property(doc)) if !doc.read_only => (doc.playhead, doc.unkeyed()),
+            _ => return,
+        };
+        if self.clip.record {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} Recording: moving something in the preview sets a key at {playhead:.2} s",
+                    icons::RECORD
+                ))
+                .color(palette.error),
+            )
+            .on_hover_text("Turn Record off in the toolbar to try moves without keying them");
+            return;
+        }
+        if !unkeyed {
+            return;
+        }
+        let mut key = false;
+        responsive::toolbar(ui, |ui| {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} Not keyed yet: moving the playhead or pressing play drops this change.",
+                    icons::WARNING
+                ))
+                .color(palette.warning),
+            );
+            key = ui
+                .button(format!("{} Key it (K)", icons::KEY))
+                .on_hover_text("Keep the change as a key at the playhead")
+                .clicked();
+        });
+        if !key {
+            return;
+        }
+        match &mut self.clip.doc {
+            Some(Clip::Take(doc)) => {
+                // With moves pending, the bones they turned are keyed and
+                // the bone passed is unused.
+                let bone = self.clip.bones.selected.unwrap_or_default();
+                if let Err(problem) = doc.key_selected(assets, bone) {
+                    ui.colored_label(palette.error, problem);
+                }
+            }
+            Some(Clip::Property(doc)) => {
+                if let Some(focus) = self.clip.objects.focus() {
+                    doc.key_focus(&focus);
+                }
+            }
+            None => {}
         }
     }
 

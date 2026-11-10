@@ -1624,6 +1624,8 @@ mod spline_content_tests;
 mod spline_tests;
 #[cfg(test)]
 mod template_tests;
+#[cfg(test)]
+mod tour_snapshots;
 
 #[cfg(test)]
 mod decal_tests;

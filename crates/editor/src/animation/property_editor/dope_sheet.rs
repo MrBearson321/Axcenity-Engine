@@ -653,7 +653,7 @@ impl PropertyDoc {
             painter.text(
                 egui::pos2(timeline.left(), rect.top() + RULER + ROW / 2.0),
                 egui::Align2::LEFT_CENTER,
-                "No tracks yet: select something in the preview, move it, and press K.",
+                self.empty_hint(),
                 egui::FontId::proportional(12.0),
                 palette.text_weak,
             );
