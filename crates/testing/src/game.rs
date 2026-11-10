@@ -153,7 +153,7 @@ impl TestGame {
             self.frames_since_index_check += 1;
             if self.frames_since_index_check == 60 {
                 self.frames_since_index_check = 0;
-                self.world.check_index().expect("index out of date");
+                self.sim.world.check_index().expect("index out of date");
             }
         }
         profiling::finish_frame!();
