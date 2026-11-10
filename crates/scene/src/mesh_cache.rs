@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 use axcenity_assets::{Assets, Model, Posed};
 use axcenity_core::InstanceId;
-use axcenity_render::Skin;
+use axcenity_render::{Shape, Skin};
+use rustc_hash::FxHashSet;
 
 use crate::draw_list::{ModelPiece, model_pieces};
 
@@ -40,6 +41,34 @@ impl MeshCache {
             .retain(|_, cached| cached.checked == frame);
         let frame = self.skins.frame;
         self.skins.by_part.retain(|_, cached| cached.used == frame);
+    }
+
+    /// Call once after drawing a frame when draw items are kept between
+    /// frames: a kept item doesn't ask for its model again, so what
+    /// nothing used this frame says nothing about models. Skins are always
+    /// asked for each frame. `models_in_use` is `Some` when the models in
+    /// use may have changed.
+    pub(crate) fn end_frame_retained(&mut self, models_in_use: Option<FxHashSet<usize>>) {
+        let frame = self.skins.frame;
+        self.skins.by_part.retain(|_, cached| cached.used == frame);
+        if let Some(in_use) = models_in_use {
+            self.models.by_id.retain(|_, cached| {
+                cached
+                    .pieces
+                    .first()
+                    .and_then(|piece| mesh_address(&piece.shape))
+                    .is_some_and(|address| in_use.contains(&address))
+            });
+        }
+    }
+}
+
+/// Which mesh `shape` is, by the address of the one copy every draw item
+/// showing it shares. `None` for a built-in shape.
+pub(crate) fn mesh_address(shape: &Shape) -> Option<usize> {
+    match shape {
+        Shape::Mesh(mesh) => Some(Arc::as_ptr(mesh).cast::<()>() as usize),
+        _ => None,
     }
 }
 

@@ -47,6 +47,12 @@ impl Streaming {
         self.hidden.contains(&id)
     }
 
+    /// Whether anything is out of range now: when nothing is, a frame needn't
+    /// ask about each Instance.
+    pub(crate) fn hides_anything(&self) -> bool {
+        !self.hidden.is_empty()
+    }
+
     /// Where everything streams around: the camera, and any regions asked for.
     pub fn focuses(&self) -> Vec<Vec3> {
         let mut focuses = vec![self.focus];

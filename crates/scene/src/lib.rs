@@ -34,6 +34,7 @@ mod pick;
 mod preload;
 #[cfg(test)]
 mod reload_tests;
+mod retained;
 mod streaming;
 mod surfaces;
 mod terrain;
