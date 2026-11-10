@@ -604,7 +604,14 @@ impl ModelStudio {
     /// colours in Weights mode. The key changes when it would.
     pub(super) fn rig_model_key(&self) -> Option<u64> {
         let doc = self.doc.as_ref()?;
-        if !matches!(doc.mode, Mode::Weights | Mode::Pose) {
+        // Without bones there's no skinned model to hand the view, so it
+        // keeps drawing the document's own.
+        let bones = doc
+            .model
+            .armature
+            .as_ref()
+            .is_some_and(|arm| !arm.bones.is_empty());
+        if !bones || !matches!(doc.mode, Mode::Weights | Mode::Pose) {
             return None;
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -1034,7 +1041,7 @@ impl ModelStudio {
             .as_ref()
             .and_then(|doc| doc.model.armature.as_ref())
         else {
-            ui.weak("No armature yet. In Rig mode, Add Humanoid or Add Bone.");
+            ui.weak("No bones yet: click Add Humanoid or Add Bone above.");
             return;
         };
         let order = armature.order();
@@ -1162,7 +1169,7 @@ impl ModelStudio {
                 self.weigh(true);
             }
         });
-        ui.weak("Weights mode paints them; Pose mode tests them.");
+        ui.weak("Weights (beside Bones) paints them; Pose tests them.");
     }
 
     fn weights_section(&mut self, ui: &mut egui::Ui) {

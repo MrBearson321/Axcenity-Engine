@@ -158,3 +158,18 @@ The Sequencer has no Record and nothing is dropped when the playhead moves (move
 - Brightness stays visible on a light but folds on an emitter. Controllers and TextLabel are checked too.
 
 The snapshot `properties-advanced.png` shows a part's panel: Data, Appearance (6 rows), Behavior (4), Part, then a closed "Advanced · 1 changed" header, then Attributes and Tags. `cargo test -p axcenity-editor`: 916 passed, only the known cloud failure.
+
+## Model Studio PR 1: modes and toolbar (U20, MS1–MS3)
+
+Findings and plan: [model-studio.md](model-studio.md).
+
+**Changed**
+
+| ID | Problem | Change |
+|---|---|---|
+| MS1 | Paint, Sculpt and Rig showed every modeling control, most doing nothing there; the toolbar wrapped to two rows | The handles, Local axes, Show normals, Mesh menu, proportional editing and pivot show in Object and Edit mode only; the UV menu and UV editor in Object, Edit and Paint; Rig keeps the 3D cursor menu (Add Bone uses it). Undo and redo always show. The handles are off in the view outside Object and Edit too |
+| MS2 | Seven modes in one switch, Weights and Pose beside Paint | Five modes (Object, Edit, Paint, Sculpt, Rig), each explained on hover. Rig shows a second switch, Bones, Weights and Pose, as Edit shows Vertex, Edge and Face |
+| MS3 | Pose without bones ignored the click; Weights without bones drew a stray cube in place of the model | A mode that can't start stays put and says why beside the switch ("Add bones first: in Bones, click Add Humanoid or Add Bone."; "Pick an object with a mesh first"). Weights now needs bones, and the view never takes over without a skinned model to show |
+
+**Tests**: `the_toolbar_fits_the_mode_and_rig_steps_say_why_they_wait` draws the tab without a GPU. Object mode shows Mesh and UV, and no Weights or Pose. Paint keeps UV but not Mesh, and Sculpt has neither. In Rig, a click on Weights with no bones stays in Bones and shows the note; after Add Humanoid the same click goes in and the note goes. `modes_that_need_a_mesh_or_bones_say_so` covers the rules, a group included. The tour (`TOUR_ONLY=studio`) has seven new states (20–26); `tour-23-studio-paint.png` and `tour-25-studio-rig.png` show one-row toolbars, and `tour-26-studio-weights.png` the rigged humanoid with Rig › Weights lit.
+
