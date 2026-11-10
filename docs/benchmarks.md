@@ -86,7 +86,7 @@ The server had no clients connected, so its Network send is the replication diff
 
 ### What the numbers say
 
-- **Physics is the largest simulation step**: about 7 ms a frame for 1,000 moving bodies over 9,000 anchored ones, one 60 Hz step per frame. Roadmap M3 (physics sync overhaul) is measured against this.
+- **Physics is the largest simulation step**: about 7 ms a frame for 1,000 moving bodies over 9,000 anchored ones, one 60 Hz step per frame. Roadmap M3 (physics sync overhaul) is measured against this (results below: about 20% less).
 - **The navmesh hitch is real (I7)**: Agents is 4 ms most frames, but its worst frame is 130–146 ms on every host that runs agents, against a 16.7 ms frame. The mean (7.5–9.4 ms) is nearly twice the median because of these rebuilds. The fingerprint hashes the moving drops, so they trigger rebuilds (fixed by I7, below).
 - **Characters cost 2.8 ms with one player character**: the controller's ray probes against 10,000 parts.
 - **Scripts are cheap at this load**: 200 scripts cost about 0.3 ms in step and 0.9–1.5 ms in Heartbeat (100 handlers writing `Orientation`). Their cost shows up elsewhere: the spinners' writes reach physics and the draw list.
@@ -236,6 +236,31 @@ S10k doesn't move (Scripts 0.016–0.017 ms, frames within noise), as its 200 sc
 ### Reusing handler coroutines (M6, part 4)
 
 `cargo test -p axcenity-script --release --lib -- --ignored bench_handler_fire --nocapture` fires `Heartbeat` 1,000 times with 1,000 handlers that don't wait. Against the branch before it (#27), Callgrind counts 6.83 billion instructions before and 5.58 billion after, about 1,250 fewer per handler call (−18%): making a coroutine and the garbage collection it caused were 40% of the run, and resetting a finished one is 8%. Wall-clock on the container is too noisy to show it reliably (665–755 against 613–724 ns per call); against main, with part 2's watchdog change, it's 1,050–1,150 against 600–680 ns.
+
+### Physics sync (M3)
+
+Taken on 2026-11-10 in the Linux cloud container (4 vCPUs, the same kind of machine as the baseline), release build: main (b9fb148, with M2 and M5), M3 with rapier's `parallel` feature off ("serial"), and M3 as merged ("parallel"), run in turn three times, 600 frames each. Medians of the runs' medians, in milliseconds. The container is noisy: run to run, Physics varied by up to 2 ms, so read the differences, not the absolute values.
+
+| Step | Test runner main | serial | parallel | Server main | serial | parallel |
+|---|---|---|---|---|---|---|
+| Physics, median | 11.32 | 9.75 | **8.87** | 9.91 | 8.87 | **8.15** |
+| Physics, 95th percentile | 17.71 | 15.21 | **12.57** | 15.72 | 13.56 | **11.38** |
+| **Frame, median** | **19.57** | **17.79** | **16.81** | **13.21** | **12.15** | **11.69** |
+| Frame, 95th percentile | 32.94 | 31.49 | 27.62 | 20.36 | 18.01 | 15.78 |
+
+Physics fell by about 22% on the test runner and 18% on the server (29% and 28% at the 95th percentile), and the frame by 14% and 11%. Where the Physics step's time goes, from temporary timers around its parts on the test runner (about 9–11 ms in all here):
+
+| Part of `Physics::step` | main | M3 serial | M3 parallel |
+|---|---|---|---|
+| Sync from the world | 1.6–1.7 | 0.6–0.8 | 0.7 |
+| rapier's step | 6.0–7.2 | 5.4–6.0 | 4.8–4.9 |
+| Write-back | 1.0 | 0.9–1.0 | 1.0 |
+
+- **Sync** reads only what changed: physics no longer reads back what it wrote itself, and reparents read just the parts they touched. What's left is the 100 spinners a script turns every frame and the walk comparing each part's revision.
+- **Write-back** is once per frame and looks only at awake bodies. It saves little on S10k because none of its 1,000 drops ever sleeps: they rest in one pile (one rapier island), and the drops script lifts 100 of them every second, which keeps the whole island awake. The ~1,100 parts written each frame cost about 0.8 µs each in `World::set_property` (string-keyed properties and the change log; roadmap L1 and M6). A world whose bodies come to rest now writes nothing. The benchmarks run one 60 Hz step per frame, so writing once per frame instead of once per step only pays when frames are slower than 60 Hz.
+- **rapier's `parallel`** took about 1 ms (17%) off rapier's step on 4 cores, more in the 95th percentile, and should gain more on a desktop with more cores. In tiny scenes it costs a little: `hello-physics` 0.008 → 0.011 ms and `hello-vehicle` 0.05–0.07 → 0.19 ms a frame. A pile of 150 parts lands exactly the same way with and without it, with any number of threads.
+
+The real projects (General Store Roadside, Abandoned Farmhouse, The Dimming, the biome patches) weren't run for M3: they're on the Windows desktop, not in the container.
 
 ### A Windows desktop with a real GPU
 

@@ -20,7 +20,7 @@ use axcenity_assets::{Assets, ModelFormat, list_objects};
 use axcenity_core::{ClassName, Instance, InstanceId, PartType, Value, Vector3, World};
 use rapier3d::glamx::Vec3;
 
-use crate::{Mass, finite, orientation_to_quat, to_vec3, to_vector3};
+use crate::{Body, Mass, finite, orientation_to_quat, to_vec3, to_vector3};
 
 /// How long the pieces take to fade out at the end of their lifetime.
 const FADE_SECONDS: f64 = 1.0;
@@ -37,9 +37,14 @@ pub(crate) struct Breakable {
 /// The parts in `parts` with a generated Fracture in them, by part.
 pub(crate) fn breakables(
     world: &World,
-    parts: impl Iterator<Item = InstanceId>,
+    parts: &BTreeMap<InstanceId, Body>,
 ) -> BTreeMap<InstanceId, Breakable> {
-    parts
+    // From the Fractures, which are few, rather than from every part.
+    let parents = world
+        .all_of(ClassName::Fracture)
+        .filter_map(|fracture| world.get(fracture)?.parent())
+        .filter(|part| parts.contains_key(part));
+    parents
         .filter_map(|part| {
             let fracture = fracture_in(world, part)?;
             let instance = world.get(fracture)?;

@@ -379,14 +379,13 @@ pub(crate) fn drive(
     }
 }
 
-/// After a fixed step: moves each wheel's part to where its wheel is now,
-/// in the world and in the simulation, and remembers what it wrote so the
-/// move isn't taken for a script's.
+/// After a fixed step: moves each wheel's body to where its wheel is now,
+/// and notes the pose in `placed` (the last step's pose wins) for
+/// [`write_wheels`] to copy into the world once the frame's steps are done.
 pub(crate) fn place_wheels(
-    world: &mut World,
-    parts: &mut BTreeMap<InstanceId, Body>,
     bodies: &mut RigidBodySet,
     vehicles: &[Vehicle],
+    placed: &mut BTreeMap<InstanceId, Pose>,
 ) {
     for vehicle in vehicles {
         let Some(chassis) = bodies.get(vehicle.chassis) else {
@@ -412,23 +411,41 @@ pub(crate) fn place_wheels(
                 * Quat::from_rotation_y(state.steering)
                 * Quat::from_rotation_x(-state.rotation);
             let pose = Pose::from_parts(center, rotation);
-            let (position, orientation) = (
-                to_vector3(pose.translation),
-                quat_to_orientation(pose.rotation),
-            );
-            let Some(seen) = parts.get_mut(&part).map(|body| &mut body.seen) else {
-                continue;
-            };
-            if seen.position == position && seen.orientation == orientation {
-                continue;
-            }
-            seen.position = position;
-            seen.orientation = orientation;
-            let _ = world.set_property(part, "Position", Value::Vector3(position));
-            let _ = world.set_property(part, "Orientation", Value::Vector3(orientation));
-            if let Some(body) = bodies.get_mut(handle) {
+            if let Some(body) = bodies.get_mut(handle)
+                && *body.position() != pose
+            {
                 body.set_position(pose, false);
             }
+            placed.insert(part, pose);
         }
+    }
+}
+
+/// Once per frame, after the write-back: moves each wheel's part to the
+/// pose [`place_wheels`] last gave it, and remembers what it wrote so the
+/// move isn't taken for a script's.
+pub(crate) fn write_wheels(
+    world: &mut World,
+    parts: &mut BTreeMap<InstanceId, Body>,
+    placed: &BTreeMap<InstanceId, Pose>,
+) {
+    for (&part, pose) in placed {
+        let Some(wheel_part) = parts.get_mut(&part) else {
+            continue;
+        };
+        let (position, orientation) = (
+            to_vector3(pose.translation),
+            quat_to_orientation(pose.rotation),
+        );
+        let seen = &mut wheel_part.seen;
+        if seen.position == position && seen.orientation == orientation {
+            continue;
+        }
+        seen.position = position;
+        seen.orientation = orientation;
+        crate::own_write(world, part, &mut wheel_part.revision, |world| {
+            let _ = world.set_property(part, "Position", Value::Vector3(position));
+            let _ = world.set_property(part, "Orientation", Value::Vector3(orientation));
+        });
     }
 }

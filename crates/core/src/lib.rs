@@ -56,6 +56,6 @@ pub use value::{
 };
 pub use world::{
     AttributeError, Change, Descendants, Instance, InstanceId, MASTER_VOLUME_SETTING,
-    MAX_ATTRIBUTE_NAME, PropertyError, RecordedChange, STARTER_CHARACTER, TreeError, World,
-    is_attribute_name,
+    MAX_ATTRIBUTE_NAME, PropertyError, RecordedChange, STARTER_CHARACTER, TreeError,
+    WORKSPACE_MOVES_KEPT, World, is_attribute_name,
 };

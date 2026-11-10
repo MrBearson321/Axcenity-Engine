@@ -10,9 +10,11 @@
 //! their heightfield, rebuilt only when the terrain changes. Painted
 //! foliage marked to collide is extra solid colliders on that terrain.
 //!
-//! Physics never gets told about changes. Instead, before stepping it compares
-//! every Part with what it last saw (or wrote), so a script that moves,
-//! anchors, resizes or deletes a part is noticed on the next frame.
+//! Physics never gets told about changes. Instead, before stepping it checks
+//! every Part's revision against the one physics last saw or wrote. Only a
+//! part something else changed is read and compared, so a script that moves,
+//! anchors, resizes or deletes a part is noticed on the next frame, and
+//! bodies physics moves itself aren't read again.
 //!
 //! After each step it also notes which parts started touching, for the
 //! `Touched` event, and which stopped, for `TouchEnded`. The host collects
@@ -60,6 +62,7 @@ mod material;
 mod movers;
 mod query;
 mod shapes;
+mod sync;
 mod vehicles;
 
 pub use mass::Mass;
@@ -81,7 +84,7 @@ use rapier3d::glamx::{EulerRot, Quat, Vec3};
 use rapier3d::math::Pose;
 use rapier3d::pipeline::PhysicsWorld;
 use rapier3d::prelude::{
-    Collider, ColliderHandle, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder,
+    Collider, ColliderHandle, Group, InteractionGroups, InteractionTestMode, RigidBody,
     RigidBodyHandle, RigidBodyType,
 };
 use shapes::{Fidelity, Form};
@@ -172,12 +175,30 @@ pub struct Physics {
     far_sleep: Option<(Vec<Vector3>, f32)>,
     /// Bodies put to sleep for being far, to wake when they come near.
     far_asleep: HashSet<RigidBodyHandle>,
-    /// What the last full sync was made from: the tree's structure and
-    /// the held parts (see `sync_changed_parts`).
-    synced: Option<(u64, BTreeSet<InstanceId>)>,
-    /// The Instances that decide how parts are put together (welds,
-    /// ragdolls, inventories), with their revisions at the last full sync.
-    watched: Vec<(InstanceId, u64)>,
+    /// Bodies the write-back looks at besides the awake ones: those the
+    /// last sync built or changed, and those awake at the last write-back
+    /// (which may have fallen asleep since, or stopped being dynamic).
+    unwritten: HashSet<RigidBodyHandle>,
+    /// What the last sync was made from; `None` before the first.
+    synced: Option<sync::Synced>,
+    /// `assets`' generation at the last sync: a model that changes is the
+    /// only way a MeshPart changes without its Instance doing so.
+    assets_generation: u64,
+    stats: SyncStats,
+}
+
+/// How much the last [`Physics::step`] read from the world to catch up, for
+/// tests and profiling.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SyncStats {
+    /// How many parts' properties were read.
+    pub parts_read: usize,
+    /// How many bodies were built, one per assembly.
+    pub bodies_built: usize,
+    /// True if all of the Workspace was read again.
+    pub full_sync: bool,
+    /// How many parts the write-back looked at.
+    pub parts_written: usize,
 }
 
 /// How a body moved before a step: its velocities and center of mass.
@@ -226,6 +247,10 @@ struct Body {
     welded: bool,
     /// Its Instance's revision when `seen` was last compared with it.
     revision: u64,
+    /// True once its pose was written while its body slept: a body can
+    /// fall asleep in any of a frame's steps, so the first write-back after
+    /// that still copies where it came to rest.
+    settled: bool,
 }
 
 /// The properties of a part that physics cares about.
@@ -474,8 +499,10 @@ impl Physics {
             held: BTreeSet::new(),
             far_sleep: None,
             far_asleep: HashSet::new(),
+            unwritten: HashSet::new(),
             synced: None,
-            watched: Vec::new(),
+            assets_generation: 0,
+            stats: SyncStats::default(),
         }
     }
 
@@ -503,7 +530,10 @@ impl Physics {
             return;
         }
         let radius_squared = radius * radius;
-        for (handle, body) in self.rapier.bodies.iter_mut() {
+        // Read first: `get_mut` tells rapier the body changed.
+        let mut wake = Vec::new();
+        let mut far = Vec::new();
+        for (handle, body) in self.rapier.bodies.iter() {
             if !body.is_dynamic() {
                 continue;
             }
@@ -513,10 +543,19 @@ impl Physics {
                 x * x + y * y + z * z <= radius_squared
             });
             if near {
-                if self.far_asleep.remove(&handle) {
-                    body.wake_up(true);
+                if self.far_asleep.contains(&handle) {
+                    wake.push(handle);
                 }
             } else if !body.is_sleeping() {
+                far.push(handle);
+            }
+        }
+        for handle in wake {
+            self.far_asleep.remove(&handle);
+            self.rapier.wake_up(handle, true);
+        }
+        for handle in far {
+            if let Some(body) = self.rapier.bodies.get_mut(handle) {
                 body.sleep();
                 self.far_asleep.insert(handle);
             }
@@ -531,18 +570,24 @@ impl Physics {
     }
 
     /// Frame step 3: catches up with script changes, then runs as many fixed
-    /// steps as fit in the time passed (0 to N), writing positions back to
-    /// `world` after each one. Returns how many steps ran.
+    /// steps as fit in the time passed (0 to N), and writes positions back to
+    /// `world` once after the last one. Returns how many steps ran.
     pub fn step(&mut self, world: &mut World, seconds: f64) -> u32 {
         profiling::scope!("Physics::step");
+        self.stats = SyncStats::default();
         self.sync_from_world(world);
         self.sleep_far_bodies();
         let wind = global_wind(world);
-        self.rapier.gravity = Vec3::new(0.0, -gravity(world), 0.0);
+        let gravity = Vec3::new(0.0, -gravity(world), 0.0);
+        if gravity != self.rapier.gravity {
+            self.rapier.gravity = gravity;
+            self.rapier.wake_up_all(true);
+        }
 
         // `max` also turns NaN into 0, so a bad time can't stop physics forever.
         self.unsimulated_seconds += seconds.max(0.0);
         let mut steps = 0;
+        let mut wheels = BTreeMap::new();
         while self.unsimulated_seconds + STEP_TOLERANCE >= STEP_SECONDS {
             if steps == MAX_STEPS_PER_FRAME {
                 self.unsimulated_seconds = 0.0;
@@ -570,18 +615,19 @@ impl Physics {
                 &mut self.rapier,
                 &mut self.joints,
             ));
-            self.write_to_world(world);
-            vehicles::place_wheels(
-                world,
-                &mut self.parts,
-                &mut self.rapier.bodies,
-                &self.vehicles,
-            );
+            vehicles::place_wheels(&mut self.rapier.bodies, &self.vehicles, &mut wheels);
             self.find_touches();
             self.shatter_hit_parts(world, &before);
             fracture::age(world, &mut self.debris, STEP_SECONDS);
             self.unsimulated_seconds = (self.unsimulated_seconds - STEP_SECONDS).max(0.0);
             steps += 1;
+        }
+        // Once per frame, not per step: scripts and the renderer only see
+        // where things are after the last step, so the steps before it
+        // needn't convert and write every moving part.
+        if steps > 0 {
+            self.write_to_world(world);
+            vehicles::write_wheels(world, &mut self.parts, &wheels);
         }
         steps
     }
@@ -751,6 +797,9 @@ impl Physics {
         if impacts.is_empty() {
             return;
         }
+        // Shattering reads where the part is and how fast it moves, which
+        // the world only has after a write-back.
+        self.write_to_world(world);
         for (part, impact) in impacts {
             let fracture = self.breakables[&part].fracture;
             let Some(debris) = fracture::shatter(
@@ -781,408 +830,9 @@ impl Physics {
         self.parts.len()
     }
 
-    /// Adds new Parts, removes ones that left the Workspace or were destroyed,
-    /// applies anything a script changed since the last step, and welds or
-    /// unwelds assemblies.
-    fn sync_from_world(&mut self, world: &World) {
-        profiling::scope!("Physics::sync");
-        if let Some((moved, changed)) = self.sync_changed_parts(world) {
-            self.finish_sync(world, moved, changed);
-            return;
-        }
-        let (ragdolled, ragdoll_bodies) = ragdoll_parts(world);
-        self.ragdoll_bodies = ragdoll_bodies;
-        let current: BTreeMap<InstanceId, PartState> = world
-            .descendants_iter(world.workspace())
-            .filter(|id| !ragdolled.contains(id))
-            .filter_map(|id| {
-                let mut state = PartState::read(world, id, &self.assets)?;
-                state.anchored |= self.held.contains(&id);
-                Some((id, state))
-            })
-            .collect();
-        let ids: Vec<InstanceId> = current.keys().copied().collect();
-        let groups: Vec<(Vec<InstanceId>, InstanceId)> =
-            assembly::group(&ids, &assembly::welds(world))
-                .into_iter()
-                .map(|members| {
-                    let root = assembly::root(world, &members);
-                    (members, root)
-                })
-                .collect();
-        let mut anything_changed = false;
-
-        // An assembly is built again when a part joins or leaves it, its
-        // root changes, or a script moves or (un)anchors a welded part, so
-        // the welds hold the parts where they are now. A part alone keeps
-        // its body (see `apply_change`).
-        let mut sharing: HashMap<RigidBodyHandle, usize> = HashMap::new();
-        for part in self.parts.values() {
-            *sharing.entry(part.body).or_default() += 1;
-        }
-        let rebuild: Vec<bool> = groups
-            .iter()
-            .map(|(members, root)| !self.is_kept(members, *root, &current, &sharing))
-            .collect();
-
-        // Take out the parts that are gone or rebuilt, with their bodies.
-        // Their last state tells the new body how fast to start.
-        let leaving = self
-            .parts
-            .keys()
-            .filter(|id| !current.contains_key(id))
-            .copied();
-        let rebuilt = groups
-            .iter()
-            .zip(&rebuild)
-            .filter(|(_, rebuild)| **rebuild)
-            .flat_map(|((members, _), _)| members.iter().copied());
-        let doomed: Vec<InstanceId> = leaving.chain(rebuilt).collect();
-        let mut old: HashMap<InstanceId, PartState> = HashMap::new();
-        for id in doomed {
-            let Some(part) = self.parts.remove(&id) else {
-                continue;
-            };
-            // `true` also removes the body's colliders. Welded parts share a
-            // body, so it may be gone already.
-            self.rapier.remove_body_with_colliders(part.body, true);
-            self.owners.remove(&part.collider);
-            for handle in part.foliage {
-                self.owners.remove(&handle);
-            }
-            old.insert(id, part.seen);
-            anything_changed = true;
-        }
-        // A part that comes back (moved into the Workspace again) touches anew.
-        self.touching
-            .retain(|(a, b), _| current.contains_key(a) && current.contains_key(b));
-
-        // Bodies a script moved, threw or otherwise changed.
-        let mut moved = HashSet::new();
-        for ((members, root), rebuild) in groups.iter().zip(rebuild) {
-            if rebuild {
-                self.build_assembly(members, *root, &current, &old);
-                continue;
-            }
-            let welded = members.len() > 1;
-            for id in members {
-                let state = &current[id];
-                let part = &self.parts[id];
-                if part.seen == *state {
-                    continue;
-                }
-                let mut part = self.parts.remove(id).expect("just found");
-                let weightless = welded && !part.root && state.massless;
-                self.owners.remove(&part.collider);
-                for handle in &part.foliage {
-                    self.owners.remove(handle);
-                }
-                self.apply_change(&mut part, state.clone(), weightless);
-                moved.insert(part.body);
-                self.owners.insert(part.collider, *id);
-                self.attach_foliage(*id, &mut part);
-                self.parts.insert(*id, part);
-                anything_changed = true;
-            }
-        }
-
-        // What the next frame compares with (see `sync_changed_parts`).
-        for (id, part) in &mut self.parts {
-            part.revision = world.get(*id).map_or(0, axcenity_core::Instance::revision);
-        }
-        // Only the Workspace: moving things around in ReplicatedStorage or
-        // putting a Model together with no parent yet doesn't touch a part.
-        // `watched` catches what puts parts together wherever it is.
-        self.synced = Some((
-            world.structure_version_of(world.workspace()),
-            self.held.clone(),
-        ));
-        self.watched = watched(world).collect();
-        self.finish_sync(world, moved, anything_changed);
-    }
-
-    /// The cheap way to catch up, when no part came or went and nothing
-    /// that puts parts together changed: only parts whose Instance changed
-    /// are read. `None` if the full sync has to run instead: with tens of
-    /// thousands of parts it's most of a frame, so it runs only when needed.
-    fn sync_changed_parts(&mut self, world: &World) -> Option<(HashSet<RigidBodyHandle>, bool)> {
-        let (structure, held) = self.synced.as_ref()?;
-        if *structure != world.structure_version_of(world.workspace()) || *held != self.held {
-            return None;
-        }
-        if !self.watched.iter().copied().eq(watched(world)) {
-            return None;
-        }
-        let mut changed = Vec::new();
-        for (&id, part) in &mut self.parts {
-            let revision = world.get(id)?.revision();
-            // A model or a Terrain can change without its Instance doing so.
-            if part.revision == revision && matches!(part.seen.shape, Form::Primitive(_)) {
-                continue;
-            }
-            let mut state = PartState::read(world, id, &self.assets)?;
-            state.anchored |= self.held.contains(&id);
-            if state == part.seen {
-                part.revision = revision;
-            } else if part.welded {
-                return None;
-            } else {
-                changed.push((id, state, revision));
-            }
-        }
-        let mut moved = HashSet::new();
-        let anything_changed = !changed.is_empty();
-        for (id, state, revision) in changed {
-            let mut part = self.parts.remove(&id).expect("just found");
-            self.owners.remove(&part.collider);
-            for handle in &part.foliage {
-                self.owners.remove(handle);
-            }
-            self.apply_change(&mut part, state, false);
-            part.revision = revision;
-            moved.insert(part.body);
-            self.owners.insert(part.collider, id);
-            self.attach_foliage(id, &mut part);
-            self.parts.insert(id, part);
-        }
-        Some((moved, anything_changed))
-    }
-
-    /// The end of every sync: joints, movers, vehicles and waking.
-    fn finish_sync(
-        &mut self,
-        world: &World,
-        moved: HashSet<RigidBodyHandle>,
-        mut anything_changed: bool,
-    ) {
-        // Joints go between the bodies just made, so they come after them.
-        anything_changed |= joints::sync(world, &mut self.rapier, &self.parts, &mut self.joints);
-        // Movers act on those bodies too, read again every frame since
-        // they keep no state.
-        self.movers = movers::read(world, &self.parts);
-        movers::forget(&mut self.learned, &moved);
-        self.vehicles = vehicles::read(world, &self.parts, &self.rapier.bodies, &self.rolling);
-        self.rolling.retain(|id, _| world.contains(*id));
-        self.breakables = fracture::breakables(world, self.parts.keys().copied());
-
-        // Parts at rest "sleep" and stop being simulated. If a script moved
-        // or removed something, a sleeping part may have lost what it was
-        // resting on, so wake everything and let it settle again. Simple, and
-        // cheap enough for v1 scene sizes.
-        if anything_changed {
-            self.rapier.wake_up_all(true);
-        }
-    }
-
-    /// True if the parts `members`, with this `root`, already make up one
-    /// body by themselves that a change to them doesn't rebuild.
-    fn is_kept(
-        &self,
-        members: &[InstanceId],
-        root: InstanceId,
-        current: &BTreeMap<InstanceId, PartState>,
-        sharing: &HashMap<RigidBodyHandle, usize>,
-    ) -> bool {
-        let Some(body) = self.parts.get(&members[0]).map(|part| part.body) else {
-            return false;
-        };
-        if sharing.get(&body) != Some(&members.len()) {
-            return false;
-        }
-        members.iter().all(|id| {
-            let Some(part) = self.parts.get(id) else {
-                return false;
-            };
-            let (seen, now) = (&part.seen, &current[id]);
-            part.body == body
-                && (members.len() == 1
-                    || (part.root == (*id == root)
-                        && seen.position == now.position
-                        && seen.orientation == now.orientation
-                        && seen.anchored == now.anchored))
-        })
-    }
-
-    /// Makes one body for the parts `members`, placed at `root`, with each
-    /// part's collider where the part is now. It's anchored if any part is.
-    /// `old` has the last state of parts that had a body before.
-    fn build_assembly(
-        &mut self,
-        members: &[InstanceId],
-        root: InstanceId,
-        current: &BTreeMap<InstanceId, PartState>,
-        old: &HashMap<InstanceId, PartState>,
-    ) {
-        let root_state = &current[&root];
-        let anchored = members.iter().any(|id| current[id].anchored);
-        // It keeps going at the root's speed, which physics wrote to every
-        // welded part. A part that a script moved or (un)anchored starts
-        // the assembly from rest (decided in Phase 6), and a velocity a
-        // script set throws it.
-        let (mut velocity, mut spin) = (root_state.velocity, root_state.spin);
-        let restarted = members.iter().any(|id| {
-            let now = &current[id];
-            old.get(id).is_some_and(|seen| {
-                seen.position != now.position
-                    || seen.orientation != now.orientation
-                    || seen.anchored != now.anchored
-            })
-        });
-        if restarted {
-            (velocity, spin) = (Vector3::default(), Vector3::default());
-        }
-        for id in members {
-            let now = &current[id];
-            if let Some(seen) = old.get(id) {
-                if seen.velocity != now.velocity {
-                    velocity = now.velocity;
-                }
-                if seen.spin != now.spin {
-                    spin = now.spin;
-                }
-            }
-        }
-        let body_type = if anchored {
-            RigidBodyType::Fixed
-        } else {
-            RigidBodyType::Dynamic
-        };
-        let root_pose = root_state.pose();
-        let ragdolled = members.iter().any(|id| self.ragdoll_bodies.contains(id));
-        let extra_iterations = if ragdolled { RAGDOLL_ITERATIONS } else { 0 };
-        let body = RigidBodyBuilder::new(body_type)
-            .pose(root_pose)
-            // Continuous collision detection: fast parts can't skip through
-            // thin ones between two steps.
-            .ccd_enabled(true)
-            .angular_damping(ANGULAR_DAMPING)
-            .additional_solver_iterations(extra_iterations)
-            .linvel(to_vec3(velocity))
-            .angvel(to_vec3(spin))
-            .build();
-        let body = self.rapier.bodies.insert(body);
-        let welded = members.len() > 1;
-        for &id in members {
-            let state = current[&id].clone();
-            let is_root = id == root;
-            let offset = if is_root {
-                Pose::IDENTITY
-            } else {
-                root_pose.inverse() * state.pose()
-            };
-            let collider = part_collider(&state, offset, welded && !is_root && state.massless);
-            let rapier = &mut self.rapier;
-            let collider = rapier
-                .colliders
-                .insert_with_parent(collider, body, &mut rapier.bodies);
-            self.owners.insert(collider, id);
-            let mut part = Body {
-                body,
-                collider,
-                offset,
-                root: is_root,
-                foliage: Vec::new(),
-                seen: state,
-                welded,
-                revision: 0,
-            };
-            self.attach_foliage(id, &mut part);
-            self.parts.insert(id, part);
-        }
-    }
-
-    /// Parents colliding foliage colliders to a terrain body, replacing any
-    /// that were there. Other classes have none.
-    fn attach_foliage(&mut self, id: InstanceId, part: &mut Body) {
-        for handle in part.foliage.drain(..) {
-            let rapier = &mut self.rapier;
-            rapier.colliders.remove(
-                handle,
-                &mut rapier.islands,
-                &mut rapier.bodies,
-                &mut rapier.soft_bodies,
-                true,
-            );
-            self.owners.remove(&handle);
-        }
-        let Form::Terrain(terrain) = &part.seen.shape else {
-            return;
-        };
-        let colliders =
-            shapes::foliage_colliders(&terrain.data, to_vec3(part.seen.size), &self.assets);
-        for mut collider in colliders {
-            collider.set_collision_groups(part.seen.groups.interaction());
-            let handle = self.rapier.colliders.insert_with_parent(
-                collider,
-                part.body,
-                &mut self.rapier.bodies,
-            );
-            self.owners.insert(handle, id);
-            part.foliage.push(handle);
-        }
-    }
-
-    /// Applies what a script changed on a part that already has a body. A
-    /// welded part (in an assembly that's kept) can only change its
-    /// collider and the assembly's speed; moving or anchoring one rebuilds
-    /// the assembly instead. `weightless` is true for a Massless part that
-    /// isn't its assembly's root.
-    fn apply_change(&mut self, part: &mut Body, state: PartState, weightless: bool) {
-        let old = std::mem::replace(&mut part.seen, state);
-        let state = &part.seen;
-
-        if old.shape != state.shape || old.size != state.size {
-            let rapier = &mut self.rapier;
-            rapier.colliders.remove(
-                part.collider,
-                &mut rapier.islands,
-                &mut rapier.bodies,
-                &mut rapier.soft_bodies,
-                true,
-            );
-            let collider = part_collider(state, part.offset, weightless);
-            part.collider =
-                rapier
-                    .colliders
-                    .insert_with_parent(collider, part.body, &mut rapier.bodies);
-        } else if let Some(collider) = self.rapier.colliders.get_mut(part.collider) {
-            if old.can_collide != state.can_collide {
-                collider.set_sensor(!state.can_collide);
-            }
-            if old.groups != state.groups {
-                collider.set_collision_groups(state.groups.interaction());
-            }
-            if old.physical != state.physical || old.massless != state.massless {
-                material::apply(collider, state.physical);
-                if weightless {
-                    collider.set_density(0.0);
-                }
-            }
-        }
-
-        let Some(body) = self.rapier.bodies.get_mut(part.body) else {
-            return;
-        };
-        if old.anchored != state.anchored {
-            body.set_body_type(state.body_type(), true);
-        }
-        let moved = old.position != state.position || old.orientation != state.orientation;
-        if moved {
-            body.set_position(state.pose(), true);
-        }
-        // A teleported part starts again from rest (decided in Phase 6), and
-        // so does a part that was just released.
-        if moved || old.anchored != state.anchored {
-            body.set_linvel(Vec3::ZERO, true);
-            body.set_angvel(Vec3::ZERO, true);
-        }
-        // A velocity set at the same time still throws it.
-        if old.velocity != state.velocity {
-            body.set_linvel(to_vec3(state.velocity), true);
-        }
-        if old.spin != state.spin {
-            body.set_angvel(to_vec3(state.spin), true);
-        }
+    /// What the last [`step`](Self::step) read from the world to catch up.
+    pub fn sync_stats(&self) -> SyncStats {
+        self.stats
     }
 
     /// Sets the wind's push on every unanchored part for the next step. A
@@ -1190,10 +840,15 @@ impl Physics {
     /// in case its WindAffected was just turned off or the wind stopped.
     /// Each welded part pushes its assembly by its own faces.
     fn blow(&mut self, wind: Vec3) {
+        // Read first: `get_mut` tells rapier the body changed, and looking
+        // at every body costs the step more than these forces do.
         for part in self.parts.values() {
-            if let Some(body) = self.rapier.bodies.get_mut(part.body)
-                && body.is_dynamic()
-            {
+            let pushed = self
+                .rapier
+                .bodies
+                .get(part.body)
+                .is_some_and(|body| body.is_dynamic() && body.user_force() != Vec3::ZERO);
+            if pushed && let Some(body) = self.rapier.bodies.get_mut(part.body) {
                 body.reset_forces(false);
             }
         }
@@ -1201,10 +856,13 @@ impl Physics {
             return;
         }
         for part in self.parts.values() {
+            if !part.seen.wind_affected {
+                continue;
+            }
             let Some(body) = self.rapier.bodies.get_mut(part.body) else {
                 continue;
             };
-            if !body.is_dynamic() || !part.seen.wind_affected {
+            if !body.is_dynamic() {
                 continue;
             }
             let size = part.seen.size;
@@ -1280,48 +938,107 @@ impl Physics {
     /// Copies where each moving part is now, and how fast it moves, into
     /// its `Position`, `Orientation` and velocities, and remembers the
     /// values written. Welded parts share their assembly's velocities.
+    ///
+    /// Only the parts of awake bodies, and of bodies in `unwritten`, can
+    /// have anything new to write: the rest of the world (anchored parts,
+    /// bodies asleep since their last write) is skipped without a look.
+    /// Parts are written in ID order, as a walk of every part would.
     fn write_to_world(&mut self, world: &mut World) {
         profiling::scope!("Physics::write_back");
-        for (&id, part) in &mut self.parts {
+        let awake: Vec<RigidBodyHandle> = self.rapier.islands.active_bodies().collect();
+        let mut ids = Vec::with_capacity(awake.len() + self.unwritten.len());
+        for handle in awake.iter().chain(self.unwritten.iter()) {
+            let Some(body) = self.rapier.bodies.get(*handle) else {
+                continue;
+            };
+            ids.extend(
+                body.colliders()
+                    .iter()
+                    .filter_map(|collider| self.owners.get(collider).copied()),
+            );
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        self.stats.parts_written += ids.len();
+        for id in ids {
+            let Some(part) = self.parts.get_mut(&id) else {
+                continue;
+            };
             let Some(body) = self.rapier.bodies.get(part.body) else {
                 continue;
             };
-            // An anchored part doesn't move, whatever was set; a part that
-            // falls asleep stops. Either way its velocities become zero.
-            let (velocity, spin) = if body.is_dynamic() {
-                (to_vector3(body.linvel()), to_vector3(body.angvel()))
-            } else {
-                (Vector3::default(), Vector3::default())
-            };
-            if velocity != part.seen.velocity {
-                part.seen.velocity = velocity;
-                let _ = world.set_property(id, "AssemblyLinearVelocity", Value::Vector3(velocity));
-            }
-            if spin != part.seen.spin {
-                part.seen.spin = spin;
-                let _ = world.set_property(id, "AssemblyAngularVelocity", Value::Vector3(spin));
-            }
-            if !body.is_dynamic() || body.is_sleeping() {
-                continue;
-            }
-            let pose = if part.root {
-                *body.position()
-            } else {
-                body.position() * part.offset
-            };
-            let position = to_vector3(pose.translation);
-            let orientation = quat_to_orientation(pose.rotation);
-            if position != part.seen.position {
-                part.seen.position = position;
-                // The part was checked to exist this frame, and scripts don't
-                // run between physics steps, so this can't fail.
-                let _ = world.set_property(id, "Position", Value::Vector3(position));
-            }
-            if orientation != part.seen.orientation {
-                part.seen.orientation = orientation;
-                let _ = world.set_property(id, "Orientation", Value::Vector3(orientation));
-            }
+            let mut revision = part.revision;
+            own_write(world, id, &mut revision, |world| {
+                write_part(world, id, part, body);
+            });
+            part.revision = revision;
         }
+        self.unwritten.clear();
+        self.unwritten.extend(awake);
+    }
+}
+
+/// Runs `write`, which sets properties of the part `id`, so that the next
+/// sync doesn't take physics' own writes for someone else's: `revision`
+/// (the part's) follows them, unless something else changed the part first
+/// and the sync still has to look at that.
+pub(crate) fn own_write(
+    world: &mut World,
+    id: InstanceId,
+    revision: &mut u64,
+    write: impl FnOnce(&mut World),
+) {
+    let in_step = world.get(id).map(Instance::revision) == Some(*revision);
+    write(world);
+    if in_step {
+        *revision = world.get(id).map_or(0, Instance::revision);
+    }
+}
+
+/// Copies one part's place and velocities from `body` into `world`.
+fn write_part(world: &mut World, id: InstanceId, part: &mut Body, body: &RigidBody) {
+    // An anchored part doesn't move, whatever was set; a part that
+    // falls asleep stops. Either way its velocities become zero.
+    let (velocity, spin) = if body.is_dynamic() {
+        (to_vector3(body.linvel()), to_vector3(body.angvel()))
+    } else {
+        (Vector3::default(), Vector3::default())
+    };
+    if velocity != part.seen.velocity {
+        part.seen.velocity = velocity;
+        let _ = world.set_property(id, "AssemblyLinearVelocity", Value::Vector3(velocity));
+    }
+    if spin != part.seen.spin {
+        part.seen.spin = spin;
+        let _ = world.set_property(id, "AssemblyAngularVelocity", Value::Vector3(spin));
+    }
+    if !body.is_dynamic() {
+        return;
+    }
+    if body.is_sleeping() {
+        if part.settled {
+            return;
+        }
+        part.settled = true;
+    } else {
+        part.settled = false;
+    }
+    let pose = if part.root {
+        *body.position()
+    } else {
+        body.position() * part.offset
+    };
+    let position = to_vector3(pose.translation);
+    let orientation = quat_to_orientation(pose.rotation);
+    if position != part.seen.position {
+        part.seen.position = position;
+        // The part was checked to exist this frame, and scripts don't
+        // run between physics steps, so this can't fail.
+        let _ = world.set_property(id, "Position", Value::Vector3(position));
+    }
+    if orientation != part.seen.orientation {
+        part.seen.orientation = orientation;
+        let _ = world.set_property(id, "Orientation", Value::Vector3(orientation));
     }
 }
 
@@ -1347,44 +1064,6 @@ impl Default for Physics {
 }
 
 /// The Workspace's `GlobalWind`, or none if it isn't a finite vector.
-/// Extra solver iterations for a ragdoll's bodies, so a long chain of
-/// light limbs holds its joints when it lands. Many more (32) made a
-/// knocked ragdoll leap off the ground.
-const RAGDOLL_ITERATIONS: usize = 16;
-
-/// The parts physics leaves to Ragdolls (Phase 41): the bodies of a
-/// Ragdoll that's off follow the animation, and the MeshPart of one that's
-/// on follows its bodies, so it doesn't push them apart. Then the bodies of
-/// the Ragdolls that are on.
-/// The Instances that decide how parts are put together, anywhere in the
-/// game, with their revisions.
-fn watched(world: &World) -> impl Iterator<Item = (InstanceId, u64)> + '_ {
-    world
-        .all_where(|class| {
-            matches!(
-                class,
-                ClassName::WeldConstraint | ClassName::Ragdoll | ClassName::Inventory
-            )
-        })
-        .filter_map(|id| Some((id, world.get(id)?.revision())))
-}
-
-fn ragdoll_parts(world: &World) -> (HashSet<InstanceId>, HashSet<InstanceId>) {
-    let (mut left, mut bodies) = (HashSet::new(), HashSet::new());
-    for id in world.all_below(world.workspace(), |class| class == ClassName::Ragdoll) {
-        let Some(ragdoll) = world.get(id) else {
-            continue;
-        };
-        if ragdoll.property("Enabled").and_then(Value::as_bool) == Some(true) {
-            left.extend(ragdoll.parent());
-            bodies.extend(world.descendants_iter(id));
-        } else {
-            left.extend(world.descendants_iter(id));
-        }
-    }
-    (left, bodies)
-}
-
 fn global_wind(world: &World) -> Vec3 {
     world
         .get(world.workspace())
@@ -1433,6 +1112,9 @@ pub(crate) fn quat_to_orientation(rotation: Quat) -> Vector3 {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod sync_tests;
 
 #[cfg(test)]
 mod assembly_tests;
