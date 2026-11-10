@@ -195,6 +195,12 @@ pub struct BenchRun {
     frames: usize,
     seen: usize,
     pub samples: StageSamples,
+    /// The very first frame, which reads whatever wasn't loaded ahead.
+    first_frame: Option<Duration>,
+    /// The slowest frame of the warm-up, where first-sight loads land.
+    warm_up_worst: Duration,
+    /// One-off times a host notes, such as launch to first frame.
+    startup: Vec<(&'static str, Duration)>,
 }
 
 impl BenchRun {
@@ -208,16 +214,48 @@ impl BenchRun {
             frames,
             seen: 0,
             samples: StageSamples::new(),
+            first_frame: None,
+            warm_up_worst: Duration::ZERO,
+            startup: Vec::new(),
         }
     }
 
     /// Notes one frame. True once every frame to keep has been kept.
     pub fn record(&mut self, laps: &Laps) -> bool {
         self.seen += 1;
+        let total = laps.total();
+        self.first_frame.get_or_insert(total);
         if self.seen > self.warm_up {
             self.samples.record_laps(laps);
+        } else {
+            self.warm_up_worst = self.warm_up_worst.max(total);
         }
         self.done()
+    }
+
+    /// Notes a one-off time, such as launch to first frame, once: a second
+    /// note of the same name is ignored.
+    pub fn note(&mut self, name: &'static str, time: Duration) {
+        if !self.startup.iter().any(|(seen, _)| *seen == name) {
+            self.startup.push((name, time));
+        }
+    }
+
+    /// Whether a one-off time called `name` was noted.
+    pub fn noted(&self, name: &str) -> bool {
+        self.startup.iter().any(|(seen, _)| *seen == name)
+    }
+
+    /// The first frame, the warm-up's worst frame, then each noted time,
+    /// in milliseconds, in the order they're reported.
+    pub fn startup(&self) -> Vec<(&'static str, Duration)> {
+        let mut times = Vec::new();
+        if let Some(first) = self.first_frame {
+            times.push(("first frame", first));
+            times.push(("worst warm-up frame", self.warm_up_worst));
+        }
+        times.extend(self.startup.iter().copied());
+        times
     }
 
     /// True once every frame to keep has been kept.
@@ -227,11 +265,23 @@ impl BenchRun {
 
     /// The table, then the JSON line, as hosts print them when done.
     pub fn finish_text(&self, host: &str, scene: &str) -> String {
-        format!(
-            "{}{}\n",
-            self.samples.report(&format!("{host}: {scene}")),
-            self.samples.json(host, scene)
-        )
+        let mut text = self.samples.report(&format!("{host}: {scene}"));
+        let startup = self.startup();
+        for (name, time) in &startup {
+            let _ = writeln!(text, "  {:<24} {:>10.3}", name, millis(*time));
+        }
+        let mut json = self.samples.json(host, scene);
+        // `"startup":{…}` goes in before the closing brace.
+        json.pop();
+        json.push_str(",\"startup\":{");
+        for (index, (name, time)) in startup.iter().enumerate() {
+            if index > 0 {
+                json.push(',');
+            }
+            let _ = write!(json, "{}:{:.4}", json_string(name), millis(*time));
+        }
+        json.push_str("}}");
+        format!("{text}{json}\n")
     }
 }
 
@@ -351,6 +401,39 @@ mod tests {
             run.finish_text("server", "S10k")
                 .contains("\"host\":\"server\"")
         );
+    }
+
+    #[test]
+    fn a_bench_run_reports_its_first_frame_worst_warm_up_and_notes() {
+        let mut run = BenchRun::new(2, 1);
+        let mut slow = Laps::start();
+        std::thread::sleep(ms(5));
+        slow.lap("Draw list");
+        run.record(&Laps::start());
+        run.record(&slow);
+        run.record(&Laps::start());
+        run.note("launch to first frame", ms(40));
+        run.note("launch to first frame", ms(99));
+        let startup = run.startup();
+        let names: Vec<_> = startup.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            names,
+            [
+                "first frame",
+                "worst warm-up frame",
+                "launch to first frame"
+            ]
+        );
+        assert!(startup[0].1 < ms(5), "the first frame was the fast one");
+        assert!(startup[1].1 >= ms(5), "the slow frame was in the warm-up");
+        assert_eq!(startup[2].1, ms(40), "a second note is ignored");
+        let text = run.finish_text("player", "S10k");
+        let json = text.lines().last().unwrap();
+        assert!(
+            json.ends_with("\"launch to first frame\":40.0000}}"),
+            "{json}"
+        );
+        assert!(json.contains(",\"startup\":{\"first frame\":"), "{json}");
     }
 
     #[test]

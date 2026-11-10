@@ -6,7 +6,9 @@
 //! most [`MAX_STEP`]), so loading can't use the splash up before it's seen.
 //! Click or a key skips to the fade-out. A game that waits for a script
 //! ([`Splash::hold`]) keeps the full bar up until it says it's ready
-//! ([`Splash::release`]); only then can it fade or be skipped.
+//! ([`Splash::release`]); only then can it fade or be skipped. It holds the
+//! same way while the Workspace's assets are still loading
+//! ([`Splash::set_loading`], roadmap I11).
 
 use std::f32::consts::TAU;
 use std::sync::Arc;
@@ -64,6 +66,8 @@ pub struct Splash {
     motion: f32,
     /// Waiting for a script before the fade.
     held: bool,
+    /// Waiting for the Workspace's assets before the fade.
+    loading: bool,
     /// When the last frame was drawn; none until the first.
     last_frame: Option<Instant>,
     skipped_at: Option<f32>,
@@ -78,6 +82,7 @@ impl Splash {
                 elapsed: 0.0,
                 motion: 0.0,
                 held: false,
+                loading: false,
                 last_frame: None,
                 skipped_at: None,
                 texture: Some(texture),
@@ -89,6 +94,7 @@ impl Splash {
                     elapsed: 0.0,
                     motion: 0.0,
                     held: false,
+                    loading: false,
                     last_frame: None,
                     skipped_at: None,
                     texture: None,
@@ -106,7 +112,7 @@ impl Splash {
             let step = (now - last).as_secs_f32().min(MAX_STEP);
             self.motion += step;
             self.elapsed += step;
-            if self.held {
+            if self.waits() {
                 self.elapsed = self.elapsed.min(BAR_END);
             }
         }
@@ -123,10 +129,26 @@ impl Splash {
         self.held = false;
     }
 
+    /// Stay on the full bar while `loading` (the Workspace's assets).
+    pub fn set_loading(&mut self, loading: bool) {
+        self.loading = loading;
+    }
+
+    /// Waiting for a script or for assets before it may fade.
+    fn waits(&self) -> bool {
+        self.held || self.loading
+    }
+
+    /// True while the full bar stays up for the assets: the time to say
+    /// how many are in.
+    pub fn waiting_for_assets(&self) -> bool {
+        self.loading && self.skipped_at.is_none() && self.elapsed >= BAR_END
+    }
+
     /// Jump to the fade-out, if the splash is still covering the game and
-    /// isn't waiting for a script.
+    /// isn't waiting for a script or assets.
     pub fn skip(&mut self) {
-        if !self.held
+        if !self.waits()
             && self.last_frame.is_some()
             && self.skipped_at.is_none()
             && self.elapsed < BAR_END
@@ -478,6 +500,25 @@ mod tests {
             "a click doesn't skip a game that isn't ready"
         );
         splash.release();
+        splash.skip();
+        assert!(splash.visual_t().expect("fading") >= BAR_END);
+    }
+
+    #[test]
+    fn a_loading_splash_waits_on_the_full_bar_until_the_assets_are_in() {
+        let mut splash = Splash::new();
+        splash.set_loading(true);
+        splash.tick();
+        assert!(!splash.waiting_for_assets(), "the bar is still filling");
+        splash.elapsed = BAR_END;
+        splash.last_frame = Some(Instant::now() - std::time::Duration::from_secs(1));
+        splash.tick();
+        assert_eq!(splash.elapsed, BAR_END);
+        assert!(splash.waiting_for_assets());
+        splash.skip();
+        assert!(splash.covers(), "a click doesn't skip loading assets");
+        splash.set_loading(false);
+        assert!(!splash.waiting_for_assets());
         splash.skip();
         assert!(splash.visual_t().expect("fading") >= BAR_END);
     }
