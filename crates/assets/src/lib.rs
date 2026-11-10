@@ -70,7 +70,7 @@ pub use light_probes::{
     encode_light_probes, is_light_probes_file, light_probes_path, read_light_probes,
     write_light_probes,
 };
-pub use loading::{LoadStatus, LoadTicket};
+pub use loading::{LoadStatus, LoadTicket, Slot};
 pub use material::{
     MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MapSettings, MaterialChain, MaterialFile,
     MaterialFileError, MaterialMaps, MaterialShader, OutlineFile, ParamValue, Shading,

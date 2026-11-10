@@ -49,6 +49,17 @@ pub enum LoadStatus {
     Failed,
 }
 
+/// How a model stands for a frame being drawn, from
+/// [`model_slot`](Assets::model_slot).
+#[derive(Clone, Debug)]
+pub enum Slot<T> {
+    Ready(Arc<T>),
+    /// On its way: draw nothing for it this frame.
+    Loading,
+    /// It has no file, or the file can't be loaded.
+    Failed,
+}
+
 /// A load in progress, from a `request_*` call. Cloning gives another handle
 /// to the same load.
 #[derive(Clone, Debug)]
@@ -452,6 +463,37 @@ impl Assets {
     /// or couldn't be. Never loads anything and never waits for a load.
     pub fn model_ready(&self, mesh_id: &str) -> Option<Arc<Model>> {
         self.lock().models.get(mesh_id).cloned().flatten()
+    }
+
+    /// The model at `mesh_id` for a frame being drawn. After
+    /// [`load_textures_in_background`](Self::load_textures_in_background)
+    /// this never waits for a file: one not read yet is queued for a worker
+    /// and is [`Slot::Loading`] until it's in, so a big model can't stall a
+    /// frame. Otherwise it's read before this returns, like
+    /// [`model_blocking`](Self::model_blocking).
+    pub fn model_slot(&self, mesh_id: &str) -> Slot<Model> {
+        if mesh_id.is_empty() {
+            return Slot::Failed;
+        }
+        {
+            let mut shared = self.lock();
+            match shared.models.get(mesh_id) {
+                Some(Some(model)) => return Slot::Ready(model.clone()),
+                Some(None) => return Slot::Failed,
+                None => {}
+            }
+            if shared.folder.is_none() {
+                return Slot::Failed;
+            }
+            if shared.waker.is_some() {
+                self.enqueue(&mut shared, LoadKey::new(Kind::Model, mesh_id));
+                return Slot::Loading;
+            }
+        }
+        match self.model_blocking(mesh_id) {
+            Some(model) => Slot::Ready(model),
+            None => Slot::Failed,
+        }
     }
 
     /// Of the files queued since none were loading, how many are done and
