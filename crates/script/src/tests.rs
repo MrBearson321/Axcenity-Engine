@@ -1638,5 +1638,8 @@ fn union_async_explains_itself_without_the_csg_feature() {
     );
     assert_eq!(output.len(), 1, "{output:?}");
     assert!(output[0].starts_with("false"), "{output:?}");
-    assert!(output[0].contains("UnionAsync isn't available"), "{output:?}");
+    assert!(
+        output[0].contains("UnionAsync isn't available"),
+        "{output:?}"
+    );
 }
