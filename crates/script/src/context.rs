@@ -22,7 +22,7 @@ use crate::remote::{self, Message, Outbox};
 use crate::sides::Side;
 use crate::user_settings::UserGraphics;
 use crate::{
-    Output, OutputLine, bindable, changes, console, debris, debugger, events, modules, push_error,
+    Output, OutputLine, bindable, changes, console, debugger, events, modules, push_error,
     run_service, sandbox, scheduler, tree, tween, watchdog, with_world,
 };
 use axcenity_core::MouseBehavior;
@@ -396,7 +396,7 @@ impl Context {
             scheduler::step(&self.lua, seconds);
             crate::csg::step(&self.lua);
             crate::content_provider::step(&self.lua);
-            debris::step(&self.lua);
+            crate::system::step(&self.lua);
             crate::decals::step(&self.lua);
         });
     }

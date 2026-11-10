@@ -37,7 +37,7 @@ fn built_game(test: &str) -> (App, World, PathBuf) {
     let start = project.world.clone();
     let mut world = project.world;
     let assets = Assets::new(&folder);
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     scripts.set_assets(assets.clone());
     scripts.set_input_map(project.input_map.clone());
     start_scripts(&mut scripts, &mut world, &project.scripts);

@@ -23,6 +23,11 @@ use axcenity_nav::Agents;
 use axcenity_physics::Physics;
 use axcenity_script::ScriptRuntime;
 
+/// The [`ScriptRuntime`] every host runs: the scripting core with the
+/// `gameplay` crate's systems added (roadmap L7). Hosts build theirs with
+/// this, never `ScriptRuntime::new`, or scripts miss services such as
+/// Debris.
+pub use axcenity_gameplay::script_runtime;
 pub use host::{FrameCtx, HostIo};
 pub use schedule::{Hosts, Schedule, Stage, Step};
 

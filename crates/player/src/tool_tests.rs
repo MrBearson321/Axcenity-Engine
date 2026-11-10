@@ -48,7 +48,7 @@ impl Game {
         let project = axcenity_project::load(&folder).unwrap();
         let mut world = project.world;
         let assets = Assets::new(&folder);
-        let mut scripts = ScriptRuntime::new();
+        let mut scripts = axcenity_sim::script_runtime();
         scripts.set_assets(assets.clone());
         scripts.set_save_folder(Some(folder.join("saves")));
         scripts.set_viewport_size(VIEW.0 as f32, VIEW.1 as f32);

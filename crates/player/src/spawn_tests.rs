@@ -87,7 +87,7 @@ struct Game {
 impl Game {
     fn new(world: World) -> Self {
         let assets = Assets::default();
-        let mut scripts = ScriptRuntime::new();
+        let mut scripts = axcenity_sim::script_runtime();
         scripts.set_assets(assets.clone());
         Self {
             world,

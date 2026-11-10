@@ -3,7 +3,6 @@
 
 use axcenity_render::glam::Vec3;
 use axcenity_render::{Camera, DecalRole, DrawList};
-use axcenity_script::ScriptRuntime;
 
 use super::tests::{copy_of_example, play_for};
 use super::*;
@@ -71,7 +70,7 @@ fn decals_in_play_are_the_ones_the_exported_game_draws() {
     assert!(project.problems.is_empty(), "{:?}", project.problems);
     let mut world = project.world;
     let game_assets = Assets::new(&exported);
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     scripts.set_assets(game_assets.clone());
     for script in &project.scripts {
         scripts.start_script(&mut world, script.instance, &script.path, &script.source);

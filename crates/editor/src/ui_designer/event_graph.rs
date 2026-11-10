@@ -77,7 +77,7 @@ impl LivePreview {
                     .is_some_and(|instance| instance.class() == ClassName::LocalScript)
             })
             .unwrap_or_else(|| axcenity_project::add_graph_script(&mut world, gui));
-        let mut scripts = ScriptRuntime::new();
+        let mut scripts = axcenity_sim::script_runtime();
         scripts.set_assets(assets.clone());
         scripts.start_script(&mut world, script, path, &compiled.source);
         let mut preview = Self {

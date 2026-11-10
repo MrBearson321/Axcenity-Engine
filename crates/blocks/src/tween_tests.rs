@@ -46,7 +46,7 @@ fn run(source: &str) -> (World, ScriptRuntime, InstanceId, InstanceId) {
     world
         .set_parent(script, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, script, "scripts/Tweens.server.lua", source);
     (world, runtime, pad, menu)
 }

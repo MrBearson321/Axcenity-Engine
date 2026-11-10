@@ -395,6 +395,13 @@ fn described_fields_and_methods_exist() {
         );
     }
     for (class, field) in CLASS_FIELDS {
+        // `game.Debris` and the like come from game systems, which a bare
+        // `ScriptRuntime` lacks: the `gameplay` crate's tests check them.
+        if *class == ClassName::DataModel
+            && crate::system::DESCRIBED_SYSTEM_SERVICES.contains(&field.name)
+        {
+            continue;
+        }
         // `LocalPlayer` is nil only before the player joins.
         check(
             side_of(*class, field.name),
@@ -429,7 +436,6 @@ fn described_fields_and_methods_exist() {
             "game:GetService('LocalizationService')",
         ),
         ("GuiService", "game:GetService('GuiService')"),
-        ("Debris", "game:GetService('Debris')"),
         ("HttpService", "game:GetService('HttpService')"),
         ("DataService", "game:GetService('DataService')"),
         ("DialogueService", "game:GetService('DialogueService')"),
@@ -464,6 +470,9 @@ fn described_fields_and_methods_exist() {
         ("OverlapParams", "OverlapParams.new()"),
     ];
     for value_type in VALUE_TYPES {
+        if crate::system::DESCRIBED_SYSTEM_SERVICES.contains(&value_type.class) {
+            continue;
+        }
         let (_, sample) = samples
             .iter()
             .find(|(class, _)| *class == value_type.class)

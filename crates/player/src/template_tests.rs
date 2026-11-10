@@ -62,7 +62,7 @@ impl App {
             .collect();
         let mut world = project.world;
         let assets = Assets::new(folder);
-        let mut scripts = ScriptRuntime::new();
+        let mut scripts = axcenity_sim::script_runtime();
         scripts.set_assets(assets.clone());
         scripts.set_save_folder(Some(saves.to_owned()));
         scripts.set_user_id(user_id);

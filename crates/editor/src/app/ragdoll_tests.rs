@@ -9,7 +9,6 @@ use axcenity_nav::Agents;
 use axcenity_physics::Physics;
 use axcenity_render::Camera;
 use axcenity_render::glam::Vec3;
-use axcenity_script::ScriptRuntime;
 
 use super::tests::{copy_of_example, inserted, play_for};
 use super::*;
@@ -153,7 +152,7 @@ fn the_dummy_is_knocked_down_the_same_in_play_as_the_player_runs_it() {
     let project = axcenity_project::load(&folder).unwrap();
     let mut world = project.world;
     let assets = Assets::new(&folder);
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     scripts.set_assets(assets.clone());
     let mut animators = Animators::new();
     animators.update(&mut world, &assets, 0.0);

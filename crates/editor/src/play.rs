@@ -26,7 +26,6 @@ use axcenity_render::{Capabilities, GraphicsSettings};
 use axcenity_scene::{Particles, Streaming};
 use axcenity_script::{
     Breakpoints, CameraState, CameraView, GameCamera, KeyEvent, NetworkRequest, OutputKind, Pause,
-    ScriptRuntime,
 };
 use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 use axcenity_ui::LoadingGui;
@@ -139,7 +138,7 @@ impl Session {
         levels: PlayLevels,
     ) -> Result<Session, Crash> {
         let mut session = Session {
-            sim: Sim::new(edit_world.clone(), ScriptRuntime::new(), assets),
+            sim: Sim::new(edit_world.clone(), axcenity_sim::script_runtime(), assets),
             schedule: Schedule::for_host(Hosts::EDITOR_PLAY),
             audio: GameAudio::default(),
             particles: Particles::new(),

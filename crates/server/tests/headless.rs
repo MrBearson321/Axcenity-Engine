@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 
 use axcenity_core::{ClassName, World};
 use axcenity_net::{GameInfo, Network};
-use axcenity_script::ScriptRuntime;
 
 /// Kills the server when the test ends, passing or not.
 struct Running(Child);
@@ -73,7 +72,7 @@ fn the_server_runs_headless_and_a_player_joins_it() {
         .unwrap_or_else(|| panic!("no port in {hosting:?}"));
 
     let mut world = World::new();
-    let mut scripts = ScriptRuntime::new();
+    let mut scripts = axcenity_sim::script_runtime();
     let script = world.create(ClassName::LocalScript).unwrap();
     world
         .set_parent(script, Some(world.starter_player_scripts()))

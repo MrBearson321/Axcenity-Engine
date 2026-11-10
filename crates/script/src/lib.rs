@@ -16,8 +16,7 @@
 //!   `events`, and the host fires them with methods such as
 //!   [`ScriptRuntime::fire_touched`] and [`ScriptRuntime::heartbeat`]
 //!   (`run_service`). BindableEvents and BindableFunctions let scripts on
-//!   one side talk (`bindable`); `Debris` destroys Instances later
-//!   (`debris`), `HttpService` reads and writes JSON (`http`), and
+//!   one side talk (`bindable`); `HttpService` reads and writes JSON (`http`), and
 //!   `DataService` reads the project's data tables (`data`), and
 //!   `NetworkService` asks the host to host, join and search (`network`).
 //!   `TweenService` tweens move properties smoothly,
@@ -27,6 +26,9 @@
 //!   `client`, and `sides` says which APIs work on which side.
 //!   `UserGameSettings` (`user_settings`) lets LocalScripts change the
 //!   player's graphics settings.
+//! - Game systems from other crates (the `gameplay` crate's Debris, for
+//!   one) add services and a per-frame step through [`GameSystem`]
+//!   ([`ScriptRuntime::add_system`], see `system`).
 //! - [`lua_definitions`] describes that API for editors, and [`api_reference`]
 //!   lists it for the editor's API reference (see `definitions`).
 //! - `print` output and errors are collected as [`OutputLine`]s for the host to
@@ -65,7 +67,6 @@ mod csg;
 #[path = "csg_off.rs"]
 mod csg;
 mod data;
-mod debris;
 mod debugger;
 mod decals;
 mod definitions;
@@ -102,6 +103,7 @@ mod sequence;
 mod sides;
 mod spec;
 mod spline;
+pub mod system;
 mod task;
 mod tool;
 mod tree;
@@ -147,6 +149,7 @@ pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
 pub use sequence::sound_actions as sequence_sound_actions;
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
 pub use spec::{FoundTest, TestReport, TestRequest};
+pub use system::GameSystem;
 pub use watchdog::DEFAULT_LIMIT as WATCHDOG_LIMIT;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -326,6 +329,15 @@ impl ScriptRuntime {
     /// A runtime whose two sides talk through the in-memory [`Loopback`].
     pub fn new() -> Self {
         Self::with_transport(Box::new(Loopback::default()))
+    }
+
+    /// Adds a game system from another crate ([`GameSystem`]) to both
+    /// sides: its services and its per-frame step. Add systems before any
+    /// script starts, so scripts find their services.
+    pub fn add_system(&mut self, system: impl GameSystem) {
+        let system: std::rc::Rc<dyn GameSystem> = std::rc::Rc::new(system);
+        system::add(&self.server.lua, std::rc::Rc::clone(&system));
+        system::add(&self.client.lua, system);
     }
 
     /// A runtime whose RemoteEvent messages go through `transport`.

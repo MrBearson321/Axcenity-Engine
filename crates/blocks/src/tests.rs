@@ -1386,7 +1386,7 @@ fn translated_blocks_run_in_the_scheduler_like_typed_lua() {
     world
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(
         &mut world,
         lua,
@@ -1434,7 +1434,7 @@ fn a_when_command_run_block_runs_its_blocks_when_the_command_is_typed() {
     world
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, lua, "scripts/Heal.server.blocks.json", &source);
     let commands = runtime.console_commands();
     assert_eq!(commands.len(), 1, "{source}");
@@ -1485,7 +1485,7 @@ fn the_time_of_day_and_atmosphere_blocks_set_lighting_and_come_back_from_lua() {
     world
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, lua, "scripts/Day.server.blocks.json", &source);
     runtime.step(&mut world, 0.1);
     assert_eq!(
@@ -1550,7 +1550,7 @@ fn the_tone_mapping_block_sets_lighting_and_comes_back_from_lua() {
     world
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, lua, "scripts/Look.server.blocks.json", &source);
     runtime.step(&mut world, 0.1);
     assert_eq!(
@@ -1617,7 +1617,7 @@ fn data_blocks_read_a_tables_row_and_column_and_come_back_from_lua() {
     world
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.set_assets(axcenity_assets::Assets::new(folder));
     runtime.start_script(&mut world, lua, "scripts/Data.server.blocks.json", &source);
     runtime.step(&mut world, 0.1);
@@ -1675,7 +1675,7 @@ fn graphics_blocks_change_user_game_settings_and_come_back_from_lua() {
     let source = translate(&script(vec![block(1, BlockKind::WhenStarted { body })]))
         .unwrap()
         .source;
-    let (mut world, mut runtime) = (World::new(), ScriptRuntime::new());
+    let (mut world, mut runtime) = (World::new(), axcenity_gameplay::script_runtime());
     let output = run(
         &mut world,
         &mut runtime,
@@ -1732,7 +1732,7 @@ fn graphics_blocks_change_user_game_settings_and_come_back_from_lua() {
         "{source}"
     );
 
-    let (mut world, mut runtime) = (World::new(), ScriptRuntime::new());
+    let (mut world, mut runtime) = (World::new(), axcenity_gameplay::script_runtime());
     let output = run(
         &mut world,
         &mut runtime,
@@ -1811,7 +1811,7 @@ fn the_animation_examples_blocks_drive_its_animator() {
     world
         .set_parent(keys, Some(world.starter_player_scripts()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, keys, "scripts/Keys.client.blocks.json", &source);
     let press = |key, pressed| KeyEvent { key, pressed };
     runtime.input(
@@ -2381,7 +2381,7 @@ end)
     world
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, lua, "scripts/Bank.server.blocks.json", &source);
     runtime.step(&mut world, 0.1);
     let output: Vec<_> = runtime
@@ -2454,7 +2454,7 @@ print(\"Hello world!\")
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
     let source = translate(&blocks).unwrap().source;
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, lua, "scripts/Typed.server.lua", &source);
     runtime.step(&mut world, 0.1);
     let output: Vec<_> = runtime
@@ -2514,7 +2514,7 @@ print(label, double(count :: number), 0b101 + 1_000)
     world
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, lua, "scripts/Luau.server.lua", &source);
     runtime.step(&mut world, 0.1);
     let output: Vec<_> = runtime
@@ -2713,7 +2713,7 @@ fn set_property_blocks_turn_a_frame_and_fade_a_labels_text() {
     let lua = world.create(ClassName::LocalScript).unwrap();
     world.set_name(lua, "Look").unwrap();
     world.set_parent(lua, Some(gui)).unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, lua, "scripts/Look.client.blocks.json", &source);
     runtime.step(&mut world, 0.1);
     let number = |id, name| world.get(id).unwrap().property(name).unwrap().clone();
@@ -2808,7 +2808,7 @@ fn look_at_move_forward_lerp_and_random_number_blocks_run_and_come_back_from_lua
     world
         .set_parent(script_id, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, script_id, "Look.server.blocks.json", &lua);
     runtime.step(&mut world, 0.0);
     let output: Vec<String> = runtime
@@ -2891,7 +2891,7 @@ fn camera_blocks_hold_point_and_shake_the_camera_and_find_the_part_under_the_mou
     let pad = world.create(ClassName::Part).unwrap();
     world.set_name(pad, "Pad").unwrap();
     world.set_parent(pad, Some(world.workspace())).unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.set_viewport_size(200.0, 100.0);
     runtime.set_camera(CameraState {
         position: Vector3::new(0.0, 6.0, 8.0),
@@ -3008,7 +3008,7 @@ fn event_and_frame_blocks_fire_bindables_destroy_later_and_run_before_physics_an
     let spark = world.create(ClassName::Part).unwrap();
     world.set_name(spark, "Spark").unwrap();
     world.set_parent(spark, Some(world.workspace())).unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     let script = world.create(ClassName::Script).unwrap();
     world
         .set_parent(script, Some(world.server_script_service()))
@@ -3151,7 +3151,7 @@ fn query_blocks_list_the_parts_in_a_zone_and_raycast_past_the_shooter() {
     world
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, lua, "scripts/Q.server.blocks.json", &source);
     let output: Vec<_> = runtime
         .take_output()
@@ -3200,7 +3200,7 @@ fn the_spawn_decal_block_places_a_decal_that_goes_after_its_seconds() {
     world
         .set_parent(lua, Some(world.server_script_service()))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = axcenity_gameplay::script_runtime();
     runtime.start_script(&mut world, lua, "scripts/Holes.server.blocks.json", &source);
     let decal = world
         .descendants(world.workspace())

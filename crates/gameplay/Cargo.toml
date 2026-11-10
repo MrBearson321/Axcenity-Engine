@@ -1,0 +1,16 @@
+[package]
+name = "axcenity-gameplay"
+description = "Axcenity's game systems outside the scripting core (roadmap L7): services and per-frame steps added to a ScriptRuntime."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-core.workspace = true
+axcenity-script.workspace = true
+mlua.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true

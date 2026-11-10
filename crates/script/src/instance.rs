@@ -13,7 +13,6 @@ use crate::client::{LocalPlayer, LuaReplicatedFirst};
 use crate::collection::LuaCollectionService;
 use crate::content_provider::LuaContentProvider;
 use crate::data::LuaDataService;
-use crate::debris::LuaDebris;
 use crate::events::{Event, LuaSignal, Owner};
 use crate::gui_service::LuaGuiService;
 use crate::http::LuaHttpService;
@@ -506,7 +505,6 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "NetworkService") => LuaNetworkService.into_lua(lua)?,
         (ClassName::DataModel, "LocalizationService") => LuaLocalizationService.into_lua(lua)?,
         (ClassName::DataModel, "GuiService") => LuaGuiService.into_lua(lua)?,
-        (ClassName::DataModel, "Debris") => LuaDebris.into_lua(lua)?,
         (ClassName::DataModel, "HttpService") => LuaHttpService.into_lua(lua)?,
         (ClassName::DataModel, "ContentProvider") => LuaContentProvider.into_lua(lua)?,
         (ClassName::DataModel, "DataService") => LuaDataService.into_lua(lua)?,
@@ -520,6 +518,11 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
             .app_data_ref::<LocalPlayer>()
             .map(|player| LuaInstance(player.0))
             .into_lua(lua)?,
+        // Services from game systems in other crates (`system`), such as
+        // `game.Debris`.
+        (ClassName::DataModel, _) if let Some(service) = crate::system::service(lua, key) => {
+            service?
+        }
         _ => {
             let method = lua
                 .app_data_ref::<ClassMethods>()
@@ -1103,13 +1106,16 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 /// `game:GetService(name)`: a service by its class name, such as
 /// `"Players"`, or `"UserInputService"`, `"ContextActionService"` or
 /// `"UserGameSettings"` (LocalScripts only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`, `"LevelService"`,
-/// `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`,
+/// `"NetworkService"`, `"LocalizationService"`, `"GuiService"`, `"HttpService"`,
 /// `"DataService"`, `"DialogueService"`, `"QuestService"`, `"ConsoleService"` or
 /// `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
         if let Some(service) = crate::edit::extra_service(lua, &name) {
             return Ok(service);
+        }
+        if let Some(service) = crate::system::service(lua, &name) {
+            return service;
         }
         match name.as_str() {
             "UserInputService" => {
@@ -1132,7 +1138,6 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "NetworkService" => return LuaNetworkService.into_lua(lua),
             "LocalizationService" => return LuaLocalizationService.into_lua(lua),
             "GuiService" => return LuaGuiService.into_lua(lua),
-            "Debris" => return LuaDebris.into_lua(lua),
             "HttpService" => return LuaHttpService.into_lua(lua),
             "ContentProvider" => return LuaContentProvider.into_lua(lua),
             "DataService" => return LuaDataService.into_lua(lua),
@@ -1165,7 +1170,6 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     "ContentProvider",
                     "ContextActionService",
                     "DataService",
-                    "Debris",
                     "DialogueService",
                     "GuiService",
                     "HttpService",
@@ -1181,6 +1185,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     "UserGameSettings",
                     "UserInputService",
                 ]);
+                names.extend(crate::system::service_names(lua));
                 Err(mlua::Error::runtime(format!(
                     "there is no service named \"{name}\"; choose from {}",
                     names.join(", ")
