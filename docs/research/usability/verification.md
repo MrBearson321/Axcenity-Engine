@@ -230,3 +230,15 @@ Merged as #48. Findings and plan: [ui-designer.md](ui-designer.md).
 | UD8 | "No CSS styles this element yet" | "No CSS rule styles this element yet" |
 
 **Tests**: `delete_on_the_right_click_menu_deletes_as_one_undo_step`, `rename_on_the_right_click_menu_types_over_the_name_in_the_inspector`, `the_empty_designer_says_what_a_screen_gui_is_and_makes_one` (`app/ui_designer_menu_tests.rs`). Snapshots of the empty tab and the menu. `cargo test -p axcenity-editor`: only the known cloud failure; clippy and fmt clean.
+
+## UI Designer PR 3: move into frames from the Hierarchy, X/Y/W/H (U20, UD9–UD10)
+
+The two items the UI Designer pass left for later. Findings and plan: [ui-designer.md](ui-designer.md).
+
+| ID | Problem | Change |
+|---|---|---|
+| UD9 | An element couldn't be moved into another Frame from the designer; the Explorer could, but the element then jumped, as its `Position` counted from the new parent's corner | Drag Hierarchy rows onto a container's row (or any row, for the container it's in): they move in and stay where they are on screen, keeping their anchors. The target row is outlined; a drop that can't go there shows the no-drop cursor. One undo step |
+| UD10 | No X, Y, width and height in design pixels | **X**, **Y**, **W**, **H** at the top of **Position & anchor**; a flex child has only W and H; a CSS-set size is greyed with the rule named |
+
+**Tests**: `app/ui_designer_move_tests.rs` (three tests, see ui-designer.md). Tour shot 47 checked. `cargo test -p axcenity-editor`: 943 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`); clippy and fmt clean. Not checked on Windows or a real GPU.
+

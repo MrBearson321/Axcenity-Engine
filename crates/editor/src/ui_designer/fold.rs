@@ -1,5 +1,5 @@
 //! The inspector's sections, each under a header that folds, like
-//! Properties' groups. The everyday ones (Styles, Anchor, Text, Widget,
+//! Properties' groups. The everyday ones (Styles, Position & anchor, Text, Widget,
 //! Image, Look, Code & animation) start open; the fine-tuning ones
 //! (States, Bevel, Slice) start folded, and their title says what the
 //! element already has there ("Bevel · Raised"), so nothing set is hidden
@@ -33,7 +33,7 @@ impl Section {
     pub fn title(self) -> &'static str {
         match self {
             Section::Styles => "Styles",
-            Section::Anchor => "Anchor",
+            Section::Anchor => "Position & anchor",
             Section::Text => "Text",
             Section::Widget => "Widget",
             Section::Image => "Image",
@@ -50,8 +50,8 @@ impl Section {
         match self {
             Section::Styles => "Ready-made looks: one click styles it, hover and pressed too",
             Section::Anchor => {
-                "What it stays pinned to when the screen is another size: an edge, the \
-                 middle, or stretched across"
+                "Where it is and how big, in design pixels, and what it stays pinned to \
+                 when the screen is another size: an edge, the middle, or stretched across"
             }
             Section::Text => "Bold, alignment, size, colour, outline and shadow of its text",
             Section::Widget => "Its value, range and the way it shows",

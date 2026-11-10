@@ -409,4 +409,102 @@ impl EditorApp {
         self.history.seal();
         self.select_many(added);
     }
+
+    /// Moves `ids` into `parent`, from dragging the UI Designer's
+    /// Hierarchy rows: each goes in last and stays where it is on screen,
+    /// its `Position` and `Size` worked out again in the new parent
+    /// (`ui_designer::placed_in`), unless a flex layout places it there.
+    /// One undo step. Something inside another one moving goes along with
+    /// it; a move the tree refuses says why in Output.
+    pub(super) fn move_ui_into(&mut self, ids: Vec<InstanceId>, parent: InstanceId) {
+        let Some(gui) = crate::ui_designer::screen_gui_of(&self.world, Some(parent)) else {
+            return;
+        };
+        let Some(target_name) = self.world.get(parent).map(|i| i.name().to_owned()) else {
+            return;
+        };
+        let stylesheets = self
+            .project
+            .as_ref()
+            .map_or(&[][..], |project| &project.stylesheets[..]);
+        let mut planned = Vec::new();
+        for &id in &ids {
+            if ids
+                .iter()
+                .any(|&other| other != id && self.world.is_descendant_of(id, other))
+            {
+                continue;
+            }
+            let Some(instance) = self.world.get(id) else {
+                continue;
+            };
+            if instance.parent() == Some(parent) {
+                continue;
+            }
+            if let Err(reason) = tree::check_move(&self.world, id, parent) {
+                self.output.error(format!(
+                    "Can't move {} into {target_name}: {reason}",
+                    instance.name()
+                ));
+                continue;
+            }
+            let placed = crate::ui_designer::placed_in(&self.world, stylesheets, gui, id, parent);
+            planned.push((id, placed));
+        }
+        let label = match planned.as_slice() {
+            [] => return,
+            [(only, _)] => format!(
+                "Move {} into {target_name}",
+                self.world.get(*only).map_or("", |i| i.name())
+            ),
+            many => format!("Move {} elements into {target_name}", many.len()),
+        };
+        self.history.seal();
+        let mut moves = Vec::new();
+        let mut properties = Vec::new();
+        for (id, placed) in planned {
+            let before = history::place_of(&self.world, id);
+            let place = Place {
+                parent,
+                index: self.world.get(parent).map_or(0, |p| p.children().len()),
+            };
+            if let Err(err) = history::put(&mut self.world, id, Some(place)) {
+                self.output.error(format!("Could not do that: {err}"));
+                continue;
+            }
+            moves.push(Move {
+                id,
+                before,
+                after: Some(place),
+            });
+            let Some((position, size)) = placed else {
+                continue;
+            };
+            if crate::ui_designer::in_flow(&self.world, stylesheets, gui, id) {
+                continue;
+            }
+            for (name, value) in [
+                ("Position", Value::UDim2(position)),
+                ("Size", Value::UDim2(size)),
+            ] {
+                let Some(old) = self.world.get(id).and_then(|i| i.property(name)).cloned() else {
+                    continue;
+                };
+                if old != value && self.world.set_property(id, name, value.clone()).is_ok() {
+                    properties.push(history::PropertyEdit {
+                        id,
+                        field: Field::Property(name),
+                        before: old,
+                        after: value,
+                    });
+                }
+            }
+        }
+        if moves.is_empty() {
+            return;
+        }
+        self.history
+            .record_tree_and_properties(&mut self.world, label, moves, properties);
+        self.history.seal();
+    }
 }
