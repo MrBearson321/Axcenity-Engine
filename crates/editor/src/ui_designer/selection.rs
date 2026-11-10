@@ -12,7 +12,7 @@ use super::arrange::{self, Align};
 use super::{DesignerAction, DesignerScene, UiDesigner, container_for};
 use crate::explorer;
 use crate::responsive;
-use crate::theme::icons;
+use crate::theme::{self, icons};
 use crate::widgets;
 
 /// A box being dragged on empty artboard to select what's inside it.
@@ -236,8 +236,9 @@ impl UiDesigner {
         })
     }
 
-    /// The right-click menu's Copy style, Paste style and Duplicate, for
-    /// `id` (or the selection, when it's in it).
+    /// The right-click menu's Copy style, Paste style, Duplicate, Rename
+    /// and Delete, for `id` (or the selection, when it's in it; Rename is
+    /// for `id` alone).
     pub(super) fn selection_menu_items(
         &mut self,
         ui: &mut egui::Ui,
@@ -271,11 +272,41 @@ impl UiDesigner {
             actions.extend(self.paste_style(&ids));
             ui.close();
         }
-        if ui.button("Duplicate").clicked() {
+        if ui
+            .add(
+                egui::Button::new(theme::with_icon(icons::COPY, "Duplicate"))
+                    .shortcut_text(ui.ctx().format_shortcut(&crate::app::DUPLICATE_SHORTCUT)),
+            )
+            .clicked()
+        {
             if !scene.selection.contains(&id) {
                 actions.push(DesignerAction::Select(Some(id)));
             }
             actions.push(DesignerAction::Duplicate);
+            ui.close();
+        }
+        ui.separator();
+        if ui
+            .button(theme::with_icon(icons::PENCIL_SIMPLE, "Rename"))
+            .on_hover_text("Type its new name in the inspector")
+            .clicked()
+        {
+            actions.push(DesignerAction::Select(Some(id)));
+            self.renaming = Some(id);
+            ui.close();
+        }
+        if ui
+            .add(
+                egui::Button::new(theme::with_icon(icons::TRASH, "Delete"))
+                    .shortcut_text(crate::app::DELETE_KEY_TEXT),
+            )
+            .on_hover_text("Ctrl+Z brings it back")
+            .clicked()
+        {
+            if !scene.selection.contains(&id) {
+                actions.push(DesignerAction::Select(Some(id)));
+            }
+            actions.push(DesignerAction::Delete);
             ui.close();
         }
     }

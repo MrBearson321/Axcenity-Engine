@@ -272,10 +272,22 @@ impl UiDesigner {
             responsive::form(ui, "ui designer inspector", |ui| {
                 ui.label("Name");
                 let mut name = instance.name().to_owned();
-                if ui
-                    .add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY))
-                    .changed()
-                {
+                let mut field = egui::TextEdit::singleline(&mut name)
+                    .desired_width(f32::INFINITY)
+                    .show(ui);
+                if self.renaming == Some(id) {
+                    // Rename, from a right-click menu: focused, all selected,
+                    // so typing replaces it.
+                    self.renaming = None;
+                    field.response.request_focus();
+                    let all = egui::text::CCursorRange::two(
+                        egui::text::CCursor::new(0),
+                        egui::text::CCursor::new(name.chars().count()),
+                    );
+                    field.state.cursor.set_char_range(Some(all));
+                    field.state.store(ui.ctx(), field.response.id);
+                }
+                if field.response.changed() {
                     actions.push(DesignerAction::Edit(id, Edit::Name(name)));
                 }
                 ui.end_row();
