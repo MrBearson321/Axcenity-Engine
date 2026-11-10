@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, UNIX_EPOCH};
 
 use axcenity_blocks_runtime::translate;
 use thiserror::Error;
@@ -9,7 +10,21 @@ use thiserror::Error;
 use crate::{is_block_script, read_block_script};
 
 const MAGIC: &[u8; 8] = b"AXCGAME\0";
-const VERSION: u32 = 1;
+/// Version 2 (roadmap M9): each entry may be zstd-compressed and carries
+/// its file's modified time. Version 1 files (no compression, no times)
+/// still unpack.
+const VERSION: u32 = 2;
+/// zstd's level for entries. Measured on the examples' built games, level
+/// 9 shrank them no more than 3 (cooked games 0.83 vs 0.81 of their size)
+/// at twice the time.
+const ZSTD_LEVEL: i32 = 3;
+/// An entry is stored compressed only if that saves at least this share,
+/// so PNG, JPEG and audio files (already compressed) cost nothing to read.
+const MIN_SAVING: f64 = 0.05;
+/// Entry flag: the data is a zstd frame.
+const COMPRESSED: u8 = 1;
+/// The largest file an entry may unpack to.
+const MAX_FILE_BYTES: u64 = 16 << 30;
 const MAX_FILES: usize = 100_000;
 const MAX_PATH_BYTES: usize = 4096;
 
@@ -37,6 +52,37 @@ pub enum PackError {
     TooManyFiles,
 }
 
+/// One file going into a game file.
+struct PackFile {
+    name: String,
+    contents: Vec<u8>,
+    /// Its modified time in nanoseconds since 1970, or 0 for none (a
+    /// translated block script). Unpacking gives the file this time back,
+    /// so a cooked copy's check against its source's length and time
+    /// passes without hashing the source (`assets::cooked`).
+    modified: u64,
+}
+
+impl PackFile {
+    fn read(name: String, path: &Path) -> Result<Self, PackError> {
+        let read_error = |source| PackError::Read {
+            path: path.to_owned(),
+            source,
+        };
+        let contents = fs::read(path).map_err(read_error)?;
+        let modified = fs::metadata(path)
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |since| u64::try_from(since.as_nanos()).unwrap_or(0));
+        Ok(Self {
+            name,
+            contents,
+            modified,
+        })
+    }
+}
+
 /// Packs the runtime files of a project into one portable game file.
 ///
 /// Editor settings and unrelated documents are excluded. Textures go with
@@ -51,7 +97,7 @@ pub fn pack_game(folder: &Path) -> Result<Vec<u8>, PackError> {
     let mut files = Vec::new();
     collect_runtime_files(folder, folder, &mut files)?;
     add_cooked_textures(folder, &mut files)?;
-    files.sort_by(|a, b| a.0.cmp(&b.0));
+    files.sort_by(|a, b| a.name.cmp(&b.name));
     if files.len() > MAX_FILES {
         return Err(PackError::TooManyFiles);
     }
@@ -61,8 +107,9 @@ pub fn pack_game(folder: &Path) -> Result<Vec<u8>, PackError> {
     output.extend_from_slice(MAGIC);
     output.extend_from_slice(&VERSION.to_le_bytes());
     output.extend_from_slice(&(files.len() as u32).to_le_bytes());
-    for (name, contents) in files {
-        let name = if is_block_script(&name) {
+    for file in files {
+        let name = file.name;
+        if is_block_script(&name) {
             let script = read_block_script(folder, &name).map_err(|error| PackError::Blocks {
                 path: name.clone(),
                 message: error.to_string(),
@@ -77,74 +124,171 @@ pub fn pack_game(folder: &Path) -> Result<Vec<u8>, PackError> {
             if !names.insert(translated_name.clone()) {
                 return Err(PackError::InvalidArchive);
             }
-            append_entry(&mut output, &translated_name, source.as_bytes())?;
+            append_entry(&mut output, &translated_name, source.as_bytes(), 0)?;
             continue;
-        } else {
-            name
-        };
+        }
         if !names.insert(name.clone()) {
             return Err(PackError::InvalidArchive);
         }
-        append_entry(&mut output, &name, &contents)?;
+        append_entry(&mut output, &name, &file.contents, file.modified)?;
     }
     Ok(output)
 }
 
 /// Extracts a packed game into an empty folder, refusing paths that could
 /// escape it and duplicate entries that could overwrite one another.
+///
+/// The whole index is read and checked first; then the files are written
+/// on a few threads, since unpacking a compressed entry is mostly zstd's
+/// time (on a 4-core machine, 3x faster for a 750 MB game).
 pub fn unpack_game(bytes: &[u8], folder: &Path) -> Result<(), PackError> {
-    let mut cursor = 0;
-    if take(bytes, &mut cursor, MAGIC.len())? != MAGIC {
-        return Err(PackError::InvalidArchive);
-    }
-    let version = u32::from_le_bytes(take(bytes, &mut cursor, 4)?.try_into().unwrap());
-    if version != VERSION {
-        return Err(PackError::UnsupportedVersion(version));
-    }
-    let count = u32::from_le_bytes(take(bytes, &mut cursor, 4)?.try_into().unwrap()) as usize;
-    if count > MAX_FILES {
-        return Err(PackError::TooManyFiles);
-    }
+    let entries = read_entries(bytes)?;
     fs::create_dir_all(folder).map_err(|source| PackError::Write {
         path: folder.to_owned(),
         source,
     })?;
-    let mut names = HashSet::new();
-    for _ in 0..count {
-        let path_len =
-            u32::from_le_bytes(take(bytes, &mut cursor, 4)?.try_into().unwrap()) as usize;
-        let data_len = usize::try_from(u64::from_le_bytes(
-            take(bytes, &mut cursor, 8)?.try_into().unwrap(),
-        ))
-        .map_err(|_| PackError::InvalidArchive)?;
-        if path_len == 0 || path_len > MAX_PATH_BYTES {
-            return Err(PackError::InvalidArchive);
-        }
-        let name = std::str::from_utf8(take(bytes, &mut cursor, path_len)?)
-            .map_err(|_| PackError::InvalidArchive)?;
-        if !safe_entry_path(name) || !names.insert(name.to_owned()) {
-            return Err(PackError::InvalidArchive);
-        }
-        let contents = take(bytes, &mut cursor, data_len)?;
-        let path = folder.join(name);
-        let parent = path.parent().ok_or(PackError::InvalidArchive)?;
-        fs::create_dir_all(parent).map_err(|source| PackError::Write {
-            path: parent.to_owned(),
-            source,
-        })?;
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|source| PackError::Write {
-                path: path.clone(),
+    let mut made = HashSet::new();
+    for entry in &entries {
+        let parent = folder
+            .join(entry.name)
+            .parent()
+            .ok_or(PackError::InvalidArchive)?
+            .to_owned();
+        if made.insert(parent.clone()) {
+            fs::create_dir_all(&parent).map_err(|source| PackError::Write {
+                path: parent,
                 source,
             })?;
-        file.write_all(contents)
-            .map_err(|source| PackError::Write { path, source })?;
+        }
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(8)
+        .min(entries.len().max(1));
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    loop {
+                        let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(entry) = entries.get(index) else {
+                            return Ok(());
+                        };
+                        if let Err(error) = write_entry(entry, folder) {
+                            // Stops the others at their next entry.
+                            next.store(entries.len(), std::sync::atomic::Ordering::Relaxed);
+                            return Err(error);
+                        }
+                    }
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|worker| worker.join().expect("unpacking threads don't panic"))
+            .collect::<Result<Vec<()>, PackError>>()
+    })?;
+    Ok(())
+}
+
+/// One entry of a game file, checked but not yet written.
+struct Entry<'a> {
+    name: &'a str,
+    flags: u8,
+    /// Nanoseconds since 1970; 0 for none.
+    modified: u64,
+    data: &'a [u8],
+    file_len: u64,
+}
+
+/// Every entry of `bytes`, with its path checked as safe and unique.
+fn read_entries(bytes: &[u8]) -> Result<Vec<Entry<'_>>, PackError> {
+    let mut cursor = 0;
+    if take(bytes, &mut cursor, MAGIC.len())? != MAGIC {
+        return Err(PackError::InvalidArchive);
+    }
+    let version = read_u32(bytes, &mut cursor)?;
+    if version != 1 && version != VERSION {
+        return Err(PackError::UnsupportedVersion(version));
+    }
+    let count = read_u32(bytes, &mut cursor)? as usize;
+    if count > MAX_FILES {
+        return Err(PackError::TooManyFiles);
+    }
+    let mut names = HashSet::new();
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let path_len = read_u32(bytes, &mut cursor)? as usize;
+        let (flags, modified, data_len, file_len) = if version == 1 {
+            let data_len = read_u64(bytes, &mut cursor)?;
+            (0, 0, data_len, data_len)
+        } else {
+            let flags = take(bytes, &mut cursor, 1)?[0];
+            let modified = read_u64(bytes, &mut cursor)?;
+            let data_len = read_u64(bytes, &mut cursor)?;
+            let file_len = read_u64(bytes, &mut cursor)?;
+            (flags, modified, data_len, file_len)
+        };
+        if path_len == 0
+            || path_len > MAX_PATH_BYTES
+            || flags & !COMPRESSED != 0
+            || file_len > MAX_FILE_BYTES
+            || (flags & COMPRESSED == 0 && file_len != data_len)
+        {
+            return Err(PackError::InvalidArchive);
+        }
+        let data_len = usize::try_from(data_len).map_err(|_| PackError::InvalidArchive)?;
+        let name = std::str::from_utf8(take(bytes, &mut cursor, path_len)?)
+            .map_err(|_| PackError::InvalidArchive)?;
+        if !safe_entry_path(name) || !names.insert(name) {
+            return Err(PackError::InvalidArchive);
+        }
+        let data = take(bytes, &mut cursor, data_len)?;
+        entries.push(Entry {
+            name,
+            flags,
+            modified,
+            data,
+            file_len,
+        });
     }
     if cursor != bytes.len() {
         return Err(PackError::InvalidArchive);
+    }
+    Ok(entries)
+}
+
+/// Writes `entry` as a new file under `folder` (its folder already made).
+fn write_entry(entry: &Entry<'_>, folder: &Path) -> Result<(), PackError> {
+    let path = folder.join(entry.name);
+    let write_error = |source| PackError::Write {
+        path: path.clone(),
+        source,
+    };
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(write_error)?;
+    if entry.flags & COMPRESSED != 0 {
+        // Streamed into the file, never more than the entry says: a damaged
+        // frame can't make it allocate or write without end, and zstd's
+        // checksum refuses one that decodes to other bytes.
+        let decoder = zstd::stream::read::Decoder::with_buffer(entry.data)
+            .map_err(|_| PackError::InvalidArchive)?;
+        let written = io::copy(&mut decoder.take(entry.file_len + 1), &mut file)
+            .map_err(|_| PackError::InvalidArchive)?;
+        if written != entry.file_len {
+            return Err(PackError::InvalidArchive);
+        }
+    } else {
+        file.write_all(entry.data).map_err(write_error)?;
+    }
+    if entry.modified != 0 {
+        // Best effort: on a file system without times, the cooked copies'
+        // check falls back to hashing their sources.
+        let _ = file.set_modified(UNIX_EPOCH + Duration::from_nanos(entry.modified));
     }
     Ok(())
 }
@@ -152,7 +296,7 @@ pub fn unpack_game(bytes: &[u8], folder: &Path) -> Result<(), PackError> {
 fn collect_runtime_files(
     root: &Path,
     directory: &Path,
-    files: &mut Vec<(String, Vec<u8>)>,
+    files: &mut Vec<PackFile>,
 ) -> Result<(), PackError> {
     let entries = fs::read_dir(directory).map_err(|source| PackError::Read {
         path: directory.to_owned(),
@@ -201,11 +345,7 @@ fn collect_runtime_files(
         if !safe_entry_path(&relative) {
             return Err(PackError::InvalidArchive);
         }
-        let contents = fs::read(&path).map_err(|source| PackError::Read {
-            path: path.clone(),
-            source,
-        })?;
-        files.push((relative, contents));
+        files.push(PackFile::read(relative, &path)?);
         if files.len() > MAX_FILES {
             return Err(PackError::TooManyFiles);
         }
@@ -215,10 +355,14 @@ fn collect_runtime_files(
 
 /// Adds the current cooked copy of each texture in `files`, at the same
 /// place in the project, so the player finds it (it checks the copy against
-/// the texture's bytes, since unpacking gives every file a new time).
-fn add_cooked_textures(root: &Path, files: &mut Vec<(String, Vec<u8>)>) -> Result<(), PackError> {
+/// the texture's length and modified time, which unpacking gives back).
+fn add_cooked_textures(root: &Path, files: &mut Vec<PackFile>) -> Result<(), PackError> {
     let mut cooked: Vec<String> = Vec::new();
-    for (name, _) in files.iter().filter(|(name, _)| name.starts_with("assets/")) {
+    for name in files
+        .iter()
+        .map(|file| &file.name)
+        .filter(|name| name.starts_with("assets/"))
+    {
         if is_texture_file(name) && axcenity_assets::is_cooked(root, name) {
             cooked.push(axcenity_assets::cooked_relative_path(name));
         } else if axcenity_assets::ModelFormat::of(Path::new(name)).is_some() {
@@ -228,8 +372,7 @@ fn add_cooked_textures(root: &Path, files: &mut Vec<(String, Vec<u8>)>) -> Resul
     }
     for name in cooked {
         let path = root.join(&name);
-        let contents = fs::read(&path).map_err(|source| PackError::Read { path, source })?;
-        files.push((name, contents));
+        files.push(PackFile::read(name, &path)?);
         if files.len() > MAX_FILES {
             return Err(PackError::TooManyFiles);
         }
@@ -306,17 +449,56 @@ fn block_lua_path(path: &str) -> Option<String> {
     None
 }
 
-fn append_entry(output: &mut Vec<u8>, name: &str, contents: &[u8]) -> Result<(), PackError> {
+/// Writes one version-2 entry: the path's length, flags, modified time,
+/// the stored data's length and the file's length, the path, the data.
+fn append_entry(
+    output: &mut Vec<u8>,
+    name: &str,
+    contents: &[u8],
+    modified: u64,
+) -> Result<(), PackError> {
     if !safe_entry_path(name) || name.len() > MAX_PATH_BYTES {
         return Err(PackError::InvalidArchive);
     }
+    // With zstd's checksum, so a damaged entry fails to unpack instead of
+    // giving the game other bytes.
+    let compressed = zstd::bulk::Compressor::new(ZSTD_LEVEL)
+        .and_then(|mut compressor| {
+            compressor.include_checksum(true)?;
+            compressor.compress(contents)
+        })
+        .ok()
+        .filter(|packed| (packed.len() as f64) <= contents.len() as f64 * (1.0 - MIN_SAVING));
+    let (flags, data) = match &compressed {
+        Some(packed) => (COMPRESSED, packed.as_slice()),
+        None => (0, contents),
+    };
     let path_len = u32::try_from(name.len()).map_err(|_| PackError::InvalidArchive)?;
-    let data_len = u64::try_from(contents.len()).map_err(|_| PackError::InvalidArchive)?;
+    let data_len = u64::try_from(data.len()).map_err(|_| PackError::InvalidArchive)?;
+    let file_len = u64::try_from(contents.len()).map_err(|_| PackError::InvalidArchive)?;
+    if file_len > MAX_FILE_BYTES {
+        return Err(PackError::InvalidArchive);
+    }
     output.extend_from_slice(&path_len.to_le_bytes());
+    output.push(flags);
+    output.extend_from_slice(&modified.to_le_bytes());
     output.extend_from_slice(&data_len.to_le_bytes());
+    output.extend_from_slice(&file_len.to_le_bytes());
     output.extend_from_slice(name.as_bytes());
-    output.extend_from_slice(contents);
+    output.extend_from_slice(data);
     Ok(())
+}
+
+fn read_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, PackError> {
+    Ok(u32::from_le_bytes(
+        take(bytes, cursor, 4)?.try_into().unwrap(),
+    ))
+}
+
+fn read_u64(bytes: &[u8], cursor: &mut usize) -> Result<u64, PackError> {
+    Ok(u64::from_le_bytes(
+        take(bytes, cursor, 8)?.try_into().unwrap(),
+    ))
 }
 
 fn safe_entry_path(name: &str) -> bool {
@@ -606,11 +788,27 @@ mod tests {
     #[test]
     fn unpacking_rejects_traversal_and_trailing_bytes() {
         let folder = temp_folder("unsafe");
+        // Version 1's entry layout, then version 2's.
+        let mut archive = Vec::new();
+        archive.extend_from_slice(MAGIC);
+        archive.extend_from_slice(&1_u32.to_le_bytes());
+        archive.extend_from_slice(&1_u32.to_le_bytes());
+        archive.extend_from_slice(&9_u32.to_le_bytes());
+        archive.extend_from_slice(&3_u64.to_le_bytes());
+        archive.extend_from_slice(b"../escape");
+        archive.extend_from_slice(b"bad");
+        assert!(matches!(
+            unpack_game(&archive, &folder),
+            Err(PackError::InvalidArchive)
+        ));
         let mut archive = Vec::new();
         archive.extend_from_slice(MAGIC);
         archive.extend_from_slice(&VERSION.to_le_bytes());
         archive.extend_from_slice(&1_u32.to_le_bytes());
         archive.extend_from_slice(&9_u32.to_le_bytes());
+        archive.push(0);
+        archive.extend_from_slice(&0_u64.to_le_bytes());
+        archive.extend_from_slice(&3_u64.to_le_bytes());
         archive.extend_from_slice(&3_u64.to_le_bytes());
         archive.extend_from_slice(b"../escape");
         archive.extend_from_slice(b"bad");
@@ -630,5 +828,135 @@ mod tests {
             Err(PackError::InvalidArchive)
         ));
         fs::remove_dir_all(folder).unwrap();
+    }
+
+    /// A version-2 archive of `entries` (name, contents, modified).
+    fn archive_of(entries: &[(&str, &[u8], u64)]) -> Vec<u8> {
+        let mut archive = Vec::new();
+        archive.extend_from_slice(MAGIC);
+        archive.extend_from_slice(&VERSION.to_le_bytes());
+        archive.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        for (name, contents, modified) in entries {
+            append_entry(&mut archive, name, contents, *modified).unwrap();
+        }
+        archive
+    }
+
+    #[test]
+    fn text_is_stored_compressed_and_already_compressed_data_as_it_is() {
+        let text = r#"{"Name":"Part","Anchored":true},"#.repeat(2000);
+        // Bytes no compressor can shrink, as in a PNG or JPEG.
+        let mut noise = Vec::new();
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        for _ in 0..20_000 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            noise.push(state as u8);
+        }
+        let archive = archive_of(&[
+            ("world.json", text.as_bytes(), 0),
+            ("assets/noise.png", &noise, 0),
+        ]);
+        assert!(
+            archive.len() < noise.len() + text.len() / 10,
+            "{} bytes",
+            archive.len()
+        );
+        let folder = temp_folder("compressed");
+        unpack_game(&archive, &folder).unwrap();
+        assert_eq!(fs::read_to_string(folder.join("world.json")).unwrap(), text);
+        assert_eq!(fs::read(folder.join("assets/noise.png")).unwrap(), noise);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn unpacked_files_get_their_modified_times_back() {
+        let source = temp_folder("times-source");
+        fs::write(
+            source.join("axcenity.json"),
+            format!(
+                r#"{{"name":"Game","format_version":{}}}"#,
+                crate::FORMAT_VERSION
+            ),
+        )
+        .unwrap();
+        fs::write(source.join("world.json"), r#"{"format_version":1}"#).unwrap();
+        let when = UNIX_EPOCH + Duration::from_secs(1_700_000_000) + Duration::from_micros(123_456);
+        fs::File::options()
+            .write(true)
+            .open(source.join("world.json"))
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+        let output = temp_folder("times-output");
+        unpack_game(&pack_game(&source).unwrap(), &output).unwrap();
+        let modified = fs::metadata(output.join("world.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(modified, when);
+        fs::remove_dir_all(source).unwrap();
+        fs::remove_dir_all(output).unwrap();
+    }
+
+    #[test]
+    fn a_version_1_game_file_still_unpacks() {
+        let mut archive = Vec::new();
+        archive.extend_from_slice(MAGIC);
+        archive.extend_from_slice(&1_u32.to_le_bytes());
+        archive.extend_from_slice(&1_u32.to_le_bytes());
+        archive.extend_from_slice(&10_u32.to_le_bytes());
+        archive.extend_from_slice(&5_u64.to_le_bytes());
+        archive.extend_from_slice(b"world.json");
+        archive.extend_from_slice(b"{\"a\"}");
+        let folder = temp_folder("version-1");
+        unpack_game(&archive, &folder).unwrap();
+        assert_eq!(fs::read(folder.join("world.json")).unwrap(), b"{\"a\"}");
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn a_damaged_or_mislabelled_compressed_entry_is_refused() {
+        let text = "print('hello')\n".repeat(500);
+        let good = archive_of(&[("scripts/a.server.lua", text.as_bytes(), 0)]);
+        // The file length sits after the path length, flags, time and data
+        // length: 12 + 4 + 1 + 8 + 8 bytes in.
+        let file_len_at = MAGIC.len() + 8 + 4 + 1 + 8 + 8;
+        assert_eq!(good[MAGIC.len() + 8 + 4], COMPRESSED);
+        for (what, archive) in [
+            ("says shorter", {
+                let mut bad = good.clone();
+                bad[file_len_at..file_len_at + 8].copy_from_slice(&10_u64.to_le_bytes());
+                bad
+            }),
+            ("says longer", {
+                let mut bad = good.clone();
+                let longer = text.len() as u64 + 1;
+                bad[file_len_at..file_len_at + 8].copy_from_slice(&longer.to_le_bytes());
+                bad
+            }),
+            ("damaged frame", {
+                let mut bad = good.clone();
+                let last = bad.len() - 3;
+                bad[last] ^= 0xff;
+                bad
+            }),
+            ("unknown flag", {
+                let mut bad = good.clone();
+                bad[MAGIC.len() + 8 + 4] = 2;
+                bad
+            }),
+        ] {
+            let folder = temp_folder("damaged");
+            assert!(
+                matches!(
+                    unpack_game(&archive, &folder),
+                    Err(PackError::InvalidArchive)
+                ),
+                "{what}"
+            );
+            fs::remove_dir_all(folder).unwrap();
+        }
     }
 }
