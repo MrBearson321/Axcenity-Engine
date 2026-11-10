@@ -125,20 +125,59 @@ fn modified_nanos(meta: &fs::Metadata) -> u64 {
 /// A quick 64-bit hash of `bytes`, eight at a time, to tell whether a file
 /// changed. Not for anything an attacker picks.
 pub fn content_hash(bytes: &[u8]) -> u64 {
-    const K: u64 = 0x9E37_79B9_7F4A_7C15;
-    let mix = |hash: u64, word: u64| (hash.rotate_left(23) ^ word).wrapping_mul(K);
     let (words, rest) = bytes.as_chunks::<8>();
-    let mut hash = (bytes.len() as u64).wrapping_mul(K);
+    let mut hasher = ContentHasher::new(bytes.len() as u64);
     for word in words {
-        hash = mix(hash, u64::from_le_bytes(*word));
+        hasher.word(u64::from_le_bytes(*word));
     }
     let mut last = [0u8; 8];
     last[..rest.len()].copy_from_slice(rest);
-    hash = mix(hash, u64::from_le_bytes(last));
-    // Spread the last words' bits through the whole hash.
-    hash ^= hash >> 29;
-    hash = hash.wrapping_mul(K);
-    hash ^ (hash >> 32)
+    hasher.word(u64::from_le_bytes(last));
+    hasher.finish()
+}
+
+/// [`content_hash`] fed a word at a time, for data that isn't one slice
+/// of bytes (such as a mesh's corners and triangles).
+pub(crate) struct ContentHasher(u64);
+
+impl ContentHasher {
+    const K: u64 = 0x9E37_79B9_7F4A_7C15;
+
+    /// Starts a hash of data `len` long.
+    pub(crate) fn new(len: u64) -> Self {
+        Self(len.wrapping_mul(Self::K))
+    }
+
+    pub(crate) fn word(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(23) ^ word).wrapping_mul(Self::K);
+    }
+
+    /// Two 32-bit values as one word.
+    pub(crate) fn pair(&mut self, low: u32, high: u32) {
+        self.word(u64::from(low) | (u64::from(high) << 32));
+    }
+
+    pub(crate) fn finish(self) -> u64 {
+        // Spread the last words' bits through the whole hash.
+        let mut hash = self.0;
+        hash ^= hash >> 29;
+        hash = hash.wrapping_mul(Self::K);
+        hash ^ (hash >> 32)
+    }
+}
+
+/// `name` with anything but letters, digits, `-`, `_` and `.` made `_`,
+/// to start a cached file's name.
+pub(crate) fn plain_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "-_.".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// Where the cooked copy of the project file `relative` goes: the file's
@@ -147,17 +186,7 @@ pub fn content_hash(bytes: &[u8]) -> u64 {
 pub fn cooked_path(project: &Path, relative: &str) -> PathBuf {
     let relative = relative.replace('\\', "/");
     let name = relative.rsplit('/').next().unwrap_or_default();
-    let name: String = name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || "-_.".contains(c) {
-                c
-            } else {
-                '_'
-            }
-        })
-        .take(64)
-        .collect();
+    let name: String = plain_name(name).chars().take(64).collect();
     let hash = content_hash(relative.to_lowercase().as_bytes());
     project
         .join(COOKED_FOLDER)
@@ -268,7 +297,15 @@ pub fn write_cooked(
     stamp: SourceStamp,
     texture: &CookedTexture,
 ) -> io::Result<()> {
-    let path = cooked_path(project, relative);
+    write_whole(
+        &cooked_path(project, relative),
+        &encode_cooked(stamp, texture),
+    )
+}
+
+/// Writes `bytes` to `path` (making its folder) so that a reader finds the
+/// old file or the whole new one, never part of it.
+pub(crate) fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -277,8 +314,10 @@ pub fn write_cooked(
     static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let partial = path.with_extension(format!("{}-{write}.partial", std::process::id()));
-    fs::write(&partial, encode_cooked(stamp, texture))?;
-    fs::rename(&partial, &path)
+    fs::write(&partial, bytes)?;
+    fs::rename(&partial, path).inspect_err(|_| {
+        let _ = fs::remove_file(&partial);
+    })
 }
 
 /// The cooked copy of the project file `relative`, if there's one made from
@@ -313,7 +352,7 @@ pub fn is_cooked(project: &Path, relative: &str) -> bool {
 }
 
 /// Whether the project file `relative` is still what `stamp` was made from.
-fn is_current(project: &Path, relative: &str, stamp: SourceStamp) -> bool {
+pub(crate) fn is_current(project: &Path, relative: &str, stamp: SourceStamp) -> bool {
     let Some(source) = safe_path(relative).map(|path| project.join(path)) else {
         return false;
     };

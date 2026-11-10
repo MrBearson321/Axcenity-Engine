@@ -299,6 +299,19 @@ Taken on 2026-11-10 in the Linux cloud container (4 vCPUs, lavapipe), release bu
 - **The first frame on lavapipe didn't change**, because lavapipe does the GPU's work on the CPU too: it decodes BC7 in software on every sample, which costs what the upload saved. The steady frame stayed within noise (Render median 17.8–21.5 ms both ways). On a real GPU BC7 sampling is free, so this needs the Windows desktop to show.
 - **Cooking** took 32 s for hello-roads' 28 images (20 of them 4096²) on the container's 4 cores, once; 418 MB of cooked copies. Image quality with the "very fast" settings, PSNR against the source: 35.8 dB for the color map, 47.4 dB for roughness, 28.1 dB for the normal map ("basic" settings: 36.3, 47.7, 30.4). Normal maps would do better as BC5, which needs the shader to rebuild z; not done yet.
 
+### Cached simpler copies (L2, offline LODs)
+
+Taken on 2026-11-10 in the Linux cloud container, release build: `Assets::model_blocking` on a copy of each model in an empty project, first with no mesh cache, then twice with it ([rendering/models.md](rendering/models.md)).
+
+| Model | First load (simplifies) | Later loads (cache) |
+|---|---|---|
+| CityPropsCollection.fbx (70.8k triangles) | 180 ms | 62–91 ms |
+| DamagedHelmet.glb (15.5k triangles) | 476 ms | 446–451 ms |
+| AWP.glb (39.8k triangles) | 1410 ms | 1195–1398 ms |
+
+- **Simplifying was most of CityPropsCollection's fitting** (68 ms of it; 6 ms with the cache, hashing the primitives for the key included at 0.7 ms). What's left is ufbx parsing (36–42 ms) and reading its nodes (18–20 ms), which only a whole cooked model would remove.
+- **The two glTF files are mostly texture decoding** (their embedded maps weren't cooked in this test; imported into a project they would be), so the cache saves only their simplifying, about 18 and 70 ms.
+
 ### A Windows desktop with a real GPU
 
 Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table above): AMD Ryzen 9 9950X3D (16 cores), 62 GB of RAM, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Each host ran three times, 600 measured frames each; the table gives the median of the three runs' medians, and the worst frame seen in any run. The first player run was slower than the other two (Physics 14.3 ms against 5.4 ms); it came straight after the release build. Times are milliseconds.

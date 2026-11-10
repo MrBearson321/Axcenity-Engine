@@ -21,9 +21,9 @@ use ufbx::{CoordinateAxes, CoordinateAxis, ShaderType};
 use super::maps::{self, Role};
 use super::objects::{self, Listed, Siblings};
 use super::{
-    AlphaMode, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, MAX_NODE_DEPTH,
-    Model, ModelError, ModelMaterial, ModelObject, Pick, Primitive, Rig, Take, Track,
-    cooked_texture, decode_image, fit, fit_matrix, missing, new_key, smooth_normals, want,
+    AlphaMode, Bone, BoneTransform, Channel, ChannelTexture, Image, InProject, Joint, Keys,
+    MAX_NODE_DEPTH, Model, ModelError, ModelMaterial, ModelObject, Pick, Primitive, Rig, Take,
+    Track, cooked_texture, decode_image, fit, fit_matrix, missing, new_key, smooth_normals, want,
 };
 
 /// Takes are baked at this many frames a second when the file doesn't say.
@@ -35,7 +35,7 @@ const DEFAULT_FRAME_RATE: f64 = 30.0;
 pub(super) fn load(
     bytes: &[u8],
     folder: &Path,
-    project: Option<&Path>,
+    in_project: Option<InProject<'_>>,
     picks: &[Pick],
 ) -> Result<Vec<Model>, ModelError> {
     let scene = parse(bytes)?;
@@ -43,7 +43,7 @@ pub(super) fn load(
         animated: animated_nodes(&scene),
         joints: Vec::new(),
         folder,
-        project,
+        in_project,
         images: HashMap::new(),
         materials: HashMap::new(),
         loose: loose_textures(&scene),
@@ -66,7 +66,7 @@ pub(super) fn load(
         if let Some(path) = missing(&wanted, &found) {
             return Err(ModelError::NoObject(path));
         }
-        let mut model = fit(std::mem::take(&mut reader.primitives))?;
+        let mut model = fit(std::mem::take(&mut reader.primitives), in_project)?;
         if !reader.joints.is_empty() {
             model.rig = Some(Arc::new(rig(&scene, &reader.joints, fit_matrix(&model))));
         }
@@ -511,8 +511,8 @@ struct Reader<'a> {
     /// bind matrix (see [`super::Joint`]).
     joints: Vec<(u32, DMat4)>,
     folder: &'a Path,
-    /// The project folder, where cooked textures are looked for.
-    project: Option<&'a Path>,
+    /// Where the model is in its project, for cooked copies.
+    in_project: Option<InProject<'a>>,
     /// Textures decoded so far, by element ID, so shared ones decode once.
     /// `None` means it couldn't be, and was noted.
     images: HashMap<u32, Option<Arc<Image>>>,
@@ -532,6 +532,11 @@ struct Reader<'a> {
 }
 
 impl Reader<'_> {
+    /// The project folder, where cooked textures are looked for.
+    fn project(&self) -> Option<&Path> {
+        self.in_project.map(|in_project| in_project.project)
+    }
+
     /// Collects the wanted meshes inside `node` (whose path is `path`),
     /// adding their paths to `found`. Every one if `wanted` is `None`.
     fn children(
@@ -983,12 +988,12 @@ impl Reader<'_> {
         let name = texture_name(texture);
         let cooked = if texture.content.is_empty() {
             texture_path(texture, self.folder).and_then(|path| {
-                cooked_texture(self.project, self.folder, &slash_path(&path), None)
+                cooked_texture(self.project(), self.folder, &slash_path(&path), None)
             })
         } else {
             self.embedded.get(&id).and_then(|file| {
                 let file = format!("{}/{file}", crate::import::TEXTURES_FOLDER);
-                cooked_texture(self.project, self.folder, &file, Some(&texture.content))
+                cooked_texture(self.project(), self.folder, &file, Some(&texture.content))
             })
         };
         if let Some(image) = cooked {

@@ -9,6 +9,7 @@
 
 mod fbx;
 mod lod;
+mod lod_cache;
 mod maps;
 mod objects;
 mod rig;
@@ -38,6 +39,7 @@ use gltf::mesh::Mode;
 use objects::{Listed, Siblings};
 
 use crate::cooked::{self, CookedTexture};
+pub use lod_cache::{MESH_CACHE_FOLDER, cached_meshes};
 
 /// Nodes inside nodes deeper than this, or more node visits than
 /// [`MAX_NODE_VISITS`], mean a broken file (nodes in a loop). Real models
@@ -108,7 +110,7 @@ impl Model {
     /// 1×1×1 cube as a loaded one is, without simpler copies: one being
     /// edited changes too often to simplify.
     pub fn from_primitives(primitives: Vec<Primitive>) -> Result<Model, ModelError> {
-        fit_with(primitives, false)
+        fit_with(primitives, None)
     }
 
     /// A new model of the same triangles with each primitive drawn by
@@ -614,19 +616,32 @@ pub fn load_models(
     load_models_in(bytes, folder, None, format, picks)
 }
 
-/// [`load_models`] for a model inside `project`, whose textures are taken
+/// Where a model being loaded is in its project, so cooked copies made
+/// ahead of time are used and kept (see [`crate::cooked`] and
+/// [`lod_cache`]).
+#[derive(Clone, Copy)]
+pub(crate) struct InProject<'a> {
+    pub project: &'a Path,
+    /// The model file, as a project path such as `assets/models/chair.glb`.
+    pub relative: &'a str,
+    /// The file's bytes, which a cooked mesh is stamped with.
+    pub bytes: &'a [u8],
+}
+
+/// [`load_models`] for a model inside a project: its textures are taken
 /// from their cooked copies where those are current (see
-/// [`read_cooked`](crate::read_cooked)).
+/// [`read_cooked`](crate::read_cooked)), and its simpler copies from the
+/// mesh cache ([`lod_cache`]).
 pub(crate) fn load_models_in(
     bytes: &[u8],
     folder: &Path,
-    project: Option<&Path>,
+    in_project: Option<InProject<'_>>,
     format: ModelFormat,
     picks: &[Pick],
 ) -> Result<Vec<Model>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
-        ModelFormat::Gltf => read(bytes, folder, project, picks),
-        ModelFormat::Fbx => fbx::load(bytes, folder, project, picks),
+        ModelFormat::Gltf => read(bytes, folder, in_project, picks),
+        ModelFormat::Fbx => fbx::load(bytes, folder, in_project, picks),
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -803,7 +818,7 @@ fn embedded_image_names(document: &gltf::Document) -> HashMap<usize, String> {
 fn read(
     bytes: &[u8],
     folder: &Path,
-    project: Option<&Path>,
+    in_project: Option<InProject<'_>>,
     picks: &[Pick],
 ) -> Result<Vec<Model>, ModelError> {
     let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(bytes)?;
@@ -818,7 +833,7 @@ fn read(
 
     let mut reader = Reader {
         folder,
-        project,
+        in_project,
         buffers: &buffers,
         images: HashMap::new(),
         primitives: Vec::new(),
@@ -841,7 +856,7 @@ fn read(
         if let Some(path) = missing(&reader.wanted, &reader.found) {
             return Err(ModelError::NoObject(path));
         }
-        let mut model = fit(std::mem::take(&mut reader.primitives))?;
+        let mut model = fit(std::mem::take(&mut reader.primitives), in_project)?;
         if !reader.joints.is_empty() {
             model.rig = Some(Arc::new(gltf_rig(
                 &document,
@@ -1104,8 +1119,8 @@ fn percent_decode(text: &str) -> Option<String> {
 /// Walks the node tree, collecting each mesh's triangles in model space.
 struct Reader<'a> {
     folder: &'a Path,
-    /// The project folder, where cooked textures are looked for.
-    project: Option<&'a Path>,
+    /// Where the model is in its project, for cooked copies.
+    in_project: Option<InProject<'a>>,
     buffers: &'a [gltf::buffer::Data],
     /// Textures decoded so far, by image index, so shared ones decode once.
     images: HashMap<usize, Arc<Image>>,
@@ -1127,6 +1142,11 @@ struct Reader<'a> {
 }
 
 impl Reader<'_> {
+    /// The project folder, where cooked textures are looked for.
+    fn project(&self) -> Option<&Path> {
+        self.in_project.map(|in_project| in_project.project)
+    }
+
     /// Collects the wanted meshes in the default scene, or every mesh if
     /// the file has no scenes.
     fn walk(&mut self, document: &gltf::Document) -> Result<(), ModelError> {
@@ -1427,7 +1447,7 @@ impl Reader<'_> {
     fn cooked_image(&self, image: &gltf::Image) -> Option<Image> {
         match image.source() {
             gltf::image::Source::Uri { uri, .. } if !uri.starts_with("data:") => {
-                cooked_texture(self.project, self.folder, &percent_decode(uri)?, None)
+                cooked_texture(self.project(), self.folder, &percent_decode(uri)?, None)
             }
             gltf::image::Source::Uri { .. } => None,
             gltf::image::Source::View { view, .. } => {
@@ -1440,7 +1460,7 @@ impl Reader<'_> {
                     crate::import::TEXTURES_FOLDER,
                     self.embedded.get(&image.index())?
                 );
-                cooked_texture(self.project, self.folder, &file, Some(bytes))
+                cooked_texture(self.project(), self.folder, &file, Some(bytes))
             }
         }
     }
@@ -1671,12 +1691,17 @@ pub fn tangents(
 /// Fits the primitives into the 1×1×1 cube centered on the origin and
 /// makes the model. The full model's primitives decide its box and hull;
 /// simpler copies (see [`lod`]) are placed the same way and attached to them.
-fn fit(primitives: Vec<Primitive>) -> Result<Model, ModelError> {
-    fit_with(primitives, true)
+/// The simpler copies are taken from the mesh cache when it has them, and
+/// kept there when they're made (for a model `in_project`).
+fn fit(primitives: Vec<Primitive>, in_project: Option<InProject<'_>>) -> Result<Model, ModelError> {
+    fit_with(primitives, Some(in_project))
 }
 
-/// [`fit`], with simpler copies only if `simplify`.
-fn fit_with(mut primitives: Vec<Primitive>, simplify: bool) -> Result<Model, ModelError> {
+/// [`fit`], with simpler copies only if `simplify` (`Some`).
+fn fit_with(
+    mut primitives: Vec<Primitive>,
+    simplify: Option<Option<InProject<'_>>>,
+) -> Result<Model, ModelError> {
     // A file with only `_LOD1` objects has them as its full model.
     if primitives.iter().all(|primitive| primitive.level > 0) {
         for primitive in &mut primitives {
@@ -1745,10 +1770,9 @@ fn fit_with(mut primitives: Vec<Primitive>, simplify: bool) -> Result<Model, Mod
         key: new_key(),
         size: Vec3::select(thick, size, Vec3::ZERO).to_array(),
         center: center.to_array(),
-        primitives: if simplify {
-            lod::attach(primitives)
-        } else {
-            primitives
+        primitives: match simplify {
+            Some(in_project) => lod::attach(primitives, in_project),
+            None => primitives,
         },
         hull_points,
         warnings: Vec::new(),
