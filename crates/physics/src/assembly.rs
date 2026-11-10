@@ -17,7 +17,8 @@ use axcenity_core::{ClassName, Instance, InstanceId, Value, World};
 /// physics holds its parts with a joint instead (see [`crate::joints`]).
 pub fn welds(world: &World) -> Vec<(InstanceId, InstanceId)> {
     world
-        .descendants_iter(world.root())
+        .all_below(world.root(), |class| class == ClassName::WeldConstraint)
+        .into_iter()
         .filter_map(|id| weld_parts(world, id))
         .collect()
 }

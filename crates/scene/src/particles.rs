@@ -638,10 +638,12 @@ fn lerp((from, to): (f32, f32), t: f32) -> f32 {
 /// parts kept inside a UnionOperation, whose parts aren't drawn.
 fn emitters(world: &World) -> impl Iterator<Item = (InstanceId, &Instance)> {
     world
-        .descendants_iter(world.workspace())
+        .all_below(world.workspace(), |class| {
+            class == ClassName::ParticleEmitter
+        })
+        .into_iter()
         .filter(move |&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(move |id| Some((id, world.get(id)?)))
-        .filter(|(_, instance)| instance.class() == ClassName::ParticleEmitter)
 }
 
 /// How far across the box a free-standing emitter gives off particles

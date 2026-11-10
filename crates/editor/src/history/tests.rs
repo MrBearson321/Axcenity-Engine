@@ -73,9 +73,11 @@ fn a_whole_world_step_undoes_property_and_tree_changes_together() {
     history.undo(&mut world).unwrap();
     assert_eq!(position(&world, part), at(1.0));
     assert!(!world.contains(made));
+    world.check_index().unwrap();
     history.redo(&mut world).unwrap();
     assert_eq!(position(&world, part), at(5.0));
     assert!(world.is_descendant_of(made, world.workspace()));
+    world.check_index().unwrap();
     // Older steps still work on the swapped-in world.
     history.undo(&mut world).unwrap();
     history.undo(&mut world).unwrap();

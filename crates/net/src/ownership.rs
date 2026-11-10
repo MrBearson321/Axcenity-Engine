@@ -311,14 +311,7 @@ impl CharacterCheck {
     /// The character sits in `seat` on the device: so it does on the
     /// server, where scripts see `Occupant`.
     fn sit(&self, world: &mut World, controller: InstanceId, seat: Option<u64>) {
-        let seats: Vec<InstanceId> = world
-            .descendants_iter(world.workspace())
-            .filter(|&id| {
-                world
-                    .get(id)
-                    .is_some_and(|i| matches!(i.class(), ClassName::Seat | ClassName::VehicleSeat))
-            })
-            .collect();
+        let seats: Vec<InstanceId> = world.all_below(world.workspace(), ClassName::is_seat);
         let wanted = seat
             .map(InstanceId::from_bits)
             .filter(|id| seats.contains(id));
@@ -436,13 +429,12 @@ impl OwnedSender {
 /// to it, or the parts in its Model.
 fn carriers(world: &World) -> Vec<InstanceId> {
     let mut parts = Vec::new();
-    for id in world.descendants_iter(world.workspace()) {
+    for id in world.all_below(world.workspace(), |class| {
+        class == ClassName::SplineFollower
+    }) {
         let Some(follower) = world.get(id) else {
             continue;
         };
-        if follower.class() != ClassName::SplineFollower {
-            continue;
-        }
         let Some(target) = follower.parent() else {
             continue;
         };

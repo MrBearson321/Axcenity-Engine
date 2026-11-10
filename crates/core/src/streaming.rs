@@ -138,7 +138,9 @@ impl Partition {
     /// or out of the tree, and otherwise measures a share of the units'
     /// boxes again. Cheap enough for every frame.
     pub fn refresh(&mut self, world: &World) {
-        let version = world.structure_version();
+        // The partition is the Workspace's, and whose characters are in it.
+        let version = world.structure_version_of(world.workspace())
+            + world.structure_version_of(world.players());
         if self.structure != Some(version) {
             self.structure = Some(version);
             self.next_bounds = 0;

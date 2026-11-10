@@ -42,10 +42,12 @@ pub(crate) fn blend(
     mut look: Look,
 ) -> Look {
     let mut volumes: Vec<(f64, f32, &Instance)> = world
-        .descendants_iter(world.workspace())
+        .all_below(world.workspace(), |class| {
+            class == ClassName::GraphicsVolume
+        })
+        .into_iter()
         .filter(|&id| !axcenity_core::csg::out_of_world(world, id))
         .filter_map(|id| world.get(id))
-        .filter(|instance| instance.class() == ClassName::GraphicsVolume)
         .filter(|volume| volume.property("Enabled") != Some(&Value::Bool(false)))
         .filter_map(|volume| {
             let weight = weight(volume, camera)?;

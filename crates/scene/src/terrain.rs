@@ -286,13 +286,12 @@ impl TerrainCache {
         self.take_finished_chunks();
         let background = self.streaming.settings().is_some();
         let mut seen = HashSet::new();
-        for id in world.descendants_iter(world.workspace()) {
+        for id in world.all_below(world.workspace(), |class| {
+            class == axcenity_core::ClassName::Terrain
+        }) {
             let Some(instance) = world.get(id) else {
                 continue;
             };
-            if instance.class() != axcenity_core::ClassName::Terrain {
-                continue;
-            }
             seen.insert(id);
             self.draw(
                 world, id, instance, assets, camera, items, chunks, background,
@@ -724,7 +723,9 @@ pub fn terrain_hit(
     skip: &[InstanceId],
 ) -> Option<(InstanceId, f32, Vec3)> {
     let mut nearest: Option<(InstanceId, f32, Vec3)> = None;
-    for id in world.descendants_iter(world.workspace()) {
+    for id in world.all_below(world.workspace(), |class| {
+        class == axcenity_core::ClassName::Terrain
+    }) {
         if skip.contains(&id) {
             continue;
         }

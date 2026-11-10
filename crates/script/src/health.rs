@@ -286,15 +286,8 @@ impl Healths {
         } else {
             0.0
         };
-        let mut healths = Vec::new();
-        let mut zones = Vec::new();
-        for id in world.descendants_iter(world.workspace()) {
-            match world.get(id).map(|instance| instance.class()) {
-                Some(ClassName::Health) => healths.push(id),
-                Some(ClassName::DamageZone) => zones.push(id),
-                _ => {}
-            }
-        }
+        let healths = world.all_below(world.workspace(), |class| class == ClassName::Health);
+        let zones = world.all_below(world.workspace(), |class| class == ClassName::DamageZone);
         self.since_damage.retain(|id, _| world.contains(*id));
         for since in self.since_damage.values_mut() {
             *since += dt;
@@ -364,11 +357,8 @@ pub fn fall_damage(world: &mut World, controller: InstanceId, speed: f64) -> Vec
 /// its MaxHealth.
 pub fn bind_bars(world: &mut World) {
     let mut bound = Vec::new();
-    for id in world.descendants_iter(world.root()) {
+    for id in world.all_below(world.root(), |class| class == ClassName::ProgressBar) {
         let Some(bar) = world.get(id) else { continue };
-        if bar.class() != ClassName::ProgressBar {
-            continue;
-        }
         let health = bar.children().iter().find_map(|&child| {
             let value = world.get(child)?;
             if value.class() != ClassName::ObjectValue || value.name() != BAR_BINDING {

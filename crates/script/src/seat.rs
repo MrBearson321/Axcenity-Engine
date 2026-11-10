@@ -43,12 +43,12 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
 /// Makes `controller` the occupant of `seat` and takes it off any other seat.
 fn sit(world: &mut World, seat: InstanceId, controller: InstanceId) {
     let occupied: Vec<InstanceId> = world
-        .descendants_iter(world.root())
+        .all_below(world.root(), ClassName::is_seat)
+        .into_iter()
         .filter(|&id| {
             id != seat
                 && world.get(id).is_some_and(|other| {
-                    other.class().is_seat()
-                        && other.property("Occupant") == Some(&Value::Instance(Some(controller)))
+                    other.property("Occupant") == Some(&Value::Instance(Some(controller)))
                 })
         })
         .collect();

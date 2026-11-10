@@ -384,10 +384,7 @@ pub fn place_held(world: &mut World, assets: &Assets, poses: &Poses) {
 
 /// Every Inventory in the Workspace.
 fn inventories(world: &World) -> Vec<InstanceId> {
-    world
-        .descendants_iter(world.workspace())
-        .filter(|&id| is_class(world, id, ClassName::Inventory))
-        .collect()
+    world.all_below(world.workspace(), |class| class == ClassName::Inventory)
 }
 
 /// The box round `parts` in the world, turned parts included.
@@ -535,13 +532,13 @@ impl Tools {
         }
         // Dropped Tools: in the Workspace, not in an Inventory or another Tool.
         let tools: Vec<(InstanceId, (Vec3, Vec3))> = world
-            .descendants_iter(world.workspace())
+            .all_below(world.workspace(), |class| class == ClassName::Tool)
+            .into_iter()
             .filter(|&id| {
-                is_class(world, id, ClassName::Tool)
-                    && world
-                        .get(id)
-                        .and_then(|tool| tool.parent())
-                        .is_some_and(|parent| tool_of(world, parent).is_none())
+                world
+                    .get(id)
+                    .and_then(|tool| tool.parent())
+                    .is_some_and(|parent| tool_of(world, parent).is_none())
                     && !in_inventory(world, id)
             })
             .filter_map(|tool| Some((tool, bounds(world, &[handle(world, tool)?])?)))

@@ -416,13 +416,11 @@ impl Agents {
 /// Every NavigationAgent in the Workspace whose parent is a body.
 fn agents(world: &World) -> Vec<InstanceId> {
     world
-        .descendants_iter(world.workspace())
-        .filter(|&id| {
-            world
-                .get(id)
-                .is_some_and(|instance| instance.class() == ClassName::NavigationAgent)
-                && !parts_of(world, id).is_empty()
+        .all_below(world.workspace(), |class| {
+            class == ClassName::NavigationAgent
         })
+        .into_iter()
+        .filter(|&id| !parts_of(world, id).is_empty())
         .collect()
 }
 

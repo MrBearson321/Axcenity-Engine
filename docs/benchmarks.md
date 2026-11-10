@@ -120,6 +120,26 @@ Same container, release build, S10k, main and the I7 branch run back to back: th
 
 Before, the navmesh fingerprint hashed every part, the 1,000 falling drops included, and formatted values as text: about 4 ms every frame, and a 110–120 ms rebuild every 0.5 s. Now unanchored parts aren't ground, and a `MeshBuilder` reads again only the parts that changed. What's left of the worst Agents frame (about 20–30 ms in the test runner and player) is S10k's 100 anchored spinners: turning, their corners cross column centres, so the mesh really changes and is put together again every 0.5 s (gathering, linking and numbering 200,000 cells; roadmap M13 moves that to a worker). Editor Play rarely rebuilt (worst 4 and 14 ms); its 1.5 ms median is the check, every frame once 0.5 s has passed, that nothing the mesh is made from changed, which a world where nothing anchored moves also pays.
 
+### Class and tag index (M2)
+
+Taken on 2026-11-10 on a Ryzen 9 9950X3D under Windows, release build, main and the M2 branch run alternately. Each run was pinned to the V-cache CCD: unpinned, other work on the machine moved main's frame median between 12.7 and 19.2 ms and the comparison was noise. Medians of the runs' medians, in milliseconds; the frame's range across runs is in brackets. Test runner and server: seven 600-frame runs. Player: three 300-frame runs.
+
+| Step | Test runner main | M2 | Server main | M2 | Player main | M2 |
+|---|---|---|---|---|---|---|
+| Characters | 1.147 | 1.049 | – | – | 1.379 | 1.272 |
+| Agents | 0.118 | 0.065 | – | – | 0.144 | 0.086 |
+| Input | 0.660 | 0.518 | 0.018 | 0.001 | 0.685 | 0.536 |
+| Scripts | 0.121 | 0.010 | 0.117 | 0.006 | 0.129 | 0.011 |
+| Physics | 3.911 | 3.652 | 3.559 | 3.387 | 3.994 | 3.783 |
+| Heartbeat | 0.817 | 0.799 | 0.788 | 0.736 | 0.827 | 0.796 |
+| Animation | 0.090 | 0.060 | – | – | 0.272 | 0.085 |
+| Draw list | – | – | – | – | 5.563 | 5.454 |
+| Network send | – | – | 0.297 | 0.270 | – | – |
+| Render | – | – | – | – | 1.937 | 1.935 |
+| **Frame, median** | **7.02** (6.52–7.62) | **6.23** (5.73–7.02) | **4.82** (4.72–5.39) | **4.44** (4.36–4.89) | **14.95** (14.77–15.79) | **14.03** (13.70–14.68) |
+
+About 11%, 8% and 6% off the frame. Each walk replaced cost a few tens of microseconds on 10,000 parts, so the gain comes from there being many of them: `Scripts` (per-frame Health, Humanoid, follower and prompt walks) falls by about 0.11 ms on every host. A world with few Instances gains almost nothing. On copies of six real projects (General Store Roadside, Abandoned Farmhouse, three biome patches, The Dimming; under 1 MB of `world.json` each, on all three hosts) every difference was within run-to-run noise, in both directions.
+
 ### Calibrating against the rendering baseline
 
 The render benchmarks ran on the same container to relate it to the machine in [rendering/performance.md](rendering/performance.md). `bench_10000_parts` (edge view) took 8.6 ms in `build_draw_list` here, against 3.3 ms there, so this container's CPU is roughly 2.5× slower for this work; divide the table above by about 2.5 for a fast desktop CPU. `bench_project` on S10k: `build_draw_list` 9.4 ms and `ScenePipeline::draw` (CPU side) 3.7 ms from the spawn, 9.5 ms and 3.7 ms from the overview, 6,575 and 10,026 items drawn. GPU times on lavapipe (300–940 ms a frame) say nothing about a real GPU and are left out.
