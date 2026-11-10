@@ -18,7 +18,7 @@ A texture file (PNG, JPEG, TGA or BMP: a SurfaceAppearance's map, a texture set'
 
 ## Loading a cooked texture
 
-`Assets::texture` (and a model's textures, by the project path of their file) uses the cooked copy when it's current: the source file has the length it recorded and the same modified time, or, if only the time differs (a copied or unpacked project), the same bytes. A texture embedded in a model is matched by its embedded bytes against the file importing copied it out to. Anything else decodes the source as before, so a stale copy is never drawn.
+`Assets::texture` (and a model's textures, by the project path of their file) uses the cooked copy when it's current: the source file has the length it recorded and the same modified time, or, if only the time differs (a copied project), the same bytes. A built game's files get their modified times back when it unpacks (`.axgame` version 2, roadmap M9), so its cooked copies pass on the length and time without hashing their sources. A texture embedded in a model is matched by its embedded bytes against the file importing copied it out to. Anything else decodes the source as before, so a stale copy is never drawn.
 
 A cooked `Image` holds its BC7 levels and decodes its source file only if something on the CPU asks for its pixels (`Image::rgba`: the Model Studio, thumbnails, color grading strips). Loading a model reads `Image::has_alpha` and `Image::sampled_average` instead, which a cooked image answers from what was recorded at cooking, so loading never decodes it.
 
