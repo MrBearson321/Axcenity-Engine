@@ -13,6 +13,7 @@ mod graphics;
 mod icon;
 mod input;
 mod logs;
+mod preload;
 mod splash;
 mod watch;
 
@@ -71,6 +72,8 @@ const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | -
                      --bench measures that many frames' steps, prints them and quits";
 
 fn main() -> Result<()> {
+    // `--bench` reports its launch times (first frame, assets loaded) from here.
+    let launched = Instant::now();
     // Show warnings and errors by default. `wgpu_hal` relays harmless graphics
     // driver chatter as warnings, so only its errors are shown. Set RUST_LOG to
     // override (for example RUST_LOG=info).
@@ -199,6 +202,10 @@ fn main() -> Result<()> {
         splash.hold();
     }
     let assets = Assets::new(&project.folder);
+    // The Workspace's models and textures load on other threads while the
+    // scripts start and the window opens; the splash or loading screen
+    // stays up until they're in (roadmap I11).
+    let preload = preload::Preload::start(&world, &assets);
     let mut scripts = ScriptRuntime::new();
     scripts.set_assets(assets.clone());
     scripts.set_save_folder(data_folder.clone());
@@ -280,6 +287,8 @@ fn main() -> Result<()> {
         .bench
         .map(|frames| BenchRun::new(BenchRun::DEFAULT_WARM_UP, frames));
     app.bench_scene = axcenity_core::bench::scene_name(&project.folder);
+    app.launched = launched;
+    app.preload = Some(preload);
     event_loop.run_app(&mut app)?;
     // Tell the other players this one is gone.
     app.network.disconnect(&mut app.world, &mut app.scripts);
@@ -673,6 +682,11 @@ struct App {
     /// `--bench`: the frames measured so far, and the scene's name.
     bench: Option<BenchRun>,
     bench_scene: String,
+    /// When the player started, for `--bench`'s launch times.
+    launched: Instant,
+    /// The Workspace's assets being read ahead; `None` when nothing was
+    /// (tests), which counts as loaded.
+    preload: Option<preload::Preload>,
 }
 
 impl App {
@@ -746,6 +760,8 @@ impl App {
             frame_stats: dev_console::FrameStats::default(),
             bench: None,
             bench_scene: String::new(),
+            launched: Instant::now(),
+            preload: None,
         }
     }
 
@@ -786,6 +802,14 @@ impl App {
             return MoveInput::default();
         }
         self.input.motion_input(look, zoom, seconds)
+    }
+
+    /// Checks on the asset preload: true while the Workspace's assets are
+    /// still loading.
+    fn preload_loading(&mut self) -> bool {
+        self.preload
+            .as_mut()
+            .is_some_and(|preload| !preload.update())
     }
 
     fn follow_level_loads(&mut self) {
@@ -1657,7 +1681,11 @@ impl ApplicationHandler for App {
                 if ready {
                     self.splash.release();
                 }
+                // The splash or loading screen also waits for the preload.
+                let loading_assets = self.preload_loading();
+                self.splash.set_loading(loading_assets);
                 if let Some(loading) = &mut self.loading_gui {
+                    loading.set_assets_loading(loading_assets);
                     loading.advance(&mut self.world, seconds, ready);
                 }
 
@@ -1803,10 +1831,29 @@ impl ApplicationHandler for App {
                 if self.show_splash {
                     // The first drawn frame starts the splash clock.
                     self.splash.tick();
+                    // Once its bar is full, a splash still waiting for
+                    // assets says how many are in.
+                    let caption = match &self.preload {
+                        Some(preload) if self.splash.waiting_for_assets() => {
+                            preload.progress().caption()
+                        }
+                        _ => "Made with Axcenity".to_owned(),
+                    };
                     draw_list.ui.extend(self.splash.items(
                         size.width as f32,
                         size.height as f32,
-                        "Made with Axcenity",
+                        &caption,
+                    ));
+                } else if loading_assets
+                    && self.loading_gui.is_none()
+                    && let Some(preload) = &self.preload
+                {
+                    // No splash and no loading screen of the game's own:
+                    // a plain one, so textures don't pop in.
+                    draw_list.ui.extend(preload::screen_items(
+                        size.width as f32,
+                        size.height as f32,
+                        preload.progress(),
                     ));
                 }
                 // Models that couldn't be loaded, by physics or for drawing.
@@ -1840,6 +1887,12 @@ impl ApplicationHandler for App {
                 watch.lap("Render");
                 self.frame_stats.finish(real_seconds, &watch);
                 profiling::finish_frame!();
+                if let Some(bench) = &mut self.bench {
+                    bench.note("launch to first frame", self.launched.elapsed());
+                    if !loading_assets {
+                        bench.note("launch to assets loaded", self.launched.elapsed());
+                    }
+                }
                 if let Some(bench) = &mut self.bench
                     && bench.record(&watch)
                 {

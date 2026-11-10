@@ -2,7 +2,8 @@
 //! all the other UI while the game starts. It goes (its `Enabled` is
 //! turned off) once it has been up for its minimum time and, when the
 //! project asks, a LocalScript has called
-//! `ReplicatedFirst:RemoveDefaultLoadingScreen()`. Hosts (the player, the
+//! `ReplicatedFirst:RemoveDefaultLoadingScreen()`, and the host says the
+//! Workspace's assets are in ([`LoadingGui::set_assets_loading`]). Hosts (the player, the
 //! editor's Play) keep one, pass [`LoadingGui::on_top`] in
 //! [`crate::UiInput::on_top`] and call [`LoadingGui::advance`] each frame.
 
@@ -17,6 +18,8 @@ pub struct LoadingGui {
     /// True until a LocalScript says the game is ready, when the project
     /// waits for one.
     waiting: bool,
+    /// True while the host is still reading the Workspace's assets.
+    assets_loading: bool,
     done: bool,
 }
 
@@ -40,6 +43,7 @@ impl LoadingGui {
                 0.0
             },
             waiting: wait_for_script,
+            assets_loading: false,
             done: false,
         })
     }
@@ -47,6 +51,12 @@ impl LoadingGui {
     /// The ScreenGui while it's covering the game.
     pub fn on_top(&self) -> Option<InstanceId> {
         (!self.done).then_some(self.gui)
+    }
+
+    /// Keeps it up while `loading` (the player's asset preload), however
+    /// long it has been up.
+    pub fn set_assets_loading(&mut self, loading: bool) {
+        self.assets_loading = loading;
     }
 
     /// Moves on by one frame of `seconds`. `ready` is whether a LocalScript
@@ -62,7 +72,7 @@ impl LoadingGui {
         if seconds.is_finite() {
             self.shown += seconds.max(0.0);
         }
-        if self.shown >= self.min_seconds && !self.waiting {
+        if self.shown >= self.min_seconds && !self.waiting && !self.assets_loading {
             self.done = true;
             // A script may have removed it already.
             let _ = world.set_property(self.gui, "Enabled", Value::Bool(false));
@@ -127,6 +137,19 @@ mod tests {
         loading.advance(&mut world, 0.1, true);
         assert_eq!(loading.on_top(), Some(gui), "ready, but up for too short");
         loading.advance(&mut world, 1.0, false);
+        assert_eq!(loading.on_top(), None);
+        assert!(!enabled(&world, gui));
+    }
+
+    #[test]
+    fn it_stays_up_while_the_host_reads_assets() {
+        let (mut world, gui) = world_with_gui("Loading", true);
+        let mut loading = LoadingGui::start(&mut world, "Loading", 0.5, false).unwrap();
+        loading.set_assets_loading(true);
+        loading.advance(&mut world, 5.0, false);
+        assert_eq!(loading.on_top(), Some(gui), "assets still loading");
+        loading.set_assets_loading(false);
+        loading.advance(&mut world, 0.0, false);
         assert_eq!(loading.on_top(), None);
         assert!(!enabled(&world, gui));
     }
