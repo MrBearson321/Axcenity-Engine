@@ -124,6 +124,11 @@ impl Shared {
         Ok(())
     }
 
+    /// `task.spawn`, for engine Lua that starts a thread of its own.
+    pub fn spawn(&self) -> &Function {
+        self.task.spawn()
+    }
+
     /// `task.wait`, for engine Lua that needs to wait.
     pub fn wait(&self) -> &Function {
         self.task.wait()

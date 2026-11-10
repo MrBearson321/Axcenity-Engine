@@ -373,7 +373,7 @@ fn noodle(machine: &str) -> (World, InstanceId, InstanceId) {
 /// The pose the noodle should have: the Run clip at `run_phase`, with Top
 /// moved `top_share` of the way to the Reload clip's at `reload_phase`.
 fn expected(assets: &Assets, run_phase: f64, reload: Option<(f64, f32)>) -> Vec<Mat4> {
-    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
     let rig = model.rig.as_deref().unwrap();
     let bind = |path: &str| {
         let (file, takes) = crate::load_clip(assets, path).unwrap();
@@ -435,7 +435,7 @@ fn an_upper_body_reload_layer_plays_while_running_and_the_legs_keep_running() {
     animators.update(&mut world, &assets, 0.9);
     let reloading = joints(&animators, part);
     assert!(same(&reloading, &expected(&assets, 3.2, Some((0.7, 1.0)))));
-    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
     let rig = model.rig.as_deref().unwrap();
     let root_bone = rig.bone("Root").unwrap();
     let (file, takes) = crate::load_clip(&assets, RELOAD).unwrap();
@@ -500,7 +500,7 @@ fn a_state_machine_with_only_a_1d_blend_tree_poses_as_its_machine_alone() {
     let path = "assets/animations/noodle/noodle.statemachine.json";
     let file = crate::read_state_machine(&assets, path).unwrap();
     assert!(file.layers.is_empty());
-    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
     let rig = model.rig.as_deref().unwrap();
     let (compiled, problems) =
         Compiled::new(file, Some(rig), |clip| crate::load_clip(&assets, clip));

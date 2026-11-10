@@ -433,7 +433,11 @@ impl FoliageKey {
             placement: [at.x, at.y, at.z, size.x, size.y, size.z].map(f32::to_bits),
             models: paths
                 .iter()
-                .map(|path| assets.model(path).map(|model| Arc::as_ptr(&model) as usize))
+                .map(|path| {
+                    assets
+                        .model_blocking(path)
+                        .map(|model| Arc::as_ptr(&model) as usize)
+                })
                 .collect(),
         }
     }
@@ -493,7 +497,7 @@ fn built_groups(
         let (cull_distance, model) = match &instance.source {
             FoliageSource::Model(path) => {
                 let model = models.entry(path.as_str()).or_insert_with(|| {
-                    assets.model(path).map(|model| {
+                    assets.model_blocking(path).map(|model| {
                         let pieces = model_pieces(&model);
                         (model, pieces)
                     })
@@ -789,7 +793,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-mesh");
         let assets = Assets::new(&folder);
         let path = "assets/models/pyramid.gltf";
-        let model = assets.model(path).expect("the example's pyramid");
+        let model = assets.model_blocking(path).expect("the example's pyramid");
         let mut world = axcenity_core::World::new();
         let terrain = world.create(ClassName::Terrain).unwrap();
         world.set_parent(terrain, Some(world.workspace())).unwrap();

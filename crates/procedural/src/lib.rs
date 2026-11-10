@@ -190,7 +190,7 @@ fn inputs(world: &World, assets: &Assets, generator: InstanceId, hasher: &mut De
         }
     }
     for model in model_ids(instance) {
-        assets.model(&model).map(|m| m.key()).hash(hasher);
+        assets.model_blocking(&model).map(|m| m.key()).hash(hasher);
     }
 }
 
@@ -253,7 +253,7 @@ fn make_pieces(world: &mut World, assets: &Assets, generator: InstanceId) -> Out
         .into_iter()
         .filter_map(|key| Some((key, instance.property(key)?.clone())))
         .collect();
-    let Some(source) = assets.model(&mesh_id) else {
+    let Some(source) = assets.model_blocking(&mesh_id) else {
         let problem = format!("The SplineMesh `{name}` can't load its model `{mesh_id}`.");
         return (Vec::new(), Vec::new(), Some(problem));
     };
@@ -328,7 +328,7 @@ fn make_scatter(world: &mut World, assets: &Assets, generator: InstanceId) -> Ou
     let missing: Vec<&String> = settings
         .models
         .iter()
-        .filter(|model| assets.model(model).is_none())
+        .filter(|model| assets.model_blocking(model).is_none())
         .collect();
     let problem = (!missing.is_empty()).then(|| {
         let list: Vec<String> = missing.iter().map(|m| format!("`{m}`")).collect();
@@ -338,7 +338,7 @@ fn make_scatter(world: &mut World, assets: &Assets, generator: InstanceId) -> Ou
     let placed = layout(
         &curve,
         &settings,
-        |model| assets.model(model).map(|m| Vec3::from(m.size)),
+        |model| assets.model_blocking(model).map(|m| Vec3::from(m.size)),
         |point| surfaces.below(point),
     );
     let mut results = Vec::new();

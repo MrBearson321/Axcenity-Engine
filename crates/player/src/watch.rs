@@ -330,7 +330,7 @@ mod tests {
         let assets = Assets::new(&folder);
         let mut animators = Animators::new();
         let mut audio = GameAudio::default();
-        assert_eq!(assets.model(TRIANGLE).unwrap().size[0], 1.0);
+        assert_eq!(assets.model_blocking(TRIANGLE).unwrap().size[0], 1.0);
         animators.update(&mut world, &assets, 0.0);
         animators.update(&mut world, &assets, 0.75);
         assert!((y(&world, door) - 5.0).abs() < 1e-3);
@@ -360,7 +360,7 @@ mod tests {
                 "Reloaded `assets/models/tri.bin`.".to_owned()
             ]
         );
-        assert_eq!(assets.model(TRIANGLE).unwrap().size[0], 2.5);
+        assert_eq!(assets.model_blocking(TRIANGLE).unwrap().size[0], 2.5);
         // Halfway through the clip, as before, but on the new one.
         animators.update(&mut world, &assets, 0.0);
         assert_eq!(world.animator(animator).unwrap().current_state, "Rise");

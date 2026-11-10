@@ -11,6 +11,20 @@ use crate::value::{CFrame, Color3, EnumItem, UDim2, Value, Vector2, Vector3};
 /// `Lighting.ClockTime` and `GeographicLatitude` for worlds saved before
 /// they existed: on this day, at this place, the sun is where it always
 /// was (toward 0.5, 1, 0.25), so those worlds look as they did.
+/// The properties that name texture files, on a SurfaceAppearance or a
+/// TerrainLayer (each class has only some of them).
+pub const TEXTURE_MAP_PROPERTIES: [&str; 9] = [
+    "ColorMap",
+    "NormalMap",
+    "MetalnessMap",
+    "RoughnessMap",
+    "AmbientOcclusionMap",
+    "EmissiveMap",
+    "OpacityMap",
+    "SpecularMap",
+    "HeightMap",
+];
+
 pub const DEFAULT_CLOCK_TIME: f64 = 10.2748873292782;
 pub const DEFAULT_LATITUDE: f64 = 14.0362434679265;
 

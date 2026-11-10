@@ -75,7 +75,7 @@ fn a_posed_character_looks_the_same_skinned_on_the_gpu_as_on_the_cpu() {
     }
     assert!(animators.take_errors().is_empty());
     let posed = animators.poses()[&noodle].clone();
-    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
 
     let camera = axcenity_render::Camera {
         position: Vec3::new(2.0, 5.0, 9.0),

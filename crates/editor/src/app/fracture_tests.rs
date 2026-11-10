@@ -28,7 +28,11 @@ fn insert_fracture_then_generate_saves_the_pieces_as_one_undo_step() {
     assert!(folder.join(path).is_file());
     assert_eq!(app.history.undo_label(), Some("Generate Fracture"));
     // The 12 pieces load from the project like any model.
-    assert!(app.assets.model(&format!("{path}#Piece12")).is_some());
+    assert!(
+        app.assets
+            .model_blocking(&format!("{path}#Piece12"))
+            .is_some()
+    );
 
     // Undone, the Fracture has no pieces again; the file stays.
     app.undo();

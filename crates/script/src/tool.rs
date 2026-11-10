@@ -296,7 +296,10 @@ fn hand(
             .property("MeshId")
             .and_then(Value::as_str)
             .unwrap_or("");
-        let Some(rig) = assets.model(mesh).and_then(|model| model.rig.clone()) else {
+        let Some(rig) = assets
+            .model_blocking(mesh)
+            .and_then(|model| model.rig.clone())
+        else {
             continue;
         };
         let Some(bone) = axcenity_anim::ragdoll::right_hand(&rig) else {

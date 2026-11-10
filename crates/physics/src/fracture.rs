@@ -137,7 +137,7 @@ pub(crate) fn shatter(
         return None;
     }
     let pieces = load_pieces(assets, &file)?;
-    let whole = assets.model(&file)?;
+    let whole = assets.model_blocking(&file)?;
     let mass = Mass::of(world, assets, part_id).map_or(1.0, |mass| mass.mass.max(1e-3));
     let copied: Vec<(&str, Value)> = [
         "Transparency",
@@ -255,7 +255,7 @@ fn load_pieces(
         .into_iter()
         .filter(|object| object.has_mesh())
         .filter_map(|object| {
-            let model = assets.model(&format!("{file}#{}", object.path))?;
+            let model = assets.model_blocking(&format!("{file}#{}", object.path))?;
             Some((object.path, model))
         })
         .collect();

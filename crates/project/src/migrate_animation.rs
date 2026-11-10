@@ -444,7 +444,7 @@ mod tests {
     /// played, as `animation:Play()` does.
     fn played(folder: &Path, world: &mut axcenity_core::World) -> Vec<(Vec<String>, String)> {
         let assets = axcenity_assets::Assets::new(folder);
-        let model = assets.model("assets/models/noodle.fbx").unwrap();
+        let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
         let workspace = world.workspace();
         let noodle = world.find_first_child(workspace, "Noodle").unwrap();
         let door = world.find_first_child(workspace, "Door").unwrap();

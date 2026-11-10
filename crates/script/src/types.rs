@@ -522,6 +522,7 @@ pub enum EnumType {
     MotionBlur,
     UserInputType,
     UserInputState,
+    AssetFetchStatus,
     MouseBehavior,
     CameraType,
     RenderPriority,
@@ -545,7 +546,7 @@ pub enum EnumType {
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 40] = [
+    pub const ALL: [EnumType; 41] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -566,6 +567,7 @@ impl EnumType {
         EnumType::MotionBlur,
         EnumType::UserInputType,
         EnumType::UserInputState,
+        EnumType::AssetFetchStatus,
         EnumType::MouseBehavior,
         EnumType::CameraType,
         EnumType::RenderPriority,
@@ -610,6 +612,7 @@ impl EnumType {
             EnumType::MotionBlur => "MotionBlur",
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
+            EnumType::AssetFetchStatus => "AssetFetchStatus",
             EnumType::MouseBehavior => "MouseBehavior",
             EnumType::CameraType => "CameraType",
             EnumType::RenderPriority => "RenderPriority",
@@ -656,6 +659,8 @@ impl EnumType {
             EnumType::MotionBlur => user_settings::motion_blur_quality_names(),
             EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
+            // How a file went, for `ContentProvider:PreloadAsync`'s callback.
+            EnumType::AssetFetchStatus => vec!["Success", "Failure"],
             EnumType::MouseBehavior => MouseBehavior::ALL.iter().map(|b| b.as_str()).collect(),
             EnumType::CameraType => CameraType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::RenderPriority => RENDER_PRIORITIES.iter().map(|(name, _)| *name).collect(),
@@ -810,6 +815,7 @@ impl LuaEnumItem {
             | EnumType::MotionBlur
             | EnumType::UserInputType
             | EnumType::UserInputState
+            | EnumType::AssetFetchStatus
             | EnumType::MouseBehavior
             | EnumType::CameraType
             | EnumType::RenderPriority

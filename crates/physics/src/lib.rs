@@ -322,7 +322,7 @@ impl PartState {
                     Some(Value::EnumItem(item)) => Fidelity::named(&item.item),
                     _ => Fidelity::Hull,
                 };
-                Form::Mesh(assets.model(mesh_id), fidelity)
+                Form::Mesh(assets.model_blocking(mesh_id), fidelity)
             }
             _ => Form::Primitive(instance.property("Shape").and_then(Value::as_part_type)?),
         };

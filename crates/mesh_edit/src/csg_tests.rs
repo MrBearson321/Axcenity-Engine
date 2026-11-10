@@ -194,7 +194,7 @@ fn combining_parts_cuts_out_the_negated_ones_in_the_first_part_s_frame() {
     // Saved, it loads at its size, and combines again as a model.
     let path = save_union(&project, &assets, "Wall", &combined).unwrap();
     assert_eq!(path, "assets/models/Wall.union.glb");
-    let model = assets.model(&path).expect("it loads");
+    let model = assets.model_blocking(&path).expect("it loads");
     let size = Vec3::from(model.size);
     assert!((size - combined.size).length() < 1e-4, "{size}");
     let union = part(

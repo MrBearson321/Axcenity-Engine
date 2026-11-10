@@ -82,7 +82,7 @@ impl EditorApp {
                     .and_then(Value::as_str)
                     .is_some_and(|id| !id.trim().is_empty());
                 edits.push(Edit::Property("MeshId", Value::String(path.to_owned())));
-                if !had && let Some(model) = self.assets.model(path) {
+                if !had && let Some(model) = self.assets.model_blocking(path) {
                     let [x, y, z] = model.size.map(|v| if v > 0.0 { v } else { 1.0 });
                     edits.push(Edit::Property(
                         "Size",
@@ -156,7 +156,7 @@ impl EditorApp {
                 .generators
                 .pieces(generator)
                 .iter()
-                .filter_map(|id| self.assets.model(id))
+                .filter_map(|id| self.assets.model_blocking(id))
                 .collect();
             if models.len() != results.len() {
                 self.output

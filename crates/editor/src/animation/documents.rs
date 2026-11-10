@@ -190,7 +190,7 @@ impl AnimationStudio {
                 let mut doc = ControllerDoc::open(path.to_owned(), file, None);
                 let animated = |mesh_id: &String| {
                     assets
-                        .model(mesh_id)
+                        .model_blocking(mesh_id)
                         .is_some_and(|model| model.rig.is_some())
                 };
                 doc.preview_model = model

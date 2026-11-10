@@ -140,7 +140,7 @@ impl AnimationStudio {
                 let model = doc
                     .preview_model
                     .as_deref()
-                    .and_then(|id| assets.model(id))
+                    .and_then(|id| assets.model_blocking(id))
                     .expect("a preview model");
                 let bone = model.rig.as_ref().and_then(|rig| rig.bone(name));
                 self.clip.bones.selected = Some(bone.expect("the bone"));
@@ -262,7 +262,7 @@ impl AnimationStudio {
                 &self.clip.bones,
                 doc.preview_model
                     .as_deref()
-                    .and_then(|id| assets.model(id))
+                    .and_then(|id| assets.model_blocking(id))
                     .and_then(|model| model.rig.as_deref().cloned()),
             ),
             None => return Vec::new(),
@@ -364,7 +364,7 @@ impl AnimationStudio {
         };
         doc.preview_model
             .as_deref()
-            .and_then(|id| assets.model(id))
+            .and_then(|id| assets.model_blocking(id))
             .and_then(|model| model.rig.as_deref().map(bone_paths))
             .unwrap_or_default()
     }
@@ -425,7 +425,7 @@ impl AnimationStudio {
             panic!("no linked clip is open");
         };
         let mesh_id = doc.preview_model.clone().expect("a preview model");
-        let model = assets.model(&mesh_id).expect("the preview model");
+        let model = assets.model_blocking(&mesh_id).expect("the preview model");
         (mesh_id, model)
     }
 
