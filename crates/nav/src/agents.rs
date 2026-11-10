@@ -30,10 +30,11 @@ use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 
 use crate::behavior::{self, BehaviorTree, TreeRun};
 use crate::perception::{self, Player, Sensed, Senses};
-use crate::{NavMesh, NavSettings, fingerprint};
+use crate::{MeshBuilder, NavMesh, NavSettings, Refresh};
 
-/// The least game time between two builds of the mesh, so parts falling
-/// don't rebuild it every frame. The editor's overlay waits as long.
+/// The least game time between two looks at what changed, so anchored
+/// parts that scripts keep moving don't rebuild the mesh every frame. The
+/// editor's overlay waits as long.
 const REBUILD_SECONDS: f32 = 0.5;
 /// The longest stretch moved before the ground is looked up again, in cells.
 const SLICE: f32 = 0.5;
@@ -97,9 +98,8 @@ struct Walk {
 
 /// The mesh the agents walk on, and what it was built from.
 struct Built {
-    mesh: NavMesh,
-    fingerprint: u64,
-    /// Game seconds since it was built.
+    builder: MeshBuilder,
+    /// Game seconds since what changed was last read.
     age: f32,
     /// Counts builds, so agents know when to look again.
     generation: u64,
@@ -329,30 +329,41 @@ impl Agents {
         std::mem::take(&mut self.sensed)
     }
 
-    /// Builds the mesh if there's none, or again once the world it was
-    /// built from has changed and it's old enough. Agents that couldn't
-    /// reach their destination try again on the new mesh.
+    /// Builds the mesh if there's none. Once the last look is old enough,
+    /// reads again the ground parts that changed, and rebuilds the mesh
+    /// when they change it. Agents that couldn't reach their destination
+    /// try again on the new mesh.
     fn refresh_mesh(&mut self, world: &World, assets: &Assets, dt: f32) {
-        let now = fingerprint(world);
-        let mut generation = 0;
-        if let Some(built) = &mut self.built {
-            generation = built.generation + 1;
-            built.age += dt;
-            if built.fingerprint == now || built.age < REBUILD_SECONDS {
+        let Some(built) = &mut self.built else {
+            let mut builder = MeshBuilder::new(NavSettings::default());
+            builder.update(world, assets);
+            self.built = Some(Built {
+                builder,
+                age: 0.0,
+                generation: 0,
+            });
+            return;
+        };
+        built.age += dt;
+        if built.age < REBUILD_SECONDS {
+            return;
+        }
+        match built.builder.update(world, assets) {
+            Refresh::Unchanged => return,
+            Refresh::Same => {
+                built.age = 0.0;
                 return;
             }
-            for walk in self.walks.values_mut() {
-                if walk.warned.is_some() && walk.corners.is_empty() {
-                    walk.target = None;
-                }
+            Refresh::Rebuilt => {
+                built.age = 0.0;
+                built.generation += 1;
             }
         }
-        self.built = Some(Built {
-            mesh: NavMesh::build(world, assets, NavSettings::default()),
-            fingerprint: now,
-            age: 0.0,
-            generation,
-        });
+        for walk in self.walks.values_mut() {
+            if walk.warned.is_some() && walk.corners.is_empty() {
+                walk.target = None;
+            }
+        }
     }
 
     /// Anchors every part an agent moves, so physics doesn't drop or push
@@ -392,7 +403,7 @@ impl Agents {
 
     /// The mesh the agents walk on, once one has been built.
     pub fn mesh(&self) -> Option<&NavMesh> {
-        self.built.as_ref().map(|built| &built.mesh)
+        self.built.as_ref().map(|built| built.builder.mesh())
     }
 
     /// The warnings since the last call, such as a destination no route
@@ -498,7 +509,7 @@ fn step_agent(
     walk: &mut Walk,
     dt: f32,
 ) -> Option<String> {
-    let mesh = &built.mesh;
+    let mesh = built.builder.mesh();
     let parts = parts_of(world, id);
     let mut feet = feet_of(world, &parts)?;
     let velocity = vector(world, id, "Velocity").unwrap_or(Vector3::new(0.0, 0.0, 0.0));

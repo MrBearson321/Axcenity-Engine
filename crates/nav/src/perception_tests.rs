@@ -1,6 +1,6 @@
 //! Agents seeing and hearing the player character.
 
-use axcenity_core::{ClassName, InstanceId};
+use axcenity_core::{ClassName, InstanceId, Value};
 
 use super::*;
 

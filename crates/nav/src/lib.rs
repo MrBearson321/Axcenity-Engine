@@ -17,20 +17,21 @@
 
 mod agents;
 mod behavior;
+mod builder;
 mod path;
 mod perception;
 
 pub use agents::{AgentStatus, Agents, agent_parts, feet_of};
 pub use behavior::{BEHAVIOR_NODE_KINDS, BEHAVIOR_TREE_SUFFIX, BehaviorTree, TreeError};
+pub use builder::{MeshBuilder, Refresh, fingerprint};
 pub use path::PathError;
 pub use perception::{Sense, Sensed};
 
 use std::collections::VecDeque;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 
 use axcenity_assets::Assets;
-use axcenity_core::{ClassName, Value, Vector3, World};
+use axcenity_core::{Vector3, World};
 use axcenity_physics::Column;
 
 /// More columns than this and the cells grow, so a build stays quick: about
@@ -86,7 +87,7 @@ pub struct NavCell {
 }
 
 /// The walkable cells of a world, linked to their neighbours.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct NavMesh {
     settings: NavSettings,
     /// World X and Z of the outer corner of column (0, 0).
@@ -102,71 +103,16 @@ pub struct NavMesh {
 }
 
 impl NavMesh {
-    /// Builds the mesh from the Workspace's solids. Sensors (`CanCollide`
-    /// off), visual foliage and the parts character controllers and
-    /// navigation agents move add nothing. Run it again after the world changes; [`fingerprint`] tells
-    /// when.
+    /// Builds the mesh from the Workspace's ground: anchored parts (and
+    /// parts welded to one) and Terrains. Unanchored parts, sensors
+    /// (`CanCollide` off), visual foliage and the parts character
+    /// controllers and navigation agents move add nothing. Run it again
+    /// after the world changes; [`fingerprint`] tells when, and a
+    /// [`MeshBuilder`] rebuilds only what changed.
     pub fn build(world: &World, assets: &Assets, settings: NavSettings) -> Self {
-        let settings = NavSettings {
-            cell_size: positive(settings.cell_size, 1.0).max(0.05),
-            agent_height: positive(settings.agent_height, 0.0),
-            max_slope: positive(settings.max_slope, 0.0).min(89.0),
-            max_step: positive(settings.max_step, 0.0),
-        };
-        let skip = moving_parts(world);
-        let solids: Vec<_> = axcenity_physics::solids(world, assets, &skip)
-            .into_iter()
-            .filter(|solid| finite(solid.min) && finite(solid.max))
-            .collect();
-        let mut mesh = Self {
-            settings,
-            ..Self::default()
-        };
-        let Some(first) = solids.first() else {
-            return mesh;
-        };
-        let (mut min_x, mut min_z) = (first.min.x, first.min.z);
-        let (mut max_x, mut max_z) = (first.max.x, first.max.z);
-        for solid in &solids {
-            min_x = min_x.min(solid.min.x);
-            min_z = min_z.min(solid.min.z);
-            max_x = max_x.max(solid.max.x);
-            max_z = max_z.max(solid.max.z);
-        }
-        loop {
-            let cell = mesh.settings.cell_size;
-            mesh.origin_x = (min_x / cell).floor() * cell;
-            mesh.origin_z = (min_z / cell).floor() * cell;
-            mesh.columns_x = (((max_x - mesh.origin_x) / cell).ceil() as usize).max(1);
-            mesh.columns_z = (((max_z - mesh.origin_z) / cell).ceil() as usize).max(1);
-            let columns = mesh.columns_x * mesh.columns_z;
-            if columns <= MAX_COLUMNS {
-                break;
-            }
-            mesh.settings.cell_size *= (columns as f32 / MAX_COLUMNS as f32).sqrt() * 1.01;
-        }
-
-        // Every solid's stretch down the centre of each column it covers.
-        let mut spans: Vec<(usize, Column)> = Vec::new();
-        for solid in &solids {
-            let (x0, x1) =
-                mesh.centres_within(solid.min.x, solid.max.x, mesh.origin_x, mesh.columns_x);
-            let (z0, z1) =
-                mesh.centres_within(solid.min.z, solid.max.z, mesh.origin_z, mesh.columns_z);
-            for cz in z0..z1 {
-                for cx in x0..x1 {
-                    let (x, z) = mesh.centre(cx, cz);
-                    if let Some(column) = solid.column(x, z) {
-                        spans.push((cz * mesh.columns_x + cx, column));
-                    }
-                }
-            }
-        }
-        spans.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.bottom.total_cmp(&b.1.bottom)));
-        mesh.add_cells(&spans);
-        mesh.link_cells();
-        mesh.find_regions();
-        mesh
+        let mut builder = MeshBuilder::new(settings);
+        builder.update(world, assets);
+        builder.into_mesh()
     }
 
     /// Merges each column's stretches and keeps the tops that are walkable.
@@ -220,6 +166,11 @@ impl NavMesh {
             let up = normal.y.max(1e-3);
             (1.0 - up * up).max(0.0).sqrt() / up
         };
+        let steep: Vec<f32> = self
+            .cells
+            .iter()
+            .map(|cell| steepness(cell.normal))
+            .collect();
         let mut links = vec![[NONE; 4]; self.cells.len()];
         for (index, cell) in self.cells.iter().enumerate() {
             for (d, (dx, dz)) in DIRECTIONS.into_iter().enumerate() {
@@ -232,7 +183,7 @@ impl NavMesh {
                 for other in self.column_cells(column) {
                     let neighbour = &self.cells[other];
                     let rise = (neighbour.height - cell.height).abs();
-                    let slope = steepness(cell.normal).max(steepness(neighbour.normal));
+                    let slope = steep[index].max(steep[other]);
                     let allowed = max_step.max(cell_size * slope) + TOUCHING;
                     if rise <= allowed && best.is_none_or(|(r, _)| rise < r) {
                         best = Some((rise, other));
@@ -383,15 +334,6 @@ impl NavMesh {
         )
     }
 
-    /// The columns (start and end, end excluded) whose centres lie between
-    /// `min` and `max` along one axis, of `count` columns from `origin`.
-    fn centres_within(&self, min: f32, max: f32, origin: f32, count: usize) -> (usize, usize) {
-        let size = self.settings.cell_size;
-        let first = ((min - origin) / size - 0.5).ceil().max(0.0) as usize;
-        let end = (((max - origin) / size - 0.5).floor() + 1.0).max(0.0) as usize;
-        (first.min(count), end.min(count))
-    }
-
     fn column_index(&self, cx: i64, cz: i64) -> Option<usize> {
         let inside =
             (0..self.columns_x as i64).contains(&cx) && (0..self.columns_z as i64).contains(&cz);
@@ -401,64 +343,6 @@ impl NavMesh {
     fn column_cells(&self, column: usize) -> Range<usize> {
         self.column_start[column] as usize..self.column_start[column + 1] as usize
     }
-}
-
-/// A number that changes whenever something the mesh is built from changes:
-/// a Part's or MeshPart's place, size, shape, model or `CanCollide`, or a
-/// Terrain's heights or foliage. Cheap enough to check every frame, so a
-/// host can rebuild only when it changes.
-pub fn fingerprint(world: &World) -> u64 {
-    let skip = moving_parts(world);
-    let mut hasher = DefaultHasher::new();
-    for id in world.descendants_iter(world.workspace()) {
-        let Some(instance) = world.get(id) else {
-            continue;
-        };
-        let class = instance.class();
-        if !matches!(
-            class,
-            ClassName::Part
-                | ClassName::MeshPart
-                | ClassName::Seat
-                | ClassName::VehicleSeat
-                | ClassName::DamageZone
-                | ClassName::ReverbZone
-                | ClassName::Terrain
-        ) || skip.contains(&id)
-        {
-            continue;
-        }
-        id.hash(&mut hasher);
-        for name in [
-            "Position",
-            "Orientation",
-            "Size",
-            "Shape",
-            "MeshId",
-            "CanCollide",
-        ] {
-            match instance.property(name) {
-                Some(Value::Vector3(v)) => [v.x, v.y, v.z].map(f32::to_bits).hash(&mut hasher),
-                Some(Value::Bool(on)) => on.hash(&mut hasher),
-                Some(Value::String(text)) => text.hash(&mut hasher),
-                Some(other) => format!("{other:?}").hash(&mut hasher),
-                None => 0_u8.hash(&mut hasher),
-            }
-        }
-        if let Some(data) = world.terrain(id) {
-            data.uid().hash(&mut hasher);
-            data.revision().hash(&mut hasher);
-        }
-    }
-    hasher.finish()
-}
-
-/// The parts characters and agents move: they walk on the ground, so they
-/// aren't ground.
-fn moving_parts(world: &World) -> Vec<axcenity_core::InstanceId> {
-    let mut parts = axcenity_character::character_parts(world);
-    parts.extend(agent_parts(world));
-    parts
 }
 
 fn positive(value: f32, fallback: f32) -> f32 {

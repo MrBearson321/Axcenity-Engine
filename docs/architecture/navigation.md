@@ -4,11 +4,11 @@ Where characters can walk, and agents that walk there. The `nav` crate builds on
 
 ## What it's built from
 
-`NavMesh::build(world, assets, NavSettings)` reads the world and never changes it. Its input is `physics::solids`, the same colliders physics simulates:
+`NavMesh::build(world, assets, NavSettings)` reads the world and never changes it. Its input is the ground: the colliders physics simulates (`physics::part_solids`) of the parts that hold still:
 
-- Parts and MeshParts with `CanCollide` on, anchored or not, at their positions when the mesh is built. MeshParts use their convex hulls.
+- Anchored Parts and MeshParts with `CanCollide` on, and unanchored ones welded (by an enabled, unbreakable WeldConstraint) to an anchored part, at their positions when the mesh is built. MeshParts use their convex hulls.
 - Terrains (their heightfield, solid all the way down) and their colliding foliage.
-- Not: parts with `CanCollide` off, visual foliage, and the parts a `ThirdPersonController`, `FirstPersonController` or `NavigationAgent` moves (`character::character_parts`, `nav::agent_parts`). Characters and agents aren't ground.
+- Not: unanchored parts (crates, balls, debris: they move, so they'd rebuild the mesh whenever they did, and agents walk through where they lie; roadmap item I7), parts with `CanCollide` off, visual foliage, and the parts a `ThirdPersonController`, `FirstPersonController` or `NavigationAgent` moves (`character::character_parts`, `nav::agent_parts`). Characters and agents aren't ground.
 
 ## How
 
@@ -27,9 +27,11 @@ The defaults match a character controller's `MaxSlopeAngle` and `MaxStepHeight`.
 - `cells`, `links(index)`, `corners(index)` and `outline()` (cell sides with no link: the edges of the walkable area).
 - `ground_at(point)`: the ground's height under `point`, along its cell's slope.
 - `find_path(from, to)`: see Paths.
-- `fingerprint(world)`: a hash of everything the mesh is built from (each Part's and MeshPart's place, size, shape, model and `CanCollide`, and each Terrain's data and revision). It's cheap enough to check every frame. A host rebuilds when it changes.
+- `fingerprint(world)`: a hash of everything the mesh is built from (which parts are ground, each one's place, size, shape, model, `CollisionFidelity` and `CanCollide`, and each Terrain's data and revision). It's cheap enough to check every frame. A host rebuilds when it changes.
 
-A build of a 512-stud terrain at 1-stud cells takes about 50 ms. The crate is optimized in dev builds, as `render` is.
+`MeshBuilder` (`builder.rs`) keeps a mesh up to date without building it from scratch. It keeps each ground part's piece (its stretch down every column it covers, on a grid counted from the world's origin) and, on `update`, reads again only the parts whose revision changed and whose shape properties changed with it. It puts the mesh together again only when a piece came out different, so an anchored part a script turns in place without uncovering a column centre costs no rebuild. `update` says which happened (`Refresh::Unchanged`, `Same` or `Rebuilt`). `NavMesh::build` is a fresh builder's first update. Agents and Humanoids' `MoveTo` each keep one; the editor overlay still builds from scratch.
+
+A build of a 512-stud terrain at 1-stud cells takes about 50 ms. On S10k (a 440-stud floor with 9,000 blocks), a build from scratch takes about 110 ms in the cloud benchmark container, and putting the mesh together again after a few parts change about 20 ms (see [benchmarks.md](../benchmarks.md)). The crate is optimized in dev builds, as `render` is.
 
 ## Paths
 
@@ -53,7 +55,7 @@ A `NavigationAgent` (a class in `core`) is parented to a Model or Part, like a c
 - `SightRange` (60), `SightAngle` (120) and `HearingRange` (30), and `SeesPlayer` and `HearsPlayer`, written by the game: see Perception.
 - `BehaviorTree`: a `.behaviortree.json` file it runs during Play, or empty for none: see Behavior trees.
 
-Hosts own an `Agents` (`agents.rs`), as they own `Controllers`. `Agents::step` runs after character controllers and before scripts, and `Agents::keep_kinematic` anchors the agents' parts just before physics. The mesh is built the first time an agent needs it (never in a game without agents), and again when the fingerprint changes, at most every 0.5 s of game time. Each step, every agent with a body and a `BehaviorTree` first runs its tree (see Behavior trees), and then, for each agent with a body:
+Hosts own an `Agents` (`agents.rs`), as they own `Controllers`. `Agents::step` runs after character controllers and before scripts, and `Agents::keep_kinematic` anchors the agents' parts just before physics. The mesh is built the first time an agent needs it (never in a game without agents). After that, once 0.5 s of game time has passed since the last look, each step reads again the ground parts that changed and rebuilds the mesh if they change it (`MeshBuilder::update`); reading anything starts the 0.5 s again. Each step, every agent with a body and a `BehaviorTree` first runs its tree (see Behavior trees), and then, for each agent with a body:
 
 - **Velocity not zero**: the path is dropped and the feet move by `Velocity × dt` across, in half-cell slices, each onto `ground_at`. At the edge of the mesh (a drop or a wall) it stops. `Destination` is set to where it now stands, so it stays put when `Velocity` goes back to zero (`Status` then `"Idle"`). Y is ignored.
 - **A Destination it hasn't planned for** (a new one, or the first step): `find_path` from its feet. A path makes it `"Moving"`. No path leaves it where it is, `"Unreachable"`, and gives a warning, `<full name> can't reach (x, y, z): <reason>.`, once per destination and reason. After the mesh rebuilds, an unreachable agent tries again (quietly, if it fails the same way).
@@ -64,7 +66,7 @@ Warnings go to the editor's Output (`Session::frame`) or the player's stderr.
 
 ### Steering round obstacles
 
-A walking agent keeps its path when the mesh rebuilds, and checks it against the latest mesh every step (`steer` and `detour` in `agents.rs`). Something that moved into the way, such as a pushed crate, leaves no cells where it stands, so the mesh shows it once it rebuilds (at once, if the mesh is 0.5 s old, otherwise within 0.5 s).
+A walking agent keeps its path when the mesh rebuilds, and checks it against the latest mesh every step (`steer` and `detour` in `agents.rs`). Something anchored that moved into the way, such as a door a script slid shut, leaves no cells where it stands, so the mesh shows it once it rebuilds (at once, if the mesh is 0.5 s old, otherwise within 0.5 s). An unanchored part, such as a pushed crate, isn't ground, so agents don't steer round it.
 
 1. **Look ahead.** From its feet, each stretch of the path that starts within `WalkSpeed × 1 s` (at least 4 cells) must be a `walkable_line`. With nothing in the way, the path is never changed: the agent walks exactly the corners `find_path` gave.
 2. **Rejoin point.** From the first stretch that isn't, the path is sampled every half cell. Past the samples that aren't on the mesh in the feet's region (the obstacle), the rejoin point is 2 cells into the clear, or the last clear sample before the destination.
