@@ -9,6 +9,7 @@ pub(super) fn field_label(ui: &mut egui::Ui, palette: &Palette, text: &str) {
             .size(type_scale::SMALL)
             .color(palette.text_secondary),
     );
+    ui.add_space(theme::space::XXS);
 }
 
 /// A problem with what was typed, in red, with what to do about it.
@@ -328,11 +329,7 @@ impl StartScreen {
                     );
                     ui.add_space(10.0);
                     field_label(ui, &palette, "Name");
-                    let name_field = ui.add(
-                        egui::TextEdit::singleline(name)
-                            .hint_text("My Game")
-                            .desired_width(f32::INFINITY),
-                    );
+                    let name_field = ui.add(dialog::text_field(name).hint_text("My Game"));
                     if name.is_empty() && !name_field.has_focus() && error.is_none() {
                         name_field.request_focus();
                     }
@@ -421,12 +418,13 @@ impl StartScreen {
                         Some(&folder.display().to_string()),
                     );
                     field_label(ui, &palette, "Name");
-                    ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                    ui.add(dialog::text_field(name));
                     ui.add_space(10.0);
                     field_label(ui, &palette, "Description");
                     ui.add(
                         egui::TextEdit::multiline(description)
                             .desired_rows(3)
+                            .margin(theme::space::margin(theme::space::S, 6.0))
                             .desired_width(f32::INFINITY),
                     );
                     ui.add_space(10.0);

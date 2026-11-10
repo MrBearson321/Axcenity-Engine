@@ -1120,7 +1120,7 @@ impl AssetBrowser {
                         "Rename prefab",
                         None,
                     );
-                    ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                    ui.add(dialog::text_field(name));
                     if let Some(problem) = error {
                         ui.colored_label(palette.error, problem.as_str());
                     }
@@ -1160,7 +1160,7 @@ impl AssetBrowser {
                         "Rename or move",
                         Some(&message),
                     );
-                    ui.add(egui::TextEdit::singleline(to).desired_width(f32::INFINITY));
+                    ui.add(dialog::text_field(to));
                     let target = to.trim();
                     // A bare name stays in its folder.
                     let target = if target.contains('/') {

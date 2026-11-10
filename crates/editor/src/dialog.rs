@@ -217,6 +217,16 @@ pub fn button_row(ui: &mut egui::Ui, buttons: &[Button], enter: Enter) -> Button
     ButtonRow { picked, rects }
 }
 
+/// A one-line text field the width of the dialog, as tall as its buttons,
+/// with room around its text. Add a hint with `.hint_text`.
+pub fn text_field(text: &mut String) -> egui::TextEdit<'_> {
+    egui::TextEdit::singleline(text)
+        .desired_width(f32::INFINITY)
+        .margin(space::margin(space::S, 6.0))
+        .min_size(vec2(0.0, theme::size::BUTTON_HEIGHT))
+        .vertical_align(egui::Align::Center)
+}
+
 /// Shows a question box. Returns what was picked, if anything, this frame.
 pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Option<Outcome> {
     let (picked, dismissed) = modal(ctx, question.id, WIDTH, |ui| {

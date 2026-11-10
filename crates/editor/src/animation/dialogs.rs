@@ -440,7 +440,7 @@ impl AnimationStudio {
                         "Rename clip",
                         Some("State machines that play it are updated too."),
                     );
-                    ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                    ui.add(dialog::text_field(name));
                     if let Some(problem) = error {
                         ui.colored_label(error_color, problem.as_str());
                     }
@@ -497,7 +497,7 @@ impl AnimationStudio {
                         "Rename state machine",
                         Some("Animators that use it are updated too."),
                     );
-                    ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                    ui.add(dialog::text_field(name));
                     if let Some(problem) = error {
                         ui.colored_label(error_color, problem.as_str());
                     }
