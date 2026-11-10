@@ -183,7 +183,7 @@ impl Context {
             "GetService",
             instance::get_service(&lua).expect("only fails when out of memory"),
         ));
-        lua.set_app_data(ClassMethods(methods));
+        lua.set_app_data(ClassMethods::new(methods));
         Self { lua }
     }
 
