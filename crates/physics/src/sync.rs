@@ -408,6 +408,9 @@ impl Physics {
 
     /// The end of every sync: joints, movers, vehicles and waking.
     fn finish_sync(&mut self, world: &World, moved: Moved) {
+        // The write-back zeroes the velocities of what became anchored and
+        // writes where a rebuilt body sits, even if it doesn't move again.
+        self.unwritten.extend(moved.iter().copied());
         // Joints go between the bodies just made, so they come after them.
         joints::sync(world, &mut self.rapier, &self.parts, &mut self.joints);
         // Movers act on those bodies too, read again every frame since
@@ -506,6 +509,9 @@ impl Physics {
             .angvel(to_vec3(spin))
             .build();
         let body = self.rapier.bodies.insert(body);
+        // Written back even if it never wakes: an anchored one's parts
+        // read zero velocities from now on.
+        self.unwritten.insert(body);
         let welded = members.len() > 1;
         for &id in members {
             let state = current[&id].clone();

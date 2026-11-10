@@ -175,6 +175,10 @@ pub struct Physics {
     far_sleep: Option<(Vec<Vector3>, f32)>,
     /// Bodies put to sleep for being far, to wake when they come near.
     far_asleep: HashSet<RigidBodyHandle>,
+    /// Bodies the write-back looks at besides the awake ones: those the
+    /// last sync built or changed, and those awake at the last write-back
+    /// (which may have fallen asleep since, or stopped being dynamic).
+    unwritten: HashSet<RigidBodyHandle>,
     /// What the last sync was made from; `None` before the first.
     synced: Option<sync::Synced>,
     /// `assets`' generation at the last sync: a model that changes is the
@@ -193,6 +197,8 @@ pub struct SyncStats {
     pub bodies_built: usize,
     /// True if all of the Workspace was read again.
     pub full_sync: bool,
+    /// How many parts the write-back looked at.
+    pub parts_written: usize,
 }
 
 /// How a body moved before a step: its velocities and center of mass.
@@ -493,6 +499,7 @@ impl Physics {
             held: BTreeSet::new(),
             far_sleep: None,
             far_asleep: HashSet::new(),
+            unwritten: HashSet::new(),
             synced: None,
             assets_generation: 0,
             stats: SyncStats::default(),
@@ -931,9 +938,32 @@ impl Physics {
     /// Copies where each moving part is now, and how fast it moves, into
     /// its `Position`, `Orientation` and velocities, and remembers the
     /// values written. Welded parts share their assembly's velocities.
+    ///
+    /// Only the parts of awake bodies, and of bodies in `unwritten`, can
+    /// have anything new to write: the rest of the world (anchored parts,
+    /// bodies asleep since their last write) is skipped without a look.
+    /// Parts are written in ID order, as a walk of every part would.
     fn write_to_world(&mut self, world: &mut World) {
         profiling::scope!("Physics::write_back");
-        for (&id, part) in &mut self.parts {
+        let awake: Vec<RigidBodyHandle> = self.rapier.islands.active_bodies().collect();
+        let mut ids = Vec::with_capacity(awake.len() + self.unwritten.len());
+        for handle in awake.iter().chain(self.unwritten.iter()) {
+            let Some(body) = self.rapier.bodies.get(*handle) else {
+                continue;
+            };
+            ids.extend(
+                body.colliders()
+                    .iter()
+                    .filter_map(|collider| self.owners.get(collider).copied()),
+            );
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        self.stats.parts_written += ids.len();
+        for id in ids {
+            let Some(part) = self.parts.get_mut(&id) else {
+                continue;
+            };
             let Some(body) = self.rapier.bodies.get(part.body) else {
                 continue;
             };
@@ -943,6 +973,8 @@ impl Physics {
             });
             part.revision = revision;
         }
+        self.unwritten.clear();
+        self.unwritten.extend(awake);
     }
 }
 

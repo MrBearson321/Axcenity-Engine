@@ -524,3 +524,60 @@ fn a_body_that_falls_asleep_in_a_long_frame_is_written_where_it_rests() {
         assert_eq!(position(&world, id), rest);
     }
 }
+
+#[test]
+fn the_write_back_looks_only_at_awake_bodies() {
+    let mut world = World::new();
+    for i in 0..200 {
+        part(&mut world, Vector3::new(i as f32 * 3.0, 0.0, 0.0), true);
+    }
+    let (_, block) = block_on_a_floor(&mut world, -50.0);
+    let falling = part(&mut world, Vector3::new(0.0, 50.0, 30.0), false);
+    let mut physics = Physics::new();
+    physics.step(&mut world, STEP_SECONDS);
+    assert!(
+        physics.sync_stats().parts_written >= 200,
+        "the first step writes all"
+    );
+
+    settle(&mut physics, &mut world);
+    assert!(asleep(&physics, block));
+    physics.step(&mut world, STEP_SECONDS);
+    assert!(!asleep(&physics, falling), "nothing is under it");
+    assert_eq!(
+        physics.sync_stats().parts_written,
+        1,
+        "only the falling part"
+    );
+}
+
+/// A pile of parts lands the same way every time, also with the
+/// `parallel` feature (rapier's multi-threaded solver), whatever the
+/// number of threads.
+#[test]
+fn a_pile_lands_the_same_way_every_time() {
+    let run = || {
+        let mut world = World::new();
+        block_on_a_floor(&mut world, 0.0);
+        let parts: Vec<InstanceId> = (0..150)
+            .map(|i| {
+                let (x, z) = ((i % 5) as f32 * 0.9 - 2.0, (i / 5 % 5) as f32 * 0.7 - 1.5);
+                part(
+                    &mut world,
+                    Vector3::new(x, 2.0 + (i / 25) as f32 * 1.5, z),
+                    false,
+                )
+            })
+            .collect();
+        let mut physics = Physics::new();
+        for _ in 0..90 {
+            physics.step(&mut world, STEP_SECONDS);
+        }
+        parts
+            .iter()
+            .map(|&id| position(&world, id))
+            .collect::<Vec<_>>()
+    };
+    let first = run();
+    assert_eq!(first, run());
+}
