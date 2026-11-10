@@ -793,8 +793,10 @@ fn a_model_finishing_loading_on_a_worker_is_drawn() {
     let assets = Assets::new(&folder);
     assets.load_textures_in_background(|| {});
     let mut cache = retained();
-    // Whatever it shows while the model is on its way...
-    from_cache(&world, &assets, &mut cache);
+    // Nothing is drawn while the model is on its way (`Assets::model_slot`
+    // is Loading, so the MeshPart's entry is kept empty)...
+    let loading = from_cache(&world, &assets, &mut cache);
+    assert!(loading.items.is_empty(), "drawn before its model is in");
     assets.request_model(PYRAMID).wait();
     // ...the frames after the model is in have it.
     let items = draw_checked(&world, &assets, &mut cache, "the model is in");
