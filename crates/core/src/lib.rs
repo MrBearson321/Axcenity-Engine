@@ -20,6 +20,7 @@ pub mod dialogue;
 mod enums;
 pub mod input;
 pub mod prefab;
+pub mod sound;
 pub mod spline;
 pub mod streaming;
 mod strings;

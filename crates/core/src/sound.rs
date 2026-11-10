@@ -1,5 +1,8 @@
-//! The mix as the world describes it (Phase 52), read fresh each frame
-//! without touching Kira: the SoundGroups and their effects, the effects on
+//! Sounds as the world describes them, for every host: the requests scripts
+//! make ([`SoundAction`]) and the mix (Phase 52), read fresh each frame
+//! without touching an audio library. The `audio` crate plays them with
+//! Kira; it lives outside `core` so a dedicated server never links audio
+//! output (roadmap M8). The mix is the SoundGroups and their effects, the effects on
 //! one Sound, the ReverbZone the listener is in, and the editor Mixer's
 //! mute and solo.
 //!
@@ -9,7 +12,26 @@
 
 use std::collections::HashSet;
 
-use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
+use crate::{ClassName, Instance, InstanceId, Value, Vector3, World};
+
+/// A request made by a `Sound` Instance. Hosts apply requests after a script
+/// step and own the resulting engine for exactly one game session.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SoundAction {
+    /// Plays from the start, even if it's already playing.
+    Play {
+        instance: InstanceId,
+        sound_id: String,
+        volume: f64,
+        looped: bool,
+    },
+    /// Stops, so the next play starts from the beginning.
+    Stop(InstanceId),
+    /// Plays a sound file once, at its own volume and not from anywhere in
+    /// the world, belonging to no Sound: a button's `HoverSound` or
+    /// `ClickSound`. Nothing stops it; it plays to its end.
+    PlayOnce { sound_id: String },
+}
 
 /// `Enum.ReverbType`'s items: the presets a ReverbZone can sound like.
 pub const REVERB_TYPES: [&str; 7] = [

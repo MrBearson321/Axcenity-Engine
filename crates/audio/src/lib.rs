@@ -24,7 +24,10 @@
 //! group's level ([`GameAudio::take_levels`]) and can mute and solo them
 //! ([`GameAudio::set_monitor`]).
 
-pub mod mix;
+/// The mix as the world describes it: `core`'s, so scripts and servers
+/// read it without linking audio output (roadmap M8).
+pub use axcenity_core::sound as mix;
+pub use axcenity_core::sound::SoundAction;
 
 mod effects;
 
@@ -60,25 +63,6 @@ const MAX_ROLLOFF: f64 = 100_000.0;
 const MIN_ROLLOFF_SPAN: f32 = 0.001;
 /// How strongly a spatial sound moves between the ears. Kira's own default.
 const SPATIALIZATION_STRENGTH: f32 = 0.75;
-
-/// A request made by a `Sound` Instance. Hosts apply requests after a script
-/// step and own the resulting engine for exactly one game session.
-#[derive(Clone, Debug, PartialEq)]
-pub enum SoundAction {
-    /// Plays from the start, even if it's already playing.
-    Play {
-        instance: InstanceId,
-        sound_id: String,
-        volume: f64,
-        looped: bool,
-    },
-    /// Stops, so the next play starts from the beginning.
-    Stop(InstanceId),
-    /// Plays a sound file once, at its own volume and not from anywhere in
-    /// the world, belonging to no Sound: a button's `HoverSound` or
-    /// `ClickSound`. Nothing stops it; it plays to its end.
-    PlayOnce { sound_id: String },
-}
 
 #[derive(Debug, Error)]
 pub enum AudioError {

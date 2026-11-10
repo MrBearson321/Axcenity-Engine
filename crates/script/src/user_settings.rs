@@ -13,7 +13,7 @@
 //! [`ScriptRuntime::set_graphics`](crate::ScriptRuntime::set_graphics) and
 //! takes a script's change with `take_graphics_change`.
 
-use axcenity_render::{
+use axcenity_render_types::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, DepthOfFieldQuality,
     GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, ReflectionQuality,
     ShadowQuality, TextureQuality,

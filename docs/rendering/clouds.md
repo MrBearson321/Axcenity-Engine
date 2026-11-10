@@ -30,4 +30,4 @@ Clouds add no pass, target or draw call: they're worked out in the sky pass's pi
 - `render/src/renderer/clouds.rs`: none by default or without density, each quality's steps and detail, the drift following the wind (level part only), keeping its place when the wind changes or time counts back.
 - `scene/src/clouds.rs`: a new world has none; Lighting's Clouds take Cover (held to 0 to 1), Density and Color, drift east at 20 studs a second by default, turn with Direction and scale with Speed (not below 0), add the GlobalWind, and Cover 0 or removing it is none.
 - `player/src/clouds_tests.rs` (GPU): a world's Clouds shade part of the floor, its GlobalWind moves the shadows, still air at Speed 0 keeps them, their own Speed moves them, and destroying the Clouds gives the frame without them.
-- `render/src/graphics.rs`: each preset's cloud quality.
+- `render-types/src/graphics.rs`: each preset's cloud quality.

@@ -48,6 +48,7 @@ zeroize = { version = "1" }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "full", "visit", "visit-mut"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
@@ -64,7 +65,6 @@ smallvec = { version = "1", default-features = false, features = ["const_new", "
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 tracing = { version = "0.1", default-features = false, features = ["log"] }
 uuid = { version = "1", features = ["serde"] }
-winit = { version = "0.30" }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
@@ -73,7 +73,7 @@ libc = { version = "0.2", features = ["extra_traits"] }
 memchr = { version = "2" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", default-features = false, features = ["alloc", "rc", "result", "std"] }
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 
 [target.x86_64-apple-darwin.dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
@@ -90,10 +90,9 @@ objc2-app-kit = { version = "0.2", features = ["NSAccessibility", "NSAccessibili
 objc2-core-foundation = { version = "0.3", features = ["CFBase"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSAppleEventDescriptor", "NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSException", "NSFileManager", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSItemProvider", "NSLocale", "NSNotification", "NSObjCRuntime", "NSObject", "NSRange", "NSSet", "NSString", "NSThread", "NSURL", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "objc2-core-foundation", "std"] }
 smallvec = { version = "1", default-features = false, features = ["const_generics"] }
-winit = { version = "0.30" }
 
 [target.x86_64-apple-darwin.build-dependencies]
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "full", "visit"] }
 
 [target.aarch64-apple-darwin.dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
@@ -110,10 +109,9 @@ objc2-app-kit = { version = "0.2", features = ["NSAccessibility", "NSAccessibili
 objc2-core-foundation = { version = "0.3", features = ["CFBase"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSAppleEventDescriptor", "NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSException", "NSFileManager", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSItemProvider", "NSLocale", "NSNotification", "NSObjCRuntime", "NSObject", "NSRange", "NSSet", "NSString", "NSThread", "NSURL", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "objc2-core-foundation", "std"] }
 smallvec = { version = "1", default-features = false, features = ["const_generics"] }
-winit = { version = "0.30" }
 
 [target.aarch64-apple-darwin.build-dependencies]
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "full", "visit"] }
 
 [target.x86_64-pc-windows-msvc.dependencies]
 crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
@@ -124,10 +122,9 @@ windows = { version = "0.62", features = ["Devices_Power", "Foundation_Collectio
 windows-core = { version = "0.62" }
 windows-sys-b21d60becc0929df = { package = "windows-sys", version = "0.52", features = ["Win32_Devices_HumanInterfaceDevice", "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Media", "Win32_Security", "Win32_System_Com_StructuredStorage", "Win32_System_LibraryLoader", "Win32_System_Ole", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_Ime", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Input_Pointer", "Win32_UI_Input_Touch", "Win32_UI_Shell", "Win32_UI_TextServices", "Win32_UI_WindowsAndMessaging"] }
 windows-sys-d4189bed749088b6 = { package = "windows-sys", version = "0.61", features = ["Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_WindowsProgramming", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
-winit = { version = "0.30" }
 
 [target.x86_64-pc-windows-msvc.build-dependencies]
 log = { version = "0.4", default-features = false, features = ["std"] }
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "visit"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "visit"] }
 
 ### END HAKARI SECTION

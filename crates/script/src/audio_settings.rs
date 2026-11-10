@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use axcenity_audio::mix;
+use axcenity_core::sound as mix;
 use axcenity_core::{ClassName, Color3, InstanceId, UDim2, Value, World};
 
 /// The ScreenGui the engine makes.

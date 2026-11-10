@@ -2,7 +2,7 @@
 //! player's graphics settings, and the host taking the change.
 
 use axcenity_core::{ClassName, World};
-use axcenity_render::{
+use axcenity_render_types::{
     AmbientOcclusion, AntiAliasing, Capabilities, CloudQuality, GraphicsSettings, Quality,
     ReflectionQuality, ShadowQuality, TextureQuality,
 };
@@ -167,7 +167,7 @@ fn each_lens_effect_has_its_own_setting_for_local_scripts() {
     assert_eq!(
         change,
         GraphicsSettings {
-            depth_of_field: Some(axcenity_render::DepthOfFieldQuality::Low),
+            depth_of_field: Some(axcenity_render_types::DepthOfFieldQuality::Low),
             vignette: Some(true),
             film_grain: Some(true),
             chromatic_aberration: Some(false),
@@ -206,8 +206,8 @@ fn taa_and_motion_blur_are_settings_for_local_scripts() {
     assert_eq!(
         change,
         GraphicsSettings {
-            anti_aliasing: Some(axcenity_render::AntiAliasing::Taa),
-            motion_blur: Some(axcenity_render::MotionBlurQuality::Off),
+            anti_aliasing: Some(axcenity_render_types::AntiAliasing::Taa),
+            motion_blur: Some(axcenity_render_types::MotionBlurQuality::Off),
             ..GraphicsSettings::preset(Quality::Medium)
         }
     );

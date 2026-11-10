@@ -9,20 +9,25 @@ authors.workspace = true
 [dependencies]
 axcenity-anim.workspace = true
 axcenity-assets.workspace = true
-axcenity-audio.workspace = true
 axcenity-character.workspace = true
 axcenity-core.workspace = true
-axcenity-mesh-edit.workspace = true
+axcenity-mesh-edit = { workspace = true, optional = true }
 axcenity-nav.workspace = true
 axcenity-physics.workspace = true
 axcenity-procedural.workspace = true
-axcenity-render.workspace = true
+axcenity-render-types.workspace = true
 axcenity-save.workspace = true
 glam.workspace = true
 mlua.workspace = true
 serde_json.workspace = true
 profiling.workspace = true
 axcenity-workspace-hack.workspace = true
+
+[features]
+default = ["csg"]
+# `part:UnionAsync` and friends, by `mesh_edit`'s booleans. Without it the
+# methods raise an error, and `mesh_edit` isn't built (roadmap M8).
+csg = ["dep:axcenity-mesh-edit"]
 
 # Only pins the Luau version `mlua` builds (see the workspace Cargo.toml).
 [build-dependencies]

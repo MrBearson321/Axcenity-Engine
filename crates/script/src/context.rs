@@ -7,7 +7,7 @@
 
 use axcenity_assets::Assets;
 use axcenity_core::{InstanceId, RecordedChange, World};
-use axcenity_render::{Capabilities, GraphicsSettings};
+use axcenity_render_types::{Capabilities, GraphicsSettings};
 use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Thread};
 
@@ -1000,7 +1000,7 @@ impl Context {
         }
     }
 
-    pub fn take_sound_actions(&self) -> Vec<axcenity_audio::SoundAction> {
+    pub fn take_sound_actions(&self) -> Vec<axcenity_core::sound::SoundAction> {
         match self.lua.app_data_mut::<crate::SoundActions>() {
             Some(mut actions) => std::mem::take(&mut actions.0),
             None => Vec::new(),

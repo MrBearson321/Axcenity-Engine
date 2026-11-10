@@ -1161,7 +1161,7 @@ impl EditorApp {
         if self.capabilities.is_none()
             && let Some(render_state) = render_state
         {
-            self.capabilities = Some(axcenity_render::Capabilities::read(
+            self.capabilities = Some(axcenity_render::read_capabilities(
                 &render_state.device,
                 Some(&render_state.adapter.get_info()),
             ));

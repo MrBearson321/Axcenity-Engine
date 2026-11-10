@@ -40,4 +40,7 @@ third-party = [
     # Tracy. Left out so the hack doesn't turn it on for every build.
     { name = "profiling" },
     { name = "profiling-procmacros" },
+    # Windows (roadmap M8): the dedicated server links no window, GPU or
+    # audio crates, and through the hack it would still build winit.
+    { name = "winit" },
 ]
