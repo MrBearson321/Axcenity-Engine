@@ -1642,6 +1642,8 @@ mod dev_console_tests;
 #[cfg(test)]
 mod dialogue_tests;
 #[cfg(test)]
+mod explorer_keys_tests;
+#[cfg(test)]
 mod feedback_tests;
 #[cfg(test)]
 mod find_tests;
@@ -1665,6 +1667,8 @@ mod joint_tests;
 mod live_script_tests;
 #[cfg(test)]
 mod mover_tests;
+#[cfg(test)]
+mod multi_edit_tests;
 #[cfg(test)]
 mod navigation_tests;
 #[cfg(test)]

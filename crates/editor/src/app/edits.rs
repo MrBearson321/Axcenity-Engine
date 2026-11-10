@@ -77,38 +77,27 @@ impl EditorApp {
                 Field::Property(name),
                 format!("Change {name} of {}", instance.name()),
             ),
-            &Edit::PickTexture(name) => {
-                let folder = match name {
-                    "Texture" => crate::asset_browser::PARTICLES_FOLDER,
-                    // A UI element's picture, as the Assets panel's Images.
-                    "Image" => crate::asset_browser::IMAGES_FOLDER,
-                    _ => axcenity_assets::PROJECT_TEXTURES_FOLDER,
-                };
-                if let Some(path) = self.pick_texture(folder) {
-                    self.apply(id, Edit::Property(name, Value::String(path)));
+            Edit::PickTexture(_)
+            | Edit::PickGradingFile(_)
+            | Edit::PickAudio
+            | Edit::PickController
+            | Edit::PickBehaviorTree
+            | Edit::PickClip => {
+                if let Some(Some((name, value))) = self.pick_file_for(&edit) {
+                    self.apply(id, Edit::Property(name, value));
                     // Picking is one whole step, not more typing.
                     self.history.seal();
                 }
                 return;
             }
-            &Edit::PickGradingFile(name) => {
-                if let Some(path) = self.pick_grading_file(name) {
-                    self.apply(id, Edit::Property(name, Value::String(path)));
-                    self.history.seal();
-                }
-                return;
-            }
-            Edit::PickAudio => {
-                if let Some(path) = self.pick_audio() {
-                    self.apply(id, Edit::Property("SoundId", Value::String(path)));
-                    self.history.seal();
-                }
-                return;
-            }
-            Edit::PickController => {
-                if let Some(path) = self.pick_controller() {
-                    self.apply(id, Edit::Property("StateMachine", Value::String(path)));
-                    self.history.seal();
+            &Edit::Reset(name) => {
+                let default = instance
+                    .class()
+                    .default_properties()
+                    .into_iter()
+                    .find(|(property, _)| *property == name);
+                if let Some((_, default)) = default {
+                    self.apply(id, Edit::Property(name, default));
                 }
                 return;
             }
@@ -125,13 +114,6 @@ impl EditorApp {
             Edit::AskSkyImage(path) => {
                 let path = path.clone();
                 self.ask_sky(path);
-                return;
-            }
-            Edit::PickBehaviorTree => {
-                if let Some(path) = self.pick_behavior_tree() {
-                    self.apply(id, Edit::Property("BehaviorTree", Value::String(path)));
-                    self.history.seal();
-                }
                 return;
             }
             Edit::OpenBehaviorTree => {
@@ -188,13 +170,6 @@ impl EditorApp {
                 }
                 return;
             }
-            Edit::PickClip => {
-                if let Some(path) = self.pick_property_clip() {
-                    self.apply(id, Edit::Property("Clip", Value::String(path)));
-                    self.history.seal();
-                }
-                return;
-            }
             Edit::OpenClip => {
                 if let Some(path) = self
                     .world
@@ -247,6 +222,118 @@ impl EditorApp {
             }
         };
         self.change(id, key, label, vec![edit]);
+    }
+    /// Asks for the file a picker edit (such as [`Edit::PickTexture`])
+    /// wants: the property to set and the path picked. `None` for other
+    /// edits, `Some(None)` when nothing was picked.
+    fn pick_file_for(&mut self, edit: &Edit) -> Option<Option<(&'static str, Value)>> {
+        let picked = match *edit {
+            Edit::PickTexture(name) => {
+                let folder = match name {
+                    "Texture" => crate::asset_browser::PARTICLES_FOLDER,
+                    // A UI element's picture, as the Assets panel's Images.
+                    "Image" => crate::asset_browser::IMAGES_FOLDER,
+                    _ => axcenity_assets::PROJECT_TEXTURES_FOLDER,
+                };
+                self.pick_texture(folder).map(|path| (name, path))
+            }
+            Edit::PickGradingFile(name) => self.pick_grading_file(name).map(|path| (name, path)),
+            Edit::PickAudio => self.pick_audio().map(|path| ("SoundId", path)),
+            Edit::PickController => self.pick_controller().map(|path| ("StateMachine", path)),
+            Edit::PickBehaviorTree => self.pick_behavior_tree().map(|path| ("BehaviorTree", path)),
+            Edit::PickClip => self.pick_property_clip().map(|path| ("Clip", path)),
+            _ => return None,
+        };
+        Some(picked.map(|(name, path)| (name, Value::String(path))))
+    }
+    /// Applies an edit made in Properties with several Instances selected
+    /// (the last is the one clicked last) to every one of them that can
+    /// take it, as one undo step: a name to those that can be renamed, a
+    /// value to those that have the property, ↺ to each one's own default.
+    /// Locked ones only take a change to Locked. Buttons (Open, Animate)
+    /// act on the last one, as with one selected.
+    pub(super) fn apply_many(&mut self, ids: &[InstanceId], edit: Edit) {
+        if let Some(picked) = self.pick_file_for(&edit) {
+            if let Some((name, value)) = picked {
+                self.apply_many(ids, Edit::Property(name, value));
+                self.history.seal();
+            }
+            return;
+        }
+        let world = shown(&self.world, &self.play);
+        let playing = self.play.is_some();
+        let can_change =
+            |id: InstanceId, name: &str| playing || name == "Locked" || !world.is_locked(id);
+        let (key, label, edits): (Field, String, Vec<(InstanceId, Vec<Edit>)>) = match &edit {
+            Edit::Name(name) => {
+                let edits: Vec<_> = ids
+                    .iter()
+                    .filter(|&&id| {
+                        world
+                            .get(id)
+                            .is_some_and(crate::properties::can_rename_here)
+                            && can_change(id, "Name")
+                    })
+                    .map(|&id| (id, vec![Edit::Name(name.clone())]))
+                    .collect();
+                let targets: Vec<_> = edits.iter().map(|(id, _)| *id).collect();
+                let label = format!("Rename {}", crate::properties::count_name(world, &targets));
+                (Field::Name, label, edits)
+            }
+            Edit::Property(name, value) => {
+                let edits: Vec<_> = ids
+                    .iter()
+                    .filter(|&&id| {
+                        world.get(id).is_some_and(|i| i.property(name).is_some())
+                            && can_change(id, name)
+                    })
+                    .map(|&id| (id, vec![Edit::Property(name, value.clone())]))
+                    .collect();
+                let targets: Vec<_> = edits.iter().map(|(id, _)| *id).collect();
+                let label = format!(
+                    "Change {name} of {}",
+                    crate::properties::count_name(world, &targets)
+                );
+                (Field::Property(name), label, edits)
+            }
+            &Edit::Reset(name) => {
+                let edits: Vec<_> = ids
+                    .iter()
+                    .filter(|&&id| can_change(id, name))
+                    .filter_map(|&id| {
+                        let instance = world.get(id)?;
+                        let (_, default) = instance
+                            .class()
+                            .default_properties()
+                            .into_iter()
+                            .find(|(property, _)| *property == name)?;
+                        (instance.property(name)? != &default)
+                            .then(|| (id, vec![Edit::Property(name, default)]))
+                    })
+                    .collect();
+                let targets: Vec<_> = edits.iter().map(|(id, _)| *id).collect();
+                let label = format!(
+                    "Reset {name} of {}",
+                    crate::properties::count_name(world, &targets)
+                );
+                (Field::Property(name), label, edits)
+            }
+            _ => {
+                if let Some(&last) = ids.last() {
+                    self.apply(last, edit);
+                }
+                return;
+            }
+        };
+        if edits.is_empty() {
+            return;
+        }
+        let reset = matches!(edit, Edit::Reset(_));
+        self.change_many(key, label, edits);
+        if reset {
+            // ↺ is one click: its own step.
+            self.history.seal();
+        }
     }
     /// Changes the attributes or tags of `ids` with `change`, as one undo
     /// step named `label` (`key` merges a drag into one step). During Play
@@ -1347,7 +1434,8 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::Keep(..)
         | Edit::Attribute(..)
         | Edit::AddTag(_)
-        | Edit::RemoveTag(_) => {}
+        | Edit::RemoveTag(_)
+        | Edit::Reset(_) => {}
     }
     Ok(())
 }

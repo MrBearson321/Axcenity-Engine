@@ -25,6 +25,11 @@ impl EditorApp {
             );
             ui.ctx().request_repaint();
         }
+        if let Some(selection) = explorer.select {
+            self.selected = selection.last().copied();
+            self.selection = selection;
+            ui.ctx().request_repaint();
+        }
         if let Some(action) = explorer.action {
             self.act(action);
             // The Explorer was drawn before this change, so draw it again.
@@ -49,9 +54,22 @@ impl EditorApp {
             (Some(session), Some(id)) => session.kept().fields(id),
             _ => Vec::new(),
         };
+        // Several selected: what they have in common, edited together.
+        let many: Vec<InstanceId> = self
+            .selection
+            .iter()
+            .copied()
+            .filter(|id| world.get(*id).is_some())
+            .collect();
+        if many.len() > 1 {
+            if let Some(edit) = properties::show_many(ui, world, &many, !editing) {
+                self.apply_many(&many, edit);
+                ui.ctx().request_repaint();
+            }
+            return;
+        }
         let mut style_edit = None;
-        let count = self.selection.len();
-        let edit = properties::show(ui, world, selected, !editing, &kept, count, |ui| {
+        let edit = properties::show(ui, world, selected, !editing, &kept, |ui| {
             // Stylesheets are edited, not the game, so not during Play.
             if editing {
                 style_edit = style_panel::show(ui, world, selected, stylesheets);

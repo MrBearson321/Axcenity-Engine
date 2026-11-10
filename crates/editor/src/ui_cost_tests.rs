@@ -1,5 +1,6 @@
 //! How long the Explorer and the Console take to draw with many rows
-//! (design system V7 and V8). Ignored: run it in release for numbers,
+//! (design system V7 and V8), and Properties with that many Parts selected
+//! (V5). Ignored: run it in release for numbers,
 //! `cargo test -p axcenity-editor --release --bins ui_cost -- --ignored --nocapture`.
 //! Each panel is drawn alone in a window of its usual shape, after three
 //! frames to warm up, and the time per frame is averaged over 20 frames.
@@ -11,6 +12,7 @@ use eframe::egui;
 
 use crate::explorer::Explorer;
 use crate::output::Output;
+use crate::properties;
 use crate::theme;
 
 const COUNTS: [usize; 3] = [100, 1_000, 10_000];
@@ -52,17 +54,23 @@ fn folder_of_parts(count: usize) -> (World, Explorer) {
     (world, explorer)
 }
 
-/// The per-frame times at each count, and whether 10,000 rows costs at
-/// most twice 100 (the plan's target).
+/// The per-frame times at each count. The plan's targets: 10,000 rows cost
+/// at most twice 100, and Properties with 1,000 selected stays well under
+/// a frame.
 #[test]
 #[ignore = "timing; run in release with --ignored --nocapture"]
 fn explorer_and_console_cost_at_100_1000_and_10000_rows() {
     let mut explorer_ms = Vec::new();
     let mut console_ms = Vec::new();
+    let mut properties_ms = Vec::new();
     for count in COUNTS {
         let (world, mut explorer) = folder_of_parts(count);
         explorer_ms.push(time(egui::vec2(300.0, 800.0), |ui| {
             explorer.show(ui, &world, &[], true);
+        }));
+        let parts = world.descendants(world.workspace());
+        properties_ms.push(time(egui::vec2(320.0, 900.0), |ui| {
+            let _ = properties::show_many(ui, &world, &parts, false);
         }));
         let mut output = Output::default();
         for index in 0..count {
@@ -72,12 +80,12 @@ fn explorer_and_console_cost_at_100_1000_and_10000_rows() {
             output.show(ui);
         }));
     }
-    println!("| Rows | Explorer | Console |");
-    println!("|---:|---:|---:|");
+    println!("| Rows | Explorer | Console | Properties, all selected |");
+    println!("|---:|---:|---:|---:|");
     for (index, count) in COUNTS.iter().enumerate() {
         println!(
-            "| {count} | {:.2} ms | {:.2} ms |",
-            explorer_ms[index], console_ms[index]
+            "| {count} | {:.2} ms | {:.2} ms | {:.2} ms |",
+            explorer_ms[index], console_ms[index], properties_ms[index]
         );
     }
 }
