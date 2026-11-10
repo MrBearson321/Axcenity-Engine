@@ -74,7 +74,7 @@ impl EditorApp {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        let name = axcenity_script::dialogue::speaker_name(world, id);
+        let name = axcenity_gameplay::dialogue::speaker_name(world, id);
         Some(SelectedPrompt { id, name, dialogue })
     }
 

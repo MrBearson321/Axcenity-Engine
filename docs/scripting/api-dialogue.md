@@ -1,6 +1,6 @@
 # Dialogue and quests
 
-Phase 77. Code: `crates/script/src/dialogue.rs` (files, running, `DialogueService`), `crates/script/src/quest.rs` (`QuestService`), `crates/blocks-runtime/src/dialogue.rs` (the nodes the editor offers), `crates/ui/src/dialogue_box.rs` (the dialogue box and quest tracker), `crates/editor/src/dialogue_editor.rs` with `app/dialogues.rs` (the Dialogue tab). The example is `examples/hello-dialogue` (the Farmer gives an apple quest through his prompt; L switches English and Spanish), with game tests in its `tests/`.
+Phase 77. Code (in the `gameplay` crate since roadmap L7, [../architecture/game-systems.md](../architecture/game-systems.md)): `crates/gameplay/src/dialogue.rs` (files, running, `DialogueService`), `crates/gameplay/src/quest.rs` (`QuestService`), `crates/gameplay/src/story.rs` (the game system: prompts, keys, events), `crates/blocks-runtime/src/dialogue.rs` (the nodes the editor offers), `crates/ui/src/dialogue_box.rs` (the dialogue box and quest tracker), `crates/editor/src/dialogue_editor.rs` with `app/dialogues.rs` (the Dialogue tab). The example is `examples/hello-dialogue` (the Farmer gives an apple quest through his prompt; L switches English and Spanish), with game tests in its `tests/`.
 
 ## Dialogue files
 
@@ -38,7 +38,7 @@ Lua in a node runs in a Script's environment on the side running the dialogue, w
 
 `ScriptRuntime::step_prompts` (frame step 1) runs a dialogue's input instead of the prompts while one is active: Interact or UIConfirm (E, Enter, a controller's X or A) goes on or picks, UINavigate up and down (arrows, D-pad, stick) moves between choices round the ends, and 1 to 4 pick a choice. The press that triggered a prompt doesn't also go on. Meanwhile prompts don't show (`shown_prompts` is empty) and `ScriptRuntime::movement_locked` is true, so hosts give the character controller no movement (it's also true while a Sequence locks input).
 
-Hosts draw `ui::dialogue_box_items(world, &scripts.dialogue_view(world), …)` over the game UI: the speaker's name, the wrapped line and the numbered choices, the highlighted one tinted. The view is worked out each frame, so changing `LocalizationService.Language` changes the box at once. CSS (any stylesheet the game loads):
+Hosts draw `ui::dialogue_box_items(world, &axcenity_gameplay::dialogue_view(&scripts, world), …)` over the game UI: the speaker's name, the wrapped line and the numbered choices, the highlighted one tinted. The view is worked out each frame, so changing `LocalizationService.Language` changes the box at once. CSS (any stylesheet the game loads):
 
 | Rule | Styles |
 |---|---|
@@ -66,10 +66,10 @@ A quest whose objectives are all done completes. `Start(quest)` (false if it's a
 
 **Saving**: a quest's state is player data in `save::Saves`: `Quest/<key>` is `"Active"` or `"Completed"` and `Quest/<key>/<objective>` its progress. So save slots and checkpoints keep it, `LoadSlot` puts it back, and on a server it would be the game's (not per player) data. `SaveService:GetPlayerData("Quest/apples")` reads it too.
 
-**The quest tracker**: hosts draw `ui::quest_tracker_items(world, &scripts.quest_tracker(world), …)` at the top left: each active quest's title, then its objectives (`Apples 3/5`, `… (done)`). `QuestTracker` rules style the panel (`width` 280px, `margin-left`, `margin-top`, and the rest), `QuestTracker::key` the titles and `QuestTracker::check` the objectives that are done.
+**The quest tracker**: hosts draw `ui::quest_tracker_items(world, &axcenity_gameplay::quest_tracker(&scripts, world), …)` at the top left: each active quest's title, then its objectives (`Apples 3/5`, `… (done)`). `QuestTracker` rules style the panel (`width` 280px, `margin-left`, `margin-top`, and the rest), `QuestTracker::key` the titles and `QuestTracker::check` the objectives that are done.
 
 ## In the editor
 
 The **Dialogue** tab (View > Panels; starts closed) edits dialogues in the generic graph editor. It follows the selected ProximityPrompt (or the one in the selected part or Model) and shows its dialogue; its picker shows any dialogue in the project's `assets`. **New dialogue** makes `assets/dialogue/<speaker>.dialogue.json` (a number added when taken) with a Start, a Line and an End, and gives it to the selected prompt if it has none; **Use on <speaker>'s prompt** sets the prompt's `Dialogue` (one undo step). Problems show on their nodes, checked by the same code that runs it. Dialogues save with the project; each finished edit is a step of the dialogue's own undo while the pointer is over the graph. The prompt's `Dialogue` is a text box in Properties.
 
-Tests: `script/src/dialogue_tests.rs`, `ui/src/dialogue_box.rs`, `blocks-runtime/src/dialogue.rs`, `editor/src/dialogue_editor.rs`, `editor/src/app/dialogue_tests.rs`, and `examples/hello-dialogue/tests/dialogue.spec.lua`.
+Tests: `gameplay/src/dialogue_tests.rs`, `ui/src/dialogue_box.rs`, `blocks-runtime/src/dialogue.rs`, `editor/src/dialogue_editor.rs`, `editor/src/app/dialogue_tests.rs`, and `examples/hello-dialogue/tests/dialogue.spec.lua`.

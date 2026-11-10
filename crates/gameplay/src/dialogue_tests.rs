@@ -9,8 +9,11 @@ use axcenity_core::input::{InputEvent, InputKind};
 use axcenity_core::{ClassName, InstanceId, KeyCode, StringTable, Value, Vector3, World};
 use serde_json::json;
 
-use super::*;
+use axcenity_script::{OutputKind, ScriptRuntime};
+
 use crate::dialogue::Dialogue;
+use crate::quest;
+use crate::{dialogue_active, dialogue_view, quest_tracker};
 
 const FRAME: f64 = 1.0 / 60.0;
 
@@ -182,7 +185,7 @@ fn farm(folder: &Path) -> (World, ScriptRuntime, InstanceId) {
     world
         .set_property(prompt, "RequiresLineOfSight", Value::Bool(false))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = crate::script_runtime();
     runtime.set_assets(Assets::new(folder));
     runtime.set_save_folder(Some(folder.join("saves")));
     (world, runtime, farmer)
@@ -227,7 +230,7 @@ fn press(runtime: &mut ScriptRuntime, world: &mut World, key: KeyCode) {
 }
 
 fn quest_state(runtime: &ScriptRuntime, quest: &str) -> quest::QuestState {
-    quest::state(&runtime.saves.0.borrow(), quest)
+    quest::state(&runtime.saves(), quest)
 }
 
 #[test]
@@ -240,16 +243,16 @@ fn a_prompt_runs_a_branching_dialogue_that_gives_a_quest_with_no_script() {
         1,
         "the Farmer's prompt shows"
     );
-    assert!(runtime.dialogue_view(&world).is_none());
+    assert!(dialogue_view(&runtime, &world).is_none());
 
     press(&mut runtime, &mut world, KeyCode::E);
-    assert!(runtime.dialogue_active());
+    assert!(dialogue_active(&runtime));
     assert!(
         runtime.movement_locked(&world),
         "the character stands still"
     );
     assert!(runtime.shown_prompts().is_empty(), "prompts hide meanwhile");
-    let view = runtime.dialogue_view(&world).expect("the box shows");
+    let view = dialogue_view(&runtime, &world).expect("the box shows");
     assert_eq!(view.speaker, "Farmer");
     assert_eq!(view.text, "Could you pick me some apples?");
     assert_eq!(
@@ -261,11 +264,11 @@ fn a_prompt_runs_a_branching_dialogue_that_gives_a_quest_with_no_script() {
 
     // Down moves to No, and wraps round to Yes.
     press(&mut runtime, &mut world, KeyCode::Down);
-    assert_eq!(runtime.dialogue_view(&world).unwrap().selected, 1);
+    assert_eq!(dialogue_view(&runtime, &world).unwrap().selected, 1);
     press(&mut runtime, &mut world, KeyCode::Down);
-    assert_eq!(runtime.dialogue_view(&world).unwrap().selected, 0);
+    assert_eq!(dialogue_view(&runtime, &world).unwrap().selected, 0);
     press(&mut runtime, &mut world, KeyCode::Return);
-    let view = runtime.dialogue_view(&world).unwrap();
+    let view = dialogue_view(&runtime, &world).unwrap();
     assert_eq!(view.text, "Off you go!");
     assert!(view.choices.is_empty());
     assert_eq!(quest_state(&runtime, "apples"), quest::QuestState::Active);
@@ -276,10 +279,10 @@ fn a_prompt_runs_a_branching_dialogue_that_gives_a_quest_with_no_script() {
     );
 
     press(&mut runtime, &mut world, KeyCode::E);
-    assert!(!runtime.dialogue_active());
+    assert!(!dialogue_active(&runtime));
     assert!(!runtime.movement_locked(&world));
     assert_eq!(runtime.shown_prompts().len(), 1, "the prompt shows again");
-    let tracker = runtime.quest_tracker(&world);
+    let tracker = quest_tracker(&runtime, &world);
     assert_eq!(tracker.len(), 1);
     assert_eq!(tracker[0].title, "Apples for the Farmer");
     assert_eq!(tracker[0].objectives[0].text, "Apples");
@@ -294,7 +297,7 @@ fn a_prompt_runs_a_branching_dialogue_that_gives_a_quest_with_no_script() {
     // Talking again takes the Active branch.
     press(&mut runtime, &mut world, KeyCode::E);
     assert_eq!(
-        runtime.dialogue_view(&world).unwrap().text,
+        dialogue_view(&runtime, &world).unwrap().text,
         "Five apples, please."
     );
     assert_eq!(output(&mut runtime), Vec::<String>::new());
@@ -334,7 +337,7 @@ fn collecting_five_apples_completes_the_quest_and_slots_keep_its_progress() {
         ]
     );
     // Five apples, but the Farmer still waits to hear.
-    let objectives = runtime.quest_tracker(&world)[0].objectives.clone();
+    let objectives = quest_tracker(&runtime, &world)[0].objectives.clone();
     assert_eq!((objectives[0].progress, objectives[1].progress), (5, 0));
 
     // Talking to him is the last objective.
@@ -344,7 +347,7 @@ fn collecting_five_apples_completes_the_quest_and_slots_keep_its_progress() {
         quest::QuestState::Completed
     );
     assert!(
-        runtime.quest_tracker(&world).is_empty(),
+        quest_tracker(&runtime, &world).is_empty(),
         "done quests leave the tracker"
     );
     assert_eq!(
@@ -352,9 +355,9 @@ fn collecting_five_apples_completes_the_quest_and_slots_keep_its_progress() {
         ["progressed apples return 1", "completed apples"]
     );
     // Talking counted as the dialogue started, so it thanks at once.
-    assert_eq!(runtime.dialogue_view(&world).unwrap().text, "Thank you!");
+    assert_eq!(dialogue_view(&runtime, &world).unwrap().text, "Thank you!");
     press(&mut runtime, &mut world, KeyCode::E);
-    assert!(!runtime.dialogue_active());
+    assert!(!dialogue_active(&runtime));
 
     // The slot saved at three apples puts them back.
     start(
@@ -388,7 +391,7 @@ fn switching_language_changes_the_dialogue_text_at_once() {
     let (mut world, mut runtime, _) = farm(&folder);
     frame(&mut runtime, &mut world, &[]);
     press(&mut runtime, &mut world, KeyCode::E);
-    let view = runtime.dialogue_view(&world).unwrap();
+    let view = dialogue_view(&runtime, &world).unwrap();
     assert_eq!(
         (view.speaker.as_str(), view.text.as_str()),
         ("Farmer", "Could you pick me some apples?")
@@ -402,7 +405,7 @@ fn switching_language_changes_the_dialogue_text_at_once() {
         print(line.Speaker, line.Text, line.Choices[1], line.Selected)
         "#,
     );
-    let view = runtime.dialogue_view(&world).unwrap();
+    let view = dialogue_view(&runtime, &world).unwrap();
     assert_eq!(view.speaker, "Granjero");
     assert_eq!(view.text, "¿Me recoges unas manzanas?");
     assert_eq!(view.choices, ["Sí", "No"]);
@@ -411,7 +414,7 @@ fn switching_language_changes_the_dialogue_text_at_once() {
         ["Granjero ¿Me recoges unas manzanas? Sí 1"]
     );
     world.set_language("English");
-    assert_eq!(runtime.dialogue_view(&world).unwrap().choices[0], "Yes");
+    assert_eq!(dialogue_view(&runtime, &world).unwrap().choices[0], "Yes");
 }
 
 #[test]
@@ -509,5 +512,5 @@ fn a_loop_with_nothing_to_read_stops_with_an_error() {
         "{lines:?}"
     );
     assert!(lines.contains(&"ended ".to_owned()), "{lines:?}");
-    assert!(!runtime.dialogue_active());
+    assert!(!dialogue_active(&runtime));
 }

@@ -43,8 +43,9 @@ pub enum Owner {
     LevelService,
     /// `NetworkService.ConnectionFailed` (Phase 63).
     NetworkService,
-    /// `QuestService`'s quest events (Phase 77).
-    QuestService,
+    /// A game system's service, by name (`QuestService`'s quest events;
+    /// see `system`).
+    Service(&'static str),
 }
 
 /// Which event of its owner.

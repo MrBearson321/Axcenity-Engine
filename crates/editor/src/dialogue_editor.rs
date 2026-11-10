@@ -7,7 +7,7 @@
 //! triggered, with no script; scripts start one with
 //! `DialogueService:Start`. The tab follows the selected prompt's dialogue
 //! and can show any dialogue in the project. It's checked as it's edited
-//! by the same code that runs it in Play (`axcenity_script::dialogue`), so
+//! by the same code that runs it in Play (`axcenity_gameplay::dialogue`), so
 //! problems show on their nodes. Dialogues are written with the project's
 //! Save; each finished edit is one step of the dialogue's own undo, used
 //! while the pointer is over the graph.
@@ -18,7 +18,7 @@ use std::path::Path;
 use axcenity_blocks::dialogue::{DialogueNodes, dialogue_name, is_dialogue, new_dialogue};
 use axcenity_blocks::node_graph::NodeGraph;
 use axcenity_core::InstanceId;
-use axcenity_script::dialogue::{Dialogue, DialogueError};
+use axcenity_gameplay::dialogue::{Dialogue, DialogueError};
 use eframe::egui;
 
 use crate::node_graph::{GraphContext, GraphView};
@@ -384,7 +384,7 @@ mod tests {
                 (spec.kind, outputs, fields)
             })
             .collect();
-        let run: Vec<_> = axcenity_script::dialogue::DIALOGUE_NODE_KINDS
+        let run: Vec<_> = axcenity_gameplay::dialogue::DIALOGUE_NODE_KINDS
             .iter()
             .map(|(kind, outputs, fields)| (*kind, outputs.to_vec(), fields.to_vec()))
             .collect();
@@ -395,7 +395,7 @@ mod tests {
             assert_eq!(inputs, expected, "{}", spec.kind);
         }
         assert_eq!(
-            axcenity_script::dialogue::DIALOGUE_SUFFIX,
+            axcenity_gameplay::dialogue::DIALOGUE_SUFFIX,
             axcenity_blocks::dialogue::DIALOGUE_SUFFIX
         );
     }
