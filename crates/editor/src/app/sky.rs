@@ -72,16 +72,8 @@ impl EditorApp {
                 items: vec![(icons::IMAGE, path.clone())],
             },
             &[
-                dialog::Button {
-                    icon: icons::X,
-                    label: "Cancel",
-                    kind: dialog::Kind::Plain,
-                },
-                dialog::Button {
-                    icon: icons::CHECK,
-                    label: "Use as Sky",
-                    kind: dialog::Kind::Main,
-                },
+                dialog::Button::new(icons::X, "Cancel", dialog::Kind::Plain),
+                dialog::Button::new(icons::CHECK, "Use as Sky", dialog::Kind::Main),
             ],
         );
         // Escape or a click outside the box means Cancel.

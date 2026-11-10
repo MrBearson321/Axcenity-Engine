@@ -81,6 +81,21 @@ impl RibbonGroup {
         RibbonGroup::Plugins,
     ];
 
+    /// Whether its buttons act on what the Scene View shows (picking a
+    /// tool, snapping, placing or shaping parts), so they wait while no
+    /// Scene View is showing rather than act out of sight.
+    pub fn needs_scene(self) -> bool {
+        matches!(
+            self,
+            RibbonGroup::Tools
+                | RibbonGroup::Build
+                | RibbonGroup::Solid
+                | RibbonGroup::Snapping
+                | RibbonGroup::Parts
+                | RibbonGroup::Constraints
+        )
+    }
+
     /// The caption under the group.
     pub fn label(self) -> &'static str {
         match self {
@@ -432,6 +447,12 @@ impl RibbonTabs {
         });
     }
 
+    /// Whether the custom tab window is open.
+    #[cfg(test)]
+    pub fn is_editing(&self) -> bool {
+        self.editing.is_some()
+    }
+
     /// The custom tab window, while it's open.
     pub fn editor_window(&mut self, ctx: &egui::Context) {
         let Some(editor) = &mut self.editing else {
@@ -445,12 +466,9 @@ impl RibbonTabs {
         } else {
             "New Tab"
         };
-        egui::Window::new(title)
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(380.0)
-            .show(ctx, |ui| {
+        widgets::tool_window(icons::PENCIL_SIMPLE, title)
+            .fit(380.0)
+            .show(ctx, &mut open, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Name");
                     ui.text_edit_singleline(&mut editor.name);

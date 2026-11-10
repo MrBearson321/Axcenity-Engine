@@ -101,16 +101,10 @@ impl EditorApp {
         }
         let mut open = true;
         let mut appearance = self.appearance.clone();
-        let screen = ctx.screen_rect();
-        egui::Window::new(theme::with_icon(icons::GEAR_SIX, "Settings"))
-            .id(egui::Id::new("settings window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .fixed_size(WINDOW_SIZE)
-            .default_pos(screen.center() - WINDOW_SIZE / 2.0)
-            .constrain(true)
-            .show(ctx, |ui| {
+        widgets::tool_window(icons::GEAR_SIX, "Settings")
+            .id("settings window")
+            .fixed(WINDOW_SIZE)
+            .show(ctx, &mut open, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(NAV_WIDTH);
@@ -154,7 +148,7 @@ impl EditorApp {
                 });
             });
         self.set_appearance(ctx, appearance);
-        if !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        if !open {
             self.settings.open = false;
         }
     }

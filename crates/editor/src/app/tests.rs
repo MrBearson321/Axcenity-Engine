@@ -1540,6 +1540,9 @@ pub(super) fn press(app: &mut EditorApp, modifiers: egui::Modifiers, key: egui::
         }],
         ..Default::default()
     };
+    // Only the shortcuts run here, with no Scene drawn: count it as shown,
+    // as it is in a normal frame, so the tool keys work.
+    app.scene_drawn_pass = Some(0);
     let _ = egui::Context::default().run(input, |ctx| app.shortcuts(ctx));
 }
 

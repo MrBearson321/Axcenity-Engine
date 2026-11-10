@@ -100,48 +100,44 @@ impl EditorApp {
         let mut edits = Vec::new();
         let mut open = self.collision_groups.open;
         let palette = theme::palette(ctx);
-        egui::Window::new("Collision Groups")
-            .open(&mut open)
-            .resizable(true)
-            .default_width(420.0)
-            .show(ctx, |ui| {
-                ui.label(
-                    egui::RichText::new(
-                        "Parts in two groups whose box is unticked pass through each other \
+        widgets::tool_window(icons::INTERSECT, "Collision Groups").show(ctx, &mut open, |ui| {
+            ui.label(
+                egui::RichText::new(
+                    "Parts in two groups whose box is unticked pass through each other \
                          and don't touch. A part joins a group with its CollisionGroup \
                          property. Saved in collision-groups.json; scripts can change them \
                          with PhysicsService.",
-                    )
-                    .color(palette.text_weak),
+                )
+                .color(palette.text_weak),
+            );
+            if !editing {
+                ui.colored_label(
+                    palette.warning,
+                    "Press Stop to change the collision groups.",
                 );
-                if !editing {
-                    ui.colored_label(
-                        palette.warning,
-                        "Press Stop to change the collision groups.",
+            }
+            ui.add_space(6.0);
+            ui.add_enabled_ui(editing, |ui| {
+                egui::ScrollArea::both().max_height(380.0).show(ui, |ui| {
+                    matrix(ui, &groups, &mut edits);
+                });
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut self.collision_groups.new_group)
+                            .hint_text("New group")
+                            .desired_width(160.0),
                     );
-                }
-                ui.add_space(6.0);
-                ui.add_enabled_ui(editing, |ui| {
-                    egui::ScrollArea::both().max_height(380.0).show(ui, |ui| {
-                        matrix(ui, &groups, &mut edits);
-                    });
-                    ui.add_space(4.0);
-                    ui.horizontal_wrapped(|ui| {
-                        let field = ui.add(
-                            egui::TextEdit::singleline(&mut self.collision_groups.new_group)
-                                .hint_text("New group")
-                                .desired_width(160.0),
-                        );
-                        let entered = field.lost_focus()
-                            && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                        if ui.button("Add group").clicked() || entered {
-                            edits.push(GroupEdit::Add(std::mem::take(
-                                &mut self.collision_groups.new_group,
-                            )));
-                        }
-                    });
+                    let entered =
+                        field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    if ui.button("Add group").clicked() || entered {
+                        edits.push(GroupEdit::Add(std::mem::take(
+                            &mut self.collision_groups.new_group,
+                        )));
+                    }
                 });
             });
+        });
         self.collision_groups.open = open;
         for edit in edits {
             self.edit_collision_groups(edit);
