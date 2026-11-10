@@ -158,7 +158,7 @@ fn every_ribbon_and_menu_command_can_be_run_from_the_palette() {
     // The menus, and their submenus.
     let menus: &[(&str, &[&str])] = &[
         ("File", &["Build Game"]),
-        ("Edit", &[]),
+        ("Edit", &["Undo History"]),
         ("View", &["View Mode"]),
         ("Debug", &[]),
         ("Help", &[]),
@@ -418,4 +418,48 @@ fn the_palette_and_find_windows_draw_on_screen() {
             .any(|(label, _)| label == "Overlay: Light Cones" || label == "Light Cones")
     );
     assert!(rows.iter().all(|(_, at)| screen.contains(*at)), "{rows:?}");
+}
+
+/// Edit ▸ Undo History lists the steps, newest first; clicking one undoes
+/// it and every step after it, and clicking a dimmed one redoes up to it.
+#[test]
+fn undo_history_jumps_back_and_forward_several_steps() {
+    let mut app = EditorApp::new(Some(&example("hello-touched")));
+    let ctx = warm(theme::test_context());
+    let mut clock = 0.0;
+    let workspace = app.world.workspace();
+    let parts: Vec<InstanceId> = app.world.get(workspace).unwrap().children().to_vec();
+    for (i, &id) in parts.iter().take(3).enumerate() {
+        app.act(Action::Rename(id, format!("Renamed{i}")));
+    }
+    let name = |app: &EditorApp, i: usize| app.world.get(parts[i]).unwrap().name().to_owned();
+    let steps = app.history.undo_labels().len();
+    assert!(steps >= 3, "{:?}", app.history.undo_labels());
+    let third_newest = app.history.undo_labels()[2].to_owned();
+
+    open(&mut app, &ctx, &mut clock, "Edit");
+    let shown = hover(&mut app, &ctx, &mut clock, "Undo History");
+    let rows: Vec<(String, egui::Pos2)> = clickables(&shown);
+    let at = rows
+        .iter()
+        .filter(|(label, _)| *label == third_newest)
+        .map(|(_, at)| *at)
+        .next()
+        .unwrap_or_else(|| panic!("`{third_newest}` is listed: {rows:?}"));
+    click_at(&mut app, &ctx, &mut clock, at);
+    // All three renames are undone, in one click.
+    assert_eq!(app.history.undo_labels().len(), steps - 3);
+    assert_eq!(app.history.redo_labels().len(), 3);
+    assert!((0..3).all(|i| !name(&app, i).starts_with("Renamed")));
+
+    // Redo up to the second rename, from the dimmed rows.
+    app.jump_in_history(2);
+    assert_eq!(name(&app, 0), "Renamed0");
+    assert_eq!(name(&app, 1), "Renamed1");
+    assert!(!name(&app, 2).starts_with("Renamed"));
+    assert_eq!(app.history.redo_labels().len(), 1);
+    // Asking for more than there is stops at the end.
+    app.jump_in_history(10);
+    assert_eq!(name(&app, 2), "Renamed2");
+    assert!(app.history.redo_labels().is_empty());
 }

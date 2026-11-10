@@ -267,6 +267,17 @@ impl EditorApp {
                 {
                     self.redo();
                 }
+                ui.add_enabled_ui(!busy, |ui| {
+                    ui.menu_button(
+                        theme::with_icon(icons::CLOCK_COUNTER_CLOCKWISE, "Undo History"),
+                        |ui| {
+                            if let Some(jump) = undo_history(ui, &self.history) {
+                                self.jump_in_history(jump);
+                                ui.close();
+                            }
+                        },
+                    );
+                });
                 ui.separator();
 
                 // These act on the selection, the same as its right-click menu in the Explorer.
@@ -685,4 +696,52 @@ impl EditorApp {
             }
         }
     }
+}
+
+/// How many steps to undo (negative) or redo (positive), picked in
+/// Edit ▸ Undo History.
+pub(in crate::app) type HistoryJump = isize;
+
+/// The newest steps that can be undone and redone, at most this many of each.
+const HISTORY_ROWS: usize = 25;
+
+/// Edit ▸ Undo History: the steps that can be redone (dimmed, the furthest
+/// at the top), then the steps that can be undone, newest first. Clicking
+/// a step undoes back to before it, or redoes up to it.
+fn undo_history(ui: &mut egui::Ui, history: &crate::history::History) -> Option<HistoryJump> {
+    let undo = history.undo_labels();
+    let redo = history.redo_labels();
+    if undo.is_empty() && redo.is_empty() {
+        ui.weak("Nothing to undo yet.");
+        return None;
+    }
+    let mut jump = None;
+    let palette = theme::palette(ui.ctx());
+    for (index, label) in redo.iter().enumerate().take(HISTORY_ROWS).rev() {
+        let text = egui::RichText::new(theme::with_icon(icons::ARROW_CLOCKWISE, label))
+            .color(palette.text_muted);
+        if ui
+            .button(text)
+            .on_hover_text("Undone. Click to redo every step up to this one.")
+            .clicked()
+        {
+            jump = Some(index as isize + 1);
+        }
+    }
+    if !redo.is_empty() && !undo.is_empty() {
+        ui.separator();
+    }
+    for (index, label) in undo.iter().enumerate().take(HISTORY_ROWS) {
+        if ui
+            .button(theme::with_icon(icons::ARROW_COUNTER_CLOCKWISE, label))
+            .on_hover_text("Click to undo this step and every step after it.")
+            .clicked()
+        {
+            jump = Some(-(index as isize + 1));
+        }
+    }
+    if undo.len() > HISTORY_ROWS {
+        ui.weak(format!("and {} older", undo.len() - HISTORY_ROWS));
+    }
+    jump
 }

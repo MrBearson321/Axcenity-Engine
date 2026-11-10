@@ -740,7 +740,12 @@ pub fn show(
             // part turns up on the next one selected.
             ui.push_id(id, |ui| {
                 let class = instance.class();
-                let data = ["Name", "ClassName"].map(|name| shows("Data", name));
+                // The header already says the class, so its own row only
+                // shows when the filter asks for it.
+                let data = [
+                    shows("Data", "Name"),
+                    filtering && shows("Data", "ClassName"),
+                ];
                 shown_any |= data.contains(&true);
                 section(ui, "Data", open, data.contains(&true), |ui| {
                   if data[0] {
@@ -2735,6 +2740,10 @@ mod decal_section_tests {
         for name in ["Name", "Color", "Anchored", "CanCollide", "Size", "Health"] {
             assert!(has(&all, name), "{name} shows unfiltered: {all:?}");
         }
+
+        // The header says the class; its own row is only for the filter.
+        assert!(!has(&all, "ClassName"), "{all:?}");
+        assert!(has(&shown_with_filter(&world, part, "class"), "ClassName"));
 
         let shown = shown_with_filter(&world, part, "can coll");
         assert!(has(&shown, "CanCollide"), "{shown:?}");
