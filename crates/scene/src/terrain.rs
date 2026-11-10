@@ -202,9 +202,9 @@ impl TerrainCache {
         cache
     }
 
-    /// Whether Instances' draw items are kept between frames: `false` from
+    /// Whether Instances' draw items are kept between frames: `true` from
     /// [`new`](Self::new) unless the environment variable
-    /// `AXCENITY_RETAINED_DRAW_LIST` is `on` or `1`.
+    /// `AXCENITY_RETAINED_DRAW_LIST` is `off` or `0`.
     pub fn retained_draw_list(&self) -> bool {
         self.draw_cache.enabled()
     }

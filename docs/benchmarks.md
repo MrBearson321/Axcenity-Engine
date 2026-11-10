@@ -181,7 +181,7 @@ Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table abov
 
 The player's first frame was 130 to 152 ms, and launch to first frame 3.3 s (7.0 s on the first run).
 
-- **The draw list is now the player's largest step**, and at 8.4 ms it doesn't shrink on a faster CPU: it is 8.1 ms on the cloud container, where physics is about 1.7× slower.
+- **The draw list is now the player's largest step**, and at 8.4 ms it doesn't shrink on a faster CPU: it is 8.1 ms on the cloud container, where physics is about 1.7× slower. Retained draw items (M4) cut it to about a third on S10k: 12.9 to 4.3–4.4 ms median on the cloud container (see [rendering/performance.md](rendering/performance.md)).
 - **Against the 3.3 ms in `rendering/performance.md`**: `bench_10000_parts` is 8.5 to 8.9 ms in `build_draw_list` here, so that figure is out of date. The roadmap's merges didn't cause it: 556b72b, the commit before them, is 8.0 to 8.8 ms on this machine, and each merge timed since is 7.4 to 8.9 ms. The rise came somewhere between the commit that added the render benchmarks and 556b72b.
 
 ### Calibrating against the rendering baseline

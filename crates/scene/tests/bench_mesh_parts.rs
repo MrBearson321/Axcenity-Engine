@@ -83,8 +83,8 @@ fn bench_build_2000_mesh_parts() {
 
 /// 10,000 parts timed as hosts draw them (with a cache kept across frames),
 /// with no GPU: all still, then with 1% moved each frame. Set
-/// `AXCENITY_RETAINED_DRAW_LIST=on` to time retained draw items instead of
-/// building every frame from scratch.
+/// `AXCENITY_RETAINED_DRAW_LIST=off` to time building every frame from
+/// scratch instead of retained draw items.
 #[test]
 #[ignore = "benchmark: run with --release -- --ignored --nocapture"]
 fn bench_build_10000_parts() {

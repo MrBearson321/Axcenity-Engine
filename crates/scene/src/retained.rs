@@ -42,14 +42,14 @@ use crate::draw_list::{InstanceFrame, OtherDrawn, add_instance};
 use crate::mesh_cache::{MeshCache, mesh_address};
 use crate::streaming::Streaming;
 
-/// The environment variable that turns retained draw items on: `on` or `1`.
-/// Off by default until they've been measured against building from scratch.
+/// The environment variable that turns retained draw items off: `off` or
+/// `0`. They're on otherwise (measured in `docs/rendering/performance.md`).
 const SWITCH: &str = "AXCENITY_RETAINED_DRAW_LIST";
 
 /// Whether a new cache keeps draw items, from [`SWITCH`] (read once).
 pub(crate) fn on_by_default() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| matches!(std::env::var(SWITCH).as_deref(), Ok("on" | "1")))
+    *ON.get_or_init(|| !matches!(std::env::var(SWITCH).as_deref(), Ok("off" | "0")))
 }
 
 /// See the module docs. Kept with the host's
