@@ -140,12 +140,14 @@ struct Described {
 /// The constraints in `world` that hold two parts with bodies, by ID:
 /// joints, and welds that can break.
 fn constraints(world: &World) -> Vec<InstanceId> {
+    // Any order: `sync` sorts them by ID into its map.
     world
-        .descendants_iter(world.workspace())
+        .all_where(|class| class.is_joint() || class == ClassName::WeldConstraint)
         .filter(|&id| {
-            world
-                .get(id)
-                .is_some_and(|i| i.class().is_joint() || is_breakable_weld(i))
+            world.is_descendant_of(id, world.workspace())
+                && world
+                    .get(id)
+                    .is_some_and(|i| i.class().is_joint() || is_breakable_weld(i))
         })
         .collect()
 }

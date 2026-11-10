@@ -18,7 +18,7 @@ Phase 80. On a world too big to keep whole, each device only has what's near it.
 
 Everything outside a unit is always sent: services and what's in them, Folders, Models themselves (a Model keeps its place when its contents go, so `workspace.Castle` still works), Terrains. A flat Model with thousands of loose parts is one unit: nest big maps in Models or Folders so they stream.
 
-A unit's box is measured in a share of the units each frame (`BOUNDS_ROUNDS`), and the split is rebuilt when `World::structure_version` changes.
+A unit's box is measured in a share of the units each frame (`BOUNDS_ROUNDS`), and the split is rebuilt when the Workspace's or Players' structure version changes (`World::structure_version_of`).
 
 ## Joined players (`net::streaming`)
 

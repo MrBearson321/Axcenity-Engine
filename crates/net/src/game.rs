@@ -1240,16 +1240,18 @@ impl Network {
 /// The seat this device's character sits in.
 fn own_seat(world: &World, scripts: &ScriptRuntime) -> Option<InstanceId> {
     let character = character_of(world, scripts.local_player()?)?;
-    world.descendants_iter(world.workspace()).find(|&seat| {
-        world.get(seat).is_some_and(|s| {
-            matches!(s.class(), ClassName::Seat | ClassName::VehicleSeat)
-                && s.property("Occupant")
+    world
+        .all_below(world.workspace(), ClassName::is_seat)
+        .into_iter()
+        .find(|&seat| {
+            world.get(seat).is_some_and(|s| {
+                s.property("Occupant")
                     .and_then(Value::as_instance)
                     .and_then(|controller| world.get(controller))
                     .and_then(|controller| controller.parent())
                     == Some(character)
+            })
         })
-    })
 }
 
 /// `Players.MaxPlayers`, at least 1.

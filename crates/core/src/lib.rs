@@ -18,6 +18,7 @@ mod collision_groups;
 pub mod csg;
 pub mod dialogue;
 mod enums;
+mod index;
 pub mod input;
 pub mod prefab;
 pub mod sound;

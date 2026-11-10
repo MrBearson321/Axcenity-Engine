@@ -285,13 +285,9 @@ impl Sequences {
         if !self.started {
             self.started = true;
             let auto: Vec<InstanceId> = world
-                .descendants_iter(world.root())
-                .filter(|&id| {
-                    world
-                        .get(id)
-                        .is_some_and(|i| i.class() == ClassName::Sequence)
-                        && flag(world, id, "AutoPlay")
-                })
+                .all_below(world.root(), |class| class == ClassName::Sequence)
+                .into_iter()
+                .filter(|&id| flag(world, id, "AutoPlay"))
                 .collect();
             for id in auto {
                 if let Err(why) = self.play(world, assets, id) {

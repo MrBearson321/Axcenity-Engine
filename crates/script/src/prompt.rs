@@ -210,13 +210,11 @@ fn exclusivity(world: &World, id: InstanceId) -> String {
 /// they need it) of `viewer`, nearest first.
 fn candidates(world: &World, assets: &Assets, viewer: &Viewer) -> Vec<Candidate> {
     let mut found: Vec<Candidate> = world
-        .descendants_iter(world.workspace())
-        .filter(|&id| {
-            world
-                .get(id)
-                .is_some_and(|instance| instance.class() == ClassName::ProximityPrompt)
-                && flag(world, id, "Enabled", true)
+        .all_below(world.workspace(), |class| {
+            class == ClassName::ProximityPrompt
         })
+        .into_iter()
+        .filter(|&id| flag(world, id, "Enabled", true))
         .filter_map(|id| {
             let (position, part) = place(world, id)?;
             let distance = position.distance(viewer.position);

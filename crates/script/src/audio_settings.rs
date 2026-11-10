@@ -55,7 +55,8 @@ impl VolumeSliders {
 
     fn bind(&mut self, world: &mut World) {
         let sliders: Vec<(InstanceId, Target)> = world
-            .descendants_iter(world.root())
+            .all_below(world.root(), |class| class == ClassName::Slider)
+            .into_iter()
             .filter_map(|id| Some((id, target(world, id)?)))
             .collect();
         self.shown

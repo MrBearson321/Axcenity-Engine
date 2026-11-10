@@ -751,3 +751,386 @@ fn server_storage_and_server_script_service_are_server_only() {
     assert!(!world.is_server_only(shown));
     assert_eq!(world.service(ClassName::ServerStorage), Some(storage));
 }
+
+fn listed(world: &World, class: ClassName) -> Vec<InstanceId> {
+    world.all_of(class).collect()
+}
+
+fn tagged_by_id(world: &World, tag: &str) -> Vec<InstanceId> {
+    world.tagged_iter(tag).collect()
+}
+
+/// What a walk from `game` finds: the index must agree.
+fn walked(world: &World, class: ClassName) -> Vec<InstanceId> {
+    world
+        .descendants_iter(world.root())
+        .filter(|&id| world.get(id).unwrap().class() == class)
+        .collect()
+}
+
+#[test]
+fn every_class_has_a_slot_in_the_index() {
+    // The index keeps a list per `ClassName as usize`, `ALL.len()` of them.
+    let mut slots: Vec<usize> = ClassName::ALL.iter().map(|&class| class as usize).collect();
+    slots.sort_unstable();
+    assert_eq!(slots, (0..ClassName::ALL.len()).collect::<Vec<_>>());
+}
+
+#[test]
+fn only_instances_in_the_game_are_indexed() {
+    let mut world = World::new();
+    let model = world.create(ClassName::Model).unwrap();
+    let part = world.create(ClassName::Part).unwrap();
+    world.set_parent(part, Some(model)).unwrap();
+    world.add_tag(part, "Lava").unwrap();
+    assert!(
+        listed(&world, ClassName::Part).is_empty(),
+        "not in the game"
+    );
+    assert!(tagged_by_id(&world, "Lava").is_empty());
+    world.check_index().unwrap();
+
+    // Putting the Model in the game brings in everything inside it.
+    world.set_parent(model, Some(world.workspace())).unwrap();
+    assert_eq!(listed(&world, ClassName::Model), [model]);
+    assert_eq!(listed(&world, ClassName::Part), [part]);
+    assert_eq!(tagged_by_id(&world, "Lava"), [part]);
+    world.check_index().unwrap();
+
+    // Taking it out takes them out, and moving inside the game keeps them.
+    world
+        .set_parent(model, Some(world.replicated_storage()))
+        .unwrap();
+    assert_eq!(listed(&world, ClassName::Part), [part], "still in the game");
+    world.check_index().unwrap();
+    world.set_parent(model, None).unwrap();
+    assert!(listed(&world, ClassName::Part).is_empty());
+    assert!(tagged_by_id(&world, "Lava").is_empty());
+    world.check_index().unwrap();
+}
+
+#[test]
+fn destroying_takes_out_everything_inside() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let model = world.create(ClassName::Model).unwrap();
+    world.set_parent(model, Some(workspace)).unwrap();
+    let part = part_in(&mut world, model, "Inside");
+    world.add_tag(part, "Lava").unwrap();
+    world.destroy(model).unwrap();
+    assert!(listed(&world, ClassName::Model).is_empty());
+    assert!(listed(&world, ClassName::Part).is_empty());
+    assert!(world.all_tags().is_empty(), "no tag left listed");
+    world.check_index().unwrap();
+    // A destroyed Instance stays out if its slot is used again.
+    let new = world.create(ClassName::Part).unwrap();
+    assert_eq!(listed(&world, ClassName::Part), []);
+    world.set_parent(new, Some(workspace)).unwrap();
+    assert_eq!(listed(&world, ClassName::Part), [new]);
+    world.check_index().unwrap();
+}
+
+#[test]
+fn tags_follow_the_instance_and_never_game_itself() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let part = part_in(&mut world, workspace, "Pad");
+    world.add_tag(part, "Lava").unwrap();
+    world.add_tag(workspace, "Lava").unwrap();
+    // `game` isn't one of its own descendants, so it never was tagged in a
+    // walk from it.
+    world.add_tag(world.root(), "Lava").unwrap();
+    assert_eq!(tagged_by_id(&world, "Lava").len(), 2);
+    assert_eq!(world.all_tags()["Lava"], 2);
+    world.check_index().unwrap();
+    world.remove_tag(part, "Lava").unwrap();
+    world.remove_tag(workspace, "Lava").unwrap();
+    assert!(world.all_tags().is_empty());
+    world.check_index().unwrap();
+}
+
+#[test]
+fn copies_are_indexed_once_they_are_in_the_game() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let model = world.create(ClassName::Model).unwrap();
+    world.set_parent(model, Some(workspace)).unwrap();
+    let part = part_in(&mut world, model, "Inside");
+    world.add_tag(part, "Lava").unwrap();
+
+    let copy = world.duplicate(model).unwrap();
+    assert_eq!(listed(&world, ClassName::Part), [part], "no parent yet");
+    world.check_index().unwrap();
+    world.set_parent(copy, Some(workspace)).unwrap();
+    assert_eq!(listed(&world, ClassName::Part).len(), 2);
+    assert_eq!(tagged_by_id(&world, "Lava").len(), 2);
+    world.check_index().unwrap();
+
+    let mut other = World::new();
+    let pasted = other.copy_from(&world, copy).unwrap();
+    other.check_index().unwrap();
+    other.set_parent(pasted, Some(other.workspace())).unwrap();
+    assert_eq!(listed(&other, ClassName::Part).len(), 1);
+    assert_eq!(tagged_by_id(&other, "Lava").len(), 1);
+    other.check_index().unwrap();
+}
+
+#[test]
+fn a_world_clone_keeps_its_index_and_moves_back_like_undo() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let a = part_in(&mut world, workspace, "A");
+    let b = part_in(&mut world, workspace, "B");
+    world.add_tag(a, "T").unwrap();
+
+    let saved = world.clone();
+    world.destroy(a).unwrap();
+    world.destroy(b).unwrap();
+    assert!(listed(&world, ClassName::Part).is_empty());
+    // A whole-world undo swaps the saved copy back in.
+    world = saved;
+    assert_eq!(listed(&world, ClassName::Part), [a, b]);
+    assert_eq!(tagged_by_id(&world, "T"), [a]);
+    world.check_index().unwrap();
+
+    // A move undone puts the Instance back at its old index among the
+    // same parent's children: tree order, not the index, sees that.
+    world.set_parent(a, None).unwrap();
+    world.set_parent_at(a, workspace, 1).unwrap();
+    world.check_index().unwrap();
+    assert_eq!(world.descendants(workspace), [b, a]);
+    assert_eq!(listed(&world, ClassName::Part), [a, b], "by ID");
+    world.add_tag(b, "T").unwrap();
+    assert_eq!(world.tagged("T"), [b, a], "in tree order");
+    assert_eq!(tagged_by_id(&world, "T"), [a, b], "by ID");
+    world.check_index().unwrap();
+}
+
+#[test]
+fn a_replica_indexes_what_it_follows() {
+    let mut server = World::new();
+    let workspace = server.workspace();
+    let part = part_in(&mut server, workspace, "Part");
+
+    let mut replica = server.empty_replica();
+    replica.create_at(part, ClassName::Part).unwrap();
+    assert!(listed(&replica, ClassName::Part).is_empty());
+    replica.set_parent(part, Some(replica.workspace())).unwrap();
+    assert_eq!(listed(&replica, ClassName::Part), [part]);
+    let own = replica.create(ClassName::Part).unwrap();
+    replica.set_parent(own, Some(replica.workspace())).unwrap();
+    assert_eq!(listed(&replica, ClassName::Part), [part, own]);
+    replica.check_index().unwrap();
+}
+
+#[test]
+fn a_service_version_changes_only_with_its_own_tree() {
+    let mut world = World::new();
+    let (workspace, storage) = (world.workspace(), world.replicated_storage());
+
+    let model = world.create(ClassName::Model).unwrap();
+    let part = world.create(ClassName::Part).unwrap();
+    let total = world.structure_version();
+    world.set_parent(part, Some(model)).unwrap();
+    assert_eq!(world.structure_version(), total + 1, "the tree changed");
+    assert_eq!(world.structure_version_of(workspace), 0, "no service did");
+
+    // Into a service, within it, and between two.
+    world.set_parent(model, Some(storage)).unwrap();
+    assert_eq!(world.structure_version_of(storage), 1);
+    assert_eq!(world.structure_version_of(workspace), 0);
+    let inner = world.create(ClassName::Model).unwrap();
+    world.set_parent(inner, Some(model)).unwrap();
+    world.set_parent(part, Some(inner)).unwrap();
+    assert_eq!(world.structure_version_of(storage), 3);
+    assert_eq!(world.structure_version_of(workspace), 0);
+    world.set_parent(model, Some(workspace)).unwrap();
+    assert_eq!(world.structure_version_of(storage), 4);
+    assert_eq!(world.structure_version_of(workspace), 1);
+
+    // Reordering among the same parent's children isn't a move.
+    let other = part_in(&mut world, workspace, "Other");
+    let before = world.structure_version_of(workspace);
+    world.set_parent_at(other, workspace, 0).unwrap();
+    assert_eq!(world.structure_version_of(workspace), before);
+
+    // A nested service's contents count as its parent service's.
+    let scripts = world.starter_player_scripts();
+    let local = world.create(ClassName::LocalScript).unwrap();
+    world.set_parent(local, Some(scripts)).unwrap();
+    assert_eq!(world.structure_version_of(world.starter_player()), 1);
+
+    // Collision groups are read with the parts.
+    let before = world.structure_version_of(workspace);
+    world.collision_groups_mut();
+    assert_eq!(world.structure_version_of(workspace), before + 1);
+    assert_eq!(world.structure_version_of(storage), 4);
+}
+
+#[test]
+fn all_below_is_the_same_list_as_a_filtered_walk() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let model = world.create(ClassName::Model).unwrap();
+    world.set_parent(model, Some(workspace)).unwrap();
+    let later = part_in(&mut world, workspace, "Later");
+    let inside = part_in(&mut world, model, "Inside");
+    // Made after `later` but before it in the tree.
+    let first = world.create(ClassName::Part).unwrap();
+    world.set_parent_at(first, workspace, 0).unwrap();
+    let storage = world.replicated_storage();
+    let stored = part_in(&mut world, storage, "Stored");
+    let is_part = |class| class == ClassName::Part;
+
+    let walk: Vec<_> = world
+        .descendants_iter(workspace)
+        .filter(|&id| world.get(id).unwrap().class() == ClassName::Part)
+        .collect();
+    assert_eq!(walk, [first, inside, later]);
+    assert_eq!(world.all_below(workspace, is_part), walk);
+    let mut everywhere = walk.clone();
+    everywhere.push(stored);
+    assert_eq!(world.all_below(world.root(), is_part), everywhere);
+    assert_eq!(world.all_below(model, is_part), [inside]);
+}
+
+#[test]
+fn in_tree_order_leaves_out_what_is_not_in_the_game() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let a = part_in(&mut world, workspace, "A");
+    let b = part_in(&mut world, workspace, "B");
+    let loose = world.create(ClassName::Part).unwrap();
+    assert_eq!(world.in_tree_order(vec![b, loose, a, b]), [a, b]);
+    assert!(world.in_tree_order(vec![]).is_empty());
+    assert_eq!(world.in_tree_order(vec![loose]), [loose], "too few to sort");
+}
+
+/// A small repeatable random number generator, so a failing run can be
+/// reproduced from its seed.
+struct Dice(u64);
+
+impl Dice {
+    fn roll(&mut self, sides: usize) -> usize {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((self.0 >> 33) as usize) % sides
+    }
+
+    fn pick<T: Copy>(&mut self, from: &[T]) -> Option<T> {
+        (!from.is_empty()).then(|| from[self.roll(from.len())])
+    }
+}
+
+/// Runs random operations on a world and returns the order the index
+/// listed each class and tag in at the end, checking the index after every
+/// few.
+fn random_operations(seed: u64, steps: usize) -> Vec<Vec<InstanceId>> {
+    let mut dice = Dice(seed);
+    let mut world = World::new();
+    let mut alive = Vec::new();
+    let classes = [
+        ClassName::Part,
+        ClassName::Model,
+        ClassName::Folder,
+        ClassName::Sound,
+        ClassName::WeldConstraint,
+    ];
+    let tags = ["A", "B", "C"];
+    let services = [
+        world.workspace(),
+        world.replicated_storage(),
+        world.server_storage(),
+        world.lighting(),
+    ];
+    for step in 0..steps {
+        let target = dice.pick(&alive);
+        match dice.roll(8) {
+            0 | 1 => {
+                let id = world.create(dice.pick(&classes).unwrap()).unwrap();
+                alive.push(id);
+            }
+            2 => {
+                // Anywhere, or nowhere: a cycle is simply refused.
+                if let Some(id) = target {
+                    let parent = match dice.roll(3) {
+                        0 => None,
+                        1 => Some(dice.pick(&services).unwrap()),
+                        _ => dice.pick(&alive),
+                    };
+                    let _ = world.set_parent(id, parent);
+                }
+            }
+            3 => {
+                if let (Some(id), Some(parent)) = (target, dice.pick(&alive)) {
+                    let _ = world.set_parent_at(id, parent, dice.roll(4));
+                }
+            }
+            4 => {
+                if let Some(id) = target {
+                    world.add_tag(id, dice.pick(&tags).unwrap()).unwrap();
+                }
+            }
+            5 => {
+                if let Some(id) = target {
+                    world.remove_tag(id, dice.pick(&tags).unwrap()).unwrap();
+                }
+            }
+            6 => {
+                if let Some(id) = target
+                    && let Ok(copy) = world.duplicate(id)
+                {
+                    alive.push(copy);
+                    alive.extend(world.descendants(copy));
+                }
+            }
+            _ => {
+                if let Some(id) = target {
+                    let gone: Vec<_> = std::iter::once(id)
+                        .chain(world.descendants_iter(id))
+                        .collect();
+                    world.destroy(id).unwrap();
+                    alive.retain(|id| !gone.contains(id));
+                }
+            }
+        }
+        if step % 7 == 0 {
+            world.check_index().unwrap();
+        }
+    }
+    world.check_index().unwrap();
+    // Whatever the mix, the lists match a walk (the index is by ID, the walk
+    // by tree, so sets), and `tagged` is in tree order.
+    let mut orders = Vec::new();
+    for class in classes {
+        let mut walk = walked(&world, class);
+        walk.sort();
+        assert_eq!(listed(&world, class), walk, "{class}");
+        orders.push(listed(&world, class));
+    }
+    for tag in tags {
+        let walk: Vec<_> = world
+            .descendants_iter(world.root())
+            .filter(|&id| world.get(id).unwrap().has_tag(tag))
+            .collect();
+        assert_eq!(world.tagged(tag), walk, "{tag}");
+        orders.push(tagged_by_id(&world, tag));
+    }
+    orders
+}
+
+#[test]
+fn random_operations_never_desync_the_index() {
+    for seed in 0..40 {
+        random_operations(seed, 300);
+    }
+}
+
+#[test]
+fn the_index_order_is_deterministic() {
+    for seed in [3, 17, 91] {
+        assert_eq!(random_operations(seed, 500), random_operations(seed, 500));
+    }
+}

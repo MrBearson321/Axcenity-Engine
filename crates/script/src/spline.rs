@@ -185,14 +185,9 @@ impl Followers {
             0.0
         };
         self.runs.retain(|&id, _| world.contains(id));
-        let followers: Vec<InstanceId> = world
-            .descendants_iter(world.workspace())
-            .filter(|&id| {
-                world
-                    .get(id)
-                    .is_some_and(|i| i.class() == ClassName::SplineFollower)
-            })
-            .collect();
+        let followers: Vec<InstanceId> = world.all_below(world.workspace(), |class| {
+            class == ClassName::SplineFollower
+        });
         let mut events = Vec::new();
         for id in followers {
             if let Some(end) = self.step_one(world, id, dt) {

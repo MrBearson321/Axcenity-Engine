@@ -38,6 +38,8 @@ pub struct TestGame {
     pub seconds: f64,
     /// The last frame's steps' times, for benchmarks (roadmap I1).
     pub laps: Laps,
+    #[cfg(debug_assertions)]
+    frames_since_index_check: u32,
 }
 
 /// What [`TestGame::start`] needs of a project's level.
@@ -69,6 +71,8 @@ impl TestGame {
             problem: None,
             seconds: 0.0,
             laps: Laps::start(),
+            #[cfg(debug_assertions)]
+            frames_since_index_check: 0,
         };
         if let Err(err) =
             axcenity_project::load_starter_character(setup.folder, &mut game.sim.world)
@@ -142,6 +146,16 @@ impl TestGame {
         self.laps = laps;
         self.collect_output();
         self.laps.lap("RenderStep");
+        // In debug builds, every game test also checks the class and tag
+        // index against the tree (it walks everything, so not every frame).
+        #[cfg(debug_assertions)]
+        {
+            self.frames_since_index_check += 1;
+            if self.frames_since_index_check == 60 {
+                self.frames_since_index_check = 0;
+                self.sim.world.check_index().expect("index out of date");
+            }
+        }
         profiling::finish_frame!();
     }
 

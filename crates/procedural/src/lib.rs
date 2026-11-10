@@ -67,11 +67,7 @@ impl Generators {
     /// a model that can't be loaded, once each time it's made.
     pub fn update(&mut self, world: &mut World, assets: &Assets) -> Vec<String> {
         self.assets = Some(assets.clone());
-        let mut generators: Vec<InstanceId> = world
-            .descendants(world.root())
-            .into_iter()
-            .filter(|&id| world.get(id).is_some_and(|i| is_generator(i.class())))
-            .collect();
+        let mut generators: Vec<InstanceId> = world.all_below(world.root(), is_generator);
         // Stable: SplineMeshes first, each kind in tree order.
         generators.sort_by_key(|&id| {
             world
@@ -224,7 +220,7 @@ fn model_ids(instance: &axcenity_core::Instance) -> Vec<String> {
 /// ground again after it's sculpted or flattened.
 fn terrain_signature(world: &World) -> Vec<(u64, u64)> {
     world
-        .descendants(world.workspace())
+        .all_below(world.workspace(), |class| class == ClassName::Terrain)
         .into_iter()
         .filter_map(|id| world.terrain(id))
         .map(|data| (data.uid(), data.revision()))

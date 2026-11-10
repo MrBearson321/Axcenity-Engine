@@ -287,20 +287,20 @@ impl Animators {
     /// what scripts should hear about, in order.
     pub fn update(&mut self, world: &mut World, assets: &Assets, dt: f64) -> Vec<AnimatorEvent> {
         let mut owners: Vec<(InstanceId, Parts)> = Vec::new();
-        for id in world.descendants_iter(world.workspace()) {
-            let Some(instance) = world.get(id) else {
-                continue;
-            };
-            let class = instance.class();
-            if !matches!(
+        let animated = world.all_below(world.workspace(), |class| {
+            matches!(
                 class,
                 ClassName::Animator
                     | ClassName::Animation
                     | ClassName::Ragdoll
                     | ClassName::IKControl
-            ) {
+            )
+        });
+        for id in animated {
+            let Some(instance) = world.get(id) else {
                 continue;
-            }
+            };
+            let class = instance.class();
             let Some(mut owner) = instance.parent() else {
                 continue;
             };

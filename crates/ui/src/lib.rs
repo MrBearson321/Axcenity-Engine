@@ -457,7 +457,8 @@ pub(crate) fn layout_ui_with_pseudo(
 
     let workspace = world.workspace();
     let mut guis: Vec<(f64, InstanceId)> = world
-        .descendants_iter(workspace)
+        .all_below(workspace, |class| class == ClassName::ScreenGui)
+        .into_iter()
         .filter(|&id| Some(id) != on_top && enabled_screen_gui(world, id))
         .map(|id| (number_property(world, id, "DisplayOrder", 0.0), id))
         .collect();
@@ -1667,13 +1668,11 @@ fn layout_billboards(
     let aspect = width as f32 / height as f32;
     let view = rh::view::look_at_mat4(camera.position, camera.look_at, Vec3::Y);
     let tan_half = (camera.fov_y_degrees.to_radians() * 0.5).tan();
-    for id in world.descendants_iter(world.workspace()) {
+    for id in world.all_below(world.workspace(), |class| class == ClassName::BillboardGui) {
         let Some(instance) = world.get(id) else {
             continue;
         };
-        if instance.class() != ClassName::BillboardGui
-            || instance.property("Enabled").and_then(Value::as_bool) != Some(true)
-        {
+        if instance.property("Enabled").and_then(Value::as_bool) != Some(true) {
             continue;
         }
         let Some(position) = instance
