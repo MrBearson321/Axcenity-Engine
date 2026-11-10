@@ -49,6 +49,8 @@ Check on the computers themselves instead. Windows and Linux are the primary pla
 
 It runs what CI runs (build, the player having no editor code, clippy, every test, doc tests), then `axcenity-test examples/hello-character` and the dedicated server started with no display (`crates/server/tests/headless.rs`; on Linux, run it from a terminal with no desktop, or over SSH, to be sure). Every step runs even after a failure. The summary is saved to `target/platform-check-<os>.txt`.
 
+Packages (installers, `.dmg`, `.deb` and the rest) and File > Build Game for each OS have their own check, `python3 scripts/check-packages.py` ([project/releases.md](project/releases.md#checking-packages)).
+
 LAN discovery between two computers is checked by hand: host `examples/hello-part` on one (`cargo run -p axcenity-player -- --host examples/hello-part`), then on another on the same network run `cargo test -p axcenity-net -- --ignored --nocapture a_game_hosted_on_another_computer`. A firewall must let the player take UDP on ports 47800 and 47801.
 
 ## The workspace-hack crate

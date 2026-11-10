@@ -6,6 +6,10 @@
 //! `AXCENITY_SNAPSHOTS=<folder> cargo test -p axcenity-editor editor_tour -- --ignored`
 //!
 //! `TOUR_ONLY=<part of a name>` draws only the states whose names have it.
+//! `TOUR_THEME=light` draws them in the light theme and `TOUR_DENSITY=compact`
+//! at Compact density, for the design-system audit
+//! (`docs/research/usability/design-system.md`); the files then end in
+//! `-light` or `-compact`.
 //! The examples are copied to a temporary folder first, so nothing in
 //! `examples/` changes.
 
@@ -42,11 +46,22 @@ fn shoot(app: &mut EditorApp, name: &str, setup: impl Fn(&mut EditorApp)) {
     let folder = PathBuf::from(folder);
     std::fs::create_dir_all(&folder).unwrap();
     setup(app);
+    let mut appearance = crate::theme::Appearance::default();
+    let mut suffix = String::new();
+    if std::env::var("TOUR_THEME").is_ok_and(|theme| theme == "light") {
+        appearance.theme = crate::theme::ThemeChoice::Light;
+        suffix.push_str("-light");
+    }
+    if std::env::var("TOUR_DENSITY").is_ok_and(|density| density == "compact") {
+        appearance.density = crate::theme::Density::Compact;
+        suffix.push_str("-compact");
+    }
     crate::snapshot::snapshot_rendered(
-        &folder.join(format!("tour-{name}.png")),
+        &folder.join(format!("tour-{name}{suffix}.png")),
         egui::vec2(1600.0, 900.0),
         vec![Vec::new(); 8],
         |ctx, rs| {
+            crate::theme::apply(ctx, &appearance);
             app.frame(ctx, Some(rs));
         },
     );
@@ -155,6 +170,26 @@ fn editor_tour_snapshots() {
     });
     run("70-profiler", Some("hello-part"), &|app| {
         app.layout.open(Pane::Profiler)
+    });
+    // The design-system audit: the graph editors and other canvases that
+    // draw with their own colours.
+    run("80-material-graph", Some("hello-material-graph"), &|app| {
+        app.open_material("assets/materials/MossyStone.material.json")
+    });
+    run("81-behavior-tree", Some("hello-behavior"), &|app| {
+        app.open_behavior_tree("assets/ai/Guard.behaviortree.json")
+    });
+    run("82-dialogue", Some("hello-dialogue"), &|app| {
+        app.open_dialogue("assets/dialogue/Farmer.dialogue.json")
+    });
+    run("83-sequencer", Some("hello-cutscene"), &|app| {
+        app.open_sequence("assets/sequences/Intro.sequence.json")
+    });
+    run("84-terrain", Some("hello-part"), &|app| {
+        app.layout.open(Pane::Terrain)
+    });
+    run("85-blocks", Some("hello-touched-blocks"), &|app| {
+        app.open_script("scripts/pad.server.blocks.json", None)
     });
     run("10-anim-empty", Some("hello-animation"), &|app| {
         app.layout.open(Pane::Animation)

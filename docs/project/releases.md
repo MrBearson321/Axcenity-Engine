@@ -38,7 +38,7 @@ Installer pictures (NSIS header/sidebar, DMG background) come from `python packa
 
 GitHub Actions is intentionally turned off ([development policy](../development-policy.md#continuous-integration)), and that includes the Release workflow. Turn **Release** back on in the repository's Actions settings for the release, and off again after.
 
-1. Main passes the local platform checks on Windows and Linux (`scripts/check-platform.ps1`, `scripts/check-platform.sh`; [development.md](../development.md)), and on macOS too if the release ships a macOS build that should be checked.
+1. Main passes the local platform checks on Windows and Linux (`scripts/check-platform.ps1`, `scripts/check-platform.sh`; [development.md](../development.md)), and on macOS too if the release ships a macOS build that should be checked. Then the package check ([below](#checking-packages)) on each of them.
 2. Push a tag, or run **Actions > Release** and type the version without `v`:
 
    ```bash
@@ -49,3 +49,44 @@ GitHub Actions is intentionally turned off ([development policy](../development-
 3. [.github/workflows/release.yml](../../.github/workflows/release.yml) builds the editor and player on Windows, macOS and Linux, packs them, and publishes the GitHub Release. Re-running the workflow on the same tag replaces the files.
 
 Unsigned: Windows SmartScreen and macOS Gatekeeper will warn. Signing and notarizing need certificates that this workflow does not have yet.
+
+## Checking packages
+
+The release workflow is off, so packages are checked on each computer with one script (Python 3, from the repository root):
+
+```bash
+python3 scripts/check-packages.py                    # dist profile, as released (fat LTO: slow)
+python3 scripts/check-packages.py --profile release  # quicker, for trying packaging changes
+python3 scripts/check-packages.py --players DIR      # add other computers' players: DIR/windows/axcenity-player.exe, DIR/macos/axcenity-player, DIR/linux/axcenity-player
+python3 scripts/check-packages.py --install          # Windows: also install silently into a scratch folder, check, uninstall
+```
+
+(`py scripts\check-packages.py` on Windows.) It runs the release workflow's steps for this OS, then checks what they made. Every step runs even after a failure; the summary is saved to `target/package-check-<os>.txt` and the packages to `target/package-check/out/`.
+
+1. Builds `axcenity-editor` and `axcenity-player`, then stages the payload (`packaging/stage.py --allow-missing-players`: a local build has only this OS's player, so the others come only from `--players`). Checks every file the packages ship, and that each program is the right kind for its OS (ELF, PE or Mach-O, read from its header) and marked executable.
+2. Packages with the tools that are installed. A missing tool is a SKIP, not a FAIL.
+   - **Linux**: the `.tar.gz` always; `.deb`, `.rpm`, `.pkg.tar.zst` with [nfpm](https://nfpm.goreleaser.com); the AppImage with [appimagetool](https://github.com/AppImage/appimagetool). Each is opened again and checked (`dpkg-deb -x`, `rpm -qlp`, `--appimage-extract`), with `desktop-file-validate` on the menu entry when it's installed.
+   - **Windows**: the setup `.exe` with [NSIS](https://nsis.sourceforge.io) (`choco install nsis`). With `--install`, it installs silently into a scratch folder, checks the files and uninstalls; it refuses when Axcenity Editor is already installed on the account, since the uninstall would remove that one's registration.
+   - **macOS**: the `.dmg` (`build-dmg.sh`; dmgbuild is fetched into a throwaway venv, so it needs the network). It's mounted read-only and checked: the app's `Info.plist` and icon, `codesign --verify --deep --strict`, the payload.
+3. **Build Game with the packaged editor** (the extracted tarball, the mounted app, the installed copy, or else the staged files the installer copies as they are): `axcenity-editor --build-game` on a copy of `examples/hello-part` for each OS the package has a player for, checking each build's files (and on Windows, that the macOS and Linux zips mark the player executable).
+4. **The built game for this OS starts**: it runs `AxcenityPlayer --bench 30` from another folder and expects its first frame (on Linux with no display, under `xvfb-run`).
+
+What one computer can't check: a package for another OS, and the games built for it actually running. Copy `target/package-check/work` (kept with `--keep`) builds across to try them, or run the script there.
+
+Cross-checks from Linux, without a Windows computer (checked 2026-11-10 on Ubuntu 24.04):
+
+- The player builds for Windows with `rustup target add x86_64-pc-windows-gnu` and MinGW (`apt install g++-mingw-w64-x86-64`). Use the posix-thread compilers; with the default win32 ones, Luau's C++ fails to link (`__mingwthr_key_dtor`, `__gthr_win32_mutex_*`):
+
+  ```bash
+  export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc-posix \
+    CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc-posix \
+    CXX_x86_64_pc_windows_gnu=x86_64-w64-mingw32-g++-posix
+  cargo build --release --locked -p axcenity-player --target x86_64-pc-windows-gnu
+  mkdir -p target/cross-players/windows
+  cp target/x86_64-pc-windows-gnu/release/axcenity-player.exe target/cross-players/windows/
+  python3 scripts/check-packages.py --profile release --players target/cross-players
+  ```
+
+  The Linux package then has a Windows player, and Build Game for Windows is checked too. Releases use the MSVC build from a Windows computer; this shows only that the Windows code compiles and links, not that it runs.
+- `makensis` from the distribution's `nsis` package compiles `installer.nsi` (NSIS takes `-DNAME=value` there instead of `/D`), so a change to the installer script can be checked before a Windows computer is at hand.
+- macOS can't be cross-built from Linux or Windows: it needs Apple's SDK. The macOS package and macOS games are checked only on a Mac.
