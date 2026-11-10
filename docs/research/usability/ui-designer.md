@@ -37,13 +37,13 @@ Severity as in the audit: **High** blocks or misleads a beginner in a common tas
 
 | ID | Change | Fixes | Complexity | Risk | PR |
 |---|---|---|---|---|---|
-| D1 | Inspector sections fold; beginner-first order (Styles, Anchor, Text, Widget, Image, Look, Code & animation, then States, Bevel, Slice folded); folded headers name what's set; open state kept per section; while States is folded the text toolbar and Ctrl+B/I/U edit the Normal look | UD1 | M | Low–medium: tests that reached Bevel, Slice and States now open them first | 1 |
-| D2 | Shadow's four fields on two fixed lines, not a wrapped row | UD2 | S | Very low | 1 |
-| D3 | "Transparency: 0% is solid, 100% is invisible." over the sliders; Reset's hover text | UD3, UD4 | S | Very low | 1 |
-| D4 | **Rename** and **Delete** in the artboard's and the Hierarchy's right-click menus | UD5 | S | Low: Delete is the editor's own, one undo step | 2 |
-| D5 | The empty state says what a ScreenGui is | UD6 | S | Very low | 2 |
-| D6 | Hover text on Fixed, Fit and Scale | UD7 | S | Very low | 2 |
-| D7 | Style (CSS)'s empty text | UD8 | S | Very low | 2 |
+| D1 | Inspector sections fold; beginner-first order (Styles, Anchor, Text, Widget, Image, Look, Code & animation, then States, Bevel, Slice folded); folded headers name what's set; open state kept per section; while States is folded the text toolbar and Ctrl+B/I/U edit the Normal look | UD1 | M | Low–medium: tests that reached Bevel, Slice and States now open them first | #44 |
+| D2 | Shadow's four fields on two fixed lines, not a wrapped row | UD2 | S | Very low | #44 |
+| D3 | "Transparency: 0% is solid, 100% is invisible." over the sliders; Reset's hover text | UD3, UD4 | S | Very low | #44 |
+| D4 | **Rename** and **Delete** in the artboard's and the Hierarchy's right-click menus | UD5 | S | Low: Delete is the editor's own, one undo step | #48 |
+| D5 | The empty state says what a ScreenGui is | UD6 | S | Very low | #48 |
+| D6 | Hover text on Fixed, Fit and Scale | UD7 | S | Very low | #48 |
+| D7 | Style (CSS)'s empty text | UD8 | S | Very low | #48 |
 | D8 | Drag a Hierarchy row onto a container to move it in, keeping where it is on screen | UD9 | M | Medium: reparenting rewrites `Position` | later |
 
 ## Verification
@@ -59,3 +59,14 @@ Severity as in the audit: **High** blocks or misleads a beginner in a common tas
 | Read a background's transparency | "Background 100%" | The same slider under "Transparency: 0% is solid, 100% is invisible." |
 
 Tests (`app/ui_inspector_tests.rs`): `the_inspector_lists_everyday_sections_first_and_the_fine_tuning_last` (the order for a button, a label, a frame and the ScreenGui, and which sections start folded); `a_folded_section_opens_on_its_header_stays_open_and_names_what_it_has` (Bevel's header clicked open, **Bevel · Raised** after Raised, still open on the next element); `with_states_folded_the_text_toolbar_edits_the_normal_look` (Ctrl+B with the Hover tab picked writes `#play`, not `#play:hover`, until States is opened). The States, Bevel and Slice tests in `ui_text_style_tests.rs` open their section first, as a user would, and draw a taller designer so the section is on screen. D2 and D3 were checked in the snapshots (tour shots 47–50).
+
+### PR 2 (#48): right-click menus and the empty tab (D4–D7)
+
+| Workflow | Before | After |
+|---|---|---|
+| Delete an element | Find out the Delete key works, or go to the Explorer | Right-click it: **Delete** (one undo step), with its key shown |
+| Rename an element | Find the Name box in the inspector | Right-click it: **Rename** puts the keyboard in Name with it all selected |
+| Open the tab with no UI yet | "There's no ScreenGui to design yet." | Says it's for the game's 2D interface and what a ScreenGui is, then **New ScreenGui** |
+| Pick a scale mode | Three bare words | Each says on hover what it does |
+
+Tests: `app/ui_designer_menu_tests.rs` (see the verification report).
