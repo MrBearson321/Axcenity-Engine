@@ -52,22 +52,35 @@ pub fn equipped(world: &World, inventory: InstanceId) -> Option<InstanceId> {
 /// How `id` (a Tool, or anything in one) is carried, or `None` when its
 /// Tool isn't in an Inventory, or it isn't in a Tool.
 pub fn carried(world: &World, id: InstanceId) -> Option<Carried> {
+    let (tool, inventory) = carrier(world, id)?;
+    Some(if equipped(world, inventory) == Some(tool) {
+        Carried::Held
+    } else {
+        Carried::Stored
+    })
+}
+
+/// The Tool `id` is carried with (a Tool inside a Tool is carried with the
+/// outer one) and the Inventory holding it, or `None` when it isn't carried.
+fn carrier(world: &World, id: InstanceId) -> Option<(InstanceId, InstanceId)> {
     let mut at = tool_of(world, id);
     while let Some(tool) = at {
         if let Some(inventory) = inventory_holding(world, tool) {
-            return Some(if equipped(world, inventory) == Some(tool) {
-                Carried::Held
-            } else {
-                Carried::Stored
-            });
+            return Some((tool, inventory));
         }
-        // A Tool inside a Tool is carried with the outer one.
         at = world
             .get(tool)
             .and_then(|instance| instance.parent())
             .and_then(|parent| tool_of(world, parent));
     }
     None
+}
+
+/// The Inventory whose `Equipped` decides whether `id` is in the world, if
+/// it's carried. Its Tool can go in and out of hand with no change of
+/// parent, so a cache of what's in the world watches this Inventory too.
+pub fn carrying_inventory(world: &World, id: InstanceId) -> Option<InstanceId> {
+    carrier(world, id).map(|(_, inventory)| inventory)
 }
 
 /// True when `id` is in a put-away Tool, so it's out of the world.

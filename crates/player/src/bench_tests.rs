@@ -275,9 +275,12 @@ fn bench_10000_parts() {
             camera(Vec3::new(-150.0, 6.0, 205.0), Vec3::new(-230.0, 3.0, 150.0)),
         ),
     ] {
+        // Kept across frames, as a host keeps one.
+        let mut cache = TerrainCache::new();
+        let poses = axcenity_scene::Poses::new();
         run(&format!("bench_10000_parts: {view}"), |steps| {
             steps.time("build_draw_list", || {
-                axcenity_scene::build_draw_list(&world, &assets, camera)
+                axcenity_scene::build_draw_list_posed(&world, &assets, camera, &poses, &mut cache)
             })
         });
     }

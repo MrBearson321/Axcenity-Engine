@@ -13,8 +13,13 @@
 //! ([`running_script`]), so what's paused and connected can be dropped for
 //! one script when its file is reloaded ([`Scheduler::forget_script`]).
 
+use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
+use std::collections::hash_map::Entry;
+
 use axcenity_core::InstanceId;
 use mlua::{IntoLuaMulti, Lua, MultiValue, Thread};
+use rustc_hash::FxHashMap;
 
 use crate::errors::error_message;
 use crate::{OutputKind, debugger, push_error, push_output, watchdog};
@@ -32,17 +37,60 @@ pub struct Scheduler {
     /// Counts up for every scheduled task, so that tasks due at the same
     /// moment resume in the order they were scheduled.
     next_order: u64,
-    waiting: Vec<Waiting>,
+    /// When each task is due, soonest first (a `BinaryHeap` pops its largest
+    /// item, and `Reverse` turns that into the smallest). A task that stopped
+    /// waiting leaves a tombstone here: nothing in `waiting` has its number,
+    /// so it's skipped when it comes up.
+    queue: BinaryHeap<Reverse<Slot>>,
+    /// The tasks still waiting, by their order number.
+    waiting: FxHashMap<u64, Waiting>,
+    /// Which tasks each coroutine has waiting, for `task.cancel`.
+    by_thread: FxHashMap<usize, Orders>,
     /// The script whose coroutine is running now, if any (not the
     /// Console's commands).
     running: Option<InstanceId>,
 }
 
-/// A coroutine waiting for its time to come.
-struct Waiting {
-    /// The game time when it's due.
+/// One place in the queue: earliest due first, then first scheduled.
+#[derive(Clone, Copy)]
+struct Slot {
     due: f64,
     order: u64,
+}
+
+impl Ord for Slot {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Floats have no total order in Rust (because of NaN), so `total_cmp` picks one.
+        self.due
+            .total_cmp(&other.due)
+            .then(self.order.cmp(&other.order))
+    }
+}
+
+impl PartialOrd for Slot {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Slot {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for Slot {}
+
+/// The order numbers of one coroutine's waiting tasks. Nearly every
+/// coroutine has one, which needs no allocation; `task.defer` on a waiting
+/// coroutine makes more.
+enum Orders {
+    One(u64),
+    Many(Vec<u64>),
+}
+
+/// A coroutine waiting for its time to come.
+struct Waiting {
     thread: Thread,
     resume_with: ResumeWith,
     /// The script it belongs to.
@@ -76,40 +124,137 @@ impl Scheduler {
     }
 
     fn add(&mut self, thread: Thread, seconds: f64, resume_with: ResumeWith) {
-        self.waiting.push(Waiting {
-            due: self.now + seconds,
-            order: self.next_order,
-            thread,
-            resume_with,
-            script: self.running,
-        });
+        let order = self.next_order;
         self.next_order += 1;
+        self.queue.push(Reverse(Slot {
+            due: self.now + seconds,
+            order,
+        }));
+        add_order(&mut self.by_thread, thread_key(&thread), order);
+        self.waiting.insert(
+            order,
+            Waiting {
+                thread,
+                resume_with,
+                script: self.running,
+            },
+        );
     }
 
     /// Drops `thread` from the waiting coroutines (`task.cancel`).
     pub fn cancel(&mut self, thread: &Thread) {
-        self.waiting.retain(|task| task.thread != *thread);
+        match self.by_thread.remove(&thread_key(thread)) {
+            Some(Orders::One(order)) => {
+                self.waiting.remove(&order);
+            }
+            Some(Orders::Many(orders)) => {
+                for order in orders {
+                    self.waiting.remove(&order);
+                }
+            }
+            None => return,
+        }
+        self.sweep_tombstones();
     }
 
     /// Drops every waiting coroutine of `script`, so they never resume.
     pub fn forget_script(&mut self, script: InstanceId) {
-        self.waiting.retain(|task| task.script != Some(script));
+        let by_thread = &mut self.by_thread;
+        self.waiting.retain(|&order, task| {
+            let keep = task.script != Some(script);
+            if !keep {
+                remove_order(by_thread, thread_key(&task.thread), order);
+            }
+            keep
+        });
+        self.sweep_tombstones();
     }
 
-    /// Moves the clock forward and removes every task that is due, sorted
-    /// into the order they resume in: earliest due first, then first scheduled.
+    /// How many places the queue holds, tombstones included.
+    #[cfg(test)]
+    pub(crate) fn queue_len(&self) -> usize {
+        self.queue.len()
+    }
+
+    /// The coroutines [`step`] would resume after `seconds`, in that order.
+    #[cfg(test)]
+    pub(crate) fn take_due_threads(&mut self, seconds: f64) -> Vec<Thread> {
+        self.take_due(seconds)
+            .into_iter()
+            .map(|task| task.thread)
+            .collect()
+    }
+
+    /// Clears the tombstones out of the queue once they outnumber the
+    /// tasks, so a script that keeps cancelling long delays can't grow it.
+    fn sweep_tombstones(&mut self) {
+        if self.queue.len() > 2 * self.waiting.len() + 64 {
+            let waiting = &self.waiting;
+            self.queue
+                .retain(|Reverse(slot)| waiting.contains_key(&slot.order));
+        }
+    }
+
+    /// Moves the clock forward and removes every task that is due, in the
+    /// order they resume in: earliest due first, then first scheduled.
     fn take_due(&mut self, seconds: f64) -> Vec<Waiting> {
         // `max` also turns NaN into 0, so a bad frame time can't break the clock.
         self.now += seconds.max(0.0);
-        let now = self.now;
-        // `partition` splits the list in two: due now, and still waiting.
-        let (mut due, waiting): (Vec<Waiting>, Vec<Waiting>) = std::mem::take(&mut self.waiting)
-            .into_iter()
-            .partition(|task| task.due <= now + TOLERANCE_SECONDS);
-        self.waiting = waiting;
-        // Floats have no total order in Rust (because of NaN), so `total_cmp` picks one.
-        due.sort_by(|a, b| a.due.total_cmp(&b.due).then(a.order.cmp(&b.order)));
+        let deadline = self.now + TOLERANCE_SECONDS;
+        let mut due = Vec::new();
+        while let Some(Reverse(slot)) = self.queue.peek().copied()
+            && slot.due <= deadline
+        {
+            self.queue.pop();
+            // `None` is a tombstone: the task stopped waiting.
+            if let Some(task) = self.waiting.remove(&slot.order) {
+                remove_order(&mut self.by_thread, thread_key(&task.thread), slot.order);
+                due.push(task);
+            }
+        }
         due
+    }
+}
+
+/// Whether `thread` has a task waiting (`task.wait`, `task.delay`, ...).
+pub fn is_waiting(lua: &Lua, thread: &Thread) -> bool {
+    lua.app_data_ref::<Scheduler>()
+        .is_some_and(|scheduler| scheduler.by_thread.contains_key(&thread_key(thread)))
+}
+
+/// Identifies a coroutine while it's held somewhere, as a `Thread` in
+/// [`Waiting`] is.
+fn thread_key(thread: &Thread) -> usize {
+    thread.to_pointer() as usize
+}
+
+fn add_order(by_thread: &mut FxHashMap<usize, Orders>, thread: usize, order: u64) {
+    match by_thread.entry(thread) {
+        Entry::Vacant(entry) => {
+            entry.insert(Orders::One(order));
+        }
+        Entry::Occupied(mut entry) => match entry.get_mut() {
+            Orders::One(first) => {
+                let first = *first;
+                entry.insert(Orders::Many(vec![first, order]));
+            }
+            Orders::Many(orders) => orders.push(order),
+        },
+    }
+}
+
+fn remove_order(by_thread: &mut FxHashMap<usize, Orders>, thread: usize, order: u64) {
+    if let Entry::Occupied(mut entry) = by_thread.entry(thread) {
+        let none_left = match entry.get_mut() {
+            Orders::One(_) => true,
+            Orders::Many(orders) => {
+                orders.retain(|&other| other != order);
+                orders.is_empty()
+            }
+        };
+        if none_left {
+            entry.remove();
+        }
     }
 }
 

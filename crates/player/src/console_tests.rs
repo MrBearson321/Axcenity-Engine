@@ -85,8 +85,10 @@ impl App {
     /// printed moved into the console.
     fn scripts_frame(&mut self) {
         let seconds = self.game_seconds(FRAME);
-        self.scripts.step(&mut self.world, f64::from(seconds));
-        print_output(&mut self.scripts);
+        self.sim
+            .scripts
+            .step(&mut self.sim.world, f64::from(seconds));
+        print_output(&mut self.sim.scripts);
         self.take_log();
     }
 
@@ -141,8 +143,9 @@ fn in_a_built_game_with_the_console_on_f9_opens_it_timescale_slows_the_game_and_
     // Anything else is Lua, and a word no script knows is said to be unknown.
     app.type_line("workspace.Gravity = 50");
     assert_eq!(
-        app.world
-            .get(app.world.workspace())
+        app.sim
+            .world
+            .get(app.sim.world.workspace())
             .and_then(|workspace| workspace.property("Gravity"))
             .cloned(),
         Some(Value::Number(50.0))
@@ -190,7 +193,7 @@ fn the_built_in_commands_change_the_game_and_bad_ones_say_why() {
     app.type_line("wireframe");
     assert!(app.dev.wireframe, "kept for when the renderer exists");
     app.type_line("noclip");
-    assert!(app.characters.noclip());
+    assert!(app.sim.characters.noclip());
     // With no character, teleport moves the camera.
     app.type_line("teleport 1 20 3");
     let (position, _) = app.camera.view();
@@ -230,7 +233,9 @@ fn the_open_console_draws_over_the_top_of_the_game() {
     let game = built_game("drawn", true);
     let mut app = play(&game, false);
     // The first frame makes the player on this device.
-    app.scripts.step_players(&mut app.world, f64::from(FRAME));
+    app.sim
+        .scripts
+        .step_players(&mut app.sim.world, f64::from(FRAME));
     app.tap(KeyCode::F9);
     app.type_line("fps");
     app.type_line("collisions");
@@ -238,7 +243,7 @@ fn the_open_console_draws_over_the_top_of_the_game() {
     let (width, height) = (640, 360);
     let camera = app.shown_camera();
     let mut renderer = axcenity_render::TextureRenderer::new(&device, &queue, width, height);
-    let mut list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
+    let mut list = axcenity_scene::build_draw_list(&app.sim.world, &app.sim.assets, camera);
     list.ui.extend(app.console_items(camera, (width, height)));
     renderer.render(&list).unwrap();
     let pixels = renderer.read_pixels();

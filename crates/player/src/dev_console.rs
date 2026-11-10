@@ -150,10 +150,15 @@ impl App {
             Some(Ok(command)) => self.run_built_in(command),
             Some(Err(why)) => logs::line(LogLevel::Warning, None, &why),
             None => {
-                if self.scripts.run_console_command(&mut self.world, line) == ConsoleRun::Unknown {
+                if self
+                    .sim
+                    .scripts
+                    .run_console_command(&mut self.sim.world, line)
+                    == ConsoleRun::Unknown
+                {
                     self.run_unknown(line);
                 }
-                print_output(&mut self.scripts);
+                print_output(&mut self.sim.scripts);
             }
         }
         self.take_log();
@@ -164,7 +169,9 @@ impl App {
     /// run as Lua (or said to be unknown).
     fn run_unknown(&mut self, line: &str) {
         let word = line.split_whitespace().next().unwrap_or_default();
-        if axcenity_ui::looks_like_command(line) && !self.scripts.console_knows(&self.world, word) {
+        if axcenity_ui::looks_like_command(line)
+            && !self.sim.scripts.console_knows(&self.sim.world, word)
+        {
             if self.network.send_console_command(line) {
                 logs::line(LogLevel::Info, None, "Sent to the server.");
             } else {
@@ -174,7 +181,7 @@ impl App {
                     &format!("Unknown command `{word}`. Type help for the list."),
                 );
             }
-        } else if let Err(err) = self.scripts.run_console_lua(&mut self.world, line) {
+        } else if let Err(err) = self.sim.scripts.run_console_lua(&mut self.sim.world, line) {
             logs::line(LogLevel::Error, None, &format!("error: {err}"));
         }
     }
@@ -187,7 +194,7 @@ impl App {
                 for (name, help) in axcenity_ui::BUILT_INS {
                     lines.push(format!("  {name:<22} {help}"));
                 }
-                for command in self.scripts.console_commands() {
+                for command in self.sim.scripts.console_commands() {
                     lines.push(format!("  {:<22} {}", command.name, command.help));
                 }
                 lines.push("Anything else runs as Lua.".to_owned());
@@ -222,8 +229,8 @@ impl App {
                 logs::line(LogLevel::Info, None, &text);
             }
             BuiltIn::Noclip => {
-                let on = !self.characters.noclip();
-                self.characters.set_noclip(on);
+                let on = !self.sim.characters.noclip();
+                self.sim.characters.set_noclip(on);
                 logs::line(LogLevel::Info, None, &format!("noclip {}", on_off(on)));
             }
             BuiltIn::Timescale(scale) => {
@@ -231,7 +238,7 @@ impl App {
                 logs::line(LogLevel::Info, None, &format!("timescale {scale}"));
             }
             BuiltIn::Teleport(to) => {
-                if !self.characters.teleport(&mut self.world, to) {
+                if !self.sim.characters.teleport(&mut self.sim.world, to) {
                     let (_, orientation) = self.camera.view();
                     self.camera.set_view(to, orientation);
                 }
@@ -265,8 +272,9 @@ impl App {
         let peers = self.network.stats();
         let network = (self.network.is_hosting() || self.network.is_joined()).then(|| {
             let players = self
+                .sim
                 .world
-                .get(self.world.players())
+                .get(self.sim.world.players())
                 .map_or(0, |players| players.children().len());
             NetworkStats {
                 players,
@@ -289,8 +297,8 @@ impl App {
             frame_ms: stats.frames.back().copied().unwrap_or(0.0) * 1000.0,
             stages: stats.stages.clone(),
             memory_bytes: stats.memory,
-            lua_bytes: self.scripts.used_memory(),
-            instances: self.world.len(),
+            lua_bytes: self.sim.scripts.used_memory(),
+            instances: self.sim.world.len(),
             network,
         }
     }
@@ -316,7 +324,7 @@ impl App {
                 ]
             };
             let (mut solid, mut sensor) = (Vec::new(), Vec::new());
-            for outline in axcenity_physics::debug_colliders(&self.world, &self.assets) {
+            for outline in axcenity_physics::debug_colliders(&self.sim.world, &self.sim.assets) {
                 let lines = if outline.can_collide {
                     &mut solid
                 } else {

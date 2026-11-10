@@ -7,6 +7,8 @@ An architectural audit of Axcenity Engine benchmarked against Unreal Engine 5, G
 - **Method:** three code auditors read the source in parallel (runtime core, simulation, tooling and loops), one researcher gathered facts on the four peer engines from official documentation, then a benchmarking pass and a strategy pass built on those notes. Key claims were spot-checked against the repo a second time.
 - **Not done:** nothing was built, run or timed. Every performance figure is either quoted from `docs/rendering/performance.md` and `docs/architecture/streaming.md`, or is an inference. Roadmap item **I1 (measure first)** exists because of this.
 
+> **Update, 2026-11-10: open questions answered.** Paul answered the questions in section 7 and set a [development policy](../development-policy.md). In short: GitHub Actions is intentionally off and testing is local; cross-machine determinism is not a requirement; desktop (Windows and Linux) comes first, with mobile and web deferred; the scripting API is Roblox-inspired, with Vector3 a first-class type and native `vector` not chosen until its type identity and interop are verified; internet-hosted dedicated servers are a future objective. The roadmap in section 6 is marked to match. Where the audit text below mentions CI as a running check, read it as a description of the workflow files, not of anything that runs today.
+
 **Evidence markers used throughout**
 
 | Marker | Meaning |
@@ -167,7 +169,7 @@ All versions are pinned once in the root `Cargo.toml`; lock versions in brackets
 - No `[profile.release]` tuning (no LTO, codegen-units or strip); `release.yml` ships the editor and player but not `axcenity-server` or `axcenity-test`; no signing or notarization.
 
 **Stale docs [V]**
-- `docs/development.md:39` says "CI is off", but `.github/workflows/ci.yml` has push and PR triggers. Either Actions is disabled in the repo settings or the doc is stale.
+- `docs/development.md:39` says "CI is off", but `.github/workflows/ci.yml` has push and PR triggers. Either Actions is disabled in the repo settings or the doc is stale. **Answered 2026-11-10:** Actions is disabled on purpose ([development policy](../development-policy.md#continuous-integration)).
 - `docs/architecture/frame-loop.md:13` says editor Play has no network step, but `editor/src/play.rs:547` receives over loopback.
 - `docs/architecture/crates.md:30` leaves `net` out of the editor's dependencies.
 
@@ -276,7 +278,7 @@ Actions: **Add**, **Alter** (version, features or usage), **Swap** (replace a me
 | `notify = "8.2"` (+ evaluate `notify-debouncer-full` 0.7) | Event-based file watching with `PollWatcher` fallback | 500 ms polling walk, up to 3 watchers (`project/src/watch.rs:24-27`) | **CC0-1.0** [cr] (compatible; no patent grant, worth a note) | Low–medium: network drives and WSL lose events, hence the fallback |
 | `zstd = "0.14"` (or `lz4_flex` 0.14 for pure Rust) | Per-entry `.axgame` compression | Uncompressed packs unpacked to temp at launch (`project/src/packed.rs`) | BSD-3-Clause / MIT [cr] | Low. Measure the ratio first: PNG and JPEG are already compressed |
 | `postcard = "1.1"` | Binary wire for reliable updates, snapshots and RemoteEvent payloads; JSON kept behind a debug flag | JSON wire (`net/src/handshake.rs:118`, `wire.rs`) | MIT OR Apache-2.0 [cr] | Medium: protocol version bump |
-| `intel_tex_2 = "0.5"` (editor/cook only) | BC7/BC6H encoding at import | RGBA8 only (`render/src/renderer/gpu.rs:967-1000`) | MIT/Apache-2.0 [cr] | Medium: check macOS arm64 and Windows ispc prebuilts [verify]; add a CI gate that it never reaches the player |
+| `intel_tex_2 = "0.5"` (editor/cook only) | BC7/BC6H encoding at import | RGBA8 only (`render/src/renderer/gpu.rs:967-1000`) | MIT/Apache-2.0 [cr] | Medium: check Windows and Linux ispc prebuilts (macOS arm64 is secondary) [verify]; add a gate to the local platform check scripts that it never reaches the player |
 | `ktx2 = "0.5"` | Cooked texture container reader in `assets` | Same | Apache-2.0 [cr] | Low. Needs wgpu `TEXTURE_COMPRESSION_BC` (desktop fine) |
 | `smallvec = "1"` (already transitive) | Cached draw items per Instance; event handler snapshots | Per-frame `Vec` churn | MIT OR Apache-2.0 | Low. Don't use it for `children` before measuring |
 
@@ -287,13 +289,13 @@ Actions: **Add**, **Alter** (version, features or usage), **Swap** (replace a me
 | `rust-toolchain.toml` | Pin `channel = "1.97.0"` (≥ 1.95 needed for the graphics upgrade) | CI can break on new lints with no code change | Low |
 | `[profile.release]` | `lto = "thin"`, `debug = "line-tables-only"`; new `[profile.dist]` with fat LTO, `codegen-units = 1`, `strip = "debuginfo"` for `release.yml`. Keep `panic = "unwind"`: asset loaders and editor Play rely on `catch_unwind` | No release tuning today | Low; longer release CI |
 | `[profile.dev.package.axcenity-script]` | `opt-level = 1` | Editor Play runs Lua glue unoptimized | Low |
-| `rapier3d` | `features = ["parallel"]` behind an `axcenity-physics/parallel` feature, **after measuring** | Single-threaded solver | Medium: gains need many islands; check determinism across thread counts [verify]. `simd8`: defer. `enhanced-determinism`: reject |
+| `rapier3d` | `features = ["parallel"]` behind an `axcenity-physics/parallel` feature, **after measuring** | Single-threaded solver | Medium: gains need many islands; check results stay consistent on one machine across thread counts [verify]. Cross-machine determinism is not a requirement (policy). `simd8`: defer. `enhanced-determinism`: reject |
 | `mlua` | Keep 0.12.2 (latest). Later add `luau-jit` for opt-in `--!native` scripts | No codegen | Medium: x86-64/AArch64 only; check watchdog and debugger interaction [verify] |
 | `luau0-src` | Keep `=0.22.0`; add a test that loads a compiled chunk and a CI check that the pin hasn't moved; file an upstream issue on mlua-sys's range | Fragile coupling | None |
 | `rustc-hash` (usage) | Use `FxHashMap` for engine-keyed long-lived maps (`World` side tables `world.rs:272-275`, renderer caches `renderer/types.rs:926-931`, `scene/src/streaming.rs:46-48`); keep SipHash for network or user keys | Mixed hashing | Low |
 | `rayon` (usage) | Widen to draw-list build, animator posing, audio diff and nav fingerprint over `&World`, applying writes in index order | Only `render` is parallel | Determinism handled by ordered apply |
-| `renet_netcode` config | `ServerAuthentication::Secure` with connect tokens for dedicated servers; LAN and editor hosting can stay unsecure with a visible label | Unsecure on both ends (`net/src/transport.rs:240, 415`) | Medium: token issuance UX |
-| Graphics stack (together) | `wgpu 30` + `eframe/egui 0.36.2` + `egui_dock 0.21.1` + `egui-phosphor 0.14` + `glyphon 0.12`; winit stays 0.30.13 [cr]. Not eframe 0.37 until egui_dock supports it | Five wgpu majors behind | **High churn** in `render` and shaders; do it only after GPU tests run in CI |
+| `renet_netcode` config | **Deferred (policy):** `ServerAuthentication::Secure` with connect tokens for internet-hosted dedicated servers; LAN and editor hosting can stay unsecure with a visible label | Unsecure on both ends (`net/src/transport.rs:240, 415`) | Medium: token issuance UX |
+| Graphics stack (together) | `wgpu 30` + `eframe/egui 0.36.2` + `egui_dock 0.21.1` + `egui-phosphor 0.14` + `glyphon 0.12`; winit stays 0.30.13 [cr]. Not eframe 0.37 until egui_dock supports it | Five wgpu majors behind | **High churn** in `render` and shaders; do it only once the GPU tests pass locally on a real GPU on Windows and Linux, before and after the upgrade (CI is off by policy) |
 | Patch bumps | `glam` 0.34.3, `kira` 0.12.6, `renet` 2.0.1, then `cargo hakari generate` | Hygiene | Low. The 5 glam copies come from rapier, kira and nalgebra and can only unify by following rapier |
 
 ### 4.3 Swap
@@ -562,7 +564,7 @@ Effort is for one developer: **S** ≤ 3 days, **M** 1–3 weeks, **L** 1–3 mo
 
 | # | Item | Files | Effort | Benefit / metric | Risk | Verdict |
 |---|---|---|---|---|---|---|
-| **I1** | **Measure first:** headless S10k benchmark, `profiling` spans in all four hosts and in `build_draw_list`, `ScriptRuntime::step`, `Physics::step` (sync / substeps / write-back), `Replicator::frame`; `profile-tracy` feature; criterion micro-benches | new `testing/benches/sim.rs`, hosts, workspace `Cargo.toml` | M− (5–7 d) | Turns every [I] in this report into numbers; regression baseline | Low (record-only nightly; shared runners are noisy) | **Do first; gates every perf item** |
+| **I1** | **Measure first:** headless S10k benchmark, `profiling` spans in all four hosts and in `build_draw_list`, `ScriptRuntime::step`, `Physics::step` (sync / substeps / write-back), `Replicator::frame`; `profile-tracy` feature; criterion micro-benches | new `testing/benches/sim.rs`, hosts, workspace `Cargo.toml` | M− (5–7 d) | Turns every [I] in this report into numbers; regression baseline | Low (run locally; no nightly CI, per policy) | **Do first; gates every perf item** |
 | **I2** | **Fix Instances as Lua table keys.** Test first (`t[workspace.Baseplate] = 1`, `rawequal`, `data[player]` across `PlayerAdded`), then route every `LuaInstance` creation through a per-VM weak-valued cache | `script/src/types.rs:954-958`, `instance.rs:150, 246` | S (1–2 d) | Correctness for a common Roblox idiom; fewer allocations | Low (generational IDs make reuse safe) | **Do now** |
 | I3 | Fix stale docs: "CI is off", editor Play network step and its three ordering differences, `net` in the editor's deps | `docs/development.md:39`, `docs/architecture/frame-loop.md:13`, `docs/architecture/crates.md:30` | S (hours) | Accurate docs for future work | None | Do now |
 | I4 | Cheap `with_world`: hold `Option<World>` in app data, or a service-less `World::placeholder()` | `script/src/lib.rs:2371-2378` | S (≤1 d) | Tens of µs per frame [I] | Low | Do |
@@ -587,9 +589,9 @@ Effort is for one developer: **S** ≤ 3 days, **M** 1–3 weeks, **L** 1–3 mo
 | M7 | Replication: motion revision + `postcard` wire | M (1–2 wk) | Server ms with 8 loopback clients; snapshot bytes | Medium: protocol bump | M2 | Do |
 | **M8** | Cut `script → render/audio/mesh_edit` edges (4.4) | S–M (1 wk) | Server stops linking wgpu/cpal; smaller rebuild fan-out | Low | — | **Cheap, do early** |
 | M9 | `.axgame` zstd + read in place (no temp unpack) | M (1 wk) | Pack size, launch time | Low | — | Do after measuring the ratio |
-| M10 | CI: lavapipe GPU tests on Linux, nightly I1 benches, run `axcenity-test` and the server headless, ship server + test binaries, `intel_tex_2` player gate | S–M (1 wk) | Real render coverage; perf trend | Low | I1 | Do (gates M12) |
-| M11 | renet secure mode for dedicated servers | M (1–2 wk) | Encrypted, token-gated connections | Medium: token UX | — | Do **before** any internet-hosting claim |
-| M12 | wgpu 30 / egui 0.36 stack upgrade | M–L (2–4 wk) | Unblocks newer wgpu features (and L5) | **High**: API and naga churn | M10, I5 | Do, not before M10 |
+| M10 | CI: lavapipe GPU tests on Linux, nightly I1 benches, run `axcenity-test` and the server headless, ship server + test binaries, `intel_tex_2` player gate | S–M (1 wk) | Real render coverage; perf trend | Low | I1 | **Deferred (policy: Actions is off).** The platform check scripts already run `axcenity-test` and the headless server locally; add the `intel_tex_2` gate there with L2. Revisit when the architecture is stable |
+| M11 | renet secure mode for dedicated servers | M (1–2 wk) | Encrypted, token-gated connections | Medium: token UX | — | **Deferred (policy).** Internet hosting is a future objective; do this before any internet-hosting claim |
+| M12 | wgpu 30 / egui 0.36 stack upgrade | M–L (2–4 wk) | Unblocks newer wgpu features (and L5) | **High**: API and naga churn | I5 | Do, once the GPU tests pass locally on a real GPU on Windows and Linux (replaces the old M10 gate) |
 | M13 | Nav build on a worker + one shared navmesh cache (drop the second cache in `script::humanoid`) | S–M (1 wk) | No build hitch; no double builds | Low | I7 | Do |
 | M14 | UI layout cache: reuse `TaffyTree`, style cache, one layout per editor frame | M (2 wk) | UI ms with a 500-element inventory | Medium | I1 | Do if I1 shows UI > 1 ms |
 
@@ -598,10 +600,10 @@ Effort is for one developer: **S** ≤ 3 days, **M** 1–3 weeks, **L** 1–3 mo
 | # | Item | Effort | Benefit / metric | Risk | Depends on | Verdict |
 |---|---|---|---|---|---|---|
 | L1 | Per-class property slots + `Prop` IDs + dirty bits (5.3 step 2) | L (1–2 mo) | ~2 KB → ~0.5 KB per Part [I]; ns per read; cheaper `World::clone` for undo and Play | Medium–high: ~500 call sites; reflection consumers (Properties panel, world file, saves, net) | M2 | Do **after** M2 and M4 show property access still dominates |
-| L2 | Import pipeline: sidecars + UIDs + cooked meshes + offline LODs + BC7/KTX2 + offline mips (5.4 phase 2) | L (1.5–2 mo) | VRAM ~4× lower for textures [K]; no runtime FBX parse in shipped games; rename-safe references | Medium: two content paths during transition | M5, M9 | **Do; the biggest shipped-game win** |
-| L3 | Luau native `vector` for Vector3 + opt-in `luau-jit` (`--!native`) | L (1 mo+) | Numeric script benches; allocations per `part.Position + v` | **High** compatibility: `typeof`, field casing, definitions, blocks translator | M6 | `luau-jit` opt-in first (cheap); `vector` only with a compat suite |
+| L2 | Import pipeline: sidecars + UIDs + cooked meshes + offline LODs + BC7/KTX2 + offline mips (5.4 phase 2) | L (1.5–2 mo) | VRAM ~4× lower for textures [K]; no runtime FBX parse in shipped games; rename-safe references | Medium: two content paths during transition | M5, M9 | **Do; the biggest shipped-game win.** Desktop formats only (BC7); ASTC/ETC2 aren't needed while mobile is deferred |
+| L3 | Faster Vector3 (first-class engine type) + opt-in `luau-jit` (`--!native`) | L (1 mo+) | Numeric script benches; allocations per `part.Position + v` | **High** compatibility: `typeof`, field casing, definitions, blocks translator | M6 | `luau-jit` opt-in first (cheap; x86-64/AArch64 is fine for desktop). **Don't choose Luau's native `vector` representation until its type identity and interop are verified** against the checks in the [policy](../development-policy.md#scripting-api-and-vector3); keep a compatible public Vector3 API over whatever internal representation is fastest. Exact `typeof(v) == "Vector3"` is desirable if it doesn't compromise the architecture |
 | L4 | Parallel read / serial write stages (5.5) | L (1–2 mo, incremental) | S10k frame ms on 8+ cores | Medium: ordered apply for determinism | M1, M4 | Do, targeted by I1 data |
-| L5 | GPU-driven path: shared mesh arena, persistent instance buffers for static items, slim shadow stream, `multi_draw_indexed_indirect` | L (2–3 mo) | Render CPU ms on forest/terrain benches | Medium: feature availability per backend [verify Metal] | M12 | Later, after M4 removes the scene-side cost |
+| L5 | GPU-driven path: shared mesh arena, persistent instance buffers for static items, slim shadow stream, `multi_draw_indexed_indirect` | L (2–3 mo) | Render CPU ms on forest/terrain benches | Medium: feature availability per backend (Vulkan and DX12 first; Metal is secondary) [verify] | M12 | Later, after M4 removes the scene-side cost |
 | L6 | Split `editor` into sub-crates behind an `EditorContext` (animation, model_studio, ui_designer, block_editor first, ~50k LOC) | L (2–3 mo, incremental) | Incremental rebuild 5–6 s → ~2 s target [I]; enforced boundaries | Medium: 109-field `EditorApp` | — | Do opportunistically, one panel family per PR |
 | L7 | Move gameplay systems out of `script` into a `gameplay` crate behind a `GameSystem` trait (registers its Lua API and its schedule steps) | L (1–2 mo) | `ScriptRuntime` shrinks to a VM core; `net` talks to a message interface instead of ~30 methods | Medium | M1, M8 | Do after M1 proves the Schedule |
 | L8 | Render graph (transient aliasing, pass culling) | L | Maintainability | Low urgency | M12 | **Defer** |
@@ -611,7 +613,8 @@ Effort is for one developer: **S** ≤ 3 days, **M** 1–3 weeks, **L** 1–3 mo
 ```
 I1 ──► I2 … I11 (in parallel)
    └─► M8, M2 ──► M1, M3, M4 ──► M5, M6, M7 ──► L1, L4, L7
-M10 ──► M12 ──► L5
+local GPU tests (Windows, Linux) ──► M12 ──► L5
+Deferred by policy: M10 (CI), M11 (internet hosting)
 M5 + M9 ──► L2
 ```
 
@@ -626,11 +629,18 @@ A reasonable first quarter for one developer: I1–I11 (about 4–5 weeks), then
 
 ## 7. Open questions
 
+All five were answered by Paul on 2026-11-10. The full answers and the policy that came with them are in [development-policy.md](../development-policy.md).
+
 1. Is GitHub Actions actually disabled for the repo (as `docs/development.md` says), or is the doc stale?
+   **Answer:** disabled on purpose, while the architecture changes. Testing and verification are local. CI can be reconsidered once the architecture and core systems are stable. M10 is deferred.
 2. Is cross-machine determinism ever a goal (lockstep multiplayer, replays)? If yes, rapier `parallel`/`simd8` and Luau codegen need more care.
+   **Answer:** not now. The priority is reliable, consistent physics behavior and performance on a single machine. Lockstep and deterministic replay are possible later and must not add complexity now, but the architecture shouldn't needlessly prevent them.
 3. Are mobile or web targets planned? Luau codegen has no wasm path, and BC7 is desktop-only (ASTC would be needed).
+   **Answer:** not as immediate priorities. Desktop first, with Windows and Linux as the primary platforms. Stay reasonably portable, but graphics formats and scripting favor desktop performance and capability.
 4. Does the Roblox-compatible surface need `typeof(v) == "Vector3"` exactly? That decides whether native `vector` (L3) is viable.
+   **Answer:** the API is Roblox-inspired, not perfectly compatible, but common Roblox-style APIs and expected type behavior are kept where reasonably practical. Vector3 is a first-class engine type; exact `typeof` is desirable if it doesn't compromise the architecture. Don't choose Luau's native `vector` until its type identity and interop are verified; a compatible public API can sit over an optimized internal representation.
 5. Is internet hosting of dedicated servers planned soon? If so, M11 moves up.
+   **Answer:** it's a future objective, not an immediate priority. The focus is local multiplayer, server/client architecture, networking fundamentals and testing in controlled environments. M11 is deferred.
 
 ---
 

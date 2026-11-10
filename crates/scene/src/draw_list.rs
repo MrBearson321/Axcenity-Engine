@@ -22,7 +22,7 @@ use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
 use crate::graphics_volumes::Look;
 use crate::material;
-use crate::mesh_cache::MeshCache;
+use crate::mesh_cache::{MeshCache, ModelLookup};
 use crate::orientation::rotation_from_orientation;
 use crate::terrain::TerrainCache;
 
@@ -426,7 +426,7 @@ pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawLi
         assets,
         camera,
         &Poses::new(),
-        &mut TerrainCache::new(),
+        &mut TerrainCache::for_one_frame(),
     )
 }
 
@@ -447,88 +447,54 @@ pub fn build_draw_list_posed(
     } else {
         1.0
     };
+    let frame = InstanceFrame {
+        world,
+        assets,
+        poses,
+        glow,
+    };
     let mut items = Vec::new();
-    let mut lights = Vec::new();
-    let mut reflection_probes = Vec::new();
-    let mut light_probe_volumes = Vec::new();
-    let mut decals = Vec::new();
-    let mut characters = crate::decals::Characters::default();
-    terrain.meshes.start_frame();
-    for (id, instance) in world
-        .descendants(world.workspace())
-        .into_iter()
-        // A Tool put away in an Inventory isn't drawn (Phase 45), nor are
-        // the parts kept inside a UnionOperation (Phase 50), nor what
-        // streaming has unloaded (Phase 80).
-        .filter(|&id| !terrain.streaming.is_hidden(id))
-        .filter(|&id| !axcenity_core::csg::out_of_world(world, id))
-        .filter_map(|id| Some((id, world.get(id)?)))
-    {
-        let first_item = items.len();
-        match instance.class() {
-            ClassName::Decal => {
-                let part = instance.parent().and_then(|parent| world.get(parent));
-                items.extend(
-                    part.and_then(|part| {
-                        crate::decals::face_decal_item(id, instance, part, assets)
-                    }),
-                );
-            }
-            ClassName::ProjectedDecal => {
-                decals.extend(crate::decals::projected_decal(instance, assets));
-            }
-            class if class.has_model() => {
-                let posed = poses.get(&id);
-                let meshes = &mut terrain.meshes;
-                mesh_part_draw_items(world, id, instance, assets, posed, meshes, &mut items)
-            }
-            class if class.is_light() => lights.extend(light_of(world, instance)),
-            ClassName::ReflectionProbe => {
-                reflection_probes.extend(reflection_probe_of(world, instance, assets))
-            }
-            ClassName::LightProbeVolume => light_probe_volumes.extend(
-                crate::light_probes::light_probe_volume_of(world, instance, assets),
-            ),
-            // Drawn chunk by chunk below.
-            ClassName::Terrain => {}
-            class if class.is_joint() => {
-                items.extend(crate::constraints::draw_items(world, instance))
-            }
-            _ => {
-                if let Some(mut item) = part_draw_item(world, instance, assets, glow) {
-                    if let Some(extra) = fixture_glow(world, instance) {
-                        for (channel, added) in item.material.emissive.iter_mut().zip(extra) {
-                            *channel = (*channel + added).min(4.0);
-                        }
-                    }
-                    // A capsule is a cylinder and a ball at each end.
-                    let shape = instance.property("Shape").and_then(Value::as_part_type);
-                    if shape == Some(PartType::Capsule) {
-                        for (piece, transform) in part_pieces(PartType::Capsule, item.transform) {
-                            items.push(DrawItem {
-                                shape: built_in_shape(piece),
-                                transform,
-                                ..item.clone()
-                            });
-                        }
-                    } else {
-                        items.push(item);
-                    }
-                }
-            }
-        }
-        // A character's parts are marked, so projected decals that ignore
-        // characters leave them bare.
-        if items.len() > first_item
-            && instance.class().is_base_part()
-            && characters.contains(world, id)
+    let mut other = OtherDrawn::default();
+    if terrain.draw_cache.enabled() {
+        let (cache, streaming) = (&mut terrain.draw_cache, &terrain.streaming);
+        cache.add_to(
+            &frame,
+            streaming,
+            &mut terrain.meshes,
+            &mut items,
+            &mut other,
+        );
+    } else {
+        let mut characters = crate::decals::Characters::default();
+        terrain.meshes.start_frame();
+        for (id, instance) in world
+            .descendants(world.workspace())
+            .into_iter()
+            // A Tool put away in an Inventory isn't drawn (Phase 45), nor are
+            // the parts kept inside a UnionOperation (Phase 50), nor what
+            // streaming has unloaded (Phase 80).
+            .filter(|&id| !terrain.streaming.is_hidden(id))
+            .filter(|&id| !axcenity_core::csg::out_of_world(world, id))
+            .filter_map(|id| Some((id, world.get(id)?)))
         {
-            for item in &mut items[first_item..] {
-                item.decal_role = DecalRole::Character;
-            }
+            add_instance(
+                &frame,
+                id,
+                instance,
+                &mut terrain.meshes,
+                &mut characters,
+                &mut items,
+                &mut other,
+            );
         }
+        terrain.meshes.end_frame();
     }
-    terrain.meshes.end_frame();
+    let OtherDrawn {
+        lights,
+        reflection_probes,
+        light_probe_volumes,
+        decals,
+    } = other;
 
     let mut chunks = Vec::new();
     terrain.draw_all(world, assets, &camera, &mut items, &mut chunks);
@@ -569,6 +535,107 @@ pub fn build_draw_list_posed(
     }
 }
 
+/// What's the same for every Instance drawn in a frame.
+pub(crate) struct InstanceFrame<'a> {
+    pub(crate) world: &'a World,
+    pub(crate) assets: &'a Assets,
+    pub(crate) poses: &'a Poses,
+    /// How much brighter than its color a glowing part is drawn.
+    pub(crate) glow: f32,
+}
+
+/// What a frame's Instances add to the draw list besides draw items.
+#[derive(Default)]
+pub(crate) struct OtherDrawn {
+    pub(crate) lights: Vec<Light>,
+    pub(crate) reflection_probes: Vec<ReflectionProbe>,
+    pub(crate) light_probe_volumes: Vec<axcenity_render::LightProbeVolume>,
+    pub(crate) decals: Vec<axcenity_render::Decal>,
+}
+
+/// Adds what `instance` draws to the frame: its draw items to `items`, and
+/// anything else to `other`. Everything that decides how an Instance is
+/// drawn is here, so a frame built from scratch and one using the
+/// [`DrawCache`](crate::retained::DrawCache) can't draw it differently.
+pub(crate) fn add_instance(
+    frame: &InstanceFrame<'_>,
+    id: InstanceId,
+    instance: &Instance,
+    meshes: &mut MeshCache,
+    characters: &mut crate::decals::Characters,
+    items: &mut Vec<DrawItem>,
+    other: &mut OtherDrawn,
+) {
+    let InstanceFrame {
+        world,
+        assets,
+        poses,
+        glow,
+    } = *frame;
+    let first_item = items.len();
+    match instance.class() {
+        ClassName::Decal => {
+            let part = instance.parent().and_then(|parent| world.get(parent));
+            items.extend(
+                part.and_then(|part| crate::decals::face_decal_item(id, instance, part, assets)),
+            );
+        }
+        ClassName::ProjectedDecal => {
+            other
+                .decals
+                .extend(crate::decals::projected_decal(instance, assets));
+        }
+        class if class.has_model() => {
+            let posed = poses.get(&id);
+            mesh_part_draw_items(world, id, instance, assets, posed, meshes, items)
+        }
+        class if class.is_light() => other.lights.extend(light_of(world, instance)),
+        ClassName::ReflectionProbe => other
+            .reflection_probes
+            .extend(reflection_probe_of(world, instance, assets)),
+        ClassName::LightProbeVolume => {
+            other
+                .light_probe_volumes
+                .extend(crate::light_probes::light_probe_volume_of(
+                    world, instance, assets,
+                ))
+        }
+        // Drawn chunk by chunk, by the terrain cache.
+        ClassName::Terrain => {}
+        class if class.is_joint() => items.extend(crate::constraints::draw_items(world, instance)),
+        _ => {
+            if let Some(mut item) = part_draw_item(world, instance, assets, glow) {
+                if let Some(extra) = fixture_glow(world, instance) {
+                    for (channel, added) in item.material.emissive.iter_mut().zip(extra) {
+                        *channel = (*channel + added).min(4.0);
+                    }
+                }
+                // A capsule is a cylinder and a ball at each end.
+                let shape = instance.property("Shape").and_then(Value::as_part_type);
+                if shape == Some(PartType::Capsule) {
+                    for (piece, transform) in part_pieces(PartType::Capsule, item.transform) {
+                        items.push(DrawItem {
+                            shape: built_in_shape(piece),
+                            transform,
+                            ..item.clone()
+                        });
+                    }
+                } else {
+                    items.push(item);
+                }
+            }
+        }
+    }
+    // A character's parts are marked, so projected decals that ignore
+    // characters leave them bare.
+    if items.len() > first_item && instance.class().is_base_part() && characters.contains(world, id)
+    {
+        for item in &mut items[first_item..] {
+            item.decal_role = DecalRole::Character;
+        }
+    }
+}
+
 /// Builds the shared scene list and lays out its UI for a physical-pixel viewport.
 pub fn build_draw_list_with_ui(
     world: &World,
@@ -589,7 +656,7 @@ pub fn build_draw_list_with_ui(
             seconds: 0.0,
         },
         &Poses::new(),
-        &mut TerrainCache::new(),
+        &mut TerrainCache::for_one_frame(),
     )
     .0
 }
@@ -1049,9 +1116,10 @@ fn place_maps(material: &mut Material, appearance: &Instance) {
 
 /// A MeshPart's draw items, one per part of its model, each with the
 /// model's own material, or its `MaterialVariant` in place of them all, or
-/// with the maps of the SurfaceAppearance inside it for that material. Until it has a model (no `MeshId` yet, or one
-/// that can't be loaded), it's drawn as a plain grey box, so it can still
-/// be seen and picked. With `posed` (a pose of its model), the model is
+/// with the maps of the SurfaceAppearance inside it for that material. While its model
+/// is still loading, nothing is drawn for it. With no model at all (no
+/// `MeshId` yet, or one that can't be loaded), it's drawn as a plain grey
+/// box, so it can still be seen and picked. With `posed` (a pose of its model), the model is
 /// drawn in that pose.
 fn mesh_part_draw_items(
     world: &World,
@@ -1074,20 +1142,24 @@ fn mesh_part_draw_items(
         .property("MeshId")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let Some((model, pieces)) = meshes.models.get(assets, mesh_id) else {
-        items.push(DrawItem {
-            shape: Shape::Block,
-            transform,
-            material: Material::default(),
-            uv_tile: 0.0,
-            casts_shadow: casts_shadow(instance),
-            id: 0,
-            cull_distance: 0.0,
-            skin: None,
-            sway: None,
-            decal_role: Default::default(),
-        });
-        return;
+    let (model, pieces) = match meshes.models.get(assets, mesh_id) {
+        ModelLookup::Ready(model, pieces) => (model, pieces),
+        ModelLookup::Loading => return,
+        ModelLookup::Failed => {
+            items.push(DrawItem {
+                shape: Shape::Block,
+                transform,
+                material: Material::default(),
+                uv_tile: 0.0,
+                casts_shadow: casts_shadow(instance),
+                id: 0,
+                cull_distance: 0.0,
+                skin: None,
+                sway: None,
+                decal_role: Default::default(),
+            });
+            return;
+        }
     };
     let appearances: Vec<&Instance> = instance
         .children()
@@ -1259,7 +1331,7 @@ pub(crate) fn push_model(
 /// paints tens of thousands of copies of a few models, so this is worked
 /// out once a frame per model rather than once per copy.
 pub(crate) struct ModelPiece {
-    shape: Shape,
+    pub(crate) shape: Shape,
     material: Material,
     sway: f32,
     flutter: f32,

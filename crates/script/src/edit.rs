@@ -14,7 +14,6 @@
 //!   such as `Selection`.
 
 use axcenity_core::{InstanceId, RecordedChange, World};
-use mlua::chunk::ChunkMode;
 use mlua::{Function, IntoLuaMulti, Lua, Table, Value};
 
 use crate::context::Context;
@@ -76,14 +75,8 @@ impl EditRuntime {
     /// Compiles the file `path` (its code `source`) to run in `env`. Its
     /// errors read `path:line: message`.
     pub fn load(&self, env: &Table, path: &str, source: &str) -> mlua::Result<Function> {
-        self.context
-            .lua
-            .load(source)
-            .set_name(format!("@{path}"))
-            // Only source text: bytecode can crash the interpreter.
-            .set_mode(ChunkMode::Text)
-            .set_environment(env.clone())
-            .into_function()
+        // Compiled once per source, as for scripts (see `chunks`).
+        crate::chunks::load(&self.context.lua, path, source, env.clone())
     }
 
     /// Calls `function` with `args` as a coroutine of its own, with `world`
@@ -100,7 +93,8 @@ impl EditRuntime {
     /// Moves the clock on by `seconds` and resumes the coroutines that
     /// are due (`task.wait`, `task.delay`).
     pub fn step(&self, world: &mut World, seconds: f64) {
-        self.context.step(world, Vec::new(), seconds);
+        let destroyed = world.take_destroyed();
+        self.context.step(world, Vec::new(), seconds, &destroyed);
     }
 
     /// True while a coroutine waits for [`step`](Self::step).

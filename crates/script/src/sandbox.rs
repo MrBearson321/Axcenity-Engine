@@ -92,6 +92,8 @@ impl Shared {
     pub fn install(lua: &Lua) -> mlua::Result<()> {
         let protected = errors::protected_calls(lua)?;
         let coroutine = watchdog::coroutine_functions(lua, &protected.clean)?;
+        // Notes what it hands out, so those coroutines aren't reused.
+        coroutine.raw_set("running", crate::handler_threads::running(lua)?)?;
         let globals = lua.globals();
         let setmetatable = lua.load(SET_METATABLE).set_name("=[engine]").call((
             globals.raw_get::<Function>("setmetatable")?,

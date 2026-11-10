@@ -34,7 +34,7 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 Block scripts are translated to Lua at project load and run through the same `ScriptRuntime` as handwritten scripts. Hosts hand queued sound actions to their `GameAudio` after script steps, and fire `Ended` for the sounds it reports finished; the player owns playback for its lifetime, while editor Play owns a separate `GameAudio` that is dropped on Stop.
 
 Rules:
-- `player` must **never** depend on `editor`, `egui`, `blocks` (the block editor's side) or `plugins`. It loads block scripts and UI Event Graphs through `project`, which translates them with `blocks-runtime`. CI checks this.
+- `player` must **never** depend on `editor`, `egui`, `blocks` (the block editor's side) or `plugins`. It loads block scripts and UI Event Graphs through `project`, which translates them with `blocks-runtime`. The platform check scripts check this (`scripts/check-platform.sh`, "The player has no editor code").
 - `render` never sees Instances, scripts or the editor. Something outside it turns the world into a draw list (meshes, materials, transforms, lights, camera).
 - `ui` reads the Instance tree and adds screen-space layout data to the render draw list; `render` remains Instance-free.
 - Don't let crates depend on each other in a cycle. If two crates need each other, move the shared type into `core`.

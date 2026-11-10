@@ -318,15 +318,32 @@ pub struct Tweens {
 }
 
 impl Tweens {
-    /// The ids of tweens a script may still hold, forgetting the rest.
-    pub fn alive(&mut self) -> Vec<u64> {
-        self.made.retain(|(_, tween)| tween.strong_count() > 0);
-        self.made.iter().map(|(id, _)| *id).collect()
+    /// The ids of tweens no script holds any more, forgetting them.
+    pub fn take_dead(&mut self) -> Vec<u64> {
+        let mut dead = Vec::new();
+        self.made.retain(|(id, tween)| {
+            let alive = tween.strong_count() > 0;
+            if !alive {
+                dead.push(*id);
+            }
+            alive
+        });
+        dead
     }
 
     fn stop(&mut self, tween: &Rc<RefCell<TweenState>>) {
         self.playing.retain(|playing| !Rc::ptr_eq(playing, tween));
     }
+}
+
+/// Whether a script may still hold the tween numbered `id`.
+pub fn is_alive(lua: &Lua, id: u64) -> bool {
+    lua.app_data_ref::<Tweens>().is_some_and(|tweens| {
+        tweens
+            .made
+            .iter()
+            .any(|(made, tween)| *made == id && tween.strong_count() > 0)
+    })
 }
 
 fn tweens_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, Tweens>> {

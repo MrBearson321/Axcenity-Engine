@@ -70,7 +70,7 @@ pub use light_probes::{
     encode_light_probes, is_light_probes_file, light_probes_path, read_light_probes,
     write_light_probes,
 };
-pub use loading::{LoadStatus, LoadTicket};
+pub use loading::{LoadStatus, LoadTicket, Slot};
 pub use material::{
     MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MapSettings, MaterialChain, MaterialFile,
     MaterialFileError, MaterialMaps, MaterialShader, OutlineFile, ParamValue, Shading,
@@ -216,7 +216,23 @@ impl Assets {
     /// draw them as they really are. Only the editor sets one, and only
     /// while editing, so the image is never part of a project or a game.
     pub fn set_blueprint(&self, image: Option<Arc<Image>>) {
-        self.lock().blueprint = image;
+        let mut shared = self.lock();
+        // The editor calls this every frame, so only a real change counts.
+        let same = match (&shared.blueprint, &image) {
+            (Some(old), Some(new)) => Arc::ptr_eq(old, new),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            shared.blueprint = image;
+            shared.generation += 1;
+        }
+    }
+
+    /// Whether `other` is this same set of assets (a clone of it), rather
+    /// than another's that happens to hold the same files.
+    pub fn same_as(&self, other: &Assets) -> bool {
+        Arc::ptr_eq(&self.shared, &other.shared)
     }
 
     /// The image set by [`set_blueprint`](Self::set_blueprint).

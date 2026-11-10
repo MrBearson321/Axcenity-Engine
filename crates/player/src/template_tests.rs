@@ -107,82 +107,127 @@ impl App {
     fn game_frame(&mut self, events: &[InputEvent], motion: MoveInput) -> Vec<String> {
         let seconds = FRAME;
         let mut problems = Vec::new();
-        self.network
-            .receive(&mut self.world, &mut self.scripts, f64::from(seconds));
+        self.network.receive(
+            &mut self.sim.world,
+            &mut self.sim.scripts,
+            f64::from(seconds),
+        );
         problems.extend(
             self.network
                 .take_log()
                 .into_iter()
                 .filter(|line| line.starts_with("warning") || line.starts_with("error")),
         );
-        if self.scripts.is_client_only() && !self.following {
+        if self.sim.scripts.is_client_only() && !self.following {
             self.follow_server();
         }
         let simulates = !self.following;
-        let others = self.network.other_characters(&self.world, &self.scripts);
-        self.characters
-            .set_players(self.scripts.local_player(), others);
+        let others = self
+            .network
+            .other_characters(&self.sim.world, &self.sim.scripts);
+        self.sim
+            .characters
+            .set_players(self.sim.scripts.local_player(), others);
         self.network.set_running(motion.run);
-        self.characters
-            .step(&mut self.world, &self.assets, motion, seconds);
-        fire_seated(&mut self.scripts, &mut self.world, &mut self.characters);
+        self.sim
+            .characters
+            .step(&mut self.sim.world, &self.sim.assets, motion, seconds);
+        fire_seated(
+            &mut self.sim.scripts,
+            &mut self.sim.world,
+            &mut self.sim.characters,
+        );
         if simulates {
-            fire_landed(&mut self.scripts, &mut self.world, &mut self.characters);
-            self.scripts
-                .step_humanoids(&mut self.world, &self.characters, f64::from(seconds));
-            self.scripts
-                .step_players(&mut self.world, f64::from(seconds));
-            self.agents.step(&mut self.world, &self.assets, seconds);
-            problems.extend(self.agents.take_warnings());
-            fire_sensed(&mut self.scripts, &mut self.world, &mut self.agents);
+            fire_landed(
+                &mut self.sim.scripts,
+                &mut self.sim.world,
+                &mut self.sim.characters,
+            );
+            self.sim.scripts.step_humanoids(
+                &mut self.sim.world,
+                &self.sim.characters,
+                f64::from(seconds),
+            );
+            self.sim
+                .scripts
+                .step_players(&mut self.sim.world, f64::from(seconds));
+            self.sim
+                .agents
+                .step(&mut self.sim.world, &self.sim.assets, seconds);
+            problems.extend(self.sim.agents.take_warnings());
+            fire_sensed(
+                &mut self.sim.scripts,
+                &mut self.sim.world,
+                &mut self.sim.agents,
+            );
         }
         self.begin_camera(seconds, VIEW);
-        self.scripts.input_events(&mut self.world, events);
+        self.sim.scripts.input_events(&mut self.sim.world, events);
         if simulates {
-            self.scripts
-                .step_prompts(&mut self.world, f64::from(seconds));
-            self.scripts.step_tools(&mut self.world);
+            self.sim
+                .scripts
+                .step_prompts(&mut self.sim.world, f64::from(seconds));
+            self.sim.scripts.step_tools(&mut self.sim.world);
         }
-        self.scripts.step(&mut self.world, f64::from(seconds));
-        self.scripts.stepped(&mut self.world, f64::from(seconds));
-        let held = self.network.held_parts(&self.world, &self.scripts);
-        self.physics.set_held(held);
+        self.sim
+            .scripts
+            .step(&mut self.sim.world, f64::from(seconds));
+        self.sim
+            .scripts
+            .stepped(&mut self.sim.world, f64::from(seconds));
+        let held = self.network.held_parts(&self.sim.world, &self.sim.scripts);
+        self.sim.physics.set_held(held);
         if !simulates && self.network.simulates_physics() {
-            self.physics.step(&mut self.world, f64::from(seconds));
-            let _ = self.physics.take_touches();
-            let _ = self.physics.take_touch_ends();
+            self.sim
+                .physics
+                .step(&mut self.sim.world, f64::from(seconds));
+            let _ = self.sim.physics.take_touches();
+            let _ = self.sim.physics.take_touch_ends();
         }
         if simulates {
-            self.characters.keep_kinematic(&mut self.world);
-            self.agents.keep_kinematic(&mut self.world);
-            self.scripts
-                .apply_shatters(&mut self.world, &mut self.physics);
-            self.physics.step(&mut self.world, f64::from(seconds));
-            let touches = self.physics.take_touches();
-            self.scripts.fire_touched(&mut self.world, &touches);
-            let ends = self.physics.take_touch_ends();
-            self.scripts.fire_touch_ended(&mut self.world, &ends);
-            self.scripts.fire_breaks(&mut self.world, &mut self.physics);
-            self.scripts
-                .step_health(&mut self.world, f64::from(seconds));
+            self.sim.characters.keep_kinematic(&mut self.sim.world);
+            self.sim.agents.keep_kinematic(&mut self.sim.world);
+            self.sim
+                .scripts
+                .apply_shatters(&mut self.sim.world, &mut self.sim.physics);
+            self.sim
+                .physics
+                .step(&mut self.sim.world, f64::from(seconds));
+            let touches = self.sim.physics.take_touches();
+            self.sim.scripts.fire_touched(&mut self.sim.world, &touches);
+            let ends = self.sim.physics.take_touch_ends();
+            self.sim
+                .scripts
+                .fire_touch_ended(&mut self.sim.world, &ends);
+            self.sim
+                .scripts
+                .fire_breaks(&mut self.sim.world, &mut self.sim.physics);
+            self.sim
+                .scripts
+                .step_health(&mut self.sim.world, f64::from(seconds));
         }
-        self.scripts.heartbeat(&mut self.world, f64::from(seconds));
-        let events = self
-            .animators
-            .update(&mut self.world, &self.assets, f64::from(seconds));
+        self.sim
+            .scripts
+            .heartbeat(&mut self.sim.world, f64::from(seconds));
+        let events =
+            self.sim
+                .animators
+                .update(&mut self.sim.world, &self.sim.assets, f64::from(seconds));
         for event in events {
             let (animator, name, args) = event.script_event();
-            self.scripts
-                .fire_instance_event(&mut self.world, animator, name, &args);
+            self.sim
+                .scripts
+                .fire_instance_event(&mut self.sim.world, animator, name, &args);
         }
-        problems.extend(self.animators.take_errors());
-        self.scripts
-            .place_tools(&mut self.world, self.animators.poses());
+        problems.extend(self.sim.animators.take_errors());
+        self.sim
+            .scripts
+            .place_tools(&mut self.sim.world, self.sim.animators.poses());
         self.render_step(seconds);
         self.end_camera(seconds);
-        problems.extend(self.assets.take_errors());
-        self.network.send(&self.world, &mut self.scripts);
-        for line in self.scripts.take_output() {
+        problems.extend(self.sim.assets.take_errors());
+        self.network.send(&self.sim.world, &mut self.sim.scripts);
+        for line in self.sim.scripts.take_output() {
             if !matches!(line.kind, OutputKind::Print) {
                 problems.push(line.text);
             }
@@ -233,17 +278,18 @@ fn every_genre_template_plays_as_a_built_game_without_errors() {
         }
         assert!(problems.is_empty(), "{}: {problems:#?}", template.name());
         // It ran: the player has a character and the menu is theirs.
-        let player = app.scripts.local_player().expect("the player joined");
+        let player = app.sim.scripts.local_player().expect("the player joined");
         assert!(
-            character_of(&app.world, player).is_some(),
+            character_of(&app.sim.world, player).is_some(),
             "{}",
             template.name()
         );
         let menu = app
+            .sim
             .world
-            .find_first_child(app.world.workspace(), "GameMenu")
+            .find_first_child(app.sim.world.workspace(), "GameMenu")
             .unwrap();
-        assert_eq!(owner(&app.world, menu).as_deref(), Some("Player"));
+        assert_eq!(owner(&app.sim.world, menu).as_deref(), Some("Player"));
         let _ = fs::remove_dir_all(&folder);
         let _ = fs::remove_dir_all(&saves);
     }
@@ -401,7 +447,7 @@ fn the_arena_hosted_with_two_players_joined_keeps_each_players_team_menu_and_sta
         no_input,
         &|d| {
             d.iter().all(|device| {
-                let world = &device.world;
+                let world = &device.sim.world;
                 let list = players(world);
                 list.len() == 3
                     && list.iter().all(|(_, id)| {
@@ -410,7 +456,7 @@ fn the_arena_hosted_with_two_players_joined_keeps_each_players_team_menu_and_sta
             })
         },
     );
-    let server = &devices[0].world;
+    let server = &devices[0].sim.world;
     let teams: Vec<_> = ["Player", "Player2", "Player3"]
         .into_iter()
         .map(|name| team(server, player(server, name)))
@@ -428,27 +474,30 @@ fn the_arena_hosted_with_two_players_joined_keeps_each_players_team_menu_and_sta
     // Each device plays with its own menu: the host's is the world's, and
     // each joined player's is a copy of its own.
     for (n, name) in ["Player", "Player2", "Player3"].into_iter().enumerate() {
-        let world = &devices[n].world;
-        assert_eq!(devices[n].scripts.local_player(), Some(player(world, name)));
+        let world = &devices[n].sim.world;
+        assert_eq!(
+            devices[n].sim.scripts.local_player(),
+            Some(player(world, name))
+        );
         assert!(claimed(world, "GameMenu", name).is_some(), "{name}'s menu");
         assert!(claimed(world, "Hud", name).is_some(), "{name}'s HUD");
     }
     // The host pauses: their menu opens, and no one else's does.
     host_taps(&mut devices, KeyCode::Escape);
-    let host_menu = claimed(&devices[0].world, "GameMenu", "Player").unwrap();
-    assert!(visible(&devices[0].world, host_menu, "Pause"));
+    let host_menu = claimed(&devices[0].sim.world, "GameMenu", "Player").unwrap();
+    assert!(visible(&devices[0].sim.world, host_menu, "Pause"));
     for (n, name) in [(1, "Player2"), (2, "Player3")] {
-        let world = &devices[n].world;
+        let world = &devices[n].sim.world;
         let menu = claimed(world, "GameMenu", name).unwrap();
         assert!(!visible(world, menu, "Pause"), "{name}'s menu stays shut");
     }
     host_taps(&mut devices, KeyCode::Escape);
-    assert!(!visible(&devices[0].world, host_menu, "Pause"));
+    assert!(!visible(&devices[0].sim.world, host_menu, "Pause"));
 
     // Chat from a joined player reaches everyone.
     // The join messages went out as each joined, before their device was
     // in the chat, so the host has them all.
-    let host_chat = devices[0].scripts.chat_lines();
+    let host_chat = devices[0].sim.scripts.chat_lines();
     for line in [
         "Player joined the Red team",
         "Player2 joined the Blue team",
@@ -459,7 +508,7 @@ fn the_arena_hosted_with_two_players_joined_keeps_each_players_team_menu_and_sta
             "{host_chat:?}"
         );
     }
-    devices[1].scripts.send_chat("good luck!");
+    devices[1].sim.scripts.send_chat("good luck!");
     run_until(
         &mut devices,
         3.0,
@@ -467,7 +516,7 @@ fn the_arena_hosted_with_two_players_joined_keeps_each_players_team_menu_and_sta
         no_input,
         &|d| {
             d.iter().all(|device| {
-                device.scripts.chat_lines().iter().any(|line| {
+                device.sim.scripts.chat_lines().iter().any(|line| {
                     line.from.as_deref() == Some("Player2") && line.text == "good luck!"
                 })
             })
@@ -476,7 +525,7 @@ fn the_arena_hosted_with_two_players_joined_keeps_each_players_team_menu_and_sta
 
     // The host swings at Player2 until they're knocked out: a kill for the
     // host, a death for Player2, on every device, and Player2 respawns.
-    let server = &mut devices[0].world;
+    let server = &mut devices[0].sim.world;
     let host_character = character_of(server, player(server, "Player")).unwrap();
     let blue = player(server, "Player2");
     let target = character_of(server, blue).unwrap();
@@ -503,7 +552,7 @@ fn the_arena_hosted_with_two_players_joined_keeps_each_players_team_menu_and_sta
         &mut swing,
         &|d| {
             d.iter().all(|device| {
-                let world = &device.world;
+                let world = &device.sim.world;
                 stat(world, player(world, "Player"), "Kills") == Some(1.0)
                     && stat(world, player(world, "Player2"), "Deaths") == Some(1.0)
             })
@@ -517,6 +566,7 @@ fn the_arena_hosted_with_two_players_joined_keeps_each_players_team_menu_and_sta
         &|d| {
             d.iter().all(|device| {
                 device
+                    .sim
                     .scripts
                     .chat_lines()
                     .iter()
@@ -525,7 +575,7 @@ fn the_arena_hosted_with_two_players_joined_keeps_each_players_team_menu_and_sta
         },
     );
     run_until(&mut devices, 6.0, "Player2 respawned", no_input, &|d| {
-        let world = &d[0].world;
+        let world = &d[0].sim.world;
         character_of(world, player(world, "Player2")).is_some_and(|character| {
             character != target && (character_at(world, character).x - 36.0).abs() < 8.0
         })
@@ -534,7 +584,7 @@ fn the_arena_hosted_with_two_players_joined_keeps_each_players_team_menu_and_sta
     for device in &mut devices {
         device
             .network
-            .disconnect(&mut device.world, &mut device.scripts);
+            .disconnect(&mut device.sim.world, &mut device.sim.scripts);
     }
     let _ = fs::remove_dir_all(&folder);
     let _ = fs::remove_dir_all(&saves);
@@ -573,8 +623,8 @@ fn write_template_pictures() {
         // Models load the first time they're drawn, so draw twice.
         for _ in 0..2 {
             let draw_list = axcenity_scene::build_draw_list_with_ui(
-                &app.world,
-                &app.assets,
+                &app.sim.world,
+                &app.sim.assets,
                 camera,
                 VIEW,
                 &app.stylesheets,

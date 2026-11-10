@@ -21,7 +21,7 @@ Implement the user's requested scope end to end: inspect only relevant context, 
 
 - Stage only files this task changed. Leave unrelated working-tree changes alone and mention them.
 - Message: a short title in the repo's style (for example "Jump, Slopes and Steps"), a blank line, a one-paragraph body if useful, and the attribution line the session asks for.
-- `git push origin HEAD`. If the push is rejected, report it; don't force-push or rebase someone else's work. After pushing, check the CI run with `gh run list --limit 3` only if the user asks about CI.
+- `git push origin HEAD`. If the push is rejected, report it; don't force-push or rebase someone else's work. GitHub Actions is off on purpose, so nothing runs after a push; the local checks are the verification.
 
 ## Final response
 

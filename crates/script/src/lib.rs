@@ -51,6 +51,7 @@ mod camera;
 mod cframe;
 mod changes;
 mod chat;
+mod chunks;
 mod click;
 mod client;
 mod collection;
@@ -73,6 +74,7 @@ mod edit;
 mod errors;
 mod events;
 mod gui_service;
+mod handler_threads;
 mod health;
 mod http;
 mod humanoid;
@@ -818,6 +820,9 @@ impl ScriptRuntime {
         self.client_only = true;
         *world = replica;
         world.record_changes();
+        for side in [Side::Server, Side::Client] {
+            self.context(side).forget_missing_instances(world);
+        }
         self.client.set_local_player(player);
         self.fire_changes(world);
     }
@@ -1284,9 +1289,11 @@ impl ScriptRuntime {
             });
         }
         self.fire_changes(world);
+        let destroyed = world.take_destroyed();
         for side in [Side::Server, Side::Client] {
             let messages = self.transport.receive(side);
-            self.context(side).step(world, messages, seconds);
+            self.context(side)
+                .step(world, messages, seconds, &destroyed);
             self.collect(side);
             self.fire_changes(world);
         }
@@ -2353,12 +2360,16 @@ pub fn run_edit_command(world: &mut World, source: &str) -> Result<EditCommand, 
         running: false,
     });
     let was_recording = world.is_recording_changes();
+    let was_watching = world.is_watching_destroyed();
     let first = world.next_change_number();
     world.record_changes();
     let result = context.run_command(world, source);
     let changed = world.next_change_number() != first;
     if !was_recording {
         world.stop_recording_changes();
+    }
+    if !was_watching {
+        world.stop_watching_destroyed();
     }
     result.map(|()| EditCommand {
         output: context.take_output(),
@@ -2416,6 +2427,18 @@ mod camera_tests;
 
 #[cfg(test)]
 mod events_tests;
+
+#[cfg(test)]
+mod scheduler_tests;
+
+#[cfg(test)]
+mod property_bench;
+
+#[cfg(test)]
+mod chunks_tests;
+
+#[cfg(test)]
+mod handler_threads_tests;
 
 #[cfg(test)]
 mod sandbox_tests;

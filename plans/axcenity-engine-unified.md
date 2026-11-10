@@ -21,7 +21,7 @@ v1, v2 and v3 rules still hold. These are the ones the remaining phases depend o
 - **Scripting**: one Lua runtime. Any creator-facing Lua added in a phase has matching blocks. Output keeps `script:line` errors.
 - **Dependencies**: **Changed**: `.axpkg` needs no new dependency. `zip` is already pinned in the workspace and used to read and write archives (`editor/src/ambient_cg.rs`). Controller (gamepad) input in Phase 19 needs one new pinned dependency, with its licence checked as Apache-2.0-compatible.
 - **Live reload** (Phases 23 to 26): watching files, reloading scripts during Play, rebuilding and hot-patching are for development only. Exported games never watch or patch anything, and the player only watches with `--watch`. Engine rebuild and hot-patching are editor features, behind a dev-only `hot-patch` feature where they need a dependency, so `player` gains no new dependency. A file that fails to reload keeps the last good version.
-- **Platforms**: Windows, macOS and Linux.
+- **Platforms**: Windows, macOS and Linux. **Changed** (2026-11-10, [development policy](../docs/development-policy.md#platforms)): desktop first, with Windows and Linux as the primary platforms and macOS secondary. Mobile and web are not immediate priorities.
 
 ## Decisions for Milestones 9 to 14
 
@@ -2443,6 +2443,8 @@ Replays work in single-player too, because it runs over the same replication.
 ---
 
 # Milestone 20: Android and iOS
+
+> **Deferred** (2026-11-10, [development policy](../docs/development-policy.md#platforms)). Mobile isn't an immediate priority: desktop comes first, with Windows and Linux as the primary platforms. Don't start these phases, and don't shape desktop code around them beyond keeping it reasonably portable. Revisit once the desktop engine is reliable. The CI criteria below (for example Phase 84's mobile builds) would also need CI, which is off on purpose.
 
 **From**: the developer's request of 2026-10-30. **Changed**: Milestones 9 to 14 and the review of 2026-10-30 left mobile export out. Phase 68 comes first. Phases 82 and 83 need no device, so they can start at once. Phases 84 to 88 run in order.
 

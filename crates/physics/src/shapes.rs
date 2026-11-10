@@ -397,7 +397,34 @@ fn wedge(half: Vec3) -> ColliderBuilder {
 /// The smallest convex shape around a model's corners, like shrink-wrap:
 /// hollows (under a table, inside a cup) are filled in. A model with no
 /// volume, such as a flat plane, can't make one and collides as its box.
+///
+/// A hull takes a pass over every corner of the model, millions in a scanned
+/// tree, and colliders are built again for each query, so the shapes are kept
+/// by model and size. A collider only shares the shape, which rapier copies
+/// before changing.
 fn hull(model: &Model, half: Vec3) -> ColliderBuilder {
+    let key = (model.key(), half.to_array().map(f32::to_bits));
+    static HULLS: LazyLock<Mutex<HashMap<ShapeKey, SharedShape>>> = LazyLock::new(Mutex::default);
+    if let Some(shape) = HULLS.lock().ok().and_then(|hulls| hulls.get(&key).cloned()) {
+        return ColliderBuilder::new(shape);
+    }
+    let shape = build_hull(model, half).shape;
+    if let Ok(mut hulls) = HULLS.lock() {
+        // Old sizes of parts being scaled aren't needed again.
+        if hulls.len() >= KEPT_HULLS {
+            hulls.clear();
+        }
+        hulls.insert(key, shape.clone());
+    }
+    ColliderBuilder::new(shape)
+}
+
+/// How many hulls are kept: enough for the models and sizes of a large
+/// scene, and a limit on what a script that keeps resizing a part can hold.
+const KEPT_HULLS: usize = 4096;
+
+/// Makes [`hull`]'s shape.
+fn build_hull(model: &Model, half: Vec3) -> ColliderBuilder {
     let flat = model.size.contains(&0.0) || model.hull_points.len() < 4;
     if flat {
         return cuboid(half);
@@ -432,8 +459,8 @@ const PRECISE: VHACDParameters = VHACDParameters {
     },
 };
 
-/// A model's load key and the half size its pieces were made for.
-type PiecesKey = (u64, [u32; 3]);
+/// A model's load key and the half size its shape was made for.
+type ShapeKey = (u64, [u32; 3]);
 
 /// Convex pieces following a model's hollows, stretched like the hull.
 /// Decomposing takes a while, and colliders are built again for queries
@@ -443,7 +470,7 @@ fn decomposed(model: &Model, half: Vec3) -> ColliderBuilder {
         return cuboid(half);
     }
     let key = (model.key(), half.to_array().map(f32::to_bits));
-    static PIECES: LazyLock<Mutex<HashMap<PiecesKey, SharedShape>>> = LazyLock::new(Mutex::default);
+    static PIECES: LazyLock<Mutex<HashMap<ShapeKey, SharedShape>>> = LazyLock::new(Mutex::default);
     if let Some(shape) = PIECES
         .lock()
         .ok()

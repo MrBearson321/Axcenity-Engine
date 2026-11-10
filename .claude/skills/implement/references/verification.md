@@ -14,7 +14,7 @@ cargo nextest run --workspace
 cargo test --workspace --doc
 ```
 
-If the change touched a `Cargo.toml` dependency, run `cargo hakari generate` first (and `cargo hakari manage-deps` for a new crate); CI fails otherwise. Clippy with `--all-targets` already checks that everything compiles, so a separate `cargo build` is only needed before running a binary. If `cargo-nextest` isn't installed, use `cargo test --workspace --no-fail-fast`. A build after a dependency or `Cargo.toml` change can run past the default 2-minute command timeout: give it a 10-minute timeout or run it in the background.
+If the change touched a `Cargo.toml` dependency, run `cargo hakari generate` first (and `cargo hakari manage-deps` for a new crate); the workspace-hack check fails otherwise. Clippy with `--all-targets` already checks that everything compiles, so a separate `cargo build` is only needed before running a binary. If `cargo-nextest` isn't installed, use `cargo test --workspace --no-fail-fast`. A build after a dependency or `Cargo.toml` change can run past the default 2-minute command timeout: give it a 10-minute timeout or run it in the background.
 
 Fix failures the change caused. Known failures that already fail on `main` (see memory and `git stash` + rerun if unsure) don't block a commit; name them in the handoff. Format only files this task touched if `cargo fmt --all` would rewrite unrelated files. Report what ran and its result, and don't describe a compile or test pass as proof of visual, cross-platform, or feel behavior.
 
@@ -32,6 +32,6 @@ powershell -ExecutionPolicy Bypass -File .claude/skills/implement/scripts/screen
 
 Inspect the screenshot rather than treating file creation as verification. Behavior that needs held input over time or interactive editor use usually can't be shown by a screenshot; leave it for the user.
 
-## Cross-platform CI
+## Cross-platform checks
 
-Pushing triggers CI. Check it with `gh run list --limit 3` only when the user asks about CI or cross-platform results.
+GitHub Actions is intentionally turned off ([docs/development-policy.md](../../../../docs/development-policy.md)), so pushing runs nothing and the local checks above are the only verification. Significant engine changes need local tests. For cross-platform results, run `scripts/check-platform.sh` (macOS, Linux) or `scripts/check-platform.ps1` (Windows); Windows and Linux are the primary platforms. Say in the handoff which OS each check ran on.

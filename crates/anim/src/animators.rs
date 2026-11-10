@@ -27,7 +27,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use axcenity_assets::{Assets, Model, ModelFormat, Posed, Rig, Take};
+use axcenity_assets::{Assets, Model, ModelFormat, Posed, Rig, Slot, Take};
 use axcenity_core::{ClassName, InstanceId, LayerWeight, PlayRequest, Value, Vector3, World};
 use glam::{EulerRot, Quat, Vec3};
 
@@ -1212,7 +1212,10 @@ fn skeleton_model(world: &World, assets: &Assets, owner: InstanceId) -> Option<A
         return None;
     }
     let mesh_id = part.property("MeshId").and_then(Value::as_str)?;
-    let model = assets.model_blocking(mesh_id)?;
+    // Like drawing, this never waits: a model still loading has no pose yet.
+    let Slot::Ready(model) = assets.model_slot(mesh_id) else {
+        return None;
+    };
     model.rig.is_some().then_some(model)
 }
 
