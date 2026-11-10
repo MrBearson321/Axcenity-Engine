@@ -88,6 +88,10 @@ memory-stats = "1.2"
 # Math types Kira's spatial listener and emitters take (MIT OR Apache-2.0).
 mint = "0.5"
 pollster = "0.4"
+# Profiler spans (roadmap I1): `profiling::scope!` and `finish_frame!` cost
+# nothing unless a host's `profile-tracy` feature picks a backend
+# (MIT OR Apache-2.0; already in the tree through wgpu, egui and rapier).
+profiling = { version = "1", default-features = false }
 # Native file and folder dialogs for the editor (Windows, macOS, and the
 # desktop portal on Linux).
 rfd = "0.17"

@@ -36,4 +36,8 @@ workspace-hack-line-style = "workspace-dotted"
 third-party = [
     { name = "http" },
     { name = "httparse" },
+    # Profiler spans (roadmap I1): hosts' `profile-tracy` feature turns on
+    # Tracy. Left out so the hack doesn't turn it on for every build.
+    { name = "profiling" },
+    { name = "profiling-procmacros" },
 ]

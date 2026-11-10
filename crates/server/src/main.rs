@@ -1,4 +1,4 @@
-//! `axcenity-server <game> [--port <port>] [--password <text>]`: a
+//! `axcenity-server <game> [--port <port>] [--password <text>] [--bench <frames>]`: a
 //! dedicated server (Phase 63). It loads a project folder or a `.axgame`,
 //! runs the game's Scripts (never its LocalScripts: it has no player of
 //! its own) and physics at 60 frames a second with no window, audio or
@@ -9,6 +9,10 @@
 //! LocalScripts there, and RemoteEvents and RemoteFunctions cross between
 //! them (Phase 64). Nothing in ServerStorage or ServerScriptService leaves
 //! the server.
+//!
+//! `--bench <frames>` runs frames back to back at a fixed 1/60 s, without
+//! waiting, prints each step's times after a warm-up and quits (roadmap
+//! I1, `docs/development/benchmarks.md`).
 
 use std::ffi::OsString;
 use std::fs;
@@ -17,12 +21,13 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use axcenity_assets::Assets;
+use axcenity_core::bench::{BenchRun, Laps};
 use axcenity_core::{ClassName, World};
 use axcenity_net::{GameInfo, Network};
 use axcenity_physics::Physics;
 use axcenity_script::{OutputKind, ScriptRuntime};
 
-const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>]\n\
+const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--bench <frames>]\n\
                      example: cargo run -p axcenity-server -- examples/hello-part --port 47800";
 
 /// Each frame is this long.
@@ -34,6 +39,8 @@ struct Arguments {
     game: Option<PathBuf>,
     port: Option<u16>,
     password: Option<String>,
+    /// `--bench <frames>`: measure that many frames, print them and quit.
+    bench: Option<usize>,
 }
 
 impl Arguments {
@@ -58,6 +65,16 @@ impl Arguments {
                         bail!("--password takes the password players join with\n\n{USAGE}");
                     };
                     parsed.password = Some(password.to_string_lossy().into_owned());
+                }
+                "--bench" => {
+                    let frames = arguments
+                        .next()
+                        .and_then(|frames| frames.to_str()?.parse::<usize>().ok())
+                        .filter(|&frames| frames > 0);
+                    let Some(frames) = frames else {
+                        bail!("--bench takes how many frames to measure, such as 600\n\n{USAGE}");
+                    };
+                    parsed.bench = Some(frames);
                 }
                 "--help" | "-h" => bail!("{USAGE}"),
                 _ if text.starts_with("--") => bail!("unknown option `{text}`\n\n{USAGE}"),
@@ -146,20 +163,38 @@ fn main() -> Result<()> {
     print_log(&mut network);
 
     let mut physics = Physics::with_assets(assets.clone());
+    let mut bench = arguments
+        .bench
+        .map(|frames| BenchRun::new(BenchRun::DEFAULT_WARM_UP, frames));
     let mut last = Instant::now();
     loop {
         let started = Instant::now();
-        let seconds = started.duration_since(last).as_secs_f64().min(0.1);
+        let seconds = match bench {
+            Some(_) => FRAME.as_secs_f64(),
+            None => started.duration_since(last).as_secs_f64().min(0.1),
+        };
         last = started;
+        let mut laps = Laps::start();
         frame(
             &mut world,
             &mut scripts,
             &mut physics,
             &mut network,
             seconds,
+            &mut laps,
         );
+        profiling::finish_frame!();
         for error in assets.take_errors() {
             eprintln!("error: {error}");
+        }
+        if let Some(bench) = &mut bench {
+            if bench.record(&laps) {
+                let scene = axcenity_core::bench::scene_name(&project.folder);
+                print!("{}", bench.finish_text("server", &scene));
+                network.disconnect(&mut world, &mut scripts);
+                return Ok(());
+            }
+            continue;
         }
         if let Some(rest) = FRAME.checked_sub(started.elapsed()) {
             std::thread::sleep(rest);
@@ -178,16 +213,21 @@ fn frame(
     physics: &mut Physics,
     network: &mut Network,
     seconds: f64,
+    laps: &mut Laps,
 ) {
+    profiling::scope!("frame");
     network.receive(world, scripts, seconds);
     // With no screen, a player here has nothing to load (Phase 80).
     for (request, _) in network.take_viewer_requests() {
         scripts.finish_stream_around(world, request);
     }
     print_log(network);
+    laps.lap("Network");
     scripts.step_players(world, seconds);
+    laps.lap("Input");
     scripts.step(world, seconds);
     scripts.stepped(world, seconds);
+    laps.lap("Scripts");
     scripts.apply_shatters(world, physics);
     physics.set_held(network.held_parts(world, scripts));
     // Far from every player, physics sleeps (Phase 80).
@@ -196,6 +236,7 @@ fn frame(
             .map(|settings| (network.player_focuses(world), settings.unload_radius())),
     );
     physics.step(world, seconds);
+    laps.lap("Physics");
     let touches = physics.take_touches();
     scripts.fire_touched(world, &touches);
     let ends = physics.take_touch_ends();
@@ -204,7 +245,9 @@ fn frame(
     scripts.step_health(world, seconds);
     scripts.heartbeat(world, seconds);
     print_output(scripts);
+    laps.lap("Heartbeat");
     network.send(world, scripts);
+    laps.lap("Network send");
 }
 
 fn print_log(network: &mut Network) {
@@ -246,6 +289,7 @@ mod tests {
                 game: Some(PathBuf::from("games/castle")),
                 port: Some(4000),
                 password: Some("moat".to_owned()),
+                bench: None,
             }
         );
     }
@@ -254,5 +298,15 @@ mod tests {
     fn a_bad_port_says_what_it_takes() {
         let err = parse(&["castle", "--port", "lots"]).unwrap_err();
         assert!(err.to_string().contains("--port takes a number"), "{err}");
+    }
+
+    #[test]
+    fn bench_takes_a_frame_count() {
+        assert_eq!(
+            parse(&["castle", "--bench", "600"]).unwrap().bench,
+            Some(600)
+        );
+        let err = parse(&["castle", "--bench", "0"]).unwrap_err();
+        assert!(err.to_string().contains("--bench takes"), "{err}");
     }
 }

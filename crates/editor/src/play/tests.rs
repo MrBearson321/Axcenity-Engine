@@ -605,9 +605,12 @@ fn with_10_percent_packet_loss_play_stays_usable_and_the_network_section_shows_t
     );
 }
 
-/// What Play and a selection cost in a project of the user's own, named by
-/// `AXCENITY_BENCH_PROJECT`: the game frame (physics, the character's rays)
-/// without drawing, and the selection box. Skipped when it isn't set.
+/// What Play and a selection cost in a project named by
+/// `AXCENITY_BENCH_PROJECT` (such as S10k, roadmap I1: `axcenity-test
+/// --make-s10k <folder>`): the game frame's steps without drawing, over
+/// `AXCENITY_BENCH_FRAMES` frames (300 unless set) after a warm-up, then
+/// the selection box. Skipped when it isn't set.
+/// `docs/development/benchmarks.md` has the other hosts.
 ///
 /// `cargo test -p axcenity-editor --release -- --ignored bench_project_play --nocapture --test-threads 1`
 #[test]
@@ -638,26 +641,30 @@ fn bench_project_play() {
     )
     .unwrap();
     eprintln!("Session::start: {:?}", started.elapsed());
-    let mut times = Vec::new();
-    for frame in 0..30 {
-        let started = Instant::now();
-        let motion = MoveInput {
-            forward: true,
-            ..MoveInput::default()
-        };
+    let frames = std::env::var("AXCENITY_BENCH_FRAMES")
+        .ok()
+        .and_then(|frames| frames.parse().ok())
+        .unwrap_or(300);
+    let mut run = axcenity_core::bench::BenchRun::new(
+        axcenity_core::bench::BenchRun::DEFAULT_WARM_UP,
+        frames,
+    );
+    loop {
         session
-            .frame(1.0 / 60.0, &[], motion, CameraState::default(), &mut output)
+            .frame(
+                1.0 / 60.0,
+                &[],
+                MoveInput::default(),
+                CameraState::default(),
+                &mut output,
+            )
             .unwrap();
-        let took = started.elapsed();
-        let cost = session.cost().unwrap();
-        eprintln!(
-            "frame {frame}: {took:?} (physics {:?}, scripts {:?}, animation {:?})",
-            cost.physics, cost.scripts, cost.animation
-        );
-        times.push(took);
+        if run.record(session.laps()) {
+            break;
+        }
     }
-    times.sort();
-    eprintln!("Session::frame median: {:?}", times[times.len() / 2]);
+    let scene = axcenity_core::bench::scene_name(&folder);
+    print!("{}", run.finish_text("editor Play", &scene));
 
     let eye = axcenity_render::glam::Vec3::new(0.0, 40.0, 80.0);
     let parts: Vec<_> = world

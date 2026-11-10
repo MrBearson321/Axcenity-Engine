@@ -409,6 +409,7 @@ impl Replicator {
     /// What changed since the last call, for the players who have the
     /// world as it was then.
     pub fn frame(&mut self, world: &World) -> Update {
+        profiling::scope!("Replicator::frame");
         let structure = Some(world.structure_version());
         let tree_changed = self.structure != structure;
         if tree_changed {

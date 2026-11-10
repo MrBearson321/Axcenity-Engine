@@ -38,6 +38,9 @@ pub struct Arguments {
     /// `--dev`: the F9 Developer Console, even in a built game whose
     /// project setting has it off (Phase 71).
     pub dev: bool,
+    /// `--bench <frames>`: measure that many frames' steps after a warm-up,
+    /// print them, and quit (roadmap I1, `docs/development/benchmarks.md`).
+    pub bench: Option<usize>,
 }
 
 /// Hosting or joining from the start.
@@ -83,6 +86,15 @@ impl Arguments {
                     };
                     NetworkStart::Join(address.to_string_lossy().into_owned())
                 });
+            } else if argument == "--bench" {
+                let frames = arguments
+                    .next()
+                    .and_then(|frames| frames.to_str()?.parse::<usize>().ok())
+                    .filter(|&frames| frames > 0);
+                let Some(frames) = frames else {
+                    bail!("--bench takes how many frames to measure, such as 600\n\n{USAGE}");
+                };
+                parsed.bench = Some(frames);
             } else if argument == "--password" {
                 let Some(password) = arguments.next() else {
                     bail!("--password takes the game's password\n\n{USAGE}");
@@ -198,6 +210,17 @@ mod tests {
 
         assert!(parse(&["--wach", folder]).is_err());
         assert!(parse(&[folder, folder]).is_err());
+    }
+
+    #[test]
+    fn bench_takes_a_frame_count() {
+        let parsed = parse(&["--bench", "600", "games/s10k"]).unwrap();
+        assert_eq!(parsed.bench, Some(600));
+        assert_eq!(parsed.game, Some(PathBuf::from("games/s10k")));
+        for bad in [&["--bench"][..], &["--bench", "0"], &["--bench", "lots"]] {
+            let err = parse(bad).unwrap_err();
+            assert!(err.to_string().contains("--bench takes"), "{err}");
+        }
     }
 
     #[test]

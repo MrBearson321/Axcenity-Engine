@@ -78,6 +78,9 @@ pub struct Session {
     /// What the last frame's steps took, for the Profiler; `None` when it
     /// didn't run (paused at a breakpoint).
     cost: Option<FrameCost>,
+    /// The last frame's steps' times under the names every host's
+    /// benchmark uses (roadmap I1, `docs/development/benchmarks.md`).
+    laps: axcenity_core::bench::Laps,
     /// The graphics settings as a LocalScript last changed them
     /// (`UserGameSettings`), for the viewport until Stop. `None` until one
     /// does: the editor's own settings are used.
@@ -149,6 +152,7 @@ impl Session {
             loading: loading.clone(),
             panic_next_frame: false,
             cost: None,
+            laps: axcenity_core::bench::Laps::start(),
             graphics: None,
             game_camera: GameCamera::default(),
             kept: PlayEdits::default(),
@@ -521,6 +525,8 @@ impl Session {
         // to nothing, so it's measured whether or not the panel is open.
         let mut cost = FrameCost::default();
         let started = Instant::now();
+        self.laps = axcenity_core::bench::Laps::start();
+        profiling::scope!("Play frame");
         let result = guard(|| {
             if self.panic_next_frame {
                 panic!("a deliberate engine panic, from Debug > Panic during Play");
@@ -549,6 +555,7 @@ impl Session {
                 .receive(&mut self.world, &mut self.scripts, seconds);
             self.forward_network_log(output);
             self.forward_output(output);
+            self.laps.lap("Network");
             let following = self.network.is_following();
             // A Sequence that locks input leaves the character still, and
             // the server view takes none.
@@ -590,9 +597,11 @@ impl Session {
                 // Then players: their first character, respawns and spawn
                 // ForceFields (Phase 47).
                 self.scripts.step_players(&mut self.world, seconds);
+                self.laps.lap("Characters");
                 // Then navigation agents, toward their destinations.
                 self.agents
                     .step(&mut self.world, &self.assets, seconds as f32);
+                self.laps.lap("Agents");
                 for warning in self.agents.take_warnings() {
                     output.warning(warning);
                 }
@@ -628,6 +637,7 @@ impl Session {
             // Then Abilities' keys, on every device (Phase 76).
             self.scripts.step_abilities(&mut self.world, seconds);
             self.forward_output(output);
+            self.laps.lap("Input");
             if self.scripts.pause().is_some() {
                 cost.scripts += lap();
                 return;
@@ -641,6 +651,7 @@ impl Session {
             }
             self.forward_output(output);
             cost.scripts += lap();
+            self.laps.lap("Scripts");
             if self.scripts.pause().is_some() {
                 return;
             }
@@ -668,6 +679,7 @@ impl Session {
                     .apply_shatters(&mut self.world, &mut self.physics);
                 cost.physics_steps = self.physics.step(&mut self.world, seconds);
                 cost.physics += lap();
+                self.laps.lap("Physics");
                 // 4. Fire `Touched` for parts that started touching (and
                 //    `Changed` for parts that moved), `TouchEnded` for
                 //    those that stopped, then `RunService.Heartbeat`.
@@ -690,6 +702,7 @@ impl Session {
                 self.scripts.heartbeat(&mut self.world, seconds);
             }
             self.forward_output(output);
+            self.laps.lap("Heartbeat");
             // A level loaded this frame shows the loading screen again.
             if !self.scripts.take_level_loads().is_empty()
                 && let Some(shown) = LoadingGui::start(
@@ -717,6 +730,7 @@ impl Session {
                 self.graphics = Some(graphics);
             }
             cost.scripts += lap();
+            self.laps.lap("RenderStep");
             if self.scripts.pause().is_some() {
                 return;
             }
@@ -739,6 +753,7 @@ impl Session {
                 self.ui_sounds.clear();
             }
             cost.audio += lap();
+            self.laps.lap("Audio");
             // Animators move on and pose their models, as in the player.
             let events = self
                 .animators
@@ -754,6 +769,7 @@ impl Session {
             self.forward_output(output);
             self.forward_animator_errors(output);
             cost.animation += lap();
+            self.laps.lap("Animation");
             // Then a Follow or Track camera follows its subject, which
             // physics and animation have moved, and shakes move on.
             self.game_camera = self.scripts.step_camera(&self.world, seconds);
@@ -761,6 +777,7 @@ impl Session {
             // for the other Play devices.
             self.network.send(&self.world, &mut self.scripts);
             self.forward_network_log(output);
+            self.laps.lap("Network send");
         });
         cost.total = started.elapsed();
         self.cost = Some(cost);
@@ -792,6 +809,13 @@ impl Session {
     }
 
     /// What the last frame's steps took, or `None` if it didn't run.
+    /// The last frame's steps' times, by the benchmark's stage names. Only
+    /// `bench_project_play` reads them so far; the Profiler shows `cost`.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn laps(&self) -> &axcenity_core::bench::Laps {
+        &self.laps
+    }
+
     pub fn cost(&self) -> Option<FrameCost> {
         self.cost
     }

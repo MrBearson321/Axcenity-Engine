@@ -533,6 +533,7 @@ impl Physics {
     /// steps as fit in the time passed (0 to N), writing positions back to
     /// `world` after each one. Returns how many steps ran.
     pub fn step(&mut self, world: &mut World, seconds: f64) -> u32 {
+        profiling::scope!("Physics::step");
         self.sync_from_world(world);
         self.sleep_far_bodies();
         let wind = global_wind(world);
@@ -559,7 +560,10 @@ impl Physics {
             let before = self.motions_before_step();
             // The hook only runs for colliders with friction or
             // elasticity weights (see `material`).
-            self.rapier.step_with_events(&material::Weighted, &());
+            {
+                profiling::scope!("Physics::substep");
+                self.rapier.step_with_events(&material::Weighted, &());
+            }
             self.broken.extend(joints::break_overloaded(
                 world,
                 &mut self.rapier,
@@ -780,6 +784,7 @@ impl Physics {
     /// applies anything a script changed since the last step, and welds or
     /// unwelds assemblies.
     fn sync_from_world(&mut self, world: &World) {
+        profiling::scope!("Physics::sync");
         if let Some((moved, changed)) = self.sync_changed_parts(world) {
             self.finish_sync(world, moved, changed);
             return;
@@ -1283,6 +1288,7 @@ impl Physics {
     /// its `Position`, `Orientation` and velocities, and remembers the
     /// values written. Welded parts share their assembly's velocities.
     fn write_to_world(&mut self, world: &mut World) {
+        profiling::scope!("Physics::write_back");
         for (&id, part) in &mut self.parts {
             let Some(body) = self.rapier.bodies.get(part.body) else {
                 continue;

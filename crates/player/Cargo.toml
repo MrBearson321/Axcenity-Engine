@@ -30,11 +30,16 @@ png.workspace = true
 pollster.workspace = true
 serde_json.workspace = true
 winit.workspace = true
+profiling.workspace = true
 axcenity-workspace-hack.workspace = true
 
 [dev-dependencies]
 # Tests check the example's Fracture pieces match what Generate makes.
 axcenity-mesh-edit.workspace = true
+
+[features]
+# Sends profiler spans to Tracy (roadmap I1): `--features profile-tracy`.
+profile-tracy = ["profiling/profile-with-tracy"]
 
 [lints]
 workspace = true

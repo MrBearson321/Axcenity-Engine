@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_character::{Controllers, MoveInput};
+use axcenity_core::bench::Laps;
 use axcenity_core::input::{Input, InputEvent, InputKind, InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, KeyCode, UserInputType, Value, World};
 use axcenity_nav::Agents;
@@ -42,6 +43,8 @@ pub struct TestGame {
     pub problem: Option<String>,
     /// Game time since the test started.
     pub seconds: f64,
+    /// The last frame's steps' times, for benchmarks (roadmap I1).
+    pub laps: Laps,
 }
 
 /// What [`TestGame::start`] needs of a project's level.
@@ -77,6 +80,7 @@ impl TestGame {
             output: Vec::new(),
             problem: None,
             seconds: 0.0,
+            laps: Laps::start(),
         };
         if let Err(err) = axcenity_project::load_starter_character(setup.folder, &mut game.world) {
             game.output.push(format!("warning: {err}"));
@@ -127,6 +131,8 @@ impl TestGame {
     /// Runs one frame: first what the spec asked for at the last one, then
     /// the frame order's steps.
     pub fn frame(&mut self) {
+        profiling::scope!("frame");
+        self.laps = Laps::start();
         let seconds = FRAME_SECONDS;
         for request in self.scripts.take_test_requests() {
             self.apply(request);
@@ -159,11 +165,13 @@ impl TestGame {
         self.scripts
             .step_humanoids(&mut self.world, &self.characters, seconds);
         self.scripts.step_players(&mut self.world, seconds);
+        self.laps.lap("Characters");
         self.agents
             .step(&mut self.world, &self.assets, seconds as f32);
         for warning in self.agents.take_warnings() {
             self.output.push(format!("warning: {warning}"));
         }
+        self.laps.lap("Agents");
         for sensed in self.agents.take_sensed() {
             let sense = sensed.sense.as_str().to_owned();
             self.scripts.fire_instance_event(
@@ -181,10 +189,12 @@ impl TestGame {
         self.scripts.step_prompts(&mut self.world, seconds);
         self.scripts.step_tools(&mut self.world);
         self.scripts.step_abilities(&mut self.world, seconds);
+        self.laps.lap("Input");
 
         // 2. Tweens, waiting scripts (the spec too), then `Stepped`.
         self.scripts.step(&mut self.world, seconds);
         self.scripts.stepped(&mut self.world, seconds);
+        self.laps.lap("Scripts");
 
         // 3. Physics, with the characters and agents held kinematic.
         self.characters.keep_kinematic(&mut self.world);
@@ -192,6 +202,7 @@ impl TestGame {
         self.scripts
             .apply_shatters(&mut self.world, &mut self.physics);
         self.physics.step(&mut self.world, seconds);
+        self.laps.lap("Physics");
 
         // 4. Touches, breaks, health, `Heartbeat`, then Animators and Tools.
         //    There's no audio: sounds asked for are let go.
@@ -202,6 +213,7 @@ impl TestGame {
         self.scripts.fire_breaks(&mut self.world, &mut self.physics);
         self.scripts.step_health(&mut self.world, seconds);
         self.scripts.heartbeat(&mut self.world, seconds);
+        self.laps.lap("Heartbeat");
         self.scripts.take_sound_actions();
         self.scripts.take_particle_emits();
         let events = self
@@ -219,12 +231,15 @@ impl TestGame {
             .place_tools(&mut self.world, self.animators.poses());
         self.scripts.take_level_loads();
         self.scripts.take_loading_screen_removed();
+        self.laps.lap("Animation");
 
         // Before a frame would be drawn: the render step, then the camera.
         self.scripts.render_step(&mut self.world, seconds);
         self.scripts.take_camera_move();
         self.scripts.step_camera(&self.world, seconds);
         self.collect_output();
+        self.laps.lap("RenderStep");
+        profiling::finish_frame!();
     }
 
     /// What the spec told the host since the last call.

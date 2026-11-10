@@ -14,6 +14,7 @@ renet.workspace = true
 renet_netcode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+profiling.workspace = true
 axcenity-workspace-hack.workspace = true
 
 [dev-dependencies]

@@ -12,12 +12,14 @@
 
 pub mod game;
 pub mod junit;
+pub mod s10k;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use axcenity_core::World;
+use axcenity_core::bench::BenchRun;
 use axcenity_core::input::InputMap;
 use axcenity_project::ScriptFile;
 use axcenity_script::TestReport;
@@ -365,6 +367,39 @@ impl Runner {
     fn read_spec(&self, file: &str) -> Result<String, Failure> {
         std::fs::read_to_string(self.folder.join(file))
             .map_err(|err| Failure::new(format!("{file}: could not read the file: {err}")))
+    }
+
+    /// Runs the start level with its scripts, as a test would, for
+    /// `warm_up` frames then `frames` measured ones, and returns each
+    /// frame's steps' times (`--bench`, roadmap I1), with the errors and
+    /// warnings scripts printed.
+    pub fn bench(
+        &mut self,
+        warm_up: usize,
+        frames: usize,
+    ) -> Result<(BenchRun, Vec<String>), String> {
+        let saves = SaveFolder::new();
+        let level = self.start_level.clone();
+        let mut game = self
+            .start_game(&level, true, &saves)
+            .map_err(|failure| failure.message)?;
+        let mut run = BenchRun::new(warm_up, frames);
+        let mut problems: Vec<String> = game
+            .output
+            .drain(..)
+            .filter(|line| line.starts_with("error:") || line.starts_with("warning:"))
+            .collect();
+        loop {
+            game.frame();
+            problems.extend(
+                game.output
+                    .drain(..)
+                    .filter(|line| line.starts_with("error:") || line.starts_with("warning:")),
+            );
+            if run.record(&game.laps) {
+                return Ok((run, problems));
+            }
+        }
     }
 
     /// A fresh copy of `level`, with the game's scripts started when
