@@ -213,8 +213,16 @@ impl EditorApp {
         }
 
         // A text box being typed in has its own undo, and uses Delete and
-        // Backspace itself, so leave those keys to it then.
-        let typing = ctx.wants_keyboard_input();
+        // Backspace itself, so leave those keys to it then. The Explorer
+        // tabbed into takes only its own keys.
+        let typing = ctx.wants_keyboard_input() && !self.explorer.has_focus(ctx);
+        // The arrow keys, Home and End are the Explorer's while it has them,
+        // taken before the viewport or the UI Designer can see them.
+        let explorer_keys =
+            !typing && !egui::Popup::is_any_open(ctx) && self.explorer.has_keys(ctx);
+        if explorer_keys {
+            ctx.input_mut(|input| self.explorer.take_keys(input));
+        }
         let playing = self.playing();
         // Over a property clip, K, Delete and Backspace are the dope sheet's;
         // over the Model Studio, its own single keys and Enter are.
@@ -287,6 +295,12 @@ impl EditorApp {
             });
             self.set_on_parts(&parts, property, Value::Bool(!all_on));
             self.history.seal();
+        } else if keys.toggle
+            && explorer_keys
+            && let Some(id) = self.selected
+        {
+            // Enter in the Explorer renames, like F2.
+            self.explorer.start_rename(&self.world, id);
         }
         // Undo, duplicate and delete check for Play themselves; renaming
         // only opens a text box, so it's checked here.

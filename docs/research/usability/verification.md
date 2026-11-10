@@ -343,3 +343,28 @@ Both now cost the same at 10,000 rows as at 100 (the plan's target was at most t
 **Left.** Other long lists (Assets in list view, the Tags and Levels panels, Find in Scripts results) still lay out every row; none was measured as slow.
 
 **Next.** Phase 4: Properties edits every selected Instance (V5) and the Explorer moves the selection with the arrow keys (V6), built on this phase's row list.
+
+## Design system Phase 4: edit many, move by keys (V5, V6)
+
+Plan and findings: [design-system.md](design-system.md). Approved by Paul with Phases 1–5 on 2026-11-10. Built on Phase 3 (the Explorer's kept row list).
+
+| ID | What changed | Files |
+|---|---|---|
+| V5 (DS6) | With several selected, Properties shows what they all have (the last one clicked's sections and order), headed "3 Parts" or "5 selected · 2 kinds". A value that differs shows as `—` (a half-ticked box for a checkbox); clicking `—` shows the control with the last one's value, and only an edit writes. An edit goes to each that has the property, as one undo step named like "Change Anchored of 3 Parts"; undo gives each its own value back, and dragging a number stays one step. ↺ resets each to its own class's default. Locked ones only take Locked. Name shows when all can be renamed here. File pickers set the picked file on all of them. During Play an edit changes each in the game | `properties/many.rs` (new), `properties.rs` (`Edit::Reset`), `app/edits.rs` (`apply_many`, `pick_file_for`), `app/chrome/panes.rs` |
+| V6 (DS27) | Once the Explorer is clicked, or tabbed into after its Filter, Up and Down move the selection, Shift+Up and Down extend it from where the keys started, Left closes a branch or goes to the parent, Right opens one or goes to its first child, Home and End go to the ends, and Enter (or F2, as before) renames. The selected row gets the accent focus ring, and the list scrolls only as far as it takes to show it. The keys are taken in `shortcuts` before the viewport or the UI Designer sees them, and only until something else is clicked; tool keys, Delete, Ctrl+D and undo still work, also when tabbed in. Settings › Shortcuts lists them | `explorer.rs`, `app/chrome/windows.rs`, `app/chrome/panes.rs`, `app/settings.rs` |
+
+**Timings.** `ui_cost_tests.rs` now also draws Properties with every Part of the Folder selected (release, cloud container, 320×900): 100 selected 0.07 ms, 1,000 selected 0.45 ms, 10,000 selected 5.03 ms per frame.
+
+**Differs from the plan, on purpose.**
+- *Vectors (V5)* show `—` for the whole field, not per axis: clicking it shows all three axes with the last one's values, and an edit sets the whole vector on each. Per axis would need its own control for every vector type.
+- *What shows with several (V5).* Attributes, tags, Keep pins, prefab override marks, the Style section and buttons such as Animate or Build stay single-selection, as the plan allowed for Style; a note under the header says so. References (an ObjectValue's target, a seat's Occupant) and Terrain's DataFolder are left out.
+- *Enter (V6)* renames only while the Explorer has the keys and no Anchor or Angular tool wants it; those tools keep Enter.
+- *A click (V6)* still centres the clicked row, as before; only the keys scroll the least.
+
+**What's preserved.** One selected looks and works as before (minus the old "Properties are for the last one clicked" note, which no longer applies). Clicking, Ctrl and Shift clicks, drag-and-drop, rename in place, the filter, and every shortcut work as before; arrow keys in the Filter field and the rename box still move the text cursor.
+
+**Tests.** New: `explorer/key_tests.rs` (`the_arrow_keys_move_open_and_close_once_the_explorer_is_clicked`, `shift_arrows_extend_the_selection_from_where_the_keys_started`, `tab_reaches_the_explorer_after_its_filter`, `the_keys_scroll_just_far_enough_to_show_the_row`, `arrows_in_the_filter_move_its_cursor`, a focus-ring snapshot); `app/explorer_keys_tests.rs` (`a_clicked_explorer_takes_the_arrows_and_enter_and_shortcuts_still_work`: Down, Up, Enter renames, 2 picks Move, Delete deletes); `app/multi_edit_tests.rs` (one undo step and each value back, a drag is one step, ↺ to each default, locked ones, names, different kinds share only common properties, `—` shown and looking writes nothing, editing during Play, snapshots). `showing_the_properties_of_anything_in_the_examples_changes_nothing` now also selects every class with two or more in each example, and everything in its Workspace together. `cargo test -p axcenity-editor`: 991 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`, no audio device); clippy and fmt clean. Not checked on Windows or a real GPU.
+
+**Left.** At 300 points wide a vector's third axis wraps under the first two and its first frame overlaps the next row (seen with one selected too; not new). Per-axis `—` for vectors.
+
+**Next.** Phase 5: one shortcut table (V16), layout presets (V17), Increase contrast (V18), and shared section, empty-state and chip pieces (V19).

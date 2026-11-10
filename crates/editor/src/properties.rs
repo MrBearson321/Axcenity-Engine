@@ -81,6 +81,9 @@ pub enum Edit {
     RevertOverride(String),
     /// Writes this overridden property into the copy's prefab.
     ApplyOverride(String),
+    /// Sets this property of each selected Instance back to its class's
+    /// default (↺ with several selected).
+    Reset(&'static str),
 }
 
 /// One group of properties in the panel, such as "Appearance".
@@ -622,7 +625,6 @@ pub fn show(
     selected: Option<InstanceId>,
     playing: bool,
     kept: &[(Field, bool)],
-    selection_count: usize,
     more: impl FnOnce(&mut egui::Ui),
 ) -> Option<Edit> {
     let palette = theme::palette(ui.ctx());
@@ -640,15 +642,6 @@ pub fn show(
             .find(|(edited, _)| *edited == field)
             .map(|(_, kept)| *kept)
     };
-    if selection_count > 1 {
-        notice(
-            ui,
-            icons::STACK,
-            &format!(
-                "{selection_count} selected. Properties are for the last one clicked. Delete and Duplicate apply to all of them."
-            ),
-        );
-    }
     let mut edit = None;
     // The scroll area fills the panel even when nothing is selected. Without
     // it the panel would shrink to fit one line of text and stay that small.
@@ -986,6 +979,11 @@ pub fn show(
         });
     edit
 }
+
+mod many;
+#[cfg(test)]
+pub use many::shared_names;
+pub use many::{count_name, show_many};
 
 /// The types an attribute can be, by name, with the value a new one starts at.
 /// Makes the value a new attribute of one type starts at.
@@ -2426,7 +2424,7 @@ mod attribute_section_tests {
         let mut draw = |ctx: &egui::Context| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let room = ui.max_rect();
-                edit = show(ui, &world, Some(folder), false, &[], 1, |_| {});
+                edit = show(ui, &world, Some(folder), false, &[], |_| {});
                 fit = Some((ui.min_rect(), room));
             });
         };
@@ -2495,7 +2493,7 @@ mod physics_section_tests {
         let mut draw = |ctx: &egui::Context| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let room = ui.max_rect();
-                edit = show(ui, &world, Some(part), false, &[], 1, |_| {});
+                edit = show(ui, &world, Some(part), false, &[], |_| {});
                 fit = Some((ui.min_rect(), room));
             });
         };
@@ -2569,7 +2567,7 @@ mod prefab_override_tests {
         let mut draw = |ctx: &egui::Context| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let room = ui.max_rect();
-                edit = show(ui, &world, Some(part), false, &[], 1, |_| {});
+                edit = show(ui, &world, Some(part), false, &[], |_| {});
                 fit = Some((ui.min_rect(), room));
             });
         };
@@ -2688,7 +2686,7 @@ mod decal_section_tests {
             };
             let output = ctx.run(input, |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    let _ = show(ui, world, Some(id), false, &[], 1, |_| {});
+                    let _ = show(ui, world, Some(id), false, &[], |_| {});
                 });
             });
             found.clear();
@@ -2728,7 +2726,7 @@ mod decal_section_tests {
             let mut edit = None;
             let output = ctx.run(input, |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    edit = show(ui, world, Some(id), playing, &[], 1, |_| {});
+                    edit = show(ui, world, Some(id), playing, &[], |_| {});
                 });
             });
             let mut at = None;
@@ -2809,7 +2807,7 @@ mod decal_section_tests {
                         d.insert_temp(egui::Id::new("properties filter"), String::new())
                     });
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        let _ = show(ui, &world, Some(part), false, &[], 1, |_| {});
+                        let _ = show(ui, &world, Some(part), false, &[], |_| {});
                     });
                 },
             );
@@ -2871,7 +2869,7 @@ mod decal_section_tests {
                         d.insert_temp(egui::Id::new("properties filter"), String::new())
                     });
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        let _ = show(ui, &world, Some(part), false, &[], 1, |_| {});
+                        let _ = show(ui, &world, Some(part), false, &[], |_| {});
                     });
                 },
             );
@@ -2950,7 +2948,7 @@ mod decal_section_tests {
                         d.insert_temp(egui::Id::new("properties filter"), filter.to_owned())
                     });
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        let _ = show(ui, &world, Some(part), false, &[], 1, |_| {});
+                        let _ = show(ui, &world, Some(part), false, &[], |_| {});
                     });
                 };
                 let frames = match hover {

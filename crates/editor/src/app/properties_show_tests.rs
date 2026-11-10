@@ -1,7 +1,8 @@
 //! Looking is never an edit: showing an Instance's properties doesn't
 //! change it. A widget that rewrites its value as it draws (a slider that
 //! rounds it, say) made "Change GeographicLatitude of Lighting" an undo
-//! step, and the project unsaved, just by selecting Lighting.
+//! step, and the project unsaved, just by selecting Lighting. The same
+//! holds with several selected, whose differing values show as `—`.
 
 use super::tests::copy_of_example;
 use super::*;
@@ -57,6 +58,40 @@ fn showing_the_properties_of_anything_in_the_examples_changes_nothing() {
             if let Some(label) = app.history.undo_label() {
                 let class = app.world.get(id).map(|i| i.class());
                 changed.push(format!("{name}: {class:?}: {label}"));
+                app.undo();
+            }
+        }
+        // Several at once (design system V5): each class with two or
+        // more, and everything in the Workspace together.
+        let mut by_class: std::collections::BTreeMap<&str, Vec<InstanceId>> = Default::default();
+        for id in app.world.descendants(app.world.root()) {
+            if let Some(instance) = app.world.get(id) {
+                by_class
+                    .entry(instance.class().as_str())
+                    .or_default()
+                    .push(id);
+            }
+        }
+        let mut selections: Vec<Vec<InstanceId>> =
+            by_class.into_values().filter(|ids| ids.len() > 1).collect();
+        selections.push(app.world.descendants(app.world.workspace()));
+        for ids in selections.into_iter().filter(|ids| ids.len() > 1) {
+            app.selected = ids.last().copied();
+            app.selection = ids;
+            for _ in 0..2 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(320.0, 2400.0),
+                    )),
+                    ..Default::default()
+                };
+                let _ = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| app.properties_pane(ui));
+                });
+            }
+            if let Some(label) = app.history.undo_label() {
+                changed.push(format!("{name}: {} selected: {label}", app.selection.len()));
                 app.undo();
             }
         }

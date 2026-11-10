@@ -10,6 +10,14 @@
 //! never changes the world itself: [`Explorer::show`] returns an [`Action`]
 //! and the app carries it out, so it's recorded for undo.
 //!
+//! Once it's clicked (or tabbed into), the arrow keys move the selection
+//! among the rows, Shift+Up and Down extend it, Left closes a branch or
+//! goes to the parent, Right opens one or goes to its first child, Home and
+//! End go to the first and last rows, and Enter or F2 renames. The app takes
+//! those keys before anything else sees them ([`Explorer::take_keys`]), so
+//! they never reach the viewport or the UI Designer, and only while the
+//! Explorer has them ([`Explorer::has_keys`]).
+//!
 //! [`Explorer::rows`] works out which rows are visible without any UI code,
 //! so tests can check the tree; [`Explorer::show`] only draws those rows.
 
@@ -105,9 +113,48 @@ pub struct Explorer {
     /// The text in Filter: while it isn't blank, only the Instances whose
     /// name or class has it in them show, with the branches above them.
     pub filter: String,
+    /// Arrow, Home and End presses taken for the Explorer this frame, with
+    /// whether Shift was held; done when it's drawn.
+    keys: Vec<(egui::Key, bool)>,
+    /// Where a Shift+arrow range starts: the row last clicked, or moved to
+    /// without Shift.
+    anchor: Option<InstanceId>,
+    /// The Explorer was clicked last, so the keys are its.
+    keys_active: bool,
+    /// The frame it was last drawn: a hidden Explorer takes no keys.
+    drawn_frame: Option<u64>,
+    /// The keyboard was used last: the selected row shows the focus ring.
+    ring: bool,
+    /// A row the keyboard moved to, scrolled to only if it's out of view.
+    keep_in_view: Option<InstanceId>,
+    /// The list's scroll offset and height last frame.
+    view: Option<(f32, f32)>,
     /// Where each row's name was drawn last frame, so tests can point at rows.
     #[cfg(test)]
     drawn: Vec<(InstanceId, egui::Rect)>,
+}
+
+/// The keys the Explorer takes while it has them.
+const NAV_KEYS: [egui::Key; 6] = [
+    egui::Key::ArrowUp,
+    egui::Key::ArrowDown,
+    egui::Key::ArrowLeft,
+    egui::Key::ArrowRight,
+    egui::Key::Home,
+    egui::Key::End,
+];
+
+/// The Explorer's place in the Tab order: a widget over its rows.
+fn focus_id() -> egui::Id {
+    egui::Id::new("explorer keys")
+}
+
+/// What one key does to the rows.
+#[derive(Debug, PartialEq)]
+enum Step {
+    Select(InstanceId),
+    Toggle(InstanceId),
+    Nothing,
 }
 
 /// What the cached rows were made from: the world (by identity), its
@@ -232,6 +279,9 @@ pub struct ExplorerOutput {
     /// A Script to open in a tab: its row was double-clicked, or Open was
     /// picked in its menu. Works during Play too.
     pub open: Option<InstanceId>,
+    /// The selection the arrow keys moved to, the last one primary; it
+    /// replaces the selection.
+    pub select: Option<Vec<InstanceId>>,
 }
 
 /// What egui's drag and drop carries while a row is being dragged.
@@ -264,6 +314,13 @@ impl Explorer {
             renaming: None,
             warnings: HashMap::new(),
             filter: String::new(),
+            keys: Vec::new(),
+            anchor: None,
+            keys_active: false,
+            drawn_frame: None,
+            ring: false,
+            keep_in_view: None,
+            view: None,
             #[cfg(test)]
             drawn: Vec::new(),
         }
@@ -286,6 +343,15 @@ impl Explorer {
         });
     }
 
+    /// Where `id`'s row name was drawn last frame.
+    #[cfg(test)]
+    pub fn row_rect(&self, id: InstanceId) -> Option<egui::Rect> {
+        self.drawn
+            .iter()
+            .find(|(row, _)| *row == id)
+            .map(|(_, rect)| *rect)
+    }
+
     /// The Instance being renamed, if any.
     #[cfg(test)]
     pub fn renaming(&self) -> Option<InstanceId> {
@@ -303,6 +369,38 @@ impl Explorer {
             parent = world.get(next).and_then(|instance| instance.parent());
         }
         self.scroll_to = Some(id);
+    }
+
+    /// Whether the arrow keys, Home, End and Enter are the Explorer's: it
+    /// was clicked last, or tabbed into, and was drawn last frame.
+    pub fn has_keys(&self, ctx: &egui::Context) -> bool {
+        self.drawn_frame
+            .is_some_and(|frame| frame + 1 >= theme::frame_number(ctx))
+            && (self.keys_active || self.has_focus(ctx))
+    }
+
+    /// Whether the Explorer was tabbed into. egui then counts it as taking
+    /// the keyboard, but only its keys are taken: shortcuts still work.
+    pub fn has_focus(&self, ctx: &egui::Context) -> bool {
+        ctx.memory(|memory| memory.has_focus(focus_id()))
+    }
+
+    /// Takes the arrow keys, Home and End out of this frame's input, for the
+    /// Explorer to act on when it's drawn. Only call it when
+    /// [`has_keys`](Self::has_keys).
+    pub fn take_keys(&mut self, input: &mut egui::InputState) {
+        for key in NAV_KEYS {
+            // Shift first: a plain key's pattern matches with Shift held too.
+            for shift in [true, false] {
+                let modifiers = if shift {
+                    egui::Modifiers::SHIFT
+                } else {
+                    egui::Modifiers::NONE
+                };
+                let count = input.count_and_consume_key(modifiers, key);
+                self.keys.extend(std::iter::repeat_n((key, shift), count));
+            }
+        }
     }
 
     /// Opens a closed branch, or closes an open one.
@@ -392,6 +490,31 @@ impl Explorer {
         }
     }
 
+    /// The rows from the anchor (the row last moved to without Shift, or
+    /// else the primary one) to `target`, with `target` last so it's primary.
+    fn range_to(
+        &self,
+        rows: &[Row],
+        selection: &[InstanceId],
+        target: InstanceId,
+    ) -> Vec<InstanceId> {
+        let index_of = |id: InstanceId| rows.iter().position(|row| row.id == id);
+        let anchor = self
+            .anchor
+            .and_then(index_of)
+            .or_else(|| selection.last().copied().and_then(index_of));
+        let Some((anchor, to)) = anchor.zip(index_of(target)) else {
+            return vec![target];
+        };
+        let mut range: Vec<_> = rows[anchor.min(to)..=anchor.max(to)]
+            .iter()
+            .map(|row| row.id)
+            .filter(|id| *id != target)
+            .collect();
+        range.push(target);
+        range
+    }
+
     /// Draws the tree with every id in `selected` highlighted. Returns the row
     /// that was clicked, and anything to do to the tree. When not `editable`
     /// (during Play), rows can still be clicked and opened, and the
@@ -431,6 +554,62 @@ impl Explorer {
             .on_hover_text("Show only what has this in its name or class, and what it's in");
         let filtering = !self.filter.trim().is_empty();
         let rows = self.take_rows(world);
+        let panel = ui.max_rect();
+        self.drawn_frame = Some(theme::frame_number(ui.ctx()));
+
+        // Tab stops here after Filter; the keys are then the Explorer's,
+        // arrows included (egui would otherwise move focus with them).
+        let focus = ui.interact(
+            ui.available_rect_before_wrap(),
+            focus_id(),
+            egui::Sense::focusable_noninteractive(),
+        );
+        if focus.has_focus() {
+            self.keys_active = true;
+            ui.memory_mut(|memory| {
+                memory.set_focus_lock_filter(
+                    focus_id(),
+                    egui::EventFilter {
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        ..Default::default()
+                    },
+                );
+            });
+        }
+        if focus.gained_focus() {
+            self.ring = true;
+        }
+
+        // The keys taken this frame, one after another.
+        let mut selection = selected.to_vec();
+        let mut moved = false;
+        for (key, shift) in std::mem::take(&mut self.keys) {
+            match step(world, &rows, selection.last().copied(), key, filtering) {
+                Step::Select(target) => {
+                    let range = shift && matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown);
+                    selection = if range {
+                        self.range_to(&rows, &selection, target)
+                    } else {
+                        self.anchor = Some(target);
+                        vec![target]
+                    };
+                    self.keep_in_view = Some(target);
+                    moved = true;
+                }
+                Step::Toggle(id) => toggled = Some(id),
+                Step::Nothing => {}
+            }
+            self.ring = true;
+        }
+        if moved {
+            output.select = Some(selection.clone());
+        }
+        // Drawn with the new selection already, so it doesn't lag a frame.
+        let selected: &[InstanceId] = if moved { &selection } else { selected };
+        let ring_row = (self.ring && (self.keys_active || focus.has_focus()))
+            .then(|| selected.last().copied())
+            .flatten();
         if filtering && rows.is_empty() {
             ui.weak(format!("Nothing matches \"{}\".", self.filter.trim()));
         }
@@ -442,12 +621,24 @@ impl Explorer {
         // running past the panel. Only the rows on screen are laid out, so
         // a row to reveal is scrolled to by its place in the list.
         let mut area = egui::ScrollArea::vertical().auto_shrink(false);
-        if let Some(index) = scroll_to.and_then(|id| rows.iter().position(|row| row.id == id)) {
+        let in_view = self.keep_in_view.take();
+        let index_of = |id: InstanceId| rows.iter().position(|row| row.id == id);
+        if let Some(index) = scroll_to.and_then(index_of) {
             let view = ui.available_height();
             let middle = index as f32 * row_height - (view - row_height) / 2.0;
             area = area.vertical_scroll_offset(middle.max(0.0));
+        } else if let Some(index) = in_view.and_then(index_of)
+            && let Some((offset, view)) = self.view
+        {
+            // The keyboard scrolls only as far as it takes to show the row.
+            let top = index as f32 * row_height;
+            if top < offset {
+                area = area.vertical_scroll_offset(top);
+            } else if top + row_height > offset + view {
+                area = area.vertical_scroll_offset(top + row_height - view);
+            }
         }
-        area.show_rows(ui, row_height, rows.len(), |ui, range| {
+        let scrolled = area.show_rows(ui, row_height, rows.len(), |ui, range| {
             for row in &rows[range] {
                 // Read now, so a rename shows without remaking the rows.
                 let name = world
@@ -608,10 +799,17 @@ impl Explorer {
                 } else {
                     palette.control.gamma_multiply(hover)
                 };
-                ui.painter().set(
-                    background,
-                    egui::Shape::rect_filled(row_rect.shrink2(egui::vec2(2.0, 0.0)), 4, fill),
-                );
+                let row_shape = row_rect.shrink2(egui::vec2(2.0, 0.0));
+                ui.painter()
+                    .set(background, egui::Shape::rect_filled(row_shape, 4, fill));
+                if ring_row == Some(row.id) {
+                    ui.painter().rect_stroke(
+                        row_shape,
+                        4,
+                        egui::Stroke::new(1.0_f32, palette.accent),
+                        egui::StrokeKind::Inside,
+                    );
+                }
                 let left = drawn.response.rect.left() + 4.0;
                 for depth in 1..=row.depth {
                     let x = left + (depth - 1) as f32 * INDENT + ARROW_SIZE / 2.0;
@@ -624,7 +822,25 @@ impl Explorer {
             }
         });
 
+        self.view = Some((scrolled.state.offset.y, scrolled.inner_rect.height()));
         self.keep_rows(world, rows);
+        // A press in the Explorer gives it the keys, anywhere else takes
+        // them away; either way the mouse is in use, so no focus ring.
+        if let Some(origin) = ui.input(|input| {
+            input
+                .pointer
+                .any_pressed()
+                .then(|| input.pointer.press_origin())
+                .flatten()
+        }) {
+            self.keys_active = panel.contains(origin);
+            self.ring = false;
+        }
+        if let Some(id) = output.clicked
+            && !output.modifiers.shift
+        {
+            self.anchor = Some(id);
+        }
         // While filtering every branch shown is open, so there's nothing to toggle.
         if let Some(id) = toggled.filter(|_| !filtering) {
             self.toggle(id);
@@ -642,6 +858,56 @@ impl Explorer {
             paint_dragged_name(ui, world, id);
         }
         output
+    }
+}
+
+/// What `key` does with `primary` selected among `rows`: Up and Down move
+/// (to the first or last row with nothing selected), Home and End go to the
+/// ends, Left closes an open branch or goes to the parent, Right opens a
+/// closed one or goes to its first child. Branches don't open or close
+/// while filtering, since every branch shown is open.
+fn step(
+    world: &World,
+    rows: &[Row],
+    primary: Option<InstanceId>,
+    key: egui::Key,
+    filtering: bool,
+) -> Step {
+    let Some(last) = rows.len().checked_sub(1) else {
+        return Step::Nothing;
+    };
+    let index = primary.and_then(|id| rows.iter().position(|row| row.id == id));
+    let select = |index: usize| Step::Select(rows[index].id);
+    match (key, index) {
+        (egui::Key::Home, _) | (egui::Key::ArrowDown, None) => select(0),
+        (egui::Key::End, _) | (egui::Key::ArrowUp, None) => select(last),
+        (egui::Key::ArrowDown, Some(i)) => select((i + 1).min(last)),
+        (egui::Key::ArrowUp, Some(i)) => select(i.saturating_sub(1)),
+        (egui::Key::ArrowLeft, Some(i)) => {
+            let row = &rows[i];
+            if row.has_children && row.expanded && !filtering {
+                return Step::Toggle(row.id);
+            }
+            world
+                .get(row.id)
+                .and_then(|instance| instance.parent())
+                .and_then(|parent| rows.iter().position(|row| row.id == parent))
+                .map_or(Step::Nothing, select)
+        }
+        (egui::Key::ArrowRight, Some(i)) => {
+            let row = &rows[i];
+            if row.has_children && !row.expanded && !filtering {
+                Step::Toggle(row.id)
+            } else if rows
+                .get(i + 1)
+                .is_some_and(|next| next.depth == row.depth + 1)
+            {
+                select(i + 1)
+            } else {
+                Step::Nothing
+            }
+        }
+        _ => Step::Nothing,
     }
 }
 
@@ -1111,6 +1377,8 @@ pub(crate) fn insert_item(ui: &egui::Ui, what: Insertable) -> (egui::RichText, &
     (icon, what.label())
 }
 
+#[cfg(test)]
+mod key_tests;
 #[cfg(test)]
 mod tests;
 

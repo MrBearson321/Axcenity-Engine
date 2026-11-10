@@ -441,6 +441,17 @@ fn shortcuts_page(ui: &mut egui::Ui) {
         .collect();
     groups.push(("Tools", tools));
     groups.push((
+        "Explorer (once clicked)",
+        vec![
+            ("Move the selection".into(), "Up, Down".into()),
+            ("Extend the selection".into(), "Shift + Up, Down".into()),
+            ("Close, or go to the parent".into(), "Left".into()),
+            ("Open, or go to the first child".into(), "Right".into()),
+            ("First and last rows".into(), "Home, End".into()),
+            ("Rename".into(), format!("Enter  or  {}", RENAME_KEY.name())),
+        ],
+    ));
+    groups.push((
         "Viewport camera",
         vec![
             ("Look around".into(), "Right-drag".into()),
