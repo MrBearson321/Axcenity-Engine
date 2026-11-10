@@ -29,6 +29,22 @@ AXCENITY_BENCH_PROJECT=target/s10k AXCENITY_BENCH_FRAMES=600 \
 
 `--bench` works on any project, not only S10k. After the table, each host also prints its **first frame** and its **worst warm-up frame** (where first-sight loads land), and the player adds **launch to first frame** and **launch to assets loaded** (from `main` starting to the end of the first frame drawn with the Workspace's assets in). The JSON line has these under `"startup"`. `core::bench` holds the shared pieces: `Laps` times a frame's steps one after another (the player's Developer Console Stats tab uses it too), `StageSamples` keeps every frame, and `BenchRun` adds the warm-up and the report.
 
+### Regression check
+
+`axcenity-bench-check` (`testing/src/bench_check.rs`) runs the scenes listed in `benchmarks/baselines.json` (S10k on every host, and copies of the owner's projects in the test runner and the player) and compares each with the numbers recorded for this machine. Run it before merging a change that could cost frame time, and after an optimization to record the new numbers:
+
+```text
+cargo build --release -p axcenity-player -p axcenity-server -p axcenity-testing -p axcenity-editor
+start "" /affinity FFFF /wait /b target\release\axcenity-bench-check.exe --machine desktop-9950x3d   # Windows
+taskset -c 0-15 target/release/axcenity-bench-check --machine <name>                               # Linux
+```
+
+- **Pin it.** Every scene it runs inherits the pinning. Unpinned, other work on the machine moves a frame by 30–50% and the check means nothing (`start /affinity FFFF` is the 9950X3D's V-cache CCD).
+- **What it measures.** One uncounted warm-up round, then `--rounds` (3) counted ones; the median of the runs' frame medians, and for the player also its first frame and launch to assets in. A measure slower than its baseline by more than `tolerance` (10% for frames, 30% for startup times) prints `SLOWER` and the exit code is 1. A slower result is a reason to measure properly, alternating before and after builds, not proof on its own. Rerunning the recorded build straight after recording it, every measure came back within 6% (frames within 5%).
+- **Projects.** A `project:<name>` scene is copied once from `AXCENITY_PROJECTS` (or `--projects`; default `Documents/Axcenity Projects`) into `target/bench-projects`, without its `.axcenity` folder, then cooked with `axcenity-editor --cook` before each run. The owner's project is never written. `--fresh` copies it again; a project that isn't on the machine is skipped.
+- **Recording.** `--update` writes this run's numbers for `--machine` into `benchmarks/baselines.json` with the commit. Commit that file with the change that moved them, and say why in the commit. A run's `known` note (Abandoned Farmhouse's player startup) is kept.
+- `--only <text>` runs the scenes whose names contain it. Raw reports of the before/after comparison below are in `benchmarks/results/2026-11-10-desktop-9950x3d.jsonl`, one JSON line per run.
+
 ### Frame steps
 
 Each host names its steps the same way where they do the same work. A step a host doesn't have is left out.
@@ -354,6 +370,26 @@ The player's first frame was 130 to 152 ms, and launch to first frame 3.3 s (7.0
 
 - **The draw list is now the player's largest step**, and at 8.4 ms it doesn't shrink on a faster CPU: it is 8.1 ms on the cloud container, where physics is about 1.7× slower. Retained draw items (M4) cut it to about a third on S10k: 12.9 to 4.3–4.4 ms median on the cloud container (see [rendering/performance.md](rendering/performance.md)).
 - **Against the 3.3 ms in `rendering/performance.md`**: `bench_10000_parts` is 8.5 to 8.9 ms in `build_draw_list` here, so that figure is out of date. The roadmap's merges didn't cause it: 556b72b, the commit before them, is 8.0 to 8.8 ms on this machine, and each merge timed since is 7.4 to 8.9 ms. The rise came somewhere between the commit that added the render benchmarks and 556b72b.
+
+#### Before and after the roadmap, same desktop (2026-11-10)
+
+`300bbb5` against `5cb8302` (M1 to M7, M13, M14, L2 parts 1 to 7 merged). Release builds, each run pinned to the V-cache CCD (CPUs 0–15) with nothing else building, the two builds alternating, one uncounted warm-up round, then three. Medians of the runs' medians in milliseconds; the startup columns are the player's. The projects are copies of the owner's, cooked with `axcenity-editor --cook` for the after runs (the before build ignores cooked copies). Test runner and server ran 600 frames on S10k and 300 on the projects; the player 300.
+
+| Host and scene | Frame before | Frame after | First frame before → after | Launch to assets in before → after |
+|---|---|---|---|---|
+| Test runner, S10k | 7.71 | 5.03 | | |
+| Server, S10k | 5.13 | 3.82 | | |
+| Player, S10k | 14.93 | 8.73 | 129 → 127 | 3,880 → 3,754 |
+| Test runner, Abandoned Farmhouse | 0.53 | 0.25 | | |
+| Player, Abandoned Farmhouse | 4.77 | **5.50** | **1,054 → 4,517** | **4,692 → 6,207** |
+| Test runner, General Store Roadside | 1.81 | 0.094 | | |
+| Player, General Store Roadside | 6.99 | 4.40 | 1,076 → 1,251 | 2,428 → 2,476 |
+| Test runner, Temperate Wet Patch | 28.97 | 0.048 | | |
+| Player, Temperate Wet Patch | 47.80 | 5.52 | 1,796 → 1,003 | 3,099 → 2,265 |
+
+- **Open issue: everything got faster except Abandoned Farmhouse in the player.** It stays open until its startup is back near the before numbers; the regression check carries it as a `known` note. Its startup is the M5 trade-off above: textures now land on the first frame, and L2 was to take that work out. It doesn't yet for this project, because its 29 `.glb` files embed their 4K maps and `--cook` only cooks an embedded map that an import copied out to a file, so neither its textures nor its models are cooked (31 loose files cooked in 3 s; first frame 3.2–4.3 s uncooked, 4.0–4.2 s cooked). Its steady frame is also 0.7 ms slower, not yet explained.
+- **Editor Play and M1** (the possible 5.9% slowdown measured on the cloud container): `bench_project_play` on S10k, `4da1528` (before M1) against `1832da8` (M1's merge), seven alternating pinned rounds of 600 frames. The frame's median is 5.99 ms before and 5.09 ms after (ranges 5.05–6.48 and 4.57–5.22), Physics 3.34 → 2.29 ms, and the worst frame 13.8–17.2 → 5.9–6.9 ms. M1 made editor Play faster, not slower.
+- **`bench_project` and `shoot_project` drew cooked textures uncooked** until their device asked for BC compression (`bench_gpu` in `player/src/bench_tests.rs`); a cooked hello-character now takes 0.2 s for its first 24 frames instead of 1.2 s. Numbers from those tools on cooked projects before that fix are the uncooked path's.
 
 ### The mouse's ray and mesh hulls (Input)
 

@@ -1,0 +1,116 @@
+{
+  "about": "Performance baselines for axcenity-bench-check (docs/benchmarks.md, \"Regression check\"). Numbers are milliseconds and only compare on the machine that recorded them. A project scene is a copy of that project from the projects folder, cooked; S10k is made by axcenity-test --make-s10k.",
+  "machines": {
+    "desktop-9950x3d": {
+      "about": "AMD Ryzen 9 9950X3D (16 cores), 62 GB, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Pinned to CPUs 0-15 (the V-cache CCD). Recorded at main 39dd258 with nothing else running.",
+      "commit": "39dd258",
+      "results": {
+        "farmhouse-player": {
+          "assets_ms": 6043.285,
+          "first_frame_ms": 4354.474,
+          "frame_ms": 5.473,
+          "known": "Open issue: startup regressed with M5 (first frame about 1.05 s at 300bbb5) and L2 doesn't cook textures embedded in its .glb files yet. See docs/benchmarks.md, 'Before and after the roadmap'."
+        },
+        "farmhouse-test": {
+          "frame_ms": 0.091
+        },
+        "s10k-editor-play": {
+          "frame_ms": 3.246
+        },
+        "s10k-player": {
+          "assets_ms": 3749.78,
+          "first_frame_ms": 124.178,
+          "frame_ms": 7.048
+        },
+        "s10k-server": {
+          "frame_ms": 3.742
+        },
+        "s10k-test": {
+          "frame_ms": 3.718
+        },
+        "store-player": {
+          "assets_ms": 2472.034,
+          "first_frame_ms": 1230.491,
+          "frame_ms": 4.19
+        },
+        "store-test": {
+          "frame_ms": 0.036
+        },
+        "wet-patch-player": {
+          "assets_ms": 2063.546,
+          "first_frame_ms": 820.125,
+          "frame_ms": 5.279
+        },
+        "wet-patch-test": {
+          "frame_ms": 0.025
+        }
+      }
+    }
+  },
+  "runs": [
+    {
+      "frames": 600,
+      "host": "test",
+      "name": "s10k-test",
+      "scene": "s10k"
+    },
+    {
+      "frames": 600,
+      "host": "server",
+      "name": "s10k-server",
+      "scene": "s10k"
+    },
+    {
+      "frames": 300,
+      "host": "player",
+      "name": "s10k-player",
+      "scene": "s10k"
+    },
+    {
+      "frames": 600,
+      "host": "editor-play",
+      "name": "s10k-editor-play",
+      "scene": "s10k"
+    },
+    {
+      "frames": 300,
+      "host": "test",
+      "name": "farmhouse-test",
+      "scene": "project:Abandoned Farmhouse"
+    },
+    {
+      "frames": 300,
+      "host": "player",
+      "name": "farmhouse-player",
+      "scene": "project:Abandoned Farmhouse"
+    },
+    {
+      "frames": 300,
+      "host": "test",
+      "name": "store-test",
+      "scene": "project:General Store Roadside"
+    },
+    {
+      "frames": 300,
+      "host": "player",
+      "name": "store-player",
+      "scene": "project:General Store Roadside"
+    },
+    {
+      "frames": 300,
+      "host": "test",
+      "name": "wet-patch-test",
+      "scene": "project:Temperate Wet Patch"
+    },
+    {
+      "frames": 300,
+      "host": "player",
+      "name": "wet-patch-player",
+      "scene": "project:Temperate Wet Patch"
+    }
+  ],
+  "tolerance": {
+    "frame": 0.1,
+    "startup": 0.3
+  }
+}
