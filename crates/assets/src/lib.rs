@@ -56,8 +56,8 @@ pub use color_grading::{
 };
 pub use cooked::{
     COOKED_EXTENSION, COOKED_FOLDER, CookedFormat, CookedTexture, SourceStamp, content_hash,
-    cooked_path, decode_cooked, encode_cooked, has_alpha, is_cooked, read_cooked, sampled_average,
-    write_cooked,
+    cooked_path, cooked_relative_path, decode_cooked, encode_cooked, has_alpha, is_cooked,
+    read_cooked, sampled_average, write_cooked,
 };
 pub use data_table::{
     AssetType, Cell, Column, ColumnType, DATA_FOLDER, DATA_TABLE_SUFFIX, DataTable, DataTableError,

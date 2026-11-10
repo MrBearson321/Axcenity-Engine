@@ -164,6 +164,15 @@ pub fn cooked_path(project: &Path, relative: &str) -> PathBuf {
         .join(format!("{name}-{hash:016x}.{COOKED_EXTENSION}"))
 }
 
+/// Where the cooked copy of `relative` goes inside the project, with `/`
+/// between folders: [`cooked_path`] without the project folder, for
+/// putting it in a packed game.
+pub fn cooked_relative_path(relative: &str) -> String {
+    cooked_path(Path::new(""), relative)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 /// The cooked file's bytes: [`MAGIC`], the stamp, the format, size and
 /// facts, each level's length, then the levels. Little-endian.
 pub fn encode_cooked(stamp: SourceStamp, texture: &CookedTexture) -> Vec<u8> {
@@ -263,7 +272,11 @@ pub fn write_cooked(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let partial = path.with_extension("partial");
+    // Named for this writer, so two cooking the same file at once (the
+    // editor's thread and Build Game) don't write into one file.
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let partial = path.with_extension(format!("{}-{write}.partial", std::process::id()));
     fs::write(&partial, encode_cooked(stamp, texture))?;
     fs::rename(&partial, &path)
 }
@@ -464,6 +477,11 @@ mod tests {
         assert_ne!(a, b);
         assert!(a.starts_with(project.join(COOKED_FOLDER)));
         assert_eq!(a, cooked_path(project, "assets\\a\\Color.png"));
+        assert_eq!(
+            Path::new("project").join(cooked_relative_path("assets/a/Color.png")),
+            a
+        );
+        assert!(cooked_relative_path("assets/a/Color.png").starts_with(".axcenity/imported/"));
         let name = a.file_name().unwrap().to_str().unwrap();
         assert!(
             name.starts_with("Color.png-") && name.ends_with(".axtex"),
