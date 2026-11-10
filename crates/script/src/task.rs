@@ -115,6 +115,10 @@ impl TaskFunctions {
     }
 
     /// `task.wait`, for other engine Lua that needs to wait.
+    pub fn spawn(&self) -> &Function {
+        &self.spawn
+    }
+
     pub fn wait(&self) -> &Function {
         &self.wait
     }

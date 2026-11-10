@@ -392,7 +392,7 @@ impl EditorApp {
         if mesh_id.is_empty() {
             return None;
         }
-        let model = self.assets.model(mesh_id)?;
+        let model = self.assets.model_blocking(mesh_id)?;
         let mut names = Vec::new();
         for primitive in &model.primitives {
             if !names.contains(&primitive.material.name) {

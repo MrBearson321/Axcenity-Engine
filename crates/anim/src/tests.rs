@@ -14,7 +14,7 @@ fn example() -> PathBuf {
 
 /// The noodle's corners in `posed`, at full detail.
 fn corners(assets: &Assets, posed: &Posed) -> Vec<PosedPrimitive> {
-    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
     posed.primitives(&model).into_iter().cloned().collect()
 }
 
@@ -216,7 +216,7 @@ fn the_example_files_are_saved_as_the_engine_writes_them() {
 /// noodle, with root motion on or off.
 fn walk(root_motion: bool) -> (crate::Clip, std::sync::Arc<axcenity_assets::Model>) {
     let assets = Assets::new(example());
-    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
     let (mut clip, takes) =
         crate::load_clip(&assets, "assets/animations/noodle/Walk.anim.json").unwrap();
     clip.link.as_mut().unwrap().root_motion = root_motion;
@@ -257,7 +257,7 @@ fn root_motion_moves_the_model_instead_of_the_root_bone() {
 fn locomotion() -> (crate::Compiled, std::sync::Arc<axcenity_assets::Model>) {
     use crate::files::{BlendChild, BlendTree, Motion, ParameterDef, StateDef};
     let assets = Assets::new(example());
-    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
     let file = StateMachineFile {
         parameters: vec![ParameterDef::Number {
             name: "Speed".into(),
@@ -1020,7 +1020,7 @@ fn a_bone_in_the_world_follows_the_pose_the_animators_made() {
     let assets = Assets::new(example());
     let mut animators = Animators::new();
     animators.update(&mut world, &assets, 0.4);
-    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
     let rig = model.rig.clone().unwrap();
     let posed = animators.poses().get(&part).cloned().unwrap();
     let (clip, _) = walk(false);

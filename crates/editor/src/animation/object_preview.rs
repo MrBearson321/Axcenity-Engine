@@ -300,7 +300,7 @@ impl ObjectPreview {
         if root.class() != ClassName::MeshPart || self.flat {
             return None;
         }
-        let model = assets.model(root.property("MeshId").and_then(Value::as_str)?)?;
+        let model = assets.model_blocking(root.property("MeshId").and_then(Value::as_str)?)?;
         model.rig.is_some().then_some(model)
     }
 

@@ -6,7 +6,9 @@
 //! the part's hull. A file that now fails to load keeps the last good
 //! version, and the failure is reported once, through
 //! [`Assets::take_errors`]. A model or texture file whose size and
-//! modification time are the same as when it was read is left alone.
+//! modification time are the same as when it was read is left alone. As
+//! with a first load, the file is read with the lock released, so the last
+//! good version stays in use until the new one is in.
 
 use std::time::SystemTime;
 
@@ -16,17 +18,83 @@ use super::*;
 pub(crate) type Stamp = (Option<SystemTime>, u64);
 
 /// The stamp of the file at `path` in `folder`, if it's there.
-fn stamp(folder: &Path, path: &str) -> Option<Stamp> {
+pub(crate) fn stamp(folder: &Path, path: &str) -> Option<Stamp> {
     let metadata = std::fs::metadata(folder.join(safe_path(path)?)).ok()?;
     Some((metadata.modified().ok(), metadata.len()))
 }
 
 /// Keeps the stamp of the file at `path` as it is now, as the one read.
 pub(crate) fn remember_stamp(shared: &mut Shared, folder: &Path, path: &str) {
-    match stamp(folder, path) {
-        Some(now) => shared.stamps.insert(path.to_owned(), now),
+    keep_stamp(shared, path, stamp(folder, path));
+}
+
+/// Keeps `stamp` as the one read for the file at `path`.
+pub(crate) fn keep_stamp(shared: &mut Shared, path: &str, stamp: Option<Stamp>) {
+    match stamp {
+        Some(stamp) => shared.stamps.insert(path.to_owned(), stamp),
         None => shared.stamps.remove(path),
     };
+}
+
+/// What's loaded from a file, noted under the lock so it can be read again
+/// without it.
+#[derive(Default)]
+struct Uses {
+    mesh_ids: Vec<String>,
+    takes: bool,
+    texture: bool,
+    sky_image: bool,
+    lookup: bool,
+    palette: bool,
+    probe: bool,
+    light_probes: bool,
+    materials: Vec<String>,
+    table: bool,
+}
+
+impl Uses {
+    fn of(shared: &Shared, file: &str) -> Self {
+        Self {
+            mesh_ids: shared
+                .models
+                .keys()
+                .filter(|mesh_id| mesh_id.split('#').next() == Some(file))
+                .cloned()
+                .collect(),
+            takes: shared.takes.contains_key(file),
+            texture: shared.textures.contains_key(file),
+            sky_image: shared.sky_images.contains_key(file),
+            lookup: shared.lookups.contains_key(file),
+            palette: shared.palettes.contains_key(file),
+            probe: shared.probes.contains_key(file),
+            light_probes: shared.light_probes.contains_key(file),
+            materials: shared
+                .materials
+                .iter()
+                .filter(|(material, resolved)| {
+                    material.as_str() == file
+                        || resolved
+                            .as_ref()
+                            .is_some_and(|resolved| resolved.files.iter().any(|used| used == file))
+                })
+                .map(|(material, _)| material.clone())
+                .collect(),
+            table: shared.tables.contains_key(file),
+        }
+    }
+
+    fn any(&self) -> bool {
+        !self.mesh_ids.is_empty()
+            || self.takes
+            || self.texture
+            || self.sky_image
+            || self.lookup
+            || self.palette
+            || self.probe
+            || self.light_probes
+            || !self.materials.is_empty()
+            || self.table
+    }
 }
 
 /// What [`Assets::reload`] did with a changed file.
@@ -76,6 +144,8 @@ impl Assets {
         let mut models: Vec<String> = shared
             .models
             .keys()
+            .map(String::as_str)
+            .chain(loading::models_being_read(&shared))
             .filter_map(|mesh_id| mesh_id.split('#').next())
             .filter(|model| {
                 let folder = model.rsplit_once('/').map_or("", |(folder, _)| folder);
@@ -94,139 +164,95 @@ impl Assets {
     fn reload_file(&self, file: &str, changed: bool) -> Reload {
         if is_font_file(file) {
             let mut shared = self.lock();
+            loading::reread_loads(&mut shared, |key| key.kind == Kind::Fonts);
             if shared.fonts.is_none() {
                 return Reload::Unused;
             }
             shared.fonts = None;
             return Reload::Reloaded;
         }
-        let mut shared = self.lock();
-        let Some(folder) = shared.folder.clone() else {
+        let Some(folder) = self.folder() else {
             return Reload::Unused;
         };
         let now = stamp(&folder, file);
-        if !changed && now.is_some() && shared.stamps.get(file) == now.as_ref() {
-            // Written by the host itself after it was read, or touched.
+        let (uses, edited, gate) = {
+            let mut shared = self.lock();
+            if !changed && now.is_some() && shared.stamps.get(file) == now.as_ref() {
+                // Written by the host itself after it was read, or touched.
+                return Reload::Unused;
+            }
+            loading::reread_loads(&mut shared, |key| {
+                key.file() == file || key.kind == Kind::Material
+            });
+            (
+                Uses::of(&shared, file),
+                shared.edited_materials.clone(),
+                shared.gate.clone(),
+            )
+        };
+        if !uses.any() {
             return Reload::Unused;
         }
-        let mut used = false;
+        if let Some(gate) = gate {
+            gate(file);
+        }
+
+        // Read everything with the lock released; the old versions stay in
+        // use meanwhile. Then all of it goes in, or none.
         let mut problems = Vec::new();
 
         // Every model picked from the file, and its takes: all new, or none.
-        let mesh_ids: Vec<String> = shared
-            .models
-            .keys()
-            .filter(|mesh_id| mesh_id.split('#').next() == Some(file))
-            .cloned()
-            .collect();
         let mut models = Vec::new();
-        for mesh_id in mesh_ids {
-            used = true;
-            match read_model(&folder, &mesh_id) {
-                Ok(model) => models.push((mesh_id, model)),
-                Err(message) => problems.push(message),
+        for mesh_id in &uses.mesh_ids {
+            if let Some(model) = kept(&mut problems, read_model(&folder, mesh_id)) {
+                models.push((mesh_id.clone(), model));
             }
         }
-        let mut takes = None;
-        if shared.takes.contains_key(file) {
-            used = true;
-            match read_takes(&folder, file) {
-                Ok(read) => takes = Some(read),
-                Err(message) => problems.push(message),
-            }
-        }
-
-        let mut texture = None;
-        if shared.textures.contains_key(file) {
-            used = true;
-            match read_texture(&folder, file) {
-                Ok(image) => texture = Some(image),
-                Err(message) => problems.push(message),
-            }
-        }
-
-        let mut sky_image = None;
-        if shared.sky_images.contains_key(file) {
-            used = true;
-            match read_sky_image(&folder, file) {
-                Ok(image) => sky_image = Some(image),
-                Err(message) => problems.push(message),
-            }
-        }
-
-        let mut lookup = None;
-        if shared.lookups.contains_key(file) {
-            used = true;
-            match crate::read_color_lookup(&folder, file) {
-                Ok(read) => lookup = Some(read),
-                Err(message) => problems.push(message),
-            }
-        }
-        let mut palette = None;
-        if shared.palettes.contains_key(file) {
-            used = true;
-            match crate::read_palette(&folder, file) {
-                Ok((read, _)) => palette = Some(read),
-                Err(message) => problems.push(message),
-            }
-        }
-
-        let mut probe = None;
-        if shared.probes.contains_key(file) {
-            used = true;
-            match read_probe(&folder, file) {
-                Ok(image) => probe = Some(image),
-                Err(message) => problems.push(message),
-            }
-        }
-
-        let mut light_probes = None;
-        if shared.light_probes.contains_key(file) {
-            used = true;
-            match read_light_probes(&folder, file) {
-                Ok(probes) => light_probes = Some(probes),
-                Err(message) => problems.push(message),
-            }
-        }
+        let takes = uses
+            .takes
+            .then(|| read_takes(&folder, file))
+            .and_then(|read| kept(&mut problems, read));
+        let texture = uses
+            .texture
+            .then(|| read_texture(&folder, file))
+            .and_then(|read| kept(&mut problems, read));
+        let sky_image = uses
+            .sky_image
+            .then(|| read_sky_image(&folder, file))
+            .and_then(|read| kept(&mut problems, read));
+        let lookup = uses
+            .lookup
+            .then(|| crate::read_color_lookup(&folder, file))
+            .and_then(|read| kept(&mut problems, read));
+        let palette = uses
+            .palette
+            .then(|| crate::read_palette(&folder, file).map(|(read, _)| read))
+            .and_then(|read| kept(&mut problems, read));
+        let probe = uses
+            .probe
+            .then(|| read_probe(&folder, file))
+            .and_then(|read| kept(&mut problems, read));
+        let light_probes = uses
+            .light_probes
+            .then(|| read_light_probes(&folder, file))
+            .and_then(|read| kept(&mut problems, read));
 
         // Every material made from the file, put together again.
-        let paths: Vec<String> = shared
-            .materials
-            .iter()
-            .filter(|(material, resolved)| {
-                material.as_str() == file
-                    || resolved
-                        .as_ref()
-                        .is_some_and(|resolved| resolved.files.iter().any(|used| used == file))
-            })
-            .map(|(material, _)| material.clone())
-            .collect();
         let mut materials = Vec::new();
-        for material in paths {
-            used = true;
+        for material in &uses.materials {
             let mut errors = Vec::new();
-            match material::resolve(&folder, &material, &shared.edited_materials, &mut errors) {
-                Some(resolved) if !resolved.broken => materials.push((material, resolved)),
+            match material::resolve(&folder, material, &edited, &mut errors) {
+                Some(resolved) if !resolved.broken => materials.push((material.clone(), resolved)),
                 _ => problems.extend(errors),
             }
         }
+        let table = uses
+            .table
+            .then(|| read_table(&folder, file))
+            .and_then(|read| kept(&mut problems, read));
 
-        let mut table = None;
-        if shared.tables.contains_key(file) {
-            used = true;
-            match read_table(&folder, file) {
-                Ok(read) => table = Some(read),
-                Err(message) => problems.push(message),
-            }
-        }
-
-        if !used {
-            return Reload::Unused;
-        }
-        match now {
-            Some(now) => shared.stamps.insert(file.to_owned(), now),
-            None => shared.stamps.remove(file),
-        };
+        let mut shared = self.lock();
+        keep_stamp(&mut shared, file, now);
         if let Some(problem) = problems.into_iter().next() {
             if shared.reload_failed.insert(file.to_owned()) {
                 shared.errors.push(format!(
@@ -236,6 +262,7 @@ impl Assets {
             return Reload::Failed;
         }
         shared.reload_failed.remove(file);
+        shared.generation += 1;
         for (mesh_id, model) in models {
             for warning in &model.warnings {
                 shared
@@ -283,6 +310,17 @@ impl Assets {
     }
 }
 
+/// `read`'s value, or `None` with why added to `problems`.
+fn kept<T>(problems: &mut Vec<String>, read: Result<T, String>) -> Option<T> {
+    match read {
+        Ok(value) => Some(value),
+        Err(message) => {
+            problems.push(message);
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -324,12 +362,12 @@ mod tests {
         let folder = project("model");
         write_triangle(&folder, 1.0);
         let assets = Assets::new(&folder);
-        let old = assets.model(TRIANGLE).unwrap();
+        let old = assets.model_blocking(TRIANGLE).unwrap();
         assert_eq!(old.size, [1.0, 1.0, 0.0]);
 
         write_triangle(&folder, 2.5);
         assert_eq!(assets.reload(TRIANGLE), Reload::Reloaded);
-        let new = assets.model(TRIANGLE).unwrap();
+        let new = assets.model_blocking(TRIANGLE).unwrap();
         assert_eq!(new.size, [2.5, 1.0, 0.0]);
         assert_ne!(new.key(), old.key());
         assert!(assets.take_errors().is_empty());
@@ -341,13 +379,13 @@ mod tests {
         let folder = project("buffer");
         write_triangle(&folder, 1.0);
         let assets = Assets::new(&folder);
-        let old = assets.model(TRIANGLE).unwrap();
+        let old = assets.model_blocking(TRIANGLE).unwrap();
         // Only the buffer changes: the triangle's corners move.
         let corners: [f32; 9] = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.5, 0.0];
         let bytes: Vec<u8> = corners.iter().flat_map(|c| c.to_le_bytes()).collect();
         fs::write(folder.join("assets/models/tri.bin"), bytes).unwrap();
         assert_eq!(assets.reload("assets/models/tri.bin"), Reload::Reloaded);
-        let new = assets.model(TRIANGLE).unwrap();
+        let new = assets.model_blocking(TRIANGLE).unwrap();
         assert_ne!(old.key(), new.key());
         // A model or clip beside it is its own file, so it's left alone.
         assert!(assets.models_reading("assets/models/other.glb").is_empty());
@@ -364,18 +402,18 @@ mod tests {
         let folder = project("broken-model");
         write_triangle(&folder, 1.0);
         let assets = Assets::new(&folder);
-        let good = assets.model(TRIANGLE).unwrap();
+        let good = assets.model_blocking(TRIANGLE).unwrap();
 
         fs::write(folder.join(TRIANGLE), "{ not a model").unwrap();
         assert_eq!(assets.reload(TRIANGLE), Reload::Failed);
-        let kept = assets.model(TRIANGLE).unwrap();
+        let kept = assets.model_blocking(TRIANGLE).unwrap();
         assert!(Arc::ptr_eq(&good, &kept));
         let errors = assets.take_errors();
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].starts_with("Could not reload `assets/models/tri.gltf`"));
         assert!(errors[0].ends_with("The last good version stays."));
         // Asking for it again doesn't report it again.
-        assets.model(TRIANGLE);
+        assets.model_blocking(TRIANGLE);
         assert!(assets.take_errors().is_empty());
         // Nor does saving it broken again before it's fixed.
         fs::write(folder.join(TRIANGLE), "{ still not a model").unwrap();
@@ -385,7 +423,10 @@ mod tests {
         // Fixed, it's swapped in.
         write_triangle(&folder, 3.75);
         assert_eq!(assets.reload(TRIANGLE), Reload::Reloaded);
-        assert_eq!(assets.model(TRIANGLE).unwrap().size, [3.75, 1.0, 0.0]);
+        assert_eq!(
+            assets.model_blocking(TRIANGLE).unwrap().size,
+            [3.75, 1.0, 0.0]
+        );
         let _ = fs::remove_dir_all(&folder);
     }
 
@@ -427,7 +468,10 @@ mod tests {
         let model = read_model(&folder, TRIANGLE).unwrap();
         let inserted = assets.insert(TRIANGLE, model);
         assert_eq!(assets.reload(TRIANGLE), Reload::Unused);
-        assert!(Arc::ptr_eq(&assets.model(TRIANGLE).unwrap(), &inserted));
+        assert!(Arc::ptr_eq(
+            &assets.model_blocking(TRIANGLE).unwrap(),
+            &inserted
+        ));
         let _ = fs::remove_dir_all(&folder);
     }
 

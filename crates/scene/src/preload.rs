@@ -4,22 +4,8 @@
 
 use std::collections::HashSet;
 
-use axcenity_assets::Assets;
-use axcenity_core::{ClassName, FoliageSource, Value, World};
-
-/// The properties that name texture files, on a SurfaceAppearance or a
-/// TerrainLayer (each class has only some of them).
-const MAPS: [&str; 9] = [
-    "ColorMap",
-    "NormalMap",
-    "MetalnessMap",
-    "RoughnessMap",
-    "AmbientOcclusionMap",
-    "EmissiveMap",
-    "OpacityMap",
-    "SpecularMap",
-    "HeightMap",
-];
+use axcenity_assets::{Assets, LoadTicket};
+use axcenity_core::{ClassName, FoliageSource, TEXTURE_MAP_PROPERTIES, Value, World};
 
 /// A file drawing the Workspace reads.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -39,12 +25,23 @@ impl AssetFile {
         }
     }
 
+    /// Starts reading it into `assets` on the asset workers and returns at
+    /// once: the ticket says when it's in. A material's ticket waits for
+    /// its textures too.
+    pub fn request(&self, assets: &Assets) -> LoadTicket {
+        match self {
+            Self::Model(mesh_id) => assets.request_model(mesh_id),
+            Self::Texture(path) => assets.request_texture(path),
+            Self::Material(path) => assets.request_material(path),
+        }
+    }
+
     /// Reads it into `assets`, which keeps it (or why it couldn't be read)
     /// for drawing, so drawing doesn't read it again.
     pub fn load(&self, assets: &Assets) {
         match self {
             Self::Model(mesh_id) => {
-                assets.model(mesh_id);
+                assets.model_blocking(mesh_id);
             }
             Self::Texture(path) => {
                 assets.texture(path);
@@ -99,7 +96,7 @@ pub fn asset_files(world: &World) -> Vec<AssetFile> {
                 }
             }
             ClassName::SurfaceAppearance | ClassName::TerrainLayer => {
-                for map in MAPS {
+                for map in TEXTURE_MAP_PROPERTIES {
                     if let Some(path) = text(map) {
                         add(AssetFile::Texture(path));
                     }

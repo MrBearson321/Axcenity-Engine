@@ -35,7 +35,9 @@ pub use animation::{
     AnimationTrackState, AnimatorState, LayerWeight, Parameter, PlayRequest, PropertyAnimationState,
 };
 pub use arena::{Arena, Id};
-pub use class::{ClassName, DEFAULT_CLOCK_TIME, DEFAULT_LATITUDE, INSTANCE_EVENTS};
+pub use class::{
+    ClassName, DEFAULT_CLOCK_TIME, DEFAULT_LATITUDE, INSTANCE_EVENTS, TEXTURE_MAP_PROPERTIES,
+};
 pub use collision_groups::{CollisionGroups, DEFAULT_GROUP, MAX_COLLISION_GROUPS};
 pub use enums::{
     KeyCode, Material, MaterialPreset, MouseBehavior, PartType, ParticleType, TextureChannel,

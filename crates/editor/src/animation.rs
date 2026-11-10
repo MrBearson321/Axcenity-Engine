@@ -239,9 +239,11 @@ impl Subject {
     /// The `MeshId` of its model, if it's a MeshPart whose model has a
     /// skeleton.
     fn rigged_model(&self, assets: &Assets) -> Option<String> {
-        self.mesh_id
-            .clone()
-            .filter(|id| assets.model(id).is_some_and(|model| model.rig.is_some()))
+        self.mesh_id.clone().filter(|id| {
+            assets
+                .model_blocking(id)
+                .is_some_and(|model| model.rig.is_some())
+        })
     }
 
     /// Its own clips: those in its model's folder for a MeshPart, or

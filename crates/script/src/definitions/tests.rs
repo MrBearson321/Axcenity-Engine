@@ -443,6 +443,7 @@ fn described_fields_and_methods_exist() {
             "DataRow",
             "game:GetService('DataService'):GetTable('sample'):Get('row')",
         ),
+        ("ContentProvider", "game:GetService('ContentProvider')"),
         ("UserGameSettings", "game:GetService('UserGameSettings')"),
         ("ReplicatedFirst", "game:GetService('ReplicatedFirst')"),
         (

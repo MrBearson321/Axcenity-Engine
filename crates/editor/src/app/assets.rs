@@ -240,7 +240,7 @@ impl EditorApp {
 
     fn drop_model(&mut self, entry: &AssetEntry, spot: Spot) {
         // A model that can't be loaded is reported by `Assets`, once.
-        let Some(model) = self.assets.model(&entry.path) else {
+        let Some(model) = self.assets.model_blocking(&entry.path) else {
             return;
         };
         let position = Vector3::new(spot.point.x, spot.point.y, spot.point.z);

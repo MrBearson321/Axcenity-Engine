@@ -1212,7 +1212,7 @@ fn skeleton_model(world: &World, assets: &Assets, owner: InstanceId) -> Option<A
         return None;
     }
     let mesh_id = part.property("MeshId").and_then(Value::as_str)?;
-    let model = assets.model(mesh_id)?;
+    let model = assets.model_blocking(mesh_id)?;
     model.rig.is_some().then_some(model)
 }
 

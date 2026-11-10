@@ -208,7 +208,7 @@ impl ClipDoc {
         let Ok(takes) = &self.takes else {
             return false;
         };
-        let Some(model) = assets.model(mesh_id) else {
+        let Some(model) = assets.model_blocking(mesh_id) else {
             return false;
         };
         let Some(rig) = &model.rig else {
@@ -298,7 +298,7 @@ impl ClipDoc {
             .clone()
             .ok_or("no model in the project has this clip's skeleton")?;
         let model = assets
-            .model(&mesh_id)
+            .model_blocking(&mesh_id)
             .ok_or_else(|| format!("`{mesh_id}` can't be loaded"))?;
         let rig = model
             .rig
@@ -484,7 +484,7 @@ impl ClipDoc {
             .as_deref()
             .ok_or("no model in the project has this clip's skeleton")?;
         let model = assets
-            .model(mesh_id)
+            .model_blocking(mesh_id)
             .ok_or_else(|| format!("`{mesh_id}` can't be loaded"))?;
         if model.rig.is_none() {
             return Err(format!("`{mesh_id}` has no skeleton"));
@@ -670,7 +670,7 @@ impl ClipDoc {
         let Some((mesh_id, model)) = self
             .preview_model
             .clone()
-            .and_then(|id| Some((id.clone(), assets.model(&id)?)))
+            .and_then(|id| Some((id.clone(), assets.model_blocking(&id)?)))
         else {
             ui.weak("No model to show the bones of.");
             return;

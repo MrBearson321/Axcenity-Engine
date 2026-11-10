@@ -101,7 +101,7 @@ pub fn colliding_model_keys(data: &TerrainData, assets: &Assets) -> Vec<(String,
     paths
         .into_iter()
         .map(|path| {
-            let key = assets.model(&path).map(|model| model.key());
+            let key = assets.model_blocking(&path).map(|model| model.key());
             (path, key)
         })
         .collect()
@@ -589,7 +589,7 @@ pub fn foliage_forms(data: &TerrainData, size: Vec3, assets: &Assets) -> Vec<(Po
         let scale = instance.scale.max(0.01);
         let (form, form_size, center) = match &instance.source {
             FoliageSource::Model(path) => {
-                let model = assets.model(path);
+                let model = assets.model_blocking(path);
                 let native = model
                     .as_ref()
                     .map(|model| Vec3::from(model.size))

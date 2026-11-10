@@ -3,6 +3,9 @@
 //! - [`Assets`] loads each model a MeshPart names the first time
 //!   something asks for it, and keeps it. The player and the editor make one
 //!   per project and share it (it's a cheap handle) with `physics` and `scene`.
+//!   Files are read and decoded with its lock released, and
+//!   [`Assets::request_model`] and its siblings load them on background
+//!   threads without waiting ([`LoadTicket`]).
 //! - [`Assets::material`] reads a `*.material.json` file a part's
 //!   `MaterialVariant` names, with its base files ([`MaterialFile`]).
 //! - [`Assets::data_table`] reads a `*.data.json` table scripts read
@@ -32,6 +35,7 @@ mod data_table;
 mod fonts;
 mod import;
 mod light_probes;
+mod loading;
 mod material;
 mod model;
 mod probe;
@@ -40,9 +44,10 @@ mod sky_image;
 mod texture_set;
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
+
+use loading::{Kind, LoadKey};
 
 pub use color_grading::{
     ColorLookup, LOOKUP_EXTENSIONS, MAX_LOOKUP_SIZE, MAX_PALETTE_COLORS, PROJECT_GRADING_FOLDER,
@@ -65,6 +70,7 @@ pub use light_probes::{
     encode_light_probes, is_light_probes_file, light_probes_path, read_light_probes,
     write_light_probes,
 };
+pub use loading::{LoadStatus, LoadTicket};
 pub use material::{
     MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MapSettings, MaterialChain, MaterialFile,
     MaterialFileError, MaterialMaps, MaterialShader, OutlineFile, ParamValue, Shading,
@@ -92,23 +98,18 @@ pub use texture_set::{
     texture_set_from_files, write_texture_set,
 };
 
-/// At most this many textures are read at once in the background, leaving
-/// cores for drawing.
-const TEXTURE_WORKERS: usize = 4;
-
 /// The project's loaded assets. Cloning gives another handle to the same
 /// assets, so a model is loaded once however many parts use it.
 ///
 /// `Arc<Mutex<…>>` shares one value between owners (`Arc`) and lets any of
-/// them change it, one at a time (`Mutex`). Background texture workers hold
-/// the lock only to take a path and to store what they read, never while
-/// reading.
+/// them change it, one at a time (`Mutex`). The lock is held only to look a
+/// file up and to keep what was read, never while reading (`loading.rs`).
 #[derive(Clone, Default)]
 pub struct Assets {
     shared: Arc<Mutex<Shared>>,
 }
 
-/// Called from a worker thread each time a background texture is ready.
+/// Called from a worker thread each time a background file is ready.
 type Waker = Arc<dyn Fn() + Send + Sync>;
 
 /// Textures being read in the background, for a progress note.
@@ -120,13 +121,6 @@ pub struct TextureProgress {
     pub total: usize,
     /// One being read now, such as `assets/textures/Ground108/…_Color.jpg`.
     pub current: String,
-}
-
-/// A file for a background worker to read: a texture, or a sky image.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct Queued {
-    path: String,
-    sky: bool,
 }
 
 #[derive(Default)]
@@ -168,16 +162,22 @@ struct Shared {
     errors: Vec<String>,
     /// Set by [`Assets::load_textures_in_background`].
     waker: Option<Waker>,
-    /// Texture and sky image files waiting for a worker, oldest first.
-    queue: VecDeque<Queued>,
-    /// Texture and sky image files queued or being read.
-    loading: HashSet<Queued>,
+    /// Files waiting for a worker, oldest first.
+    queue: VecDeque<LoadKey>,
+    /// Every file queued or being read, each with its ticket.
+    loads: HashMap<LoadKey, loading::Load>,
     /// Worker threads running.
     workers: usize,
+    /// Everything queued since none were loading, for [`Assets::progress`].
+    jobs: loading::Batch,
+    /// Textures and sky images among those, for [`TextureProgress`].
+    images: loading::Batch,
+    /// Goes up when anything is loaded (see [`Assets::generation`]).
+    generation: u64,
+    /// Set by [`Assets::set_load_gate`].
+    gate: Option<loading::LoadGate>,
     /// The project's font files, read the first time they're asked for.
     fonts: Option<Arc<Vec<FontFile>>>,
-    /// Textures asked for since none were loading, for [`TextureProgress`].
-    batch: usize,
     /// Each model and texture file's stamp when it was read, so
     /// [`Assets::reload`] skips one that hasn't changed since (such as a
     /// model the editor just imported).
@@ -225,43 +225,23 @@ impl Assets {
     }
 
     /// The model at `mesh_id` (a MeshPart's `MeshId`, such as
-    /// `assets/models/chair.glb`), loading it the first time. `None` if
-    /// `mesh_id` is empty or the model can't be loaded; the reason goes to
-    /// [`take_errors`](Self::take_errors), once, as do the model's
-    /// [warnings](Model::warnings).
-    pub fn model(&self, mesh_id: &str) -> Option<Arc<Model>> {
+    /// `assets/models/chair.glb`), loading it the first time and waiting
+    /// for that. `None` if `mesh_id` is empty or the model can't be loaded;
+    /// the reason goes to [`take_errors`](Self::take_errors), once, as do
+    /// the model's [warnings](Model::warnings). To load without waiting,
+    /// see [`request_model`](Self::request_model).
+    pub fn model_blocking(&self, mesh_id: &str) -> Option<Arc<Model>> {
         if mesh_id.is_empty() {
             return None;
         }
-        let mut shared = self.lock();
-        if let Some(model) = shared.models.get(mesh_id) {
-            return model.clone();
-        }
-        let folder = shared.folder.clone()?;
-        let model = match read_model(&folder, mesh_id) {
-            Ok(model) => {
-                for warning in &model.warnings {
-                    shared
-                        .errors
-                        .push(format!("The model `{mesh_id}` {warning}."));
-                }
-                Some(Arc::new(model))
-            }
-            Err(message) => {
-                let source_id = mesh_id.split('#').next().unwrap_or(mesh_id);
-                let prefix = format!("Could not load the model `{source_id}`:");
-                if !shared.errors.iter().any(|error| error.starts_with(&prefix)) {
-                    shared
-                        .errors
-                        .push(format!("Could not load the model `{source_id}`: {message}"));
-                }
-                None
-            }
-        };
-        let file = mesh_id.split('#').next().unwrap_or(mesh_id);
-        reload::remember_stamp(&mut shared, &folder, file);
-        shared.models.insert(mesh_id.to_owned(), model.clone());
-        model
+        self.load(
+            Kind::Model,
+            mesh_id,
+            None,
+            |shared| shared.models.get(mesh_id).cloned(),
+            |folder| read_model(folder, mesh_id),
+            |shared, read| store_model(shared, mesh_id, read),
+        )
     }
 
     /// The texture file at `path` (a SurfaceAppearance's map, such as
@@ -276,16 +256,34 @@ impl Assets {
         if path.is_empty() {
             return None;
         }
-        let mut shared = self.lock();
-        if let Some(texture) = shared.textures.get(path) {
-            return texture.clone();
+        {
+            let mut shared = self.lock();
+            if let Some(texture) = shared.textures.get(path) {
+                return texture.clone();
+            }
+            shared.folder.as_ref()?;
+            if shared.waker.is_some() {
+                self.enqueue(&mut shared, LoadKey::new(Kind::Texture, path));
+                return None;
+            }
         }
-        let folder = shared.folder.clone()?;
-        if shared.waker.is_some() {
-            self.queue_file(&mut shared, path, false);
+        self.texture_blocking(path)
+    }
+
+    /// The texture file at `path`, as [`texture`](Self::texture) gives it,
+    /// but waiting for it even when textures load in the background.
+    pub fn texture_blocking(&self, path: &str) -> Option<Arc<Image>> {
+        if path.is_empty() {
             return None;
         }
-        store_texture(&mut shared, path, read_texture(&folder, path))
+        self.load(
+            Kind::Texture,
+            path,
+            None,
+            |shared| shared.textures.get(path).cloned(),
+            |folder| read_texture(folder, path),
+            |shared, read| store_texture(shared, path, read),
+        )
     }
 
     /// The sky image at `path` (Lighting's `SkyImage`, such as
@@ -301,16 +299,34 @@ impl Assets {
         if path.is_empty() {
             return None;
         }
-        let mut shared = self.lock();
-        if let Some(image) = shared.sky_images.get(path) {
-            return image.clone();
+        {
+            let mut shared = self.lock();
+            if let Some(image) = shared.sky_images.get(path) {
+                return image.clone();
+            }
+            shared.folder.as_ref()?;
+            if shared.waker.is_some() {
+                self.enqueue(&mut shared, LoadKey::new(Kind::SkyImage, path));
+                return None;
+            }
         }
-        let folder = shared.folder.clone()?;
-        if shared.waker.is_some() {
-            self.queue_file(&mut shared, path, true);
+        self.sky_image_blocking(path)
+    }
+
+    /// The sky image at `path`, as [`sky_image`](Self::sky_image) gives it,
+    /// but waiting for it even when textures load in the background.
+    pub fn sky_image_blocking(&self, path: &str) -> Option<Arc<SkyImage>> {
+        if path.is_empty() {
             return None;
         }
-        store_sky_image(&mut shared, path, read_sky_image(&folder, path))
+        self.load(
+            Kind::SkyImage,
+            path,
+            None,
+            |shared| shared.sky_images.get(path).cloned(),
+            |folder| read_sky_image(folder, path),
+            |shared, read| store_sky_image(shared, path, read),
+        )
     }
 
     /// The reflection probe bake at `path` (a ReflectionProbe's `Bake`,
@@ -322,24 +338,27 @@ impl Assets {
         if path.is_empty() {
             return None;
         }
-        let mut shared = self.lock();
-        if let Some(image) = shared.probes.get(path) {
-            return image.clone();
-        }
-        let folder = shared.folder.clone()?;
-        let image = match read_probe(&folder, path) {
-            Ok(image) => Some(Arc::new(image)),
-            Err(message) => {
-                shared.errors.push(format!(
-                    "Could not load the reflection probe bake `{path}`: {message}. \
-                     The sky is reflected instead; bake the probe again."
-                ));
-                None
-            }
-        };
-        reload::remember_stamp(&mut shared, &folder, path);
-        shared.probes.insert(path.to_owned(), image.clone());
-        image
+        self.load(
+            Kind::ReflectionProbe,
+            path,
+            None,
+            |shared| shared.probes.get(path).cloned(),
+            |folder| read_probe(folder, path),
+            |shared, read| {
+                let image = match read {
+                    Ok(image) => Some(Arc::new(image)),
+                    Err(message) => {
+                        shared.errors.push(format!(
+                            "Could not load the reflection probe bake `{path}`: {message}. \
+                             The sky is reflected instead; bake the probe again."
+                        ));
+                        None
+                    }
+                };
+                shared.probes.insert(path.to_owned(), image.clone());
+                image
+            },
+        )
     }
 
     /// Uses `image` as the bake at `path` from now on, without reading the
@@ -349,6 +368,7 @@ impl Assets {
         if let Some(folder) = shared.folder.clone() {
             reload::remember_stamp(&mut shared, &folder, path);
         }
+        loading::replace_load(&mut shared, &LoadKey::new(Kind::ReflectionProbe, path));
         shared.probes.insert(path.to_owned(), Some(Arc::new(image)));
     }
 
@@ -360,24 +380,27 @@ impl Assets {
         if path.is_empty() {
             return None;
         }
-        let mut shared = self.lock();
-        if let Some(probes) = shared.light_probes.get(path) {
-            return probes.clone();
-        }
-        let folder = shared.folder.clone()?;
-        let probes = match read_light_probes(&folder, path) {
-            Ok(probes) => Some(Arc::new(probes)),
-            Err(message) => {
-                shared.errors.push(format!(
-                    "Could not load the light probe bake `{path}`: {message}. \
-                     The sky lights its volume instead; bake the probes again."
-                ));
-                None
-            }
-        };
-        reload::remember_stamp(&mut shared, &folder, path);
-        shared.light_probes.insert(path.to_owned(), probes.clone());
-        probes
+        self.load(
+            Kind::LightProbes,
+            path,
+            None,
+            |shared| shared.light_probes.get(path).cloned(),
+            |folder| read_light_probes(folder, path),
+            |shared, read| {
+                let probes = match read {
+                    Ok(probes) => Some(Arc::new(probes)),
+                    Err(message) => {
+                        shared.errors.push(format!(
+                            "Could not load the light probe bake `{path}`: {message}. \
+                             The sky lights its volume instead; bake the probes again."
+                        ));
+                        None
+                    }
+                };
+                shared.light_probes.insert(path.to_owned(), probes.clone());
+                probes
+            },
+        )
     }
 
     /// Uses `probes` as the bake at `path` from now on, without reading the
@@ -387,6 +410,7 @@ impl Assets {
         if let Some(folder) = shared.folder.clone() {
             reload::remember_stamp(&mut shared, &folder, path);
         }
+        loading::replace_load(&mut shared, &LoadKey::new(Kind::LightProbes, path));
         shared
             .light_probes
             .insert(path.to_owned(), Some(Arc::new(probes)));
@@ -402,23 +426,27 @@ impl Assets {
         if path.is_empty() {
             return None;
         }
-        let mut shared = self.lock();
-        if let Some(lookup) = shared.lookups.get(path) {
-            return lookup.clone();
-        }
-        let folder = shared.folder.clone()?;
-        let lookup = match read_color_lookup(&folder, path) {
-            Ok(lookup) => Some(Arc::new(lookup)),
-            Err(message) => {
-                shared.errors.push(format!(
-                    "Could not load the lookup table `{path}`: {message}. Colors are left as                      they are."
-                ));
-                None
-            }
-        };
-        reload::remember_stamp(&mut shared, &folder, path);
-        shared.lookups.insert(path.to_owned(), lookup.clone());
-        lookup
+        self.load(
+            Kind::ColorLookup,
+            path,
+            None,
+            |shared| shared.lookups.get(path).cloned(),
+            |folder| read_color_lookup(folder, path),
+            |shared, read| {
+                let lookup = match read {
+                    Ok(lookup) => Some(Arc::new(lookup)),
+                    Err(message) => {
+                        shared.errors.push(format!(
+                            "Could not load the lookup table `{path}`: {message}. Colors are \
+                             left as they are."
+                        ));
+                        None
+                    }
+                };
+                shared.lookups.insert(path.to_owned(), lookup.clone());
+                lookup
+            },
+        )
     }
 
     /// The palette image at `path` (a ColorCorrectionEffect's `Palette`,
@@ -429,30 +457,34 @@ impl Assets {
         if path.is_empty() {
             return None;
         }
-        let mut shared = self.lock();
-        if let Some(palette) = shared.palettes.get(path) {
-            return palette.clone();
-        }
-        let folder = shared.folder.clone()?;
-        let palette = match read_palette(&folder, path) {
-            Ok((palette, warning)) => {
-                if let Some(warning) = warning {
-                    shared
-                        .errors
-                        .push(format!("The palette `{path}` {warning}."));
-                }
-                Some(Arc::new(palette))
-            }
-            Err(message) => {
-                shared.errors.push(format!(
-                    "Could not load the palette `{path}`: {message}. Colors are left as they are."
-                ));
-                None
-            }
-        };
-        reload::remember_stamp(&mut shared, &folder, path);
-        shared.palettes.insert(path.to_owned(), palette.clone());
-        palette
+        self.load(
+            Kind::Palette,
+            path,
+            None,
+            |shared| shared.palettes.get(path).cloned(),
+            |folder| read_palette(folder, path),
+            |shared, read| {
+                let palette = match read {
+                    Ok((palette, warning)) => {
+                        if let Some(warning) = warning {
+                            shared
+                                .errors
+                                .push(format!("The palette `{path}` {warning}."));
+                        }
+                        Some(Arc::new(palette))
+                    }
+                    Err(message) => {
+                        shared.errors.push(format!(
+                            "Could not load the palette `{path}`: {message}. Colors are left \
+                             as they are."
+                        ));
+                        None
+                    }
+                };
+                shared.palettes.insert(path.to_owned(), palette.clone());
+                palette
+            },
+        )
     }
 
     /// The material file at `path` (a part's `MaterialVariant`, such as
@@ -465,17 +497,40 @@ impl Assets {
         if path.is_empty() {
             return None;
         }
-        let mut shared = self.lock();
-        if let Some(material) = shared.materials.get(path) {
-            return material.as_ref().map(|resolved| resolved.material.clone());
-        }
-        let folder = shared.folder.clone()?;
-        let shared = &mut *shared;
-        let resolved =
-            material::resolve(&folder, path, &shared.edited_materials, &mut shared.errors);
-        let material = resolved.as_ref().map(|resolved| resolved.material.clone());
-        shared.materials.insert(path.to_owned(), resolved);
-        material
+        self.load(
+            Kind::Material,
+            path,
+            None,
+            |shared| {
+                shared
+                    .materials
+                    .get(path)
+                    .map(|material| material.as_ref().map(|resolved| resolved.material.clone()))
+            },
+            |folder| {
+                let edited = self.lock().edited_materials.clone();
+                let mut errors = Vec::new();
+                let resolved = material::resolve(folder, path, &edited, &mut errors);
+                Ok((resolved, errors))
+            },
+            |shared, read: Result<(Option<material::Resolved>, Vec<String>), String>| {
+                let resolved = match read {
+                    Ok((resolved, errors)) => {
+                        shared.errors.extend(errors);
+                        resolved
+                    }
+                    Err(message) => {
+                        shared
+                            .errors
+                            .push(format!("Could not load the material `{path}`: {message}"));
+                        None
+                    }
+                };
+                let material = resolved.as_ref().map(|resolved| resolved.material.clone());
+                shared.materials.insert(path.to_owned(), resolved);
+                material
+            },
+        )
     }
 
     /// The material file at `path` with its chain of bases, put together
@@ -502,6 +557,8 @@ impl Assets {
             None => shared.edited_materials.remove(path),
         };
         forget_materials_using(&mut shared, path);
+        loading::reread_loads(&mut shared, |key| key.kind == Kind::Material);
+        shared.generation += 1;
     }
 
     /// The data table named `name` (such as `weapons`, the file
@@ -509,31 +566,36 @@ impl Assets {
     /// can't be. Scripts show that reason in their error, so it isn't
     /// also put in [`take_errors`](Self::take_errors).
     pub fn data_table(&self, name: &str) -> Result<Arc<DataTable>, String> {
-        let path = data_table_path(name);
-        let mut shared = self.lock();
-        if let Some(table) = shared.tables.get(&path) {
-            return table.clone();
-        }
-        let Some(folder) = shared.folder.clone() else {
-            return Err("there is no project folder".to_owned());
-        };
-        let table = read_table(&folder, &path).map(Arc::new);
-        reload::remember_stamp(&mut shared, &folder, &path);
-        shared.tables.insert(path, table.clone());
-        table
+        self.table_at(data_table_path(name))
+    }
+
+    /// The data table in the file at `path`, as
+    /// [`data_table`](Self::data_table) reads it.
+    fn table_at(&self, path: String) -> Result<Arc<DataTable>, String> {
+        self.load(
+            Kind::DataTable,
+            &path,
+            Err("there is no project folder".to_owned()),
+            |shared| shared.tables.get(&path).cloned(),
+            |folder| read_table(folder, &path).map(Arc::new),
+            |shared, read| {
+                shared.tables.insert(path.clone(), read.clone());
+                read
+            },
+        )
     }
 
     /// Uses `table` as the one at `path` from now on, without reading the
     /// file: the editor's Data Table tab hands over each edit, so a game
     /// in Play reads it at once.
     pub fn put_data_table(&self, path: &str, table: DataTable) {
-        self.lock()
-            .tables
-            .insert(path.to_owned(), Ok(Arc::new(table)));
+        let mut shared = self.lock();
+        loading::replace_load(&mut shared, &LoadKey::new(Kind::DataTable, path));
+        shared.tables.insert(path.to_owned(), Ok(Arc::new(table)));
     }
 
     /// From now on, [`texture`](Self::texture) doesn't wait for a file it
-    /// hasn't read: up to [`TEXTURE_WORKERS`] threads read them, and
+    /// hasn't read: worker threads read them, and
     /// `ready` is called (on one of those threads) after each, so the host
     /// can draw again. For the editor, where a 4K texture set takes seconds
     /// to decode. The player reads its textures on its loading screen.
@@ -550,81 +612,17 @@ impl Assets {
     /// The textures being read in the background, or `None` when none are.
     pub fn texture_progress(&self) -> Option<TextureProgress> {
         let shared = self.lock();
-        let current = shared
-            .loading
+        let (key, _) = shared
+            .loads
             .iter()
-            .find(|queued| !shared.queue.contains(queued))
-            .or_else(|| shared.queue.front())?
-            .path
-            .clone();
+            .filter(|(key, load)| load.background && key.kind.is_image())
+            // One being read now, if any is; otherwise one waiting.
+            .min_by_key(|(_, load)| load.queued)?;
         Some(TextureProgress {
-            done: shared.batch - shared.loading.len(),
-            total: shared.batch,
-            current,
+            done: shared.images.done(),
+            total: shared.images.total(),
+            current: key.file().to_owned(),
         })
-    }
-
-    /// Queues `path` (a sky image if `sky`, otherwise a texture) for a
-    /// background worker, starting one if fewer than [`TEXTURE_WORKERS`]
-    /// are running.
-    fn queue_file(&self, shared: &mut Shared, path: &str, sky: bool) {
-        let queued = Queued {
-            path: path.to_owned(),
-            sky,
-        };
-        if !shared.loading.insert(queued.clone()) {
-            return;
-        }
-        shared.queue.push_back(queued);
-        shared.batch += 1;
-        if shared.workers < TEXTURE_WORKERS {
-            shared.workers += 1;
-            let assets = self.clone();
-            std::thread::spawn(move || assets.read_queued_textures());
-        }
-    }
-
-    /// A worker: reads queued textures and sky images until there are
-    /// none left.
-    fn read_queued_textures(&self) {
-        loop {
-            let (queued, folder) = {
-                let mut shared = self.lock();
-                let Some(queued) = shared.queue.pop_front() else {
-                    shared.workers -= 1;
-                    return;
-                };
-                (queued, shared.folder.clone().unwrap_or_default())
-            };
-            let path = &queued.path;
-            // A decoder that panics fails this file, not the worker, which
-            // would leave the file "loading" forever.
-            let failed = || "the decoder failed on it".to_owned();
-            let waker = if queued.sky {
-                let read = panic::catch_unwind(AssertUnwindSafe(|| read_sky_image(&folder, path)))
-                    .unwrap_or_else(|_| Err(failed()));
-                let mut shared = self.lock();
-                store_sky_image(&mut shared, path, read);
-                shared.loading.remove(&queued);
-                if shared.loading.is_empty() {
-                    shared.batch = 0;
-                }
-                shared.waker.clone()
-            } else {
-                let read = panic::catch_unwind(AssertUnwindSafe(|| read_texture(&folder, path)))
-                    .unwrap_or_else(|_| Err(failed()));
-                let mut shared = self.lock();
-                store_texture(&mut shared, path, read);
-                shared.loading.remove(&queued);
-                if shared.loading.is_empty() {
-                    shared.batch = 0;
-                }
-                shared.waker.clone()
-            };
-            if let Some(waker) = waker {
-                waker();
-            }
-        }
     }
 
     /// The takes (animation timelines) in the model file at `path`, such
@@ -637,23 +635,26 @@ impl Assets {
         if path.is_empty() {
             return None;
         }
-        let mut shared = self.lock();
-        if let Some(takes) = shared.takes.get(path) {
-            return takes.clone();
-        }
-        let folder = shared.folder.clone()?;
-        let takes = match read_takes(&folder, path) {
-            Ok(takes) => Some(Arc::new(takes)),
-            Err(message) => {
-                shared.errors.push(format!(
-                    "Could not load the animation in `{path}`: {message}"
-                ));
-                None
-            }
-        };
-        reload::remember_stamp(&mut shared, &folder, path);
-        shared.takes.insert(path.to_owned(), takes.clone());
-        takes
+        self.load(
+            Kind::Takes,
+            path,
+            None,
+            |shared| shared.takes.get(path).cloned(),
+            |folder| read_takes(folder, path),
+            |shared, read| {
+                let takes = match read {
+                    Ok(takes) => Some(Arc::new(takes)),
+                    Err(message) => {
+                        shared.errors.push(format!(
+                            "Could not load the animation in `{path}`: {message}"
+                        ));
+                        None
+                    }
+                };
+                shared.takes.insert(path.to_owned(), takes.clone());
+                takes
+            },
+        )
     }
 
     /// Reads a project asset by a relative path such as
@@ -681,6 +682,7 @@ impl Assets {
             let file = mesh_id.split('#').next().unwrap_or(mesh_id);
             reload::remember_stamp(&mut shared, &folder, file);
         }
+        loading::replace_load(&mut shared, &LoadKey::new(Kind::Model, mesh_id));
         shared
             .models
             .insert(mesh_id.to_owned(), Some(model.clone()));
@@ -705,6 +707,9 @@ impl Assets {
         shared.takes.remove(file);
         shared.tables.remove(file);
         forget_materials_using(&mut shared, file);
+        loading::reread_loads(&mut shared, |key| {
+            key.file() == file || key.kind == Kind::Material
+        });
     }
 
     /// Forgets every model, texture, probe bake, take and material that couldn't be
@@ -723,6 +728,7 @@ impl Assets {
         shared
             .materials
             .retain(|_, material| material.as_ref().is_some_and(|resolved| !resolved.broken));
+        loading::reread_loads(&mut shared, |_| true);
     }
 
     /// Removes and returns the loading errors since the last call, one line
@@ -734,25 +740,27 @@ impl Assets {
     /// The project's font files (`.ttf` and `.otf` anywhere in it), read
     /// the first time they're asked for. Empty with no project.
     pub fn fonts(&self) -> Arc<Vec<FontFile>> {
-        let mut shared = self.lock();
-        if let Some(fonts) = &shared.fonts {
-            return fonts.clone();
-        }
-        let fonts = Arc::new(
-            shared
-                .folder
-                .as_deref()
-                .map(fonts::read_fonts)
-                .unwrap_or_default(),
-        );
-        shared.fonts = Some(fonts.clone());
-        fonts
+        self.load(
+            Kind::Fonts,
+            "",
+            None,
+            |shared| shared.fonts.clone().map(Some),
+            |folder| Ok(Arc::new(fonts::read_fonts(folder))),
+            |shared, read| {
+                let fonts = read.unwrap_or_default();
+                shared.fonts = Some(fonts.clone());
+                Some(fonts)
+            },
+        )
+        .unwrap_or_default()
     }
 
     /// Reads the project's fonts again next time, after one was added,
     /// changed or removed.
     pub fn forget_fonts(&self) {
-        self.lock().fonts = None;
+        let mut shared = self.lock();
+        shared.fonts = None;
+        loading::reread_loads(&mut shared, |key| key.kind == Kind::Fonts);
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Shared> {
@@ -806,7 +814,37 @@ fn read_table(folder: &Path, path: &str) -> Result<DataTable, String> {
         .map_err(|err| format!("`{path}` can't be read: {}", with_causes(&err)))
 }
 
-/// Keeps what reading the texture at `path` gave, reporting a failure.
+/// Keeps what reading the model at `mesh_id` gave, reporting its warnings
+/// or, once for its file, a failure.
+fn store_model(
+    shared: &mut Shared,
+    mesh_id: &str,
+    read: Result<Model, String>,
+) -> Option<Arc<Model>> {
+    let model = match read {
+        Ok(model) => {
+            for warning in &model.warnings {
+                shared
+                    .errors
+                    .push(format!("The model `{mesh_id}` {warning}."));
+            }
+            Some(Arc::new(model))
+        }
+        Err(message) => {
+            let source_id = mesh_id.split('#').next().unwrap_or(mesh_id);
+            let prefix = format!("Could not load the model `{source_id}`:");
+            if !shared.errors.iter().any(|error| error.starts_with(&prefix)) {
+                shared
+                    .errors
+                    .push(format!("Could not load the model `{source_id}`: {message}"));
+            }
+            None
+        }
+    };
+    shared.models.insert(mesh_id.to_owned(), model.clone());
+    model
+}
+
 /// Keeps what reading the sky image at `path` gave, reporting a failure or
 /// a picture that isn't a panorama once.
 fn store_sky_image(
@@ -830,13 +868,11 @@ fn store_sky_image(
             None
         }
     };
-    if let Some(folder) = shared.folder.clone() {
-        reload::remember_stamp(shared, &folder, path);
-    }
     shared.sky_images.insert(path.to_owned(), image.clone());
     image
 }
 
+/// Keeps what reading the texture at `path` gave, reporting a failure.
 fn store_texture(
     shared: &mut Shared,
     path: &str,
@@ -851,9 +887,6 @@ fn store_texture(
             None
         }
     };
-    if let Some(folder) = shared.folder.clone() {
-        reload::remember_stamp(shared, &folder, path);
-    }
     shared.textures.insert(path.to_owned(), texture.clone());
     texture
 }
@@ -933,9 +966,9 @@ mod tests {
     #[test]
     fn a_missing_model_is_reported_once_and_empty_ids_never() {
         let assets = Assets::new(std::env::temp_dir().join("axcenity-no-such-project"));
-        assert!(assets.model("").is_none());
-        assert!(assets.model("assets/models/gone.glb").is_none());
-        assert!(assets.model("assets/models/gone.glb").is_none());
+        assert!(assets.model_blocking("").is_none());
+        assert!(assets.model_blocking("assets/models/gone.glb").is_none());
+        assert!(assets.model_blocking("assets/models/gone.glb").is_none());
         let errors = assets.take_errors();
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].contains("`assets/models/gone.glb`"), "{errors:?}");
@@ -946,7 +979,7 @@ mod tests {
     #[test]
     fn paths_outside_the_project_are_refused() {
         let assets = Assets::new(std::env::temp_dir());
-        assert!(assets.model("../secret.glb").is_none());
+        assert!(assets.model_blocking("../secret.glb").is_none());
         assert!(assets.take_errors()[0].contains("inside the project folder"));
     }
 
@@ -975,7 +1008,7 @@ mod tests {
     #[test]
     fn only_model_files_are_loaded() {
         let assets = Assets::new(std::env::temp_dir());
-        assert!(assets.model("assets/notes.txt").is_none());
+        assert!(assets.model_blocking("assets/notes.txt").is_none());
         assert!(assets.take_errors()[0].contains(".gltf, .glb or .fbx"));
     }
 
@@ -1046,7 +1079,7 @@ mod tests {
     #[test]
     fn without_a_project_there_are_no_models_and_no_errors() {
         let assets = Assets::default();
-        assert!(assets.model("assets/models/chair.glb").is_none());
+        assert!(assets.model_blocking("assets/models/chair.glb").is_none());
         assert!(assets.take_errors().is_empty());
     }
 }

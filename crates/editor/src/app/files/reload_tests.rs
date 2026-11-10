@@ -85,7 +85,7 @@ fn until(app: &mut EditorApp, done: impl Fn(&EditorApp) -> bool) -> Duration {
 }
 
 fn width(app: &EditorApp) -> f32 {
-    app.assets.model(TRIANGLE).unwrap().size[0]
+    app.assets.model_blocking(TRIANGLE).unwrap().size[0]
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn a_broken_model_saved_over_a_good_one_keeps_the_good_one_and_is_reported_once(
     write_triangle(&folder, 1.0);
     let mut app = EditorApp::new(Some(&folder));
     add_triangle_part(&mut app);
-    let good = app.assets.model(TRIANGLE).unwrap();
+    let good = app.assets.model_blocking(TRIANGLE).unwrap();
     let drawn = drawn_mesh(&app.world, &app.assets);
     std::thread::sleep(Duration::from_millis(100));
 
@@ -159,7 +159,10 @@ fn a_broken_model_saved_over_a_good_one_keeps_the_good_one_and_is_reported_once(
         app.check_disk();
     }
     assert_eq!(reported(&app), 1, "{:?}", printed(&app));
-    assert!(Arc::ptr_eq(&app.assets.model(TRIANGLE).unwrap(), &good));
+    assert!(Arc::ptr_eq(
+        &app.assets.model_blocking(TRIANGLE).unwrap(),
+        &good
+    ));
     assert_eq!(
         drawn_mesh(&app.world, &app.assets),
         drawn,

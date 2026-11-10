@@ -241,7 +241,7 @@ mod tests {
     fn noodle() -> (Arc<Rig>, Arc<Vec<Take>>) {
         let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-animation");
         let assets = Assets::new(example);
-        let model = assets.model("assets/models/noodle.fbx").unwrap();
+        let model = assets.model_blocking("assets/models/noodle.fbx").unwrap();
         let takes = assets.takes("assets/models/noodle.fbx").unwrap();
         (model.rig.clone().unwrap(), takes)
     }

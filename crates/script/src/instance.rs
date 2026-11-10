@@ -10,6 +10,7 @@ use crate::camera::LuaCamera;
 use crate::cframe::LuaCFrame;
 use crate::client::{LocalPlayer, LuaReplicatedFirst};
 use crate::collection::LuaCollectionService;
+use crate::content_provider::LuaContentProvider;
 use crate::data::LuaDataService;
 use crate::debris::LuaDebris;
 use crate::events::{Event, LuaSignal, Owner};
@@ -482,6 +483,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "GuiService") => LuaGuiService.into_lua(lua)?,
         (ClassName::DataModel, "Debris") => LuaDebris.into_lua(lua)?,
         (ClassName::DataModel, "HttpService") => LuaHttpService.into_lua(lua)?,
+        (ClassName::DataModel, "ContentProvider") => LuaContentProvider.into_lua(lua)?,
         (ClassName::DataModel, "DataService") => LuaDataService.into_lua(lua)?,
         (ClassName::DataModel, "ConsoleService") => {
             crate::console_service::LuaConsoleService.into_lua(lua)?
@@ -1111,6 +1113,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "GuiService" => return LuaGuiService.into_lua(lua),
             "Debris" => return LuaDebris.into_lua(lua),
             "HttpService" => return LuaHttpService.into_lua(lua),
+            "ContentProvider" => return LuaContentProvider.into_lua(lua),
             "DataService" => return LuaDataService.into_lua(lua),
             "DialogueService" => return crate::dialogue::LuaDialogueService.into_lua(lua),
             "QuestService" => return crate::quest::LuaQuestService.into_lua(lua),
@@ -1138,6 +1141,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     .collect();
                 names.extend([
                     "CollectionService",
+                    "ContentProvider",
                     "ContextActionService",
                     "DataService",
                     "Debris",

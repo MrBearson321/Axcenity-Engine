@@ -73,7 +73,7 @@ fn control(
 }
 
 fn rig_of(assets: &Assets) -> std::sync::Arc<Rig> {
-    assets.model(MODEL).unwrap().rig.clone().unwrap()
+    assets.model_blocking(MODEL).unwrap().rig.clone().unwrap()
 }
 
 fn bone(rig: &Rig, name: &str) -> usize {

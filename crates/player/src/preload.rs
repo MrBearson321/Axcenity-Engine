@@ -2,38 +2,27 @@
 //! (roadmap I11).
 //!
 //! [`Preload::start`] lists every file the first drawing reads
-//! (`scene::asset_files`) and asks for them on a thread of its own while the
-//! player opens its window and starts its scripts. Textures and sky images
-//! go to the asset workers (`Assets::load_textures_in_background`), so a 4K
-//! texture set never stalls a frame; models are parsed on the preload
-//! thread. The splash, the game's own loading screen, or a plain progress
+//! (`scene::asset_files`) and requests them from the asset workers
+//! (`Assets::request_model` and friends) while the player opens its window
+//! and starts its scripts, so a 4K texture set or a big FBX never stalls a
+//! frame. The splash, the game's own loading screen, or a plain progress
 //! screen stays up until everything is in, so the world doesn't appear with
 //! its textures popping in one by one.
 //!
 //! A file needed later (a level loaded by a script, a model cloned from
 //! storage) is still read the first time it's drawn: textures in the
-//! background, models in the frame that needs them.
+//! background, models in the frame that needs them. A script can load those
+//! ahead with `ContentProvider:PreloadAsync`.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-use axcenity_assets::Assets;
+use axcenity_assets::{Assets, LoadTicket};
 use axcenity_core::World;
 use axcenity_render::{TextAlign, UiDrawItem, UiRectangle, UiText, VerticalAlign};
-use axcenity_scene::{AssetFile, asset_files};
+use axcenity_scene::asset_files;
 
 /// The Workspace's files being read ahead of the first frame.
 pub struct Preload {
-    assets: Assets,
-    /// How many of the files are models, which the preload thread parses.
-    models: usize,
-    /// Models the thread has parsed (or failed to).
-    models_done: Arc<AtomicUsize>,
-    /// Set once the thread has asked for every file.
-    asked: Arc<AtomicBool>,
-    /// The most textures seen loading at once, so the count doesn't drop
-    /// back when the workers finish before the models do.
-    textures: usize,
+    /// One for each file, or for a material and its textures.
+    tickets: Vec<LoadTicket>,
     /// Set once every file is in.
     finished: bool,
 }
@@ -46,81 +35,43 @@ pub struct Progress {
 }
 
 impl Preload {
-    /// Starts reading every file drawing `world`'s Workspace reads. Turns on
-    /// the asset workers for textures, which stay on for the rest of the
-    /// game: a texture first seen later loads in the background too.
+    /// Starts reading every file drawing `world`'s Workspace reads, and
+    /// returns at once. Turns on the asset workers for textures, which stay
+    /// on for the rest of the game: a texture first seen later loads in the
+    /// background too.
     pub fn start(world: &World, assets: &Assets) -> Self {
         // The player draws every frame, so it needs no wake-up call when a
         // texture is ready.
         assets.load_textures_in_background(|| {});
-        // Textures and material files first: asking for them only queues
-        // them for the workers, which then decode while this thread parses
-        // the models.
-        let (models, others): (Vec<AssetFile>, Vec<AssetFile>) = asset_files(world)
-            .into_iter()
-            .partition(|file| matches!(file, AssetFile::Model(_)));
-        let preload = Self {
-            assets: assets.clone(),
-            models: models.len(),
-            models_done: Arc::new(AtomicUsize::new(0)),
-            asked: Arc::new(AtomicBool::new(false)),
-            textures: 0,
+        let tickets = asset_files(world)
+            .iter()
+            .map(|file| file.request(assets))
+            .collect();
+        Self {
+            tickets,
             finished: false,
-        };
-        let thread_assets = assets.clone();
-        let models_done = preload.models_done.clone();
-        let asked = preload.asked.clone();
-        let read = move || {
-            for file in &others {
-                file.load(&thread_assets);
-            }
-            for file in &models {
-                file.load(&thread_assets);
-                models_done.fetch_add(1, Ordering::Relaxed);
-            }
-            asked.store(true, Ordering::Release);
-        };
-        let spawned = std::thread::Builder::new()
-            .name("asset preload".to_owned())
-            .spawn(read);
-        if let Err(err) = spawned {
-            // Without the thread, each file is read when it's first drawn,
-            // as before preloading.
-            log::warn!("could not start loading assets ahead: {err}");
-            preload.asked.store(true, Ordering::Release);
         }
-        preload
     }
 
     /// Checks on the files once a frame. True once every file is in (or
     /// has failed); stays true.
     pub fn update(&mut self) -> bool {
-        if self.finished {
-            return true;
-        }
-        let loading = self.assets.texture_progress();
-        if let Some(textures) = &loading {
-            self.textures = self.textures.max(textures.total);
-        }
-        self.finished = self.asked.load(Ordering::Acquire) && loading.is_none();
+        self.finished = self.finished || self.tickets.iter().all(LoadTicket::is_finished);
         self.finished
     }
 
     /// Files read so far, of how many.
     pub fn progress(&self) -> Progress {
-        let total = self.models + self.textures;
-        if self.finished {
-            return Progress { done: total, total };
-        }
-        let textures_done = match self.assets.texture_progress() {
-            Some(textures) => textures.done.min(self.textures),
-            // None loading now: every one asked for so far is in.
-            None => self.textures,
+        let total = self.tickets.len();
+        let done = if self.finished {
+            total
+        } else {
+            self.tickets
+                .iter()
+                .filter(|ticket| ticket.is_finished())
+                .count()
         };
-        Progress {
-            done: self.models_done.load(Ordering::Relaxed) + textures_done,
-            total,
-        }
+        Progress { done, total }
     }
 }
 
@@ -265,7 +216,7 @@ mod tests {
         assert!(assets.texture("assets/textures/b.png").is_some());
         assert!(assets.texture_progress().is_none());
         // A model that isn't there fails once, and is reported.
-        assert!(assets.model("assets/models/missing.glb").is_none());
+        assert!(assets.model_blocking("assets/models/missing.glb").is_none());
         let errors = assets.take_errors();
         assert!(
             errors.iter().any(|error| error.contains("missing.glb")),

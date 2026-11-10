@@ -717,7 +717,10 @@ fn chosen_objects_import_as_a_model_laid_out_as_in_the_file() {
     let model = reopened.world.find_first_child(workspace, "props").unwrap();
     let street = reopened.world.find_first_child(model, "Street").unwrap();
     let big = reopened.world.find_first_child(street, "Big").unwrap();
-    let loaded = reopened.assets.model(&mesh_id(&reopened, big)).unwrap();
+    let loaded = reopened
+        .assets
+        .model_blocking(&mesh_id(&reopened, big))
+        .unwrap();
     assert!((loaded.center[0] - 10.0).abs() < 1e-4);
     assert!(reopened.assets.take_errors().is_empty());
 

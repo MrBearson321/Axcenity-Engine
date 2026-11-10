@@ -231,7 +231,7 @@ fn subtract_async_scoops_a_crater_that_the_marble_rolls_into() {
     let mesh_id = instance.property("MeshId").and_then(Value::as_str).unwrap();
     let model = game
         .assets
-        .model(mesh_id)
+        .model_blocking(mesh_id)
         .expect("its model is in the assets");
     // A dish: the middle of the top is gone.
     assert!(
@@ -309,7 +309,7 @@ fn a_union_saves_reloads_and_packs_into_a_built_game() {
         panic!("a MeshId");
     };
     let model = Assets::new(&built)
-        .model(mesh_id)
+        .model_blocking(mesh_id)
         .expect("the union's model");
     let size = model.size;
     assert!(

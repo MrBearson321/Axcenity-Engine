@@ -75,7 +75,7 @@ fn corners(world: &World, assets: &Assets, part: InstanceId) -> Vec<Vec3> {
     let property = |name| v3(instance.property(name).unwrap().as_vector3().unwrap());
     let (position, size) = (property("Position"), property("Size"));
     let mesh_id = instance.property("MeshId").unwrap().as_str().unwrap();
-    let model = assets.model(mesh_id).unwrap();
+    let model = assets.model_blocking(mesh_id).unwrap();
     model
         .primitives
         .iter()

@@ -185,7 +185,7 @@ fn terrain_colliders(
         && kept
             .models
             .iter()
-            .all(|(path, key)| assets.model(path).map(|model| model.key()) == *key)
+            .all(|(path, key)| assets.model_blocking(path).map(|model| model.key()) == *key)
     {
         return kept;
     }

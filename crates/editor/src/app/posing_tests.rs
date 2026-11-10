@@ -36,7 +36,7 @@ fn assert_same_poses(a: &[BoneTransform], b: &[BoneTransform], what: &str) {
 
 /// Whether two posed models put every corner in the same place.
 fn assert_same_shape(app: &EditorApp, a: &Posed, b: &Posed, what: &str) {
-    let model = app.assets.model(NOODLE).unwrap();
+    let model = app.assets.model_blocking(NOODLE).unwrap();
     let (a, b) = (a.primitives(&model), b.primitives(&model));
     assert_eq!(a.len(), b.len());
     for (a, b) in a.iter().zip(&b) {
@@ -63,7 +63,7 @@ fn a_three_key_wave_made_on_an_imported_rig_plays_in_the_preview_a_state_and_pla
     let folder = copy_of_example("hello-animation", "wave");
     let mut app = EditorApp::new(Some(&folder));
     let noodle = part(&app, "Noodle");
-    let model = app.assets.model(NOODLE).unwrap();
+    let model = app.assets.model_blocking(NOODLE).unwrap();
     let rig = model.rig.clone().unwrap();
     let rest = rig.rest_pose();
     let top = rig.bone("Top").unwrap();
@@ -170,7 +170,7 @@ fn a_linked_clips_take_bones_are_locked_until_convert_to_keys_which_looks_the_sa
     let noodle = part(&app, "Noodle");
     let rest = app
         .assets
-        .model(NOODLE)
+        .model_blocking(NOODLE)
         .unwrap()
         .rig
         .clone()
@@ -320,7 +320,7 @@ pub(super) fn record_clip_edit(app: &mut EditorApp, folder: &std::path::Path) {
 /// checks, twice, that the game draws it as the preview does at the
 /// Animation's time then.
 pub(super) fn plays_as_previewed(app: &mut EditorApp, noodle: InstanceId, what: &str) {
-    let model = app.assets.model(NOODLE).unwrap();
+    let model = app.assets.model_blocking(NOODLE).unwrap();
     let animator = crate::animation::animator_of(&app.world, noodle).unwrap();
     let animation = crate::animation::Subject::of(&app.world, noodle)
         .unwrap()
@@ -362,7 +362,13 @@ fn a_bones_first_turn_after_the_start_also_keys_it_at_rest_at_0_so_it_moves() {
     let folder = copy_of_example("hello-animation", "start-key");
     let mut app = EditorApp::new(Some(&folder));
     let noodle = part(&app, "Noodle");
-    let rig = app.assets.model(NOODLE).unwrap().rig.clone().unwrap();
+    let rig = app
+        .assets
+        .model_blocking(NOODLE)
+        .unwrap()
+        .rig
+        .clone()
+        .unwrap();
     let rest = rig.rest_pose();
     let top = rig.bone("Top").unwrap();
 
@@ -418,7 +424,13 @@ fn smooth_linear_and_constant_keys_made_by_posing_play_the_same_in_the_preview_a
     let folder = copy_of_example("hello-animation", "eased-wave");
     let mut app = EditorApp::new(Some(&folder));
     let noodle = part(&app, "Noodle");
-    let rig = app.assets.model(NOODLE).unwrap().rig.clone().unwrap();
+    let rig = app
+        .assets
+        .model_blocking(NOODLE)
+        .unwrap()
+        .rig
+        .clone()
+        .unwrap();
     let rest = rig.rest_pose();
     app.animate(noodle);
     assert_eq!(

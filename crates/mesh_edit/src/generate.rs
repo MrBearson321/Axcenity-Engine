@@ -222,7 +222,7 @@ fn mesh_part(part: &Instance, assets: &Assets, project: &Path) -> Result<Source,
         return Err(format!("`{}` has no model to break", part.name()));
     }
     let model = assets
-        .model(mesh_id)
+        .model_blocking(mesh_id)
         .ok_or_else(|| format!("Could not load the model `{mesh_id}`"))?;
     let file = mesh_id.split('#').next().unwrap_or(mesh_id);
     let folder = file.rsplit_once('/').map_or("", |(folder, _)| folder);

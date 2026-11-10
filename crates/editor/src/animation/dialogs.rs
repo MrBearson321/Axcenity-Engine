@@ -37,7 +37,7 @@ pub(super) fn takes_of(path: &str, assets: &Assets) -> Result<Vec<Take>, String>
 
 /// Shows `mesh_id`'s model in the preview, or nothing.
 pub(super) fn show_model(preview: &mut Preview, mesh_id: Option<&str>, assets: &Assets) {
-    match mesh_id.and_then(|mesh_id| Some((mesh_id, assets.model(mesh_id)?))) {
+    match mesh_id.and_then(|mesh_id| Some((mesh_id, assets.model_blocking(mesh_id)?))) {
         Some((mesh_id, model)) => preview.set_model(mesh_id, &model),
         None => preview.clear(),
     }
