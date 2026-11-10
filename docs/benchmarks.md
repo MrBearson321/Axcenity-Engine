@@ -154,6 +154,25 @@ Taken on 2026-11-10 on a Ryzen 9 9950X3D under Windows, release build, main (940
 
 About 12%, 5% and 1.5% off the frame (the player also draws, which M2 leaves alone). Each walk replaced cost a few tens of microseconds on 10,000 parts, so the gain comes from there being many of them: `Scripts` (per-frame Health, Humanoid, follower and prompt walks) falls by about 0.11 ms on every host, `Input` by 0.14 ms and `Animation` in the player by 0.18 ms. A world with few Instances gains almost nothing: on copies of six real projects (General Store Roadside, Abandoned Farmhouse, three biome patches, The Dimming; under 1 MB of `world.json` each, on all three hosts) every difference was within run-to-run noise, in both directions.
 
+### Scheduler and handlers (M6, part 1)
+
+The wait list became a heap, and handlers are dropped when their Instance is destroyed instead of every handler being checked each frame. Same cloud container, release build, main and the branch run back to back: three 600-frame runs of each host, S10k. Milliseconds, median of the runs' medians, ranges in brackets.
+
+| Step | Test runner, main | Test runner, branch | Server, main | Server, branch |
+|---|---|---|---|---|
+| Scripts | 0.029 [0.029–0.031] | 0.018 [0.016–0.019] | 0.025 [0.025–0.026] | 0.017 [0.017–0.017] |
+| Frame | 12.1 [11.9–12.3] | 12.4 [11.7–12.5] | 8.9 [8.9–9.3] | 8.7 [8.6–8.8] |
+
+S10k has 200 scripts, so the Scripts step was already small; the frame difference is within run-to-run noise. The micro-benchmarks show where it matters, with many tasks or handlers (`cargo test -p axcenity-script --release --lib -- --ignored bench_scheduler bench_connections --nocapture`), nanoseconds per step:
+
+| Case | main | branch |
+|---|---|---|
+| 10,000 tasks waiting, none due | 95,457 | 35 |
+| 10,000 tasks looping on `task.wait` (about 1,000 resumed per step) | 1,364,000 | 1,364,000–1,424,000 |
+| `ScriptRuntime::step` with 10,000 handlers, none destroyed | 59,363 | 2,949 |
+
+With many tasks resuming every step, resuming them is the cost, and the queue doesn't change it.
+
 ### A Windows desktop with a real GPU
 
 Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table above): AMD Ryzen 9 9950X3D (16 cores), 62 GB of RAM, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Each host ran three times, 600 measured frames each; the table gives the median of the three runs' medians, and the worst frame seen in any run. The first player run was slower than the other two (Physics 14.3 ms against 5.4 ms); it came straight after the release build. Times are milliseconds.
