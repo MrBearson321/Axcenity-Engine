@@ -49,7 +49,8 @@ fn luau_sources_stay_pinned() {
     // `luau0-src` must stay on the exact release the workspace pins, which
     // `mlua` 0.12.2 reads. CI builds with `--locked`, so this checks the
     // lockfile it builds from.
-    let lock = include_str!("../../../Cargo.lock");
+    // A Windows checkout may have CRLF line endings.
+    let lock = include_str!("../../../Cargo.lock").replace("\r\n", "\n");
     let pinned = lock
         .split("[[package]]")
         .find(|package| package.contains("\nname = \"luau0-src\"\n"))
