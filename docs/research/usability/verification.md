@@ -188,3 +188,18 @@ Findings and plan: [block-editor.md](block-editor.md).
 | BL6 | A loose stack silently didn't run | "Not under an event block, so it doesn't run" above it |
 
 **Tests**: `ctrl_z_over_blocks_undoes_the_blocks_not_the_world`, `delete_and_ctrl_d_over_blocks_leave_the_selected_part_alone`, `an_edit_over_several_frames_is_one_step`, `undo_stays_in_the_view_shown`, `the_palette_search_finds_blocks_by_their_words_and_their_lua`, `searching_the_palette_shows_the_matches_and_they_drag_out`, `hovering_a_palette_block_says_the_lua_it_becomes`, `luau_blocks_fold_under_their_own_heading_but_stay_in_the_graph_menu`. Snapshots: `palette-search.png`, `palette-hover.png`, `palette-lua-blocks.png`. `cargo test -p axcenity-editor` (on `main` before #42): 926 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`); clippy and fmt clean.
+
+## Model Studio PR 2: explain and fold (U20, MS4–MS8)
+
+**Changed**
+
+| ID | Problem | Change |
+|---|---|---|
+| MS4 | Retopology and Bake (about 15 controls) filled the side panel in Object and Edit mode | One **Retopology and Bake** fold, closed until it's in use (a reference set, Poly Build on, or a bake's report showing), when it opens by itself |
+| MS5 | The Mesh, UV and Add Modifier menus named operations without explaining them; the Mesh menu was greyed in Object mode with no reason | Every item explains itself on hover in a sentence, enabled or not. The Mesh menu in Object mode says at its top that its operations work on what's picked in Edit mode (shading still works) |
+| MS6 | Painting a New cube painted all six sides at once, with no hint why | Paint warns when the active object's faces share texture space (or it has no uvs), with a **Smart UV Project** button beside the warning (one undo step) |
+| MS7 | Edit mode's hint ended in a row of bare keys | It names E, I and Ctrl+B and points at the Mesh menu for the rest |
+| MS8 | No ribbon button for the Model Studio | **Model Studio** on the Model tab, in the group now called Models (Import… and Model Studio), and in the palette |
+
+**Tests**: `retopology_and_bake_stay_folded_until_used` (closed at first, a click opens and closes it, a reference opens it), `the_mesh_menu_says_why_its_operations_are_greyed` (the note in Object mode, shading and Bridge Edge Loops listed, no note in Edit mode), `paint_warns_when_faces_share_texture_space_and_one_click_fixes_it` (a New cube warns; a click on Smart UV Project clears it as one undo step and stays in Paint; undo brings it back; an object with no uvs says so), and `every_ribbon_and_menu_command_can_be_run_from_the_palette` with the new button. Tour shots: `tour-21-studio-object.png` (the closed fold), `tour-27-studio-paint-new-cube.png` (the warning and its button), `tour-03-ribbon-Model.png` (the Models group).
+

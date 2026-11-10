@@ -179,4 +179,11 @@ fn editor_tour_snapshots() {
         let doc = app.model_studio.doc.as_mut().unwrap();
         doc.set_mode(crate::model_studio::Mode::Weights);
     });
+    run("27-studio-paint-new-cube", Some("hello-part"), &|app| {
+        app.layout.open(Pane::ModelStudio);
+        app.model_studio
+            .open(crate::model_studio::tests::cube_doc());
+        let doc = app.model_studio.doc.as_mut().unwrap();
+        doc.set_mode(crate::model_studio::Mode::Paint);
+    });
 }

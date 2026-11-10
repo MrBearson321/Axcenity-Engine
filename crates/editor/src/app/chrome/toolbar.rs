@@ -485,13 +485,25 @@ impl EditorApp {
                     }
                 }
             }),
-            RibbonGroup::Import => ribbon::group(ui, "Import", |ui| {
+            RibbonGroup::Import => ribbon::group(ui, "Models", |ui| {
                 let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import…");
                 clicks.import = ui
                     .add_enabled(!playing, button)
                     .on_hover_text(IMPORT_HOVER)
                     .on_disabled_hover_text("Press Stop to edit.")
                     .clicked();
+                let studio = RibbonButton::new(Pane::ModelStudio.icon(), "Model Studio")
+                    .selected(self.layout.is_open(Pane::ModelStudio));
+                if ui
+                    .add_enabled(can_play, studio)
+                    .on_hover_text(
+                        "Open the Model Studio: make a shape and model it, unwrap, paint, sculpt and rig it, then save it as a .glb.",
+                    )
+                    .on_disabled_hover_text("Open a project first.")
+                    .clicked()
+                {
+                    self.layout.open(Pane::ModelStudio);
+                }
             }),
             RibbonGroup::Ui => ribbon::group(ui, "UI", |ui| {
                 let screen = Insertable::ScreenGui;

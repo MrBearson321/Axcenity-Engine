@@ -96,6 +96,38 @@ impl UvAction {
             UvAction::ClearSecond => "Clear UV 2",
         }
     }
+
+    /// What it does, for its menu item's hover.
+    pub fn tip(self) -> &'static str {
+        match self {
+            UvAction::MarkSeam => {
+                "Mark the picked edges as cuts, where Unwrap splits the surface to lay it flat"
+            }
+            UvAction::ClearSeam => "Take the cut marks off the picked edges",
+            UvAction::Unwrap => {
+                "Lay the surface flat on the texture, cut at the seams, with as little stretching as it can"
+            }
+            UvAction::SmartProject => {
+                "Unwrap without seams: split the surface where it bends sharply and lay each part flat. The quick choice for most models"
+            }
+            UvAction::CubeProject => "Project the texture from six sides, like wrapping a box",
+            UvAction::CylinderProject => "Wrap the texture round the model like a label on a can",
+            UvAction::SphereProject => "Wrap the texture round the model like a map on a globe",
+            UvAction::ProjectFromView => "Lay the texture on as seen from the view's camera",
+            UvAction::Pack => {
+                "Arrange the flattened parts (islands) to fill the texture without overlapping"
+            }
+            UvAction::AverageScale => {
+                "Size the islands so the texture's detail is even across the model"
+            }
+            UvAction::Pin => "Hold the picked uv points in place while unwrapping",
+            UvAction::Unpin => "Let the picked uv points move again",
+            UvAction::Stitch => "Join the picked edges' islands where they meet on the model",
+            UvAction::Align(AlignAxis::U) => "Line the picked uv points up across",
+            UvAction::Align(AlignAxis::V) => "Line the picked uv points up down",
+            UvAction::ClearSecond => "Remove the second uv set (the one lightmaps use)",
+        }
+    }
 }
 
 /// The UV editor's state.
@@ -381,7 +413,13 @@ impl ModelStudio {
             } else {
                 format!("{}    {keys}", action.label())
             };
-            if ui.add_enabled(enabled, egui::Button::new(text)).clicked() {
+            let tip = action.tip();
+            if ui
+                .add_enabled(enabled, egui::Button::new(text))
+                .on_hover_text(tip)
+                .on_disabled_hover_text(format!("{tip}. {}", super::tools::EDIT_ONLY))
+                .clicked()
+            {
                 chosen = Some(action);
             }
         };
@@ -430,7 +468,11 @@ impl ModelStudio {
             .is_some_and(EditMesh::has_uv2)
         {
             ui.separator();
-            if ui.button(UvAction::ClearSecond.label()).clicked() {
+            if ui
+                .button(UvAction::ClearSecond.label())
+                .on_hover_text(UvAction::ClearSecond.tip())
+                .clicked()
+            {
                 chosen = Some(UvAction::ClearSecond);
             }
         }

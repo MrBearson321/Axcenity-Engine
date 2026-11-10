@@ -328,7 +328,7 @@ fn the_tab_draws_a_loop_picked_on_a_cylinder_and_the_handles_on_a_face() {
 }
 
 /// The text drawn by one frame's shapes, with where each is.
-fn drawn(output: &egui::FullOutput) -> Vec<(String, egui::Pos2)> {
+pub(super) fn drawn(output: &egui::FullOutput) -> Vec<(String, egui::Pos2)> {
     fn walk(shape: &egui::Shape, found: &mut Vec<(String, egui::Pos2)>) {
         match shape {
             egui::Shape::Text(text) => found.push((
@@ -348,7 +348,7 @@ fn drawn(output: &egui::FullOutput) -> Vec<(String, egui::Pos2)> {
 
 /// Draws the tab (no GPU) for a few frames with `events` in the first
 /// that has any, and returns what the last frame drew.
-fn frames(
+pub(super) fn frames(
     ctx: &egui::Context,
     studio: &mut ModelStudio,
     events: Vec<egui::Event>,
@@ -367,7 +367,7 @@ fn frames(
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
-                egui::vec2(1600.0, 500.0),
+                egui::vec2(1600.0, 900.0),
             )),
             events,
             ..Default::default()
@@ -383,14 +383,14 @@ fn frames(
 }
 
 /// A button whose text ends with `label`.
-fn button<'a>(shown: &'a [(String, egui::Pos2)], label: &str) -> Option<&'a egui::Pos2> {
+pub(super) fn button<'a>(shown: &'a [(String, egui::Pos2)], label: &str) -> Option<&'a egui::Pos2> {
     shown
         .iter()
         .find(|(text, _)| text == label || text.ends_with(&format!("  {label}")))
         .map(|(_, at)| at)
 }
 
-fn click(at: egui::Pos2) -> Vec<egui::Event> {
+pub(super) fn click(at: egui::Pos2) -> Vec<egui::Event> {
     let press = |pressed| egui::Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,

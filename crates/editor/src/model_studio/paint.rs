@@ -57,7 +57,37 @@ pub struct PaintState {
     stencil: Option<(egui::TextureHandle, u64)>,
     /// Why the last stroke didn't paint, for the hint.
     pub status: Option<String>,
+    /// What's wrong with the active object's uvs for painting, worked out
+    /// for this revision and object (`paint_uv_problem`).
+    uv_check: Option<(u64, usize, Option<UvProblem>)>,
 }
+
+/// Why paint won't land where a beginner expects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UvProblem {
+    /// The file gave the object no uvs, so every face paints one texel.
+    Missing,
+    /// Faces share texture space (a New shape's faces each fill the whole
+    /// square), so a stroke on one shows on the others.
+    Overlapping,
+}
+
+impl UvProblem {
+    fn says(self) -> &'static str {
+        match self {
+            UvProblem::Missing => {
+                "This object has no texture layout (uvs) yet, so paint can't land on it."
+            }
+            UvProblem::Overlapping => {
+                "Some faces share the same texture space, so paint on one shows on the others."
+            }
+        }
+    }
+}
+
+/// Above this many faces the overlap check is skipped: it's a hint, and
+/// a dense sculpt would take too long.
+const UV_CHECK_FACES: usize = 50_000;
 
 impl Default for PaintState {
     fn default() -> Self {
@@ -75,6 +105,7 @@ impl Default for PaintState {
             texture: None,
             stencil: None,
             status: None,
+            uv_check: None,
         }
     }
 }
@@ -851,6 +882,49 @@ impl ModelStudio {
         if !ui.input(|input| input.pointer.any_down()) {
             self.paint.editing = false;
         }
+        let uv_problem = self.paint_uv_problem();
+        let mut unwrap = false;
+        self.paint_sections(ui, editable, actions, uv_problem, &mut unwrap);
+        if unwrap {
+            // Paint is on the first uv set, whatever the UV editor shows.
+            let channel = std::mem::replace(&mut self.uv.channel, 0);
+            self.run_uv(super::uv_editor::UvAction::SmartProject);
+            self.uv.channel = channel;
+        }
+    }
+
+    /// What's wrong with the active object's uvs for painting, if
+    /// anything, worked out again only when the mesh or object changes.
+    pub(crate) fn paint_uv_problem(&mut self) -> Option<UvProblem> {
+        let doc = self.doc.as_ref()?;
+        let key = (doc.revision, doc.active);
+        if let Some((revision, active, problem)) = self.paint.uv_check
+            && (revision, active) == key
+        {
+            return problem;
+        }
+        let object = doc.model.objects.get(doc.active)?;
+        let mesh = object.mesh.as_ref()?;
+        let problem = if !object.uvs {
+            Some(UvProblem::Missing)
+        } else if mesh.face_count() <= UV_CHECK_FACES {
+            let faces: Vec<u32> = (0..mesh.face_count() as u32).collect();
+            (!uv::overlapping_islands(mesh, &faces, 0).is_empty()).then_some(UvProblem::Overlapping)
+        } else {
+            None
+        };
+        self.paint.uv_check = Some((key.0, key.1, problem));
+        problem
+    }
+
+    fn paint_sections(
+        &mut self,
+        ui: &mut egui::Ui,
+        editable: bool,
+        actions: &mut Vec<StudioAction>,
+        uv_problem: Option<UvProblem>,
+        unwrap: &mut bool,
+    ) {
         let Some(doc) = &mut self.doc else {
             return;
         };
@@ -931,6 +1005,19 @@ impl ModelStudio {
             });
             if set_size.is_none() {
                 ui.weak("The first stroke starts painting this material.");
+            }
+            if let Some(problem) = uv_problem {
+                let palette = theme::palette(ui.ctx());
+                ui.colored_label(palette.warning, theme::with_icon(icons::WARNING, problem.says()));
+                if ui
+                    .button(theme::with_icon(icons::SQUARES_FOUR, "Smart UV Project"))
+                    .on_hover_text(
+                        "Give every face its own space on the texture (one undo step). UV > Smart UV Project does the same",
+                    )
+                    .clicked()
+                {
+                    *unwrap = true;
+                }
             }
             layers_ui(ui, doc, state);
             ui.add_space(8.0);

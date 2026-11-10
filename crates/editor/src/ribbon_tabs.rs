@@ -95,7 +95,7 @@ impl RibbonGroup {
             RibbonGroup::Effects => "Effects",
             RibbonGroup::Gameplay => "Gameplay",
             RibbonGroup::Constraints => "Constraints",
-            RibbonGroup::Import => "Import",
+            RibbonGroup::Import => "Models",
             RibbonGroup::Ui => "UI",
             RibbonGroup::Scripts => "Scripts",
             RibbonGroup::Terrain => "Terrain",
@@ -125,7 +125,9 @@ impl RibbonGroup {
                 "Insert characters, health, seats, prompts, spawns, tools, vehicles and cameras"
             }
             RibbonGroup::Constraints => "Weld parts together and insert Attachments",
-            RibbonGroup::Import => "Import models, images, sounds and prefabs",
+            RibbonGroup::Import => {
+                "Import models, images, sounds and prefabs, or make and edit models in the Model Studio"
+            }
             RibbonGroup::Ui => "Insert screens, frames, text, buttons and other UI",
             RibbonGroup::Scripts => "Insert scripts",
             RibbonGroup::Terrain => "Sculpt, paint and generate terrain",

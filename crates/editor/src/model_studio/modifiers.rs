@@ -101,7 +101,7 @@ pub(super) fn panel(
     ui.add_enabled_ui(editable, |ui| {
         ui.menu_button(theme::with_icon(icons::PLUS, "Add Modifier"), |ui| {
             for kind in ModifierKind::defaults() {
-                if ui.button(kind.label()).clicked() {
+                if ui.button(kind.label()).on_hover_text(tip(&kind)).clicked() {
                     change = Some(format!("Add {}", kind.label()));
                     stack.push(Modifier::new(kind));
                     ui.close();
@@ -324,4 +324,22 @@ pub(super) fn settings_ui(ui: &mut egui::Ui, kind: &mut ModifierKind) -> bool {
         }
     });
     changed
+}
+
+/// What a modifier does, for the Add Modifier menu. A modifier changes
+/// what's drawn and saved, never the mesh itself, until it's applied.
+fn tip(kind: &ModifierKind) -> &'static str {
+    match kind {
+        ModifierKind::Mirror { .. } => {
+            "A reflected copy across the object's middle: model one half, get both"
+        }
+        ModifierKind::Subdivision { .. } => {
+            "Smooths the shape by splitting every face, so a few faces make a round surface"
+        }
+        ModifierKind::Array { .. } => "Copies in a row: fences, stairs, chains",
+        ModifierKind::Solidify { .. } => "Gives a flat surface thickness",
+        ModifierKind::Bevel { .. } => "Rounds the sharp edges a little, so they catch the light",
+        ModifierKind::Decimate { .. } => "Fewer triangles, for a lighter model",
+        ModifierKind::Triangulate => "Cuts every face into triangles, as the game draws them",
+    }
 }
