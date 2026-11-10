@@ -612,8 +612,6 @@ pub(super) fn styles_section(
         name: name.to_owned(),
         rules: set.rules.clone(),
     };
-    ui.add_space(4.0);
-    widgets::section_label(ui, "Styles");
     let built_ins: Vec<&BuiltIn> = built_ins_for(instance.class()).collect();
     if !built_ins.is_empty() {
         ui.horizontal_wrapped(|ui| {

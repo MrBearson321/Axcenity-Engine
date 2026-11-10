@@ -41,6 +41,19 @@ pub fn has_states(world: &World, id: InstanceId, stylesheets: &[Stylesheet]) -> 
     })
 }
 
+/// The states besides Normal that `id` has a rule of its own for, such as
+/// `#play:hover`.
+pub fn styled_states(world: &World, id: InstanceId, stylesheets: &[Stylesheet]) -> Vec<UiState> {
+    let Some(own) = own_id(world, id) else {
+        return Vec::new();
+    };
+    UiState::ALL[1..]
+        .iter()
+        .copied()
+        .filter(|&state| axcenity_ui::has_rule(stylesheets, &state_selector(&own, state)))
+        .collect()
+}
+
 /// `id`'s `Id`, if it has one.
 fn own_id(world: &World, id: InstanceId) -> Option<String> {
     world
@@ -142,8 +155,6 @@ impl UiDesigner {
             return;
         };
         let sheets = scene.stylesheets;
-        ui.add_space(4.0);
-        widgets::section_label(ui, "States");
         ui.horizontal_wrapped(|ui| {
             // The four tabs, which wrap onto a second line in a narrow column.
             ui.spacing_mut().item_spacing.x = 2.0;

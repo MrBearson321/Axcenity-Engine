@@ -134,12 +134,6 @@ pub(super) fn text_toolbar(
     let mut set = |property: &'static str, value: String, dragging: bool| {
         actions.push(state_style_action(id, state, property, value, dragging));
     };
-    ui.add_space(4.0);
-    if state == UiState::Normal {
-        widgets::section_label(ui, "Text");
-    } else {
-        widgets::section_label(ui, &format!("Text · {}", state.name()));
-    }
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         for (toggle, icon, tip) in [
@@ -284,7 +278,9 @@ pub(super) fn text_toolbar(
         ui.end_row();
 
         ui.label("Shadow");
-        ui.horizontal_wrapped(|ui| {
+        // Two fixed lines, not a wrapped row: a row that wraps inside a
+        // grid cell spills over the row under it.
+        ui.vertical(|ui| {
             let mut shadows = style.shadows.clone();
             let mut first = shadows.first().copied().unwrap_or(TextShadow {
                 offset: [0.0, 0.0],
@@ -293,28 +289,33 @@ pub(super) fn text_toolbar(
             });
             let mut dragging = false;
             let mut changed = false;
-            let [x, y] = &mut first.offset;
-            for (value, prefix, tip) in [
-                (x, "x ", "How far right"),
-                (y, "y ", "How far down"),
-                (&mut first.blur, "blur ", "How soft"),
-            ] {
+            let mut drag = |ui: &mut egui::Ui, value: &mut f32, prefix: &str, tip: &str| {
                 let response = ui
                     .add(egui::DragValue::new(value).speed(0.1).prefix(prefix))
                     .on_hover_text(tip);
                 changed |= response.changed();
                 dragging |= response.dragged();
-            }
+            };
+            ui.horizontal(|ui| {
+                let [x, y] = &mut first.offset;
+                drag(ui, x, "x ", "How far right");
+                drag(ui, y, "y ", "How far down");
+            });
+            let mut recolored = false;
+            ui.horizontal(|ui| {
+                drag(ui, &mut first.blur, "blur ", "How soft");
+                let mut bytes = rgba_bytes(first.color);
+                if ui
+                    .color_edit_button_srgba_unmultiplied(&mut bytes)
+                    .on_hover_text("Shadow colour")
+                    .changed()
+                {
+                    first.color = rgba_floats(bytes);
+                    recolored = true;
+                }
+            });
+            changed |= recolored;
             first.blur = first.blur.max(0.0);
-            let mut bytes = rgba_bytes(first.color);
-            if ui
-                .color_edit_button_srgba_unmultiplied(&mut bytes)
-                .on_hover_text("Shadow colour")
-                .changed()
-            {
-                first.color = rgba_floats(bytes);
-                changed = true;
-            }
             if changed {
                 let none = first.offset == [0.0, 0.0] && first.blur == 0.0;
                 match (shadows.is_empty(), none) {

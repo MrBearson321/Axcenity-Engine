@@ -38,6 +38,7 @@ mod artboard;
 pub(crate) use artboard::sketch;
 pub(crate) mod bevel;
 mod event_graph;
+mod fold;
 mod group;
 pub(crate) mod image;
 pub(crate) mod links;
@@ -59,6 +60,10 @@ mod widget_section;
 pub use anchors::Pin;
 pub use arrange::UiClipboard;
 pub use event_graph::{DesignerTab, GraphPane, LivePreview};
+#[cfg(test)]
+pub use fold::Section;
+#[cfg(test)]
+pub use panels::sections;
 pub use states::state_selector;
 pub use text_toolbar::Toggle;
 
@@ -437,6 +442,9 @@ pub struct UiDesigner {
     state: UiState,
     /// The eye: the selected element is shown in `state` on the artboard.
     show_state: bool,
+    /// The inspector's States section is open. Folded, the inspector edits
+    /// and shows the Normal state whatever tab was picked.
+    states_open: bool,
     /// The Slice editor's picture path as typed, for the element it's typed for.
     slice_path: Option<(InstanceId, String)>,
     /// The Slice editor's picture, and the image it was made from.
@@ -530,6 +538,7 @@ impl Default for UiDesigner {
             project_fonts: None,
             state: UiState::Normal,
             show_state: true,
+            states_open: false,
             slice_path: None,
             slice_image: None,
             slice_drag: None,
@@ -745,12 +754,13 @@ impl UiDesigner {
     pub fn show_in_state(&mut self, state: UiState, show: bool) {
         self.state = state;
         self.show_state = show;
+        self.states_open = true;
     }
 
     /// The state the inspector edits `id` in: the states editor's tab, or
-    /// Normal for an element without states.
+    /// Normal for an element without states or while States is folded.
     fn state_for(&self, scene: &DesignerScene, id: InstanceId) -> UiState {
-        if states::has_states(scene.world, id, scene.stylesheets) {
+        if self.states_open && states::has_states(scene.world, id, scene.stylesheets) {
             self.state
         } else {
             UiState::Normal

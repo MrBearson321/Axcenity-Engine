@@ -8,7 +8,7 @@ use eframe::egui;
 
 use super::{DesignerAction, DesignerScene};
 use crate::properties::Edit;
-use crate::{responsive, widgets};
+use crate::responsive;
 
 /// The section, for a widget; nothing for anything else. Each change is one
 /// undo step, and a dragged number is one.
@@ -36,8 +36,6 @@ pub(super) fn widget_section(
     let mut set = |name: &'static str, value: Value| {
         actions.push(DesignerAction::Edit(id, Edit::Property(name, value)));
     };
-    ui.add_space(4.0);
-    widgets::section_label(ui, "Widget");
     responsive::form(ui, "ui designer widget", |ui| match class {
         ClassName::Slider | ClassName::ProgressBar => {
             let names: &[(&'static str, &str)] = if class == ClassName::Slider {

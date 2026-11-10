@@ -124,6 +124,37 @@ fn editor_tour_snapshots() {
         let id = find(app, "Floor");
         select(app, id)
     });
+    let designer = |app: &mut EditorApp, tab: crate::ui_designer::DesignerTab| {
+        app.layout.open(Pane::UiDesigner);
+        app.ui_designer.set_tab(tab);
+    };
+    run("40-ui-empty", Some("hello-part"), &|app| {
+        designer(app, crate::ui_designer::DesignerTab::Design)
+    });
+    run("41-ui-menu", Some("hello-menu"), &|app| {
+        designer(app, crate::ui_designer::DesignerTab::Design);
+        let id = find(app, "Menu");
+        select(app, id)
+    });
+    run("42-ui-button", Some("hello-menu"), &|app| {
+        designer(app, crate::ui_designer::DesignerTab::Design);
+        let id = find(app, "Play");
+        select(app, id)
+    });
+    run("43-ui-label", Some("hello-menu"), &|app| {
+        designer(app, crate::ui_designer::DesignerTab::Design);
+        let id = find(app, "Title");
+        select(app, id)
+    });
+    run("44-ui-graph", Some("hello-ui-graph"), &|app| {
+        designer(app, crate::ui_designer::DesignerTab::EventGraph)
+    });
+    run("45-ui-strings", Some("hello-menu"), &|app| {
+        designer(app, crate::ui_designer::DesignerTab::Strings)
+    });
+    run("46-ui-pages", Some("hello-menu"), &|app| {
+        designer(app, crate::ui_designer::DesignerTab::Pages)
+    });
     run("14-animate-floor", Some("hello-door"), &|app| {
         app.layout.open(Pane::Animation);
         let id = find(app, "Floor");
@@ -186,4 +217,29 @@ fn editor_tour_snapshots() {
         let doc = app.model_studio.doc.as_mut().unwrap();
         doc.set_mode(crate::model_studio::Mode::Paint);
     });
+    // The designer alone, tall, so its whole inspector shows.
+    for (name, element, width) in [
+        ("47-ui-inspector-button", "Play", 1100.0),
+        ("48-ui-inspector-label", "Title", 1100.0),
+        ("49-ui-inspector-slider", "Volume", 1100.0),
+        ("50-ui-inspector-button-wide", "Play", 1600.0),
+    ] {
+        if !only.is_empty() && !name.contains(only.as_str()) {
+            continue;
+        }
+        let Ok(folder) = std::env::var("AXCENITY_SNAPSHOTS") else {
+            return;
+        };
+        let mut app = fresh(Some("hello-menu"));
+        let id = find(&app, element);
+        select(&mut app, id);
+        crate::snapshot::snapshot_rendered(
+            &PathBuf::from(&folder).join(format!("tour-{name}.png")),
+            egui::vec2(width, 2400.0),
+            vec![Vec::new(); 4],
+            |ctx, rs| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, Some(rs)));
+            },
+        );
+    }
 }

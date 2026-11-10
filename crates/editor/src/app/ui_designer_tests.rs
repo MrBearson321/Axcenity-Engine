@@ -1182,6 +1182,12 @@ fn dragging_the_horizontal_diamonds_to_both_edges_stretches_an_element_across() 
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+/// Opens the inspector's `section`, as clicking its header does. The
+/// fine-tuning ones (States, Bevel, Slice) start folded.
+pub(super) fn open_section(ctx: &egui::Context, section: crate::ui_designer::Section) {
+    section.set_open(ctx, true);
+}
+
 /// Runs one frame of the UI Designer tab, as [`run_designer`] does, and
 /// returns egui's output (with AccessKit on, so it says where each widget is).
 pub(super) fn designer_frame(

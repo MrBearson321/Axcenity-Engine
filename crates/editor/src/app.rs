@@ -1673,6 +1673,8 @@ mod ui_designer_tests;
 #[cfg(test)]
 mod ui_graph_tests;
 #[cfg(test)]
+mod ui_inspector_tests;
+#[cfg(test)]
 mod ui_layering_tests;
 #[cfg(test)]
 mod ui_pages_tests;
