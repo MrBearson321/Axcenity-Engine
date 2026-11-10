@@ -410,3 +410,90 @@ fn rays_meet_a_terrain_where_it_is_now_after_an_edit_or_in_a_copy() {
         "the edited original"
     );
 }
+
+// --- Kept bounding balls (roadmap L4) ----------------------------------------
+
+/// What a straight-down ray at `x` hits, with the default params.
+fn hit_below(world: &World, x: f32) -> Option<InstanceId> {
+    raycast(
+        world,
+        &Assets::default(),
+        v(x, 50.0, 0.0),
+        v(0.0, -100.0, 0.0),
+        &QueryParams::default(),
+    )
+    .map(|hit| hit.instance)
+}
+
+#[test]
+fn a_ray_finds_a_part_where_it_is_now_not_where_it_was() {
+    let mut world = World::new();
+    let block = part(&mut world, v(0.0, 0.0, 0.0), v(2.0, 2.0, 2.0), true);
+    assert_eq!(hit_below(&world, 0.0), Some(block));
+    assert_eq!(hit_below(&world, 20.0), None);
+    // Moved and resized after the first query: the kept ball must follow.
+    set(
+        &mut world,
+        block,
+        "Position",
+        Value::Vector3(v(20.0, 0.0, 0.0)),
+    );
+    assert_eq!(hit_below(&world, 0.0), None);
+    assert_eq!(hit_below(&world, 20.0), Some(block));
+    set(&mut world, block, "Size", Value::Vector3(v(60.0, 2.0, 2.0)));
+    assert_eq!(hit_below(&world, 0.0), Some(block));
+}
+
+#[test]
+fn a_ray_sees_parts_added_removed_and_moved_into_models() {
+    let mut world = World::new();
+    assert_eq!(hit_below(&world, 5.0), None);
+    let block = part(&mut world, v(5.0, 0.0, 0.0), v(2.0, 2.0, 2.0), true);
+    assert_eq!(hit_below(&world, 5.0), Some(block));
+    let model = world.create(ClassName::Model).unwrap();
+    world.set_parent(model, Some(world.workspace())).unwrap();
+    world.set_parent(block, Some(model)).unwrap();
+    assert_eq!(hit_below(&world, 5.0), Some(block), "inside a Model");
+    world.set_parent(block, None).unwrap();
+    assert_eq!(hit_below(&world, 5.0), None, "taken out of the Workspace");
+    world.set_parent(block, Some(world.workspace())).unwrap();
+    world.destroy(block).unwrap();
+    assert_eq!(hit_below(&world, 5.0), None, "destroyed");
+}
+
+#[test]
+fn a_copy_of_the_world_keeps_its_own_bounds() {
+    let mut world = World::new();
+    let block = part(&mut world, v(0.0, 0.0, 0.0), v(2.0, 2.0, 2.0), true);
+    let mut copy = world.clone();
+    assert_eq!(hit_below(&world, 0.0), Some(block));
+    assert_eq!(hit_below(&copy, 0.0), Some(block));
+    // Same ID and the same revision in both, different places.
+    set(
+        &mut copy,
+        block,
+        "Position",
+        Value::Vector3(v(30.0, 0.0, 0.0)),
+    );
+    set(
+        &mut world,
+        block,
+        "Position",
+        Value::Vector3(v(-30.0, 0.0, 0.0)),
+    );
+    assert_eq!(hit_below(&world, -30.0), Some(block));
+    assert_eq!(hit_below(&copy, -30.0), None);
+    assert_eq!(hit_below(&copy, 30.0), Some(block));
+}
+
+#[test]
+fn of_two_parts_at_the_same_distance_the_first_in_the_tree_wins() {
+    let mut world = World::new();
+    let first = part(&mut world, v(0.0, 0.0, 0.0), v(2.0, 2.0, 2.0), true);
+    let second = part(&mut world, v(0.0, 0.0, 0.0), v(2.0, 2.0, 2.0), true);
+    assert_eq!(hit_below(&world, 0.0), Some(first));
+    // Reordered among the Workspace's children: the walk follows.
+    world.set_parent(first, None).unwrap();
+    world.set_parent(first, Some(world.workspace())).unwrap();
+    assert_eq!(hit_below(&world, 0.0), Some(second));
+}

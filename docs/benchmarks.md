@@ -403,6 +403,20 @@ The linux cloud container above, release build, `axcenity-server target/s10k --b
 - **Engine calls don't speed up.** Vector3 math and Instance reads are mlua userdata calls either way (the Vector3 row allocates a userdata per result); native code can't inline them. That cost is what a native `vector` Vector3 would remove ([research/native-vector-check.md](research/native-vector-check.md)).
 - **S10k doesn't move**: its 200 scripts mostly read and write Instances. Three alternating 600-frame runs each, medians: test runner frame 10.29 → 10.15 ms, Heartbeat 1.38 → 1.38; server frame 8.32 → 8.23, Heartbeat 1.33 → 1.36; Scripts 0.015–0.02 ms on both. `bench_member_access` moved 0–12% faster (a `part.Position` read 468 → 447 ns), within this container's noise.
 
+### Query bounds (L4's first measurement)
+
+L4 (parallel read, serial write) was to be "targeted by I1 data", so the data came first. On S10k's test runner the stages that could be split across threads are Characters (2.05 ms), Heartbeat (scripts, one Luau VM, 1.4 ms) and Physics (rapier, already `parallel` since M3). Callgrind on the Characters step (`--toggle-collect='*Controllers*step*'`, 20 frames) put **93% of it in `Reach::may_touch`**: every ray a character casts walked all 10,000 Workspace parts and read each one's `Position` and `Size` by name (string compares in a `BTreeMap`). Running that scan on more threads would have hidden it, not fixed it.
+
+Queries now keep each part's bounding ball between rays (`physics::query::WorkspaceBounds`, [architecture/physics.md](architecture/physics.md)), checked by the Instance's revision. Same container, `main` and the branch alternating, three 600-frame runs each, medians in ms (ranges in brackets):
+
+| | main | branch |
+|---|---|---|
+| Test runner Characters | 2.05 (2.05–2.06) | 0.31 (0.31–0.32) |
+| Test runner frame | 10.03 (9.83–10.21) | 8.56 (8.48–8.90) |
+| Server frame (no characters) | 8.12 (8.10–8.14) | 8.32 (7.81–9.18) |
+
+Every query benefits the same way (`workspace:Raycast`, `Spherecast`, `GetPartBoundsInBox`, ...). After this, S10k has no stage left where splitting work across threads is the clear next step on a 4-core machine: Physics is rapier's own (already parallel), Heartbeat is one Luau VM, and the player's draw list became retained in M4. L4 stays open for an 8+ core measurement.
+
 ### Calibrating against the rendering baseline
 
 The render benchmarks ran on the same container to relate it to the machine in [rendering/performance.md](rendering/performance.md). `bench_10000_parts` (edge view) took 8.6 ms in `build_draw_list` there, about the same as the desktop above; steps other than the draw list are about 1.5 to 2× slower on the container. Compare runs on one machine rather than scaling between them. `bench_project` on S10k: `build_draw_list` 9.4 ms and `ScenePipeline::draw` (CPU side) 3.7 ms from the spawn, 9.5 ms and 3.7 ms from the overview, 6,575 and 10,026 items drawn. GPU times on lavapipe (300–940 ms a frame) say nothing about a real GPU and are left out.

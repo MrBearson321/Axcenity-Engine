@@ -131,16 +131,16 @@ impl Reach {
         (self.from + along * t - center).length_squared() <= reach * reach
     }
 
-    /// Whether `instance`, a Part or MeshPart, can touch this: its collider
-    /// is inside the box its Size makes (a model fills that box). False
-    /// for anything without a Position and a Size, which isn't a part.
-    fn may_touch(&self, instance: &Instance) -> bool {
+    /// The ball `instance`, a Part or MeshPart, fits in: its collider is
+    /// inside the box its Size makes (a model fills that box). `None` for
+    /// anything without a Position and a Size, which isn't a part.
+    fn ball_of(instance: &Instance) -> Option<(Vec3, f32)> {
         let vector = |name| instance.property(name).and_then(Value::as_vector3);
         let (Some(position), Some(size)) = (vector("Position"), vector("Size")) else {
-            return false;
+            return None;
         };
         let half = to_vec3(size).abs().max(Vec3::splat(shapes::MIN_SIZE)) / 2.0;
-        self.touches(to_vec3(position), half.length() + BOUND_MARGIN)
+        Some((to_vec3(position), half.length() + BOUND_MARGIN))
     }
 }
 
@@ -220,6 +220,11 @@ fn terrain_colliders(
 
 /// Each collider a query can find inside `reach`, with its part, its state
 /// and whether it's solid: a part's own, and a Terrain's colliding foliage.
+///
+/// Parts are visited in tree order (a walk of the Workspace), so ties go
+/// to the same part every time. Their bounding balls come from
+/// [`WorkspaceBounds`], so a part far from `reach` costs a revision check
+/// instead of reading its Position and Size by name.
 fn candidates(
     world: &World,
     assets: &Assets,
@@ -227,24 +232,124 @@ fn candidates(
     reach: Reach,
     mut visit: impl FnMut(InstanceId, &PartState, &Collider, bool),
 ) {
-    for id in world.descendants_iter(world.workspace()) {
-        let Some(instance) = world.get(id) else {
+    let mut bounds = WorkspaceBounds::take(world);
+    bounds.update_tree(world);
+    for entry in &mut bounds.entries {
+        let Some(instance) = world.get(entry.id) else {
             continue;
         };
-        if instance.class() == ClassName::Terrain {
-            terrain_candidates(world, assets, filter, reach, id, instance, &mut visit);
+        if entry.terrain {
+            terrain_candidates(world, assets, filter, reach, entry.id, instance, &mut visit);
             continue;
         }
-        if !reach.may_touch(instance) {
-            continue;
+        if entry.revision != Some(instance.revision()) {
+            entry.ball = Reach::ball_of(instance);
+            entry.revision = Some(instance.revision());
         }
-        let Some(state) = PartState::read(world, id, assets) else {
+        let Some((center, radius)) = entry.ball else {
             continue;
         };
-        if filter.admits(id, &state, state.can_collide) {
+        if !reach.touches(center, radius) {
+            continue;
+        }
+        let Some(state) = PartState::read(world, entry.id, assets) else {
+            continue;
+        };
+        if filter.admits(entry.id, &state, state.can_collide) {
             let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
             collider.set_position(state.pose() * *collider.position());
-            visit(id, &state, &collider, state.can_collide);
+            visit(entry.id, &state, &collider, state.can_collide);
+        }
+    }
+    bounds.put_back();
+}
+
+/// The Workspace's Instances in tree order, each with the bounding ball
+/// [`Reach`] tests (roadmap L4's measurement: S10k's characters cast
+/// several rays a frame, and reading 10,000 parts' Position and Size by
+/// name for each was 93% of the Characters step).
+///
+/// Kept per thread between queries, for a few Worlds by
+/// [`World::identity`]. The list is walked again when the Workspace's
+/// structure or a child order changes; a ball is worked out again when its
+/// Instance's revision changes, so a moved part is never tested where it
+/// was.
+#[derive(Default)]
+struct WorkspaceBounds {
+    world: u64,
+    /// `(structure_version_of(workspace), child_order_version)` when
+    /// `entries` was made.
+    tree: Option<(u64, u64)>,
+    entries: Vec<BoundsEntry>,
+}
+
+struct BoundsEntry {
+    id: InstanceId,
+    terrain: bool,
+    /// The Instance revision `ball` is for; `None` until worked out.
+    revision: Option<u64>,
+    /// Center and radius; `None` for anything without a Position and a
+    /// Size, which isn't a part.
+    ball: Option<(Vec3, f32)>,
+}
+
+/// How many Worlds' bounds a thread keeps (the oldest goes first): a game
+/// test has a server and a client World, the editor its edit and Play ones.
+const KEPT_WORLDS: usize = 4;
+
+thread_local! {
+    static KEPT_BOUNDS: std::cell::RefCell<Vec<WorkspaceBounds>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+impl WorkspaceBounds {
+    /// This thread's bounds for `world`, taken out while a query runs, so a
+    /// query made from inside another one (none is now) gets its own.
+    fn take(world: &World) -> Self {
+        let identity = world.identity();
+        KEPT_BOUNDS
+            .with_borrow_mut(|kept| {
+                let found = kept.iter().position(|bounds| bounds.world == identity)?;
+                Some(kept.remove(found))
+            })
+            .unwrap_or_else(|| Self {
+                world: identity,
+                ..Self::default()
+            })
+    }
+
+    fn put_back(self) {
+        KEPT_BOUNDS.with_borrow_mut(|kept| {
+            kept.retain(|bounds| bounds.world != self.world);
+            if kept.len() >= KEPT_WORLDS {
+                kept.remove(0);
+            }
+            kept.push(self);
+        });
+    }
+
+    /// Walks the Workspace again if anything in it was added, removed or
+    /// reordered since the last walk.
+    fn update_tree(&mut self, world: &World) {
+        let tree = (
+            world.structure_version_of(world.workspace()),
+            world.child_order_version(),
+        );
+        if self.tree == Some(tree) {
+            return;
+        }
+        self.tree = Some(tree);
+        self.entries.clear();
+        for id in world.descendants_iter(world.workspace()) {
+            let Some(instance) = world.get(id) else {
+                continue;
+            };
+            self.entries.push(BoundsEntry {
+                id,
+                terrain: instance.class() == ClassName::Terrain,
+                revision: None,
+                ball: None,
+            });
         }
     }
 }
