@@ -19,10 +19,13 @@ Build in release. Each host runs a 60-frame warm-up, then measures the frames as
 cargo run --release -p axcenity-testing -- --make-s10k target/s10k
 cargo run --release -p axcenity-testing -- target/s10k --bench 600          # test runner (TestGame)
 cargo run --release -p axcenity-server  -- target/s10k --port 0 --bench 600 # dedicated server
+cargo run --release -p axcenity-server  -- target/s10k --bench 600 --bench-clients 8 # server with 8 players
 cargo run --release -p axcenity-player  -- target/s10k --bench 600          # player, with its window
 AXCENITY_BENCH_PROJECT=target/s10k AXCENITY_BENCH_FRAMES=600 \
   cargo test -p axcenity-editor --release -- --ignored bench_project_play --nocapture --test-threads 1
 ```
+
+`--bench-clients <n>` makes the server host in memory and join `n` loopback players that read everything sent to them, as a player's device would, so the frame pays for replicating to them (roadmap M7). Measuring (and its warm-up) starts once every player has its snapshot. After the table it prints the snapshot's size, how many frames joining took, the bytes sent per frame and how long the players took to read them (not in the frame's steps).
 
 `--bench` works on any project, not only S10k. After the table, each host also prints its **first frame** and its **worst warm-up frame** (where first-sight loads land), and the player adds **launch to first frame** and **launch to assets loaded** (from `main` starting to the end of the first frame drawn with the Workspace's assets in). The JSON line has these under `"startup"`. `core::bench` holds the shared pieces: `Laps` times a frame's steps one after another (the player's Developer Console Stats tab uses it too), `StageSamples` keeps every frame, and `BenchRun` adds the warm-up and the report.
 
@@ -304,6 +307,25 @@ A 16-core Ryzen 9 9950X3D desktop, each run pinned to the V-cache CCD, release b
 | S10k | 0.50 | 0.016 | 5.9 | 5.4 | 0.52 | 0.023 | 13.7 | 13.2 |
 
 `Clicks::step` casts the mouse's ray every frame, and a query builds a collider for each part near the ray. A MeshPart's collider was a new convex hull of every corner of its model, and the two scanned trees in those patches have 2-3 million corners between them (Tropical Snow's palms about 160,000). Hulls are now kept by model and size (`shapes::hull`), and the ray isn't cast at all when the game has no ClickDetector (`World::all_of`). The kept hulls also make every other ray, such as `workspace:Raycast`, cheap near heavy models. The editor Play bench keeps the camera at the origin, where its ray misses the trees, so it doesn't show the 30 ms (Input 0.020 before, 0.006 after).
+
+### Replication to 8 players (M7)
+
+The linux cloud container above, release build, `axcenity-server target/s10k --bench 600 --bench-clients 8`, main and this change run alternately, three runs each, the runs' medians (milliseconds) and their range.
+
+| | main | M7 |
+|---|---|---|
+| Players who can join S10k | none: the server drops all 8 | all 8 |
+| Snapshot | 14.4 MB (JSON) | 1.02 MB (postcard, only non-default properties) |
+| Frames until all 8 have it | 242 (with the channel limit raised) | 19 |
+| Network send, median | 45.2 (44.3–48.0) | 5.06 (4.86–5.30) |
+| Frame, median | 57.4 (56.3–60.8) | 14.9 (14.1–15.2) |
+| Bytes a frame to all 8 after joining | 10,324 | 5,464 |
+| Players' reading, per frame | 0.19 | 0.055 |
+
+- **On main nobody can join S10k.** Its snapshot is 14.4 MB of JSON, and the reliable channel holds 5 MiB (`transport.rs`), so renet drops each player as soon as the snapshot is queued ("The server closed the connection."). The main column was measured with that limit raised to 64 MiB in a local build, only to have numbers to compare. A Create now carries only what differs from its class's defaults, in postcard, so the same snapshot is 1.02 MB.
+- **Network send was the motion sender.** Callgrind put 92% of main's network send with 8 players in `MotionSender::frame`: for each player, every frame, it read each of the 10,000 parts' Position, Orientation and velocity by name and rebuilt a set of all of them. It now re-reads a part only when its `motion_revision` moved, and keeps its parts in a list beside what the player has of each. What's left is mostly reading the ~1,100 parts that move, once per player, and `ScriptRuntime::owned_parts`.
+- **The replication diff** skips a part whose only change was its motion (`revision_without_motion`) and compares what did change in place, so the 1,000 falling parts no longer each copy all their properties every frame.
+- With no players, the server's frame is unchanged (Network send 0.65 vs 0.70, Physics 7.7 vs 7.7 over six alternating runs, within noise).
 
 ### Calibrating against the rendering baseline
 
