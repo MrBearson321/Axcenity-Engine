@@ -14,7 +14,6 @@
 use std::collections::{BTreeSet, HashMap};
 
 use axcenity_core::{ClassName, InstanceId};
-use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Table, Thread, Value};
 
 use crate::instance::{LuaInstance, world};
@@ -214,14 +213,8 @@ fn begin(lua: &Lua, module: Value) -> mlua::Result<(&'static str, Value)> {
             script: id,
         }
     };
-    let code = lua
-        .load(source)
-        // `@` makes messages start with the module's path, as for scripts.
-        .set_name(format!("@{path}"))
-        // Only source text, never precompiled bytecode (see `context.rs`).
-        .set_mode(ChunkMode::Text)
-        .set_environment(sandbox::environment(lua, ids)?)
-        .into_function()?;
+    // Compiled once per source, as for scripts (see `chunks`).
+    let code = crate::chunks::load(lua, &path, &source, sandbox::environment(lua, ids)?)?;
     modules_mut(lua)?
         .states
         .insert(id, State::Loading(lua.current_thread()));

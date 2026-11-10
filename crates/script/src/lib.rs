@@ -51,6 +51,7 @@ mod camera;
 mod cframe;
 mod changes;
 mod chat;
+mod chunks;
 mod click;
 mod client;
 mod collection;
@@ -2431,6 +2432,9 @@ mod scheduler_tests;
 
 #[cfg(test)]
 mod property_bench;
+
+#[cfg(test)]
+mod chunks_tests;
 
 #[cfg(test)]
 mod sandbox_tests;

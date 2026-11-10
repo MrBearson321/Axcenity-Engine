@@ -199,6 +199,10 @@ What the profile showed, and what changed:
 
 S10k doesn't move (Scripts 0.016–0.017 ms, frames within noise), as its 200 scripts do little per frame.
 
+### Compiled-chunk cache (M6, part 3)
+
+`cargo test -p axcenity-script --release --lib -- --ignored bench_script_start --nocapture` starts 200 copies of a 31 KB script (what cloning a model with scripts does). Same container, three runs each: main 2.40–2.51 ms per copy, the branch 0.18–0.28 ms, as only the first copy is parsed and compiled. S10k's 200 scripts are all different, so its load doesn't change.
+
 ### A Windows desktop with a real GPU
 
 Taken on 2026-11-09 at `300bbb5` (I1 to I11 merged, so later than the table above): AMD Ryzen 9 9950X3D (16 cores), 62 GB of RAM, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Each host ran three times, 600 measured frames each; the table gives the median of the three runs' medians, and the worst frame seen in any run. The first player run was slower than the other two (Physics 14.3 ms against 5.4 ms); it came straight after the release build. Times are milliseconds.
