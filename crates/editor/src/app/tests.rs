@@ -2043,3 +2043,124 @@ fn steady_frames_are_presented_on_a_fixed_grid() {
     wait_until(target);
     assert!(Instant::now() >= target);
 }
+
+/// Every piece of text drawn in `output`, with where it was drawn.
+fn drawn_texts(output: &egui::FullOutput) -> Vec<(String, egui::Pos2)> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<(String, egui::Pos2)>) {
+        match shape {
+            egui::Shape::Text(text) => found.push((
+                text.galley.text().to_owned(),
+                text.visual_bounding_rect().center(),
+            )),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, found)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut found);
+    }
+    found
+}
+
+/// Record on says so above the timeline (and the empty dope sheet doesn't
+/// ask for K); with it off, a move that isn't keyed yet is named, with
+/// Key it (K), which keys it, and moving the playhead drops it as before.
+#[test]
+fn recording_and_unkeyed_moves_are_said_above_the_timeline() {
+    use axcenity_anim::{EvaluatedProperty, PropertyName};
+    let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
+    let folder = copy_of_example("hello-touched", "key-status");
+    let mut app = EditorApp::new(Some(&folder));
+    let pad = select_pad(&mut app);
+    app.animate(pad);
+    assert!(app.animation.recording(), "Animate turns Record on");
+
+    let ctx = theme::test_context();
+    let size = egui::vec2(1100.0, 600.0);
+    let frame = |app: &mut EditorApp, events: Vec<egui::Event>| {
+        let mut output = None;
+        for events in [events, Vec::new(), Vec::new()] {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            };
+            output = Some(ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.animation_pane(ui, None));
+            }));
+        }
+        drawn_texts(&output.unwrap())
+    };
+    let shows = |texts: &[(String, egui::Pos2)], part: &str| {
+        texts
+            .iter()
+            .find(|(text, _)| text.contains(part))
+            .map(|(_, at)| *at)
+    };
+    let snapshot = |app: &mut EditorApp, name: &str| {
+        if let Some(folder) = &snapshots {
+            crate::snapshot::snapshot(
+                &folder.join(format!("animation-{name}.png")),
+                size,
+                vec![Vec::new(); 3],
+                &mut |ctx: &egui::Context| {
+                    egui::CentralPanel::default().show(ctx, |ui| app.animation_pane(ui, None));
+                },
+            );
+        }
+    };
+
+    let texts = frame(&mut app, Vec::new());
+    assert!(
+        shows(&texts, "Recording: moving something").is_some(),
+        "{texts:?}"
+    );
+    assert!(shows(&texts, "Record keys it").is_some(), "{texts:?}");
+    assert!(shows(&texts, "and press K").is_none(), "{texts:?}");
+    snapshot(&mut app, "recording");
+
+    // Record off: a move shows, isn't keyed, and says so.
+    app.animation.set_record(false);
+    app.animation.set_playhead(0.5);
+    let moved = |app: &mut EditorApp, y: f32| {
+        app.animation.move_in_preview(vec![EvaluatedProperty {
+            target: ".".into(),
+            property: PropertyName::Position,
+            value: vec![0.0, y, 0.0],
+        }]);
+    };
+    moved(&mut app, 4.0);
+    let texts = frame(&mut app, Vec::new());
+    assert!(shows(&texts, "Recording:").is_none(), "{texts:?}");
+    assert!(shows(&texts, "and press K").is_some(), "{texts:?}");
+    let key_it = shows(&texts, "Key it (K)").expect("Key it (K) shows");
+    assert!(shows(&texts, "Not keyed yet").is_some(), "{texts:?}");
+    assert!(app.animation.open_tracks().is_empty(), "nothing keyed yet");
+    snapshot(&mut app, "unkeyed");
+
+    // Key it (K) keys it, and the note goes.
+    let press = |pressed| egui::Event::PointerButton {
+        pos: key_it,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    frame(&mut app, vec![egui::Event::PointerMoved(key_it)]);
+    frame(&mut app, vec![press(true)]);
+    let texts = frame(&mut app, vec![press(false)]);
+    assert!(shows(&texts, "Not keyed yet").is_none(), "{texts:?}");
+    let tracks = app.animation.open_tracks();
+    assert!(
+        tracks.iter().any(|t| t.property == PropertyName::Position),
+        "Position was keyed: {tracks:?}"
+    );
+
+    // Another move, then the playhead moves: it's dropped, as before, and
+    // the note goes with it.
+    moved(&mut app, 9.0);
+    assert!(shows(&frame(&mut app, Vec::new()), "Not keyed yet").is_some());
+    app.animation.set_playhead(1.0);
+    assert!(shows(&frame(&mut app, Vec::new()), "Not keyed yet").is_none());
+    let _ = std::fs::remove_dir_all(&folder);
+}

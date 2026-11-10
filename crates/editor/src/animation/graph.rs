@@ -830,8 +830,18 @@ pub fn parameters_panel(
         return events;
     }
     ui.horizontal_wrapped(|ui| {
+        // Where rows end. A wrapping row reports its whole width as
+        // available, so what's left of it is measured from here.
+        let right = ui.max_rect().right();
         for def in parameters {
             let kind = ParameterKind::of(def);
+            // A chip that doesn't fit what's left of the row starts the
+            // next one, rather than its name breaking letter by letter.
+            if chip_width(ui, kind, def.name()) > right - ui.cursor().left()
+                && ui.cursor().left() > ui.max_rect().left()
+            {
+                ui.end_row();
+            }
             let id = ui.id().with(("parameter chip", def.name()));
             let response = ui
                 .dnd_drag_source(id, ParameterChip(def.name().to_owned()), |ui| {
@@ -848,10 +858,68 @@ pub fn parameters_panel(
     events
 }
 
+/// How wide a parameter chip for `name` is drawn, margins included.
+fn chip_width(ui: &egui::Ui, kind: ParameterKind, name: &str) -> f32 {
+    let text = ui.painter().layout_no_wrap(
+        format!("{} {name}", kind.icon()),
+        egui::TextStyle::Body.resolve(ui.style()),
+        egui::Color32::WHITE,
+    );
+    text.size().x + draw::CHIP_MARGIN_X * 2.0 + 2.0
+}
+
 fn node_id(node: Node) -> i64 {
     match node {
         Node::State(index) => index as i64,
         Node::Any => -1,
         Node::Entry => -2,
+    }
+}
+
+#[cfg(test)]
+mod chip_tests {
+    use super::*;
+
+    /// In the state machine's narrow parameter column, a chip that doesn't
+    /// fit what's left of a row starts the next row, whole, instead of its
+    /// name breaking letter by letter ("Wav/e", "H/o/p").
+    #[test]
+    fn parameter_chips_start_a_new_row_instead_of_breaking_their_names() {
+        let parameters = vec![
+            ParameterDef::Number {
+                name: "Speed".into(),
+                default: 0.0,
+            },
+            ParameterDef::Trigger {
+                name: "Wave".into(),
+            },
+            ParameterDef::Trigger { name: "Hop".into() },
+        ];
+        let ctx = crate::theme::test_context();
+        let mut chips = Vec::new();
+        let column = Rect::from_min_size(Pos2::ZERO, egui::vec2(132.0, 400.0));
+        for _ in 0..2 {
+            let _ = ctx.run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
+                        parameters_panel(ui, &parameters, &mut chips);
+                    });
+                });
+            });
+        }
+        assert_eq!(chips.len(), 3);
+        let line = chips[0].1.height();
+        for (name, rect) in &chips {
+            assert!(
+                (rect.height() - line).abs() < 0.5,
+                "{name} is one line: {rect:?}"
+            );
+            assert!(
+                rect.right() <= column.right() + 0.5,
+                "{name} fits: {rect:?}"
+            );
+        }
+        // Speed and Wave don't fit side by side in 132 points.
+        assert!(chips[1].1.top() > chips[0].1.top(), "{chips:?}");
     }
 }

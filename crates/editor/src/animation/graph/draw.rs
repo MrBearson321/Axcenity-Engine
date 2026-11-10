@@ -333,17 +333,26 @@ pub(super) fn draw_label(
 }
 
 /// A parameter chip: its type's icon and its name in a pill.
+/// A parameter chip's room left and right of its name.
+pub(super) const CHIP_MARGIN_X: f32 = 8.0;
+
 pub(super) fn draw_chip(ui: &mut egui::Ui, kind: ParameterKind, name: &str) {
     let color = kind.color();
     egui::Frame::new()
         .fill(color.gamma_multiply(0.18))
         .stroke(Stroke::new(1.0_f32, color))
         .corner_radius(10)
-        .inner_margin(egui::Margin::symmetric(8, 3))
+        .inner_margin(egui::Margin::symmetric(CHIP_MARGIN_X as i8, 3))
         .show(ui, |ui| {
             let text = egui::RichText::new(format!("{} {name}", kind.icon()))
                 .color(ui.visuals().text_color());
-            ui.add(egui::Label::new(text).selectable(false));
+            // Always one line: the row it's in starts a new one first if
+            // it doesn't fit (`parameters_panel`).
+            ui.add(
+                egui::Label::new(text)
+                    .selectable(false)
+                    .wrap_mode(egui::TextWrapMode::Extend),
+            );
         });
 }
 

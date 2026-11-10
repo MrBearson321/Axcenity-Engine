@@ -610,6 +610,14 @@ fn unique(groups: &[RibbonGroup]) -> Vec<RibbonGroup> {
 }
 
 #[cfg(test)]
+impl RibbonTabs {
+    /// Shows `tab`, as clicking it does.
+    pub fn set_active_for_tour(&mut self, tab: BuiltInTab) {
+        self.active = ActiveTab::BuiltIn(tab);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
