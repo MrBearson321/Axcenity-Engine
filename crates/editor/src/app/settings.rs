@@ -233,6 +233,42 @@ impl EditorApp {
             self.layout_name = Some(Default::default());
         }
         ui.add_space(space::L);
+        // The start screen's navigation (`start/nav.rs`), saved per user.
+        section(ui, "Start screen navigation");
+        let mut nav = self.start.nav();
+        widgets::segmented_tips(
+            ui,
+            &mut nav.layout,
+            &[
+                (
+                    crate::start::NavLayout::Sidebar,
+                    Some(crate::start::NavLayout::Sidebar.icon()),
+                    crate::start::NavLayout::Sidebar.label(),
+                ),
+                (
+                    crate::start::NavLayout::TopBar,
+                    Some(crate::start::NavLayout::TopBar.icon()),
+                    crate::start::NavLayout::TopBar.label(),
+                ),
+            ],
+            &[
+                "Projects, Learn and the other pages down the left side.",
+                "The pages as tabs across the top, leaving the page the full width.",
+            ],
+        );
+        let folded = ui
+            .add_enabled(
+                nav.layout == crate::start::NavLayout::Sidebar,
+                egui::Checkbox::new(&mut nav.folded, "Fold the sidebar to its icons"),
+            )
+            .on_hover_text(
+                "Only the pages' icons show, each with a tooltip. Gives the page more room.",
+            );
+        found(ui, &folded, "Fold the sidebar to its icons");
+        if nav != self.start.nav() {
+            self.start.set_nav(nav);
+        }
+        ui.add_space(space::L);
         section(ui, "Viewport");
         let row = ui
             .checkbox(
@@ -457,6 +493,24 @@ pub(super) const SEARCHABLE: &[SearchableSetting] = {
                 "Modeling layout",
             ],
             "Switch to a preset for a task or a layout you saved, or save this one.",
+        ),
+        setting(
+            Layout,
+            "Start screen navigation",
+            &[
+                "Sidebar",
+                "Top bar",
+                "Navigation",
+                "Home screen",
+                "Collapse sidebar",
+            ],
+            "The start screen's pages down the left side, or as tabs across the top.",
+        ),
+        setting(
+            Layout,
+            "Fold the sidebar to its icons",
+            &["Collapse sidebar", "Compact sidebar", "Icons only"],
+            "The start screen's sidebar shows only its icons, each with a tooltip.",
         ),
         setting(
             Layout,

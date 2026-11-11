@@ -960,3 +960,21 @@ fn a_slot_keeps_a_spline_scatters_settings_but_not_what_it_made() {
     assert_eq!(classes, ["Spline", "SplineScatter"]);
     assert!(saved.instances[1].properties.contains_key("Seed"));
 }
+
+/// `name`'s number in the repository's `releases/formats.toml`, which the
+/// release tools copy into each release record.
+fn released_format(name: &str) -> u32 {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../releases/formats.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    text.lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key.trim() == name).then(|| value.trim().parse().unwrap())
+        })
+        .unwrap_or_else(|| panic!("releases/formats.toml has no `{name}`"))
+}
+
+#[test]
+fn the_release_files_list_this_save_format() {
+    assert_eq!(released_format("save"), SAVE_VERSION);
+}

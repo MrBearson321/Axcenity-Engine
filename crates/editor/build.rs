@@ -20,9 +20,11 @@ fn main() {
     for sub in ["history", "unreleased", "features"] {
         files.extend(toml_files(&releases.join(sub), sub));
     }
-    let issues = releases.join("issues.toml");
-    if issues.is_file() {
-        files.push(("issues.toml".to_owned(), issues));
+    for file in ["issues.toml", "formats.toml"] {
+        let path = releases.join(file);
+        if path.is_file() {
+            files.push((file.to_owned(), path));
+        }
     }
     files.sort();
 

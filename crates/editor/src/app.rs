@@ -43,6 +43,7 @@ mod files;
 mod find_in_scripts;
 mod floating;
 mod game_tests;
+mod graphics_benchmark;
 mod input_settings;
 mod layouts;
 mod levels;
@@ -426,6 +427,9 @@ pub struct EditorApp {
     capabilities: Option<axcenity_render::Capabilities>,
     /// The graphics adapter, for the About box's diagnostics.
     adapter: Option<String>,
+    /// Debug › Graphics Benchmark: its window, a run, and the last report
+    /// (saved between runs).
+    benchmark: crate::graphics_benchmark::GraphicsBenchmark,
     /// Settings > Engine: rebuilding the editor when engine code changes
     /// (a debug editor run from the source tree only; see `engine.rs`).
     rebuilds: Rebuilds,
@@ -928,6 +932,7 @@ impl EditorApp {
             graphics: axcenity_render::GraphicsSettings::default(),
             capabilities: None,
             adapter: None,
+            benchmark: Default::default(),
             rebuilds: Rebuilds {
                 source: EngineSource::find(),
                 ..Rebuilds::default()
@@ -978,6 +983,9 @@ impl EditorApp {
             if let Some(text) = storage.get_string(RIBBON_TABS_KEY) {
                 self.ribbon_tabs = RibbonTabs::from_text(&text);
             }
+            if let Some(text) = storage.get_string(start::StartNav::KEY) {
+                self.start.set_nav(start::StartNav::from_text(&text));
+            }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
             self.grid = storage.get_string(GRID_KEY).as_deref() != Some("off");
@@ -1018,6 +1026,9 @@ impl EditorApp {
             {
                 self.graphics = settings;
             }
+            self.benchmark.report = storage
+                .get_string(crate::graphics_benchmark::REPORT_KEY)
+                .and_then(|text| crate::graphics_benchmark::GraphicsBenchmark::load(&text));
             self.rebuilds.on_change =
                 storage.get_string(engine::REBUILD_KEY).as_deref() == Some("on");
             self.rebuilds.relaunch_automatically =
@@ -1087,6 +1098,7 @@ impl eframe::App for EditorApp {
         storage.set_string(LAYOUT_KEY, self.layout.to_text());
         storage.set_string(layouts::SAVED_LAYOUTS_KEY, self.saved_layouts.to_text());
         storage.set_string(RIBBON_TABS_KEY, self.ribbon_tabs.to_text());
+        storage.set_string(start::StartNav::KEY, self.start.nav().to_text());
         let cones = if self.light_cones { "on" } else { "off" };
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
         let cube = if self.view_cube { "on" } else { "off" };
@@ -1128,6 +1140,9 @@ impl eframe::App for EditorApp {
         );
         if let Ok(text) = serde_json::to_string(&self.graphics) {
             storage.set_string(GRAPHICS_KEY, text);
+        }
+        if let Some(text) = self.benchmark.saved() {
+            storage.set_string(crate::graphics_benchmark::REPORT_KEY, text);
         }
         storage.set_string(
             engine::REBUILD_KEY,
@@ -1652,6 +1667,7 @@ impl EditorApp {
         {
             self.about_open = start::about(ctx, brand, self.adapter.as_deref());
         }
+        self.graphics_benchmark_frame(ctx, render_state);
         self.follow_sound_preview();
         self.updates_frame();
         self.update_install_frame();
@@ -1713,6 +1729,8 @@ mod fracture_tests;
 mod game_tests_tests;
 #[cfg(test)]
 mod graph_zoom_tests;
+#[cfg(test)]
+mod graphics_benchmark_tests;
 #[cfg(test)]
 mod health_tests;
 #[cfg(test)]

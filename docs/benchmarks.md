@@ -604,3 +604,8 @@ Absolute numbers depend on the machine. Compare runs on one machine, and run the
 `benchmarks/cross-engine/` holds XB10k: S10k's parts, physics and scripts (no sounds, characters or agents) rebuilt from the same formulas in Godot, Unity, Unreal, s&box and Roblox, with one timing rule and one result line for all of them. Its README is the spec; results go in `benchmarks/cross-engine/results.md`. For the player's part, `AXCENITY_VSYNC=off` turns vsync off (the player otherwise uses the surface's default, vsync, so `--bench` frames wait for the display) and `AXCENITY_WINDOW_SIZE=1920x1080` sets the window size in physical pixels.
 
 Results on Paul's desktop (11 Nov 2026, median frame): Unity 3.11 ms, Axcenity 5.14 ms (6.70 ms before the physics PRs #84/#86/#93 and render pool #88), Godot 10.27 ms, s&box 2.05 ms (real time, not ranked); Unreal and Roblox not timed yet. What the numbers mean against each engine's features: [research/engine-comparison.md](research/engine-comparison.md).
+
+## Editor graphics benchmark
+
+Debug > Graphics Benchmark… in the editor measures the viewport on the machine it runs on and recommends the editor's own graphics settings (never a project's or a game's). It isn't a regression tool: its numbers are for the person at that computer. What it draws and how it decides: [rendering/settings.md](rendering/settings.md) ("Who changes them").
+

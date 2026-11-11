@@ -1,3 +1,5 @@
 packaging/**/*.sh text eol=lf
 packaging/linux/AppRun text eol=lf
 *.nsi text eol=crlf
+# Signed test files: a changed line ending breaks their signatures.
+crates/release/src/testdata/** -text

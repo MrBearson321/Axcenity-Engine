@@ -32,6 +32,7 @@ mod find_in_scripts;
 mod game_tests;
 mod gizmo;
 mod global_assets;
+mod graphics_benchmark;
 mod history;
 mod hot_patch;
 mod import_dialog;

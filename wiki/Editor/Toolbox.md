@@ -16,6 +16,10 @@ tags: [system/editor, assets, toolbox]
 > [!summary]
 > Roadmap **G1** (PRs #90, #92, #96, #107): the editor's one way to find and fetch assets online. The **`toolbox`** crate defines `AssetSource` and the shared `AssetRecord`, with **ambientCG** (v3 API), **Poly Haven** and **Openverse** sources; verified downloads (size, MD5, `.part` files, unpacking) into a **central asset directory** recorded in a SQLite `metadata.db` (`rusqlite`, versioned schema, also read from Python); a library (favourites, collections, recents); provenance (`.axcenity/asset-sources.json`, `CREDITS.txt`); Toolbox packs; the Blender library migration; the `axcenity-toolbox` CLI and a Python package with Blender providers. The editor's **Toolbox tab** (`toolbox_panel.rs`) replaced the Assets panel's old ambientCG "Get texture". **Editor only.** **Implemented.**
 
+## Where its assets show
+
+The Assets panel groups a project's assets by where they came from (`asset_browser/origin.rs`): each Toolbox source gets a section, read from the project's `.axcenity/asset-sources.json` (`Snapshot::source_of`), beside Built-in, Made in Axcenity, Imported and Global assets. A model's folder takes its model's origin, and a material made from a texture set is listed under that set.
+
 ## Flow
 
 ```mermaid

@@ -8,6 +8,7 @@ releases/
   history/         one file per release: <version>.toml
   features/        the feature registry, one file per subsystem
   issues.toml      known issues
+  formats.toml     the file formats the code writes now
 ```
 
 Check everything with `cargo run -p axcenity-release -- check`. Unknown fields are errors, so typos don't silently drop information.
@@ -81,3 +82,7 @@ The fixed version comes from the change entry whose `fixes` names the issue; set
 ## What's here so far
 
 `0.1.0-alpha.1` and `0.1.0-alpha.2` are tags that were never published; `0.1.0-alpha.3` is the one published release, checked against the tag. Features that exist in the tree at that tag are recorded as introduced there (`verified`). Everything since then was written on 2026-11-11 from pull requests and commits and is marked `reconstructed`, with its sources.
+
+## When a file format changes
+
+`formats.toml` lists the formats the code writes now (project, world, built game, save, network protocol). Bump the number there with the constant; that crate's tests fail until both agree. `check` then wants a `breaking` change entry in `unreleased/` saying what an older Axcenity can no longer open, and `prepare` copies the numbers into the release record.

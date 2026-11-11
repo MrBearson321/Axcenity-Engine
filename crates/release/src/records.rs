@@ -428,6 +428,14 @@ pub(crate) struct FeatureFile {
     pub feature: Vec<Feature>,
 }
 
+/// `releases/formats.toml`: the file formats this version of the code
+/// writes, by name. Each format's own crate tests that its constant matches.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FormatsFile {
+    pub formats: BTreeMap<String, u32>,
+}
+
 /// `releases/issues.toml`: `[[issue]]` entries.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]

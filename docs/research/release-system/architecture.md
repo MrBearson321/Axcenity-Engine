@@ -302,7 +302,7 @@ User-facing and format details: `docs/project/layout.md` (the upgrade bullet). D
 - The dialog lists the steps and where the copy goes; it doesn't offer Back Up Project to a zip, which needs an open project.
 - "Validate afterwards" runs the Asset Check (`project::check_assets`) once after an upgrade and warns with the count. The files are put back only when the world read before the upgrade and doesn't after it, and only when this upgrade made the copy.
 - An engine from now on refuses a manifest it can't parse whose `format_version` is newer. Engines from before this phase open a format 5 manifest as damaged (its `engine` field is unknown to them) with the folder's name; they don't write `format_version` back, so the project stays format 5.
-- `prepare` doesn't yet fill a release's `formats` or check them against the change entries; that's left to Phase 8, with the first release.
+- `prepare` didn't fill a release's `formats` in Phase 7; Phase 8 added that (below).
 
 ## 9. Security and integrity (D7)
 
@@ -339,6 +339,12 @@ TDD per phase; each list is what that phase's tests prove.
 | Migration | the dialog's step list per format; validate after; failure restores backup; format 5 step |
 | End to end | a scripted release from fixture records → packages → manifest → signed → served from loopback → editor finds it → updater installs → `--version --json` matches. Runs locally on Windows and Linux |
 | Real GitHub (phase 8) | one real `0.2.0-alpha.1` on the Development channel, updated *to* from a locally installed build, on Windows and Linux |
+
+### As built in Phase 8
+
+- **End to end** (`crates/updater/tests/end_to_end.rs`, Linux and Windows): `prepare` and `Manifest::build` make a release from a copy of the repository's `releases/`, a key made for the test signs it with the trusted comment the workflow writes, and `updates::check` (over a GitHub-shaped release list), the download, staging, hand-over and the real `axcenity-updater` install it and check its `--version --json`. A second test: a manifest signed by another key isn't offered, and a package that isn't the signed one is thrown away. Only the network and the editor's window are left out; the editor's own steps have their tests in `app/update_install.rs`.
+- **Formats** are one file, `releases/formats.toml`, rather than read from the code by `prepare` (the release crate stays free of engine crates). Each format's crate tests its constant against it (`project`, `world`, `axgame` in `project`; `save`; `network_protocol` in `net`). `prepare` copies them into the record, and `check` wants a `breaking` unreleased change when one differs from the last release's.
+- The first real release waits for the signing key (`docs/project/releases.md`, "The first release").
 
 ## 11. Implementation roadmap
 
