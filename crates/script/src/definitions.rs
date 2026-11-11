@@ -23,10 +23,16 @@ use axcenity_core::{ClassName, Value, ValueKind, World};
 use crate::sides::{Side, side_only};
 
 mod docs;
+mod examples;
+mod markdown;
 mod tables;
 
 use crate::types::EnumType;
 use docs::*;
+pub use examples::api_example;
+pub use markdown::{
+    API_DOCS_PATH, SUMMARY_HEADING, SUMMARY_PATH, api_markdown, api_summary, with_api_summary,
+};
 use tables::*;
 
 /// Where the generated file is kept, relative to the repository root.

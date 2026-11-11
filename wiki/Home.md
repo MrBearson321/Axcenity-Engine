@@ -89,6 +89,7 @@ The engine's persistent engineering memory: what exists, why it exists, how it w
 | Date | Page | Change |
 |---|---|---|
 | 2026-11-11 | System inventory, dependencies, roadmap; ADR-0020 | Team Create design (#134) and TC1 sync core (`collab`) |
+| 2026-11-11 | Repository structure | `documentation/` became the user documentation and in-editor Learn and Documentation pages |
 | 2026-11-11 | Vault moved into the repo as `wiki/`; M12, format 5, G5/G7/G8, updater | Caught up with PRs #116–#130 |
 | 2026-11-11 | Roadmap, performance, physics, asset pipeline; new pages for gameplay systems, MCP, Toolbox, releases; ADR-0018, ADR-0019 | Caught up with PRs #65–#115 |
 | 2026-11-10 | Whole wiki | Created from the Phase 1 audit at `f47d5f0` |
