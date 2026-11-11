@@ -25,18 +25,21 @@ pub(super) enum SettingsPage {
     Graphics,
     Shortcuts,
     Accessibility,
+    /// Update checks (`app/updates.rs`).
+    Updates,
     /// Only in a debug editor run from the source tree (`engine.rs`).
     Engine,
 }
 
 impl SettingsPage {
-    const ALL: [SettingsPage; 7] = [
+    const ALL: [SettingsPage; 8] = [
         SettingsPage::Appearance,
         SettingsPage::Typography,
         SettingsPage::Layout,
         SettingsPage::Graphics,
         SettingsPage::Shortcuts,
         SettingsPage::Accessibility,
+        SettingsPage::Updates,
         SettingsPage::Engine,
     ];
 
@@ -48,6 +51,7 @@ impl SettingsPage {
             SettingsPage::Graphics => "Graphics",
             SettingsPage::Shortcuts => "Shortcuts",
             SettingsPage::Accessibility => "Accessibility",
+            SettingsPage::Updates => "Updates",
             SettingsPage::Engine => "Engine",
         }
     }
@@ -60,6 +64,7 @@ impl SettingsPage {
             SettingsPage::Graphics => icons::MONITOR,
             SettingsPage::Shortcuts => icons::KEYBOARD,
             SettingsPage::Accessibility => icons::EYE,
+            SettingsPage::Updates => icons::ARROW_CIRCLE_UP,
             SettingsPage::Engine => icons::HAMMER,
         }
     }
@@ -139,6 +144,7 @@ impl EditorApp {
                                 SettingsPage::Accessibility => {
                                     accessibility_page(ui, &mut appearance);
                                 }
+                                SettingsPage::Updates => self.updates_page(ui),
                                 SettingsPage::Engine => self.engine_page(ui),
                             });
                         });
@@ -706,6 +712,18 @@ pub(super) const SEARCHABLE: &[SearchableSetting] = {
             &["Tab navigation", "Focus ring"],
             "Moving between controls with Tab.",
         ),
+        setting(
+            Updates,
+            "Update channel",
+            &["Stable", "Beta", "Development", "Alpha", "Pre-release"],
+            "Which releases the editor tells you about.",
+        ),
+        setting(
+            Updates,
+            "Automatic checks",
+            &["Check for updates", "Update check", "New version"],
+            "How often the editor looks for a new release, and Check now.",
+        ),
     ]
 };
 
@@ -742,7 +760,7 @@ pub(super) fn find_setting(ctx: &egui::Context, name: &'static str) {
 }
 
 /// A section label that search can find.
-fn section(ui: &mut egui::Ui, name: &str) {
+pub(super) fn section(ui: &mut egui::Ui, name: &str) {
     let palette = theme::palette(ui.ctx());
     let row = ui.label(widgets::micro(name, palette.text_weak));
     found(ui, &row, name);
@@ -1660,7 +1678,10 @@ mod tests {
             };
             match &snapshots {
                 Some(folder)
-                    if matches!(page, SettingsPage::Appearance | SettingsPage::Graphics) =>
+                    if matches!(
+                        page,
+                        SettingsPage::Appearance | SettingsPage::Graphics | SettingsPage::Updates
+                    ) =>
                 {
                     crate::snapshot::snapshot(
                         &folder.join(format!("settings-{}.png", page.label().to_lowercase())),

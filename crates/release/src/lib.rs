@@ -12,6 +12,7 @@
 //! - [`publish`]: what a release attaches: release notes, the public history
 //!   file and the manifest the updater trusts.
 //! - [`install`]: `install.json`, how this copy was installed.
+//! - [`updates`]: finding an update and checking its signed manifest.
 //!
 //! Design: `docs/research/release-system/`. Writing release files:
 //! `releases/README.md`.
@@ -22,6 +23,7 @@ pub mod install;
 pub mod prepare;
 pub mod publish;
 pub mod records;
+pub mod updates;
 pub mod version;
 
 pub use build_info::{BuildInfo, BuildKind, version_flag};

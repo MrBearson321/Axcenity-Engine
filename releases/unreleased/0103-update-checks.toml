@@ -1,0 +1,5 @@
+category = "feature"
+subsystem = "release"
+title = "The editor tells you when a new version is out on your update channel"
+details = "Settings > Updates: follow Stable, Beta or Development, check every day, every week or only by hand. Official builds only; a check asks GitHub for its release list and verifies the release's signed manifest before saying anything."
+features = ["release.update-checks"]

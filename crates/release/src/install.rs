@@ -38,6 +38,29 @@ impl InstallKind {
         )
     }
 
+    /// How it reads in diagnostics and settings.
+    pub fn label(self) -> &'static str {
+        match self {
+            InstallKind::WindowsSetup => "Windows setup",
+            InstallKind::LinuxTarball => "Linux tar.gz",
+            InstallKind::AppImage => "AppImage",
+            InstallKind::Deb => "Debian package",
+            InstallKind::Rpm => "RPM package",
+            InstallKind::Pacman => "Arch package",
+            InstallKind::MacosDmg => "macOS disk image",
+            InstallKind::Source => "built from source",
+        }
+    }
+
+    /// How the running program was installed: the `install.json` beside its
+    /// executable.
+    pub fn current() -> InstallKind {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(InstallKind::of_folder))
+            .unwrap_or(InstallKind::Source)
+    }
+
     /// The kind recorded in `dir`'s `install.json`; [`InstallKind::Source`]
     /// when there is none or it can't be read.
     pub fn of_folder(dir: &Path) -> InstallKind {

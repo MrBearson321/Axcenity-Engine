@@ -377,6 +377,15 @@ fn an_unreleased_fix_leaves_an_issue_open_until_released() {
             .unwrap(),
         IssueState::ConfirmedAffected
     );
+    // A build newer than every release carries the unreleased fix.
+    assert_eq!(
+        history
+            .issue_status("AX-0002", &v("0.2.0-alpha.2"))
+            .unwrap(),
+        IssueState::Fixed {
+            fixed_in: VersionRef::Unreleased
+        }
+    );
 }
 
 #[test]
@@ -1088,4 +1097,31 @@ fn the_release_plan_follows_the_channel() {
             "profile": "dist", "platforms": ["windows", "linux", "macos"]
         })
     );
+}
+
+#[test]
+fn the_history_reads_the_same_from_texts_as_from_disk() {
+    let root = sample("sources");
+    let mut sources = Vec::new();
+    for sub in ["history", "unreleased", "features"] {
+        for entry in fs::read_dir(root.join(sub)).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            sources.push((format!("{sub}/{name}"), fs::read_to_string(&path).unwrap()));
+        }
+    }
+    sources.push((
+        "issues.toml".to_owned(),
+        fs::read_to_string(root.join("issues.toml")).unwrap(),
+    ));
+    // Order and Windows separators don't matter; other files are ignored.
+    sources.reverse();
+    sources[0].0 = sources[0].0.replace('/', "\\");
+    sources.push(("README.md".to_owned(), "# not a release file".to_owned()));
+    let from_texts = History::from_sources(sources).unwrap();
+    assert_eq!(from_texts, History::load(&root).unwrap());
+    assert!(matches!(
+        History::from_sources([("history/0.3.0.toml", "version = ")]),
+        Err(crate::LoadError::Parse { .. })
+    ));
 }

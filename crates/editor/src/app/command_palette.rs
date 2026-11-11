@@ -170,6 +170,8 @@ pub(super) enum Command {
     RibbonTab(BuiltInTab),
     Learn,
     About,
+    /// Help > Check for Updates…: Settings > Updates, checking.
+    CheckForUpdates,
     PanicDuringPlay,
     /// Play, or Continue at a breakpoint.
     Play,
@@ -742,6 +744,14 @@ impl EditorApp {
                 "Learn is on the start screen until a project is open.",
             ),
         );
+        add(
+            Command::CheckForUpdates,
+            "Check for Updates…",
+            "Help",
+            &["Update", "New version"],
+            None,
+            Ok(()),
+        );
         add(Command::About, "About Axcenity", "Help", &[], None, Ok(()));
         if cfg!(debug_assertions) {
             add(
@@ -1083,6 +1093,7 @@ impl EditorApp {
                 }
             }
             Command::About => self.about_open = true,
+            Command::CheckForUpdates => self.open_updates(),
             Command::PanicDuringPlay => {
                 if let Some(session) = &mut self.play {
                     session.panic_next_frame();

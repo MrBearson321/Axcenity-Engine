@@ -11,3 +11,27 @@ docs = "docs/project/releases.md"
 version = "unreleased"
 evidence = "verified"
 source = "this change: crates/release"
+
+[[feature]]
+id = "release.version-explorer"
+name = "Version Explorer"
+subsystem = "release"
+description = "Help > Version Explorer: the releases, features, known issues and what changed between two versions, offline."
+status = "active"
+docs = "docs/editor/shell.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "verified"
+source = "this change: crates/editor/src/version_explorer.rs"
+
+[[feature]]
+id = "release.update-checks"
+name = "Update checks"
+subsystem = "release"
+description = "Settings > Updates: an update channel, daily or weekly checks of GitHub releases, and a verified, signed manifest before an update is shown."
+status = "active"
+docs = "docs/editor/shell.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "verified"
+source = "this change: crates/release/src/updates.rs, crates/editor/src/app/updates.rs"

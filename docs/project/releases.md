@@ -32,6 +32,10 @@ cargo run -p axcenity-release -- query search physics --json
 
 The design (the manifest, the update flow, the Version Explorer) is in [research/release-system](../research/release-system/README.md).
 
+## In the editor
+
+The editor's Help > Version Explorer reads the same files, built in, and Settings > Updates looks for new releases on GitHub: official builds only, once a day by default, verifying the release's signed manifest before saying anything. What each shows: [editor/shell.md](../editor/shell.md), "Versions and updates". The update check reads only what a release publishes (the GitHub release's tag, pre-release flag and its `axcenity-release.json` and `.minisig`), so a draft, or a release missing those files, is never offered.
+
 ## What a release contains
 
 | File | What it is |
