@@ -26,7 +26,7 @@ pub const SPEC: ToolSpec = ToolSpec {
         IDS,
         Param::optional("props", Kind::Object, "name: value"),
         Param::optional("name", Kind::String, "new name"),
-        Param::optional("parent", Kind::String, "move into this object"),
+        Param::optional("parent", Kind::String, "new parent"),
         Param::optional("attrs", Kind::Object, "name: value; null removes"),
         Param::optional("tags_add", Kind::Strings, "tags to add"),
         Param::optional("tags_remove", Kind::Strings, "tags to remove"),

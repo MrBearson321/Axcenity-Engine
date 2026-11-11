@@ -1,6 +1,8 @@
 //! `history`: the undo steps, newest first, and undoing or redoing this
 //! client's own. A step someone else made (the user, in the live editor,
 //! or another client) stays: the user can undo anything in the editor.
+//! `changes` says what changed since a mark (default: since the last
+//! time it was asked), by this client and by others (`changes.rs`).
 
 use axcenity_mcp::{Args, Class, Code, Kind, Outcome, Param, Profile, ToolError, ToolSpec};
 
@@ -10,28 +12,38 @@ use super::refs::quoted;
 pub const SPEC: ToolSpec = ToolSpec {
     name: "history",
     title: "Undo history",
-    summary: "List the undo steps, or undo or redo this client's latest ones.",
+    summary: "List undo steps or changes since a mark, or undo or redo this client's own steps.",
     profile: Profile::Lite,
     class: Class::Modify,
     idempotent: false,
     params: &[
         Param::optional(
             "action",
-            Kind::Enum(&["list", "undo", "redo"]),
+            Kind::Enum(&["list", "undo", "redo", "changes"]),
             "default list",
         ),
         Param::optional("steps", Kind::Integer, "default 1"),
+        Param::optional("since", Kind::Integer, "default: last asked"),
     ],
 };
 
 /// The most steps one call lists, or undoes.
 const MAX_STEPS: usize = 20;
 
+/// The most lines `changes` shows.
+const CHANGE_LINES: usize = 30;
+
 pub fn call(host: &mut Host, args: &Args) -> Outcome {
     let steps = args.u64("steps").unwrap_or(1).clamp(1, MAX_STEPS as u64) as usize;
     match args.str("action").unwrap_or("list") {
         "undo" => step(host, steps, true),
         "redo" => step(host, steps, false),
+        "changes" => {
+            Ok(host
+                .session
+                .changes
+                .summary(&host.app.world, args.u64("since"), CHANGE_LINES))
+        }
         _ => Ok(list(host)),
     }
 }
