@@ -5,8 +5,9 @@ How drawing is measured, and the baseline that optimizations (culling, LOD, GPU 
 ## What's measured
 
 - **`RenderStats`** (`TextureRenderer::stats`, `render/src/renderer.rs`), for the last frame: draw calls, triangles and vertices (the drawn meshes' corners, every instance counted; shadow views and the prepass included); items submitted (in the draw list), drawn (by the scene pass) and culled (outside the camera's view); shadow casters drawn into and culled from the shadow views (summed over views) and sprites culled (graphics Phase 12, see Frustum culling in [pipeline.md](pipeline.md)); batches (the scene pass's instanced draws, one per mesh and material); GPU bytes by kind: textures and meshes (counted at upload and when freed), render targets (`FrameTargets`, the shadow maps and the turned-text sheet, counted when made) and buffers; GPU particles; the LOD distribution (`lod_items`: items in view whose mesh has levels of detail, by the level drawn, one cross-fading counted at the level coming in; `LOD_LEVELS` is 3); surface shaders compiled and not compiling; and the GPU's time for the frame and for each pass (`pass_times`, `pass_time(FramePass)`).
-- **Per-pass GPU time** (`renderer/gpu_timer.rs`) needs `Features::TIMESTAMP_QUERY`, which the editor and the benchmarks ask for where the adapter has it and the player never does. An empty compute pass writes a timestamp before each `FramePass` (Shadows, Depth prepass, Ambient occlusion, Volumetric fog, GPU particles, Scene, Post-processing, UI) and one after the last, so a part made of many render passes (three cascades, the bloom chain) is timed whole. A pass the frame didn't draw (shadows, ambient occlusion or volumetric fog off, no GPU particles, no UI) is `None`. The readings come back a frame or two later without the CPU waiting.
-- **The editor's Profiler** (`editor/src/profiler.rs`) shows these while playing, in its **Graphics** tab (graphics Phase 37): **Frame** (CPU frame time with the peak, the viewport's CPU time to draw, GPU frame time), **GPU passes** (each pass's average time, "off" for one no recent frame drew, or one "not available on this GPU" line without timestamps), **Draws** (draw calls, batches, triangles, vertices), **Culling** (items drawn of submitted, items culled, shadow casters drawn and culled, sprites culled, GPU particles, lights), **Levels of detail** (Full detail, Level 1, Level 2), **GPU memory** by kind with a total, and **Shaders** (surface shaders compiled and not compiling, and the last 20 compile errors, which also go to the Output window). Times are averaged over the last 120 frames; counts are the newest frame's `RenderStats` as they are. Shader messages are kept across Plays, since each is reported once.
+- **Per-pass GPU time** (`renderer/gpu_timer.rs`) needs `Features::TIMESTAMP_QUERY`, which the editor, the benchmarks and the player ask for where the adapter has it. The player times frames only while `Renderer::set_gpu_timing` is on: during `--bench`, and while its `fps` readout or the console's Stats tab is shown, so a game nobody is measuring pays nothing. `RenderStats::gpu_readings` counts the readings, so a reader that keeps every frame's time takes a reading once. An empty compute pass writes a timestamp before each `FramePass` (Shadows, Depth prepass, Ambient occlusion, Volumetric fog, GPU particles, Scene, Post-processing, UI) and one after the last, so a part made of many render passes (three cascades, the bloom chain) is timed whole. A pass the frame didn't draw (shadows, ambient occlusion or volumetric fog off, no GPU particles, no UI) is `None`. Inside the Shadows pass each of the sun's cascades is stamped too (`cascade_times`, with `cascade_casters` and `cascade_triangles`); passes with no dependency between them can overlap on the GPU, so treat a cascade's time as approximate. The readings come back a frame or two later without the CPU waiting.
+- **The editor's Profiler** (`editor/src/profiler.rs`) shows these while playing, in its **Graphics** tab (graphics Phase 37): **Frame** (CPU frame time with the peak, the viewport's CPU time to draw, GPU frame time), **GPU passes** (each pass's average time, "off" for one no recent frame drew, or one "not available on this GPU" line without timestamps), **Draws** (draw calls, batches, triangles, vertices), **Culling** (items drawn of submitted, items culled, shadow casters drawn and culled, sprites culled, GPU particles, lights), **Levels of detail** (Full detail, Level 1, Level 2), **GPU memory** by kind with a total, and **Shaders** (surface shaders compiled and not compiling, and the last 20 compile errors, which also go to the Output window). Times are averaged over the last 120 frames; counts are the newest frame's `RenderStats` as they are. Shader messages are kept across Plays, since each is reported once. The Game tab adds the **1% low** over those frames, and the Graphics tab **Limited by** (GPU-bound, CPU-bound or sync-bound, `core::bench::Bound`, where sync-bound in the editor usually means its own UI or the display).
+- **The `fps` readout** (player and editor Play, [developer-console.md](../developer-console.md)): `fps` shows frame rate, frame time, 1% low, CPU and GPU times and the bound in one line; `fps full` adds each frame step and the drawing's numbers (`axcenity_ui::render_lines`). Its cost wasn't measured on its own: the readout is a few UI quads and up to a dozen lines of text, and GPU timing is nine empty compute passes and a 72-byte readback every other frame, against frames of several milliseconds.
 
 ## Benchmarks
 
@@ -172,6 +173,37 @@ What it says:
 - **The GPU wins from about 3,000 particles**, so `scene::GPU_PARTICLE_THRESHOLD` is 3,000. At 2,000 the GPU path costs more GPU time than it saves on the CPU. Weaker GPUs pay more for the fixed cost, and weaker CPUs more per particle. The CPU's cap is 4,000 per emitter, so an emitter needing more than that has to be on the GPU anyway.
 - **100,000 particles take 0.23 ms to move and sort** (131,072 slots), and 1.5 ms to draw: filling overlapping squares, not moving them, is the cost there. That's the same per pixel as the CPU path would pay.
 - `RenderStats::gpu_particles` counts the slots kept, and their buffers (88 bytes a slot) count in the buffer bytes.
+
+## Where the frame goes (`profile_project`)
+
+`profile_project` (`player/src/profile_tests.rs`) measures a project from named cameras by leaving one cost out at a time and timing the frame again. Each variant changes only that run's draw list or graphics settings:
+
+```text
+AXCENITY_BENCH_PROJECT=<absolute folder> AXCENITY_SHOT_VIEWS='walker:-39.6,5.5,39.6:22,14,12' \
+  AXCENITY_SHOT_SIZE=2560x1440 AXCENITY_SHOT_QUALITY=Ultra AXCENITY_SHOT_DIR=<folder for PNGs> \
+  cargo test -p axcenity-player --release -- --ignored profile_project --nocapture --test-threads 1
+```
+
+| Variant | Leaves out |
+|---|---|
+| `no-shadows` | every shadow map (and the scene pass's shadow lookups) |
+| `no-foliage-shadows` | shadows of painted foliage (items with a cull distance) |
+| `no-wind`, `no-sway` | the wind (nothing bends), or every item's sway (the vertex shader skips it) |
+| `no-cutout` | alpha testing: cut-out materials drawn solid (a different picture; it shows what the depth fill saves, not a saving to take) |
+| `single-sided` | back faces of double-sided materials |
+| `no-foliage` | painted foliage altogether |
+| `no-large-meshes` | meshes of more than 100,000 triangles |
+| `no-msaa`, `no-ao` | anti-aliasing, ambient occlusion |
+
+Each variant's list is built once and drawn again and again with three frames in flight, so the GPU is never idle between frames: drawing a new list each frame left the GPU waiting on the CPU, it clocked down, and its timestamps read up to 70% slower (a first version of the tool had removals "costing" 3 to 4 ms). Variants are measured in three rounds through all of them, and each cell is the median of the rounds' medians. `AXCENITY_PROFILE_VARIANTS` picks some. After the table it reads the overdraw view back (`OverdrawStats`, below), and `AXCENITY_SHOT_DIR` saves a PNG of every variant to compare by eye.
+
+`lod_report_project`, beside it, lists every model a project's MeshParts show or its terrains have painted with its levels of detail and their warnings (`assets::LodReport`), biggest first.
+
+## Overdraw, as numbers (`OverdrawStats`)
+
+`render::OverdrawStats::from_pixels` reads the overdraw view's picture back into numbers: layers per pixel over the picture and over covered pixels, the most on one pixel, the share of pixels in bands (none, 1, 2–3, 4–7, 8–15, 16–31, 32 and up, `OVERDRAW_BANDS`) and the busiest cells of an 8 × 6 grid over the screen. Each layer adds 0.02 to blue in linear light, so counts read back exactly up to `MAX_LAYERS` (50) from an 8-bit sRGB picture; 50 means "50 or more" (reported as `50+`).
+
+**What it counts is depth complexity, not shading work.** The view draws every batch again with no depth test, back faces culled as the scene culls them, cut-out holes and dithered fades left out. So a pixel's count is how many surfaces the camera looks through there. The lit scene doesn't shade each of them: cut-out materials draw their depth first and are then lit once per pixel (`PrefillPipelines`), and an opaque surface drawn in front stops what's behind before shading (distance bands sort near first). The count is the *input* to the depth tests: the cost it predicts is vertex work and the cheap depth fill (`fs_depth_only` samples one alpha texel per layer), not full lighting per layer. Shadow maps, the prepass, MSAA samples, terrain's own passes, sprites and the sky aren't counted, and see-through items count as solid. The editor's overdraw view is the same picture; its brightest orange is 8 or more layers (red is full at 8.3 layers, green at 20, blue at 50).
 
 ## Debug views (graphics Phase 38)
 
@@ -346,3 +378,93 @@ At High, after these changes, the GPU frame is 10.0 to 15.9.
 - **Cut-out edges (`fs_depth_coverage`).** Alpha to coverage on the depth fill (see Anti-aliasing in [shadows.md](shadows.md)) costs up to about 1 ms of GPU here, which is about what the shadow reach saves, so the GPU frame is unchanged while the edges are smooth.
 - **Simpler meshes for shadows were tried and removed.** Drawing shadows two levels of detail down saved about 1 ms, added 36 to 54 MB of mesh memory and visibly changed how the trees shaded themselves and the ground.
 - **Game logic isn't the cost**: `Session::frame` is 0.4 ms in `bench_project_play`. What's left is triangles. The two trees are 1.7 million triangles in up to seven passes, about half of the frame's, so a project's first saving is lighter tree models.
+
+## Temperate Dry Patch at Ultra, 2560 × 1440 (2026-11-11)
+
+The owner's primary benchmark: a 72 × 72-stud biome patch (see Small dense patches above) on the desktop above (Ryzen 9 9950X3D, RX 9070 XT, Vulkan), release builds, pinned to the V-cache CCD.
+
+**The player** (`axcenity-bench-check`'s `dry-patch-ultra-1440p`: `--size 2560x1440 --quality Ultra`, vertical sync off, 400 frames from the project's demo camera): **frame median 11.3–11.5 ms (about 88 FPS), 1% low 72–75 FPS, GPU-bound**: the GPU's frame is 11.3 ms of it. Game logic is under 0.3 ms (Draw list 0.1 ms); the CPU's drawing work (`Render`) is 4.8 ms and the rest is Present wait. GPU passes: shadows 3.8 ms, depth prepass 1.6, ambient occlusion 0.2, scene 5.6, post-processing 0.1. So the 20–30% CPU and 70% GPU utilization the owner saw with vertical sync on is a GPU-bound frame waiting on the display, not idle headroom on the CPU's side.
+
+A first run reported a frame-time standard deviation of 2.6 ms and a mean 1.5 ms below the median. The timeline (`AXCENITY_BENCH_TIMELINE`) showed one step, not jitter: the project's `views.client.lua` holds a demo camera for 8 seconds and then hands the camera to the walker, whose view costs half as much. The check now measures 400 frames, all on the demo camera.
+
+**Where it goes** (`profile_project`, three cameras: the walker's view, under the canopy, along the ground; the offscreen renderer at the same size and preset, so 1 to 2 ms under the player's frame). GPU frame in milliseconds, then the change from leaving each cost out:
+
+| | Walker | Canopy | Ground |
+|---|---|---|---|
+| GPU frame (shadows / prepass / scene) | 9.09 (3.01 / 1.02 / 4.88) | 9.18 (3.59 / 1.07 / 4.26) | 9.13 (3.46 / 1.37 / 4.03) |
+| No shadows at all | −4.52 | −4.99 | −4.40 |
+| No shadows from painted foliage | (−0.9 shadows pass) | −0.96 | −1.12 |
+| The two oaks left out (1.7 M triangles) | −3.84 | −4.50 | −2.56 |
+| Painted foliage left out | −2.26 | −1.71 | −2.86 |
+| Anti-aliasing off (MSAA 4×) | −1.46 | −0.74 | −0.77 |
+| Double-sided drawn one-sided | −1.28 | −0.71 | −0.89 |
+| Ambient occlusion off | −0.13 | −0.11 | −0.23 |
+| No wind / no sway | −0.09 / −0.14 | −0.08 / −0.08 | −0.05 / −0.01 |
+| Cut-outs drawn solid | +3.06 | +4.84 | +2.49 |
+
+Overdraw (`OverdrawStats`, layers each pixel looks through): walker 16.8 per covered pixel (13.6% of the picture at 32 or more), canopy 14.6, ground 22.5 (24.5% at 32 or more, the busiest cells along the grass at the horizon, 44 to 49 layers).
+
+What it says:
+
+- **It's triangles and shadows, not fragments.** The two oaks are 969k and 738k triangles at LOD0 (`lod_report_project`), drawn in up to six views (cascades, prepass, depth fill, lit). Leaving them out saves 2.6 to 4.5 ms; leaving out all 35,000 painted ground models saves 1.7 to 2.9 ms. **Most of each oak is bark**: 549k and 556k bark triangles against 163k and 182k of leaves (plus 258k of moss cards on one), and the bark material is double-sided.
+- **The bright overdraw is mostly cheap.** Cut-outs are lit once per pixel already (depth fill, then lit where depth is equal): drawing the same leaves as solid cards costs 2.5 to 4.8 ms *more*, which is what the depth fill saves. What a layer still costs is the depth fill's one alpha sample and its vertices. Overdraw is highest along the grass at grazing angles, where nothing can be culled behind it.
+- **Wind is free.** Every variant without it is within 0.15 ms: the sway is a few vertex instructions on the GPU, with one shared `GlobalWind` in the frame uniform and no CPU work per plant (see [wind.md](wind.md)). Nothing to optimize.
+- **Ambient occlusion is cheap** (0.1–0.2 ms). Anti-aliasing costs 0.7–1.5 ms and double-sided materials 0.7–1.3 ms, but turning either off changes the picture (jagged leaf edges, missing leaf backs), so neither is a saving to take at Ultra.
+- **Shadows are the largest single pass** (3.0–3.6 ms; 4.4–5.0 ms with the lookups). Painted foliage's share is about 1 ms, even though `SHADOW_REACH` already limits it to 35% of its cull distance.
+
+### Whose overdraw it is
+
+`profile_project` with `AXCENITY_PROFILE_OVERDRAW_GROUPS=<n>` draws the overdraw view again with only one model primitive's items at a time (named `file: material` from the models the world's MeshParts and terrains show) and lists the `n` biggest by their share of all the layers. Temperate Dry Patch, Ultra 2560 × 1440:
+
+| Share of the layers | Demo camera | Along the ground |
+|---|---|---|
+| The five grass models (13,180 tufts, 28–108 triangles each) | 73.8% | 80.4% |
+| Both oaks' leaves | 5.2% | 10.4% |
+| Oak bark | under 1% | 2.4% |
+| Shrubs, rocks, thistles and the rest | the remainder | the remainder |
+
+So the bright bands in the overdraw view are grass seen at a low angle, 6 to 12 layers where each grass model covers anything and 40 to 50 where they all overlap along the horizon. The canopy is a small share. What a grass layer costs is its corners and the depth tests (the alpha sample of the depth fill and the prepass), not lighting; leaving all painted foliage out saved 1.7–2.9 ms of GPU, a third of it their shadows. Fewer layers there means fewer tufts far away (density by distance), which changes how full the ground looks; a choice for the project or the preset, not a fix.
+
+### Shadows on the patch, cascade by cascade
+
+`RenderStats::cascade_times` (graphics timer stamps before each of the sun's cascades and after the last, inside the Shadows pass; shown in `fps full`, the Profiler's Graphics tab and `profile_project`) with `cascade_casters` and `cascade_triangles`. Demo camera, Ultra 2560 × 1440:
+
+| Cascade (nearest first) | GPU | Casters | Triangles |
+|---|---|---|---|
+| 1 | 1.22 ms | 5,238 | 2.35 M |
+| 2 | 1.53 ms | 15,062 | 3.58 M |
+| 3 (every other frame) | 0.87 ms | 15,938 | 3.70 M |
+| 4 (every other frame) | 0.61 ms | about the same | |
+
+So a frame's 3.6 ms of shadows is the two near cascades (2.75 ms) plus one far one. Leaving the oaks' shadows out saves 1.9 ms; painted foliage's, 1.0 ms. High's shadows (three 2048² maps, `shadows-high`) cost 2.6–2.9 ms less than Ultra's four 4096² ones. Halving the shadow distance doesn't make them cheaper (+0.4 to +1.4 ms): the same casters land in denser cascades, so the cost follows the texels the casters cover, not the distance.
+
+What was checked and left as it is:
+
+- **The implementation does what it should.** Casters are culled per cascade by their spheres against each cascade's box, the far two cascades take turns past 12,000 casters, painted foliage casts only to 35% of its cull distance, cut-outs cast from their depth-only pipeline (no alpha test, so no fragment shader in the shadow pass), and a cascade is snapped to texels. Nothing is drawn twice or for nothing.
+- **Big meshes cut into spatial clusters** (tried, not kept). Cutting every primitive over 65,536 triangles into pieces of at most 32,768 by where its triangles are, so each cascade and the camera cull pieces instead of whole trees, took the first cascade from 2.35 to 1.76 M triangles and the shadow pass from 3.58 to 3.37 ms, but the scene pass got 0.15–0.5 ms slower (2,427 to 2,799 draw calls; the pieces share one distance band, so they lose the sort's near-first order) and the frame didn't get faster (10.81 ms against 10.79–10.88). It would pay for one huge mesh seen partly; the oaks are seen whole.
+- **Shadow-specific LOD** was tried before (Small dense patches, above) and rejected for changing how the trees shade themselves. A tree's simplified copy may move its surface up to 2% and 5% of its size, which at the near cascades' texel size (under 0.05 studs) is visible.
+- **Caching cascades between frames** isn't worth it here: every plant sways, so its shadow moves every frame, and a moving camera moves the cascades. A scene with no wind and a still camera could keep them; no game benchmark is like that.
+- **Lowering Ultra** (fewer or smaller maps) is the one big saving (2.7 ms) and it's a quality choice, which the High preset already offers.
+
+The levers that remain are the scene's: the oaks are 1.7 M triangles, three quarters bark, and the bark material is double-sided. Drawing only the bark one-sided (`profile_project`'s `single-sided-match` with `AXCENITY_PROFILE_MATCH=Bark`) saves 0.22–0.48 ms of GPU across the three cameras, and the pictures match (at most 108 of 3.7 million pixels differ by more than 8 of 255, one by more than 32): the bark is closed, so its back faces are never seen. That's a change to the project's model files, the owner's call; all double-sided materials one-sided saves 0.6–1.5 ms but leaves leaves' backs missing.
+
+After all of this the full regression check matched every baseline within 7% (Temperate Dry Patch 11.6 ms, GPU 11.3 ms, 1% low 71.6 FPS) and `cargo nextest run --workspace` passed 3,184 of 3,184.
+
+## Levels of detail, inspected
+
+**How levels are picked today** (`renderer/lod.rs`, unchanged by this section): by **projected size**, the share of the view's height an item's bounding sphere covers, not by world distance or screen-space error. Below 30% an item draws its first simpler copy, below 12% its second (`LOD_SCREEN_SIZES`); it switches back once 15% past the threshold (hysteresis), and a switch cross-fades over 12 frames by dither. All primitives of a model share one decision (the sphere of the part's box). Shadow views draw the level the camera picked; only the level fading in casts. Levels come from the file (`_LOD1`, `_LOD2`) or are simplified at load to half and a quarter of the triangles with meshoptimizer, a copy that saves less than a fifth on the level before being dropped ([models.md](models.md)).
+
+**What works:** no popping (dithered fades), no flicker on a threshold (hysteresis, `a_model_sitting_on_a_threshold_keeps_its_level`), switching per model rather than per primitive, levels uploaded only when drawn, and simplified copies cached on disk.
+
+**Limitations, measured on the patches:**
+
+- **Leaf cards don't simplify.** Edge collapse can't merge disconnected quads, so the hazel and juniper shrubs' leaves (840–4,000 triangles) get no copies at all, while their wood does (`lod_report_project`). Grass and other small painted models are under the 256-triangle floor. Their saving comes from the cull distance and `SHADOW_REACH`, not from levels.
+- **Thresholds are one size for everything.** A rock and a tree switch at the same screen size; nothing lets an asset category pick its own (`LodReport` and the inspector are written per model, so a per-category table can be added where `lod_level` reads `LOD_SCREEN_SIZES`).
+- **Size, not error.** Two copies that look alike switch as early as two that don't; `LodReport`'s Almost the Same warning catches file-made copies like that.
+- **Big trees stay at LOD0 in a small scene.** The patches' oaks fill a third of the view or more from anywhere on the patch, so they never switch, and their LOD2 is still 195k–260k triangles.
+
+**The tools:**
+
+- **LOD Levels legend** (View > View Mode > LOD Levels): the viewport's corner names each color (LOD0 green, LOD1 yellow, LOD2 orange; grey has no copies), how many items in view draw each (`RenderStats::lod_items`) and the thresholds. The Overdraw view has a legend too, with a **Measure** button that reads the frame back as `OverdrawStats`.
+- **LOD Inspector** (View > Panels > LOD Inspector, `lod_inspector.rs`): for the selected MeshPart, its mesh, camera distance, size on screen, the thresholds, the level it's drawn at (`TextureRenderer::lod_level_of`) and the level its size picks, then each level's triangles, vertices, share of LOD0 and estimated GPU memory, and warnings. **Preview** buttons draw that one part at LOD0, LOD1 or LOD2 in the viewport whatever its size (`TextureRenderer::preview_lod`, no fade), to compare outlines; Auto goes back, and the preview ends when the selection changes or the panel closes. Nothing in the world or the model changes.
+- **`assets::LodReport`**: per primitive, its levels' triangles, vertices, share and estimated bytes (position, normal, UV and tangent per corner, 32-bit indices), and warnings, which are advice, never a rejection: no copies for a primitive of 5,000 triangles or more, a level keeping over 85% of the one before, one keeping under 10%, the simplest level still 50,000 triangles or more, and a level whose box shrinks by more than 10% on a side (its outline changes). It's what an import or a generated model can be checked with: the same report applies to any model, whatever its kind.

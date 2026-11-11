@@ -17,6 +17,27 @@ use crate::layout::Pane;
 
 impl EditorApp {
     /// The Asset Check panel: scan results, their fixes, and a button to run the scan.
+    /// The LOD Inspector: the selected MeshPart's levels, and its preview.
+    pub(in crate::app) fn lod_inspector_pane(&mut self, ui: &mut eframe::egui::Ui) {
+        let world = super::shown(&self.world, &self.play);
+        let inspection = self.selected.and_then(|id| {
+            crate::lod_inspector::inspect(
+                world,
+                &self.assets,
+                id,
+                self.viewport.render_camera(),
+                |item| self.viewport.lod_level_of(item),
+            )
+        });
+        let preview = self
+            .lod_preview
+            .filter(|(id, _)| Some(*id) == self.selected)
+            .map(|(_, level)| level);
+        if let Some(change) = crate::lod_inspector::show(ui, inspection.as_ref(), preview) {
+            self.lod_preview = change.zip(self.selected).map(|(level, id)| (id, level));
+        }
+    }
+
     pub(in crate::app) fn asset_check_pane(&mut self, ui: &mut eframe::egui::Ui) {
         let can_fix = !self.playing();
         match self.asset_check.show(ui, self.project.is_some(), can_fix) {

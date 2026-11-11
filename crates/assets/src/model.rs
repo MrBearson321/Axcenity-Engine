@@ -11,6 +11,7 @@ pub(crate) mod cooked_model;
 mod fbx;
 mod lod;
 mod lod_cache;
+mod lod_report;
 mod maps;
 mod objects;
 mod rig;
@@ -19,6 +20,7 @@ mod stamped;
 mod test_rig;
 
 pub use lod::level_of as lod_level;
+pub use lod_report::{LevelReport, LodReport, LodWarning, PrimitiveReport};
 pub use maps::{MapSlot, TextureRole, texture_roles};
 pub use objects::{ModelObject, Pick};
 pub use rig::{

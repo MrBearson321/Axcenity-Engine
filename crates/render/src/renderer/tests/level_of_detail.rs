@@ -175,6 +175,30 @@ fn a_model_sitting_on_a_threshold_keeps_its_level() {
     assert_eq!(renderer.stats().triangles, Detailed::triangles(1));
 }
 
+#[test]
+fn a_previewed_item_draws_at_its_level_whatever_its_size_and_says_so() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = renderer(&device, &queue, 32);
+    let near = square_at(2.0, 7);
+    assert_eq!(settled(&mut renderer, &near), Detailed::triangles(0));
+    assert_eq!(renderer.lod_level_of(7), Some(0));
+    // The editor's preview: at once, with no fade, at any distance.
+    renderer.preview_lod(Some((7, 2)));
+    renderer.render(&near).unwrap();
+    assert_eq!(renderer.stats().triangles, Detailed::triangles(2));
+    assert_eq!(renderer.stats().items_drawn, 1);
+    // Another item isn't touched, and a level past the last is the last.
+    renderer.preview_lod(Some((8, 5)));
+    renderer.render(&square_at(2.0, 8)).unwrap();
+    assert_eq!(renderer.stats().triangles, Detailed::triangles(2));
+    renderer.preview_lod(None);
+    assert_eq!(settled(&mut renderer, &near), Detailed::triangles(0));
+    assert_eq!(renderer.lod_level_of(99), None, "never drawn");
+}
+
 /// The share of the pixels in the middle `side` × `side` of a `size`²
 /// image that are white.
 fn white_share(pixels: &[u8], size: usize, side: usize) -> f32 {

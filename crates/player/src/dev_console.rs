@@ -24,6 +24,11 @@ use crate::{App, logs, print_output};
 
 /// The frames the frame rate is averaged over.
 const AVERAGED_FRAMES: usize = 60;
+/// The frames the 1% low is taken over: the slowest 10 of them.
+const PACED_FRAMES: usize = 1000;
+/// The frame step that's time blocked on the window (vertical sync, or the
+/// GPU frames behind), split off `Render`.
+pub const PRESENT_WAIT: &str = "Present wait";
 /// Asking the OS for memory every frame would be wasted work.
 const MEMORY_EVERY: u64 = 30;
 /// Collider outlines: solid (green) and sensors (amber).
@@ -43,6 +48,8 @@ pub struct DevSettings {
     /// Game time per real second (`timescale`).
     pub time_scale: f32,
     pub show_fps: bool,
+    /// `fps full`: the readout with the drawing's numbers.
+    pub fps_full: bool,
     pub wireframe: bool,
     pub collisions: bool,
 }
@@ -52,6 +59,7 @@ impl Default for DevSettings {
         Self {
             time_scale: 1.0,
             show_fps: false,
+            fps_full: false,
             wireframe: false,
             collisions: false,
         }
@@ -67,18 +75,66 @@ pub use axcenity_core::bench::Laps as Stopwatch;
 pub struct FrameStats {
     /// The last frames' real lengths, in seconds, newest last.
     frames: VecDeque<f32>,
+    /// More of them, in milliseconds, for the 1% low.
+    paced: VecDeque<f32>,
     stages: Vec<(&'static str, f32)>,
     memory: Option<u64>,
     frame: u64,
+    /// The CPU's work in recent frames (each frame less its present
+    /// wait), in milliseconds, averaged like `frames`.
+    cpu: VecDeque<f32>,
+    /// The GPU's recent readings, in milliseconds.
+    gpu: VecDeque<f32>,
+    /// The newest drawing numbers, while someone is looking.
+    render: Option<axcenity_render::RenderStats>,
+    gpu_readings: u64,
 }
 
 impl FrameStats {
-    /// Notes a frame `real_seconds` long, whose steps `watch` timed.
-    pub fn finish(&mut self, real_seconds: f32, watch: &Stopwatch) {
+    /// The GPU measurements read so far, so a new one can be told apart.
+    pub fn gpu_readings(&self) -> u64 {
+        self.gpu_readings
+    }
+
+    /// Notes a frame `real_seconds` long, whose steps `watch` timed, and
+    /// what drawing it cost if it was measured (`render`).
+    pub fn finish(
+        &mut self,
+        real_seconds: f32,
+        watch: &Stopwatch,
+        render: Option<&axcenity_render::RenderStats>,
+    ) {
+        let keep = |queue: &mut VecDeque<f32>, value: f32, most: usize| {
+            queue.push_back(value);
+            while queue.len() > most {
+                queue.pop_front();
+            }
+        };
         if real_seconds > 0.0 {
-            self.frames.push_back(real_seconds);
-            while self.frames.len() > AVERAGED_FRAMES {
-                self.frames.pop_front();
+            keep(&mut self.frames, real_seconds, AVERAGED_FRAMES);
+            keep(&mut self.paced, real_seconds * 1000.0, PACED_FRAMES);
+        }
+        let waited: f32 = watch
+            .stages()
+            .iter()
+            .filter(|(name, _)| *name == PRESENT_WAIT)
+            .map(|(_, time)| time.as_secs_f32() * 1000.0)
+            .sum();
+        let work = watch.total().as_secs_f32() * 1000.0 - waited;
+        keep(&mut self.cpu, work.max(0.0), AVERAGED_FRAMES);
+        match render {
+            Some(stats) => {
+                if let Some(gpu) = stats.gpu_time
+                    && stats.gpu_readings != self.gpu_readings
+                {
+                    keep(&mut self.gpu, gpu.as_secs_f32() * 1000.0, AVERAGED_FRAMES);
+                }
+                self.gpu_readings = stats.gpu_readings;
+                self.render = Some(*stats);
+            }
+            None => {
+                self.gpu.clear();
+                self.render = None;
             }
         }
         self.stages = watch
@@ -203,12 +259,15 @@ impl App {
                 }
             }
             BuiltIn::Clear => self.console.clear(),
-            BuiltIn::Fps => {
-                self.dev.show_fps = !self.dev.show_fps;
+            BuiltIn::Fps { full } => {
+                // The same command again hides it; the other mode switches.
+                self.dev.show_fps = !(self.dev.show_fps && self.dev.fps_full == full);
+                self.dev.fps_full = full;
+                let mode = if full { "fps full" } else { "fps" };
                 logs::line(
                     LogLevel::Info,
                     None,
-                    &format!("fps {}", on_off(self.dev.show_fps)),
+                    &format!("{mode} {}", on_off(self.dev.show_fps)),
                 );
             }
             BuiltIn::Wireframe => {
@@ -263,6 +322,32 @@ impl App {
 
     /// The Stats tab's numbers now.
     pub(crate) fn console_stats(&self) -> ConsoleStats {
+        let mut console = self.base_console_stats();
+        let stats = &self.frame_stats;
+        let mean = |queue: &VecDeque<f32>| {
+            (!queue.is_empty()).then(|| queue.iter().sum::<f32>() / queue.len() as f32)
+        };
+        console.low_fps = axcenity_core::bench::FramePacing::of_millis(
+            stats.paced.iter().map(|&ms| f64::from(ms)),
+        )
+        .map_or(0.0, |pacing| pacing.low_1pct_fps as f32);
+        console.cpu_ms = mean(&stats.cpu).unwrap_or(0.0);
+        console.gpu_ms = mean(&stats.gpu);
+        if let (Some(frame), Some(gpu)) = (mean(&stats.frames), console.gpu_ms) {
+            let bound = axcenity_core::bench::Bound::of(
+                f64::from(frame * 1000.0),
+                f64::from(console.cpu_ms),
+                Some(f64::from(gpu)),
+            );
+            console.bound = bound.label();
+        }
+        if let Some(render) = &stats.render {
+            console.detail = axcenity_ui::render_lines(render);
+        }
+        console
+    }
+
+    fn base_console_stats(&self) -> ConsoleStats {
         let stats = &self.frame_stats;
         let average = if stats.frames.is_empty() {
             0.0
@@ -300,6 +385,7 @@ impl App {
             lua_bytes: self.sim.scripts.used_memory(),
             instances: self.sim.world.len(),
             network,
+            ..ConsoleStats::default()
         }
     }
 
@@ -354,6 +440,7 @@ impl App {
                 &self.console,
                 size.0,
                 size.1,
+                self.dev.fps_full,
             ));
         }
         items

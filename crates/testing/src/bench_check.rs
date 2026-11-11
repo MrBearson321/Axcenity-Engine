@@ -32,12 +32,16 @@ struct Options {
 }
 
 /// What one scene measured: the frame's median and, from the player, its
-/// startup times, all in milliseconds.
+/// startup times and (where the GPU can be timed) the GPU frame's median,
+/// all in milliseconds, and the 1% low frame rate.
 #[derive(Default)]
 struct Measured {
     frame_ms: Vec<f64>,
     first_frame_ms: Vec<f64>,
     assets_ms: Vec<f64>,
+    gpu_ms: Vec<f64>,
+    low_1pct_fps: Vec<f64>,
+    bound: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -120,6 +124,7 @@ fn run() -> Result<ExitCode, String> {
                 &measured.assets_ms,
                 startup_tolerance,
             ),
+            ("gpu_ms", "GPU frame", &measured.gpu_ms, frame_tolerance),
         ] {
             let Some(now) = median(samples) else { continue };
             entry.insert(key.into(), json!((now * 1000.0).round() / 1000.0));
@@ -143,6 +148,22 @@ fn run() -> Result<ExitCode, String> {
                 "{name:<20} {label:<16} {base:>10.3} {now:>10.3} {:>+7.1}%  {status}",
                 change * 100.0
             );
+        }
+        // The 1% low and the bound are noted, not judged: the low is one
+        // frame in a hundred, too noisy to fail a check on.
+        // Only hosts that draw (whose GPU was timed) have a frame rate
+        // worth showing.
+        let drawn = !measured.gpu_ms.is_empty();
+        if let Some(low) = median(&measured.low_1pct_fps).filter(|_| drawn) {
+            let base = recorded[name]["low_1pct_fps"]
+                .as_f64()
+                .map_or("-".to_owned(), |base| format!("{base:.1}"));
+            println!("{name:<20} {:<16} {base:>10} {low:>10.1}", "1% low fps");
+            entry.insert("low_1pct_fps".into(), json!((low * 10.0).round() / 10.0));
+        }
+        if let Some(bound) = measured.bound.as_ref().filter(|_| drawn) {
+            println!("{name:<20} {bound}");
+            entry.insert("bound".into(), json!(bound));
         }
         if let Some(note) = recorded[name]["known"].as_str() {
             println!("{name:<20} known: {note}");
@@ -241,6 +262,15 @@ fn measure(run: &Value, options: &Options) -> Result<Option<Measured>, String> {
     let name = run["name"].as_str().unwrap_or_default();
     let host = run["host"].as_str().unwrap_or_default();
     let frames = run["frames"].as_u64().unwrap_or(300).to_string();
+    // A player run's own options, such as `--size 2560x1440 --quality Ultra`.
+    let extra: Vec<String> = run["args"]
+        .as_array()
+        .map(|args| {
+            args.iter()
+                .filter_map(|arg| arg.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
     let Some(scene) = scene_folder(run["scene"].as_str().unwrap_or_default(), options)? else {
         return Ok(None);
     };
@@ -255,7 +285,11 @@ fn measure(run: &Value, options: &Options) -> Result<Option<Measured>, String> {
                 "axcenity-server",
                 &[&scene_arg, "--port", "0", "--bench", &frames],
             )?,
-            "player" => binary("axcenity-player", &[&scene_arg, "--bench", &frames])?,
+            "player" => {
+                let mut args = vec![scene_arg.as_str(), "--bench", frames.as_str()];
+                args.extend(extra.iter().map(String::as_str));
+                binary("axcenity-player", &args)?
+            }
             "editor-play" => {
                 let mut command = Command::new("cargo");
                 command
@@ -290,6 +324,17 @@ fn measure(run: &Value, options: &Options) -> Result<Option<Measured>, String> {
             .and_then(|stages| stages.iter().find(|stage| stage["name"] == "frame"))
             .and_then(|stage| stage["median_ms"].as_f64());
         measured.frame_ms.extend(frame);
+        let gpu = report["gpu"]
+            .as_array()
+            .and_then(|stages| stages.iter().find(|stage| stage["name"] == "frame"))
+            .and_then(|stage| stage["median_ms"].as_f64());
+        measured.gpu_ms.extend(gpu);
+        measured
+            .low_1pct_fps
+            .extend(report["pacing"]["low_1pct_fps"].as_f64());
+        if let Some(bound) = report["bound"].as_str() {
+            measured.bound = Some(bound.to_owned());
+        }
         if host == "player" {
             let startup = &report["startup"];
             measured

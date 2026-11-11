@@ -18,6 +18,7 @@ mod splash;
 mod watch;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::fs;
 use std::ops;
 use std::path::PathBuf;
@@ -56,6 +57,28 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, CursorIcon, Window, WindowId};
 
 const DEFAULT_WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
+
+/// `AXCENITY_WINDOW_SIZE`'s `<width>x<height>`, if it's two whole numbers
+/// above zero.
+fn window_size_override(value: Option<&str>) -> Option<(u32, u32)> {
+    let (width, height) = value?.trim().split_once(['x', 'X'])?;
+    let (width, height) = (width.trim().parse().ok()?, height.trim().parse().ok()?);
+    (width > 0 && height > 0).then_some((width, height))
+}
+
+#[cfg(test)]
+mod window_size_tests {
+    use super::window_size_override;
+
+    #[test]
+    fn reads_width_by_height() {
+        assert_eq!(window_size_override(Some("1920x1080")), Some((1920, 1080)));
+        assert_eq!(window_size_override(Some(" 800 X 600 ")), Some((800, 600)));
+        assert_eq!(window_size_override(Some("0x600")), None);
+        assert_eq!(window_size_override(Some("big")), None);
+        assert_eq!(window_size_override(None), None);
+    }
+}
 const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
 /// After a long pause (such as dragging the window), don't jump the camera
 /// by the whole pause; treat the frame as at most this long.
@@ -66,12 +89,15 @@ const REGION_WAIT_SECONDS: f64 = 5.0;
 const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
 const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | --join address:port] \
-                     [--password text] [--bench frames] [project-folder | game.axgame]\n\
+                     [--password text] [--bench frames] [--size WxH] [--quality preset] \
+                     [project-folder | game.axgame]\n\
                      example: cargo run -p axcenity-player -- examples/hello-part\n\
                      --watch reloads a project folder's changed assets while it plays\n\
                      --dev turns on the F9 Developer Console in a built game\n\
                      --host hosts the game (port 47800 unless given); --join joins one\n\
-                     --bench measures that many frames' steps, prints them and quits";
+                     --bench measures that many frames' steps, prints them and quits\n\
+                     --size sets the window's size in pixels, such as 2560x1440\n\
+                     --quality draws with that preset (Low, Medium, High, Ultra) for this run only";
 
 fn main() -> Result<()> {
     // `--bench` reports its launch times (first frame, assets loaded) from here.
@@ -293,9 +319,19 @@ fn main() -> Result<()> {
     app.watcher = watcher;
     app.network = network;
     app.console_allowed = console_allowed;
-    app.bench = arguments
-        .bench
-        .map(|frames| BenchRun::new(BenchRun::DEFAULT_WARM_UP, frames));
+    app.bench = arguments.bench.map(|frames| {
+        let mut run = BenchRun::new(BenchRun::DEFAULT_WARM_UP, frames);
+        run.wait_stage(dev_console::PRESENT_WAIT);
+        run
+    });
+    if app.bench.is_some() && std::env::var_os("AXCENITY_BENCH_TIMELINE").is_some() {
+        app.bench_counts = Some(
+            "camera x,camera y,camera z,look x,look y,look z,items drawn,triangles,draw calls,shadow casters\n"
+                .to_owned(),
+        );
+    }
+    app.window_size = arguments.size;
+    app.quality = arguments.quality;
     app.bench_scene = axcenity_core::bench::scene_name(&project.folder);
     app.launched = launched;
     app.preload = Some(preload);
@@ -684,6 +720,14 @@ struct App {
     /// `--bench`: the frames measured so far, and the scene's name.
     bench: Option<BenchRun>,
     bench_scene: String,
+    /// `AXCENITY_BENCH_TIMELINE`: each frame's camera and drawing counts,
+    /// written beside the timeline when the run ends.
+    bench_counts: Option<String>,
+    /// `--size`: the window's size in physical pixels.
+    window_size: Option<(u32, u32)>,
+    /// `--quality`: the preset drawn with for this run, whatever
+    /// `graphics.json` or a LocalScript says.
+    quality: Option<axcenity_render::Quality>,
     /// When the player started, for `--bench`'s launch times.
     launched: Instant,
     /// The Workspace's assets being read ahead; `None` when nothing was
@@ -764,6 +808,9 @@ impl App {
             frame_stats: dev_console::FrameStats::default(),
             bench: None,
             bench_scene: String::new(),
+            bench_counts: None,
+            window_size: None,
+            quality: None,
             launched: Instant::now(),
             preload: None,
         }
@@ -1305,8 +1352,38 @@ impl App {
                 logs::line(LogLevel::Error, None, &format!("error: {error}"));
             }
         }
-        watch.lap("Render");
-        self.frame_stats.finish(real_seconds, &watch);
+        let renderer = self.renderer.as_mut().expect("checked");
+        watch.lap_with_wait("Render", dev_console::PRESENT_WAIT, renderer.present_wait());
+        // The GPU is timed while someone is looking: `--bench`, the `fps`
+        // readout or the console's Stats tab.
+        let looking = self.bench.is_some() || self.dev.show_fps || self.console.showing_stats();
+        renderer.set_gpu_timing(looking);
+        let render_stats = looking.then(|| renderer.stats());
+        if let (Some(bench), Some(stats)) = (&mut self.bench, &render_stats)
+            && let Some(gpu) = stats.gpu_time
+            && stats.gpu_readings != self.frame_stats.gpu_readings()
+        {
+            bench.record_gpu(gpu, &axcenity_ui::pass_times(stats));
+        }
+        if let (Some(counts), Some(stats)) = (&mut self.bench_counts, &render_stats) {
+            let camera = draw_list.camera;
+            let _ = writeln!(
+                counts,
+                "{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{},{},{}",
+                camera.position.x,
+                camera.position.y,
+                camera.position.z,
+                camera.look_at.x,
+                camera.look_at.y,
+                camera.look_at.z,
+                stats.items_drawn,
+                stats.triangles,
+                stats.draw_calls,
+                stats.shadow_casters_drawn
+            );
+        }
+        self.frame_stats
+            .finish(real_seconds, &watch, render_stats.as_ref());
         profiling::finish_frame!();
         let loading_assets = self.frame_loading_assets;
         if let Some(bench) = &mut self.bench {
@@ -1319,6 +1396,15 @@ impl App {
             && bench.record(&watch)
         {
             print!("{}", bench.finish_text("player", &self.bench_scene));
+            // Every frame's steps (and the GPU's passes) for a spreadsheet.
+            if let Some(path) = std::env::var_os("AXCENITY_BENCH_TIMELINE") {
+                let path = std::path::PathBuf::from(path);
+                let _ = std::fs::write(&path, bench.samples.csv());
+                let _ = std::fs::write(path.with_extension("gpu.csv"), bench.gpu.csv());
+                if let Some(counts) = &self.bench_counts {
+                    let _ = std::fs::write(path.with_extension("counts.csv"), counts);
+                }
+            }
             event_loop.exit();
         }
     }
@@ -1467,6 +1553,7 @@ impl HostIo for App {
     /// drawn from this frame.
     fn graphics_changed(&mut self) {
         if let Some(change) = self.sim.scripts.take_graphics_change()
+            && self.quality.is_none()
             && let Some(renderer) = &mut self.renderer
         {
             let capabilities = *renderer.capabilities();
@@ -1702,10 +1789,18 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let attributes = Window::default_attributes()
+        let mut attributes = Window::default_attributes()
             .with_title(&self.title)
             .with_inner_size(DEFAULT_WINDOW_SIZE)
             .with_window_icon(icon::window_icon());
+        // `--size`, else `AXCENITY_WINDOW_SIZE=1920x1080` (physical pixels),
+        // for benchmarks that need the same window every run, in every engine.
+        let size = self.window_size.or_else(|| {
+            window_size_override(std::env::var("AXCENITY_WINDOW_SIZE").ok().as_deref())
+        });
+        if let Some((width, height)) = size {
+            attributes = attributes.with_inner_size(winit::dpi::PhysicalSize::new(width, height));
+        }
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(err) => return self.fail(event_loop, err.into()),
@@ -1722,6 +1817,16 @@ impl ApplicationHandler for App {
                     Some(change) => graphics::changed(folder, change, &capabilities),
                     None => graphics::start(folder, &capabilities),
                 };
+                // `--quality`: the preset alone, not saved.
+                let settings = match self.quality {
+                    Some(quality) => GraphicsSettings::preset(quality),
+                    None => settings,
+                };
+                if self.bench.is_some() {
+                    // Frames as fast as they're drawn, each timed on the GPU.
+                    renderer.set_vsync(false);
+                    renderer.set_gpu_timing(true);
+                }
                 self.sim.scripts.set_graphics(&settings, &capabilities);
                 set_graphics(&mut renderer, &settings);
                 self.renderer = Some(renderer);
@@ -1943,6 +2048,8 @@ mod weather_tests;
 
 #[cfg(test)]
 mod bench_tests;
+#[cfg(test)]
+mod profile_tests;
 
 #[cfg(test)]
 mod gpu_particles_tests;
