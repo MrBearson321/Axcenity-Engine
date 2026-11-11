@@ -73,6 +73,7 @@ mod tree_ops;
 mod ui_graphs;
 mod ui_links;
 mod ui_selection;
+mod update_install;
 mod updates;
 mod version_history;
 
@@ -710,6 +711,9 @@ enum Discard {
     NewProject,
     /// Opening a level from the Levels panel (`None`: the start level).
     OpenLevel(Option<String>),
+    /// Closing for the updater to install an update or roll back
+    /// (`app/update_install.rs`).
+    Update(axcenity_updater::apply::Action),
 }
 
 /// A screenshot asked for, to make the open project's thumbnail from.
@@ -939,6 +943,10 @@ impl EditorApp {
     /// Restores the settings saved by [`eframe::App::save`] (none in tests, or
     /// on the first run) and applies the look.
     pub fn load_settings(&mut self, ctx: &egui::Context, storage: Option<&dyn eframe::Storage>) {
+        // Tests never look at, or tidy, the real app data.
+        if !cfg!(test) {
+            self.update_results_on_start();
+        }
         if let Some(storage) = storage {
             self.appearance = match storage.get_string(APPEARANCE_KEY) {
                 Some(text) => Appearance::from_text(&text),
@@ -1638,6 +1646,7 @@ impl EditorApp {
         }
         self.follow_sound_preview();
         self.updates_frame();
+        self.update_install_frame();
         self.settings_window(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();

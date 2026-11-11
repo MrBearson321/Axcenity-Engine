@@ -53,7 +53,7 @@ The editor's Help > Version Explorer reads the same files, built in, and Setting
 | `axcenity-history.json` | The public release history, for the Version Explorer |
 | `SHA256SUMS.txt` | Checksums |
 
-Each editor payload includes `axcenity-player` for the host OS beside the editor, and `players/windows`, `players/macos`, `players/linux` for **File > Build Game**, and an `install.json` that says how it was installed (`windows-setup`, `linux-tarball`, `appimage`, `deb`, `rpm`, `pacman` or `macos-dmg`; `crates/release/src/install.rs`). Only the Windows setup, the tar.gz and the AppImage will update themselves. macOS editor and player binaries are universal (Apple Silicon + Intel). Linux builds use Ubuntu 22.04 so the glibc requirement stays at 2.35. Windows and Linux packages are x86_64.
+Each editor payload includes `axcenity-player` for the host OS beside the editor, and `players/windows`, `players/macos`, `players/linux` for **File > Build Game**, and an `install.json` that says how it was installed (`windows-setup`, `linux-tarball`, `appimage`, `deb`, `rpm`, `pacman` or `macos-dmg`; `crates/release/src/install.rs`). Only the Windows setup and the tar.gz update themselves: each also carries `axcenity-updater` beside the editor (`crates/updater`; `packaging/stage.py --updater`), and the editor runs the new release's copy of it to swap the install folder (it keeps the old one as `<install>.previous` for Roll back; the uninstaller removes that too). The AppImage doesn't yet. macOS editor and player binaries are universal (Apple Silicon + Intel). Linux builds use Ubuntu 22.04 so the glibc requirement stays at 2.35. Windows and Linux packages are x86_64.
 
 Installer pictures (NSIS header/sidebar, DMG background) come from `python packaging/generate-assets.py`, which reads `assets/branding` and Inter.
 
@@ -146,3 +146,9 @@ Cross-checks from Linux, without a Windows computer (checked 2026-11-10 on Ubunt
   The Linux package then has a Windows player, and Build Game for Windows is checked too. Releases use the MSVC build from a Windows computer; this shows only that the Windows code compiles and links, not that it runs.
 - `makensis` from the distribution's `nsis` package compiles `installer.nsi` (NSIS takes `-DNAME=value` there instead of `/D`), so a change to the installer script can be checked before a Windows computer is at hand.
 - macOS can't be cross-built from Linux or Windows: it needs Apple's SDK. The macOS package and macOS games are checked only on a Mac.
+
+## Checking the updater
+
+`cargo test -p axcenity-updater` on each OS before a tag. Its `real_binary` test `a_downloaded_archive_is_staged_handed_over_and_installed` runs the real binary through a whole update and a roll back in a scratch folder: the release's archive (a zip on Windows, a tar.gz on Linux) is staged, the copied updater swaps the folders, keeps `Uninstall.exe`, checks `--version --json` and puts the old version back. On Windows this is the check for file locks, `tasklist` and moving folders; the uninstall entry's version changes only when the entry names the folder being updated, so the test leaves an installed copy alone. The other `real_binary` tests use shell scripts, so they're Unix only.
+
+Once a release is out, the real check on each computer is updating an installed older version from Settings > Updates and rolling it back; `<app data>/Updates/update.log` says what the updater did.
