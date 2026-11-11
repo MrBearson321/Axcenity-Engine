@@ -440,7 +440,7 @@ What it says:
 | Oak bark | under 1% | 2.4% |
 | Shrubs, rocks, thistles and the rest | the remainder | the remainder |
 
-So the bright bands in the overdraw view are grass seen at a low angle, 6 to 12 layers where each grass model covers anything and 40 to 50 where they all overlap along the horizon. The canopy is a small share. What a grass layer costs is its corners and the depth tests (the alpha sample of the depth fill and the prepass), not lighting; leaving all painted foliage out saved 1.7–2.9 ms of GPU, a third of it their shadows. Fewer layers there means fewer tufts far away (density by distance), which changes how full the ground looks; a choice for the project or the preset, not a fix.
+So the bright bands in the overdraw view are grass seen at a low angle, 6 to 12 layers where each grass model covers anything and 40 to 50 where they all overlap along the horizon. The canopy is a small share. What a grass layer costs is its corners and the depth tests (the alpha sample of the depth fill and the prepass), not lighting; leaving all painted foliage out saved 1.7–2.9 ms of GPU, a third of it their shadows. Fewer layers there means fewer tufts far away (density by distance). That was built and measured as a graphics setting (small painted plants thinning out past 35% of their cull distance) and dropped: on all three projects the GPU frame moved by −0.12 to +0.05 ms, since a grass tuft's cull distance (about 290 studs) puts its thinning far beyond the grass that costs. The code and numbers are on the branch `claude/project-thread-92jjy2-grass`.
 
 ### Shadows on the patch, cascade by cascade
 
