@@ -46,6 +46,7 @@ mod prefab;
 mod project_check;
 mod project_info;
 mod project_save;
+mod project_settings;
 mod refs;
 mod scene_inspect;
 mod script_read;
@@ -228,6 +229,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &style_edit::SPEC,
         call: style_edit::call,
+    },
+    Tool {
+        spec: &project_settings::SPEC,
+        call: project_settings::call,
     },
 ];
 

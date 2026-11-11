@@ -1664,3 +1664,63 @@ fn style_edit_lists_shows_and_changes_rules_by_selector() {
     .unwrap_err();
     assert_eq!(bad.code, Code::BadValue, "{bad}");
 }
+
+#[test]
+fn project_settings_changes_input_collision_groups_and_strings() {
+    let mut opened = open("hello-part", "mcp-settings");
+    let host = &mut opened.app;
+    let input = ok(host, "project_settings", json!({"setting": "input"}));
+    assert!(input.contains("\nJump: Space | ButtonA"), "{input}");
+    // A new action and its key are one step.
+    let dash = ok(
+        host,
+        "project_settings",
+        json!({"setting": "input", "action": "add", "name": "Dash", "input": "Q"}),
+    );
+    assert!(
+        dash.contains("undo \"AI (test): Add input to Dash\""),
+        "{dash}"
+    );
+    let input = ok(host, "project_settings", json!({"setting": "input"}));
+    assert!(input.contains("\nDash: Q"), "{input}");
+    let file = std::fs::read_to_string(opened.folder.join("input.json")).unwrap();
+    assert!(file.contains("Dash"), "{file}");
+    ok(host, "history", json!({"action": "undo"}));
+    let input = ok(host, "project_settings", json!({"setting": "input"}));
+    assert!(!input.contains("Dash"), "{input}");
+    let wrong = call(
+        host,
+        "project_settings",
+        json!({"setting": "input", "action": "add", "name": "Jump", "input": "Spaceship"}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+    // Collision groups.
+    ok(
+        host,
+        "project_settings",
+        json!({"setting": "collision", "action": "add", "name": "Ghosts"}),
+    );
+    ok(
+        host,
+        "project_settings",
+        json!({"setting": "collision", "action": "set", "name": "Ghosts", "other": "Default", "collide": false}),
+    );
+    let groups = ok(host, "project_settings", json!({"setting": "collision"}));
+    assert!(
+        groups.contains("Ghosts") && groups.contains("don't collide: "),
+        "{groups}"
+    );
+    // Strings.
+    let set = ok(
+        host,
+        "project_settings",
+        json!({"setting": "strings", "action": "set", "name": "greeting", "value": "Hello"}),
+    );
+    assert!(set.contains("unsaved"), "{set}");
+    let strings = ok(host, "project_settings", json!({"setting": "strings"}));
+    assert!(strings.contains("\ngreeting: \"Hello\""), "{strings}");
+    ok(host, "history", json!({"action": "undo"}));
+    let strings = ok(host, "project_settings", json!({"setting": "strings"}));
+    assert!(!strings.contains("greeting"), "{strings}");
+}
