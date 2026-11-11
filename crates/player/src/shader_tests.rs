@@ -2,18 +2,18 @@
 //! conveyor's chevrons scroll with the frame's time, and a shader with an
 //! error is reported on its own line while the rest of the scene draws.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use axcenity_render::{DrawList, TextureRenderer};
 
 use super::graphics_tests::{SIZE, average, changed_pixels, pixels_of};
-use super::tests::{run_until, start_example_in, test_gpu, write_png};
+use super::tests::{TempCopy, run_until, start_example_in, test_gpu, write_png};
 use super::*;
 
 const CONVEYOR: &str = "assets/materials/Conveyor.material.json";
 
 /// hello-shader's folder (a copy), world, assets and the player's camera.
-fn hello_shader() -> (PathBuf, World, Assets, FlyCamera) {
+fn hello_shader() -> (TempCopy, World, Assets, FlyCamera) {
     let (mut world, mut scripts, folder) = start_example_in("hello-shader");
     let (mut physics, mut clock) = (Physics::new(), 0);
     run_until(&mut world, &mut scripts, &mut physics, &mut clock, 0.5);

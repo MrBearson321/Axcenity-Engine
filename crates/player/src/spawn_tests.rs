@@ -8,7 +8,7 @@ use axcenity_core::{ClassName, Color3, InstanceId, KeyCode, STARTER_CHARACTER, V
 use axcenity_render::UiDrawItem;
 use axcenity_script::CameraState;
 
-use super::tests::copy_folder;
+use super::tests::TempCopy;
 use super::*;
 
 const FRAME: f32 = 1.0 / 60.0;
@@ -104,12 +104,10 @@ impl Game {
     /// hello-spawn from a copy, its scripts started as the player does.
     fn example(test: &str) -> Self {
         let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-spawn");
-        let folder = std::env::temp_dir().join(format!(
-            "axcenity-player-spawn-{test}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&folder);
-        copy_folder(&example, &folder);
+        let folder = TempCopy::of(
+            &example,
+            &format!("axcenity-player-spawn-{test}-{}", std::process::id()),
+        );
         let project = axcenity_project::load(&folder).unwrap();
         let mut world = project.world;
         axcenity_project::load_starter_character(&folder, &mut world).unwrap();

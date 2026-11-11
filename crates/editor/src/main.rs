@@ -158,6 +158,11 @@ fn main() -> eframe::Result {
         let cooked = cooking::cook_from_command_line(&PathBuf::from(folder));
         std::process::exit(if cooked { 0 } else { 1 });
     }
+    if first.as_deref() == Some(app::mcp::FLAG.as_ref()) {
+        // An MCP server for AI clients, without a window (`app/mcp.rs`).
+        let served = app::mcp::run_from_command_line(args);
+        std::process::exit(if served { 0 } else { 1 });
+    }
     if first.as_deref() == Some(build_game::BUILD_FLAG.as_ref()) {
         let built = build_game::build_from_command_line(args);
         std::process::exit(if built { 0 } else { 1 });
