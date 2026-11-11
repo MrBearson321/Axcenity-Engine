@@ -1492,3 +1492,71 @@ fn level_lists_makes_renames_deletes_and_opens_levels() {
     let list = ok(host, "level", json!({}));
     assert!(list.contains("Castle · open"), "{list}");
 }
+
+#[test]
+fn prefab_saves_places_and_applies_copies_as_undo_steps() {
+    let mut opened = open("hello-part", "mcp-prefab");
+    let host = &mut opened.app;
+    let made = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "name": "Crate"}),
+    );
+    let crate_id = made.split_whitespace().nth(1).unwrap().to_owned();
+    let saved = ok(host, "prefab", json!({"action": "save", "id": crate_id}));
+    assert!(
+        saved.starts_with("saved assets/prefabs/Crate.prefab.json"),
+        "{saved}"
+    );
+    let path = "assets/prefabs/Crate.prefab.json";
+    assert!(opened.folder.join(path).is_file());
+    let placed = ok(
+        host,
+        "prefab",
+        json!({"action": "place", "path": path, "position": [20, 3, 0]}),
+    );
+    assert!(
+        placed.contains("undo \"AI (test): Place Crate\""),
+        "{placed}"
+    );
+    let copy = placed
+        .trim_start_matches("placed ")
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned();
+    let position = ok(
+        host,
+        "object_get",
+        json!({"id": copy, "props": ["Position"]}),
+    );
+    assert!(position.contains("Position [20,3,0]"), "{position}");
+    // A change on the copy is an override, which apply writes back.
+    ok(
+        host,
+        "object_set",
+        json!({"id": copy, "props": {"Transparency": 0.5}}),
+    );
+    let overrides = ok(host, "prefab", json!({"action": "overrides", "id": copy}));
+    assert!(overrides.contains("Transparency"), "{overrides}");
+    let asked = call(host, "prefab", json!({"action": "apply", "id": copy})).unwrap_err();
+    assert_eq!(asked.code, Code::NeedsConfirm, "{asked}");
+    ok(
+        host,
+        "prefab",
+        json!({"action": "apply", "id": copy, "confirm": token(&asked)}),
+    );
+    let file = std::fs::read_to_string(opened.folder.join(path)).unwrap();
+    assert!(file.contains("0.5"), "{file}");
+    // The first copy follows it too.
+    let first = ok(
+        host,
+        "object_get",
+        json!({"id": crate_id, "props": ["Transparency"]}),
+    );
+    assert!(first.contains("0.5"), "{first}");
+    let unpacked = ok(host, "prefab", json!({"action": "unpack", "id": copy}));
+    assert!(unpacked.contains("no longer follows"), "{unpacked}");
+    let not_a_copy = call(host, "prefab", json!({"action": "revert", "id": copy})).unwrap_err();
+    assert_eq!(not_a_copy.code, Code::BadValue, "{not_a_copy}");
+}

@@ -240,7 +240,7 @@ fn new_roots(app: &super::super::EditorApp) -> Vec<InstanceId> {
 }
 
 /// Moves `roots` (and their parts) so the first one's centre is at `to`.
-fn move_to(world: &mut axcenity_core::World, roots: &[InstanceId], to: Vector3) {
+pub(super) fn move_to(world: &mut axcenity_core::World, roots: &[InstanceId], to: Vector3) {
     let Some(&first) = roots.first() else {
         return;
     };

@@ -42,6 +42,7 @@ mod object_duplicate;
 mod object_get;
 mod object_set;
 mod ops;
+mod prefab;
 mod project_check;
 mod project_info;
 mod project_save;
@@ -213,6 +214,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &level::SPEC,
         call: level::call,
+    },
+    Tool {
+        spec: &prefab::SPEC,
+        call: prefab::call,
     },
 ];
 
