@@ -393,6 +393,17 @@ pub struct ViewportScene<'a> {
     pub play_camera: Option<PlayCamera>,
     /// This computer's graphics settings (Settings > Graphics).
     pub graphics: &'a axcenity_render::GraphicsSettings,
+    /// What other Team Create members have selected.
+    pub others: &'a [MemberSelection],
+}
+
+/// Another Team Create member's selection, as the viewport and Explorer
+/// show it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemberSelection {
+    pub name: String,
+    pub color: egui::Color32,
+    pub selection: Vec<InstanceId>,
 }
 
 /// Which visual-debug overlays the viewport draws. Off in the player.
@@ -1001,6 +1012,7 @@ impl Viewport {
             plugin_mouse,
             play_camera,
             graphics,
+            others,
         } = scene;
         // A brush takes the left button: no handles, dragging or picking.
         let brush = terrain_brush.filter(|_| tool.is_some());
@@ -1422,6 +1434,11 @@ impl Viewport {
         }
         if let Some(selected) = selected {
             paint_selection_box(ui, rect, &screen, &occluders, selected, eye);
+        }
+        if play_camera.is_none() {
+            for member in others {
+                paint_member_selection(ui, rect, &screen, &occluders, eye, member);
+            }
         }
         let painter = ui.painter_at(rect);
         for marker in &markers {

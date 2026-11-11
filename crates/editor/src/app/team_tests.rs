@@ -410,4 +410,99 @@ fn what_one_editor_selects_shows_in_the_others_session() {
     assert_eq!(seen.selection, [part]);
     assert!(seen.camera.is_some(), "and where a's camera is");
     assert_eq!(client.roster().len(), 2);
+    // What the viewport, Explorer and Properties show of it.
+    let shown = b.team_selections();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0].selection, [part]);
+    assert_eq!(shown[0].name, "Member 1", "the in-process hub names nobody");
+    // Drawing the panels with it doesn't trip over anything.
+    b.selected = Some(part);
+    b.selection = vec![part];
+    let ctx = theme::test_context();
+    for _ in 0..2 {
+        let _ = theme::run(&ctx, Default::default(), |ui| {
+            b.explorer_pane(ui);
+            b.properties_pane(ui);
+        });
+    }
+    assert_eq!(b.explorer.others.get(&part).map(Vec::len), Some(1));
+}
+
+/// Draws the Team Create panel 260 points wide (the narrowest column), and
+/// saves it as `name` when `AXCENITY_SNAPSHOTS` names a folder.
+fn draw_panel(app: &mut EditorApp, name: &str) {
+    let mut draw = |ui: &mut egui::Ui| app.team_create_pane(ui);
+    match std::env::var_os("AXCENITY_SNAPSHOTS") {
+        Some(folder) => crate::snapshot::snapshot(
+            &std::path::Path::new(&folder).join(format!("{name}.png")),
+            egui::vec2(260.0, 560.0),
+            vec![Vec::new(); 3],
+            &mut draw,
+        ),
+        None => {
+            let ctx = theme::test_context();
+            for _ in 0..3 {
+                let _ = theme::run(&ctx, Default::default(), |ui| draw(ui));
+            }
+        }
+    }
+}
+
+#[test]
+fn the_panel_offers_share_and_join_then_shows_the_session() {
+    let mut a = EditorApp::new(Some(&example("hello-part")));
+    draw_panel(&mut a, "team-create-start");
+    assert!(!a.in_team_session());
+
+    // A bad link says why, and nothing starts.
+    a.team_panel.link = "https://example.com".into();
+    a.team_action_for_test(super::team_panel::TestAction::Join);
+    assert!(a.team_panel.problem.is_some());
+    assert!(!a.in_team_session());
+
+    let invite = a
+        .host_network_session(Some(&team_folder("panel-host")), 0)
+        .expect("hosting");
+    let port = invite.host.rsplit(':').next().unwrap();
+    let invite = axcenity_collab::access::Invite {
+        host: format!("127.0.0.1:{port}"),
+        ..invite
+    };
+    let mut b = EditorApp::new(Some(&example("hello-part")));
+    b.join_network_session(&invite, Some(&team_folder("panel-joiner")))
+        .expect("joining");
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq)
+            && caught_up(b, seq)
+            && b.team()
+                .unwrap()
+                .roster()
+                .iter()
+                .filter(|c| c.online)
+                .count()
+                == 2
+    });
+    assert_eq!(
+        super::team_panel::status_text(&a.team().unwrap().status()),
+        "Connected"
+    );
+    draw_panel(&mut a, "team-create-host");
+    draw_panel(&mut b, "team-create-member");
+
+    // The owner makes the joiner a Viewer; the joiner's editor hears it.
+    let member = b.team().unwrap().me().unwrap();
+    a.set_team_role(member, Role::Viewer);
+    settle_net(&mut a, &mut b, |_, b| {
+        b.team().unwrap().client_role() == Some(Role::Viewer)
+    });
+    // A new invite replaces the link shown.
+    let link = a.make_team_invite(Role::Editor).expect("hosting");
+    assert_eq!(a.team().unwrap().invite(), Some(link.as_str()));
+
+    // Leaving keeps the World and stops syncing; ending drops everyone.
+    b.leave_team_session();
+    assert!(!b.in_team_session() && !b.world.is_recording_edits());
+    a.leave_team_session();
+    assert!(!a.in_team_session());
 }
