@@ -166,3 +166,15 @@ fn a_project_with_scripts_inside_objects_saves_them_back() {
     assert_eq!(copies, 5);
     let _ = fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn make_unique_numbers_the_file_before_its_ending() {
+    assert_eq!(
+        numbered_path("objects/Door/Open.server.lua", 2),
+        "objects/Door/Open 2.server.lua"
+    );
+    assert_eq!(
+        numbered_path("objects/Lamp/Glow.client.blocks.json", 3),
+        "objects/Lamp/Glow 3.client.blocks.json"
+    );
+}

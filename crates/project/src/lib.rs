@@ -91,7 +91,9 @@ pub use levels::{
     set_start_level, set_start_level_name, write_files, write_level,
 };
 pub use migrate::PREVIOUS_FORMAT_DIR;
-pub use object_scripts::{in_start_order, object_scripts, source_file_fits};
+pub use object_scripts::{
+    in_start_order, numbered_path, object_scripts, read_object_file, source_file_fits,
+};
 pub use package::{
     Clashes, Contents, ImportPlan, PACKAGE_EXTENSION, Package, PackageError, PackageManifest,
     package_contents, package_contents_with_scripts, plan_import, read_package, script_tables,
@@ -123,6 +125,9 @@ pub const WORLD_FILE: &str = "world.json";
 /// this name is taken too.
 pub const KEPT_WORLD_FILE: &str = "world.backup.json";
 pub const SCRIPTS_FOLDER: &str = "scripts";
+/// Where new files of scripts inside objects go (G2); the `scripts` scan
+/// never reads it.
+pub const OBJECTS_FOLDER: &str = "objects";
 /// The editor's Lua plugins for this project (Phase 54; the `plugins`
 /// crate). Editor-only: built games never have it, and its stylesheets
 /// don't style the game.
