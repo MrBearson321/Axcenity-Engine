@@ -7,8 +7,10 @@ The protocol half is the `mcp` crate (`axcenity-mcp`): `rmcp` on a thread of its
 ## Running it
 
 ```
-axcenity-editor --mcp <project folder> [--profile lite|standard|full] [--mode read|edit|full] [--allow-import <folder>]…
+axcenity-editor --mcp [--check] <project folder> [--profile lite|standard|full] [--mode read|edit|full] [--allow-import <folder>]…
 ```
+
+`--check` doesn't serve: it opens the project, prints `ok`/`warn`/`FAIL` lines (the project, the mode, whether the call log can be written, the profile's tool count and token cost, each `--allow-import` folder, a warning that `lite` can't save) and then the lines to add the server to Claude Code, `mcpServers` JSON clients, VS Code and Codex, with this binary's and the project's full paths and the other flags filled in (`app/mcp/check.rs`); it exits with 1 if anything failed. The user guide is [docs/mcp/README.md](../mcp/README.md).
 
 `--project <folder>` works in place of the positional folder. If the folder isn't a project it says why on stderr and exits with 1. stdout carries only protocol messages; everything else goes to stderr. Closing stdin ends the server. Object edits stay in memory until `project_save`: closing without saving loses them (the undo history goes with the process). `script_write` saves its file at once, as Insert Script does. `--allow-import` (repeatable) names a folder `asset_import` may copy from; without one, nothing outside the project is read.
 
@@ -16,25 +18,7 @@ Both protocol eras are served: the `initialize` handshake (2025-11-25 and earlie
 
 ### Connecting a client
 
-Claude Code, from the project folder or anywhere:
-
-```
-claude mcp add axcenity -- axcenity-editor --mcp /path/to/project
-```
-
-Clients that read a JSON config (Cursor's `.cursor/mcp.json`, Claude Code's `.mcp.json`):
-
-```json
-{ "mcpServers": { "axcenity": { "command": "axcenity-editor", "args": ["--mcp", "/path/to/project"] } } }
-```
-
-Codex (`~/.codex/config.toml`, or `codex mcp add axcenity -- axcenity-editor --mcp /path/to/project`):
-
-```toml
-[mcp_servers.axcenity]
-command = "axcenity-editor"
-args = ["--mcp", "/path/to/project"]
-```
+Every client's config, profiles for local models and troubleshooting are in the user guide, [docs/mcp/README.md](../mcp/README.md); `--check` prints the lines for this machine. In short, Claude Code: `claude mcp add axcenity -- axcenity-editor --mcp /path/to/project`; JSON clients: `{"mcpServers": {"axcenity": {"command": "axcenity-editor", "args": ["--mcp", "/path/to/project"]}}}`.
 
 ## Profiles
 
@@ -112,5 +96,5 @@ Resources mirror read tools (`axcenity_mcp::ResourceSpec`); reading one runs the
 
 - `crates/mcp/tests/protocol.rs`: a client in memory against the server, in both protocol eras, with prompts (filled in, a missing argument refused) and resources (listed only when their tool is, read through it, templates decoded).
 - `crates/mcp/src/safety.rs`: modes, call keys and confirm tokens (once only, expiry).
-- `editor/src/app/mcp/tests.rs`: each tool on copies of the examples, called as a client would: undo and redo, rollback of a failed write, confirm tokens, modes, saving and the log, batches (`$name` references, a failing step changes nothing, a big delete asks), duplicate rows, material files and their undo, environment presets, asset lists, and imports (allowed folders only, undo takes the copies away, a model placed where asked), terrain (raise to a height, a ridge along a line, flatten, paint by layer, foliage in and out, generating asks first, a new Terrain when there's none, erosion), and keyed animation (Animate, keys now and given, info, unkey and undo), and in the full profile levels, prefabs (save, place, apply asks, unpack), unions, stylesheets (in place, added, removed, undo), project settings (input, collision groups, strings) and asset rename and delete; `history changes` (by this client and by others, folding, asked again, after an undo, a level open), the prompts per profile, and a resource reading the same as its tool.
+- `editor/src/app/mcp/tests.rs`: each tool on copies of the examples, called as a client would: undo and redo, rollback of a failed write, confirm tokens, modes, saving and the log, batches (`$name` references, a failing step changes nothing, a big delete asks), duplicate rows, material files and their undo, environment presets, asset lists, and imports (allowed folders only, undo takes the copies away, a model placed where asked), terrain (raise to a height, a ridge along a line, flatten, paint by layer, foliage in and out, generating asks first, a new Terrain when there's none, erosion), and keyed animation (Animate, keys now and given, info, unkey and undo), and in the full profile levels, prefabs (save, place, apply asks, unpack), unions, stylesheets (in place, added, removed, undo), project settings (input, collision groups, strings) and asset rename and delete; `history changes` (by this client and by others, folding, asked again, after an undo, a level open), the prompts per profile, a resource reading the same as its tool, and `--check` (the report, full paths in every client line, the probe file gone, `FAIL` for a missing project or import folder).
 - `crates/editor/tests/mcp_stdio.rs`: the real binary over stdio; every stdout line is JSON-RPC, a write's undo label names the client, and it exits when stdin closes.
