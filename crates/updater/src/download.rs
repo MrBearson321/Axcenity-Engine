@@ -76,7 +76,9 @@ pub fn download(
                 let _ = fs::remove_file(&part);
                 return Err(DownloadError::Cancelled);
             }
-            let read = body.read(&mut buffer).map_err(|e| DownloadError::Fetch(e.to_string()))?;
+            let read = body
+                .read(&mut buffer)
+                .map_err(|e| DownloadError::Fetch(e.to_string()))?;
             if read == 0 {
                 break;
             }
@@ -208,7 +210,10 @@ mod tests {
     }
 
     fn artifact_of(body: &[u8]) -> Artifact {
-        let hash: String = Sha256::digest(body).iter().map(|b| format!("{b:02x}")).collect();
+        let hash: String = Sha256::digest(body)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
         Artifact {
             file: "update.zip".to_owned(),
             sha256: hash,
@@ -217,7 +222,8 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("axcenity-download-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("axcenity-download-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         dir
     }
@@ -230,16 +236,42 @@ mod tests {
         let server = memory(&body, true, Some(70_000));
         let cancel = AtomicBool::new(false);
         let mut seen = 0;
-        let first = download(&server, "https://x", &artifact, &to, &mut |n, _| seen = n, &cancel);
-        assert!(matches!(first, Err(DownloadError::WrongSize { got: 70_000, .. })));
+        let first = download(
+            &server,
+            "https://x",
+            &artifact,
+            &to,
+            &mut |n, _| seen = n,
+            &cancel,
+        );
+        assert!(matches!(
+            first,
+            Err(DownloadError::WrongSize { got: 70_000, .. })
+        ));
         assert_eq!(fs::metadata(part_path(&to)).unwrap().len(), 70_000);
-        download(&server, "https://x", &artifact, &to, &mut |n, _| seen = n, &cancel).unwrap();
+        download(
+            &server,
+            "https://x",
+            &artifact,
+            &to,
+            &mut |n, _| seen = n,
+            &cancel,
+        )
+        .unwrap();
         assert_eq!(*server.asked.borrow(), [0, 70_000]);
         assert_eq!(seen, body.len() as u64);
         assert_eq!(fs::read(&to).unwrap(), body);
         assert!(!part_path(&to).exists());
         // Already there: nothing is fetched again.
-        download(&server, "https://x", &artifact, &to, &mut |_, _| {}, &cancel).unwrap();
+        download(
+            &server,
+            "https://x",
+            &artifact,
+            &to,
+            &mut |_, _| {},
+            &cancel,
+        )
+        .unwrap();
         assert_eq!(server.asked.borrow().len(), 2);
     }
 
@@ -251,8 +283,15 @@ mod tests {
         fs::create_dir_all(to.parent().unwrap()).unwrap();
         fs::write(part_path(&to), &body[..3000]).unwrap();
         let server = memory(&body, false, None);
-        download(&server, "https://x", &artifact, &to, &mut |_, _| {}, &AtomicBool::new(false))
-            .unwrap();
+        download(
+            &server,
+            "https://x",
+            &artifact,
+            &to,
+            &mut |_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         assert_eq!(fs::read(&to).unwrap(), body);
     }
 
@@ -265,7 +304,14 @@ mod tests {
         let server = memory(&body, true, None);
         let cancel = AtomicBool::new(false);
         assert!(matches!(
-            download(&server, "https://x", &artifact, &to, &mut |_, _| {}, &cancel),
+            download(
+                &server,
+                "https://x",
+                &artifact,
+                &to,
+                &mut |_, _| {},
+                &cancel
+            ),
             Err(DownloadError::WrongHash)
         ));
         assert!(!to.exists() && !part_path(&to).exists());

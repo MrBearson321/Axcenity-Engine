@@ -134,6 +134,8 @@ def check_payload(folder: Path, host: str, players: dict) -> None:
     """The files every package holds (`packaging/stage.py`)."""
     check_binary(folder / exe(host, "axcenity-editor"), host)
     check_binary(folder / exe(host, "axcenity-player"), host)
+    if host in ("windows", "linux"):
+        check_binary(folder / exe(host, "axcenity-updater"), host)
     for os_name in OSES:
         player = folder / "players" / os_name / exe(os_name, "axcenity-player")
         if os_name in players:
@@ -387,13 +389,16 @@ def main() -> int:
 
     if not args.no_build:
         check.step(f"Build the editor and player ({args.profile})", lambda: run(
-            ["cargo", "build", "--profile", args.profile, "--locked", "-p", "axcenity-editor", "-p", "axcenity-player"]))
+            ["cargo", "build", "--profile", args.profile, "--locked", "-p", "axcenity-editor", "-p", "axcenity-player",
+             "-p", "axcenity-updater"]))
 
     def stage_payload() -> None:
         player = bins / exe(HOST, "axcenity-player")
         command = [sys.executable, ROOT / "packaging/stage.py", "--os", HOST,
                    "--editor", bins / exe(HOST, "axcenity-editor"), "--player-native", player,
                    f"--player-{HOST}", player, "--out", stage, "--allow-missing-players"]
+        if HOST in ("windows", "linux"):
+            command += ["--updater", bins / exe(HOST, "axcenity-updater")]
         for os_name in OSES:
             other = args.players / os_name / exe(os_name, "axcenity-player") if args.players else None
             if os_name != HOST and other and other.is_file():

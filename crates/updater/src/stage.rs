@@ -46,8 +46,14 @@ pub fn payload(manifest: &Manifest, kind: InstallKind) -> Option<&Artifact> {
 /// Unpacks the downloaded `archive` (named `file`, as in the manifest) into
 /// a fresh `staged` folder and checks it is a whole install of `kind`: its
 /// `install.json`, the editor and the updater.
-pub fn stage(archive: &Path, file: &str, kind: InstallKind, staged: &Path) -> Result<(), StageError> {
-    let format = Format::of(file).ok_or_else(|| StageError::Wrong(format!("{file} isn't an archive")))?;
+pub fn stage(
+    archive: &Path,
+    file: &str,
+    kind: InstallKind,
+    staged: &Path,
+) -> Result<(), StageError> {
+    let format =
+        Format::of(file).ok_or_else(|| StageError::Wrong(format!("{file} isn't an archive")))?;
     if staged.exists() {
         fs::remove_dir_all(staged)?;
     }
@@ -56,7 +62,10 @@ pub fn stage(archive: &Path, file: &str, kind: InstallKind, staged: &Path) -> Re
         .ok()
         .and_then(|text| serde_json::from_str::<InstallMarker>(&text).ok());
     if marker.map(|m| m.kind) != Some(kind) {
-        return Err(StageError::Wrong(format!("it isn't a {} install", kind.label())));
+        return Err(StageError::Wrong(format!(
+            "it isn't a {} install",
+            kind.label()
+        )));
     }
     for exe in [EDITOR_EXE, UPDATER_EXE] {
         if !staged.join(exe).is_file() {
@@ -70,7 +79,10 @@ pub fn stage(archive: &Path, file: &str, kind: InstallKind, staged: &Path) -> Re
 /// `instruction.json` beside it. Returns the updater to start, with
 /// `apply <instruction>`; the editor exits right after starting it. Running
 /// a copy means no program replaces its own running file.
-pub fn hand_over(version_dir: &Path, instruction: &Instruction) -> Result<(PathBuf, PathBuf), StageError> {
+pub fn hand_over(
+    version_dir: &Path,
+    instruction: &Instruction,
+) -> Result<(PathBuf, PathBuf), StageError> {
     let from = match &instruction.staged {
         Some(staged) => staged.join(UPDATER_EXE),
         // A roll back runs this install's own updater.

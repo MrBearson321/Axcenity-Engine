@@ -39,7 +39,7 @@ impl Host for Fake {
         Ok(())
     }
 
-    fn record_version(&mut self, _: InstallKind, version: &str) -> Result<(), String> {
+    fn record_version(&mut self, _: &Path, _: InstallKind, version: &str) -> Result<(), String> {
         self.recorded.push(version.to_owned());
         Ok(())
     }
@@ -70,10 +70,19 @@ fn world(name: &str, new_editor: &str) -> World {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     };
-    write(home.join("Projects/Farm/manifest.json"), "{\"name\":\"Farm\"}");
+    write(
+        home.join("Projects/Farm/manifest.json"),
+        "{\"name\":\"Farm\"}",
+    );
     write(home.join("Projects/Farm/world.json"), "a world");
-    write(home.join(".local/share/Axcenity Editor/app.ron"), "settings");
-    write(home.join(".local/share/Axcenity/Saves/slot1.json"), "a save");
+    write(
+        home.join(".local/share/Axcenity Editor/app.ron"),
+        "settings",
+    );
+    write(
+        home.join(".local/share/Axcenity/Saves/slot1.json"),
+        "a save",
+    );
     write(home.join("apps/notes.txt"), "next to the install");
     let install = home.join("apps/Axcenity");
     write(install.join("install.json"), KIND);
@@ -81,7 +90,10 @@ fn world(name: &str, new_editor: &str) -> World {
     write(install.join(UPDATER_EXE), "old updater");
     write(install.join("Uninstall.exe"), "uninstaller");
     write(install.join("assets/logo.png"), "old logo");
-    write(install.join("assets/removed.png"), "gone in the new version");
+    write(
+        install.join("assets/removed.png"),
+        "gone in the new version",
+    );
     let staged = home.join(".local/share/Axcenity Editor/Updates/0.2.0-alpha.2/staged");
     write(staged.join("install.json"), KIND);
     write(staged.join(EDITOR_EXE), new_editor);
@@ -197,10 +209,17 @@ fn a_new_editor_that_fails_its_check_is_replaced_by_the_old_one() {
         let mut host = closing();
         let outcome = apply::run(&w.instruction(Action::Install), &mut host);
         assert!(!outcome.ok);
-        assert!(outcome.message.contains("didn't start correctly"), "{}", outcome.message);
+        assert!(
+            outcome.message.contains("didn't start correctly"),
+            "{}",
+            outcome.message
+        );
         assert_eq!(outcome.version, "0.2.0-alpha.1");
         assert_eq!(w.read(&w.install.join(EDITOR_EXE)), "0.2.0-alpha.1 old");
-        assert_eq!(w.read(&w.install.join("assets/removed.png")), "gone in the new version");
+        assert_eq!(
+            w.read(&w.install.join("assets/removed.png")),
+            "gone in the new version"
+        );
         assert_eq!(w.siblings(), ["Axcenity", "notes.txt"], "{name}");
         assert_eq!(w.user_data(), before);
         // The old editor comes back.
@@ -237,7 +256,11 @@ fn folders_that_arent_an_updatable_install_are_refused() {
     assert!(refused(Path::new("/")).contains("not an install folder"));
     assert!(refused(Path::new("apps/Axcenity")).contains("not an install folder"));
     // A system package updates through its package manager.
-    fs::write(w.install.join("install.json"), r#"{"schema":1,"kind":"deb"}"#).unwrap();
+    fs::write(
+        w.install.join("install.json"),
+        r#"{"schema":1,"kind":"deb"}"#,
+    )
+    .unwrap();
     assert!(refused(&w.install).contains("Debian package"));
     // A link to an install is not followed.
     #[cfg(unix)]
@@ -250,16 +273,28 @@ fn folders_that_arent_an_updatable_install_are_refused() {
 
     // A staged update of another kind.
     fs::write(w.install.join("install.json"), KIND).unwrap();
-    fs::write(w.staged.join("install.json"), r#"{"schema":1,"kind":"windows-setup"}"#).unwrap();
+    fs::write(
+        w.staged.join("install.json"),
+        r#"{"schema":1,"kind":"windows-setup"}"#,
+    )
+    .unwrap();
     let mut host = closing();
     let outcome = apply::run(&w.instruction(Action::Install), &mut host);
-    assert!(outcome.message.contains("isn't a Linux tar.gz install"), "{}", outcome.message);
+    assert!(
+        outcome.message.contains("isn't a Linux tar.gz install"),
+        "{}",
+        outcome.message
+    );
     assert_eq!(w.read(&w.install.join(EDITOR_EXE)), "0.2.0-alpha.1 old");
 
     // An updater too old for the instruction.
     let mut newer = w.instruction(Action::Install);
     newer.protocol = 99;
-    assert!(apply::run(&newer, &mut closing()).message.contains("newer updater"));
+    assert!(
+        apply::run(&newer, &mut closing())
+            .message
+            .contains("newer updater")
+    );
 }
 
 #[test]
@@ -270,19 +305,29 @@ fn something_else_named_like_the_old_version_is_never_deleted() {
     fs::write(previous.join("thesis.docx"), "years of work").unwrap();
     let outcome = apply::run(&w.instruction(Action::Install), &mut closing());
     assert!(!outcome.ok);
-    assert!(outcome.message.contains("isn't an older install"), "{}", outcome.message);
+    assert!(
+        outcome.message.contains("isn't an older install"),
+        "{}",
+        outcome.message
+    );
     assert_eq!(w.read(&previous.join("thesis.docx")), "years of work");
     assert_eq!(w.read(&w.install.join(EDITOR_EXE)), "0.2.0-alpha.1 old");
     // Nothing to roll back to, either.
     let outcome = apply::run(&w.instruction(Action::RollBack), &mut closing());
-    assert!(outcome.message.contains("no earlier version"), "{}", outcome.message);
+    assert!(
+        outcome.message.contains("no earlier version"),
+        "{}",
+        outcome.message
+    );
 }
 
 #[test]
 fn a_download_is_staged_checked_and_handed_over() {
     let w = world("stage", "0.2.0-alpha.2 new");
     // The archive the release workflow makes from a staged install.
-    let archive = w.root.join("AxcenityEditor-0.2.0-alpha.2-linux-x86_64.tar.gz");
+    let archive = w
+        .root
+        .join("AxcenityEditor-0.2.0-alpha.2-linux-x86_64.tar.gz");
     let gz = flate2::write::GzEncoder::new(
         fs::File::create(&archive).unwrap(),
         flate2::Compression::fast(),
@@ -294,10 +339,21 @@ fn a_download_is_staged_checked_and_handed_over() {
 
     let version_dir = w.root.join("Updates/0.2.0-alpha.2");
     let staged = version_dir.join("staged");
-    stage::stage(&archive, "x-linux-x86_64.tar.gz", InstallKind::LinuxTarball, &staged).unwrap();
+    stage::stage(
+        &archive,
+        "x-linux-x86_64.tar.gz",
+        InstallKind::LinuxTarball,
+        &staged,
+    )
+    .unwrap();
     assert_eq!(w.read(&staged.join(EDITOR_EXE)), "0.2.0-alpha.2 new");
     assert!(matches!(
-        stage::stage(&archive, "x-linux-x86_64.tar.gz", InstallKind::WindowsSetup, &staged),
+        stage::stage(
+            &archive,
+            "x-linux-x86_64.tar.gz",
+            InstallKind::WindowsSetup,
+            &staged
+        ),
         Err(stage::StageError::Wrong(_))
     ));
 
@@ -312,10 +368,8 @@ fn a_download_is_staged_checked_and_handed_over() {
 
 #[test]
 fn the_payload_is_this_platforms_update_archive() {
-    let manifest: axcenity_release::Manifest = serde_json::from_slice(include_bytes!(
-        "../../release/src/testdata/manifest.json"
-    ))
-    .unwrap();
+    let manifest: axcenity_release::Manifest =
+        serde_json::from_slice(include_bytes!("../../release/src/testdata/manifest.json")).unwrap();
     let windows = stage::payload(&manifest, InstallKind::WindowsSetup);
     assert_eq!(
         windows.map(|a| a.file.as_str()),

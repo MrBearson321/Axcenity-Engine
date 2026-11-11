@@ -35,3 +35,15 @@ docs = "docs/editor/shell.md"
 version = "unreleased"
 evidence = "verified"
 source = "this change: crates/release/src/updates.rs, crates/editor/src/app/updates.rs"
+
+[[feature]]
+id = "release.updater"
+name = "Updater"
+subsystem = "release"
+description = "Download and install from Settings > Updates on the Windows setup and the Linux tar.gz: a verified, resumable download, a folder swap after the editor closes, a check that the new version runs, automatic and by-hand roll back."
+status = "active"
+docs = "docs/editor/shell.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "verified"
+source = "this change: crates/updater, crates/editor/src/app/update_install.rs"

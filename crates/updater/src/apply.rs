@@ -116,9 +116,15 @@ pub trait Host {
     fn version_of(&mut self, editor: &Path) -> Result<(String, String), String>;
     /// Starts the editor and leaves it running.
     fn launch(&mut self, editor: &Path, args: &[String]) -> Result<(), String>;
-    /// After a swap: updates the OS's record of the install (the Windows
-    /// uninstall entry's version). Failures are only logged.
-    fn record_version(&mut self, _kind: InstallKind, _version: &str) -> Result<(), String> {
+    /// After a swap: updates the OS's record of the install at `install`
+    /// (the Windows uninstall entry's version, when that entry is this
+    /// folder's). Failures are only logged.
+    fn record_version(
+        &mut self,
+        _install: &Path,
+        _kind: InstallKind,
+        _version: &str,
+    ) -> Result<(), String> {
         Ok(())
     }
     /// Retries a rename that the OS refuses for a while (Windows keeps a
@@ -139,7 +145,11 @@ impl Log {
             let _ = fs::create_dir_all(parent);
         }
         Log {
-            file: fs::OpenOptions::new().create(true).append(true).open(path).ok(),
+            file: fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .ok(),
         }
     }
 
@@ -176,7 +186,11 @@ pub fn run(instruction: &Instruction, host: &mut dyn Host) -> Outcome {
         action: instruction.action,
         ok: result.is_ok(),
         version,
-        message: result.as_ref().err().map(ToString::to_string).unwrap_or_default(),
+        message: result
+            .as_ref()
+            .err()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
         at: now(),
     };
     match &result {
@@ -286,7 +300,11 @@ fn remove_sibling(install: &Path, suffix: &str) -> Result<(), ApplyError> {
     fs::remove_dir_all(&path).map_err(io(format!("couldn't remove {}", path.display())))
 }
 
-fn install(instruction: &Instruction, host: &mut dyn Host, log: &mut Log) -> Result<(), ApplyError> {
+fn install(
+    instruction: &Instruction,
+    host: &mut dyn Host,
+    log: &mut Log,
+) -> Result<(), ApplyError> {
     if instruction.protocol > UPDATE_PROTOCOL {
         return Err(ApplyError::Refused(
             "this update needs a newer updater".to_owned(),
@@ -347,7 +365,9 @@ fn install(instruction: &Instruction, host: &mut dyn Host, log: &mut Log) -> Res
         Err(error) => Err(error),
     };
     if let Err(why) = checked {
-        log.line(&format!("the new editor failed its check ({why}); putting the old one back"));
+        log.line(&format!(
+            "the new editor failed its check ({why}); putting the old one back"
+        ));
         let failed = sibling(install, ".failed");
         let _ = remove_sibling(install, ".failed");
         host.rename(install, &failed)
@@ -357,13 +377,17 @@ fn install(instruction: &Instruction, host: &mut dyn Host, log: &mut Log) -> Res
         let _ = remove_sibling(install, ".failed");
         return Err(ApplyError::Verify(why));
     }
-    if let Err(error) = host.record_version(kind, &expect.version) {
+    if let Err(error) = host.record_version(install, kind, &expect.version) {
         log.line(&format!("couldn't update the uninstall entry: {error}"));
     }
     Ok(())
 }
 
-fn roll_back(instruction: &Instruction, host: &mut dyn Host, log: &mut Log) -> Result<(), ApplyError> {
+fn roll_back(
+    instruction: &Instruction,
+    host: &mut dyn Host,
+    log: &mut Log,
+) -> Result<(), ApplyError> {
     let install = &instruction.install;
     let kind = check_install(install)?;
     let previous = sibling(install, ".previous");
@@ -392,7 +416,7 @@ fn roll_back(instruction: &Instruction, host: &mut dyn Host, log: &mut Log) -> R
             // The newer one becomes the one to go back to.
             host.rename(&aside, &previous)
                 .map_err(io("couldn't keep the newer version"))?;
-            if let Err(error) = host.record_version(kind, &version) {
+            if let Err(error) = host.record_version(install, kind, &version) {
                 log.line(&format!("couldn't update the uninstall entry: {error}"));
             }
             Ok(())
@@ -457,15 +481,37 @@ impl Host for System {
             .map_err(|e| e.to_string())
     }
 
-    fn record_version(&mut self, kind: InstallKind, version: &str) -> Result<(), String> {
+    fn record_version(
+        &mut self,
+        install: &Path,
+        kind: InstallKind,
+        version: &str,
+    ) -> Result<(), String> {
         if kind != InstallKind::WindowsSetup || !cfg!(windows) {
             return Ok(());
         }
         // The same key the installer writes (packaging/windows/installer.nsi).
+        const KEY: &str =
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\AxcenityEditor";
+        // Only the entry for this folder: another copy (or none) is left alone.
+        let query = std::process::Command::new("reg")
+            .args(["query", KEY, "/v", "InstallLocation"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        let listed = String::from_utf8_lossy(&query.stdout)
+            .lines()
+            .find_map(|line| line.split_once("REG_SZ").map(|(_, v)| v.trim().to_owned()));
+        let ours = listed.is_some_and(|listed| {
+            let (a, b) = (Path::new(&listed).canonicalize(), install.canonicalize());
+            matches!((a, b), (Ok(a), Ok(b)) if a == b)
+        });
+        if !ours {
+            return Ok(());
+        }
         let status = std::process::Command::new("reg")
             .args([
                 "add",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\AxcenityEditor",
+                KEY,
                 "/v",
                 "DisplayVersion",
                 "/t",

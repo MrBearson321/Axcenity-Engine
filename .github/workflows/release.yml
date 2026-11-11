@@ -212,10 +212,11 @@ jobs:
         if: matrix.host != 'macos'
         run: |
           set -euo pipefail
-          cargo build --profile "$PROFILE" --locked -p axcenity-editor -p axcenity-player
+          # Windows and Linux installs update in-app, with axcenity-updater.
+          cargo build --profile "$PROFILE" --locked -p axcenity-editor -p axcenity-player -p axcenity-updater
           mkdir -p dist-bin
           ext=""; if [ "${{ matrix.host }}" = "windows" ]; then ext=".exe"; fi
-          for bin in axcenity-editor axcenity-player; do
+          for bin in axcenity-editor axcenity-player axcenity-updater; do
             cp "target/$PROFILE/$bin$ext" "dist-bin/$bin$ext"
           done
       - name: Build macOS universal binaries
@@ -281,6 +282,7 @@ jobs:
             --os windows \
             --editor ci-bins/bin-windows/axcenity-editor.exe \
             --player-native ci-bins/bin-windows/axcenity-player.exe \
+            --updater ci-bins/bin-windows/axcenity-updater.exe \
             --player-windows ci-bins/bin-windows/axcenity-player.exe \
             --player-macos ci-bins/bin-macos/axcenity-player \
             --player-linux ci-bins/bin-linux/axcenity-player \
@@ -391,6 +393,7 @@ jobs:
             --os linux \
             --editor ci-bins/bin-linux/axcenity-editor \
             --player-native ci-bins/bin-linux/axcenity-player \
+            --updater ci-bins/bin-linux/axcenity-updater \
             --player-windows ci-bins/bin-windows/axcenity-player.exe \
             --player-macos ci-bins/bin-macos/axcenity-player \
             --player-linux ci-bins/bin-linux/axcenity-player \

@@ -673,6 +673,7 @@ dependencies = [
  "axcenity-testing",
  "axcenity-toolbox",
  "axcenity-ui",
+ "axcenity-updater",
  "axcenity-workspace-hack",
  "dioxus-cli-config",
  "dioxus-devtools",
@@ -680,6 +681,7 @@ dependencies = [
  "egui-phosphor",
  "egui_dock",
  "env_logger",
+ "flate2",
  "image",
  "log",
  "memory-stats",
@@ -692,6 +694,7 @@ dependencies = [
  "serde",
  "serde_json",
  "subsecond",
+ "tar",
  "zip",
 ]
 

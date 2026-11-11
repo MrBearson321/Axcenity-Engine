@@ -142,6 +142,8 @@ Section "un.Uninstall"
   RMDir "$SMPROGRAMS\$StartMenuFolder"
 
   RMDir /r "$INSTDIR"
+  ; The version an in-app update replaced, kept for Roll back (crates/updater).
+  RMDir /r "$INSTDIR.previous"
 
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AxcenityEditor"
   DeleteRegKey HKCU "Software\Axcenity\Editor"

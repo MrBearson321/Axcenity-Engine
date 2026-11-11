@@ -5,8 +5,8 @@
 //! newest release's signed manifest. Only an official build with the release
 //! key looks at all; a local build says so and never touches the network.
 //! When an update is found, a quiet chip by the Settings gear says so (never
-//! during Play), and a short note shows once. Installing it is Phase 6; for
-//! now the release page has the downloads.
+//! during Play), and a short note shows once. Downloading and installing it:
+//! `update_install.rs`.
 
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -49,6 +49,8 @@ pub(super) struct Updates {
     /// is said even when it's "up to date".
     by_hand: bool,
     pub outcome: Option<Outcome>,
+    /// Downloading and installing the found update (`update_install.rs`).
+    pub install: super::update_install::Install,
 }
 
 impl Updates {
@@ -70,6 +72,14 @@ impl Updates {
             Some(Outcome::Available(update)) if self.prefs.notifies(&update.candidate.version) => {
                 Some(update)
             }
+            _ => None,
+        }
+    }
+
+    /// The found update, dismissed or not.
+    pub fn available_or_dismissed(&self) -> Option<&Update> {
+        match &self.outcome {
+            Some(Outcome::Available(update)) => Some(update),
             _ => None,
         }
     }
@@ -331,6 +341,8 @@ impl EditorApp {
         }
         ui.add_space(space::L);
         self.update_result(ui);
+        ui.add_space(space::L);
+        self.roll_back_controls(ui);
     }
 
     /// The last check's result on the Updates page.
@@ -375,6 +387,15 @@ impl EditorApp {
                         .color(palette.text_weak),
                     );
                 }
+                if !manifest.notes.breaking.is_empty() {
+                    ui.label(egui::RichText::new("Breaking changes:").color(palette.warning));
+                    for note in &manifest.notes.breaking {
+                        ui.add(egui::Label::new(format!("• {}", note.title)).wrap());
+                    }
+                }
+                ui.add_space(space::S);
+                self.install_controls(ui, &update);
+                ui.add_space(space::S);
                 ui.horizontal_wrapped(|ui| {
                     ui.hyperlink_to(
                         theme::with_icon(icons::ARROW_SQUARE_OUT, "Release page and downloads"),

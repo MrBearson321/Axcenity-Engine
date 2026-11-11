@@ -191,8 +191,8 @@ fn lift_single_folder(into: &Path, written: Vec<PathBuf>) -> Result<Vec<PathBuf>
     let Some(first) = tops.next() else {
         return Ok(written);
     };
-    let all_under_one = written.iter().all(|p| p.components().count() > 1)
-        && tops.all(|top| top == first);
+    let all_under_one =
+        written.iter().all(|p| p.components().count() > 1) && tops.all(|top| top == first);
     if !all_under_one {
         return Ok(written);
     }
@@ -214,7 +214,8 @@ mod tests {
     use std::io::Write;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("axcenity-extract-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("axcenity-extract-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -253,13 +254,22 @@ mod tests {
     fn a_zip_unpacks_at_its_root() {
         let dir = scratch("zip");
         let archive = dir.join("update.zip");
-        zip_of(&archive, &[("install.json", b"{}"), ("bin/axcenity-editor.exe", b"MZ")]);
+        zip_of(
+            &archive,
+            &[("install.json", b"{}"), ("bin/axcenity-editor.exe", b"MZ")],
+        );
         let files = extract(&archive, Format::Zip, &dir.join("staged")).unwrap();
         assert_eq!(
             files,
-            [PathBuf::from("bin/axcenity-editor.exe"), PathBuf::from("install.json")]
+            [
+                PathBuf::from("bin/axcenity-editor.exe"),
+                PathBuf::from("install.json")
+            ]
         );
-        assert_eq!(fs::read(dir.join("staged/bin/axcenity-editor.exe")).unwrap(), b"MZ");
+        assert_eq!(
+            fs::read(dir.join("staged/bin/axcenity-editor.exe")).unwrap(),
+            b"MZ"
+        );
     }
 
     #[test]
@@ -277,7 +287,10 @@ mod tests {
         let files = extract(&archive, Format::TarGz, &staged).unwrap();
         assert_eq!(
             files,
-            [PathBuf::from("axcenity-editor"), PathBuf::from("install.json")]
+            [
+                PathBuf::from("axcenity-editor"),
+                PathBuf::from("install.json")
+            ]
         );
         assert_eq!(fs::read(staged.join("axcenity-editor")).unwrap(), b"ELF");
         #[cfg(unix)]
@@ -291,7 +304,13 @@ mod tests {
 
     #[test]
     fn entries_that_could_leave_the_folder_are_refused() {
-        for name in ["../evil", "a/../../evil", "/etc/evil", "C:/evil", "a\\..\\..\\evil"] {
+        for name in [
+            "../evil",
+            "a/../../evil",
+            "/etc/evil",
+            "C:/evil",
+            "a\\..\\..\\evil",
+        ] {
             assert!(
                 matches!(safe_relative(name), Err(ExtractError::Unsafe(_))),
                 "{name}"
@@ -321,7 +340,8 @@ mod tests {
         let mut header = tar::Header::new_gnu();
         header.set_entry_type(tar::EntryType::Symlink);
         header.set_size(0);
-        tar.append_link(&mut header, "top/link", "/etc/passwd").unwrap();
+        tar.append_link(&mut header, "top/link", "/etc/passwd")
+            .unwrap();
         tar.into_inner().unwrap().finish().unwrap();
         assert!(matches!(
             extract(&archive, Format::TarGz, &dir.join("staged")),
