@@ -914,6 +914,15 @@ impl History {
         self.open = None;
     }
 
+    /// Renames the newest undo step, for one recorded by a path that names
+    /// its own steps on behalf of a caller that labels them differently
+    /// (an AI client's import). Nothing happens with no steps.
+    pub fn relabel_top(&mut self, label: String) {
+        if let Some(step) = self.undo.last_mut() {
+            step.label = label;
+        }
+    }
+
     /// What Undo would undo, such as "Move Pad".
     pub fn undo_label(&self) -> Option<&str> {
         self.undo.last().map(|step| step.label.as_str())

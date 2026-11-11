@@ -45,6 +45,7 @@ mod watch;
 
 pub(super) use export::ExportTarget;
 pub(super) use import::is_package;
+pub(in crate::app) use import::{asset_files, files_made_since};
 
 /// An error and its causes on one line, the way `{:#}` shows an `anyhow::Error`.
 pub(super) fn chain(err: &dyn std::error::Error) -> String {
