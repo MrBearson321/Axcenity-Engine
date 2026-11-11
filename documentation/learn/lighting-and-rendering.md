@@ -19,7 +19,7 @@ Select **Lighting** in the Explorer:
 
 ## Lights
 
-**PointLight**, **SpotLight** and **RectLight** light the area around them. Put one in a part to make a lamp, or insert one with nothing selected and it stands on its own, shown as an icon you can move and turn. Set **Color**, **Brightness** and **Range** (and a spot's **Angle**, a rect's **Width** and **Height**); turn on **Shadows** to have it cast them. The **Lighting** tool (**U**) adds and tunes lights in many parts at once. **View > Light Cones** shows where every light reaches. A part's **CastShadow** stops it casting a shadow; **Material** Neon and a part's **Emission** make it glow.
+**PointLight**, **SpotLight** and **RectLight** light the area around them. Put one in a part to make a lamp, or insert one with nothing selected and it stands on its own, shown as an icon you can move and turn. Set **Color**, **Brightness** and **Range** (and a spot's **Angle**, a rect's **Width** and **Height**); turn on **Shadows** to have it cast them. The **Lighting** tool (**U**) adds and tunes lights in many parts at once. **Viewport > Light Cones** shows where every light reaches. A part's **CastShadow** stops it casting a shadow; **Material** Neon and a part's **Emission** make it glow.
 
 ## Reflections and indirect light
 
@@ -36,10 +36,10 @@ A **ParticleEmitter** in a part gives off particles (fire, smoke, sparks). The *
 
 ## Graphics quality
 
-**Settings > Graphics** sets this computer's preset (**Low**, **Medium**, **High** or **Ultra**) and overrides for shadows, shadow distance, post-processing, render scale, texture quality and anti-aliasing (FXAA, MSAA or TAA). The panel says what is in use and why anything was lowered. In a built game players choose the same from the game's settings. These settings never change your project.
+**Settings > Graphics** sets this computer's preset (**Low**, **Medium**, **High** or **Ultra**) and overrides for shadows, shadow distance, post-processing, render scale, texture quality and anti-aliasing (FXAA, MSAA or TAA). The panel says what is in use and why anything was lowered. Below 100% render scale the scene is drawn smaller and then upscaled with an edge-aware filter and sharpened (in the style of AMD FSR 1), which looks noticeably crisper than a plain stretch; there's nothing to switch on. **Debug > Graphics Benchmark…** measures this computer and recommends the editor's settings. In a built game players choose the same from the game's settings. These settings never change your project.
 
 ## Seeing how it's drawn
 
-**View > View Mode** switches the Scene to debug views such as wireframe, normals and overdraw. **View > Overlays > Culling** shows what is drawn and what is skipped. The **Profiler** panel's Graphics tab counts draw calls, triangles and video memory, and times each rendering pass on the GPU. See [Debugging and performance](debugging-and-performance.md).
+**Viewport > View Mode** switches the Scene to debug views such as wireframe, normals and overdraw. **Viewport > Overlays > Culling** shows what is drawn and what is skipped. The **Profiler** panel's Graphics tab counts draw calls, triangles and video memory, and times each rendering pass on the GPU. See [Debugging and performance](debugging-and-performance.md).
 
 > **Known limits.** Overlapping see-through objects can blend in the wrong order. Lights are sorted in screen tiles, so very many lights at different depths cost more than they would with clustering. Rect lights light from one representative point.

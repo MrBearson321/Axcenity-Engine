@@ -9,6 +9,7 @@ use axcenity_render::glam::{Quat, Vec3};
 
 use super::posing::{Posed, Posing, Skeleton};
 use super::property_editor::NewKeys;
+
 use super::*;
 
 /// The bones a drag doing `posing` sends, with their transforms.
@@ -297,6 +298,28 @@ impl AnimationStudio {
         }
     }
 
+    /// The open clip as the transport sees it: whether it plays, the
+    /// playhead and the length, in seconds, and its frames a second.
+    pub fn transport_state(&mut self) -> (bool, f64, f64, f64) {
+        let doc = self.clip.playback().expect("a clip is open");
+        (
+            doc.playing(),
+            doc.playhead(),
+            doc.length(),
+            doc.frame_rate(),
+        )
+    }
+
+    /// The preview's playback rate.
+    pub fn preview_rate(&self) -> f64 {
+        self.clip.rate.0
+    }
+
+    /// Sets the preview's playback rate, as its box does.
+    pub fn set_preview_rate(&mut self, rate: f64) {
+        self.clip.rate.0 = rate;
+    }
+
     /// Moves the open clip's playhead to `seconds` (paused).
     pub fn set_playhead(&mut self, seconds: f64) {
         match &mut self.clip.doc {
@@ -385,6 +408,14 @@ impl AnimationStudio {
         };
         doc.file.start = start;
         doc.file.end = end;
+    }
+
+    /// The open keyed clip as it would be saved.
+    pub fn open_keyed_file(&self) -> axcenity_anim::ClipFile {
+        let Some(Clip::Property(doc)) = &self.clip.doc else {
+            panic!("no keyed clip is open");
+        };
+        doc.file.clone()
     }
 
     /// The open linked clip as it would be saved.

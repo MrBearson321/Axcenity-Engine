@@ -16,7 +16,7 @@ Items: `Plastic`, `SmoothPlastic`, `Wood`, `WoodPlanks`, `Marble`, `Granite`, `C
 
 The choices of `Enum.PartType`.
 
-Items: `Block`, `Ball`, `Cylinder`, `Wedge`, `Capsule`
+Items: `Block`, `Ball`, `Cylinder`, `Wedge`, `Capsule`, `CornerWedge`
 
 ## Enum.KeyCode
 

@@ -158,11 +158,13 @@ pub enum Insertable {
 
 impl Insertable {
     /// The primitives, in toolbar order.
-    pub const PARTS: [Insertable; 4] = [
+    pub const PARTS: [Insertable; 6] = [
         Insertable::Part(PartType::Block),
         Insertable::Part(PartType::Ball),
         Insertable::Part(PartType::Cylinder),
         Insertable::Part(PartType::Wedge),
+        Insertable::Part(PartType::CornerWedge),
+        Insertable::Part(PartType::Capsule),
     ];
     /// The classes that group other Instances.
     pub const GROUPS: [Insertable; 2] = [Insertable::Model, Insertable::Folder];
@@ -340,6 +342,7 @@ impl Insertable {
             Insertable::Part(PartType::Cylinder) => "Cylinder",
             Insertable::Part(PartType::Wedge) => "Wedge",
             Insertable::Part(PartType::Capsule) => "Capsule",
+            Insertable::Part(PartType::CornerWedge) => "Corner Wedge",
             Insertable::MeshPart => "MeshPart",
             Insertable::Model => "Model",
             Insertable::Folder => "Folder",
@@ -605,11 +608,14 @@ pub fn light_has_part_parent(world: &World, near: Option<InstanceId>) -> bool {
 }
 
 /// The size a new part of each shape starts with, in studs. Blocks and
-/// wedges are the default Part size; spheres are 2 across; cylinders are 4
-/// long (along X) and 2 across, so they look like cylinders straight away.
+/// wedges are the default Part size; spheres are 2 across; cylinders and
+/// capsules are 4 long (along X) and 2 across, so they look like what they
+/// are straight away; a corner wedge is a 2-stud cube's corner, so its
+/// slopes are 45°.
 fn new_part_size(shape: PartType) -> Vector3 {
     match shape {
         PartType::Block | PartType::Wedge => Vector3::new(4.0, 1.0, 2.0),
+        PartType::CornerWedge => Vector3::new(2.0, 2.0, 2.0),
         PartType::Ball => Vector3::new(2.0, 2.0, 2.0),
         PartType::Cylinder | PartType::Capsule => Vector3::new(4.0, 2.0, 2.0),
     }

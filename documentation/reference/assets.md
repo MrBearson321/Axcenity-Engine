@@ -46,7 +46,7 @@ Each computer has a **texture memory budget** from its graphics quality (256 MB 
 
 ## The Toolbox and licences
 
-The Toolbox downloads textures, skies, models and sounds from **ambientCG** and **Poly Haven** (public domain, CC0) and **Openverse** (mixed licences, filtered to CC0 and CC BY to start) into a library on your computer, then copies them into the project. Where each asset came from and its licence are kept in `.axcenity/asset-sources.json`, and Build Game writes the credits they ask for into `CREDITS.txt`, warning about anything not cleared for a commercial game.
+The Toolbox downloads textures, skies, models and sounds from **ambientCG** and **Poly Haven** (public domain, CC0) and **Openverse** (mixed licences, filtered to CC0 and CC BY to start) into a library on your computer, then copies them into the project. **All sources** searches every library at once for textures and skies, and the Sounds tab warns that many sounds aren't cleared for commercial use. The **Downloaded / Imported Assets** tab lists everything that came from outside the editor, one row per asset, with its licence, credit line and files. Where each asset came from and its licence are kept in `.axcenity/asset-sources.json`, and Build Game writes the credits they ask for into `CREDITS.txt`, warning about anything not cleared for a commercial game.
 
 > **Known limits.** Model files aren't watched while the editor runs: reopen the project after replacing one outside the editor. Some older projects name assets by path rather than ID; both work.
 

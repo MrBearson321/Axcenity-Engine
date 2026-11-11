@@ -9,6 +9,10 @@
 //! subtitles and levels; drag a section to move it, or its ends to resize
 //! it, and pick one to set it in the inspector below.
 //!
+//! Above the timeline, the Animation tab's transport bar (start, a frame
+//! back, play or pause, a frame on, end, stop, a seek bar, the time and the
+//! preview's rate), with its keys while the mouse is over the tab.
+//!
 //! **Preview** shows the sequence in the Scene view at the playhead without
 //! entering Play: a copy of the world put where the sequence has it (by the
 //! same `SequenceRun` the game plays), posed by its own Animators and seen
@@ -33,6 +37,7 @@ use eframe::egui;
 use crate::animation::object_preview::Focus;
 use crate::animation::property_editor::PropertyDoc;
 use crate::animation::timeline::Timeline;
+use crate::animation::transport;
 use crate::theme::{self, icons};
 
 /// How long a new sequence is, in seconds.
@@ -534,6 +539,8 @@ pub struct Sequencer {
     pub preview_on: bool,
     new_name: String,
     preview: Option<Preview>,
+    /// How fast the preview plays (the transport's rate).
+    pub rate: transport::Rate,
     audio: GameAudio,
     /// Errors to show once.
     pub errors: Vec<String>,
@@ -643,7 +650,18 @@ impl Sequencer {
     /// open file was changed (to write once the mouse is let go).
     pub fn show(&mut self, ui: &mut egui::Ui, scene: &SequencerScene) -> Vec<SequencerAction> {
         let mut actions = Vec::new();
-        let dt = f64::from(ui.input(|input| input.unstable_dt)).min(MAX_FRAME_SECONDS);
+        // The transport's keys first, before any widget of the tab's can
+        // take Space or an arrow.
+        if let Some(doc) = &mut self.doc
+            && ui.rect_contains_pointer(ui.max_rect())
+            && transport::keys_free(ui.ctx())
+        {
+            for command in ui.input_mut(transport::keys) {
+                transport::apply(&mut doc.keys, command);
+            }
+        }
+        let dt =
+            f64::from(ui.input(|input| input.unstable_dt)).min(MAX_FRAME_SECONDS) * self.rate.0;
         if let Some(doc) = &mut self.doc {
             doc.tick(dt);
             if doc.keys.playing {
@@ -697,28 +715,7 @@ impl Sequencer {
         // What's picked is keyed as the preview shows it.
         let shown = self.preview.as_ref().map_or(scene.world, |p| &p.world);
         crate::responsive::toolbar(ui, |ui| {
-            let keys = &mut doc.keys;
-            let (icon, hover) = if keys.playing {
-                (icons::PAUSE, "Pause the preview")
-            } else {
-                (icons::PLAY, "Play the preview")
-            };
-            if ui.button(icon).on_hover_text(hover).clicked() {
-                if !keys.playing && keys.playhead >= keys.file.duration {
-                    keys.playhead = 0.0;
-                }
-                keys.playing = !keys.playing;
-            }
-            if ui
-                .button(icons::STOP)
-                .on_hover_text("Stop and go back to the start")
-                .clicked()
-            {
-                keys.playing = false;
-                keys.playhead = 0.0;
-            }
-            ui.monospace(format!("{:.2} s", keys.playhead));
-            let mut duration = keys.file.duration;
+            let mut duration = doc.duration();
             ui.label("Length");
             if ui
                 .add(
@@ -744,6 +741,10 @@ impl Sequencer {
                 actions.push(SequencerAction::Insert(doc.path.clone()));
             }
         });
+
+        if let Some(command) = transport::bar(ui, &doc.keys, &mut self.rate) {
+            transport::apply(&mut doc.keys, command);
+        }
 
         // The timeline: playhead, events, and the end as the duration.
         let events: Vec<(f64, String)> = doc

@@ -1,7 +1,7 @@
 ---
-description: The window, the ribbon, the panels and how to arrange them, the camera, search and settings.
+description: The window, the ribbon, the panels and how to arrange them, the camera, search, settings and plugins.
 icon: layout
-samples: [hello-part]
+samples: [hello-part, hello-plugins]
 ---
 
 # Editor interface
@@ -12,7 +12,9 @@ The editor is one window: a header with the menus, a **ribbon** of tools under i
 
 - **File**: New Project, Open Project, Save, Version History, Save Checkpoint, Back Up Project, Input, Close Project, Import, **Build Game**, stylesheets, Check Assets, Set Up VS Code Autocomplete, Settings and Quit.
 - **Edit**: undo and redo, rename, duplicate and delete, **Search Everything**, the Command Palette, Quick Open and Find in Scripts.
-- **View**: theme, **Panels** (show or hide any panel), **Reset Layout**, **Layout** presets, Light Cones, the View Cube, the measuring **Grid**, **View Mode** (debug views) and **Overlays** (colliders, raycasts, bounds, sound emitters, nav mesh, agent paths, constraints, culling).
+- **View**: the editor's own windows: **Panels** (show or hide any panel), **Reset Layout**, **Layout** presets and **New Ribbon Tab…**.
+- **Viewport**: what the Scene draws over the world while you edit: the guides (the measuring **Grid**, the **View Cube**, **Light Cones** and the **Movement Guide**, the line and distance shown while you move a part), **View Mode** (debug views), **Overlays** (colliders, raycasts, bounds, sound emitters, nav mesh, agent paths, constraints, culling) and **Viewport Settings…**.
+- **Debug**: **Graphics Benchmark…**, which measures how this computer draws the viewport and recommends the editor's own graphics settings (never your game's).
 - **Help**: **Learn** (this page, the Documentation and the API Reference in a window beside your project), the Version Explorer, Check for Updates and About.
 
 The title in the middle shows the project's name, with a `*` while there are unsaved changes.
@@ -62,15 +64,31 @@ Press **Ctrl+K** (**Cmd+K** on macOS) to search the whole editor at once: comman
 
 ## Settings
 
-**File > Settings…** (**Ctrl+,**) has:
+**File > Settings…** (**Ctrl+,**, or the gear) has two groups. **Editor** settings are yours, saved on this computer for every project:
 
-- **Appearance**: dark, light or system theme, accent colour and interface scale.
+- **Appearance**: dark, light or system theme, accent colour and interface scale. (The theme is no longer in the View menu.)
 - **Text & density**: Comfortable or Compact, and the code font size.
-- **Editor layout**: panels, layouts, the grid and the overlays.
+- **Editor layout**: panels, layout presets and your saved layouts, and the start screen's navigation.
+- **Viewport**: the grid and its strength, the view cube, light cones, the movement guide, the view mode and the overlays: the same switches as the Viewport menu.
 - **Graphics**: the viewport's quality preset, shadows, post-processing, render scale, texture quality and anti-aliasing for this computer. These change how the editor draws, not your game's own Lighting.
 - **Shortcuts**: every keyboard shortcut, grouped by where it works.
 - **Accessibility**: Reduce motion, Increase contrast and the steady frame rate.
 - **Updates**: the update channel and checks, on official builds.
+
+**Project** settings (**This project**) are saved in the project folder and shared with everyone who opens it: the project's name and folder, **Input…**, **Collision Groups…**, and the Workspace and Lighting settings.
+
+## Plugins
+
+> **Experimental.** Plugins work, but their API may still change.
+
+Plugins are Lua scripts that add tools to the editor: buttons on the ribbon's **Plugins** tab and panels of their own built from UI objects. They run only while you edit, never in a built game.
+
+- A plugin is a folder with a `plugin.json` (its name and version) and an `init.lua`, either in the project's `plugins/` folder (for that project) or in the editor's own **Plugins** folder (for every project). Plugins reload when you save their files.
+- The **Plugins** panel (**View > Panels**) lists them, with an on/off box, **Reload** and any errors. **New Plugin…** makes a starter plugin to edit.
+- **Export** on a plugin saves it as one `.axcenity-plugin` file to send to someone. **Import plugin…**, in the Plugins panel or the Toolbox's **Packs** menu, installs one. A package may only hold `plugin.json`, `.lua` and `.css` files.
+- A plugin can only read and write the project's files if its `plugin.json` asks for the `files` permission.
+
+The [hello-plugins](https://github.com/MrBearson321/Axcenity-Engine/tree/main/examples/hello-plugins) sample has two worked plugins.
 
 ## Keyboard shortcuts you'll use most
 

@@ -257,18 +257,58 @@ pub fn wedge() -> MeshData {
     mesh
 }
 
+/// A corner wedge: a full bottom face and a point at the top back right
+/// corner (+X, +Y, +Z), with two upright triangles (right and back) and two
+/// sloping ones running up to that point.
+pub fn corner_wedge() -> MeshData {
+    let mut mesh = MeshData::default();
+    mesh.push_quad(Vec3::NEG_Y, Vec3::NEG_Y * 0.5, Vec3::X * 0.5, Vec3::Z * 0.5);
+    let [front_left, front_right, back_right, back_left] = [
+        Vec3::new(-0.5, -0.5, -0.5),
+        Vec3::new(0.5, -0.5, -0.5),
+        Vec3::new(0.5, -0.5, 0.5),
+        Vec3::new(-0.5, -0.5, 0.5),
+    ];
+    let top = Vec3::splat(0.5);
+    // A point inside, so each triangle can be turned to face away from it.
+    let inside = Vec3::new(0.25, -0.25, 0.25);
+    for [a, b, c] in [
+        [front_right, back_right, top],
+        [back_right, back_left, top],
+        [front_left, front_right, top],
+        [back_left, front_left, top],
+    ] {
+        let mut corners = [a, b, c];
+        let middle = (a + b + c) / 3.0;
+        if (b - a).cross(c - a).dot(middle - inside) < 0.0 {
+            corners.swap(1, 2);
+        }
+        let [a, b, c] = corners;
+        let normal = (b - a).cross(c - a).normalize();
+        // Texture coordinates in studs across the face, from its first corner.
+        let u_dir = (b - a).normalize();
+        let v_dir = normal.cross(u_dir);
+        let uv = |point: Vec3| [(point - a).dot(u_dir), (point - a).dot(v_dir)];
+        let ids = corners.map(|corner| mesh.push_vertex(corner, normal, uv(corner), u_dir, 1.0));
+        mesh.indices.extend(ids);
+    }
+    mesh
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// Each mesh with a point that lies inside it.
-    fn all_meshes() -> [(&'static str, MeshData, Vec3); 4] {
+    fn all_meshes() -> [(&'static str, MeshData, Vec3); 5] {
         [
             ("block", block(), Vec3::ZERO),
             ("sphere", sphere(), Vec3::ZERO),
             ("cylinder", cylinder(), Vec3::ZERO),
             // The wedge's center lies on its slope, so use a point below the slope.
             ("wedge", wedge(), Vec3::new(0.0, -0.25, 0.25)),
+            // Likewise below the corner wedge's slopes, toward its point.
+            ("corner wedge", corner_wedge(), Vec3::new(0.25, -0.25, 0.25)),
         ]
     }
 

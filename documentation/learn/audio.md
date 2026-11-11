@@ -32,7 +32,7 @@ end)
 
 ## Spatial sound
 
-Tick **Spatial** on a Sound and it plays from a place in the world: it gets quieter with distance from the camera and pans left and right as you turn. The place is the part (or model part, or terrain) the Sound is inside, or its **Position** when it isn't in one. **View > Overlays > Emitters** marks where sounds are in the editor.
+Tick **Spatial** on a Sound and it plays from a place in the world: it gets quieter with distance from the camera and pans left and right as you turn. The place is the part (or model part, or terrain) the Sound is inside, or its **Position** when it isn't in one. **Viewport > Overlays > Emitters** marks where sounds are in the editor.
 
 - **RollOffMinDistance** (10 studs to start) is how far it stays at full volume, and **RollOffMaxDistance** (150) where it can no longer be heard.
 - **RollOffMode** picks the curve: **Inverse** (natural, the default), **Linear**, **LinearSquare** (quieter sooner) or **InverseTapered** (natural, fading out smoothly at the end).

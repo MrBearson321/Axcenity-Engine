@@ -860,7 +860,7 @@ fn the_layout_buttons_switch_between_sidebar_and_top_bar() {
 // Moved from widgets.rs when it went to the editor kit: it draws the
 // start screen's brand mark.
 #[test]
-fn the_logo_entrances_the_dots_and_the_spotlight_draw() {
+fn the_logo_entrances_and_the_spotlight_draw() {
     let pointer = egui::pos2(340.0, 200.0);
     let mut draw = |ui: &mut egui::Ui| {
         let ctx = &ui.ctx().clone();
@@ -868,7 +868,6 @@ fn the_logo_entrances_the_dots_and_the_spotlight_draw() {
         egui::CentralPanel::default().show(ui, |ui| {
             let palette = crate::theme::palette(ui.ctx());
             let (top, ink) = (ui.max_rect().top() + 20.0, palette.text_strong);
-            crate::widgets::dot_grid(ui.painter(), ui.max_rect(), ink.gamma_multiply(0.04));
             let at = |index: usize, y: f32| {
                 Rect::from_min_size(egui::pos2(20.0 + index as f32 * 100.0, y), vec2(80.0, 80.0))
             };
@@ -891,7 +890,6 @@ fn the_logo_entrances_the_dots_and_the_spotlight_draw() {
                 egui::Id::new("card"),
                 1.0,
             );
-            crate::widgets::atmosphere(ui, ui.max_rect());
             ui.horizontal(|ui| {
                 let icons = crate::theme::icons::SQUARES_FOUR;
                 let _ = crate::widgets::nav_rail(ui, icons, "Projects", Some(3), true, 1.0);
@@ -912,5 +910,256 @@ fn the_logo_entrances_the_dots_and_the_spotlight_draw() {
             let ctx = crate::theme::test_context();
             let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
         }
+    }
+}
+
+/// Where every button sits on each frame (60 a second) while the sidebar
+/// folds (`fold`) or opens, `width` wide, from a settled start.
+fn slide_frames(width: f32, fold: bool) -> Vec<Vec<(String, f32, f32, f32)>> {
+    let mut projects: Vec<ProjectLink> = (1..=9).map(|n| link(&format!("Project {n}"))).collect();
+    let mut start = StartScreen::default();
+    start.set_nav(StartNav {
+        folded: !fold,
+        ..Default::default()
+    });
+    let ctx = theme::test_context();
+    ctx.enable_accesskit();
+    let mut frames = Vec::new();
+    let mut time = 0.0;
+    for frame in 0..60 {
+        if frame == 10 {
+            start.set_nav(StartNav {
+                folded: fold,
+                ..Default::default()
+            });
+        }
+        time += if frame < 10 { 1.0 } else { 1.0 / 60.0 };
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 1400.0))),
+            time: Some(time),
+            ..Default::default()
+        };
+        let output = crate::theme::run(&ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
+            theme::apply(ctx, &theme::Appearance::default());
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
+                .show(ui, |ui| {
+                    let brand = Brand::load(ui.ctx());
+                    assert!(start.show(ui, &mut projects, &brand).is_none());
+                });
+        });
+        if frame >= 9 {
+            frames.push(drawn_buttons(&output));
+        }
+    }
+    frames
+}
+
+#[test]
+fn the_page_slides_with_the_sidebar_instead_of_reflowing() {
+    for width in [1100.0, 1280.0, 1440.0, 1920.0] {
+        for fold in [true, false] {
+            let frames = slide_frames(width, fold);
+            let cards = |frame: &[(String, f32, f32, f32)]| -> Vec<(f32, f32, f32)> {
+                (1..=9)
+                    .map(|n| {
+                        let name = format!("Project {n}");
+                        let (_, left, right, top) = frame
+                            .iter()
+                            .find(|(label, ..)| *label == name)
+                            .unwrap_or_else(|| panic!("`{name}` is drawn"));
+                        (*left, *right - *left, *top)
+                    })
+                    .collect()
+            };
+            let settled = cards(frames.last().unwrap());
+            let mut last_left = cards(&frames[1])[0].0;
+            // From the first frame of the slide, every card already has the
+            // size and row it ends with; it only moves, one way, steadily.
+            for (index, frame) in frames.iter().enumerate().skip(1) {
+                let now = cards(frame);
+                for ((_, size, top), (_, end_size, end_top)) in now.iter().zip(&settled) {
+                    assert!(
+                        (size - end_size).abs() < 0.5 && (top - end_top).abs() < 0.5,
+                        "{size} wide at {top} on frame {index}, {end_size} at {end_top} at \
+                         the end ({width} wide window, folding {fold})"
+                    );
+                }
+                let left = now[0].0;
+                let step = left - last_left;
+                assert!(
+                    if fold { step <= 0.5 } else { step >= -0.5 },
+                    "frame {index} moved {step} the wrong way ({width} wide, folding {fold})"
+                );
+                assert!(step.abs() < 60.0, "frame {index} jumped {step}");
+                last_left = left;
+            }
+        }
+    }
+}
+
+/// A gradient picture for a project's thumbnail, in a new folder.
+fn pictured_project(name: &str, tint: [u8; 3]) -> ProjectLink {
+    let folder = std::env::temp_dir().join(format!(
+        "axcenity-start-{}-{}",
+        name.replace(' ', "-"),
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&folder).unwrap();
+    let mut rgb = Vec::new();
+    for y in 0..180u32 {
+        for x in 0..320u32 {
+            let shade = |base: u8, along: u32, over: u32| {
+                (u32::from(base) * (over / 2 + along) / over).min(255) as u8
+            };
+            rgb.extend([
+                shade(tint[0], x, 320),
+                shade(tint[1], 180 - y, 180),
+                shade(tint[2], x / 2 + y, 340),
+            ]);
+        }
+    }
+    let mut png_bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut png_bytes, 320, 180);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&rgb)
+        .unwrap();
+    std::fs::write(folder.join(axcenity_project::THUMBNAIL_FILE), png_bytes).unwrap();
+    ProjectLink {
+        name: name.to_owned(),
+        description: String::new(),
+        folder,
+    }
+}
+
+/// Screenshots of the start screen's look: at rest, a card leaning under
+/// the pointer, part way through the sidebar folding, and the light theme.
+/// Only with AXCENITY_SNAPSHOTS.
+#[test]
+fn the_start_screen_look_draws_at_rest_hovered_and_sliding() {
+    let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) else {
+        return;
+    };
+    let size = vec2(1440.0, 900.0);
+    let mut projects = vec![
+        pictured_project("Space Race", [90, 140, 250]),
+        pictured_project("Lava Obby", [250, 120, 60]),
+        pictured_project("Castle Builder", [120, 220, 140]),
+        link("Night Market"),
+    ];
+    // Where the cards are, to point at them.
+    let ctx = theme::test_context();
+    ctx.enable_accesskit();
+    let mut start = StartScreen::default();
+    let mut output = None;
+    for frame in 0..3 {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), size)),
+            time: Some(frame as f64),
+            ..Default::default()
+        };
+        output = Some(crate::theme::run(&ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
+            theme::apply(ctx, &theme::Appearance::default());
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| {
+                    let brand = Brand::load(ui.ctx());
+                    start.show(ui, &mut projects, &brand);
+                });
+        }));
+    }
+    let buttons = drawn_buttons(&output.unwrap());
+    let corner_of = |name: &str| {
+        let (_, left, right, top) = buttons
+            .iter()
+            .find(|(label, ..)| label == name)
+            .unwrap_or_else(|| panic!("`{name}` is drawn"));
+        pos2(left + (right - left) * 0.85, top + 30.0)
+    };
+    let pointers = [
+        ("start-look-rest", None),
+        (
+            "start-look-hover-template",
+            Some(corner_of("Starter scene")),
+        ),
+        ("start-look-hover-game", Some(corner_of("Vehicle"))),
+        ("start-look-hover-project", Some(corner_of("Lava Obby"))),
+    ];
+    for light in [false, true] {
+        let appearance = theme::Appearance {
+            theme: if light {
+                theme::ThemeChoice::Light
+            } else {
+                theme::ThemeChoice::Dark
+            },
+            ..Default::default()
+        };
+        for (name, pointer) in pointers {
+            if light && pointer.is_some() {
+                continue;
+            }
+            let mut start = StartScreen::default();
+            let mut frames: Vec<(f64, Vec<egui::Event>)> =
+                (0..4).map(|i| (f64::from(i) * 0.5, Vec::new())).collect();
+            if let Some(pointer) = pointer {
+                for step in 0..30 {
+                    frames.push((
+                        2.0 + f64::from(step) / 60.0,
+                        vec![egui::Event::PointerMoved(pointer)],
+                    ));
+                }
+            }
+            let file = if light {
+                format!("{name}-light.png")
+            } else {
+                format!("{name}.png")
+            };
+            crate::snapshot::snapshot_timed(&folder.join(file), size, frames, |ui, _| {
+                let ctx = &ui.ctx().clone();
+                theme::apply(ctx, &appearance);
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        let brand = Brand::load(ui.ctx());
+                        start.show(ui, &mut projects, &brand);
+                    });
+            });
+        }
+    }
+    // Part way through folding: a third of the slide in.
+    for (name, stop) in [("start-look-folding", 0.08), ("start-look-folded", 1.0)] {
+        let mut start = StartScreen::default();
+        let mut frames: Vec<(f64, Vec<egui::Event>)> =
+            (0..4).map(|i| (f64::from(i) * 0.5, Vec::new())).collect();
+        frames.push((2.0, Vec::new()));
+        frames.push((2.0 + stop, Vec::new()));
+        let mut frame = 0;
+        crate::snapshot::snapshot_timed(
+            &folder.join(format!("{name}.png")),
+            size,
+            frames,
+            |ui, _| {
+                frame += 1;
+                if frame == 5 {
+                    start.set_nav(StartNav {
+                        folded: true,
+                        ..Default::default()
+                    });
+                }
+                let ctx = &ui.ctx().clone();
+                theme::apply(ctx, &theme::Appearance::default());
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        let brand = Brand::load(ui.ctx());
+                        start.show(ui, &mut projects, &brand);
+                    });
+            },
+        );
     }
 }
