@@ -473,8 +473,10 @@ fn print_output(runtime: &mut ScriptRuntime) {
 
 /// The moving parts to draw between physics steps this frame (roadmap G3).
 fn blends_to_draw(sim: &axcenity_sim::Sim) -> axcenity_scene::Blends {
+    let moving = sim.blends();
     let mut blends = axcenity_scene::Blends::new(sim.physics.blend_alpha());
-    for blend in sim.blends() {
+    blends.reserve(moving.len());
+    for blend in moving {
         blends.add(
             blend.part,
             (blend.from_position, blend.from_orientation),

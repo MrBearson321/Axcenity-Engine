@@ -41,6 +41,11 @@ fn the_car_the_player_sits_in_stays_stepped_and_the_rest_blends() {
     let crate_ = part(&mut world, Vector3::new(20.0, 50.0, 0.0));
 
     let mut sim = Sim::new(world, crate::script_runtime(), Assets::default());
+    // The controller steps first each frame, which is how the frame knows
+    // whose character it is.
+    let assets = sim.assets.clone();
+    sim.characters
+        .step(&mut sim.world, &assets, Default::default(), 0.0);
     for _ in 0..10 {
         sim.physics.step(&mut sim.world, 1.0 / 60.0);
     }

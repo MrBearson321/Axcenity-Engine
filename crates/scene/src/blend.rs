@@ -8,7 +8,7 @@
 //! where the step put the part, and each frame only shifts what it draws.
 
 use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
-use axcenity_render::glam::{Mat4, Quat, Vec3};
+use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{DrawItem, Light};
 use rustc_hash::FxHashMap;
 
@@ -23,8 +23,9 @@ pub struct Blends {
 
 #[derive(Clone, Copy, Debug)]
 struct Blended {
-    from_position: Vec3,
-    from_rotation: Quat,
+    /// What moves the part's draw items from where it was written to
+    /// where it's drawn, worked out once when it's added.
+    shift: Mat4,
     to_position: Vector3,
     to_orientation: Vector3,
 }
@@ -44,15 +45,32 @@ impl Blends {
     /// step wrote: a part that's somewhere else by the time it's drawn (a
     /// script moved it) is drawn where it is.
     pub fn add(&mut self, part: InstanceId, from: (Vector3, Vector3), to: (Vector3, Vector3)) {
+        let to_position = vec3(to.0);
+        let to_rotation = rotation_from_orientation(to.1);
+        let position = vec3(from.0).lerp(to_position, self.alpha);
+        // A step turns a part only a little, so a normalized straight-line
+        // blend of the rotations looks the same as a slerp, without the trig.
+        let rotation = rotation_from_orientation(from.1).lerp(to_rotation, self.alpha);
+        // Undo where it was written, then place it where it's drawn: turn
+        // by the difference, about the written position.
+        let turn = rotation * to_rotation.conjugate();
+        let shift = Mat4::from_rotation_translation(turn, position - turn * to_position);
+        if !shift.is_finite() {
+            return;
+        }
         self.parts.insert(
             part,
             Blended {
-                from_position: vec3(from.0),
-                from_rotation: rotation_from_orientation(from.1),
+                shift,
                 to_position: to.0,
                 to_orientation: to.1,
             },
         );
+    }
+
+    /// Makes room for `more` parts.
+    pub fn reserve(&mut self, more: usize) {
+        self.parts.reserve(more);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -66,27 +84,21 @@ impl Blends {
         if self.parts.is_empty() {
             return None;
         }
-        let class = instance.class();
-        let (part_id, part) = if class == ClassName::Decal || class.is_light() {
-            let parent = instance.parent()?;
-            (parent, world.get(parent)?)
-        } else {
-            (id, instance)
+        let (blended, part) = match self.parts.get(&id) {
+            Some(blended) => (blended, instance),
+            None => {
+                let class = instance.class();
+                if class != ClassName::Decal && !class.is_light() {
+                    return None;
+                }
+                let parent = instance.parent()?;
+                (self.parts.get(&parent)?, world.get(parent)?)
+            }
         };
-        let blended = self.parts.get(&part_id)?;
         let vector = |name| part.property(name).and_then(Value::as_vector3);
-        if vector("Position") != Some(blended.to_position)
-            || vector("Orientation") != Some(blended.to_orientation)
-        {
-            return None;
-        }
-        let to_position = vec3(blended.to_position);
-        let to_rotation = rotation_from_orientation(blended.to_orientation);
-        let position = blended.from_position.lerp(to_position, self.alpha);
-        let rotation = blended.from_rotation.slerp(to_rotation, self.alpha);
-        let written = Mat4::from_rotation_translation(to_rotation, to_position);
-        let shift = Mat4::from_rotation_translation(rotation, position) * written.inverse();
-        shift.is_finite().then_some(shift)
+        (vector("Position") == Some(blended.to_position)
+            && vector("Orientation") == Some(blended.to_orientation))
+        .then_some(blended.shift)
     }
 
     /// Moves `items`, which `instance` just drew, to where it's drawn.

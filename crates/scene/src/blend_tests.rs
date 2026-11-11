@@ -173,3 +173,41 @@ fn blends_rotate_about_the_part_not_the_origin() {
     );
     assert!(rotation.angle_between(Quat::from_rotation_y(45f32.to_radians())) < 1e-3);
 }
+
+/// How much blending adds to building the draw list: 10,000 parts, 1,000
+/// of them blended (S10k's moving drops). Run with
+/// `cargo test -p axcenity-scene --release blend_cost -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn blend_cost() {
+    use std::time::Instant;
+    let mut world = World::new();
+    let mut moving = Vec::new();
+    for i in 0..10_000 {
+        let at = Vector3::new((i % 100) as f32 * 4.0, 1.0, (i / 100) as f32 * 4.0);
+        let id = part(&mut world, at);
+        if i % 10 == 0 {
+            moving.push((id, at));
+        }
+    }
+    let blends = || {
+        let mut blends = Blends::new(0.5);
+        for &(id, at) in &moving {
+            let from = Vector3::new(at.x, at.y + 1.0, at.z);
+            blends.add(id, (from, Vector3::new(10.0, 20.0, 0.0)), (at, ZERO));
+        }
+        blends
+    };
+    let mut cache = TerrainCache::new();
+    cache.set_retained_draw_list(true);
+    let frames = 200;
+    for with in [false, true, false, true] {
+        let started = Instant::now();
+        for _ in 0..frames {
+            cache.set_blends(if with { blends() } else { Blends::default() });
+            std::hint::black_box(draw(&world, &mut cache));
+        }
+        let ms = started.elapsed().as_secs_f64() * 1000.0 / frames as f64;
+        println!("blends {with}: {ms:.3} ms a frame");
+    }
+}

@@ -622,6 +622,9 @@ impl Physics {
     pub fn step(&mut self, world: &mut World, seconds: f64) -> u32 {
         profiling::scope!("Physics::step");
         self.stats = SyncStats::default();
+        // Before syncing scripts' changes, which could make an unread list
+        // of blends wrong.
+        self.blending.start_frame();
         self.sync_from_world(world);
         self.sleep_far_bodies();
         let wind = global_wind(world);
@@ -678,12 +681,12 @@ impl Physics {
         if steps > 0 {
             self.write_to_world(world);
             if interpolating {
-                self.find_blends(&wheels);
+                self.remember_wheels_before_writing();
             }
             vehicles::write_wheels(world, &mut self.parts, &wheels);
         }
         if !interpolating {
-            self.clear_blends();
+            self.blending.forget();
         }
         steps
     }

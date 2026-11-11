@@ -76,7 +76,7 @@ impl Sim {
     pub fn blends(&self) -> Vec<axcenity_physics::Blend> {
         let world = &self.world;
         let mut followed = Vec::new();
-        if let Some(character) = axcenity_character::player_character(world) {
+        if let Some(character) = self.characters.stepped_character(world) {
             followed.extend(axcenity_character::body_parts(world, character));
         }
         if let Some(subject) = self.scripts.camera_followed()

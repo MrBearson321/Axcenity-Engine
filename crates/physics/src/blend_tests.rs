@@ -169,3 +169,46 @@ fn turning_it_off_on_the_workspace_leaves_nothing_to_blend_and_moves_the_same() 
     assert!(off_physics.blends(&[]).is_empty());
     assert_eq!(position(&world, block), position(&off, block));
 }
+
+#[test]
+fn a_list_nobody_read_before_a_script_moved_the_part_is_forgotten() {
+    let (mut world, block, mut physics) = falling_block();
+    assert_eq!(physics.step(&mut world, 1.0 / 60.0), 1);
+    world
+        .set_property(
+            block,
+            "Position",
+            Value::Vector3(Vector3::new(9.0, 80.0, 0.0)),
+        )
+        .unwrap();
+    assert_eq!(physics.step(&mut world, 1.0 / 240.0), 0);
+    assert!(physics.blends(&[]).is_empty());
+}
+
+/// How long listing the blends takes with 1,000 parts falling (S10k's
+/// drops). Run with
+/// `cargo test -p axcenity-physics --release blend_list_cost -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn blend_list_cost() {
+    use std::time::Instant;
+    let mut world = World::new();
+    for i in 0..1000 {
+        let at = Vector3::new((i % 32) as f32 * 3.0, 50.0, (i / 32) as f32 * 3.0);
+        part(&mut world, at, false);
+    }
+    let mut physics = Physics::new();
+    physics.step(&mut world, 1.0 / 60.0);
+    let (mut listing, frames) = (0.0, 60);
+    for _ in 0..frames {
+        physics.step(&mut world, 1.0 / 60.0);
+        let started = Instant::now();
+        let blends = physics.blends(&[]);
+        listing += started.elapsed().as_secs_f64();
+        assert_eq!(blends.len(), 1000);
+    }
+    println!(
+        "listing 1,000 blends: {:.3} ms",
+        listing * 1000.0 / frames as f64
+    );
+}

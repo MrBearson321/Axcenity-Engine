@@ -646,8 +646,10 @@ impl Session {
     /// The moving parts to draw between physics steps (roadmap G3), for
     /// the viewport.
     pub fn blends(&self) -> axcenity_scene::Blends {
+        let moving = self.sim.blends();
         let mut blends = axcenity_scene::Blends::new(self.sim.physics.blend_alpha());
-        for blend in self.sim.blends() {
+        blends.reserve(moving.len());
+        for blend in moving {
             blends.add(
                 blend.part,
                 (blend.from_position, blend.from_orientation),

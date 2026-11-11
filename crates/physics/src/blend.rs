@@ -14,6 +14,8 @@
 //! the stepped values, and results are the same with it on or off. The
 //! Workspace's `PhysicsInterpolation` (on by default) turns it off.
 
+use std::cell::OnceCell;
+
 use super::*;
 
 /// One moving part, before and after the frame's last step, as the world's
@@ -27,17 +29,39 @@ pub struct Blend {
     pub to_orientation: Vector3,
 }
 
-/// What [`Physics`] keeps for [`Blend`]s.
+/// What [`Physics`] keeps for [`Blend`]s. Only the poses before the last
+/// step are kept while stepping: the list is worked out the first time a
+/// host asks for it, so hosts that don't draw (the server, the test runner)
+/// don't pay for it.
 #[derive(Default)]
 pub(crate) struct Blending {
     /// Each awake dynamic body's pose before the last step of the frame.
-    before: HashMap<RigidBodyHandle, Pose>,
-    /// Where the wheels' parts were placed before that step, when an
-    /// earlier step in the same frame placed them.
+    before: Vec<(RigidBodyHandle, Pose)>,
+    /// Where each wheel's part was before that step: where an earlier step
+    /// in the same frame placed it, or else where the last frame wrote it.
     wheels_before: BTreeMap<InstanceId, Pose>,
     /// The blends of the last frame that stepped, by part, each with the
-    /// body that moves it.
-    list: Vec<(RigidBodyHandle, Blend)>,
+    /// body that moves it, once a host has asked for them.
+    list: OnceCell<Vec<(RigidBodyHandle, Blend)>>,
+}
+
+impl Blending {
+    /// At the start of a frame: a list no host asked for while the world
+    /// still matched the last step is forgotten, because syncing scripts'
+    /// changes could make it wrong. One a host read is kept for the frames
+    /// without a step.
+    pub(crate) fn start_frame(&mut self) {
+        if self.list.get().is_none() {
+            self.forget();
+        }
+    }
+
+    /// Forgets every blend: nothing is drawn between steps.
+    pub(crate) fn forget(&mut self) {
+        self.before.clear();
+        self.wheels_before.clear();
+        self.list = OnceCell::new();
+    }
 }
 
 impl Physics {
@@ -51,7 +75,8 @@ impl Physics {
     /// that has one of `keep_stepped`'s parts (and so every part welded to
     /// it). Hosts pass what the camera follows: a camera that follows a
     /// stepped part while the car under it is drawn blended would make the
-    /// car shake on screen.
+    /// car shake on screen. Ask after the frame's [`step`](Self::step); a
+    /// list nobody asked for by the next step is gone.
     pub fn blends(&self, keep_stepped: &[InstanceId]) -> Vec<Blend> {
         let held: HashSet<RigidBodyHandle> = keep_stepped
             .iter()
@@ -59,32 +84,49 @@ impl Physics {
             .collect();
         self.blending
             .list
+            .get_or_init(|| self.find_blends())
             .iter()
             .filter(|(body, _)| !held.contains(body))
             .map(|(_, blend)| *blend)
             .collect()
     }
 
-    /// Before the frame's last step: remembers where each moving body is.
+    /// Before the frame's last step: remembers where each moving body is,
+    /// and where the steps before it this frame placed the wheels.
     pub(crate) fn remember_before_last_step(&mut self, wheels: &BTreeMap<InstanceId, Pose>) {
-        let before = &mut self.blending.before;
-        before.clear();
+        let blending = &mut self.blending;
+        blending.list = OnceCell::new();
+        blending.before.clear();
         for handle in self.rapier.islands.active_bodies() {
             if let Some(body) = self.rapier.bodies.get(handle)
                 && body.is_dynamic()
             {
-                before.insert(handle, *body.position());
+                blending.before.push((handle, *body.position()));
             }
         }
-        self.blending.wheels_before.clone_from(wheels);
+        blending.wheels_before.clone_from(wheels);
     }
 
-    /// After the write-back of a frame that stepped, and before the wheels
-    /// are written: lists every part that moved in the last step.
-    pub(crate) fn find_blends(&mut self, wheels: &BTreeMap<InstanceId, Pose>) {
-        let mut list = std::mem::take(&mut self.blending.list);
-        list.clear();
-        for (&handle, &from) in &self.blending.before {
+    /// After the frame's steps, before the wheels are written: a wheel no
+    /// earlier step this frame placed was where the last frame wrote it.
+    pub(crate) fn remember_wheels_before_writing(&mut self) {
+        for (_, id) in vehicles::wheel_parts(&self.vehicles) {
+            if let Some(part) = self.parts.get(&id) {
+                self.blending.wheels_before.entry(id).or_insert_with(|| {
+                    Pose::from_parts(
+                        to_vec3(part.seen.position),
+                        orientation_to_quat(part.seen.orientation),
+                    )
+                });
+            }
+        }
+    }
+
+    /// Every part that moved in the last step, from where it was before
+    /// that step to where it was written (its `seen`).
+    fn find_blends(&self) -> Vec<(RigidBodyHandle, Blend)> {
+        let mut list = Vec::new();
+        for &(handle, from) in &self.blending.before {
             let Some(body) = self.rapier.bodies.get(handle) else {
                 continue;
             };
@@ -112,38 +154,26 @@ impl Physics {
                 }
             }
         }
-        // A wheel's part is placed by its car, not simulated: before the
-        // last step it was where an earlier step this frame put it, or else
-        // where the last frame wrote it.
+        // A wheel's part is placed by its car, not simulated.
         for (chassis, id) in vehicles::wheel_parts(&self.vehicles) {
-            let (Some(to), Some(part)) = (wheels.get(&id), self.parts.get(&id)) else {
+            let (Some(from), Some(part)) =
+                (self.blending.wheels_before.get(&id), self.parts.get(&id))
+            else {
                 continue;
-            };
-            let (from_position, from_orientation) = match self.blending.wheels_before.get(&id) {
-                Some(from) => (
-                    to_vector3(from.translation),
-                    quat_to_orientation(from.rotation),
-                ),
-                None => (part.seen.position, part.seen.orientation),
             };
             let blend = Blend {
                 part: id,
-                from_position,
-                from_orientation,
-                to_position: to_vector3(to.translation),
-                to_orientation: quat_to_orientation(to.rotation),
+                from_position: to_vector3(from.translation),
+                from_orientation: quat_to_orientation(from.rotation),
+                to_position: part.seen.position,
+                to_orientation: part.seen.orientation,
             };
             if moved(&blend) {
                 list.push((chassis, blend));
             }
         }
         list.sort_unstable_by_key(|(_, blend)| blend.part);
-        self.blending.list = list;
-    }
-
-    /// Forgets every blend: nothing is drawn between steps.
-    pub(crate) fn clear_blends(&mut self) {
-        self.blending.list.clear();
+        list
     }
 }
 
