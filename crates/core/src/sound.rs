@@ -12,6 +12,12 @@
 
 use std::collections::HashSet;
 
+mod spatial;
+
+pub use spatial::{
+    MAX_WALLS, OPEN_CUTOFF, ROLL_OFF_MODES, RollOff, emitter_part, emitter_position, muffle,
+};
+
 use crate::{ClassName, Instance, InstanceId, Value, Vector3, World};
 
 /// A request made by a `Sound` Instance. Hosts apply requests after a script

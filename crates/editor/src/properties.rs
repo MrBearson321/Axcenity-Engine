@@ -2271,6 +2271,8 @@ pub(crate) fn enum_items(enum_name: &str) -> Option<Vec<&'static str>> {
         "ProximityPromptExclusivity" => vec!["OnePerButton", "OneGlobally", "AlwaysShow"],
         // The room a ReverbZone sounds like (Phase 52).
         "ReverbType" => axcenity_audio::REVERB_TYPES.to_vec(),
+        // How a spatial Sound gets quieter with distance (G8).
+        "RollOffMode" => axcenity_audio::mix::ROLL_OFF_MODES.to_vec(),
         // What a Weather lets fall (graphics Phase 27).
         "Precipitation" => vec!["None", "Rain", "Snow"],
         // A SplinePoint's handles and a SplineFollower's ends (Phase 73).

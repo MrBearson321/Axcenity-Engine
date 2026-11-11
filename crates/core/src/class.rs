@@ -1018,7 +1018,6 @@ impl ClassName {
             | ClassName::ServerStorage
             | ClassName::StarterPlayerScripts
             | ClassName::Teams
-            | ClassName::SoundService
             | ClassName::ForceField
             | ClassName::RemoteEvent
             | ClassName::RemoteFunction
@@ -1091,6 +1090,12 @@ impl ClassName {
             ClassName::Color3Value => vec![("Value", Value::Color3(Color3::default()))],
             ClassName::CFrameValue => vec![("Value", Value::CFrame(CFrame::IDENTITY))],
             ClassName::ObjectValue => vec![("Value", Value::Instance(None))],
+            ClassName::SoundService => vec![
+                // On, solid anchored parts between a spatial Sound and the
+                // listener muffle it: quieter and duller with each wall
+                // (roadmap G8).
+                ("Occlusion", Value::Bool(true)),
+            ],
             ClassName::Workspace => vec![
                 // The wind everywhere, in studs a second. It pushes particles
                 // from emitters with WindAffectsDrag, and parts with
@@ -1967,6 +1972,16 @@ impl ClassName {
                 // RollOffMaxDistance. Ignored while Spatial is off.
                 ("RollOffMinDistance", Value::Number(10.0)),
                 ("RollOffMaxDistance", Value::Number(150.0)),
+                // How it gets quieter between the two (`Enum.RollOffMode`,
+                // roadmap G8): Inverse, Linear, LinearSquare or
+                // InverseTapered.
+                (
+                    "RollOffMode",
+                    Value::EnumItem(EnumItem {
+                        enum_name: "RollOffMode".to_owned(),
+                        item: "Inverse".to_owned(),
+                    }),
+                ),
                 // The SoundGroup it plays through, or none for straight
                 // out.
                 ("SoundGroup", Value::Instance(None)),

@@ -309,3 +309,87 @@ fn adding_an_effect_rebuilds_the_bus_and_the_music_carries_on() {
     let after = rig.engine.sounds[&sound].handle.position();
     assert!(after >= before, "from where it was: {before} then {after}");
 }
+
+/// A spatial noise Sound `distance` studs in front of the listener, rolling
+/// off from 10 studs to 110 by `mode`.
+fn noise_ahead(rig: &mut Rig, mode: &str) -> InstanceId {
+    let sound = rig.sound(NOISE, None);
+    rig.set(sound, "Spatial", Value::Bool(true));
+    rig.set(sound, "RollOffMinDistance", Value::Number(10.0));
+    rig.set(sound, "RollOffMaxDistance", Value::Number(110.0));
+    rig.set(
+        sound,
+        "RollOffMode",
+        Value::EnumItem(EnumItem {
+            enum_name: "RollOffMode".to_owned(),
+            item: mode.to_owned(),
+        }),
+    );
+    sound
+}
+
+/// Moves `sound` `distance` studs ahead, lets the volume glide there, then
+/// returns what's heard.
+fn heard_at(rig: &mut Rig, sound: InstanceId, distance: f32) -> Vec<f32> {
+    rig.set(
+        sound,
+        "Position",
+        Value::Vector3(Vector3::new(0.0, 0.0, -distance)),
+    );
+    rig.play(0.2);
+    rig.play(0.3)
+}
+
+#[test]
+fn each_roll_off_mode_is_heard_at_its_curve_s_volume() {
+    for mode in mix::ROLL_OFF_MODES {
+        let mut rig = Rig::new();
+        let sound = noise_ahead(&mut rig, mode);
+        let near = rms(&heard_at(&mut rig, sound, 5.0));
+        assert!(near > 0.05, "{mode} plays close up: {near}");
+        for distance in [20.0, 60.0, 100.0] {
+            let far = rms(&heard_at(&mut rig, sound, distance));
+            let expected = mix::RollOff::named(mode).gain(distance, 10.0, 110.0);
+            assert!(
+                (far / near - expected).abs() < 0.02 + expected * 0.05,
+                "{mode} at {distance}: {} vs {expected}",
+                far / near
+            );
+        }
+        let past = rms(&heard_at(&mut rig, sound, 200.0));
+        assert!(past < 1e-4, "{mode} is silent past the max: {past}");
+    }
+}
+
+#[test]
+fn a_wall_between_makes_a_sound_quieter_and_duller() {
+    let mut rig = Rig::new();
+    let sound = noise_ahead(&mut rig, "Inverse");
+    let open = heard_at(&mut rig, sound, 5.0);
+    let (open_rms, open_bright) = (rms(&open), brightness(&open));
+
+    rig.engine.walls.insert(sound, 1);
+    let walled = heard_at(&mut rig, sound, 5.0);
+    let (walled_rms, walled_bright) = (rms(&walled), brightness(&walled));
+    assert!(
+        walled_rms < open_rms * 0.5,
+        "half as loud, less the highs: {walled_rms} vs {open_rms}"
+    );
+    assert!(
+        walled_bright / walled_rms < open_bright / open_rms * 0.6,
+        "duller: {} vs {}",
+        walled_bright / walled_rms,
+        open_bright / open_rms
+    );
+
+    rig.engine.walls.insert(sound, 3);
+    let thick = rms(&heard_at(&mut rig, sound, 5.0));
+    assert!(thick < walled_rms * 0.5, "more walls, quieter: {thick}");
+
+    rig.engine.walls.clear();
+    let clear = rms(&heard_at(&mut rig, sound, 5.0));
+    assert!(
+        (clear / open_rms - 1.0).abs() < 0.1,
+        "it opens up again: {clear} vs {open_rms}"
+    );
+}
