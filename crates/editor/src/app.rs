@@ -403,6 +403,9 @@ pub struct EditorApp {
     /// Whether the viewport shows the view cube (Test > View, View > View
     /// Cube). On unless turned off; saved between runs.
     view_cube: bool,
+    /// Settings > AI connections: MCP clients working in this window
+    /// (`mcp/live.rs`).
+    ai: mcp::AiConnections,
     /// Whether the viewport shows the measuring grid (saved between runs).
     grid: bool,
     /// How solid the grid's lines are, as a multiple of the usual soft look.
@@ -676,6 +679,7 @@ const LAYOUT_KEY: &str = "panel layout";
 const RIBBON_TABS_KEY: &str = "ribbon tabs";
 const LIGHT_CONES_KEY: &str = "light cones";
 const VIEW_CUBE_KEY: &str = "view cube";
+const AI_CONNECTIONS_KEY: &str = "ai connections";
 const GRID_KEY: &str = "grid";
 const GRID_STRENGTH_KEY: &str = "grid strength";
 const COLOR_PALETTES_KEY: &str = "color palettes";
@@ -919,6 +923,7 @@ impl EditorApp {
             ribbon_tabs: RibbonTabs::default(),
             light_cones: false,
             view_cube: true,
+            ai: Default::default(),
             grid: true,
             grid_strength: DEFAULT_GRID_STRENGTH,
             colors: Default::default(),
@@ -985,6 +990,7 @@ impl EditorApp {
             }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
+            self.ai.allowed = storage.get_string(AI_CONNECTIONS_KEY).as_deref() == Some("on");
             self.grid = storage.get_string(GRID_KEY).as_deref() != Some("off");
             self.grid_strength = storage
                 .get_string(GRID_STRENGTH_KEY)
@@ -1100,6 +1106,8 @@ impl eframe::App for EditorApp {
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
         let cube = if self.view_cube { "on" } else { "off" };
         storage.set_string(VIEW_CUBE_KEY, cube.to_owned());
+        let ai = if self.ai.allowed { "on" } else { "off" };
+        storage.set_string(AI_CONNECTIONS_KEY, ai.to_owned());
         let grid = if self.grid { "on" } else { "off" };
         storage.set_string(GRID_KEY, grid.to_owned());
         storage.set_string(GRID_STRENGTH_KEY, self.grid_strength.to_string());
@@ -1295,6 +1303,9 @@ impl EditorApp {
             project.watcher.wake(ctx);
         }
         self.check_disk();
+        // AI clients' calls (Settings > AI connections), before this frame's
+        // input, so what they change is drawn now.
+        self.ai_frame(ctx);
         let seconds = ctx
             .input(|input| f64::from(input.stable_dt))
             .min(MAX_FRAME_SECONDS);
