@@ -33,7 +33,7 @@ use axcenity_collab::access::{Access, INVITE_LIFETIME_SECONDS, Invite};
 use axcenity_collab::identity::{Fingerprint, Identity};
 use axcenity_collab::session::{HostSession, Hosting, Remote, RemoteEvent};
 use axcenity_collab::socket::{DEFAULT_PORT, HostCert};
-use axcenity_collab::{Client, Host, MemberId, Notice, Role, ToClient, ToHost};
+use axcenity_collab::{Camera, Client, Host, MemberId, Notice, Presence, Role, ToClient, ToHost};
 use axcenity_core::spline::is_generator;
 
 use super::*;
@@ -43,6 +43,10 @@ const ROUNDS_PER_FRAME: usize = 8;
 
 /// How often the editor looks at the network while nothing else redraws.
 const NET_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// The least time between two presences this editor sends (design §7.9:
+/// at most 10 a second).
+const PRESENCE_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// `axcenity-editor <project> --team-host`: host a session for the project.
 pub const HOST_FLAG: &str = "--team-host";
@@ -205,6 +209,8 @@ pub(crate) struct Team {
     link: Link,
     /// The host refused this editor: the session is over for it.
     ended: bool,
+    /// When this editor last said what it's doing.
+    presence_sent: Option<std::time::Instant>,
 }
 
 impl Team {
@@ -245,6 +251,7 @@ impl EditorApp {
             client: Some(client),
             link: Link::Hub(hub),
             ended: false,
+            presence_sent: None,
         });
         self.team_frame();
     }
@@ -331,6 +338,7 @@ impl EditorApp {
                 hosting: Some(hosting),
             },
             ended: false,
+            presence_sent: None,
         });
         Ok(invite)
     }
@@ -360,6 +368,7 @@ impl EditorApp {
                 hosting: None,
             },
             ended: false,
+            presence_sent: None,
         });
         Ok(())
     }
@@ -423,6 +432,7 @@ impl EditorApp {
         {
             return;
         }
+        self.send_presence();
         let mut changed = false;
         for _ in 0..ROUNDS_PER_FRAME {
             let mut inbox = self.team_network();
@@ -463,6 +473,41 @@ impl EditorApp {
         }
     }
 
+    /// What this editor is doing: its selection and camera.
+    fn presence(&self) -> Presence {
+        let camera = self.viewport.render_camera();
+        let look = (camera.look_at - camera.position).normalize_or_zero();
+        Presence {
+            selection: self.selection.clone(),
+            camera: Some(Camera {
+                position: camera.position.to_array(),
+                look: look.to_array(),
+            }),
+            editing: None,
+        }
+    }
+
+    /// Tells the others what this editor is doing, at most 10 times a
+    /// second (the client sends only what changed).
+    fn send_presence(&mut self) {
+        let due = self.team.as_ref().is_some_and(|team| {
+            team.client.is_some()
+                && team
+                    .presence_sent
+                    .is_none_or(|sent| sent.elapsed() >= PRESENCE_EVERY)
+        });
+        if !due {
+            return;
+        }
+        let presence = self.presence();
+        let team = self.team.as_mut().expect("checked above");
+        team.presence_sent = Some(std::time::Instant::now());
+        team.client
+            .as_mut()
+            .expect("checked above")
+            .set_presence(presence);
+    }
+
     fn team_notices(&mut self) {
         let Some(team) = self.team.as_mut() else {
             return;
@@ -491,6 +536,12 @@ impl EditorApp {
                 Notice::Refused { label, reason, .. } => self
                     .output
                     .warning(format!("Team Create: \"{label}\" was refused: {reason}")),
+                Notice::Arrived { name, .. } => self
+                    .output
+                    .info(format!("Team Create: {name} joined the session")),
+                Notice::Left { name, .. } => self
+                    .output
+                    .info(format!("Team Create: {name} left the session")),
                 Notice::Resynced => self.output.warning(
                     "Team Create: this copy disagreed with the session and was reloaded \
                      (your unsent edits were kept)",

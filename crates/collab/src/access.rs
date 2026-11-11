@@ -97,7 +97,14 @@ pub struct Member {
     pub id: MemberId,
     pub key: PublicKey,
     pub name: String,
+    /// Their colour for presence, as they last said.
+    #[serde(default = "grey")]
+    pub color: [u8; 3],
     pub role: Role,
+}
+
+fn grey() -> [u8; 3] {
+    [128, 128, 128]
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -125,15 +132,16 @@ impl Access {
             next_member: 1,
             ..Access::default()
         };
-        access.add(owner, name.into(), Role::Owner);
+        access.add(owner, name.into(), grey(), Role::Owner);
         access
     }
 
-    fn add(&mut self, key: PublicKey, name: String, role: Role) -> Member {
+    fn add(&mut self, key: PublicKey, name: String, color: [u8; 3], role: Role) -> Member {
         let member = Member {
             id: MemberId(self.next_member),
             key,
             name,
+            color,
             role,
         };
         self.next_member += 1;
@@ -168,16 +176,18 @@ impl Access {
     }
 
     /// Lets `key` in: as the member it is, or as a new one through
-    /// `invite`. A member's name follows what they call themselves now.
+    /// `invite`. A member's name and colour follow what they say now.
     pub fn admit(
         &mut self,
         key: PublicKey,
         name: &str,
+        color: [u8; 3],
         invite: Option<[u8; 16]>,
         now: u64,
     ) -> Result<Member, AccessRefusal> {
         if let Some(member) = self.members.iter_mut().find(|m| m.key == key) {
             member.name = name.to_owned();
+            member.color = color;
             return Ok(member.clone());
         }
         let secret = invite.ok_or(AccessRefusal::NotInvited)?;
@@ -195,7 +205,7 @@ impl Access {
         }
         issued.used = true;
         let role = issued.role;
-        Ok(self.add(key, name.to_owned(), role))
+        Ok(self.add(key, name.to_owned(), color, role))
     }
 
     /// Changes a member's role. False if there's no such member.

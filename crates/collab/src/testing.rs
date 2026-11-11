@@ -81,7 +81,8 @@ impl Net {
         self.connected[i] = false;
         self.up[i].clear();
         self.down[i].clear();
-        self.host.disconnected(member(i));
+        let out = self.host.disconnected(member(i));
+        self.route(out);
         self.clients[i].disconnected();
     }
 
@@ -122,6 +123,17 @@ impl Net {
     /// The host's document, as `dump` writes it.
     pub fn host_copy(&self) -> String {
         dump_doc(self.host.doc())
+    }
+
+    /// Member `i` says what they're doing.
+    pub fn set_presence(&mut self, i: usize, presence: crate::presence::Presence) {
+        self.clients[i].set_presence(presence);
+        self.flush(i);
+    }
+
+    /// Delivers what the host said outside a client message.
+    pub fn route_out(&mut self, out: Vec<Outgoing>) {
+        self.route(out);
     }
 
     pub fn set_role(&mut self, i: usize, role: Role) {

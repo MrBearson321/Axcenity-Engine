@@ -12,13 +12,14 @@
 use std::collections::VecDeque;
 
 use axcenity_core::{InstanceId, World};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::apply::{self, DocMut, Graveyard, Note, Refusal, Undo};
 use crate::capture;
 use crate::ids::BLOCK_SIZE;
 use crate::message::{MemberId, ToClient, ToHost};
 use crate::op::{Op, Transaction};
+use crate::presence::{Collaborator, Presence};
 use crate::role::{Capability, Role};
 
 /// Something the editor should tell the user about, or act on.
@@ -45,6 +46,10 @@ pub enum Notice {
     /// snapshot (a bug if it ever happens; edits not yet confirmed are kept
     /// and sent again).
     Resynced,
+    /// Another member connected.
+    Arrived { member: MemberId, name: String },
+    /// Another member's connection closed, or they were removed.
+    Left { member: MemberId, name: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +89,12 @@ pub struct Client {
     connection: Connection,
     outbox: Vec<ToHost>,
     notices: Vec<Notice>,
+    /// Everyone in the project, as the host last said.
+    roster: Vec<Collaborator>,
+    /// What the other connected members are doing.
+    presences: FxHashMap<MemberId, Presence>,
+    /// What this member is doing, as last set.
+    presence: Presence,
 }
 
 impl Client {
@@ -102,6 +113,31 @@ impl Client {
             connection: Connection::Offline,
             outbox: Vec::new(),
             notices: Vec::new(),
+            roster: Vec::new(),
+            presences: FxHashMap::default(),
+            presence: Presence::default(),
+        }
+    }
+
+    /// Everyone in the project, as the host last said.
+    pub fn roster(&self) -> &[Collaborator] {
+        &self.roster
+    }
+
+    /// What each other connected member is doing.
+    pub fn presences(&self) -> &FxHashMap<MemberId, Presence> {
+        &self.presences
+    }
+
+    /// Says what this member is doing now; sent if it changed.
+    pub fn set_presence(&mut self, presence: Presence) {
+        let presence = presence.tidied();
+        if presence == self.presence {
+            return;
+        }
+        self.presence = presence.clone();
+        if self.connection != Connection::Offline {
+            self.outbox.push(ToHost::Presence(presence));
         }
     }
 
@@ -154,6 +190,9 @@ impl Client {
         self.awaiting_snapshot = false;
         let have = self.joined.then_some(self.seq);
         self.outbox.push(ToHost::Hello { have });
+        if self.presence != Presence::default() {
+            self.outbox.push(ToHost::Presence(self.presence.clone()));
+        }
     }
 
     /// The connection closed. Editing goes on; edits wait in `pending`
@@ -161,6 +200,7 @@ impl Client {
     pub fn disconnected(&mut self) {
         self.connection = Connection::Offline;
         self.outbox.clear();
+        self.presences.clear();
     }
 
     /// An ID from this member's blocks, for a new Instance to make with
@@ -343,9 +383,42 @@ impl Client {
                 self.asked_for_ids = false;
             }
             ToClient::RoleChanged(role) => self.role = role,
+            ToClient::Roster(roster) => self.new_roster(roster),
+            ToClient::Presence { member, presence } => {
+                if member != self.member {
+                    self.presences.insert(member, presence);
+                }
+            }
         }
         // What applying and undoing did isn't the user's edit.
         world.take_edits();
+    }
+
+    /// A new roster: says who came and went (not on the first, which lists
+    /// who was already here).
+    fn new_roster(&mut self, roster: Vec<Collaborator>) {
+        let online =
+            |list: &[Collaborator], member| list.iter().any(|c| c.member == member && c.online);
+        if !self.roster.is_empty() {
+            for c in &roster {
+                if c.member != self.member && c.online && !online(&self.roster, c.member) {
+                    self.notices.push(Notice::Arrived {
+                        member: c.member,
+                        name: c.profile.name.clone(),
+                    });
+                }
+            }
+            for c in &self.roster {
+                if c.member != self.member && c.online && !online(&roster, c.member) {
+                    self.notices.push(Notice::Left {
+                        member: c.member,
+                        name: c.profile.name.clone(),
+                    });
+                }
+            }
+        }
+        self.presences.retain(|&member, _| online(&roster, member));
+        self.roster = roster;
     }
 
     #[allow(clippy::too_many_arguments)]

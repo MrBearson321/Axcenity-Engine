@@ -170,7 +170,7 @@ fn check_no_resync(net: &mut Net, seed: u64, seen: &mut Seen) {
     for client in &mut net.clients {
         for notice in client.take_notices() {
             match notice {
-                Notice::Joined => {}
+                Notice::Joined | Notice::Arrived { .. } | Notice::Left { .. } => {}
                 Notice::Resynced => panic!("seed {seed}: a copy disagreed with the host"),
                 Notice::Refused { .. } => seen.refused += 1,
                 Notice::Changed { notes, .. } => {

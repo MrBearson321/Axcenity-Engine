@@ -17,7 +17,7 @@ use crate::message::MemberId;
 use crate::role::Role;
 
 /// Raise it when a handshake or session message changes.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 
 /// This engine's version, as the handshake compares it.
 pub const ENGINE: &str = env!("CARGO_PKG_VERSION");
@@ -117,6 +117,7 @@ enum GateState {
         nonce: [u8; 32],
         key: PublicKey,
         name: String,
+        color: [u8; 3],
         invite: Option<[u8; 16]>,
     },
     Done,
@@ -166,8 +167,8 @@ impl Gate {
                     class_defaults,
                     key,
                     name,
+                    color,
                     invite,
-                    ..
                 }),
             ) => {
                 let theirs = Versions {
@@ -188,6 +189,7 @@ impl Gate {
                     nonce,
                     key,
                     name: name.chars().take(64).collect(),
+                    color,
                     invite,
                 };
                 GateStep::Reply(
@@ -202,6 +204,7 @@ impl Gate {
                     nonce,
                     key,
                     name,
+                    color,
                     invite,
                 },
                 Some(Greeting::Proof { signature }),
@@ -210,7 +213,7 @@ impl Gate {
                 if !key.verifies(&signed(&nonce, &self.cert), &signature) {
                     return refuse("Signing in failed: the key didn't match.");
                 }
-                match access.admit(key, &name, invite, now) {
+                match access.admit(key, &name, color, invite, now) {
                     Ok(member) => GateStep::Admit {
                         reply: Greeting::Admitted {
                             member: member.id,

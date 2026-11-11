@@ -22,6 +22,7 @@ use crate::handshake::{Gate, GateStep, Knock, KnockStep, Versions};
 use crate::host::Host;
 use crate::identity::{Fingerprint, Identity};
 use crate::message::{MemberId, ToClient, ToHost};
+use crate::presence::Profile;
 use crate::role::Role;
 use crate::socket::{ConnId, HostCert, Link, LinkClosed, LinkEvent, Listener, NetEvent};
 use crate::wire;
@@ -156,8 +157,9 @@ impl HostSession {
         if let Some(conn) = self.conns.remove(&member) {
             self.members.remove(&conn);
             self.listener.close(conn);
-            self.host.disconnected(member);
         }
+        let out = self.host.remove_member(member);
+        self.route(out);
     }
 
     /// Handles what arrived since the last call. Returns how many events
@@ -247,7 +249,8 @@ impl HostSession {
                     && self.conns.get(&member) == Some(&conn)
                 {
                     self.conns.remove(&member);
-                    self.host.disconnected(member);
+                    let out = self.host.disconnected(member);
+                    self.route(out);
                 }
             }
         }
@@ -257,16 +260,24 @@ impl HostSession {
         match self.host.role(member.id) {
             None => self.host.add_member(member.id, member.role),
             Some(role) if role != member.role => {
-                let _ = self.host.set_role(member.id, member.role);
+                let out = self.host.set_role(member.id, member.role);
+                self.route(out);
             }
             Some(_) => {}
         }
+        let profile = Profile {
+            name: member.name.clone(),
+            color: member.color,
+        };
+        let out = self.host.set_profile(member.id, profile);
+        self.route(out);
         // The same member connecting again before their old connection
         // was noticed gone: the new one wins.
         if let Some(old) = self.conns.insert(member.id, conn) {
             self.members.remove(&old);
             self.listener.close(old);
-            self.host.disconnected(member.id);
+            let out = self.host.disconnected(member.id);
+            self.route(out);
         }
         self.members.insert(conn, member.id);
         self.save_access();
