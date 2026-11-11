@@ -129,6 +129,8 @@ pub(super) enum Command {
     OpenProject,
     Save,
     VersionHistory,
+    ShareTeamCreate,
+    JoinTeamCreate,
     SaveCheckpoint,
     BackUpProject,
     Input,
@@ -356,6 +358,29 @@ impl EditorApp {
             &[],
             None,
             when(editing, not_editing),
+        );
+        let solo = self.team.is_none();
+        add(
+            Command::ShareTeamCreate,
+            "Share with Team Create…",
+            "File",
+            &["collaborate", "multiplayer editing", "invite", "host"],
+            None,
+            when(
+                editing && solo,
+                "Open a project, stop Play, and leave any session first.",
+            ),
+        );
+        add(
+            Command::JoinTeamCreate,
+            "Join Team Create…",
+            "File",
+            &["collaborate", "invite link", "join session"],
+            None,
+            when(
+                editing && solo,
+                "Open a project, stop Play, and leave any session first.",
+            ),
         );
         add(
             Command::SaveCheckpoint,
@@ -1043,6 +1068,8 @@ impl EditorApp {
                 }
             }
             Command::VersionHistory => self.version_history.open = true,
+            Command::ShareTeamCreate => self.share_with_team_create(),
+            Command::JoinTeamCreate => self.join_team_create(),
             Command::SaveCheckpoint => self.version_history.open_for_checkpoint(),
             Command::BackUpProject => self.back_up_project(false),
             Command::Input => self.input_settings.open = true,

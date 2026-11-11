@@ -69,6 +69,18 @@ impl HostSession {
         bind: SocketAddr,
         address: Option<String>,
     ) -> io::Result<HostSession> {
+        // Everyone who's a member is on the roster, connected or not.
+        let mut host = host;
+        for member in access.members() {
+            if host.role(member.id).is_none() {
+                host.add_member(member.id, member.role);
+            }
+            let profile = Profile {
+                name: member.name.clone(),
+                color: member.color,
+            };
+            let _ = host.set_profile(member.id, profile);
+        }
         let listener = Listener::bind(bind, cert)?;
         let port = listener.address().port();
         let address = address.unwrap_or_else(|| {
