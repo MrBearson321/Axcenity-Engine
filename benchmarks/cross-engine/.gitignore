@@ -1,6 +1,7 @@
 # Engine-generated folders for the XB10k projects
 logs/
 godot/.godot/
+godot/export/
 unity/Library/
 unity/Temp/
 unity/Logs/

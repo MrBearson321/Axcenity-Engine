@@ -22,6 +22,7 @@ var last_usec := 0
 var frame := 0
 var first_frame_ms := 0.0
 var samples := PackedFloat64Array()
+var fixed_step := true
 
 
 func _ready() -> void:
@@ -33,7 +34,7 @@ func _ready() -> void:
 	last_usec = Time.get_ticks_usec()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var now := Time.get_ticks_usec()
 	var ms := (now - last_usec) / 1000.0
 	last_usec = now
@@ -41,6 +42,9 @@ func _process(_delta: float) -> void:
 	if frame == 1:
 		first_frame_ms = ms
 	elif frame > WARMUP + 1:
+		# --fixed-fps 60 isn't visible to scripts, so check its effect instead.
+		if absf(delta - 1.0 / 60.0) > 1e-6:
+			fixed_step = false
 		samples.append(ms)
 		if samples.size() == MEASURED:
 			report()
@@ -66,7 +70,7 @@ func report() -> void:
 		"fps_from_median": 1000.0 / median,
 		"build_ms": build_ms,
 		"first_frame_ms": first_frame_ms,
-		"fixed_timestep": Engine.physics_ticks_per_second == 60 and OS.get_cmdline_args().has("--fixed-fps"),
+		"fixed_timestep": Engine.physics_ticks_per_second == 60 and fixed_step,
 	}
 	var line := JSON.stringify(result)
 	print("XB10K_RESULT " + line)
