@@ -11,7 +11,7 @@ use axcenity_mcp::{
 };
 use axcenity_script::{ApiEntry, ApiKind};
 
-use super::super::EditorApp;
+use super::Host;
 use super::LIMIT;
 use super::refs::quoted;
 use super::values::{show, type_name};
@@ -55,7 +55,7 @@ fn first_sentence(text: &str, max: usize) -> String {
     }
 }
 
-pub fn call(_app: &mut EditorApp, args: &Args) -> Outcome {
+pub fn call(_host: &mut Host, args: &Args) -> Outcome {
     if let Some(name) = args.str("class") {
         let class = find_class(name)?;
         return match args.str("property") {
@@ -72,8 +72,9 @@ pub fn call(_app: &mut EditorApp, args: &Args) -> Outcome {
     }
     let classes: Vec<&str> = ClassName::ALL.iter().map(|class| class.as_str()).collect();
     Ok(format!(
-        "docs: give class (its properties), class + property, or query (search the script API).\nclasses: {}",
-        classes.join(", ")
+        "docs: give class (its properties), class + property, or query (search the script API).\nclasses: {}\nobject_create kinds: {}",
+        classes.join(", "),
+        super::object_create::offered().join(", ")
     ))
 }
 

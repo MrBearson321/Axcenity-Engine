@@ -86,7 +86,17 @@ fn a_client_lists_and_calls_tools_over_stdio() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    for name in ["project_info", "scene_inspect", "object_get", "docs"] {
+    for name in [
+        "project_info",
+        "scene_inspect",
+        "object_get",
+        "docs",
+        "object_create",
+        "object_set",
+        "object_delete",
+        "history",
+        "project_save",
+    ] {
         assert!(names.contains(&name), "{names:?}");
     }
 
@@ -109,6 +119,19 @@ fn a_client_lists_and_calls_tools_over_stdio() {
     assert_eq!(wrong["result"]["isError"], true, "{wrong}");
     let text = wrong["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("did you mean \"Workspace/Block\"?"), "{text}");
+
+    // A write is an undo step named after the client.
+    send(
+        json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
+            "name": "object_create", "arguments": {"kind": "Block", "name": "Wall"}
+        }}),
+    );
+    let created = answer(5);
+    let text = created["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.ends_with("undo \"AI (stdio-test): Create Wall\""),
+        "{created}"
+    );
 
     // Closing stdin ends the session; the server exits cleanly.
     drop(stdin);

@@ -2,16 +2,16 @@
 //! a tool name and JSON arguments, checked by the same `Args::check`.
 
 use axcenity_core::{ClassName, InstanceId};
-use axcenity_mcp::{Args, Code, Profile, ToolError, text::estimate_tokens, tools_list_json};
+use axcenity_mcp::{Args, Code, Mode, Profile, ToolError, text::estimate_tokens, tools_list_json};
 use serde_json::{Value, json};
 
 use super::super::EditorApp;
 use super::super::tests::copy_of_example;
 use super::refs::id_text;
-use super::{TOOLS, run, tools_for};
+use super::{Host, TOOLS, run, tools_for};
 
 struct Opened {
-    app: EditorApp,
+    app: Host,
     folder: std::path::PathBuf,
 }
 
@@ -25,11 +25,14 @@ fn open(example: &str, test: &str) -> Opened {
     let folder = copy_of_example(example, test);
     let app = EditorApp::new(Some(&folder));
     assert!(app.project.is_some(), "{example} opens");
-    Opened { app, folder }
+    Opened {
+        app: Host::new(app, Mode::Edit),
+        folder,
+    }
 }
 
 /// Calls `tool` with `args` as a client would: arguments checked first.
-fn call(app: &mut EditorApp, tool: &str, args: Value) -> Result<String, ToolError> {
+fn call(app: &mut Host, tool: &str, args: Value) -> Result<String, ToolError> {
     let spec = TOOLS
         .iter()
         .find(|entry| entry.spec.name == tool)
@@ -37,17 +40,18 @@ fn call(app: &mut EditorApp, tool: &str, args: Value) -> Result<String, ToolErro
         .spec;
     let args = Args::new(args.as_object().cloned().unwrap_or_default());
     args.check(spec)?;
-    run(app, spec, &args)
+    run(app, spec, &args, Some("test"))
 }
 
-fn ok(app: &mut EditorApp, tool: &str, args: Value) -> String {
+fn ok(app: &mut Host, tool: &str, args: Value) -> String {
     call(app, tool, args).unwrap_or_else(|error| panic!("{tool} failed: {error}"))
 }
 
-fn add(app: &mut EditorApp, class: ClassName, name: &str, parent: InstanceId) -> InstanceId {
-    let id = app.world.create(class).unwrap();
-    app.world.set_name(id, name).unwrap();
-    app.world.set_parent(id, Some(parent)).unwrap();
+fn add(host: &mut Host, class: ClassName, name: &str, parent: InstanceId) -> InstanceId {
+    let world = &mut host.app.world;
+    let id = world.create(class).unwrap();
+    world.set_name(id, name).unwrap();
+    world.set_parent(id, Some(parent)).unwrap();
     id
 }
 
@@ -67,8 +71,9 @@ fn scene_inspect_shows_the_workspace_tree_one_line_per_object() {
     let mut opened = open("hello-part", "mcp-tree");
     let block = opened
         .app
+        .app
         .world
-        .find_first_child(opened.app.world.workspace(), "Block")
+        .find_first_child(opened.app.app.world.workspace(), "Block")
         .unwrap();
     let text = ok(&mut opened.app, "scene_inspect", json!({}));
     let mut lines = text.lines();
@@ -98,7 +103,7 @@ fn scene_inspect_shows_the_workspace_tree_one_line_per_object() {
 fn scene_inspect_folds_repeats_and_pages_long_answers() {
     let mut opened = open("hello-part", "mcp-fold");
     let app = &mut opened.app;
-    let workspace = app.world.workspace();
+    let workspace = app.app.world.workspace();
     let fence = add(app, ClassName::Model, "Fence", workspace);
     for _ in 0..40 {
         add(app, ClassName::Part, "Post", fence);
@@ -138,16 +143,17 @@ fn scene_inspect_folds_repeats_and_pages_long_answers() {
 fn scene_inspect_searches_by_class_name_tag_and_distance() {
     let mut opened = open("hello-part", "mcp-search");
     let app = &mut opened.app;
-    let workspace = app.world.workspace();
+    let workspace = app.app.world.workspace();
     let far = add(app, ClassName::Part, "FarRock", workspace);
-    app.world
+    app.app
+        .world
         .set_property(
             far,
             "Position",
             axcenity_core::Value::Vector3(axcenity_core::Vector3::new(500.0, 0.0, 0.0)),
         )
         .unwrap();
-    app.world.add_tag(far, "Rocks").unwrap();
+    app.app.world.add_tag(far, "Rocks").unwrap();
     let light = add(app, ClassName::PointLight, "Lamp", far);
 
     let parts = ok(app, "scene_inspect", json!({"class": "BasePart"}));
@@ -294,6 +300,11 @@ fn docs_describe_classes_properties_and_search_the_api() {
     assert_eq!(error.fix.as_deref(), Some("did you mean Color?"));
     let index = ok(app, "docs", json!({}));
     assert!(index.contains("PointLight"), "{index}");
+    assert!(
+        index.contains("\nobject_create kinds: Block, Sphere,"),
+        "{index}"
+    );
+    assert!(!index.contains("HealthBar"), "{index}");
 }
 
 #[test]
@@ -320,6 +331,12 @@ fn every_tool_is_short_flat_and_in_budget() {
         );
         assert!(!schema.contains("oneOf") && !schema.contains("anyOf") && !schema.contains("$ref"));
     }
+    // Some clients put the instructions in every prompt.
+    let instructions = estimate_tokens(super::INSTRUCTIONS);
+    assert!(
+        instructions <= 150,
+        "instructions take ~{instructions} tokens"
+    );
     // Budgets from docs/research/mcp/tool-inventory.md.
     for (profile, budget) in [
         (Profile::Lite, 2000),
@@ -337,8 +354,340 @@ fn every_tool_is_short_flat_and_in_budget() {
 
 #[test]
 fn project_info_without_a_project_says_so() {
-    let mut app = EditorApp::new(None);
+    let mut app = Host::new(EditorApp::new(None), Mode::Edit);
     // No project: project_info explains instead of panicking.
     let error = call(&mut app, "project_info", json!({})).unwrap_err();
     assert_eq!(error.code, Code::NotFound);
+}
+
+/// The confirm token in a `needs_confirm` error's fix line.
+fn token(error: &ToolError) -> String {
+    assert_eq!(error.code, Code::NeedsConfirm, "{error}");
+    let fix = error.fix.as_deref().unwrap();
+    let start = fix.find("\"confirm\":\"").unwrap() + "\"confirm\":\"".len();
+    fix[start..start + 6].to_owned()
+}
+
+fn objects(host: &Host) -> usize {
+    let world = &host.app.world;
+    world.descendants_iter(world.root()).count()
+}
+
+#[test]
+fn object_create_inserts_one_undoable_object() {
+    let mut opened = open("hello-part", "mcp-create");
+    let host = &mut opened.app;
+    let text = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "name": "Wall", "size": [20, 10, 1], "material": "Brick", "props": {"Anchored": true}}),
+    );
+    assert!(
+        text.starts_with("created ") && text.contains(" Part \"Wall\" in Workspace"),
+        "{text}"
+    );
+    assert!(
+        text.ends_with("· undo \"AI (test): Create Wall\""),
+        "{text}"
+    );
+    let wall = ok(
+        host,
+        "object_get",
+        json!({"id": "Workspace/Wall", "props": ["Size", "Material", "Position", "Anchored"]}),
+    );
+    // Without a position, it rests on the ground at the origin.
+    assert!(
+        wall.contains("Size [20,10,1]")
+            && wall.contains("Material \"Brick\"")
+            && wall.contains("Position [0,5,0]"),
+        "{wall}"
+    );
+
+    // A second Wall gets a name no sibling has; a light goes where Insert puts it.
+    let text = ok(
+        host,
+        "object_create",
+        json!({"kind": "block", "name": "Wall", "position": [10, 1, 0]}),
+    );
+    assert!(text.contains("\"Wall2\""), "{text}");
+    let text = ok(
+        host,
+        "object_create",
+        json!({"kind": "PointLight", "parent": "Workspace/Wall"}),
+    );
+    assert!(
+        text.contains("PointLight \"PointLight\" in Workspace/Wall"),
+        "{text}"
+    );
+
+    let list = ok(host, "history", json!({}));
+    assert!(
+        list.starts_with("3 steps to undo · unsaved changes\n  \"AI (test): Create PointLight\""),
+        "{list}"
+    );
+    ok(host, "history", json!({"action": "undo", "steps": 2}));
+    assert!(call(host, "object_get", json!({"id": "Workspace/Wall2"})).is_err());
+    assert!(call(host, "object_get", json!({"id": "Workspace/Wall"})).is_ok());
+    let redo = ok(host, "history", json!({"action": "redo"}));
+    assert_eq!(redo, "redid \"AI (test): Create Wall\"");
+    assert!(call(host, "object_get", json!({"id": "Workspace/Wall2"})).is_ok());
+
+    // The session's first write kept a version of the files first.
+    let versions = axcenity_project::list_versions(&opened.folder);
+    assert!(
+        versions
+            .iter()
+            .any(|version| version.label == "Before AI session (test)" && version.pinned),
+        "{:?}",
+        versions.iter().map(|v| &v.label).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_failed_write_changes_nothing() {
+    let mut opened = open("hello-part", "mcp-rollback");
+    let host = &mut opened.app;
+    let before = objects(host);
+    let error = call(
+        host,
+        "object_create",
+        json!({"kind": "Block", "props": {"Colour": [1, 0, 0]}}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, Code::UnknownProperty);
+    assert_eq!(error.fix.as_deref(), Some("did you mean Color?"));
+    let error = call(
+        host,
+        "object_create",
+        json!({"kind": "Block", "color": [255, 0, 0]}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, Code::BadValue);
+    assert!(error.message.contains("divide each by 255"), "{error}");
+    let error = call(host, "object_create", json!({"kind": "Blok"})).unwrap_err();
+    assert!(
+        error
+            .fix
+            .as_deref()
+            .unwrap()
+            .starts_with("did you mean Block"),
+        "{error}"
+    );
+    let error = call(host, "object_create", json!({"kind": "Character"})).unwrap_err();
+    assert_eq!(error.code, Code::Unsupported);
+    assert_eq!(objects(host), before);
+
+    // One bad object among several: none of them change.
+    let a = add(host, ClassName::Part, "A", host.app.world.workspace());
+    let light = add(host, ClassName::PointLight, "L", host.app.world.workspace());
+    let error = call(
+        host,
+        "object_set",
+        json!({"ids": [id_text(a), id_text(light)], "props": {"Anchored": true}}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, Code::UnknownProperty, "{error}");
+    assert_eq!(
+        host.app.world.get(a).unwrap().property("Anchored"),
+        Some(&axcenity_core::Value::Bool(false))
+    );
+    assert!(ok(host, "history", json!({})).starts_with("0 steps"));
+}
+
+#[test]
+fn object_set_changes_properties_names_parents_attributes_and_tags() {
+    let mut opened = open("hello-part", "mcp-set");
+    let host = &mut opened.app;
+    let workspace = host.app.world.workspace();
+    let model = add(host, ClassName::Model, "House", workspace);
+    let text = ok(
+        host,
+        "object_set",
+        json!({"id": "Workspace/Block", "props": {"Color": [0, 0, 1], "Transparency": 0.5}, "name": "Door"}),
+    );
+    assert!(
+        text.starts_with("changed ") && text.contains("Part \"Door\": Color, Transparency, Name"),
+        "{text}"
+    );
+    assert!(text.ends_with("undo \"AI (test): Change Block\""), "{text}");
+    let text = ok(
+        host,
+        "object_set",
+        json!({"id": "Workspace/Door", "parent": "Workspace/House", "attrs": {"Open": false}, "tags_add": ["Doors"]}),
+    );
+    assert!(text.contains("Parent, attribute \"Open\", tags"), "{text}");
+    let door = ok(
+        host,
+        "object_get",
+        json!({"id": "Workspace/House/Door", "detail": "full"}),
+    );
+    assert!(
+        door.contains("attribute \"Open\" false") && door.contains("tags \"Doors\""),
+        "{door}"
+    );
+
+    // Locked objects are refused unless the change unlocks them.
+    ok(
+        host,
+        "object_set",
+        json!({"id": "Workspace/House", "props": {"Locked": true}}),
+    );
+    let error = call(
+        host,
+        "object_set",
+        json!({"id": "Workspace/House/Door", "props": {"Transparency": 0}}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, Code::Locked, "{error}");
+    ok(
+        host,
+        "object_set",
+        json!({"id": "Workspace/House", "props": {"Locked": false}}),
+    );
+
+    let error = call(
+        host,
+        "object_set",
+        json!({"id": "Workspace", "name": "World"}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, Code::NotAllowed);
+    let error = call(host, "object_set", json!({"id": id_text(model)})).unwrap_err();
+    assert_eq!(error.code, Code::BadArgs);
+}
+
+#[test]
+fn deleting_much_or_a_script_asks_first_with_a_token_for_that_call() {
+    let mut opened = open("hello-part", "mcp-delete");
+    let host = &mut opened.app;
+    let workspace = host.app.world.workspace();
+    // One part goes at once.
+    let text = ok(host, "object_delete", json!({"id": "Workspace/Block"}));
+    assert_eq!(text, "deleted 1 object · undo \"AI (test): Delete Block\"");
+
+    let fence = add(host, ClassName::Model, "Fence", workspace);
+    for _ in 0..6 {
+        add(host, ClassName::Part, "Post", fence);
+    }
+    let gate = add(host, ClassName::ObjectValue, "Gate", workspace);
+    host.app
+        .world
+        .set_property(gate, "Value", axcenity_core::Value::Instance(Some(fence)))
+        .unwrap();
+    let before = objects(host);
+    let error = call(host, "object_delete", json!({"id": "Workspace/Fence"})).unwrap_err();
+    assert!(
+        error.message.starts_with("preview: deletes ")
+            && error.message.contains("with 6 inside (7 objects in all)"),
+        "{error}"
+    );
+    assert!(
+        error
+            .message
+            .contains("1 reference will point at nothing: Workspace/Gate.Value"),
+        "{error}"
+    );
+    assert_eq!(objects(host), before, "a preview changes nothing");
+    let first = token(&error);
+
+    // A token is for its own call only, and works once.
+    let error = call(
+        host,
+        "object_delete",
+        json!({"ids": ["Workspace/Fence", "Workspace/Gate"], "confirm": first}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, Code::NeedsConfirm);
+    let second = token(&call(host, "object_delete", json!({"id": "Workspace/Fence"})).unwrap_err());
+    let text = ok(
+        host,
+        "object_delete",
+        json!({"id": "Workspace/Fence", "confirm": second}),
+    );
+    assert_eq!(text, "deleted 7 objects · undo \"AI (test): Delete Fence\"");
+    assert!(
+        call(
+            host,
+            "object_delete",
+            json!({"id": "Workspace/Fence", "confirm": second})
+        )
+        .is_err()
+    );
+
+    ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(objects(host), before);
+    let error = call(host, "object_delete", json!({"id": "Workspace"})).unwrap_err();
+    assert_eq!(error.code, Code::NotAllowed);
+}
+
+#[test]
+fn modes_decide_what_a_session_may_do() {
+    let mut opened = open("hello-part", "mcp-modes");
+    opened.app.session.mode = Mode::Read;
+    let error = call(&mut opened.app, "object_create", json!({"kind": "Block"})).unwrap_err();
+    assert_eq!(error.code, Code::NotAllowed);
+    assert!(
+        error.fix.as_deref().unwrap().contains("--mode edit"),
+        "{error}"
+    );
+    let info = ok(&mut opened.app, "project_info", json!({}));
+    assert!(info.contains("mode read: reads only"), "{info}");
+
+    opened.app.session.mode = Mode::Full;
+    let host = &mut opened.app;
+    let workspace = host.app.world.workspace();
+    let fence = add(host, ClassName::Model, "Fence", workspace);
+    for _ in 0..6 {
+        add(host, ClassName::Part, "Post", fence);
+    }
+    let text = ok(host, "object_delete", json!({"id": "Workspace/Fence"}));
+    assert!(text.starts_with("deleted 7 objects"), "{text}");
+}
+
+#[test]
+fn project_save_asks_first_then_writes_the_files() {
+    let mut opened = open("hello-part", "mcp-save");
+    let host = &mut opened.app;
+    ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "name": "Saved"}),
+    );
+    let error = call(host, "project_save", json!({})).unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("Version History keeps the files from before this AI session"),
+        "{error}"
+    );
+    let token = token(&error);
+    let text = ok(host, "project_save", json!({"confirm": token}));
+    assert!(text.starts_with("saved \""), "{text}");
+    assert!(ok(host, "history", json!({})).contains("· saved"));
+
+    let reopened = EditorApp::new(Some(&opened.folder));
+    assert!(
+        reopened
+            .world
+            .find_first_child(reopened.world.workspace(), "Saved")
+            .is_some()
+    );
+
+    // Every call is a line of the log.
+    let log = std::fs::read_to_string(opened.folder.join(super::LOG_FILE)).unwrap();
+    let lines: Vec<Value> = log
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let tools: Vec<&str> = lines
+        .iter()
+        .map(|line| line["tool"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        tools,
+        ["object_create", "project_save", "project_save", "history"]
+    );
+    assert_eq!(lines[0]["undo"], "AI (test): Create Saved");
+    assert_eq!(lines[0]["client"], "test");
+    assert_eq!(lines[1]["result"], "needs_confirm");
 }

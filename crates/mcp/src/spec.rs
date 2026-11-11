@@ -21,6 +21,18 @@ pub enum Class {
     Destructive,
 }
 
+impl Class {
+    /// Its name in logs: `read`, `add`, `modify` or `destructive`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Class::Read => "read",
+            Class::Add => "add",
+            Class::Modify => "modify",
+            Class::Destructive => "destructive",
+        }
+    }
+}
+
 /// Which tool lists a server shows. A profile only hides tools: every tool
 /// behaves the same in every profile that has it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

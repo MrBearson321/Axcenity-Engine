@@ -11,7 +11,7 @@ use axcenity_mcp::{
     Args, Class, Code, Kind, Outcome, Param, Profile, ToolError, ToolSpec, closest,
 };
 
-use super::super::EditorApp;
+use super::Host;
 use super::refs::{label, path, quoted, resolve};
 use super::{CURSOR, LIMIT};
 
@@ -52,8 +52,8 @@ const MAX_DEPTH: u64 = 12;
 const DEFAULT_LIMIT: usize = 60;
 const MAX_LIMIT: usize = 500;
 
-pub fn call(app: &mut EditorApp, args: &Args) -> Outcome {
-    let world = &app.world;
+pub fn call(host: &mut Host, args: &Args) -> Outcome {
+    let world = &host.app.world;
     let root = match args.str("root") {
         Some(text) => resolve(world, text)?,
         None => world.workspace(),

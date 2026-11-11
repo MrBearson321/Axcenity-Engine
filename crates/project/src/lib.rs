@@ -111,7 +111,10 @@ pub use versions::{
     version_changes,
 };
 pub use watch::{Watched, Watcher, is_asset_path};
-pub use world_file::{WorldError, parse_prefab, parse_world, write_prefab, write_world};
+pub use world_file::{
+    WorldError, json_to_attribute, json_to_value, parse_prefab, parse_world, write_prefab,
+    write_world,
+};
 
 pub const MANIFEST_FILE: &str = "axcenity.json";
 pub const WORLD_FILE: &str = "world.json";

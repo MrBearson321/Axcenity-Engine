@@ -3,7 +3,7 @@
 
 use axcenity_mcp::{Args, Class, Outcome, Profile, ToolError, ToolSpec};
 
-use super::super::EditorApp;
+use super::Host;
 use super::TOOLKIT_VERSION;
 use super::refs::quoted;
 
@@ -17,7 +17,8 @@ pub const SPEC: ToolSpec = ToolSpec {
     params: &[],
 };
 
-pub fn call(app: &mut EditorApp, _args: &Args) -> Outcome {
+pub fn call(host: &mut Host, _args: &Args) -> Outcome {
+    let app = &host.app;
     let Some(project) = &app.project else {
         return Err(ToolError::not_found("no project is open"));
     };
@@ -44,6 +45,10 @@ pub fn call(app: &mut EditorApp, _args: &Args) -> Outcome {
         "objects {objects} ({in_workspace} in Workspace) · scripts {}\n",
         project.scripts.len()
     ));
-    text.push_str("mode read: this server only reads (editing tools come later)");
+    let mode = host.session.mode;
+    text.push_str(&format!("mode {}: {}", mode.name(), mode.about()));
+    if !app.history.is_saved() {
+        text.push_str("\nunsaved changes: project_save writes them");
+    }
     Ok(text)
 }
