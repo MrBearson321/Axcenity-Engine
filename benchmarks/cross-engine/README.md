@@ -48,6 +48,7 @@ Each behaviour is its own script instance or component, as an engine's users wou
 
 - Camera at (−260, 180, −260) looking at (0, 0, 0), vertical field of view 70°, near 0.1, far 2,000.
 - One directional sun shining **from** the direction (0.5, 1, 0.25) (normalised), white, the engine's default intensity, shadows on at the engine's default shadow quality. Default sky and ambient.
+- **Sun shadows reach 700 units from the camera**, so the whole scene casts them (the camera is about 400 units from its centre). Most engines' default shadow distance (Unity 50, Godot 100, Axcenity 150) would draw no shadows at all from this camera, which isn't the same work as an engine that draws them. Each engine's switch: Axcenity `Lighting.ShadowDistance` plus `shadow_distance` in the game's `graphics.json`, Godot `directional_shadow_max_distance`, Unity URP asset `shadowDistance`, Unreal `DynamicShadowDistanceMovableLight` = 70,000 cm for the simple profile (virtual shadow maps already reach), s&box the sun's shadow distance; Roblox has none to set. Cascade count and resolution stay at the engine's default.
 - 1920 × 1080 window, **vsync off and no frame cap**.
 - Each engine's default renderer settings for a new project otherwise. The run records which renderer and anti-aliasing it used. Unreal is run twice: defaults (Lumen, virtual shadow maps, TSR) and "simple" (Lumen off, shadow maps, no TSR), because its defaults do far more work than the others.
 

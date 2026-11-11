@@ -218,6 +218,8 @@ def write_axcenity(folder):
             _folder("Spinners", spinners),
             _folder("Drops", drops),
         ]},
+        # Sun shadows over the whole scene (README: "Sun shadows reach 700 units").
+        "lighting": {"properties": {"ShadowDistance": 700}},
         # No character: the other engines have no player either.
         "players": {"properties": {"CharacterAutoLoads": False}},
     }
@@ -226,6 +228,13 @@ def write_axcenity(folder):
     for name, source in lua_scripts().items():
         with open(os.path.join(folder, "scripts", name), "w") as f:
             f.write(source)
+    # The player's graphics settings live outside the game (per machine), so
+    # the run points AXCENITY_SAVE_DIR at <folder>/save: default Automatic
+    # quality, with sun shadows over the whole scene.
+    save = os.path.join(folder, "save", "XB10k")
+    os.makedirs(save, exist_ok=True)
+    with open(os.path.join(save, "graphics.json"), "w") as f:
+        json.dump({"quality": "High", "automatic": True, "shadow_distance": 700.0}, f, indent=2)
     # A game test that the scene and its scripts work: axcenity-test <folder>
     os.makedirs(os.path.join(folder, "tests"), exist_ok=True)
     with open(os.path.join(folder, "tests", "xb10k.spec.lua"), "w") as f:
