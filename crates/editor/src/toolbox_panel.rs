@@ -69,6 +69,7 @@ mod packs;
 mod search_tests;
 mod views;
 
+pub(crate) use drawer::size_text;
 use install::{DownloadResult, Installed, download};
 pub use views::View;
 
@@ -157,6 +158,8 @@ pub enum ToolboxAction {
     },
     /// Write a material file from the texture set at `set` and open it.
     MakeMaterial { set: String, name: String },
+    /// Show the Downloaded / Imported Assets tab.
+    OpenInventory,
 }
 
 #[derive(Clone)]
@@ -424,6 +427,11 @@ pub struct ToolboxPanel {
     pack: Option<packs::Review>,
     /// The Gets waiting their turn (a pack's Get all).
     queue: VecDeque<Listing>,
+    /// An asset to show in its library view, with its details open, when
+    /// next drawn (`show_record`).
+    reveal: Option<AssetRecord>,
+    /// The view menu's Downloaded / Imported Assets… was picked.
+    open_inventory: bool,
 }
 
 impl Default for ToolboxPanel {
@@ -464,6 +472,8 @@ impl ToolboxPanel {
             search_on_show: false,
             pack: None,
             queue: VecDeque::new(),
+            reveal: None,
+            open_inventory: false,
         }
     }
 
@@ -513,12 +523,27 @@ impl ToolboxPanel {
             self.start_search(&ctx, 1);
         }
         self.search_on_show = false;
-        if self.shown_for.as_deref() != project {
+        if self.shown_for.as_deref() != project || self.reveal.is_some() {
             self.shown_for = project.map(Path::to_owned);
             self.refresh_collections();
             if self.view != View::Search {
                 self.load_view(&ctx);
             }
+        }
+        if let Some(record) = self.reveal.take() {
+            let key = record.key();
+            if self.listing(&key).is_some() {
+                self.open_drawer(&ctx, project, &key);
+            } else {
+                // Not in the library view (its download was just removed).
+                self.status = Some(format!(
+                    "{} isn't in the library any more. Search for it to get it again.",
+                    record.name
+                ));
+            }
+        }
+        if std::mem::take(&mut self.open_inventory) {
+            actions.push(ToolboxAction::OpenInventory);
         }
         let palette = theme::palette(&ctx);
         self.kind_tabs(ui);

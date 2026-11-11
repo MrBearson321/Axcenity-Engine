@@ -62,6 +62,7 @@ mod sequencer;
 mod session;
 mod settings;
 
+mod inventory;
 mod sky;
 mod solid;
 mod spline_content;
@@ -364,6 +365,8 @@ pub struct EditorApp {
     asset_browser: AssetBrowser,
     /// The Toolbox tab (`toolbox_panel.rs`, its actions `app/toolbox.rs`).
     toolbox: ToolboxPanel,
+    /// The Downloaded / Imported Assets tab.
+    inventory: crate::asset_inventory::AssetInventory,
     /// Update checks and their settings (`app/updates.rs`).
     updates: updates::Updates,
     /// The Version Explorer tab (`version_explorer.rs`).
@@ -511,6 +514,7 @@ impl DockViewer<'_> {
             Pane::Plugins => self.app.plugins_pane(ui),
             Pane::ModelStudio => self.app.model_studio_pane(ui, self.render_state),
             Pane::Toolbox => self.app.toolbox_pane(ui),
+            Pane::Inventory => self.app.inventory_pane(ui),
             Pane::VersionExplorer => self
                 .app
                 .version_explorer
@@ -913,6 +917,7 @@ impl EditorApp {
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
             toolbox: ToolboxPanel::default(),
+            inventory: Default::default(),
             version_explorer: Default::default(),
             updates: Default::default(),
             toolbox_imports: HashMap::new(),

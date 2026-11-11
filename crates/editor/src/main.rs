@@ -13,6 +13,7 @@ mod animation;
 mod app;
 mod asset_browser;
 mod asset_check;
+mod asset_inventory;
 mod autocomplete;
 mod behavior_tree;
 mod block_editor;
