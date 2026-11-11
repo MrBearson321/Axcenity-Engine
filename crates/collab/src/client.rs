@@ -9,13 +9,14 @@
 //! [`Client::submit`]. Every call that takes the World captures what's
 //! outstanding first, so edits never get lost or out of order.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use axcenity_core::{InstanceId, World};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::apply::{self, DocMut, Graveyard, Note, Refusal, Undo};
 use crate::capture;
+use crate::files::{self, Assembly, Bytes, FileHash, Manifest, Piece};
 use crate::ids::BLOCK_SIZE;
 use crate::message::{MemberId, ToClient, ToHost};
 use crate::op::{Op, Transaction};
@@ -95,6 +96,24 @@ pub struct Client {
     presences: FxHashMap<MemberId, Presence>,
     /// What this member is doing, as last set.
     presence: Presence,
+    /// The project's files as the host's order says, with this member's
+    /// unconfirmed saves on top (as the World is).
+    files: Manifest,
+    /// The bytes of files this member's pending transactions publish, to
+    /// upload again after a reconnect.
+    uploads: HashMap<FileHash, Bytes>,
+    /// Fetched files arriving in pieces.
+    downloads: HashMap<FileHash, Assembly>,
+    /// Fetched files that have arrived, for [`Client::take_files`].
+    arrived: Vec<(FileHash, Bytes)>,
+    /// Fetched files the host didn't have.
+    missing: Vec<FileHash>,
+    /// Who is editing which document.
+    locks: BTreeMap<String, MemberId>,
+    /// Documents this member asked to edit.
+    my_locks: BTreeSet<String>,
+    /// This member's transactions the host refused lately, newest last.
+    refused: VecDeque<u64>,
 }
 
 impl Client {
@@ -116,7 +135,209 @@ impl Client {
             roster: Vec::new(),
             presences: FxHashMap::default(),
             presence: Presence::default(),
+            files: Manifest::new(),
+            uploads: HashMap::new(),
+            downloads: HashMap::new(),
+            arrived: Vec::new(),
+            missing: Vec::new(),
+            locks: BTreeMap::new(),
+            my_locks: BTreeSet::new(),
+            refused: VecDeque::new(),
         }
+    }
+
+    /// True if the host refused transaction `client_seq` (among the last
+    /// few hundred).
+    pub fn was_refused(&self, client_seq: u64) -> bool {
+        self.refused.contains(&client_seq)
+    }
+
+    fn note_refused(&mut self, client_seq: u64) {
+        self.refused.push_back(client_seq);
+        while self.refused.len() > 256 {
+            self.refused.pop_front();
+        }
+    }
+
+    /// The project's files, with this member's unconfirmed saves.
+    pub fn files(&self) -> &Manifest {
+        &self.files
+    }
+
+    /// True while transaction `client_seq` waits for the host.
+    pub fn is_pending(&self, client_seq: u64) -> bool {
+        self.pending
+            .iter()
+            .any(|p| p.transaction.client_seq == client_seq)
+    }
+
+    /// Asks the host for files by hash; they come back through
+    /// [`Client::take_files`] (or [`Client::take_missing`]). False while
+    /// offline (ask again later).
+    pub fn fetch(&mut self, hashes: Vec<FileHash>) -> bool {
+        if !self.is_online() || hashes.is_empty() {
+            return false;
+        }
+        self.outbox.push(ToHost::Fetch(hashes));
+        true
+    }
+
+    /// Files fetched since the last call.
+    pub fn take_files(&mut self) -> Vec<(FileHash, Bytes)> {
+        std::mem::take(&mut self.arrived)
+    }
+
+    /// Fetched files the host no longer had, since the last call.
+    pub fn take_missing(&mut self) -> Vec<FileHash> {
+        std::mem::take(&mut self.missing)
+    }
+
+    /// Who is editing which document, as the host last said.
+    pub fn locks(&self) -> &BTreeMap<String, MemberId> {
+        &self.locks
+    }
+
+    /// Who is editing `path`, if anyone.
+    pub fn lock_holder(&self, path: &str) -> Option<MemberId> {
+        self.locks.get(path).copied()
+    }
+
+    /// True if this member may save `path` now: nobody else is editing it.
+    pub fn may_save(&self, path: &str) -> bool {
+        self.lock_holder(path).is_none_or(|m| m == self.member)
+    }
+
+    /// True if this member's role changes files like `path` and nobody
+    /// else is editing it.
+    pub fn can_change_file(&self, path: &str) -> bool {
+        self.role.can(if files::is_script(path) {
+            Capability::EditScripts
+        } else {
+            Capability::EditAssets
+        }) && self.may_save(path)
+    }
+
+    /// Asks to be the one editing `path` (asked again after a reconnect
+    /// until [`Client::unlock`]). [`Client::lock_holder`] says who got it.
+    pub fn lock(&mut self, path: &str) {
+        if self.my_locks.insert(path.to_owned()) && self.is_online() {
+            self.outbox.push(ToHost::Lock {
+                path: path.to_owned(),
+            });
+        }
+    }
+
+    /// Done editing `path`.
+    pub fn unlock(&mut self, path: &str) {
+        if self.my_locks.remove(path) && self.is_online() {
+            self.outbox.push(ToHost::Unlock {
+                path: path.to_owned(),
+            });
+        }
+    }
+
+    /// Publishes changed files (`None` deletes one), with any World edits
+    /// not captured yet, as one transaction (one undo step): an import is
+    /// its files and the model placed from them. Each file's base is its
+    /// version in [`Client::files`]. Returns the transaction's number, or
+    /// `None` if nothing changed.
+    pub fn publish(
+        &mut self,
+        world: &mut World,
+        label: impl Into<String>,
+        changes: Vec<(String, Option<Bytes>)>,
+    ) -> Result<Option<u64>, Refusal> {
+        if !self.joined {
+            return Err(Refusal::Invalid("not in a session yet".to_owned()));
+        }
+        let mut ops = Vec::new();
+        let mut uploads = Vec::new();
+        for (path, bytes) in changes {
+            files::check_path(&path).map_err(Refusal::Invalid)?;
+            if !self.role.can(if files::is_script(&path) {
+                Capability::EditScripts
+            } else {
+                Capability::EditAssets
+            }) {
+                return Err(Refusal::Permission);
+            }
+            if !self.may_save(&path) {
+                return Err(Refusal::Locked {
+                    by: self.lock_holder(&path).expect("may_save checked"),
+                    path,
+                });
+            }
+            let base = self.files.get(&path).copied();
+            let new = bytes.as_ref().map(|b| FileHash::of(b));
+            if base == new {
+                continue;
+            }
+            if let (Some(hash), Some(bytes)) = (new, bytes) {
+                uploads.push((hash, bytes));
+            }
+            ops.push(Op::FileVersion { path, base, new });
+        }
+        let label = label.into();
+        if world.has_edits() {
+            let captured = capture::capture(world, &self.graveyard, &mut self.unsent);
+            if !captured.ops.is_empty() {
+                if self.role.can(Capability::EditWorld) {
+                    ops.extend(captured.ops);
+                } else {
+                    // `capture` put the World back as it was.
+                    self.notices.push(Notice::Refused {
+                        client_seq: 0,
+                        label: label.clone(),
+                        reason: Refusal::Permission,
+                    });
+                }
+            }
+        }
+        if ops.is_empty() {
+            return Ok(None);
+        }
+        for (hash, bytes) in uploads {
+            self.uploads.insert(hash, bytes);
+            self.send_upload(hash);
+        }
+        let result = self.submit_ops(world, label, ops);
+        self.ask_for_ids_if_low(world);
+        if result.is_err() {
+            self.forget_uploads();
+        }
+        result.map(Some)
+    }
+
+    fn send_upload(&mut self, hash: FileHash) {
+        if !self.is_online() {
+            return;
+        }
+        let Some(bytes) = self.uploads.get(&hash) else {
+            return;
+        };
+        let total = bytes.len() as u64;
+        for (at, piece) in files::pieces(bytes) {
+            self.outbox.push(ToHost::Upload {
+                hash,
+                at,
+                total,
+                bytes: Piece(piece),
+            });
+        }
+    }
+
+    /// Keeps only the uploads pending transactions still publish.
+    fn forget_uploads(&mut self) {
+        let wanted: FxHashSet<FileHash> = self
+            .pending
+            .iter()
+            .flat_map(|p| p.transaction.ops.iter())
+            .filter_map(|op| match op {
+                Op::FileVersion { new, .. } => *new,
+                _ => None,
+            })
+            .collect();
+        self.uploads.retain(|hash, _| wanted.contains(hash));
     }
 
     /// Everyone in the project, as the host last said.
@@ -193,6 +414,9 @@ impl Client {
         if self.presence != Presence::default() {
             self.outbox.push(ToHost::Presence(self.presence.clone()));
         }
+        for path in &self.my_locks {
+            self.outbox.push(ToHost::Lock { path: path.clone() });
+        }
     }
 
     /// The connection closed. Editing goes on; edits wait in `pending`
@@ -201,6 +425,7 @@ impl Client {
         self.connection = Connection::Offline;
         self.outbox.clear();
         self.presences.clear();
+        self.downloads.clear();
     }
 
     /// An ID from this member's blocks, for a new Instance to make with
@@ -320,7 +545,9 @@ impl Client {
                 role,
                 ids,
                 rejected,
+                files,
             } => {
+                self.files = files;
                 // The old copy is gone, and with it what undoes the pending
                 // edits on it. Blocks of IDs not used yet stay this member's.
                 for pending in &mut self.pending {
@@ -370,6 +597,7 @@ impl Client {
                     .position(|p| p.transaction.client_seq == client_seq)
                 {
                     let pending = self.pending.remove(at).expect("found above");
+                    self.note_refused(client_seq);
                     self.notices.push(Notice::Refused {
                         client_seq,
                         label: pending.transaction.label,
@@ -377,6 +605,7 @@ impl Client {
                     });
                 }
                 self.put_pending_on(world);
+                self.forget_uploads();
             }
             ToClient::Ids(block) => {
                 world.add_id_block(block.start, block.len);
@@ -389,6 +618,18 @@ impl Client {
                     self.presences.insert(member, presence);
                 }
             }
+            ToClient::File {
+                hash,
+                at,
+                total,
+                bytes,
+            } => match Assembly::add(&mut self.downloads, hash, at, total, &bytes.0) {
+                Ok(Some(file)) => self.arrived.push((hash, file)),
+                Ok(None) => {}
+                Err(()) => self.missing.push(hash),
+            },
+            ToClient::Missing(hash) => self.missing.push(hash),
+            ToClient::Locks(locks) => self.locks = locks,
         }
         // What applying and undoing did isn't the user's edit.
         world.take_edits();
@@ -463,6 +704,7 @@ impl Client {
                 }
                 self.pending.pop_front();
             }
+            self.forget_uploads();
             if !notes.is_empty() {
                 self.notices.push(Notice::Changed {
                     client_seq,
@@ -490,6 +732,7 @@ impl Client {
             let pending = self.pending.pop_front().expect("checked above");
             let client_seq = pending.transaction.client_seq;
             if let Some((_, reason)) = rejected.iter().find(|(seq, _)| *seq == client_seq) {
+                self.note_refused(client_seq);
                 self.notices.push(Notice::Refused {
                     client_seq,
                     label: pending.transaction.label,
@@ -499,6 +742,13 @@ impl Client {
         }
         self.put_pending_on(world);
         self.connection = Connection::Online;
+        // The files they publish go first: the host takes a save only once
+        // it has the file.
+        self.forget_uploads();
+        let hashes: Vec<FileHash> = self.uploads.keys().copied().collect();
+        for hash in hashes {
+            self.send_upload(hash);
+        }
         for pending in &self.pending {
             self.outbox
                 .push(ToHost::Submit(pending.transaction.clone()));
@@ -528,6 +778,7 @@ impl Client {
         DocMut {
             world,
             graveyard: &mut self.graveyard,
+            files: &mut self.files,
         }
     }
 
@@ -539,6 +790,7 @@ impl Client {
         let mut doc = DocMut {
             world,
             graveyard: &mut self.graveyard,
+            files: &mut self.files,
         };
         for pending in self.pending.iter_mut().rev() {
             if let Some(undo) = pending.undo.take() {
@@ -557,6 +809,7 @@ impl Client {
         let mut doc = DocMut {
             world,
             graveyard: &mut self.graveyard,
+            files: &mut self.files,
         };
         for pending in &mut self.pending {
             pending.undo = apply::apply(&mut doc, &pending.transaction.ops, &|_| true)

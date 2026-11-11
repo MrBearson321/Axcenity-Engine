@@ -15,7 +15,7 @@ use crate::identity::{self, Fingerprint, Identity};
 use crate::role::Role;
 use crate::session::{HostSession, Hosting, Remote, RemoteEvent};
 use crate::socket::{HostCert, Link, LinkEvent};
-use crate::testing::{dump, dump_doc};
+use crate::testing::{dump, dump_doc, dump_files};
 
 /// How long a test waits for the network before failing.
 const PATIENCE: Duration = Duration::from_secs(20);
@@ -167,7 +167,8 @@ fn converge(hosting: &Hosting, members: &mut [&mut Member]) {
     });
     let host = dump_doc(hosting.lock().host().doc());
     for (i, member) in members.iter().enumerate() {
-        let copy = dump(&member.world, member.client().graveyard());
+        let copy =
+            dump(&member.world, member.client().graveyard()) + &dump_files(member.client().files());
         assert_eq!(copy, host, "member {i}'s copy differs from the host's");
     }
 }
@@ -627,4 +628,56 @@ fn names_colours_and_selections_travel_between_computers() {
     until(&mut [&mut owner, &mut sam], "the selection", |m| {
         m[1].client().presences().get(&paul) == Some(&presence)
     });
+}
+
+#[test]
+fn files_and_locks_travel_between_computers() {
+    let owner_id = Arc::new(Identity::new("Paul", [200, 80, 40]));
+    let (hosting, cert) = host(&owner_id, None);
+    let mut owner = Member::owner(&hosting, &cert, owner_id);
+    let invite = hosting.lock().invite(Role::Editor, INVITE_LIFETIME_SECONDS);
+    let mut sam = Member::invited(&invite, "Sam");
+    converge(&hosting, &mut [&mut owner, &mut sam]);
+
+    // Bigger than one piece, so it goes up and down in several.
+    let big: Vec<u8> = (0..crate::files::CHUNK + 4321)
+        .map(|i| (i % 253) as u8)
+        .collect();
+    let hash = crate::files::FileHash::of(&big);
+    let client = sam.client.as_mut().unwrap();
+    client
+        .publish(
+            &mut sam.world,
+            "Import",
+            vec![("assets/big.bin".into(), Some(Arc::from(big.clone())))],
+        )
+        .unwrap()
+        .unwrap();
+    client.lock("scripts/Door.server.lua");
+    converge(&hosting, &mut [&mut owner, &mut sam]);
+    assert_eq!(
+        hosting.lock().host().files().get("assets/big.bin"),
+        Some(&hash)
+    );
+
+    owner.client.as_mut().unwrap().fetch(vec![hash]);
+    let mut got = Vec::new();
+    let start = Instant::now();
+    while got.is_empty()
+        || owner
+            .client()
+            .lock_holder("scripts/Door.server.lua")
+            .is_none()
+    {
+        assert!(start.elapsed() < PATIENCE, "timed out waiting for the file");
+        owner.step();
+        sam.step();
+        got.extend(owner.client.as_mut().unwrap().take_files());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(got[0].1.to_vec(), big);
+    assert_eq!(
+        owner.client().lock_holder("scripts/Door.server.lua"),
+        Some(sam.client().member())
+    );
 }

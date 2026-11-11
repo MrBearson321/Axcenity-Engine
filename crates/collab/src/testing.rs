@@ -115,9 +115,37 @@ impl Net {
         seq
     }
 
+    /// Runs `f` on member `i`'s client and World (as the editor's mirror
+    /// does), then sends what it said.
+    pub fn with_client<R>(&mut self, i: usize, f: impl FnOnce(&mut Client, &mut World) -> R) -> R {
+        let result = f(&mut self.clients[i], &mut self.worlds[i]);
+        self.flush(i);
+        result
+    }
+
+    /// Member `i` publishes files (`None` deletes one).
+    pub fn publish(
+        &mut self,
+        i: usize,
+        label: &str,
+        changes: &[(&str, Option<&[u8]>)],
+    ) -> Result<Option<u64>, Refusal> {
+        let changes = changes
+            .iter()
+            .map(|(path, bytes)| ((*path).to_owned(), bytes.map(std::sync::Arc::from)))
+            .collect();
+        self.with_client(i, |client, world| client.publish(world, label, changes))
+    }
+
+    /// Lets the host's clock move to `now`.
+    pub fn tick(&mut self, now: std::time::Instant) {
+        let out = self.host.tick(now);
+        self.route(out);
+    }
+
     /// Member `i`'s copy, as `dump` writes it.
     pub fn copy(&self, i: usize) -> String {
-        dump(&self.worlds[i], self.clients[i].graveyard())
+        dump(&self.worlds[i], self.clients[i].graveyard()) + &dump_files(self.clients[i].files())
     }
 
     /// The host's document, as `dump` writes it.
@@ -280,7 +308,16 @@ pub(crate) fn dump(world: &World, graveyard: &Graveyard) -> String {
 }
 
 pub(crate) fn dump_doc(doc: &Doc) -> String {
-    dump(&doc.world, &doc.graveyard)
+    dump(&doc.world, &doc.graveyard) + &dump_files(&doc.files)
+}
+
+/// Each file and its version.
+pub(crate) fn dump_files(files: &crate::files::Manifest) -> String {
+    let mut out = String::new();
+    for (path, hash) in files {
+        let _ = writeln!(out, "file {path} {hash:?}");
+    }
+    out
 }
 
 fn dump_tree(world: &World, id: InstanceId, depth: usize, out: &mut String) {

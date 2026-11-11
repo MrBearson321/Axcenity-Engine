@@ -7,13 +7,17 @@
 //! server-only ones too: collaborators edit ServerScriptService) and every
 //! deleted one, each with the properties that differ from its class's
 //! defaults. Not yet: Terrain voxels, the string table and the other
-//! world-wide settings (TC5).
+//! world-wide settings (later). Files (TC5) travel in pieces by hash.
 
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use axcenity_net::WireValue;
 use serde::{Deserialize, Serialize};
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use crate::apply::{DropReason, Graveyard, Note, Place, Refusal};
+use crate::files::{FileHash, Manifest, Piece};
 use crate::ids::IdBlock;
 use crate::message::{MemberId, Snapshot, ToClient, ToHost};
 use crate::op::{NodeSpec, Op, Transaction};
@@ -21,7 +25,7 @@ use crate::presence::{Camera, Collaborator, Presence};
 use crate::role::Role;
 
 /// The first byte of every message. Raise it when a message changes.
-pub const FORMAT: u8 = 1;
+pub const FORMAT: u8 = 2;
 
 /// Why bytes aren't a message.
 #[derive(Debug, thiserror::Error)]
@@ -130,6 +134,11 @@ enum WireOp {
         tag: String,
         added: bool,
     },
+    FileVersion {
+        path: String,
+        base: Option<FileHash>,
+        new: Option<FileHash>,
+    },
 }
 
 impl From<&Op> for WireOp {
@@ -174,6 +183,11 @@ impl From<&Op> for WireOp {
                 id: id.to_bits(),
                 tag: tag.clone(),
                 added: *added,
+            },
+            Op::FileVersion { path, base, new } => WireOp::FileVersion {
+                path: path.clone(),
+                base: *base,
+                new: *new,
             },
         }
     }
@@ -235,6 +249,7 @@ impl WireOp {
                 tag,
                 added,
             },
+            WireOp::FileVersion { path, base, new } => Op::FileVersion { path, base, new },
         })
     }
 }
@@ -260,6 +275,8 @@ enum WireRefusal {
     Cycle(u64),
     NotYourId(u64),
     Invalid(String),
+    FileChanged(String),
+    Locked(String, u32),
 }
 
 impl From<&Refusal> for WireRefusal {
@@ -269,6 +286,8 @@ impl From<&Refusal> for WireRefusal {
             Refusal::Cycle { id } => WireRefusal::Cycle(id.to_bits()),
             Refusal::NotYourId { id } => WireRefusal::NotYourId(id.to_bits()),
             Refusal::Invalid(why) => WireRefusal::Invalid(why.clone()),
+            Refusal::FileChanged { path } => WireRefusal::FileChanged(path.clone()),
+            Refusal::Locked { path, by } => WireRefusal::Locked(path.clone(), by.0),
         }
     }
 }
@@ -280,6 +299,11 @@ impl From<WireRefusal> for Refusal {
             WireRefusal::Cycle(bits) => Refusal::Cycle { id: id(bits) },
             WireRefusal::NotYourId(bits) => Refusal::NotYourId { id: id(bits) },
             WireRefusal::Invalid(why) => Refusal::Invalid(why),
+            WireRefusal::FileChanged(path) => Refusal::FileChanged { path },
+            WireRefusal::Locked(path, by) => Refusal::Locked {
+                path,
+                by: MemberId(by),
+            },
         }
     }
 }
@@ -466,10 +490,21 @@ impl WireWorld {
 
 #[derive(Serialize, Deserialize)]
 enum WireToHost {
-    Hello { have: Option<u64> },
+    Hello {
+        have: Option<u64>,
+    },
     Submit(WireTransaction),
     NeedIds,
     Presence(WirePresence),
+    Upload {
+        hash: FileHash,
+        at: u64,
+        total: u64,
+        bytes: Vec<u8>,
+    },
+    Fetch(Vec<FileHash>),
+    Lock(String),
+    Unlock(String),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -510,6 +545,20 @@ impl From<&ToHost> for WireToHost {
             }),
             ToHost::NeedIds => WireToHost::NeedIds,
             ToHost::Presence(p) => WireToHost::Presence(p.into()),
+            ToHost::Upload {
+                hash,
+                at,
+                total,
+                bytes,
+            } => WireToHost::Upload {
+                hash: *hash,
+                at: *at,
+                total: *total,
+                bytes: bytes.0.to_vec(),
+            },
+            ToHost::Fetch(hashes) => WireToHost::Fetch(hashes.clone()),
+            ToHost::Lock { path } => WireToHost::Lock(path.clone()),
+            ToHost::Unlock { path } => WireToHost::Unlock(path.clone()),
         }
     }
 }
@@ -525,6 +574,20 @@ impl WireToHost {
             }),
             WireToHost::NeedIds => ToHost::NeedIds,
             WireToHost::Presence(p) => ToHost::Presence(p.into()),
+            WireToHost::Upload {
+                hash,
+                at,
+                total,
+                bytes,
+            } => ToHost::Upload {
+                hash,
+                at,
+                total,
+                bytes: Piece(Arc::from(bytes)),
+            },
+            WireToHost::Fetch(hashes) => ToHost::Fetch(hashes),
+            WireToHost::Lock(path) => ToHost::Lock { path },
+            WireToHost::Unlock(path) => ToHost::Unlock { path },
         })
     }
 }
@@ -538,6 +601,7 @@ enum WireToClient {
         role: Role,
         ids: Option<IdBlock>,
         rejected: Vec<(u64, WireRefusal)>,
+        files: Manifest,
     },
     Resumed {
         last_client_seq: u64,
@@ -563,6 +627,14 @@ enum WireToClient {
         member: u32,
         presence: WirePresence,
     },
+    File {
+        hash: FileHash,
+        at: u64,
+        total: u64,
+        bytes: Vec<u8>,
+    },
+    Missing(FileHash),
+    Locks(BTreeMap<String, u32>),
 }
 
 impl From<&ToClient> for WireToClient {
@@ -576,6 +648,7 @@ impl From<&ToClient> for WireToClient {
                 role,
                 ids,
                 rejected,
+                files,
             } => WireToClient::Welcome {
                 world: WireWorld::of(&world.0, graveyard),
                 seq: *seq,
@@ -583,6 +656,7 @@ impl From<&ToClient> for WireToClient {
                 role: *role,
                 ids: *ids,
                 rejected: refusals(rejected),
+                files: files.clone(),
             },
             ToClient::Resumed {
                 last_client_seq,
@@ -631,6 +705,24 @@ impl From<&ToClient> for WireToClient {
                 member: member.0,
                 presence: presence.into(),
             },
+            ToClient::File {
+                hash,
+                at,
+                total,
+                bytes,
+            } => WireToClient::File {
+                hash: *hash,
+                at: *at,
+                total: *total,
+                bytes: bytes.0.to_vec(),
+            },
+            ToClient::Missing(hash) => WireToClient::Missing(*hash),
+            ToClient::Locks(locks) => WireToClient::Locks(
+                locks
+                    .iter()
+                    .map(|(path, member)| (path.clone(), member.0))
+                    .collect(),
+            ),
         }
     }
 }
@@ -645,6 +737,7 @@ impl WireToClient {
                 role,
                 ids,
                 rejected,
+                files,
             } => {
                 let (world, graveyard) = world.into_world()?;
                 ToClient::Welcome {
@@ -655,6 +748,7 @@ impl WireToClient {
                     role,
                     ids,
                     rejected: unwire_refusals(rejected),
+                    files,
                 }
             }
             WireToClient::Resumed {
@@ -708,6 +802,24 @@ impl WireToClient {
                 member: MemberId(member),
                 presence: presence.into(),
             },
+            WireToClient::File {
+                hash,
+                at,
+                total,
+                bytes,
+            } => ToClient::File {
+                hash,
+                at,
+                total,
+                bytes: Piece(Arc::from(bytes)),
+            },
+            WireToClient::Missing(hash) => ToClient::Missing(hash),
+            WireToClient::Locks(locks) => ToClient::Locks(
+                locks
+                    .into_iter()
+                    .map(|(path, member)| (path, MemberId(member)))
+                    .collect(),
+            ),
         })
     }
 }

@@ -12,6 +12,7 @@
 //! | Create or move into a deleted parent | Goes to its nearest surviving ancestor | [`Note::Rehomed`] |
 //! | Move into itself or its own descendant | The whole transaction is refused | [`Refusal::Cycle`] |
 //! | Bad class, property, type or ID | The whole transaction is refused | [`Refusal::Invalid`], [`Refusal::NotYourId`] |
+//! | A file saved from a version that isn't the current one | The whole transaction is refused | [`Refusal::FileChanged`] |
 //!
 //! A transaction applies completely or not at all: on a refusal, what its
 //! earlier ops did is undone before returning.
@@ -21,6 +22,8 @@ use std::collections::BTreeMap;
 use axcenity_core::{InstanceId, TreeError, Value, World};
 use rustc_hash::FxHashMap;
 
+use crate::files::{self, FileHash, Manifest};
+use crate::message::MemberId;
 use crate::op::{NodeSpec, Op};
 
 /// Where an Instance sat: its parent and its position among the parent's
@@ -35,12 +38,13 @@ pub struct Place {
 /// made inside it meanwhile can go to the nearest place that still exists.
 pub type Graveyard = FxHashMap<InstanceId, Place>;
 
-/// A World as Team Create edits it, with its graveyard: what the host
-/// keeps.
+/// A World as Team Create edits it, with its graveyard and the project's
+/// files: what the host keeps.
 #[derive(Clone)]
 pub struct Doc {
     pub world: World,
     pub graveyard: Graveyard,
+    pub files: Manifest,
 }
 
 impl Doc {
@@ -52,6 +56,7 @@ impl Doc {
         Doc {
             world,
             graveyard: Graveyard::default(),
+            files: Manifest::new(),
         }
     }
 
@@ -60,6 +65,7 @@ impl Doc {
         DocMut {
             world: &mut self.world,
             graveyard: &mut self.graveyard,
+            files: &mut self.files,
         }
     }
 
@@ -74,6 +80,7 @@ impl Doc {
 pub struct DocMut<'a> {
     pub world: &'a mut World,
     pub graveyard: &'a mut Graveyard,
+    pub files: &'a mut Manifest,
 }
 
 impl DocMut<'_> {
@@ -118,6 +125,10 @@ pub enum Refusal {
     Cycle { id: InstanceId },
     #[error("a new Instance must use an ID from your own block")]
     NotYourId { id: InstanceId },
+    #[error("someone else saved `{path}` first; your version is kept beside it")]
+    FileChanged { path: String },
+    #[error("`{path}` is open for editing by someone else")]
+    Locked { path: String, by: MemberId },
     #[error("{0}")]
     Invalid(String),
 }
@@ -164,6 +175,11 @@ enum Inverse {
     },
     /// The whole tag list as it was, in order.
     Tags { id: InstanceId, tags: Vec<String> },
+    /// A file's version as it was (`None`: it didn't exist).
+    File {
+        path: String,
+        hash: Option<FileHash>,
+    },
 }
 
 /// Applies `ops` in order. `owns` says whether a new Instance may take an
@@ -218,6 +234,12 @@ pub fn undo(doc: &mut DocMut<'_>, undo: Undo) {
                 let _ = doc.world.set_attribute(id, &name, value);
             }
             Inverse::Tags { id, tags } => set_tags(doc.world, id, &tags),
+            Inverse::File { path, hash } => {
+                match hash {
+                    Some(hash) => doc.files.insert(path, hash),
+                    None => doc.files.remove(&path),
+                };
+            }
         }
     }
 }
@@ -288,6 +310,23 @@ fn apply_op(
             applied.undo.0.push(Inverse::Tags {
                 id: *id,
                 tags: before,
+            });
+            applied.ops.push(op.clone());
+            Ok(())
+        }
+        Op::FileVersion { path, base, new } => {
+            files::check_path(path).map_err(Refusal::Invalid)?;
+            let current = doc.files.get(path).copied();
+            if current != *base {
+                return Err(Refusal::FileChanged { path: path.clone() });
+            }
+            match new {
+                Some(hash) => doc.files.insert(path.clone(), *hash),
+                None => doc.files.remove(path),
+            };
+            applied.undo.0.push(Inverse::File {
+                path: path.clone(),
+                hash: current,
             });
             applied.ops.push(op.clone());
             Ok(())

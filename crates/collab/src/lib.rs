@@ -35,11 +35,13 @@ pub mod access;
 pub mod apply;
 pub mod capture;
 pub mod client;
+pub mod files;
 pub mod handshake;
 pub mod host;
 pub mod identity;
 pub mod ids;
 pub mod message;
+pub mod mirror;
 pub mod op;
 pub mod presence;
 pub mod role;
@@ -52,6 +54,8 @@ mod capture_tests;
 #[cfg(test)]
 mod convergence_tests;
 #[cfg(test)]
+mod files_tests;
+#[cfg(test)]
 mod net_tests;
 #[cfg(test)]
 mod presence_tests;
@@ -62,9 +66,11 @@ mod tests;
 
 pub use apply::{Doc, Note, Refusal};
 pub use client::{Client, Notice};
+pub use files::{FileHash, FileStore, FolderStore, Manifest, MemoryStore};
 pub use host::Host;
 pub use ids::IdBlock;
 pub use message::{MemberId, ToClient, ToHost};
+pub use mirror::Mirror;
 pub use op::{NodeSpec, Op, Transaction};
 pub use presence::{Camera, Collaborator, Presence, Profile};
 pub use role::{Capability, Role};

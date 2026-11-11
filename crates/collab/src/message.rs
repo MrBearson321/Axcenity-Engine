@@ -1,12 +1,15 @@
 //! What clients and the host say to each other. TC3 puts these on the wire
 //! (postcard over WebSocket and TLS); here they're plain values.
 
+use std::collections::BTreeMap;
+
 use axcenity_core::World;
 use rustc_hash::FxHashMap;
 
 use axcenity_core::InstanceId;
 
 use crate::apply::{Note, Place, Refusal};
+use crate::files::{FileHash, Manifest, Piece};
 use crate::ids::IdBlock;
 use crate::op::{Op, Transaction};
 use crate::presence::{Collaborator, Presence};
@@ -43,6 +46,21 @@ pub enum ToHost {
     NeedIds,
     /// What the member is doing now (sent when it changes).
     Presence(Presence),
+    /// A piece of a file the member is about to publish with a
+    /// `FileVersion`: `bytes` from offset `at` of `total` (TC5).
+    Upload {
+        hash: FileHash,
+        at: u64,
+        total: u64,
+        bytes: Piece,
+    },
+    /// Asks for files by hash.
+    Fetch(Vec<FileHash>),
+    /// Asks to be the one member editing a document (a script tab with
+    /// unsaved changes, say).
+    Lock { path: String },
+    /// Done editing it.
+    Unlock { path: String },
 }
 
 /// From the host to a client.
@@ -61,6 +79,8 @@ pub enum ToClient {
         /// The member's recently refused transactions, so a client that
         /// missed a `Rejected` while away can say which edits were refused.
         rejected: Vec<(u64, Refusal)>,
+        /// The project's files as of `seq`.
+        files: Manifest,
     },
     /// After a `Hello` whose `have` the host could catch up from: the
     /// missed transactions came just before this, and transactions the
@@ -93,4 +113,16 @@ pub enum ToClient {
         member: MemberId,
         presence: Presence,
     },
+    /// A piece of a file the member fetched.
+    File {
+        hash: FileHash,
+        at: u64,
+        total: u64,
+        bytes: Piece,
+    },
+    /// The host doesn't have a fetched file (any more): a newer version
+    /// replaced it.
+    Missing(FileHash),
+    /// Who is editing which document, whenever that changes.
+    Locks(BTreeMap<String, MemberId>),
 }
