@@ -891,6 +891,13 @@ fn the_logo_entrances_the_dots_and_the_spotlight_draw() {
                 egui::Id::new("card"),
                 1.0,
             );
+            crate::widgets::atmosphere(ui, ui.max_rect());
+            ui.horizontal(|ui| {
+                let icons = crate::theme::icons::SQUARES_FOUR;
+                let _ = crate::widgets::nav_rail(ui, icons, "Projects", Some(3), true, 1.0);
+                let gear = crate::theme::icons::GEAR_SIX;
+                let _ = crate::widgets::nav_rail(ui, gear, "Settings", None, false, 0.0);
+            });
         });
     };
     let moved = vec![egui::Event::PointerMoved(pointer)];

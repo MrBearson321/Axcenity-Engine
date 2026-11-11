@@ -195,6 +195,16 @@ zstd = { version = "0.13", default-features = false }
 # HTTPS for the Toolbox (`crates/toolbox`, editor only). rustls so no system TLS library
 # is required. MIT OR Apache-2.0.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# Team Create's network (`crates/collab`, TC3): WebSocket over TLS 1.3 to a
+# host whose self-signed certificate each invite pins, and Ed25519 device
+# keys. rustls and ring are already in the tree through ureq; tungstenite
+# (sync, no TLS of its own) and rcgen (makes the host's certificate) are new.
+# rustls: Apache-2.0 OR ISC OR MIT. ring: Apache-2.0 AND ISC.
+# tungstenite and rcgen: MIT OR Apache-2.0.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+ring = "0.17"
+tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"] }
 # The Toolbox's metadata database (`metadata.db` in the central asset
 # directory, `crates/toolbox`, editor only). `bundled` builds SQLite with `cc`
 # on every desktop OS, so no system library is needed. MIT; SQLite itself is

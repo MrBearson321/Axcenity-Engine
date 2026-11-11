@@ -47,6 +47,7 @@ mod graphics_benchmark;
 mod input_settings;
 mod layouts;
 mod levels;
+mod luau_checks;
 mod material_files;
 mod material_tab;
 pub(crate) mod mcp;
@@ -68,7 +69,7 @@ mod solid;
 mod spline_content;
 mod splines;
 mod tags;
-mod team;
+pub(crate) mod team;
 mod terrain;
 mod texture_set;
 mod to_terrain;
@@ -208,6 +209,9 @@ pub struct EditorApp {
     history: History,
     /// The Team Create session this editor is in, if any (`app/team.rs`).
     team: Option<team::Team>,
+    /// A session to start once the project opens (`--team-host`,
+    /// `--team-join`).
+    team_start: Option<team::TeamStart>,
     /// The tool picked in the toolbar, and its snapping settings. Both are
     /// preferences, so they stay when another project is opened.
     tool: Tool,
@@ -307,6 +311,8 @@ pub struct EditorApp {
     warnings: WarningCache,
     /// The open script tabs, and whether the viewport or a script is shown.
     tabs: ScriptTabs,
+    /// luau-lsp's checks of the open code tabs (G4 stage 2).
+    luau: luau_checks::LuauChecks,
     /// A Script waiting for an answer to "Delete script?".
     confirm_delete: Option<InstanceId>,
     /// A sky image waiting for "Use this sky?" to be answered (`app/sky.rs`).
@@ -855,6 +861,7 @@ impl EditorApp {
             references: None,
             history: History::new(),
             team: None,
+            team_start: None,
             tool: Tool::default(),
             snap: Snap::default(),
             modes: Modes::default(),
@@ -898,6 +905,7 @@ impl EditorApp {
             asset_check: AssetCheck::default(),
             tags: crate::tags::TagsPanel::default(),
             tabs: ScriptTabs::default(),
+            luau: Default::default(),
             confirm_delete: None,
             confirm_sky: None,
             levels_panel: Default::default(),
@@ -1357,6 +1365,9 @@ impl EditorApp {
         self.terrain_frame(ctx);
         // Team Create: send what this frame's tools did, then catch up.
         self.team_frame();
+        if let Some(every) = self.team_wants_frames() {
+            ctx.request_repaint_after(every);
+        }
         self.generate_frame();
         self.palette_frame(ctx);
         self.shortcuts(ctx);
@@ -1492,6 +1503,10 @@ impl EditorApp {
         // spans the whole top, then the Explorer (with Properties under it)
         // runs down the whole right side, then the Output fits under the viewport.
         self.update_warnings();
+        let now = ctx.input(|input| input.time);
+        if self.check_scripts(now) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+        }
         let palette = theme::palette(ctx);
         // The header is the window's only title bar (see `window_frame.rs`).
         egui::Panel::top("menu bar")

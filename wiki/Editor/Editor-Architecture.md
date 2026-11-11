@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [editor, editor-kit, plugins]
-source: [crates/editor/src/main.rs, crates/editor/src/app.rs, crates/editor/src/play.rs, crates/editor/src/play/multi.rs, crates/editor/src/viewport.rs, crates/editor/src/layout.rs, crates/editor/src/theme.rs, crates/editor-kit/src/lib.rs, crates/editor-kit/src/theme.rs, crates/editor-kit/src/widgets.rs, crates/editor-kit/src/responsive.rs, crates/editor/src/history.rs, crates/editor/src/cooking.rs, crates/editor/src/profiler.rs, crates/plugins/src/lib.rs, crates/plugins/src/api.rs]
+source: [crates/editor/src/main.rs, crates/editor/src/script_completion.rs, crates/editor/src/scripts/assist.rs, crates/editor/src/luau_check.rs, crates/editor/src/app/luau_checks.rs, crates/editor/src/app.rs, crates/editor/src/play.rs, crates/editor/src/play/multi.rs, crates/editor/src/viewport.rs, crates/editor/src/layout.rs, crates/editor/src/theme.rs, crates/editor-kit/src/lib.rs, crates/editor-kit/src/theme.rs, crates/editor-kit/src/widgets.rs, crates/editor-kit/src/responsive.rs, crates/editor/src/history.rs, crates/editor/src/cooking.rs, crates/editor/src/profiler.rs, crates/editor/src/start/nav.rs, crates/plugins/src/lib.rs, crates/plugins/src/api.rs, crates/plugins/src/bundle.rs]
 docs: [docs/architecture.md, docs/editor/shell.md, docs/architecture/play-mode.md, docs/editor/selection.md, docs/editor/transforms.md, docs/editor/tree.md, docs/editor/scripts.md, docs/editor/plugins.md, crates/editor/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -43,12 +43,13 @@ Play (F5) autosaves if needed, clones the World (every `InstanceId` stays valid)
 
 ## Plugins
 
-Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin folders, project-only file access, and an API (`plugin`, toolbars, dock widgets, `Selection`, `ChangeHistoryService`, mouse, settings) run in `script`'s long-lived `EditRuntime` against the edit world. Undo, the ribbon and dock tabs are the editor's (`app/plugins.rs`). Keep `definitions/axcenity-plugin.d.luau` in step with `api.rs` (a test checks). The player must never depend on `plugins`.
+Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin folders, project-only file access, and an API (`plugin`, toolbars, dock widgets, `Selection`, `ChangeHistoryService`, mouse, settings) run in `script`'s long-lived `EditRuntime` against the edit world. Creators scaffold, pack and share plugins as `.axcenity-plugin` zips (`plugins::bundle`); the Plugins panel and Toolbox **Packs ▸ Import plugin…** install them. Undo, the ribbon and dock tabs are the editor's (`app/plugins.rs`). Keep `definitions/axcenity-plugin.d.luau` in step with `api.rs` (a test checks). The player must never depend on `plugins`.
 
 ## Recent additions (2026-11-11)
 
 - **Universal search** (Ctrl+K; `command_palette.rs`, `app/search.rs`): one fuzzy-ranked list over commands, tools, scripts, assets, levels, objects and settings, each provider re-listed only when its stamp changes; the command palette (Ctrl+Shift+P) and Quick Open (Ctrl+P) are views of it.
 - **Design system Phases 2–5**: errors stay until seen; one way to open and close windows and dialogs; Explorer and Console draw only what's visible; Properties edits every selected item; Explorer arrow keys; a **shortcut table** (`shortcuts.rs`, every shortcut one `Action` with a context); layout presets; Increase contrast.
+- **Script completion** (G4 stage 1; `crates/editor/src/script_completion.rs`, `crates/editor/src/scripts/assist.rs`): code tabs list members after `.`/`:` and names on Ctrl+Space, and show an engine call's signature after `(`/`,`. It reads `axcenity_script::api_reference()` (the luau-lsp definitions' tables) and follows chains and locals' declarations against the edit world; no type checking. Stage 2 (`crates/editor/src/luau_check.rs`, `crates/editor/src/app/luau_checks.rs`) runs `luau-lsp analyze` as a child process on a background thread when a tab's code goes quiet, and underlines errors and lints; luau-lsp is found, not shipped (`AXCENITY_LUAU_LSP`, the PATH, or VS Code's Luau extension).
 - **Scripts inside objects** editor support (Insert Script into a selected object creates `objects/<name>/Script.server.lua`).
 - [MCP server](MCP-Server.md) and [Toolbox](Toolbox.md).
 - **UI prefabs** (G5): Save prefab and Export Package take ScreenGuis and UI elements with their `SourceFile` LocalScripts.

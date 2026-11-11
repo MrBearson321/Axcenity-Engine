@@ -2,6 +2,10 @@
 //! or folded to its icons) or a bar across the top. Both list the same
 //! pages and Settings; which one shows, and whether the sidebar is folded,
 //! is saved between runs ([`StartNav::to_text`]).
+//!
+//! Folding slides the rail. Labels only appear once the rail is wide enough
+//! to hold them, so nothing is clipped mid-slide; the open and folded
+//! headers never draw on top of each other.
 
 use eframe::egui::{self, Rect, RichText, Stroke, pos2, vec2};
 
@@ -11,15 +15,19 @@ use crate::widgets;
 
 /// How wide the sidebar is when open, and folded to its icons.
 pub(super) const SIDEBAR_WIDTH: f32 = 220.0;
-pub(super) const FOLDED_WIDTH: f32 = 60.0;
+pub(super) const FOLDED_WIDTH: f32 = 64.0;
+/// How long the sidebar takes to fold or open.
+const SIDEBAR_SECONDS: f32 = 0.32;
+/// Open chrome height (wordmark + buttons on one row).
+const HEADER_OPEN: f32 = 36.0;
+/// Folded chrome height (mark, then the open button under it — room so
+/// neither is clipped).
+const HEADER_FOLDED: f32 = 72.0;
 /// The top bar's height.
 pub(super) const TOP_BAR_HEIGHT: f32 = 52.0;
 /// Narrower than this, the top bar's tabs drop their names (each keeps a
 /// tooltip) and the version moves into the logo's tooltip.
 const TOP_BAR_ROOM_FOR_NAMES: f32 = 900.0;
-/// Below this width the sidebar draws only icons, so labels never spill
-/// out of it while it folds and opens.
-const ROOM_FOR_LABELS: f32 = 150.0;
 
 /// Where the start screen's navigation goes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -135,6 +143,29 @@ fn about_line() -> String {
     format!("Axcenity Engine {}\nApache-2.0", version_label())
 }
 
+/// How far the sidebar is through folding open (1) or closed (0), eased.
+/// Requests a repaint while the slide is in progress so the animation runs
+/// even when the editor would otherwise sit idle between inputs.
+fn sidebar_open(ctx: &egui::Context, folded: bool) -> f32 {
+    let time = if ctx.global_style().animation_time <= 0.0 {
+        0.0
+    } else {
+        SIDEBAR_SECONDS
+    };
+    let t = ctx.animate_bool_with_time(egui::Id::new("start sidebar open"), !folded, time);
+    if time > 0.0 && t > 0.0 && t < 1.0 {
+        ctx.request_repaint();
+    }
+    theme::bezier(theme::curve::SETTLE, t)
+}
+
+/// How strongly labels read. They stay off until the rail is wide enough
+/// that titles aren't clipped against the page edge.
+fn label_amount(open: f32) -> f32 {
+    let t = ((open - 0.55) / 0.35).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 impl StartScreen {
     /// How the navigation is laid out now.
     pub fn nav(&self) -> StartNav {
@@ -157,15 +188,10 @@ impl StartScreen {
     ) -> (Rect, bool) {
         match self.nav.layout {
             NavLayout::Sidebar => {
-                // Folding and opening slide (or snap, with Reduce motion).
-                let open = theme::ease(
-                    ui.ctx(),
-                    egui::Id::new("start sidebar open"),
-                    !self.nav.folded,
-                );
+                let open = sidebar_open(ui.ctx(), self.nav.folded);
                 let width = FOLDED_WIDTH + (SIDEBAR_WIDTH - FOLDED_WIDTH) * open;
                 let rect = Rect::from_min_size(full.min, vec2(width, full.height()));
-                let settings = self.sidebar(ui, rect, tracked, brand);
+                let settings = self.sidebar(ui, rect, tracked, brand, open);
                 (
                     Rect::from_min_max(pos2(rect.right(), full.top()), full.max),
                     settings,
@@ -182,11 +208,16 @@ impl StartScreen {
         }
     }
 
-    /// The sidebar: the logo and the fold and layout buttons, the pages,
-    /// and at the bottom Settings and the version. Folded (or narrower than
-    /// [`ROOM_FOR_LABELS`] while it slides), only icons show, each with a
-    /// tooltip. Returns true when Settings was clicked.
-    fn sidebar(&mut self, ui: &mut egui::Ui, rect: Rect, tracked: usize, brand: &Brand) -> bool {
+    /// The sidebar: width follows `open`; labels and the open header only
+    /// appear once there's room. Returns true when Settings was clicked.
+    fn sidebar(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        tracked: usize,
+        brand: &Brand,
+        open: f32,
+    ) -> bool {
         let palette = theme::palette(ui.ctx());
         ui.painter().rect_filled(rect, 0, palette.app_bg);
         ui.painter().vline(
@@ -194,85 +225,39 @@ impl StartScreen {
             rect.y_range(),
             Stroke::new(1.0_f32, palette.border),
         );
-        let labels = rect.width() >= ROOM_FOR_LABELS;
-        let inner = rect.shrink2(vec2(if labels { 12.0 } else { 8.0 }, 18.0));
+        let labels = label_amount(open);
+        let pad_x = 8.0 + 4.0 * open;
+        let inner = rect.shrink2(vec2(pad_x, 18.0));
         let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-        // Nothing drawn while it slides spills over the page.
+        // Clip to the sliding rail so nothing spills onto the page.
         bar.set_clip_rect(rect);
         let ctx = ui.ctx().clone();
         let intro = *self.intro.get_or_insert(ctx.input(|input| input.time));
         let cut = theme::arrival(&ctx, intro, 0.1, 1.0, theme::curve::CUT);
         let wipe = theme::arrival(&ctx, intro, 0.3, 0.7, theme::curve::CUT);
 
-        if labels {
-            bar.horizontal(|ui| {
-                ui.add_space(6.0);
-                widgets::wordmark(ui, brand.mark(), 15.0, cut, wipe).on_hover_text(about_line());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    if widgets::icon_button(
-                        ui,
-                        icons::BROWSER,
-                        "Show the pages in a top bar",
-                        false,
-                    )
-                    .clicked()
-                    {
-                        self.nav.layout = NavLayout::TopBar;
-                    }
-                    if widgets::icon_button(
-                        ui,
-                        icons::SIDEBAR_SIMPLE,
-                        "Fold the sidebar to its icons",
-                        false,
-                    )
-                    .clicked()
-                    {
-                        self.nav.folded = true;
-                    }
-                });
-            });
-        } else {
-            bar.vertical_centered(|ui| {
-                let (mark, response) =
-                    ui.allocate_exact_size(vec2(22.0, 22.0), egui::Sense::hover());
-                widgets::paint_mark(ui.painter(), mark, brand.mark(), palette.text_strong);
-                response.on_hover_text(about_line());
-                ui.add_space(10.0);
-                if widgets::icon_button(ui, icons::SIDEBAR_SIMPLE, "Open the sidebar", false)
-                    .clicked()
-                {
-                    self.nav.folded = false;
-                }
-            });
-        }
-        bar.add_space(if labels { 22.0 } else { 14.0 });
+        self.sidebar_header(&mut bar, brand, &palette, labels, cut, wipe);
+
+        bar.add_space(12.0 + 6.0 * open);
         bar.spacing_mut().item_spacing.y = 2.0;
         for (page, icon, title, about) in PAGES {
             let count = (page == Page::Projects).then_some(tracked);
             let selected = self.page == page;
-            let clicked = if labels {
-                widgets::nav_item(&mut bar, icon, title, count, selected)
-                    .on_hover_text(about)
-                    .clicked()
-            } else {
-                let tip = match count {
-                    Some(count) => format!("{title} ({count})\n{about}"),
-                    None => format!("{title}\n{about}"),
-                };
-                widgets::nav_icon(&mut bar, icon, title, selected)
-                    .on_hover_text(tip)
-                    .clicked()
+            let tip = match count {
+                Some(count) if labels < 0.5 => format!("{title} ({count})\n{about}"),
+                _ if labels < 0.5 => format!("{title}\n{about}"),
+                _ => about.to_owned(),
             };
-            if clicked {
+            if widgets::nav_rail(&mut bar, icon, title, count, selected, open)
+                .on_hover_text(tip)
+                .clicked()
+            {
                 self.page = page;
             }
         }
 
-        // Settings and the version, from the bottom up, so the version can
-        // take as many lines as the width needs without covering Settings.
         let mut top_of_version = inner.bottom();
-        if labels {
+        if labels > 0.01 {
             let mut version = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(Rect::from_min_max(
@@ -282,6 +267,7 @@ impl StartScreen {
                     .layout(egui::Layout::bottom_up(egui::Align::Min)),
             );
             version.set_clip_rect(rect);
+            version.multiply_opacity(labels);
             version.spacing_mut().item_spacing.y = 0.0;
             let line = |text: String, color| {
                 egui::Label::new(RichText::new(text).size(type_scale::CAPTION).color(color)).wrap()
@@ -300,12 +286,92 @@ impl StartScreen {
                 .layout(egui::Layout::bottom_up(egui::Align::Min)),
         );
         foot.set_clip_rect(rect);
-        let settings = if labels {
-            widgets::nav_item(&mut foot, icons::GEAR_SIX, "Settings", None, false)
-        } else {
-            widgets::nav_icon(&mut foot, icons::GEAR_SIX, "Settings", false)
-        };
+        let settings = widgets::nav_rail(&mut foot, icons::GEAR_SIX, "Settings", None, false, open);
         settings.on_hover_text(settings_tooltip(&ctx)).clicked()
+    }
+
+    /// Header height lerps with the labels so the page list doesn't jump.
+    /// Open chrome and folded chrome never draw at once.
+    fn sidebar_header(
+        &mut self,
+        bar: &mut egui::Ui,
+        brand: &Brand,
+        palette: &theme::Palette,
+        labels: f32,
+        cut: f32,
+        wipe: f32,
+    ) {
+        let width = bar.available_width();
+        let height = HEADER_FOLDED + (HEADER_OPEN - HEADER_FOLDED) * labels;
+        let (header, _) = bar.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+
+        if labels >= 0.5 {
+            let mut open_ui = bar.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(header)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            open_ui.set_clip_rect(header);
+            open_ui.multiply_opacity(labels.max(0.001));
+            open_ui.add_space(4.0);
+            widgets::wordmark(&mut open_ui, brand.mark(), 15.0, cut, wipe)
+                .on_hover_text(about_line());
+            open_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                if widgets::icon_button(ui, icons::BROWSER, "Show the pages in a top bar", false)
+                    .clicked()
+                {
+                    self.nav.layout = NavLayout::TopBar;
+                }
+                if widgets::icon_button(
+                    ui,
+                    icons::SIDEBAR_SIMPLE,
+                    "Fold the sidebar to its icons",
+                    false,
+                )
+                .clicked()
+                {
+                    self.nav.folded = true;
+                }
+            });
+            return;
+        }
+
+        let fade = (1.0 - labels).clamp(0.0, 1.0);
+        let mark_size = 24.0;
+        let mark = Rect::from_center_size(
+            pos2(header.center().x, header.top() + 6.0 + mark_size / 2.0),
+            vec2(mark_size, mark_size),
+        );
+        let mark_response = bar.interact(mark, bar.id().with("folded mark"), egui::Sense::hover());
+        widgets::paint_mark(
+            bar.painter(),
+            mark,
+            brand.mark(),
+            palette.text_strong.gamma_multiply(fade * cut.max(0.001)),
+        );
+        mark_response.on_hover_text(about_line());
+
+        let button_top = mark.bottom() + 10.0;
+        let button_rect = Rect::from_center_size(
+            pos2(header.center().x, button_top + 14.0),
+            vec2(width.min(40.0), 28.0),
+        );
+        let mut folded_ui = bar.new_child(egui::UiBuilder::new().max_rect(button_rect).layout(
+            egui::Layout::centered_and_justified(egui::Direction::TopDown),
+        ));
+        folded_ui.set_clip_rect(header);
+        folded_ui.multiply_opacity(fade);
+        if widgets::icon_button(
+            &mut folded_ui,
+            icons::SIDEBAR_SIMPLE,
+            "Open the sidebar",
+            false,
+        )
+        .clicked()
+        {
+            self.nav.folded = false;
+        }
     }
 
     /// The top bar: the logo, the pages as tabs, and at the right the
@@ -395,8 +461,16 @@ mod tests {
                 assert_eq!(StartNav::from_text(&nav.to_text()), nav);
             }
         }
-        // Nothing saved yet, or something unknown: an open sidebar.
         assert_eq!(StartNav::from_text(""), StartNav::default());
         assert_eq!(StartNav::from_text("sideways"), StartNav::default());
+    }
+
+    #[test]
+    fn labels_stay_off_until_the_rail_is_wide_enough() {
+        assert!(label_amount(0.0) < 0.01);
+        assert!(label_amount(0.5) < 0.01);
+        assert!(label_amount(0.7) > 0.1);
+        assert!(label_amount(1.0) > 0.99);
+        assert!(label_amount(0.65) < label_amount(0.85));
     }
 }

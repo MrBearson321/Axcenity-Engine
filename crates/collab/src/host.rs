@@ -9,6 +9,7 @@ use crate::apply::{self, Doc, Note, Refusal};
 use crate::ids::{IdAllocator, IdBlock};
 use crate::message::{MemberId, Snapshot, ToClient, ToHost};
 use crate::op::Op;
+use crate::presence::{Collaborator, Presence, Profile};
 use crate::role::{Capability, Role};
 
 /// How many applied transactions the host keeps to catch a reconnecting
@@ -45,6 +46,9 @@ struct Member {
     last_client_seq: u64,
     refused: VecDeque<(u64, Refusal)>,
     connected: bool,
+    profile: Profile,
+    /// What they're doing, while connected.
+    presence: Presence,
 }
 
 /// The authority of one Team Create session.
@@ -108,8 +112,53 @@ impl Host {
                 last_client_seq: 0,
                 refused: VecDeque::new(),
                 connected: false,
+                profile: Profile::unnamed(member),
+                presence: Presence::default(),
             },
         );
+    }
+
+    /// Sets a member's name and colour (TC3 does this as they sign in).
+    pub fn set_profile(&mut self, member: MemberId, profile: Profile) -> Vec<Outgoing> {
+        let Some(m) = self.members.get_mut(&member) else {
+            return Vec::new();
+        };
+        let profile = profile.tidied();
+        if m.profile == profile {
+            return Vec::new();
+        }
+        m.profile = profile;
+        self.roster_to_everyone()
+    }
+
+    /// Takes a member out: their transactions are no longer taken.
+    pub fn remove_member(&mut self, member: MemberId) -> Vec<Outgoing> {
+        if self.members.remove(&member).is_none() {
+            return Vec::new();
+        }
+        self.roster_to_everyone()
+    }
+
+    /// Everyone in the session, by member ID.
+    pub fn roster(&self) -> Vec<Collaborator> {
+        self.members
+            .iter()
+            .map(|(&member, m)| Collaborator {
+                member,
+                profile: m.profile.clone(),
+                role: m.role,
+                online: m.connected,
+            })
+            .collect()
+    }
+
+    /// What `member` is doing now.
+    pub fn presence(&self, member: MemberId) -> Option<&Presence> {
+        self.members.get(&member).map(|m| &m.presence)
+    }
+
+    fn roster_to_everyone(&self) -> Vec<Outgoing> {
+        self.to_everyone(ToClient::Roster(self.roster()))
     }
 
     pub fn role(&self, member: MemberId) -> Option<Role> {
@@ -122,22 +171,29 @@ impl Host {
             return Vec::new();
         };
         m.role = role;
+        let mut out = Vec::new();
         if m.connected {
-            vec![Outgoing {
+            out.push(Outgoing {
                 to: member,
                 message: ToClient::RoleChanged(role),
-            }]
-        } else {
-            Vec::new()
+            });
         }
+        out.extend(self.roster_to_everyone());
+        out
     }
 
     /// The member's connection closed. What they send after reconnecting
     /// starts with `Hello`.
-    pub fn disconnected(&mut self, member: MemberId) {
-        if let Some(m) = self.members.get_mut(&member) {
-            m.connected = false;
+    pub fn disconnected(&mut self, member: MemberId) -> Vec<Outgoing> {
+        let Some(m) = self.members.get_mut(&member) else {
+            return Vec::new();
+        };
+        if !m.connected {
+            return Vec::new();
         }
+        m.connected = false;
+        m.presence = Presence::default();
+        self.roster_to_everyone()
     }
 
     /// Handles one message from `member`. Messages from someone who isn't
@@ -181,6 +237,28 @@ impl Host {
                     Err(reason) => self.refuse(member, transaction.client_seq, reason),
                 }
             }
+            ToHost::Presence(presence) => {
+                let m = self.members.get_mut(&member).expect("checked above");
+                if !m.connected {
+                    return Vec::new();
+                }
+                let presence = presence.tidied();
+                if m.presence == presence {
+                    return Vec::new();
+                }
+                m.presence = presence.clone();
+                self.members
+                    .iter()
+                    .filter(|&(&to, m)| m.connected && to != member)
+                    .map(|(&to, _)| Outgoing {
+                        to,
+                        message: ToClient::Presence {
+                            member,
+                            presence: presence.clone(),
+                        },
+                    })
+                    .collect()
+            }
             ToHost::NeedIds => {
                 let block = self.ids.block();
                 let m = self.members.get_mut(&member).expect("checked above");
@@ -194,6 +272,25 @@ impl Host {
     }
 
     fn hello(&mut self, member: MemberId, have: Option<u64>) -> Vec<Outgoing> {
+        let mut out = self.catch_up(member, have);
+        // Who's here, to everyone (the member is online now), and what the
+        // others are doing, to the member.
+        out.extend(self.roster_to_everyone());
+        for (&other, m) in &self.members {
+            if other != member && m.connected && m.presence != Presence::default() {
+                out.push(Outgoing {
+                    to: member,
+                    message: ToClient::Presence {
+                        member: other,
+                        presence: m.presence.clone(),
+                    },
+                });
+            }
+        }
+        out
+    }
+
+    fn catch_up(&mut self, member: MemberId, have: Option<u64>) -> Vec<Outgoing> {
         let first_kept = self.log.front().map_or(self.seq + 1, |logged| logged.seq);
         let can_catch_up = have.is_some_and(|have| have <= self.seq && have + 1 >= first_kept);
         let m = self.members.get_mut(&member).expect("checked by receive");

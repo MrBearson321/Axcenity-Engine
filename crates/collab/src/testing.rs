@@ -15,6 +15,7 @@ use crate::host::{Host, Outgoing};
 use crate::message::{MemberId, ToClient, ToHost};
 use crate::op::{NodeSpec, Op};
 use crate::role::Role;
+use crate::wire;
 
 pub(crate) struct Net {
     pub host: Host,
@@ -80,7 +81,8 @@ impl Net {
         self.connected[i] = false;
         self.up[i].clear();
         self.down[i].clear();
-        self.host.disconnected(member(i));
+        let out = self.host.disconnected(member(i));
+        self.route(out);
         self.clients[i].disconnected();
     }
 
@@ -123,6 +125,17 @@ impl Net {
         dump_doc(self.host.doc())
     }
 
+    /// Member `i` says what they're doing.
+    pub fn set_presence(&mut self, i: usize, presence: crate::presence::Presence) {
+        self.clients[i].set_presence(presence);
+        self.flush(i);
+    }
+
+    /// Delivers what the host said outside a client message.
+    pub fn route_out(&mut self, out: Vec<Outgoing>) {
+        self.route(out);
+    }
+
     pub fn set_role(&mut self, i: usize, role: Role) {
         let out = self.host.set_role(member(i), role);
         self.route(out);
@@ -133,6 +146,8 @@ impl Net {
         let Some(message) = self.up[i].pop_front() else {
             return false;
         };
+        // Every message goes through its bytes, as on the network.
+        let message = wire::decode_to_host(&wire::encode_to_host(&message)).expect("reads back");
         let out = self.host.receive(member(i), message);
         self.route(out);
         true
@@ -143,6 +158,8 @@ impl Net {
         let Some(message) = self.down[i].pop_front() else {
             return false;
         };
+        let message =
+            wire::decode_to_client(&wire::encode_to_client(&message)).expect("reads back");
         self.clients[i].receive(&mut self.worlds[i], message);
         self.flush(i);
         true

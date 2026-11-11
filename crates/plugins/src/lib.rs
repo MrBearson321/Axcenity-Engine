@@ -11,6 +11,7 @@
 //! for ([`Plugin::take_requests`]), and its output.
 
 mod api;
+pub mod bundle;
 pub mod files;
 mod manifest;
 
@@ -21,6 +22,9 @@ use axcenity_core::{InstanceId, RecordedChange, Vector3, World};
 use axcenity_script::{EditRuntime, OutputLine};
 use mlua::{IntoLuaMulti, MultiValue};
 
+pub use bundle::{
+    Preview, SUFFIX as PLUGIN_PACKAGE_SUFFIX, install, pack, preview, scaffold, slug,
+};
 pub use manifest::{
     ENTRY_FILE, Found, MANIFEST_FILE, Manifest, Origin, PLUGINS_FOLDER, Permission, find_plugins,
     plugin_files,

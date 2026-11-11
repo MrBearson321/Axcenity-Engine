@@ -12,7 +12,7 @@ use axcenity_core::InstanceId;
 pub const BLOCK_SIZE: u32 = 1024;
 
 /// Arena indices `start..start + len`, each used at generation 0.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IdBlock {
     pub start: u32,
     pub len: u32,

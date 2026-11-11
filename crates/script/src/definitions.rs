@@ -174,6 +174,13 @@ pub struct ApiEntry {
     pub signature: String,
     /// What it does, in the definitions' words. Empty if they have none.
     pub doc: String,
+    /// The type it gives: a property's or global's type, `Signal` for an
+    /// event, what a function returns (G4's completion follows it). Empty
+    /// for a class, type, enum or library itself.
+    pub value: String,
+    /// Reached on the global table itself (`Vector3.new`, `task.wait`),
+    /// not on a value of that type.
+    pub library: bool,
 }
 
 impl ApiEntry {
@@ -195,6 +202,8 @@ struct Writer {
     /// What the members being written belong to, such as `Part`.
     owner: String,
     reference: Vec<ApiEntry>,
+    /// Writing a library's members ([`ApiEntry::library`]).
+    library: bool,
 }
 
 impl Writer {
@@ -205,12 +214,26 @@ impl Writer {
 
     /// Adds a member of the current owner to the reference.
     fn entry(&mut self, kind: ApiKind, name: &str, signature: String, doc: &str) {
+        self.entry_giving(kind, name, signature, doc, "");
+    }
+
+    /// [`entry`](Self::entry), for one that gives a value of type `value`.
+    fn entry_giving(
+        &mut self,
+        kind: ApiKind,
+        name: &str,
+        signature: String,
+        doc: &str,
+        value: &str,
+    ) {
         self.reference.push(ApiEntry {
             kind,
             name: name.to_owned(),
             owner: self.owner.clone(),
             signature,
             doc: doc.to_owned(),
+            value: value.to_owned(),
+            library: self.library,
         });
     }
 
@@ -235,7 +258,7 @@ impl Writer {
         self.doc("\t", doc);
         self.line(&format!("\t{name}: {ty}"));
         let signature = format!("{}.{name}: {ty}", self.owner);
-        self.entry(kind, name, signature, doc);
+        self.entry_giving(kind, name, signature, doc, ty);
     }
 
     fn field(&mut self, field: &Field) {
@@ -261,7 +284,13 @@ impl Writer {
             "{}:{}({params}): {}",
             self.owner, method.name, method.returns
         );
-        self.entry(ApiKind::Function, method.name, signature, &doc);
+        self.entry_giving(
+            ApiKind::Function,
+            method.name,
+            signature,
+            &doc,
+            method.returns,
+        );
     }
 
     fn heading(&mut self, title: &str) {
@@ -449,6 +478,9 @@ fn write() -> Writer {
         w.line(&format!("declare {name}: {ty}"));
         w.line("");
         w.top(ApiKind::Global, name, format!("{name}: {ty}"), doc);
+        if let Some(global) = w.reference.last_mut() {
+            global.value = ty.to_owned();
+        }
     }
     w.doc("", ENUM_GLOBAL_DOC);
     w.line("declare Enum: EnumLibrary");
@@ -466,7 +498,13 @@ fn write() -> Writer {
         w.doc("", &doc);
         w.line(&format!("declare function {signature}"));
         w.line("");
-        w.entry(ApiKind::Function, function.name, signature, &doc);
+        w.entry_giving(
+            ApiKind::Function,
+            function.name,
+            signature,
+            &doc,
+            function.returns,
+        );
     }
 
     // Each library is a class of function fields (called with `.`), so its
@@ -486,11 +524,18 @@ fn write() -> Writer {
         } else {
             w.top(ApiKind::Library, global, global.to_owned(), library.doc);
         }
+        w.library = true;
         for constant in library.constants {
             w.doc("\t", constant.doc);
             w.line(&format!("\t{}: {}", constant.name, constant.ty));
             let signature = format!("{global}.{}: {}", constant.name, constant.ty);
-            w.entry(ApiKind::Property, constant.name, signature, constant.doc);
+            w.entry_giving(
+                ApiKind::Property,
+                constant.name,
+                signature,
+                constant.doc,
+                constant.ty,
+            );
         }
         for function in library.functions {
             let doc = with_side(function.name, function.doc);
@@ -503,8 +548,15 @@ fn write() -> Writer {
                 parameters(function, false).join(", "),
                 function.returns
             );
-            w.entry(ApiKind::Function, function.name, signature, &doc);
+            w.entry_giving(
+                ApiKind::Function,
+                function.name,
+                signature,
+                &doc,
+                function.returns,
+            );
         }
+        w.library = false;
         w.end();
         w.doc("", library.doc);
         w.line(&format!("declare {}: {class}", library.global));

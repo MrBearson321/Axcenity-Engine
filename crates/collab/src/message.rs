@@ -9,11 +9,14 @@ use axcenity_core::InstanceId;
 use crate::apply::{Note, Place, Refusal};
 use crate::ids::IdBlock;
 use crate::op::{Op, Transaction};
+use crate::presence::{Collaborator, Presence};
 use crate::role::Role;
 
 /// Who a member is within one hosted project. TC3 ties it to a signed-in
 /// identity; here the caller assigns it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct MemberId(pub u32);
 
 /// A whole World sent to a joining member. Its own type so `Debug` prints
@@ -38,6 +41,8 @@ pub enum ToHost {
     Submit(Transaction),
     /// The client is running low on IDs.
     NeedIds,
+    /// What the member is doing now (sent when it changes).
+    Presence(Presence),
 }
 
 /// From the host to a client.
@@ -80,4 +85,12 @@ pub enum ToClient {
     Ids(IdBlock),
     /// The member's role changed.
     RoleChanged(Role),
+    /// Everyone in the project, whenever someone joins, leaves, or changes
+    /// name or role.
+    Roster(Vec<Collaborator>),
+    /// What another member is doing now.
+    Presence {
+        member: MemberId,
+        presence: Presence,
+    },
 }

@@ -337,7 +337,8 @@ impl StartScreen {
             action = Some(StartAction::Settings);
         }
         let palette = theme::palette(&ctx);
-        let dot = if palette.dark { 0.04 } else { 0.07 };
+        widgets::atmosphere(ui, page);
+        let dot = if palette.dark { 0.035 } else { 0.06 };
         widgets::dot_grid(
             &ui.painter_at(page),
             page,

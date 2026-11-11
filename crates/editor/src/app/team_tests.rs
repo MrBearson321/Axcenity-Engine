@@ -286,3 +286,128 @@ fn many_edits_from_both_editors_stay_identical() {
             .any(|&id| a.world.get(id).unwrap().class() == ClassName::Part)
     );
 }
+
+/// A folder for one test's Team Create files (identity, certificate,
+/// members), so each editor is its own computer.
+fn team_folder(name: &str) -> std::path::PathBuf {
+    let folder = std::env::temp_dir().join(format!(
+        "axcenity-team-{name}-{}-{:?}",
+        std::process::id(),
+        std::time::Instant::now()
+    ));
+    let _ = std::fs::remove_dir_all(&folder);
+    folder
+}
+
+/// Runs both editors' frames until `done`, or fails after 20 s.
+fn settle_net(a: &mut EditorApp, b: &mut EditorApp, done: impl Fn(&EditorApp, &EditorApp) -> bool) {
+    let start = std::time::Instant::now();
+    while !done(a, b) {
+        assert!(
+            start.elapsed().as_secs() < 20,
+            "timed out: {:?}",
+            warnings(b)
+        );
+        a.team_frame();
+        b.team_frame();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// The session's newest transaction, from `host`'s editor.
+fn host_seq(host: &EditorApp) -> u64 {
+    let hosting = host
+        .team
+        .as_ref()
+        .and_then(|t| t.hosting())
+        .expect("hosting");
+    hosting.lock().host().seq()
+}
+
+/// Joined, with everything up to `seq` and nothing unconfirmed.
+fn caught_up(app: &EditorApp, seq: u64) -> bool {
+    team_client(app).is_some_and(|c| c.is_online() && c.pending() == 0 && c.seq() == seq)
+}
+
+fn team_client(app: &EditorApp) -> Option<&axcenity_collab::Client> {
+    let team = app.team.as_ref()?;
+    team.is_joined().then(|| team.client())
+}
+
+#[test]
+fn two_editors_share_a_session_over_the_network() {
+    let mut a = EditorApp::new(Some(&example("hello-part")));
+    let invite = a
+        .host_network_session(Some(&team_folder("host")), 0)
+        .expect("hosting");
+    // The invite names this computer's LAN address; join over loopback.
+    let port = invite.host.rsplit(':').next().unwrap();
+    let invite = axcenity_collab::access::Invite {
+        host: format!("127.0.0.1:{port}"),
+        ..invite
+    };
+    let mut b = EditorApp::new(Some(&example("hello-part")));
+    b.join_network_session(&invite, Some(&team_folder("joiner")))
+        .expect("joining");
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq) && caught_up(b, seq)
+    });
+    assert_eq!(team_client(&a).unwrap().role(), Role::Owner);
+    assert_eq!(team_client(&b).unwrap().role(), Role::Editor);
+
+    b.insert(Insertable::Part(PartType::Block), None);
+    let part = b.selected.expect("the new part is selected");
+    rename(&mut b, part, "Crate");
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq)
+            && caught_up(b, seq)
+            && a.world.get(part).is_some_and(|p| p.name() == "Crate")
+    });
+    let host = {
+        let team = a.team.as_ref().unwrap();
+        let hosting = team.hosting().unwrap();
+        dump(hosting.lock().host().world())
+    };
+    assert_eq!(dump(&a.world), host);
+    assert_eq!(dump(&b.world), host);
+}
+
+#[test]
+fn the_command_line_asks_for_a_session() {
+    use super::team::TeamStart;
+    let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(TeamStart::from_args(&args(&[])), Ok(None));
+    assert_eq!(
+        TeamStart::from_args(&args(&["--team-host"])),
+        Ok(Some(TeamStart::Host))
+    );
+    let link = "axcenity://teamcreate/join?host=192.168.1.20:47810&cert=\
+                00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff&\
+                invite=00112233445566778899aabbccddeeff";
+    let Ok(Some(TeamStart::Join(invite))) = TeamStart::from_args(&args(&["--team-join", link]))
+    else {
+        panic!("a join")
+    };
+    assert_eq!(invite.host, "192.168.1.20:47810");
+    assert!(TeamStart::from_args(&args(&["--team-join"])).is_err());
+    assert!(TeamStart::from_args(&args(&["--team-join", "https://example.com"])).is_err());
+}
+
+#[test]
+fn what_one_editor_selects_shows_in_the_others_session() {
+    let (mut a, mut b, _hub) = two_editors();
+    let part = a.world.descendants(a.world.workspace())[0];
+    a.selection = vec![part];
+    a.selected = Some(part);
+    // Presence goes out at most 10 times a second.
+    std::thread::sleep(std::time::Duration::from_millis(110));
+    settle(&mut a, &mut b);
+    let me = a.team.as_ref().unwrap().client().member();
+    let client = b.team.as_ref().unwrap().client();
+    let seen = client.presences().get(&me).expect("a's presence");
+    assert_eq!(seen.selection, [part]);
+    assert!(seen.camera.is_some(), "and where a's camera is");
+    assert_eq!(client.roster().len(), 2);
+}

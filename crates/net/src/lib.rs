@@ -30,7 +30,7 @@ mod wire;
 
 pub use discovery::{HostInfo, LanAnswerer, LanSearch, SEARCH_TIME};
 pub use game::{Network, PeerStats, ScriptCode};
-pub use handshake::{GameInfo, Message, Peer, Refusal};
+pub use handshake::{GameInfo, Message, Peer, Refusal, class_defaults};
 pub use motion::{
     DELAY, ENTRY_BYTES, MOTION_BUDGET, Motion, MotionSender, PartState, SETTLE_TIME, Smoother,
 };

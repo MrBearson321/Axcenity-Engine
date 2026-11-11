@@ -4,8 +4,8 @@ type: system
 status: current
 implementation: implemented
 crates: [toolbox, editor]
-source: [crates/toolbox/src/lib.rs, crates/toolbox/src/source.rs, crates/toolbox/src/record.rs, crates/toolbox/src/download.rs, crates/toolbox/src/db.rs, crates/toolbox/src/provenance.rs, crates/editor/src/toolbox_panel.rs]
-docs: [docs/research/asset-sources/README.md, docs/research/asset-sources/provider-interface.md, docs/editor/assets.md, crates/toolbox/CLAUDE.md]
+source: [crates/toolbox/src/lib.rs, crates/toolbox/src/source.rs, crates/toolbox/src/record.rs, crates/toolbox/src/download.rs, crates/toolbox/src/db.rs, crates/toolbox/src/provenance.rs, crates/editor/src/toolbox_panel.rs, crates/editor/src/toolbox_panel/packs.rs]
+docs: [docs/research/asset-sources/README.md, docs/research/asset-sources/provider-interface.md, docs/editor/assets.md, docs/editor/plugins.md, crates/toolbox/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
 tags: [system/editor, assets, toolbox]
@@ -25,6 +25,8 @@ Textures and skies search **All sources** by default: `search` in `toolbox_panel
 The Assets panel groups a project's assets by where they came from (`asset_browser/origin.rs`): each Toolbox source gets a section, read from the project's `.axcenity/asset-sources.json` (`Snapshot::source_of`), beside Built-in, Made in Axcenity, Imported and Global assets. A model's folder takes its model's origin, and a material made from a texture set is listed under that set.
 
 The **Downloaded / Imported Assets** tab (`asset_inventory.rs`) lists the library's downloads (`Database::downloads_of`), this project's installs and the snapshot together with the project's imported files, one row per asset (`provider:id`, or the path for an imported file), grouped by type. **Remove download** deletes a variant's folder and `forget_download`s it; the `assets` row stays, per the crate's rule.
+
+**Packs ▸ Import plugin…** installs a creator-shared `.axcenity-plugin` (from `plugins::bundle`) into the project's `plugins/` or the user's `Plugins` folder, then opens the Plugins panel. Asset packs stay separate; there is no hosted plugin catalogue.
 
 ## Flow
 

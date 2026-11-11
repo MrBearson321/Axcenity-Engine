@@ -66,18 +66,18 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G1 | Toolbox: one provider layer for asset discovery | **Done** ([Toolbox](../Editor/Toolbox.md); #90, #92, #96, #107) |
 | G2 | Scripts inside objects (`SourceFile` references, `objects/` folder) | **Done** (#91 design, #111, #114, #115, #117 on players' devices, in levels and characters, #120) |
 | G3 | Physics render interpolation | **Done** (#110) |
-| G4 | Script completion and diagnostics in the editor | Planned, after M12 |
+| G4 | Script completion and diagnostics in the editor | Stage 1 (completion and signature hints) and stage 2 (luau-lsp errors and lints in code tabs) in review |
 | G5 | UI prefabs (ScreenGuis and elements with their scripts) | **Done** (#122) |
 | G6 | Debugger stepping and watches | Planned |
 | G7 | Memory breakdown (Profiler Memory tab and F9 Stats) | **Done** (#125, #126) |
 | G8 | `RollOffMode` curves and audio occlusion | **Done** (#128) |
-| G9 | Upscaling (FSR 1-class) | Planned, after M12 |
+| G9 | Upscaling (FSR 1-class) | Stage 1 (spatial EASU + RCAS below 100% render scale) in review; stage 2 (upscale inside TAA) not started |
 | G10 | Plugin API additions | Planned, as needed |
 | G11 | Split the editor (L6) | In progress: PR 1 moves the shared UI base into `editor-kit`; Model Studio next |
 | G12 | Cooked-only games, read the pack in place | Planned |
 | G13 | 16–32 client LAN test | Planned, when the PC is free |
 | G14–G16 | Run without a player; physics debug views; humanoid retargeting | Planned |
-| TC1–TC8 | Team Create (live collaboration; brief of 2026-11-11 §8): design approved ([ADR-0020](../Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md), #134); TC1 sync core in `collab` (#140); TC2 editor sync over loopback (edit journal, capture, two-editor tests) | In progress |
+| TC1–TC8 | Team Create (live collaboration; brief of 2026-11-11 §8): design approved ([ADR-0020](../Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md), #134); TC1 sync core in `collab` (#140); TC2 editor sync (edit journal, capture, two-editor tests, #150); TC3 network and identity (device keys, invites, TLS WebSocket, `--team-host`/`--team-join`) | In progress |
 | Priority 4 | GPU-driven drawing, occlusion culling, dynamic GI, ray tracing, AI assistant in the editor, Parallel Luau, … | Future, each with a trigger in the gap analysis |
 
 ## Feature plan (unified plan, Phases 1–93)

@@ -46,6 +46,7 @@ mod layout;
 mod levels;
 mod loading;
 mod lod_inspector;
+mod luau_check;
 mod material_editor;
 mod material_graph;
 mod mixer;
@@ -64,6 +65,7 @@ mod rebuild;
 mod relaunch;
 mod ribbon;
 mod ribbon_tabs;
+mod script_completion;
 mod scripts;
 mod sequencer;
 mod shortcuts;
@@ -192,6 +194,24 @@ fn main() -> eframe::Result {
         }
         other => (other.map(PathBuf::from), None),
     };
+    // `--team-host` or `--team-join <link>` after the project folder: a
+    // Team Create session to start once it opens (`app/team.rs`).
+    let rest: Vec<String> = args.map(|a| a.to_string_lossy().into_owned()).collect();
+    let team_start = match app::team::TeamStart::from_args(&rest) {
+        Ok(start) => start,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(2);
+        }
+    };
+    if team_start.is_some() && folder.is_none() {
+        eprintln!(
+            "usage: axcenity-editor <project folder> {} | {} <invite link>",
+            app::team::HOST_FLAG,
+            app::team::JOIN_FLAG
+        );
+        std::process::exit(2);
+    }
 
     let options = eframe::NativeOptions {
         // The viewport draws with wgpu, so egui must too (they share the GPU device).
@@ -230,6 +250,9 @@ fn main() -> eframe::Result {
             if let Some(handoff) = &handoff {
                 app.resume(ctx, handoff);
             } else if let Some(folder) = &folder {
+                if let Some(start) = team_start.clone() {
+                    app.start_team_after_open(start);
+                }
                 app.begin_open(ctx, folder);
             }
             Ok(Box::new(app))
