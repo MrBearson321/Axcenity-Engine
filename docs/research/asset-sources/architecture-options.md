@@ -1,6 +1,6 @@
 # Architecture options: how asset sources reach the engine
 
-Four ways to connect the engine with the asset providers and with the Axcenity Toolbox, judged against the [development policy](../../development-policy.md) and what the code bases do today ([toolbox-assessment.md](toolbox-assessment.md)). Part of [Asset sources](README.md). Dated 2026-11-11.
+Four ways to connect the engine with the asset providers and with the Axcenity Toolbox, judged against the [development policy](../../development-policy.md) and what the code bases do today ([toolbox-assessment.md](toolbox-assessment.md)). Part of [Axcenity Toolbox in the engine](README.md). Dated 2026-11-11.
 
 ## What the answer has to satisfy
 
@@ -58,9 +58,23 @@ Some mix of the above. Two variants are worth separating:
 
 ## Recommendation
 
-**D2: embedded providers, with the Toolbox linked by its manifest file.** In practice that is option A plus one importer:
+**D2: the Toolbox as an embedded native module, with the Django site linked by its manifest file.** This keeps the brief's layering, Engine → Toolbox → Providers: the editor talks only to the Toolbox's interface, and every provider sits behind it. What changes is where the Toolbox runs: inside the editor as a Rust crate, built from the Django app's extracted logic, rather than as the Django app itself. Measured against the brief's tradeoffs:
 
-1. A new editor-only crate, `asset-sources`, is the one provider layer. The editor embeds it; it also builds `axcenity-assets`, a command-line tool that prints JSON, so the Blender pipeline (Python, inside Blender or not) calls the same code instead of its own providers. That gives one implementation without a service: a process call per search or fetch is cheap, and the shared on-disk cache and library mean the second caller pays nothing. Details and the record are in [provider-interface.md](provider-interface.md).
+| Concern | How D2 handles it |
+|---|---|
+| Performance and latency | No local network hop; Poly Haven searches one cached catalogue instead of up to 13 requests; files never downloaded twice per machine |
+| Offline | Library search, previews and installs from the library all work offline |
+| Deployment | Nothing beyond the editor; the Blender pipeline adds one CLI binary |
+| Security | Downloads checked (https, allowed hosts, refused file types, zip and glTF limits, MD5); no server to attack |
+| Authentication | None needed for ambientCG, Poly Haven or Openverse; keyed sources read the key from the environment |
+| Rate limits | Each machine is its own client within the providers' anonymous limits, cached so it rarely asks twice |
+| Caching | On-disk API cache and file library, shared by the editor and the CLI |
+| Maintainability | One implementation in the engine's language, tested offline with fixtures |
+| Extensibility | A new source is one type implementing `AssetSource`; nothing in the editor changes |
+
+In practice that is option A plus one importer:
+
+1. A new editor-only crate, `toolbox`, is the one provider layer. The editor embeds it; it also builds `axcenity-toolbox`, a command-line tool that prints JSON, so the Blender pipeline (Python, inside Blender or not) calls the same code instead of its own providers. That gives one implementation without a service: a process call per search or fetch is cheap, and the shared on-disk cache and library mean the second caller pays nothing. Details and the record are in [provider-interface.md](provider-interface.md).
 2. The Toolbox stays an optional web companion for browsing, curating and sharing packs. It keeps its browse-only Python clients (a web request is the wrong place to spawn a CLI, and it never downloads files), but its manifest carries the shared record's fields, and the editor's **Import Toolbox pack…** reads the file.
 3. A live Toolbox link (D1) and a hosted service (C) are deferred, with a revisit point: when the Toolbox is deployed somewhere other people use. The manifest importer is where D1 would plug in.
 

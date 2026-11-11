@@ -1,6 +1,6 @@
 # Assessment: the Toolbox, the Blender pipeline's providers, and the engine's Get texture
 
-What each code base does with asset providers, how sound it is, and what the engine should take from it. Part of [Asset sources](README.md). Dated 2026-11-11; the commits read are in the README.
+What each code base does with asset providers, how sound it is, and what the engine should take from it. Part of [Axcenity Toolbox in the engine](README.md). Dated 2026-11-11; the commits read are in the README.
 
 Evidence markers: **[read]** means read in the source; **[doc]** means taken from that project's own docs; **[web]** means checked on the provider's site on 2026-11-11.
 
@@ -52,9 +52,28 @@ These are the provider-specific lessons the engine would otherwise relearn.
 - **`db.sqlite3` holds members' accounts and their DRF API tokens.** It is not tracked by git. It must never be copied into the engine repository or any document. Nothing in this proposal reads it.
 - `library_client.py` takes a token from `TOOLBOX_TOKEN` or a hidden prompt, never from a file.
 
+### Area by area (brief 3.1)
+
+| Area | What's there | Reuse, modify or redesign for the engine |
+|---|---|---|
+| Django architecture | Five apps: `config`, `providers` (plain Python, no Django), `catalog`, `packs`, `accounts`; thin class-based views over service modules (`catalog/library.py`, `packs/services.py`), each workflow in one transaction | Redesign: the engine needs a module, not a site. The clean split (providers know nothing of Django) is what makes porting easy |
+| Applications | `catalog`: Discover, the library, saving, review status; `packs`: packs, gallery, export, downloads, attribution centre, demo data; `accounts`: sign-up, settings, download defaults, API token page | Reuse the ideas: library → the Toolbox's library views; packs → collections; download defaults → the panel's defaults. Accounts stay web-only |
+| API integrations | ambientCG v3, Poly Haven, Openverse audio, each with the console API and the Toolbox API side by side; all through one `get_json()` | Reuse: port the Toolbox API halves to Rust providers |
+| Discovery and search | Discover shelves per kind and provider, Load more paging, Openverse licence filters, provider status | Reuse the paging rules; replace Poly Haven `/search` + `/info` with the Blender pipeline's cached catalogue search (one request, works offline) |
+| Metadata | `AssetRecord` → stored `Asset` (shared, first save wins) with variants as JSON | Reuse the record (merged into the one record); modify: records refresh on a time-to-live instead of never |
+| Categorisation | Four kinds (`texture`, `hdri`, `model`, `sound`) and normalised tags; provider categories are not used | Modify: add provider categories for browsing |
+| Retrieval and downloading | None on the server: the browser fetches and zips the files the server lists | Redesign: the engine downloads, verifies and extracts itself (the Blender pipeline's downloader and guard) |
+| Authentication and keys | Django sessions, DRF token auth for the API, token rotation; no provider keys at all | Not needed in the engine now; sources that need keys read them from the environment |
+| Caching | Django's per-process memory cache: searches 1 h, Poly Haven `/info` 12 h, drawer records 1 h, failures never cached | Modify: an on-disk cache shared with the CLI, usable offline, same lifetimes and the same never-cache-failures rule |
+| Database models | `Asset`, `Tag`, `SavedAsset` (notes, rating, status), `StatusChange`, `Pack`, `PackItem` (variant and import path per pack), Django users and tokens; SQLite | Redesign: no database in the editor; the library registry and `toolbox.json` hold what one machine needs |
+| Frontend | Server-rendered templates with HTMX, Tailwind and DaisyUI, styled after the editor, light and dark | Reuse the layout ideas (cards, drawer, filters, licence pages) in egui; the markup itself can't move |
+| Error handling | `ProviderError` with safe messages, details logged, malformed items skipped, 429 handling | Reuse as `SourceError` |
+| Tests | ~880, offline by rule, a golden manifest | Reuse the cases as Rust fixture tests; reuse the golden manifest for the pack importer |
+| Limitations | Development-only settings, provider calls inside requests, no JSON search API, records never refreshed, no file checksums in the manifest | See the weaknesses table above |
+
 ### Verdict
 
-Good, careful code with strong tests and docs, built as a website. Its value to the engine is its **knowledge** (paging quirks, safe errors, variant and licence handling, the manifest), not its runtime. Port the logic to Rust; keep the site as an optional web companion; link the two by the manifest.
+Good, careful code with strong tests and docs, built as a website. Its value to the engine is its **knowledge** (paging quirks, safe errors, variant and licence handling, the library and pack ideas, the manifest), not its runtime. The Toolbox the engine talks to should be a native Rust module built from that knowledge; the Django site stays as an optional web companion, linked by the manifest.
 
 ## 2. The Blender pipeline's provider layer ("3D Models")
 
@@ -109,17 +128,17 @@ No keys are stored. The only credential is `SKETCHFAB_API_TOKEN`, read from the 
 
 | Piece | Best source | Engine destination |
 |---|---|---|
-| Asset record | Blender `AssetRecord` + Toolbox `AssetRecord` (variants, attribution) | `asset-sources::AssetRecord` ([provider-interface.md](provider-interface.md)) |
+| Asset record | Blender `AssetRecord` + Toolbox `AssetRecord` (variants, attribution) | `toolbox::AssetRecord` ([provider-interface.md](provider-interface.md)) |
 | Provider contract | Blender `base.py` (kinds, formats, licences, opt-in) | `AssetSource` trait |
-| ambientCG | Toolbox `ambientcg.py` (v3) | `asset-sources::ambientcg`, replacing the v2 code in the dialog |
-| Poly Haven | Blender `polyhaven.py` (catalogue search, downloads) + Toolbox `polyhaven.py` (variants from `/files`) | `asset-sources::polyhaven` |
+| ambientCG | Toolbox `ambientcg.py` (v3) | `toolbox::ambientcg`, replacing the v2 code in the dialog |
+| Poly Haven | Blender `polyhaven.py` (catalogue search, downloads) + Toolbox `polyhaven.py` (variants from `/files`) | `toolbox::polyhaven` |
 | Kenney | Blender `kenney.py` | Later; sprites have no engine use yet |
 | Sketchfab | Blender `sketchfab.py` | Later, opt-in, token from the environment only |
 | Sounds | Neither is right yet; Openverse (Toolbox) for no-key use, Freesound API with a user's key | Later, once a sound source is chosen |
-| HTTP, cache, verified downloads | Blender `asset_downloader.py` | `asset-sources::http`, `::download` |
-| Untrusted-data rules | Blender `download_guard.py` + the engine's existing zip checks | `asset-sources::guard` |
-| Variant description and choice | Toolbox `catalog/files.py` | `asset-sources::variants` |
-| Licences and credits | Blender codes and policy + Toolbox `license_key()` reader and notice text | `asset-sources::license` |
-| Library on disk | Blender `asset_registry.py` layout and `registry.json` | `asset-sources::library` |
+| HTTP, cache, verified downloads | Blender `asset_downloader.py` | `toolbox::http`, `::download` |
+| Untrusted-data rules | Blender `download_guard.py` + the engine's existing zip checks | `toolbox::guard` |
+| Variant description and choice | Toolbox `catalog/files.py` | `toolbox::variants` |
+| Licences and credits | Blender codes and policy + Toolbox `license_key()` reader and notice text | `toolbox::license` |
+| Library on disk | Blender `asset_registry.py` layout and `registry.json` | `toolbox::library` |
 | Pack manifest | Toolbox `axcenity-pack` v1 | An importer in the editor |
-| Safe user-facing errors | Toolbox `ProviderError` | `asset-sources::SourceError` |
+| Safe user-facing errors | Toolbox `ProviderError` | `toolbox::SourceError` |
