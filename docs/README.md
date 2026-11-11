@@ -26,6 +26,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Build speed, test commands, or nextest settings | [development.md](development.md) |
 | Scope and priorities: CI (off on purpose), target platforms, determinism, the Vector3 caveat, dedicated hosting, and the development policy | [development-policy.md](development-policy.md) |
 | Whole-frame benchmarks, the S10k scene, `--bench`, profiler spans and Tracy | [benchmarks.md](benchmarks.md) |
+| How Axcenity compares with Unity, Unreal, Roblox Studio, Godot and s&box, the XB10k cross-engine results, and recommendations C1–C10 with their owners | [research/engine-comparison.md](research/engine-comparison.md) |
 | The editor window, ribbon, or theme | [editor/shell.md](editor/shell.md) |
 | Selection or Properties | [editor/selection.md](editor/selection.md) |
 | Move, scale, rotate, or undo | [editor/transforms.md](editor/transforms.md) |
