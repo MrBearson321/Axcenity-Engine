@@ -51,6 +51,8 @@ use axcenity_collab::{
 use axcenity_core::spline::is_generator;
 use axcenity_project as project;
 
+use crate::start::JoinProgress;
+
 use super::*;
 
 /// Most rounds of messages one frame passes back and forth.
@@ -557,6 +559,58 @@ impl EditorApp {
         team.mirrors_home = Some(folder.join("Projects"));
         self.team = Some(team);
         Ok(())
+    }
+
+    /// The start screen's Join: joins the session `invite` names, with no
+    /// project open. The session's files open as the project once they're
+    /// in (`open_team_mirror_when_ready`). `folder` is as for
+    /// [`Self::join_network_session`].
+    pub(crate) fn join_from_start(&mut self, invite: &Invite, folder: Option<&Path>) {
+        if self.team.is_some() {
+            self.cancel_team_join();
+        }
+        self.start.show_joining();
+        if let Err(error) = self.join_network_session(invite, folder) {
+            self.start.join_failed(error);
+        }
+    }
+
+    /// Stops joining from the start screen, without a word in Output.
+    pub(crate) fn cancel_team_join(&mut self) {
+        self.team = None;
+        self.world.stop_recording_edits();
+        self.history.set_shared(false);
+        self.replace_world(World::new());
+    }
+
+    /// Each frame on the start screen: tells the Join dialog how joining
+    /// goes, and why it stopped if the host refused this editor.
+    pub(super) fn follow_start_join(&mut self) {
+        let Some(team) = &self.team else {
+            self.start.set_join_progress(None);
+            return;
+        };
+        let host = team.address().to_owned();
+        let progress = match team.status() {
+            TeamStatus::Refused(why) => {
+                self.cancel_team_join();
+                let why = if why.is_empty() {
+                    "the host refused this computer".to_owned()
+                } else {
+                    why
+                };
+                self.start.join_failed(why);
+                return;
+            }
+            TeamStatus::Joining => JoinProgress::Connecting { host },
+            TeamStatus::Reconnecting { why, .. } if team.client.is_none() => {
+                JoinProgress::Retrying { host, why }
+            }
+            TeamStatus::Connected { .. } | TeamStatus::Reconnecting { .. } => {
+                JoinProgress::Fetching { host }
+            }
+        };
+        self.start.set_join_progress(Some(progress));
     }
 
     /// A new invite for `role`, when this editor hosts; its link.

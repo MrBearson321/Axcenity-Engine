@@ -4,10 +4,11 @@ use super::*;
 pub(super) enum HeaderAction {
     New,
     Open,
+    Join,
 }
 
-/// The page's title and a line about the engine, with New Project and Open
-/// Project at the right.
+/// The page's title and a line about the engine, with New Project, Open
+/// Project and Join Session at the right.
 pub(super) fn page_header(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -58,6 +59,15 @@ pub(super) fn page_header(
                 .clicked()
             {
                 action = Some(HeaderAction::Open);
+            }
+            let join = widgets::button(Role::Secondary, Some(icons::SIGN_IN), "Join…", palette)
+                .min_size(vec2(0.0, 32.0));
+            if ui
+                .add(join)
+                .on_hover_text("Join someone's Team Create session with their invite link")
+                .clicked()
+            {
+                action = Some(HeaderAction::Join);
             }
         });
     });

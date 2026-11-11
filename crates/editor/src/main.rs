@@ -189,15 +189,21 @@ fn main() -> eframe::Result {
         let built = build_game::build_from_command_line(args);
         std::process::exit(if built { 0 } else { 1 });
     }
+    // `--team-host` or `--team-join <link>` after the project folder: a
+    // Team Create session to start once it opens (`app/team.rs`). Without a
+    // folder, `--team-join <link>` joins from the start screen.
+    let mut rest: Vec<String> = Vec::new();
     let (folder, handoff) = match first {
         Some(flag) if cfg!(debug_assertions) && flag == relaunch::RESUME_FLAG => {
             (None, args.next().map(PathBuf::from))
         }
+        Some(flag) if flag == app::team::JOIN_FLAG => {
+            rest.push(app::team::JOIN_FLAG.to_owned());
+            (None, None)
+        }
         other => (other.map(PathBuf::from), None),
     };
-    // `--team-host` or `--team-join <link>` after the project folder: a
-    // Team Create session to start once it opens (`app/team.rs`).
-    let rest: Vec<String> = args.map(|a| a.to_string_lossy().into_owned()).collect();
+    rest.extend(args.map(|a| a.to_string_lossy().into_owned()));
     let team_start = match app::team::TeamStart::from_args(&rest) {
         Ok(start) => start,
         Err(error) => {
@@ -205,9 +211,9 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
-    if team_start.is_some() && folder.is_none() {
+    if team_start == Some(app::team::TeamStart::Host) && folder.is_none() {
         eprintln!(
-            "usage: axcenity-editor <project folder> {} | {} <invite link>",
+            "usage: axcenity-editor <project folder> {} | [<project folder>] {} <invite link>",
             app::team::HOST_FLAG,
             app::team::JOIN_FLAG
         );
@@ -255,6 +261,8 @@ fn main() -> eframe::Result {
                     app.start_team_after_open(start);
                 }
                 app.begin_open(ctx, folder);
+            } else if let Some(app::team::TeamStart::Join(invite)) = &team_start {
+                app.join_from_start(invite, None);
             }
             Ok(Box::new(app))
         }),

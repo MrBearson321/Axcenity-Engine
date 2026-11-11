@@ -331,6 +331,7 @@ impl StartScreen {
         } else {
             Vec::new()
         };
+        let progress = self.join.clone();
         let dialog = self.dialog.as_mut()?;
         let palette = theme::palette(ctx);
         let mut close = false;
@@ -338,6 +339,7 @@ impl StartScreen {
         let mut deleted = None;
         let mut picked_parent = None;
         let mut restored = None;
+        let mut join = None;
         let ((), dismissed) = dialog::modal(ctx, "start dialog", 400.0, |ui| {
             match dialog {
                 Dialog::New {
@@ -542,6 +544,74 @@ impl StartScreen {
                     }
                     close |= cancel;
                 }
+                Dialog::Join {
+                    link,
+                    error,
+                    waiting,
+                } => {
+                    dialog::header(
+                        ui,
+                        icons::SIGN_IN,
+                        dialog::Tone::Question,
+                        "Join a Team Create session",
+                        Some(
+                            "Paste the invite link someone sent you. The session's files are \
+                             kept in a folder of their own on this computer.",
+                        ),
+                    );
+                    match (&progress, *waiting) {
+                        (Some(progress), true) => {
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.add(egui::Label::new(progress.describe()).wrap());
+                            });
+                            ui.add_space(8.0);
+                            let cancel = dialog::buttons(
+                                ui,
+                                &[dialog::Button::cancel()],
+                                dialog::Enter::Main,
+                            );
+                            if cancel.is_some() {
+                                join = Some(StartAction::CancelJoin);
+                                close = true;
+                            }
+                        }
+                        // The session opened as a project, or ended.
+                        (None, true) => close = true,
+                        (_, false) => {
+                            field_label(ui, &palette, "Invite link");
+                            let field = ui.add(
+                                dialog::text_field(link).hint_text("axcenity://teamcreate/join?…"),
+                            );
+                            if link.is_empty() && !field.has_focus() && error.is_none() {
+                                field.request_focus();
+                            }
+                            error_line(ui, &palette, error.as_deref());
+                            let (picked, cancel) = dialog_buttons(
+                                ui,
+                                (
+                                    icons::SIGN_IN,
+                                    "Join",
+                                    dialog::Kind::Main,
+                                    !link.trim().is_empty(),
+                                ),
+                                dialog::Enter::FromField,
+                            );
+                            if picked {
+                                match axcenity_collab::access::Invite::parse(link.trim()) {
+                                    Ok(invite) => {
+                                        *error = None;
+                                        *waiting = true;
+                                        join = Some(StartAction::Join(invite));
+                                    }
+                                    Err(problem) => *error = Some(problem.to_string()),
+                                }
+                            }
+                            close |= cancel;
+                        }
+                    }
+                }
                 Dialog::History {
                     folder,
                     error,
@@ -698,9 +768,13 @@ impl StartScreen {
         if let Some(folder) = restored {
             self.edited.remove(&folder);
         }
+        if dismissed && matches!(self.dialog, Some(Dialog::Join { waiting: true, .. })) {
+            join = Some(StartAction::CancelJoin);
+        }
         if close || dismissed {
             self.dialog = None;
         }
+        self.join_asked = join;
         created
     }
 }

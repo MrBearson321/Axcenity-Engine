@@ -531,6 +531,55 @@ fn scripts(app: &EditorApp) -> Vec<(String, InstanceId, String)> {
 }
 
 #[test]
+fn the_start_screen_joins_a_session_and_opens_its_files() {
+    use crate::start::JoinProgress;
+    let project = copy_of_example("hello-touched", "team-start-host");
+    let mut a = EditorApp::new(Some(&project));
+    let invite = over_loopback(
+        a.host_network_session(Some(&team_folder("start-host")), 0)
+            .expect("hosting"),
+    );
+    // From the start screen: the Join dialog waits and says how it goes.
+    let mut b = EditorApp::new(None);
+    let joiner = team_folder("start-joiner");
+    b.join_from_start(&invite, Some(&joiner));
+    b.follow_start_join();
+    assert!(matches!(
+        b.start.join_dialog(),
+        Some((true, None, Some(JoinProgress::Connecting { .. })))
+    ));
+    settle_net(&mut a, &mut b, |_, b| b.project.is_some());
+    assert!(b.project.as_ref().unwrap().folder.starts_with(&joiner));
+    assert!(b.in_team_session());
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq) && caught_up(b, seq)
+    });
+    assert_eq!(dump(&a.world), dump(&b.world));
+
+    // The invite worked once: another computer with it is refused, and
+    // the dialog says why and asks for a link again.
+    let mut c = EditorApp::new(None);
+    c.join_from_start(&invite, Some(&team_folder("start-refused")));
+    let start = std::time::Instant::now();
+    while c.team.is_some() {
+        assert!(start.elapsed().as_secs() < 20, "never refused");
+        a.team_frame();
+        c.team_frame();
+        c.follow_start_join();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let (waiting, error, _) = c.start.join_dialog().expect("the Join dialog");
+    assert!(!waiting);
+    assert!(error.is_some_and(|e| !e.is_empty()), "{error:?}");
+    assert!(c.project.is_none());
+
+    // Closing the session's project leaves the session.
+    b.finish_closing_project();
+    assert!(!b.in_team_session());
+}
+
+#[test]
 fn a_joining_editor_gets_the_files_and_its_saves_reach_the_host() {
     let project = copy_of_example("hello-touched", "team-files-host");
     let mut a = EditorApp::new(Some(&project));
