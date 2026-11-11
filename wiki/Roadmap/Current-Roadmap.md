@@ -66,7 +66,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G1 | Toolbox: one provider layer for asset discovery | **Done** ([Toolbox](../Editor/Toolbox.md); #90, #92, #96, #107) |
 | G2 | Scripts inside objects (`SourceFile` references, `objects/` folder) | **Done** (#91 design, #111, #114, #115, #117 on players' devices, in levels and characters, #120) |
 | G3 | Physics render interpolation | **Done** (#110) |
-| G4 | Script completion and diagnostics in the editor | Stage 1 (completion and signature hints) in review; stage 2 (luau-lsp diagnostics) next |
+| G4 | Script completion and diagnostics in the editor | Stage 1 (completion and signature hints) and stage 2 (luau-lsp errors and lints in code tabs) in review |
 | G5 | UI prefabs (ScreenGuis and elements with their scripts) | **Done** (#122) |
 | G6 | Debugger stepping and watches | Planned |
 | G7 | Memory breakdown (Profiler Memory tab and F9 Stats) | **Done** (#125, #126) |

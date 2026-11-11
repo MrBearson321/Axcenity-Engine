@@ -22,6 +22,7 @@ use axcenity_core::{ClassName, World};
 use axcenity_project::{is_stylesheet, script_name};
 use eframe::egui;
 
+use crate::luau_check::{Diagnostic, Severity};
 use crate::side_warnings::SideWarning;
 use crate::theme::{self, icons};
 use crate::{css_syntax, lua_syntax};
@@ -78,6 +79,9 @@ pub struct ScriptTab {
     highlighted: Option<usize>,
     /// The completion list and signature hint.
     pub assist: Assist,
+    /// What luau-lsp last found in the code (`luau_check.rs`), underlined.
+    /// Kept while the code changes, until the next check comes back.
+    pub problems: Vec<Diagnostic>,
 }
 
 impl ScriptTab {
@@ -158,6 +162,7 @@ impl ScriptTabs {
             go_to_line: None,
             highlighted: None,
             assist: Assist::default(),
+            problems: Vec::new(),
         });
         self.next_id += 1;
         self.tabs.len() - 1
@@ -221,6 +226,11 @@ impl ScriptTabs {
             .iter()
             .find(|tab| tab.id == id)
             .map(|tab| tab.path.as_str())
+    }
+
+    /// Every open tab.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ScriptTab> {
+        self.tabs.iter_mut()
     }
 
     pub fn get(&self, path: &str) -> Option<&ScriptTab> {
@@ -387,6 +397,9 @@ impl ScriptTabs {
                 tab.go_to_line = Some(side_warning.line);
             }
         }
+        if let Some(line) = problems_bar(ui, &tab.problems) {
+            tab.go_to_line = Some(line);
+        }
         let paused_line = self
             .paused
             .as_ref()
@@ -516,6 +529,7 @@ fn code_editor(
                     tab.highlighted = None;
                 }
                 if !stylesheet {
+                    underline_problems(ui, &tab.text, &tab.problems, &output);
                     assist(ui, tab, &output, keys, world);
                 }
                 if stylesheet {
@@ -564,6 +578,161 @@ fn code_editor(
             });
         });
     clicked
+}
+
+/// One line above the code saying how many problems luau-lsp found, and
+/// the first; clicking it returns that problem's line.
+fn problems_bar(ui: &mut egui::Ui, problems: &[Diagnostic]) -> Option<usize> {
+    let first = problems
+        .iter()
+        .find(|problem| problem.severity == Severity::Error)
+        .or(problems.first())?;
+    let errors = problems
+        .iter()
+        .filter(|problem| problem.severity == Severity::Error)
+        .count();
+    let warnings = problems.len() - errors;
+    let palette = theme::palette(ui.ctx());
+    let mut counts = Vec::new();
+    if errors > 0 {
+        counts.push(format!(
+            "{errors} error{}",
+            if errors == 1 { "" } else { "s" }
+        ));
+    }
+    if warnings > 0 {
+        counts.push(format!(
+            "{warnings} warning{}",
+            if warnings == 1 { "" } else { "s" }
+        ));
+    }
+    let (icon, color) = if errors > 0 {
+        (icons::X_CIRCLE, palette.error)
+    } else {
+        (icons::WARNING, palette.warning)
+    };
+    let message = first.message.lines().next().unwrap_or("");
+    let text = format!(
+        "{icon}  {}  ·  Line {}: {message}",
+        counts.join(", "),
+        first.line
+    );
+    let label = egui::Label::new(
+        egui::RichText::new(text)
+            .size(theme::type_scale::SMALL)
+            .color(color),
+    )
+    .truncate()
+    .sense(egui::Sense::click());
+    let response = ui
+        .add(label)
+        .on_hover_text("Found by luau-lsp. Click to go to this line.");
+    response.clicked().then_some(first.line)
+}
+
+/// The bytes a problem covers in `text`: from its first byte to after its
+/// last, kept to its first line and inside the text.
+fn problem_bytes(text: &str, problem: &Diagnostic) -> std::ops::Range<usize> {
+    let line_start = |line: usize| {
+        let mut at = 0;
+        for _ in 1..line {
+            match text[at..].find('\n') {
+                Some(next) => at += next + 1,
+                None => return text.len(),
+            }
+        }
+        at
+    };
+    let start_of_line = line_start(problem.line);
+    let end_of_line = text[start_of_line..]
+        .find('\n')
+        .map_or(text.len(), |at| start_of_line + at);
+    let floor = |mut at: usize| {
+        at = at.min(end_of_line);
+        while !text.is_char_boundary(at) {
+            at -= 1;
+        }
+        at
+    };
+    let start = floor(start_of_line + problem.column.saturating_sub(1));
+    let end = if problem.end_line == problem.line {
+        floor(start_of_line + problem.end_column)
+    } else {
+        end_of_line
+    };
+    start..end.max(start)
+}
+
+/// A wavy line under each problem, red for errors and amber for lints;
+/// hovering one shows its message.
+fn underline_problems(
+    ui: &egui::Ui,
+    text: &str,
+    problems: &[Diagnostic],
+    output: &egui::text_edit::TextEditOutput,
+) {
+    if problems.is_empty() {
+        return;
+    }
+    let palette = theme::palette(ui.ctx());
+    let offset = output.galley_pos.to_vec2();
+    let at = |byte: usize| {
+        let chars = text[..byte].chars().count();
+        output
+            .galley
+            .pos_from_cursor(egui::text::CCursor::new(chars))
+            .translate(offset)
+    };
+    let pointer = ui.ctx().pointer_hover_pos();
+    let mut hovered = Vec::new();
+    let painter = ui.painter();
+    for problem in problems {
+        let bytes = problem_bytes(text, problem);
+        let (start, end) = (at(bytes.start), at(bytes.end));
+        // An empty range (an expected token) still gets a short squiggle.
+        let right = end.left().max(start.left() + 6.0);
+        let color = match problem.severity {
+            Severity::Error => palette.error,
+            Severity::Warning => palette.warning,
+        };
+        let y = start.bottom() - 1.0;
+        let mut points = Vec::new();
+        let mut x = start.left();
+        let mut up = false;
+        while x < right {
+            points.push(egui::pos2(x, if up { y - 2.0 } else { y }));
+            x += 2.0;
+            up = !up;
+        }
+        points.push(egui::pos2(right, if up { y - 2.0 } else { y }));
+        painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, color)));
+        let area = egui::Rect::from_min_max(
+            egui::pos2(start.left(), start.top()),
+            egui::pos2(right, start.bottom()),
+        );
+        if pointer.is_some_and(|pointer| area.contains(pointer)) {
+            hovered.push(problem);
+        }
+    }
+    if let (Some(pointer), false) = (pointer, hovered.is_empty()) {
+        egui::Area::new(output.response.id.with("problem"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(pointer + egui::vec2(12.0, 16.0))
+            .interactable(false)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_max_width(420.0);
+                    for problem in hovered {
+                        ui.label(&problem.message);
+                        ui.label(
+                            egui::RichText::new(format!("luau-lsp: {}", problem.code))
+                                .size(theme::type_scale::SMALL)
+                                .color(palette.text_weak),
+                        );
+                    }
+                });
+            });
+    }
 }
 
 /// Follows the text box for the completion list and signature hint, puts
@@ -999,5 +1168,114 @@ mod tests {
         let cursor = state.cursor.char_range().unwrap().primary;
         assert_eq!(cursor.index.0, char_index_of_line(&code, 150));
         assert!(ctx.memory(|memory| memory.has_focus(editor_id(path))));
+    }
+
+    fn problem(line: usize, column: usize, end_column: usize, severity: Severity) -> Diagnostic {
+        Diagnostic {
+            line,
+            column,
+            end_line: line,
+            end_column,
+            severity,
+            code: "TypeError".to_owned(),
+            message: "Unknown global 'nope'".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_problem_covers_its_bytes_on_its_first_line_only() {
+        let text = "print(nope)\nlocal é = 1\n";
+        let at = |problem: &Diagnostic| &text[problem_bytes(text, problem)];
+        assert_eq!(at(&problem(1, 7, 10, Severity::Error)), "nope");
+        // Past the end of the line stops at the line's end.
+        assert_eq!(at(&problem(1, 7, 99, Severity::Error)), "nope)");
+        // Over several lines: to the end of the first.
+        let mut long = problem(1, 1, 3, Severity::Error);
+        long.end_line = 2;
+        assert_eq!(at(&long), "print(nope)");
+        // Bytes inside a character are kept to its start.
+        assert_eq!(at(&problem(2, 7, 7, Severity::Warning)), "");
+        assert_eq!(at(&problem(9, 1, 2, Severity::Error)), "");
+    }
+
+    #[test]
+    fn problems_are_underlined_counted_and_explained_on_hover() {
+        let path = "scripts/pad.server.lua";
+        let code = "print(nope)\nlocal unused = 1\n";
+        let mut tabs = ScriptTabs::default();
+        tabs.open(path, code, None);
+        let tab = tabs.get_mut(path).unwrap();
+        tab.problems = vec![problem(1, 7, 10, Severity::Error), {
+            let mut lint = problem(2, 7, 12, Severity::Warning);
+            lint.code = "LocalUnused".to_owned();
+            lint.message = "Variable 'unused' is never used".to_owned();
+            lint
+        }];
+        // The pointer rests on `nope`.
+        let hover = vec![egui::Event::PointerMoved(egui::pos2(95.0, 40.0))];
+        let frames = vec![Vec::new(), hover.clone(), hover];
+        match std::env::var_os("AXCENITY_SNAPSHOTS") {
+            Some(folder) => crate::snapshot::snapshot(
+                &std::path::PathBuf::from(folder).join("script-problems.png"),
+                egui::vec2(520.0, 200.0),
+                frames,
+                |ui| {
+                    egui::CentralPanel::default()
+                        .show(ui, |ui| tabs.show(ui, path, &World::default()));
+                },
+            ),
+            None => {
+                let ctx = theme::test_context();
+                for events in frames {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(520.0, 200.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    };
+                    let _ = crate::theme::run(&ctx, input, |ui| {
+                        egui::CentralPanel::default()
+                            .show(ui, |ui| tabs.show(ui, path, &World::default()));
+                    });
+                }
+            }
+        }
+        // Clicking the count goes to the first error's line.
+        let ctx = theme::test_context();
+        let at = egui::pos2(60.0, 10.0);
+        for events in [
+            vec![egui::Event::PointerMoved(at)],
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            Vec::new(),
+        ] {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(520.0, 200.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| tabs.show(ui, path, &World::default()));
+            });
+        }
+        assert!(ctx.memory(|memory| memory.has_focus(editor_id(path))));
+        let state = egui::TextEdit::load_state(&ctx, editor_id(path)).unwrap();
+        let cursor = state.cursor.char_range().unwrap().primary;
+        assert_eq!(cursor.index.0, char_index_of_line(code, 1));
     }
 }

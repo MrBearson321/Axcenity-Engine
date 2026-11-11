@@ -47,6 +47,7 @@ mod graphics_benchmark;
 mod input_settings;
 mod layouts;
 mod levels;
+mod luau_checks;
 mod material_files;
 mod material_tab;
 pub(crate) mod mcp;
@@ -298,6 +299,8 @@ pub struct EditorApp {
     warnings: WarningCache,
     /// The open script tabs, and whether the viewport or a script is shown.
     tabs: ScriptTabs,
+    /// luau-lsp's checks of the open code tabs (G4 stage 2).
+    luau: luau_checks::LuauChecks,
     /// A Script waiting for an answer to "Delete script?".
     confirm_delete: Option<InstanceId>,
     /// A sky image waiting for "Use this sky?" to be answered (`app/sky.rs`).
@@ -870,6 +873,7 @@ impl EditorApp {
             asset_check: AssetCheck::default(),
             tags: crate::tags::TagsPanel::default(),
             tabs: ScriptTabs::default(),
+            luau: Default::default(),
             confirm_delete: None,
             confirm_sky: None,
             levels_panel: Default::default(),
@@ -1450,6 +1454,10 @@ impl EditorApp {
         // spans the whole top, then the Explorer (with Properties under it)
         // runs down the whole right side, then the Output fits under the viewport.
         self.update_warnings();
+        let now = ctx.input(|input| input.time);
+        if self.check_scripts(now) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+        }
         let palette = theme::palette(ctx);
         // The header is the window's only title bar (see `window_frame.rs`).
         egui::Panel::top("menu bar")

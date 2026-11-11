@@ -41,6 +41,7 @@ mod levels;
 mod loading;
 mod lod_inspector;
 mod lua_syntax;
+mod luau_check;
 mod material_editor;
 mod material_graph;
 mod mixer;
