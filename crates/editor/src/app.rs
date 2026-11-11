@@ -62,6 +62,7 @@ mod sequencer;
 mod session;
 mod settings;
 
+mod inventory;
 mod sky;
 mod solid;
 mod spline_content;
@@ -364,6 +365,8 @@ pub struct EditorApp {
     asset_browser: AssetBrowser,
     /// The Toolbox tab (`toolbox_panel.rs`, its actions `app/toolbox.rs`).
     toolbox: ToolboxPanel,
+    /// The Downloaded / Imported Assets tab.
+    inventory: crate::asset_inventory::AssetInventory,
     /// Update checks and their settings (`app/updates.rs`).
     updates: updates::Updates,
     /// The Version Explorer tab (`version_explorer.rs`).
@@ -416,6 +419,10 @@ pub struct EditorApp {
     ai: mcp::AiConnections,
     /// Whether the viewport shows the measuring grid (saved between runs).
     grid: bool,
+    /// Viewport > Movement Guide: the line, snap points and distance drawn
+    /// while parts are moved, resized or turned. Only what's drawn; moving
+    /// works the same without it. On unless turned off; saved between runs.
+    move_guide: bool,
     /// How solid the grid's lines are, as a multiple of the usual soft look.
     grid_strength: f32,
     /// The user's saved color palettes, shared by every color control.
@@ -511,6 +518,7 @@ impl DockViewer<'_> {
             Pane::Plugins => self.app.plugins_pane(ui),
             Pane::ModelStudio => self.app.model_studio_pane(ui, self.render_state),
             Pane::Toolbox => self.app.toolbox_pane(ui),
+            Pane::Inventory => self.app.inventory_pane(ui),
             Pane::VersionExplorer => self
                 .app
                 .version_explorer
@@ -689,6 +697,11 @@ const LIGHT_CONES_KEY: &str = "light cones";
 const VIEW_CUBE_KEY: &str = "view cube";
 const AI_CONNECTIONS_KEY: &str = "ai connections";
 const GRID_KEY: &str = "grid";
+const MOVE_GUIDE_KEY: &str = "movement guide";
+/// What the Movement Guide toggle does, for its menu item and Settings row.
+const MOVE_GUIDE_HINT: &str = "While a part is moved, resized or turned: the line along the \
+    change, the snap points near it and how far it has gone. Off, moving, snapping and the \
+    handles work the same; only the guide isn't drawn.";
 const GRID_STRENGTH_KEY: &str = "grid strength";
 const COLOR_PALETTES_KEY: &str = "color palettes";
 const DEFAULT_GRID_STRENGTH: f32 = 1.0;
@@ -913,6 +926,7 @@ impl EditorApp {
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
             toolbox: ToolboxPanel::default(),
+            inventory: Default::default(),
             version_explorer: Default::default(),
             updates: Default::default(),
             toolbox_imports: HashMap::new(),
@@ -935,6 +949,7 @@ impl EditorApp {
             light_cones: false,
             view_cube: true,
             ai: Default::default(),
+            move_guide: true,
             grid: true,
             grid_strength: DEFAULT_GRID_STRENGTH,
             colors: Default::default(),
@@ -1003,6 +1018,7 @@ impl EditorApp {
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
             self.ai.allowed = storage.get_string(AI_CONNECTIONS_KEY).as_deref() == Some("on");
             self.grid = storage.get_string(GRID_KEY).as_deref() != Some("off");
+            self.move_guide = storage.get_string(MOVE_GUIDE_KEY).as_deref() != Some("off");
             self.grid_strength = storage
                 .get_string(GRID_STRENGTH_KEY)
                 .and_then(|text| text.parse::<f32>().ok())
@@ -1121,6 +1137,8 @@ impl eframe::App for EditorApp {
         storage.set_string(AI_CONNECTIONS_KEY, ai.to_owned());
         let grid = if self.grid { "on" } else { "off" };
         storage.set_string(GRID_KEY, grid.to_owned());
+        let guide = if self.move_guide { "on" } else { "off" };
+        storage.set_string(MOVE_GUIDE_KEY, guide.to_owned());
         storage.set_string(GRID_STRENGTH_KEY, self.grid_strength.to_string());
         storage.set_string(COLOR_PALETTES_KEY, self.colors.get().to_text());
         let flag = |on| if on { "on" } else { "off" };

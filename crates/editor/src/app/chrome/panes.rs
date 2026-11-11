@@ -989,6 +989,7 @@ impl EditorApp {
                             light_cones: self.light_cones,
                             view_cube: self.view_cube,
                             grid: self.grid,
+                            move_guide: self.move_guide,
                             grid_strength: self.grid_strength,
                             overlays: self.overlays,
                             view_mode: self.view_mode,

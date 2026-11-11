@@ -94,6 +94,10 @@ pub enum Pane {
     /// the asset library (`toolbox_panel.rs`). Starts closed; the Assets
     /// panel's Toolbox button opens it beside Assets.
     Toolbox,
+    /// Every asset downloaded into the asset library or imported into the
+    /// project, by type (`asset_inventory.rs`). Starts closed; the Toolbox's
+    /// view menu and the Assets panel's Source menu open it beside Assets.
+    Inventory,
     /// The engine's versions: this build, its releases, features, known
     /// issues and what changed between two versions (`version_explorer.rs`).
     /// Starts closed; Help > Version Explorer opens it.
@@ -108,7 +112,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 23] = [
+    pub const CLOSABLE: [Pane; 24] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -131,6 +135,7 @@ impl Pane {
         Pane::Plugins,
         Pane::ModelStudio,
         Pane::Toolbox,
+        Pane::Inventory,
         Pane::VersionExplorer,
     ];
 
@@ -159,6 +164,7 @@ impl Pane {
             Pane::Plugins => "Plugins",
             Pane::ModelStudio => "Model Studio",
             Pane::Toolbox => "Toolbox",
+            Pane::Inventory => "Downloaded / Imported Assets",
             Pane::VersionExplorer => "Version Explorer",
             Pane::Script(_) => "Script",
             Pane::Plugin(_) => "Plugin",
@@ -190,6 +196,7 @@ impl Pane {
             Pane::Plugins => icons::PUZZLE_PIECE,
             Pane::ModelStudio => icons::POLYGON,
             Pane::Toolbox => icons::TOOLBOX,
+            Pane::Inventory => icons::TRAY_ARROW_DOWN,
             Pane::VersionExplorer => icons::GIT_BRANCH,
             Pane::Script(_) => icons::CODE,
             Pane::Plugin(_) => icons::PUZZLE_PIECE,
@@ -280,7 +287,7 @@ impl Layout {
             Pane::Scene => None,
             Pane::Explorer => Some(Pane::Properties),
             Pane::Properties => Some(Pane::Explorer),
-            Pane::Console | Pane::Toolbox => Some(Pane::Assets),
+            Pane::Console | Pane::Toolbox | Pane::Inventory => Some(Pane::Assets),
             Pane::Assets | Pane::Profiler | Pane::Mixer | Pane::AssetCheck | Pane::Tests => {
                 Some(Pane::Console)
             }
@@ -637,6 +644,7 @@ mod tests {
                     | Pane::Plugins
                     | Pane::ModelStudio
                     | Pane::Toolbox
+                    | Pane::Inventory
                     | Pane::VersionExplorer
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");

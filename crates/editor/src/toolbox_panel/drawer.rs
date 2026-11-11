@@ -24,7 +24,7 @@ pub(super) struct Drawer {
 }
 
 /// Bytes as people read them: "640 KB", "12.5 MB", "1.2 GB".
-pub(super) fn size_text(bytes: u64) -> String {
+pub(crate) fn size_text(bytes: u64) -> String {
     let bytes = bytes as f64;
     if bytes >= 1e9 {
         format!("{:.1} GB", bytes / 1e9)

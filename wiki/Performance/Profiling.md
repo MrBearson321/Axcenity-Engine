@@ -21,8 +21,8 @@ Where to look when something is slow.
 | **Tracy** | Build a host with `--features profile-tracy` | `profiling` spans: every frame step, `build_draw_list`, `UiInteraction::layout`, `ScriptRuntime::step`/`stepped`/`heartbeat`, `Physics::step`/`sync`/`substep`/`write_back`, `Replicator::frame` | Zero (spans compile to nothing; hakari leaves `profiling` out so Tracy is never on by accident) |
 | **Player F9 console, Stats tab** | `dev_console.rs` | The frame's `Laps` (same step names as `--bench`) and the memory breakdown (G7) | Asked for only while the tab is open |
 | **Profiler › Memory** (G7, PRs #125, #126) | Editor | Process, game memory by kind (Lua, Instances, Models, Textures, Sky and probes, Sounds, Physics) and the 12 heaviest Instance classes | — |
-| **Debug views** | Editor View > View Mode (`debug-views` feature of `render`, editor only) | Wireframe, normals, overdraw and others | Not built into the player |
-| **Culling overlay** | Editor View > Overlays > Culling | Freezes culling at a camera and shows drawn (green) vs culled (red) spheres | Editor only |
+| **Debug views** | Editor Viewport > View Mode (`debug-views` feature of `render`, editor only) | Wireframe, normals, overdraw and others | Not built into the player |
+| **Culling overlay** | Editor Viewport > Overlays > Culling | Freezes culling at a camera and shows drawn (green) vs culled (red) spheres | Editor only |
 | **Frame-rate and bound tools** (rendering Phase 1, PR #83) | `profile_project`, the Profiler and F9 | Frame rate with 1% lows, whether a frame is CPU- or GPU-bound, GPU passes including per-cascade shadow timing | — |
 | **Overdraw as numbers** (`OverdrawStats`) and the **LOD Inspector** tab | Editor | How many times pixels are shaded, whose overdraw it is; which LOD each item draws | Editor only |
 | **Callgrind** | valgrind on the container | Instruction counts per function; stable across runs | — |
