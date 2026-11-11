@@ -97,7 +97,7 @@ fn step(host: &mut Host, count: usize, undo: bool) -> Outcome {
             host.app.redo();
         }
         // A script's step puts its file back: the project takes it in.
-        super::script_write::resync_scripts(host);
+        super::script_write::resync_files(host);
         done.push(quoted(&label));
     }
     if done.is_empty() {

@@ -155,7 +155,7 @@ fn imported(
 
 /// A name for a material file: `wanted`'s file stem, numbered if the
 /// project already has a material or folder by that name.
-fn free_stem(folder: &Path, wanted: &str) -> String {
+pub(super) fn free_stem(folder: &Path, wanted: &str) -> String {
     let stem = prefab_file_stem(wanted.trim());
     let stem = if stem.is_empty() {
         "Material".to_owned()

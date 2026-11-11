@@ -1071,3 +1071,175 @@ fn a_batch_with_a_big_delete_asks_first() {
     assert!(text.contains("\n4. deleted 8 objects"), "{text}");
     assert_eq!(objects(host), before);
 }
+
+#[test]
+fn material_edit_makes_changes_and_assigns_material_files_undoably() {
+    let mut opened = open("hello-part", "mcp-material");
+    let folder = opened.folder.clone();
+    let host = &mut opened.app;
+    let text = ok(
+        host,
+        "material_edit",
+        json!({"action": "create", "name": "Rust", "values": {"color": [0.5, 0.2, 0.1], "roughness": 0.8}, "id": "Workspace/Block"}),
+    );
+    let path = "assets/materials/Rust.material.json";
+    assert!(
+        text.starts_with(&format!("created {path} · drew "))
+            && text.contains("\"AI (test): Create material Rust\"")
+            && text.contains("\"roughness\":0.8"),
+        "{text}"
+    );
+    let file = std::fs::read_to_string(folder.join(path)).unwrap();
+    assert!(file.contains("\"roughness\": 0.8"), "{file}");
+    let block = ok(
+        host,
+        "object_get",
+        json!({"id": "Workspace/Block", "props": ["MaterialVariant", "Color"]}),
+    );
+    assert!(
+        block.contains(&format!("MaterialVariant \"{path}\"")) && block.contains("Color [1,1,1]"),
+        "{block}"
+    );
+
+    // A change keeps what it doesn't name; null takes a value away.
+    let text = ok(
+        host,
+        "material_edit",
+        json!({"action": "change", "path": path, "values": {"metalness": 1, "roughness": null}}),
+    );
+    assert!(
+        text.starts_with(&format!("changed {path} · undo")),
+        "{text}"
+    );
+    let file = std::fs::read_to_string(folder.join(path)).unwrap();
+    assert!(
+        file.contains("\"metalness\": 1")
+            && file.contains("\"color\"")
+            && !file.contains("roughness"),
+        "{file}"
+    );
+
+    // Undo puts the file back as it was, then takes it and the part's look away.
+    ok(host, "history", json!({"action": "undo"}));
+    let file = std::fs::read_to_string(folder.join(path)).unwrap();
+    assert!(file.contains("\"roughness\": 0.8"), "{file}");
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(!folder.join(path).exists());
+    let block = ok(
+        host,
+        "object_get",
+        json!({"id": "Workspace/Block", "props": ["MaterialVariant"]}),
+    );
+    assert!(!block.contains("Rust"), "{block}");
+
+    // Mistakes say what to do and change nothing.
+    for (args, code, says) in [
+        (
+            json!({"action": "create", "name": "X", "values": {"colour": [1, 0, 0]}}),
+            Code::BadValue,
+            "no field \"colour\"",
+        ),
+        (
+            json!({"action": "create", "name": "X", "values": {"maps": {"color": "assets/nope.png"}}}),
+            Code::NotFound,
+            "isn't in the project",
+        ),
+        (
+            json!({"action": "create", "name": "X", "values": {"base": "../outside.material.json"}}),
+            Code::BadValue,
+            "isn't a path in the project",
+        ),
+        (
+            json!({"action": "assign", "path": path, "id": "Workspace/Block"}),
+            Code::NotFound,
+            "",
+        ),
+        (
+            json!({"action": "assign", "path": "world.json", "id": "Workspace/Block"}),
+            Code::BadValue,
+            "isn't a material file",
+        ),
+        (
+            json!({"action": "create", "name": "X", "id": "Workspace"}),
+            Code::BadValue,
+            "isn't a part",
+        ),
+    ] {
+        let error = call(host, "material_edit", args).unwrap_err();
+        assert_eq!(error.code, code, "{error}");
+        assert!(error.message.contains(says), "{error}");
+    }
+    assert!(!folder.join("assets/materials/X.material.json").exists());
+}
+
+#[test]
+fn env_set_changes_the_look_in_one_step_and_makes_sky_objects_when_needed() {
+    let mut opened = open("hello-part", "mcp-env");
+    let host = &mut opened.app;
+    let before = objects(host);
+    let text = ok(
+        host,
+        "env_set",
+        json!({"preset": "foggy", "time": 7.5, "weather": "rain", "intensity": 0.8}),
+    );
+    assert!(
+        text.contains("Lighting ClockTime")
+            && text.contains("FogEnd")
+            && text.contains("made Clouds in Lighting")
+            && text.contains("Weather")
+            && text.ends_with("· undo \"AI (test): Environment: foggy\""),
+        "{text}"
+    );
+    let lighting = ok(
+        host,
+        "object_get",
+        json!({"id": "Lighting", "props": ["ClockTime", "FogEnd"]}),
+    );
+    assert!(
+        lighting.contains("ClockTime 7.5") && lighting.contains("FogEnd 180"),
+        "{lighting}"
+    );
+    let weather = ok(
+        host,
+        "object_get",
+        json!({"id": "Lighting/Weather", "props": ["Precipitation", "Intensity"]}),
+    );
+    assert!(
+        weather.contains("Precipitation.Rain") && weather.contains("Intensity 0.8"),
+        "{weather}"
+    );
+
+    // Enum items go by their names alone, and a wrong one lists the right ones.
+    ok(
+        host,
+        "object_set",
+        json!({"id": "Lighting/Weather", "props": {"Precipitation": "snow"}}),
+    );
+    let error = call(
+        host,
+        "object_set",
+        json!({"id": "Lighting/Weather", "props": {"Precipitation": "Hail"}}),
+    )
+    .unwrap_err();
+    assert!(error.message.contains("one of None, Rain, Snow"), "{error}");
+    ok(host, "history", json!({"action": "undo"}));
+
+    // A second call changes those objects rather than making more.
+    let made = objects(host);
+    assert!(made > before);
+    let text = ok(
+        host,
+        "env_set",
+        json!({"clouds": 0.9, "weather": "none", "fog": 0}),
+    );
+    assert!(text.contains("Clouds Cover"), "{text}");
+    assert_eq!(objects(host), made);
+
+    ok(host, "history", json!({"action": "undo", "steps": 2}));
+    assert_eq!(objects(host), before);
+
+    let error = call(host, "env_set", json!({})).unwrap_err();
+    assert_eq!(error.code, Code::BadArgs);
+    let error = call(host, "env_set", json!({"time": 30})).unwrap_err();
+    assert_eq!(error.code, Code::BadValue);
+}

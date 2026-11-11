@@ -205,9 +205,10 @@ pub(super) fn warnings(path: &str, source: &str) -> Vec<String> {
         .collect()
 }
 
-/// After an undo or redo that may have put a script file back: takes in
-/// every script file as it is on disk now (new, changed or gone).
-pub(super) fn resync_scripts(host: &mut Host) {
+/// After an undo or redo that may have put a file back: takes in every
+/// script file, and every asset file this session wrote, as it is on disk
+/// now (new, changed or gone).
+pub(super) fn resync_files(host: &mut Host) {
     let Some(project) = &host.app.project else {
         return;
     };
@@ -218,5 +219,6 @@ pub(super) fn resync_scripts(host: &mut Host) {
             paths.push(script.path.clone());
         }
     }
+    paths.extend(host.session.files.iter().cloned());
     host.app.disk_changed(&paths);
 }

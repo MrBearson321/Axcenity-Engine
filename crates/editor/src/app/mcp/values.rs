@@ -173,6 +173,29 @@ pub fn read_value(
             _ => Err(bad("expected an object's ID or path, or null".to_owned())),
         };
     }
+    // An enum item can be given by its name alone: "Rain" for
+    // "Precipitation.Rain".
+    if let (Value::EnumItem(item), Json::String(text)) = (current, json) {
+        let wanted = text
+            .strip_prefix(&format!("{}.", item.enum_name))
+            .unwrap_or(text);
+        if let Some(items) = crate::properties::enum_items(&item.enum_name) {
+            let found = items
+                .iter()
+                .find(|known| known.eq_ignore_ascii_case(wanted))
+                .ok_or_else(|| bad(format!("one of {}", items.join(", "))))?;
+            return Ok(Value::EnumItem(axcenity_core::EnumItem {
+                enum_name: item.enum_name.clone(),
+                item: (*found).to_owned(),
+            }));
+        }
+        if !wanted.contains('.') {
+            return Ok(Value::EnumItem(axcenity_core::EnumItem {
+                enum_name: item.enum_name.clone(),
+                item: wanted.to_owned(),
+            }));
+        }
+    }
     axcenity_project::json_to_value(json, current.kind()).map_err(bad)
 }
 
