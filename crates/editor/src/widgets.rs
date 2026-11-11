@@ -398,6 +398,154 @@ pub fn nav_item(
     response
 }
 
+/// [`nav_item`] folded to its icon: a square the sidebar's width, centred,
+/// highlighted the same way. `title` names it for screen readers; give it a
+/// tooltip, since the title doesn't show.
+pub fn nav_icon(ui: &mut egui::Ui, icon: &str, title: &str, selected: bool) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let width = ui.available_width();
+    let (row, response) = ui.allocate_exact_size(vec2(width, 34.0), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, title)
+    });
+    let rect = Rect::from_center_size(row.center(), vec2(36.0_f32.min(width), 34.0));
+    let hovered = response.hovered();
+    let t = theme::ease(ui.ctx(), response.id.with("hover"), hovered || selected);
+    if t > 0.0 {
+        let fill = if selected {
+            palette.control_active
+        } else {
+            palette.control_hover
+        };
+        ui.painter()
+            .rect_filled(rect, theme::radius::CONTROL, fill.gamma_multiply(t));
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect,
+            theme::radius::CONTROL,
+            palette.focus_stroke(),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let color = if selected {
+        palette.accent
+    } else if hovered {
+        palette.text_strong
+    } else {
+        palette.text_secondary
+    };
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        icon,
+        FontId::proportional(theme::size::ICON_MEDIUM + 2.0),
+        color,
+    );
+    response
+}
+
+/// A tab in a top bar: an icon, the name if `shown`, and an optional count,
+/// with an accent line along the bar's bottom edge (`bar_bottom`) while
+/// it's the page shown. `title` names it for screen readers.
+pub fn nav_tab(
+    ui: &mut egui::Ui,
+    icon: &str,
+    title: &str,
+    shown: Option<&str>,
+    count: Option<usize>,
+    selected: bool,
+    bar_bottom: f32,
+) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let font = FontId::new(type_scale::BODY, theme::medium_family());
+    let name = shown.map(|text| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+    });
+    let count_text = count.filter(|_| shown.is_some()).map(|count| {
+        ui.painter().layout_no_wrap(
+            count.to_string(),
+            FontId::proportional(type_scale::SMALL),
+            Color32::WHITE,
+        )
+    });
+    let icon_width = theme::size::ICON_MEDIUM + 2.0;
+    let mut width = 12.0 + icon_width + 12.0;
+    if let Some(name) = &name {
+        width += 6.0 + name.size().x;
+    }
+    if let Some(count) = &count_text {
+        width += 6.0 + count.size().x + 10.0;
+    }
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 32.0), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, title)
+    });
+    let hovered = response.hovered();
+    let t = theme::ease(ui.ctx(), response.id.with("hover"), hovered);
+    if t > 0.0 {
+        ui.painter().rect_filled(
+            rect,
+            theme::radius::CONTROL,
+            palette.control_hover.gamma_multiply(t),
+        );
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect,
+            theme::radius::CONTROL,
+            palette.focus_stroke(),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let on = theme::ease(ui.ctx(), response.id.with("on"), selected);
+    if on > 0.0 {
+        let line = Rect::from_min_max(
+            egui::pos2(rect.left() + 6.0, bar_bottom - 2.0),
+            egui::pos2(rect.right() - 6.0, bar_bottom),
+        );
+        ui.painter()
+            .rect_filled(line, 1.0, palette.accent.gamma_multiply(on));
+    }
+    let color = if selected || hovered {
+        palette.text_strong
+    } else {
+        palette.text_secondary
+    };
+    let mut x = rect.left() + 12.0;
+    ui.painter().text(
+        egui::pos2(x + icon_width / 2.0, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        icon,
+        FontId::proportional(theme::size::ICON_MEDIUM),
+        if selected { palette.accent } else { color },
+    );
+    x += icon_width;
+    if let Some(name) = name {
+        x += 6.0;
+        let at = egui::pos2(x, rect.center().y - name.size().y / 2.0);
+        x += name.size().x;
+        ui.painter()
+            .galley_with_override_text_color(at, name, color);
+    }
+    if let Some(count) = count_text {
+        x += 6.0;
+        let pill = Rect::from_min_size(
+            egui::pos2(x, rect.center().y - 8.0),
+            vec2(count.size().x + 10.0, 16.0),
+        );
+        ui.painter()
+            .rect_filled(pill, theme::radius::CARD, palette.inset);
+        ui.painter().galley_with_override_text_color(
+            pill.center() - count.size() / 2.0,
+            count,
+            palette.text_weak,
+        );
+    }
+    response
+}
+
 /// The room [`search_field`] adds around its text, left and right together.
 pub const SEARCH_FIELD_MARGINS: f32 = 48.0;
 
