@@ -30,6 +30,7 @@ use super::EditorApp;
 mod batch;
 mod docs;
 mod env_set;
+mod game_run;
 mod history;
 mod material_edit;
 mod object_create;
@@ -181,6 +182,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &project_check::SPEC,
         call: project_check::call,
+    },
+    Tool {
+        spec: &game_run::SPEC,
+        call: game_run::call,
     },
     Tool {
         spec: &history::SPEC,
