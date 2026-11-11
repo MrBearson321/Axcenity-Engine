@@ -13,12 +13,14 @@ mod schedule;
 mod steps;
 
 #[cfg(test)]
+mod blend_tests;
+#[cfg(test)]
 mod golden;
 
 use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_character::Controllers;
-use axcenity_core::World;
+use axcenity_core::{ClassName, World};
 use axcenity_nav::Agents;
 use axcenity_physics::Physics;
 use axcenity_script::ScriptRuntime;
@@ -63,6 +65,35 @@ impl Sim {
             animators: Animators::with_ground(axcenity_character::foot_ground),
             assets,
         }
+    }
+
+    /// The moving parts to draw between physics steps this frame (roadmap
+    /// G3), as far along as [`Physics::blend_alpha`] says. What the camera
+    /// follows is left out, with all that's welded to it: the player's
+    /// character (and the car it sits in) and a Follow or Track camera's
+    /// subject. Drawn blended under a camera that follows the stepped
+    /// part, they would shake on screen.
+    pub fn blends(&self) -> Vec<axcenity_physics::Blend> {
+        let world = &self.world;
+        let mut followed = Vec::new();
+        if let Some(character) = self.characters.stepped_character(world) {
+            followed.extend(axcenity_character::body_parts(world, character));
+        }
+        if let Some(subject) = self.scripts.camera_followed()
+            && let Some(instance) = world.get(subject)
+        {
+            // A controller or agent moves its parent's body.
+            let class = instance.class();
+            let holder = if class.is_character_controller() || class == ClassName::NavigationAgent {
+                instance.parent()
+            } else {
+                Some(subject)
+            };
+            if let Some(holder) = holder {
+                followed.extend(axcenity_character::body_parts(world, holder));
+            }
+        }
+        self.physics.blends(&followed)
     }
 
     /// True while a script is stopped at a breakpoint (editor Play only).

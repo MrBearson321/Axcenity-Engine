@@ -368,6 +368,9 @@ pub struct ViewportScene<'a> {
     pub agent_paths: &'a [(InstanceId, Vec<axcenity_core::Vector3>)],
     /// Animated MeshParts' poses during Play; `None` draws every model still.
     pub poses: Option<&'a axcenity_scene::Poses>,
+    /// Moving parts drawn between physics steps during Play (roadmap G3);
+    /// `None` draws every part where the world has it.
+    pub blends: Option<axcenity_scene::Blends>,
     /// A Terrain Studio brush, which takes the left button while it's on.
     pub terrain_brush: Option<TerrainBrush>,
     /// The Constraint tool, when it's on: the left button picks part
@@ -965,6 +968,7 @@ impl Viewport {
             nav_mesh,
             agent_paths,
             poses,
+            blends,
             playing: game_playing,
             terrain_brush,
             constraint_pick,
@@ -1295,6 +1299,7 @@ impl Viewport {
         }
         let still = axcenity_scene::Poses::new();
         let poses = poses.unwrap_or(&still);
+        self.terrain.set_blends(blends.unwrap_or_default());
         // During Play the game's frame streams the world, as for particles.
         if !game_playing && self.terrain.streaming.settings().is_some() {
             // Editing shows everything, whatever Play streamed.

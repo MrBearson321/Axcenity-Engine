@@ -471,6 +471,21 @@ fn print_output(runtime: &mut ScriptRuntime) {
     }
 }
 
+/// The moving parts to draw between physics steps this frame (roadmap G3).
+fn blends_to_draw(sim: &axcenity_sim::Sim) -> axcenity_scene::Blends {
+    let moving = sim.blends();
+    let mut blends = axcenity_scene::Blends::new(sim.physics.blend_alpha());
+    blends.reserve(moving.len());
+    for blend in moving {
+        blends.add(
+            blend.part,
+            (blend.from_position, blend.from_orientation),
+            (blend.to_position, blend.to_orientation),
+        );
+    }
+    blends
+}
+
 fn listener_of(camera: &FlyCamera) -> axcenity_audio::Listener {
     let (position, orientation) = camera.view();
     listener_of_state(CameraState {
@@ -1575,6 +1590,7 @@ impl HostIo for App {
         let size = self.frame_size;
         let on_top = self.loading_gui.as_ref().and_then(LoadingGui::on_top);
         let camera = self.shown_camera();
+        self.terrain.set_blends(blends_to_draw(&self.sim));
         let (draw_list, ui_layout) = axcenity_scene::build_draw_list_with_ui_interaction(
             &self.sim.world,
             &self.sim.assets,

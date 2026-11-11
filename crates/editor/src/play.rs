@@ -643,6 +643,22 @@ impl Session {
         self.sim.animators.poses()
     }
 
+    /// The moving parts to draw between physics steps (roadmap G3), for
+    /// the viewport.
+    pub fn blends(&self) -> axcenity_scene::Blends {
+        let moving = self.sim.blends();
+        let mut blends = axcenity_scene::Blends::new(self.sim.physics.blend_alpha());
+        blends.reserve(moving.len());
+        for blend in moving {
+            blends.add(
+                blend.part,
+                (blend.from_position, blend.from_orientation),
+                (blend.to_position, blend.to_orientation),
+            );
+        }
+        blends
+    }
+
     /// The path each NavigationAgent is walking, from its feet, for the
     /// Agent Paths overlay. Reading them changes nothing.
     pub fn agent_paths(&self) -> Vec<(InstanceId, Vec<Vector3>)> {
