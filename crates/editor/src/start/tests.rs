@@ -856,3 +856,54 @@ fn the_layout_buttons_switch_between_sidebar_and_top_bar() {
     frame(&mut start, click(sidebar));
     assert_eq!(start.nav().layout, NavLayout::Sidebar);
 }
+
+// Moved from widgets.rs when it went to the editor kit: it draws the
+// start screen's brand mark.
+#[test]
+fn the_logo_entrances_the_dots_and_the_spotlight_draw() {
+    let pointer = egui::pos2(340.0, 200.0);
+    let mut draw = |ui: &mut egui::Ui| {
+        let ctx = &ui.ctx().clone();
+        let brand = Brand::load(ctx);
+        egui::CentralPanel::default().show(ui, |ui| {
+            let palette = crate::theme::palette(ui.ctx());
+            let (top, ink) = (ui.max_rect().top() + 20.0, palette.text_strong);
+            crate::widgets::dot_grid(ui.painter(), ui.max_rect(), ink.gamma_multiply(0.04));
+            let at = |index: usize, y: f32| {
+                Rect::from_min_size(egui::pos2(20.0 + index as f32 * 100.0, y), vec2(80.0, 80.0))
+            };
+            for (index, t) in [0.25, 0.5, 0.75, 1.0].into_iter().enumerate() {
+                crate::widgets::paint_mark_cut(ui.painter(), at(index, top), brand.mark(), ink, t);
+            }
+            for (index, position) in [0.3, 0.5, 0.7, 0.0].into_iter().enumerate() {
+                let colors = (palette.text_muted, ink);
+                crate::widgets::paint_mark_sweep(
+                    ui.painter(),
+                    at(index, top + 100.0),
+                    brand.mark(),
+                    colors,
+                    position,
+                );
+            }
+            crate::widgets::spotlight(
+                ui,
+                Rect::from_center_size(pointer, vec2(220.0, 120.0)),
+                egui::Id::new("card"),
+                1.0,
+            );
+        });
+    };
+    let moved = vec![egui::Event::PointerMoved(pointer)];
+    match std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from) {
+        Some(folder) => crate::snapshot::snapshot(
+            &folder.join("logo-entrances.png"),
+            vec2(460.0, 280.0),
+            vec![moved, Vec::new()],
+            &mut draw,
+        ),
+        None => {
+            let ctx = crate::theme::test_context();
+            let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
+        }
+    }
+}

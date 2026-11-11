@@ -673,6 +673,7 @@ dependencies = [
  "axcenity-collab",
  "axcenity-cook",
  "axcenity-core",
+ "axcenity-editor-kit",
  "axcenity-gameplay",
  "axcenity-mcp",
  "axcenity-mesh-edit",
@@ -715,6 +716,25 @@ dependencies = [
  "subsecond",
  "tar",
  "zip",
+]
+
+[[package]]
+name = "axcenity-editor-kit"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-anim",
+ "axcenity-assets",
+ "axcenity-core",
+ "axcenity-project",
+ "axcenity-render",
+ "axcenity-scene",
+ "axcenity-workspace-hack",
+ "eframe",
+ "egui-phosphor",
+ "png",
+ "pollster 0.4.0",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
