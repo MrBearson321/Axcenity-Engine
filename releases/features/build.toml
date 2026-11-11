@@ -1,0 +1,25 @@
+# The build subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "build.installers"
+name = "Installers"
+subsystem = "build"
+description = "Editor installers and packages for Windows, macOS and Linux."
+status = "active"
+docs = "docs/project/install.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "packaging/ and the GitHub release's files in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "build.package-checks"
+name = "Package checks"
+subsystem = "build"
+description = "check-packages.py builds, packages and runs Build Game on each OS without CI."
+status = "active"
+docs = "docs/project/releases.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "PR #62 (Check packages and Build Game on each OS without CI), after v0.1.0-alpha.3"

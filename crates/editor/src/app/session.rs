@@ -272,6 +272,18 @@ impl EditorApp {
             })
             .collect();
         let ui_graphs = ui_graphs::documents(&project.world, project.ui_graphs);
+        // Scripts inside objects (G2) are found again in the world each
+        // Play, as copies come and go while editing.
+        let world = &project.world;
+        let scripts: Vec<_> = project
+            .scripts
+            .into_iter()
+            .filter(|script| {
+                world
+                    .get(script.instance)
+                    .is_none_or(|instance| instance.source_file().is_none())
+            })
+            .collect();
         // A level that's the start level by name is opened as it.
         let start_level = project.manifest.start_level;
         let level = level.filter(|name| *name != start_level);
@@ -294,7 +306,7 @@ impl EditorApp {
             folder: project.folder,
             stylesheets,
             stylesheet_texts,
-            scripts: project.scripts,
+            scripts,
             block_scripts,
             ui_graphs,
             remembered_blocks: HashMap::new(),
@@ -459,6 +471,14 @@ impl EditorApp {
             &self.world,
             &mut self.output,
         );
+        // With the scripts inside objects in the world being played (G2).
+        let mut problems = Vec::new();
+        let objects = axcenity_project::object_scripts(&project.folder, game, &mut problems);
+        for problem in &problems {
+            self.output
+                .error(format!("A script won't run: {}", files::chain(problem)));
+        }
+        let scripts = axcenity_project::in_start_order(game, scripts, objects);
         let (position, orientation) = self.viewport.camera_view();
         match Play::start(
             game,

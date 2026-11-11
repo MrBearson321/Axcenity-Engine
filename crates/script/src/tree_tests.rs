@@ -1,7 +1,7 @@
 //! Tests for the Instance tree API (Phase 27): `Clone`, `Destroy`,
 //! `WaitForChild`, `IsA`, finding and listing, and the tree events.
 
-use axcenity_core::{ClassName, InstanceId, World};
+use axcenity_core::{ClassName, InstanceId, Value, World};
 
 use super::*;
 
@@ -144,6 +144,70 @@ fn a_cloned_script_waits_until_it_is_somewhere_scripts_run() {
     );
     step(&mut runtime, &mut world, 1.0, 1);
     assert_eq!(lines(&mut runtime), ["hello from Workspace.Held"]);
+}
+
+/// Adds a Script inside `parent` whose code is in `objects/Coin/Spin.server.lua`
+/// (a script inside an object, G2) and starts it.
+fn start_object_script(
+    runtime: &mut ScriptRuntime,
+    world: &mut World,
+    parent: InstanceId,
+    source: &str,
+) -> InstanceId {
+    let script = world.create(ClassName::Script).unwrap();
+    world.set_name(script, "Spin").unwrap();
+    world
+        .set_property(
+            script,
+            "SourceFile",
+            Value::String("objects/Coin/Spin.server.lua".into()),
+        )
+        .unwrap();
+    world.set_parent(script, Some(parent)).unwrap();
+    runtime.start_script(world, script, "objects/Coin/Spin.server.lua", source);
+    script
+}
+
+#[test]
+fn scripts_inside_objects_run_per_copy_and_templates_wait_until_placed() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    let code = r#"print("spin " .. script.Parent:GetFullName())"#;
+    let mut coins = Vec::new();
+    for (name, place) in [
+        ("A", world.workspace()),
+        ("B", world.workspace()),
+        ("Template", world.server_storage()),
+    ] {
+        let coin = world.create(ClassName::Model).unwrap();
+        world.set_name(coin, name).unwrap();
+        world.set_parent(coin, Some(place)).unwrap();
+        coins.push(coin);
+    }
+    for &coin in &coins {
+        start_object_script(&mut runtime, &mut world, coin, code);
+    }
+    // The template in ServerStorage doesn't run.
+    assert_eq!(
+        lines(&mut runtime),
+        ["spin Workspace.A", "spin Workspace.B"]
+    );
+
+    start(
+        &mut runtime,
+        &mut world,
+        r#"
+        local copy = game.ServerStorage.Template:Clone()
+        copy.Name = "C"
+        copy.Parent = workspace
+        task.wait(1)
+        game.ServerStorage.Template.Parent = workspace
+        "#,
+    );
+    assert_eq!(lines(&mut runtime), ["spin Workspace.C"]);
+    // Moved where scripts run, the template itself starts.
+    step(&mut runtime, &mut world, 1.0, 1);
+    assert_eq!(lines(&mut runtime), ["spin Workspace.Template"]);
 }
 
 #[test]

@@ -1,0 +1,6 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "improvement"
+subsystem = "editor"
+title = "A usability pass over the editor: filters, reset to default, folding Advanced properties, clearer Model Studio, block editor and Animation tab"
+prs = [31, 33, 35, 36, 38, 39, 40, 42, 43, 46, 54, 56]
+evidence = "reconstructed"

@@ -1,0 +1,13 @@
+# The terrain subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "terrain.studio"
+name = "Terrain Studio"
+subsystem = "terrain"
+description = "Generate, sculpt, erode and paint terrain in the editor."
+status = "active"
+docs = "docs/terrain.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/terrain and crates/editor/src/terrain_studio.rs in the tree at tag v0.1.0-alpha.3"

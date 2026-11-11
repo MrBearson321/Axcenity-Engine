@@ -70,6 +70,8 @@ pub struct TerrainCache {
     pub(crate) meshes: crate::mesh_cache::MeshCache,
     /// Instances' draw items, kept between frames (M4).
     pub(crate) draw_cache: crate::retained::DrawCache,
+    /// Moving parts drawn between physics steps this frame (roadmap G3).
+    pub(crate) blends: crate::blend::Blends,
 }
 
 impl Default for TerrainCache {
@@ -84,6 +86,7 @@ impl Default for TerrainCache {
             pending: HashSet::new(),
             meshes: Default::default(),
             draw_cache: crate::retained::DrawCache::new(crate::retained::on_by_default()),
+            blends: crate::blend::Blends::default(),
         }
     }
 }
@@ -192,6 +195,13 @@ struct WeightsKey {
 impl TerrainCache {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The moving parts to draw between physics steps from the next frame
+    /// on (roadmap G3), until the host sets others. Hosts set them every
+    /// frame from the physics step's.
+    pub fn set_blends(&mut self, blends: crate::blend::Blends) {
+        self.blends = blends;
     }
 
     /// One that's thrown away after one frame, with nothing kept: there's

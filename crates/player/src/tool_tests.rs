@@ -9,7 +9,7 @@ use axcenity_core::{InstanceId, KeyCode, UserInputType, Value, Vector3};
 use axcenity_render::UiDrawItem;
 use axcenity_script::CameraState;
 
-use super::tests::copy_folder;
+use super::tests::TempCopy;
 use super::*;
 
 const FRAME: f32 = 1.0 / 60.0;
@@ -25,6 +25,8 @@ struct Game {
     physics: Physics,
     stylesheets: Vec<axcenity_ui::Stylesheet>,
     printed: Vec<String>,
+    /// The example's copy, which its assets load from.
+    _copy: TempCopy,
 }
 
 impl Game {
@@ -39,12 +41,10 @@ impl Game {
         let example = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples")
             .join(name);
-        let folder = std::env::temp_dir().join(format!(
-            "axcenity-player-{name}-{test}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&folder);
-        copy_folder(&example, &folder);
+        let folder = TempCopy::of(
+            &example,
+            &format!("axcenity-player-{name}-{test}-{}", std::process::id()),
+        );
         let project = axcenity_project::load(&folder).unwrap();
         let mut world = project.world;
         let assets = Assets::new(&folder);
@@ -68,6 +68,7 @@ impl Game {
             characters: Controllers::default(),
             stylesheets,
             printed: Vec::new(),
+            _copy: folder,
         };
         game.take_printed();
         assert!(game.printed().is_empty(), "the scripts start cleanly");

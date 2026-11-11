@@ -7,7 +7,6 @@
 //! Built on eframe (egui's app framework), which owns the window and the GPU
 //! device; the viewport draws with the same renderer as the player.
 
-mod ambient_cg;
 mod angular;
 mod anim_import;
 mod animation;
@@ -77,6 +76,7 @@ mod terrain_studio;
 mod theme;
 mod thumbnail;
 mod toast;
+mod toolbox_panel;
 mod tree;
 #[cfg(test)]
 mod ui_cost_tests;
@@ -133,6 +133,16 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
 }
 
 fn main() -> eframe::Result {
+    // `--version` (and `--version --json`): this build's version, channel,
+    // commit and toolchain, then exit.
+    let all: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    if let Some(text) = axcenity_release::version_flag("axcenity-editor", &all) {
+        println!("{text}");
+        return Ok(());
+    }
     // Same logging defaults as the player: warnings and errors, minus
     // harmless graphics driver chatter. Set RUST_LOG to override.
     env_logger::Builder::from_env(

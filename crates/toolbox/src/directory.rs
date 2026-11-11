@@ -78,6 +78,7 @@ pub fn kind_folder(kind: Kind) -> &'static str {
         Kind::Hdri => "hdri",
         Kind::Model => "models",
         Kind::Sound => "audio",
+        Kind::Sprites => "sprites",
     }
 }
 

@@ -19,6 +19,8 @@ pub enum Kind {
     Model,
     /// A sound effect or music.
     Sound,
+    /// 2D sprite sheets (Kenney packs in the Blender pipeline's library).
+    Sprites,
 }
 
 impl Kind {
@@ -32,6 +34,19 @@ impl Kind {
             Kind::Hdri => "hdri",
             Kind::Model => "model",
             Kind::Sound => "sound",
+            Kind::Sprites => "sprites",
+        }
+    }
+
+    /// A kind from its name or a common plural ("textures", "skies").
+    pub fn parse(text: &str) -> Option<Kind> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "texture" | "textures" | "material" | "materials" => Some(Kind::Texture),
+            "hdri" | "hdris" | "sky" | "skies" => Some(Kind::Hdri),
+            "model" | "models" => Some(Kind::Model),
+            "sound" | "sounds" | "audio" => Some(Kind::Sound),
+            "sprites" | "sprite" => Some(Kind::Sprites),
+            _ => None,
         }
     }
 }

@@ -176,7 +176,7 @@ impl EditorApp {
     }
 
     /// Carries out one of the panel's actions.
-    fn terrain_action(&mut self, action: TerrainAction) {
+    pub(super) fn terrain_action(&mut self, action: TerrainAction) {
         if self.playing() {
             return;
         }
@@ -229,6 +229,9 @@ impl EditorApp {
             }
             TerrainAction::PickLayerTexture(layer, name) => {
                 self.apply(layer, Edit::PickTexture(name));
+            }
+            TerrainAction::FromToolbox(layer) => {
+                self.open_toolbox(Some(crate::toolbox_panel::Target::TerrainLayer(layer)));
             }
             TerrainAction::UseTextureSet(layer, entry) => {
                 if !self.use_global_asset(&entry.path) {

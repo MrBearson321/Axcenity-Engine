@@ -1,0 +1,49 @@
+# The animation subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "animation.clips"
+name = "Animation clips and state machines"
+subsystem = "animation"
+description = "Keyframe clips, Animator controllers, state machines and blend trees."
+status = "active"
+docs = "docs/rendering/animation.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/anim in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.sequencer"
+name = "Sequencer"
+subsystem = "animation"
+description = "Cutscenes on a timeline."
+status = "active"
+docs = "docs/project/sequences.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 37c51365 (Cutscene Sequencer), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "animation.ik"
+name = "Inverse kinematics"
+subsystem = "animation"
+description = "Runtime IK and IK posing."
+status = "active"
+docs = "docs/rendering/animation.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 19f73042 (Runtime IK), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "animation.layers"
+name = "Animation layers and blend spaces"
+subsystem = "animation"
+description = "Layered animation and blend spaces."
+status = "active"
+docs = "docs/rendering/animation.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 5a030375 (Animation Layers and Blend Spaces), after v0.1.0-alpha.3"

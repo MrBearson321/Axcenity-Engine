@@ -270,6 +270,93 @@ fn scripts_and_players_are_left_out_when_saving() {
     assert_eq!(write_world(&world), write_world(&World::new()));
 }
 
+/// A Door model in the Workspace with a Script inside it whose code is
+/// in `objects/Door/Open.server.lua` (G2).
+fn door_with_script(world: &mut World) -> (InstanceId, InstanceId) {
+    let door = world.create(ClassName::Model).unwrap();
+    world.set_name(door, "Door").unwrap();
+    world.set_parent(door, Some(world.workspace())).unwrap();
+    let script = world.create(ClassName::Script).unwrap();
+    world.set_name(script, "Open").unwrap();
+    world
+        .set_property(
+            script,
+            "SourceFile",
+            Value::String("objects/Door/Open.server.lua".into()),
+        )
+        .unwrap();
+    world.set_parent(script, Some(door)).unwrap();
+    (door, script)
+}
+
+#[test]
+fn scripts_inside_objects_round_trip_and_make_the_file_version_2() {
+    let mut world = World::new();
+    let (_, script) = door_with_script(&mut world);
+    // A script from `scripts/` beside it is still left out.
+    let service = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(service, Some(world.server_script_service()))
+        .unwrap();
+    let inside = world.create(ClassName::StringValue).unwrap();
+    world.set_name(inside, "Sound").unwrap();
+    world.set_parent(inside, Some(script)).unwrap();
+
+    let written = write_world(&world);
+    assert!(
+        written.starts_with("{\n  \"format_version\": 2,"),
+        "{written}"
+    );
+    assert!(
+        written.contains("\"class\": \"Script\",\n            \"name\": \"Open\",\n            \"properties\": {\n              \"SourceFile\": \"objects/Door/Open.server.lua\"\n            }"),
+        "{written}"
+    );
+    let loaded = parse_world(&written).unwrap();
+    let open = loaded
+        .find_first_descendant(loaded.workspace(), "Open")
+        .unwrap();
+    let open = loaded.get(open).unwrap();
+    assert_eq!(open.class(), ClassName::Script);
+    assert_eq!(open.source_file(), Some("objects/Door/Open.server.lua"));
+    assert_eq!(open.children().len(), 1, "with what's inside it");
+    assert_eq!(write_world(&loaded), written);
+    // Taking the script out writes version 1 again.
+    world.destroy(script).unwrap();
+    assert!(write_world(&world).starts_with("{\n  \"format_version\": 1,"));
+}
+
+#[test]
+fn levels_and_prefabs_hold_scripts_inside_objects_too() {
+    let mut world = World::new();
+    let (door, _) = door_with_script(&mut world);
+    let level = write_workspace_only(&world);
+    assert!(level.starts_with("{\n  \"format_version\": 2,"), "{level}");
+    assert!(level.contains("objects/Door/Open.server.lua"), "{level}");
+
+    let prefab = write_prefab(&world, &[door]);
+    assert!(
+        prefab.starts_with("{\n  \"format_version\": 2,"),
+        "{prefab}"
+    );
+    let mut placed = World::new();
+    let workspace = placed.workspace();
+    let roots = parse_prefab(&prefab, &mut placed, workspace).unwrap();
+    let children = placed.get(roots[0]).unwrap().children().to_vec();
+    assert_eq!(
+        placed.get(children[0]).unwrap().source_file(),
+        Some("objects/Door/Open.server.lua")
+    );
+
+    let empty = World::new();
+    assert!(write_workspace_only(&empty).starts_with("{\n  \"format_version\": 1,"));
+}
+
+#[test]
+fn a_newer_world_format_than_2_asks_for_an_update() {
+    let err = parse_err(r#"{ "format_version": 3, "workspace": {} }"#);
+    assert!(err.contains("update Axcenity"), "{err}");
+}
+
 #[test]
 fn remote_events_in_replicated_storage_save_and_load() {
     let mut world = World::new();

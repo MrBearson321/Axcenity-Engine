@@ -132,6 +132,7 @@ const GROUPS: [(&str, &[&str]); 35] = [
             "AssemblyLinearVelocity",
             "AssemblyAngularVelocity",
             "Gravity",
+            "PhysicsInterpolation",
         ],
     ),
     ("Wind", &["GlobalWind"]),

@@ -1,0 +1,37 @@
+# The assets subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "assets.model-import"
+name = "Model import"
+subsystem = "assets"
+description = "Import glTF and FBX models, with skinned FBX animation."
+status = "active"
+docs = "docs/editor/import.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/assets/src/import.rs and crates/editor/src/anim_import.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "assets.cooked-assets"
+name = "Cooked assets"
+subsystem = "assets"
+description = "Textures cooked to BC7/BC5 with mips, cached LODs and cooked models, shipped in built games."
+status = "active"
+docs = "docs/editor/import.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "PR #45 (Cooked BC7 textures, roadmap L2 part 1), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "assets.asset-ids"
+name = "Stable asset IDs"
+subsystem = "assets"
+description = "Assets keep an ID in a sidecar file, so references survive renames and moves."
+status = "active"
+docs = "docs/project/assets.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "PR #50 (Stable asset IDs in sidecars), after v0.1.0-alpha.3"

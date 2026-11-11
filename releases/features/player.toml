@@ -1,0 +1,13 @@
+# The player subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "player.standalone"
+name = "Player"
+subsystem = "player"
+description = "The standalone game player."
+status = "active"
+docs = "README.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/player in the tree at tag v0.1.0-alpha.3"

@@ -181,6 +181,19 @@ impl Instance {
     pub fn prefab(&self) -> Option<&PrefabLink> {
         self.prefab.as_deref()
     }
+
+    /// The project file a script inside an object takes its code from (its
+    /// `SourceFile`), or `None` for anything else, including the scripts
+    /// made from `scripts/`.
+    pub fn source_file(&self) -> Option<&str> {
+        if !self.class.is_script() {
+            return None;
+        }
+        match self.properties.get("SourceFile") {
+            Some(Value::String(path)) if !path.is_empty() => Some(path),
+            _ => None,
+        }
+    }
 }
 
 /// The longest attribute name, as in Roblox.
@@ -1166,7 +1179,8 @@ impl World {
     /// Copies `id` in `source` (another world) and everything inside it
     /// into this world, like [`duplicate`](Self::duplicate), and returns the
     /// copy, with no parent yet. Scripts are left out, and so is what's
-    /// inside them. An ObjectValue pointing inside the copied tree points at
+    /// inside them, except a script with a `SourceFile` (one inside an
+    /// object, which world files hold). An ObjectValue pointing inside the copied tree points at
     /// the same place in the copy; one pointing elsewhere becomes nil. Levels
     /// load this way.
     pub fn copy_from(&mut self, source: &World, id: InstanceId) -> Result<InstanceId, TreeError> {
@@ -1188,7 +1202,7 @@ impl World {
                 },
                 _ => None,
             };
-            if instance.class.is_script() {
+            if instance.class.is_script() && instance.source_file().is_none() {
                 continue;
             }
             let mut copy = instance.clone();
@@ -1220,6 +1234,26 @@ impl World {
         }
         // A script at the root copies nothing.
         root.ok_or(TreeError::Stale)
+    }
+
+    /// Whether `script` is where scripts of its kind run: a Script under the
+    /// Workspace or ServerScriptService, a LocalScript under the Workspace,
+    /// StarterPlayerScripts or Players. A ModuleScript can be required
+    /// wherever it is. A script elsewhere, such as a template in
+    /// ServerStorage, waits there; its clones run once placed.
+    pub fn runs_scripts_at(&self, script: InstanceId) -> bool {
+        let under = |place| self.is_descendant_of(script, place);
+        match self.get(script).map(|instance| instance.class) {
+            Some(ClassName::Script) => {
+                under(self.workspace()) || under(self.server_script_service())
+            }
+            Some(ClassName::LocalScript) => {
+                under(self.workspace())
+                    || under(self.starter_player_scripts())
+                    || under(self.players())
+            }
+            _ => true,
+        }
     }
 
     /// Gives a copy of a Terrain its original's landscape. They share it

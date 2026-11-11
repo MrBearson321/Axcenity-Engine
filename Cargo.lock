@@ -549,7 +549,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "axcenity-anim"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-core",
@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-assets"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-workspace-hack",
  "glam 0.34.3",
@@ -576,7 +576,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-audio"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-core",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-blocks"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-blocks-runtime",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-blocks-runtime"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-workspace-hack",
  "serde",
@@ -612,7 +612,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-character"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-anim",
  "axcenity-assets",
@@ -624,7 +624,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-cook"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-workspace-hack",
@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-core"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-workspace-hack",
  "rustc-hash 2.1.3",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-editor"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "axcenity-anim",
@@ -663,6 +663,7 @@ dependencies = [
  "axcenity-plugins",
  "axcenity-procedural",
  "axcenity-project",
+ "axcenity-release",
  "axcenity-render",
  "axcenity-save",
  "axcenity-scene",
@@ -696,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-gameplay"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-anim",
  "axcenity-assets",
@@ -714,7 +715,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-mcp"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-workspace-hack",
  "rmcp",
@@ -724,7 +725,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-mesh-edit"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-core",
@@ -738,7 +739,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-nav"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-character",
@@ -751,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-net"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-character",
@@ -771,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-physics"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-core",
@@ -784,7 +785,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-player"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "axcenity-anim",
@@ -798,6 +799,7 @@ dependencies = [
  "axcenity-net",
  "axcenity-physics",
  "axcenity-project",
+ "axcenity-release",
  "axcenity-render",
  "axcenity-save",
  "axcenity-scene",
@@ -817,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-plugins"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-core",
  "axcenity-script",
@@ -829,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-procedural"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-core",
@@ -840,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-project"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-anim",
  "axcenity-assets",
@@ -857,8 +859,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "axcenity-release"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-workspace-hack",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml",
+]
+
+[[package]]
 name = "axcenity-render"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "axcenity-render-types",
@@ -875,7 +889,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-render-types"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-workspace-hack",
  "glam 0.34.3",
@@ -885,7 +899,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-save"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-core",
  "axcenity-workspace-hack",
@@ -896,7 +910,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-scene"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-core",
@@ -911,7 +925,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-script"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-anim",
  "axcenity-assets",
@@ -934,13 +948,14 @@ dependencies = [
 
 [[package]]
 name = "axcenity-server"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "axcenity-assets",
  "axcenity-core",
  "axcenity-net",
  "axcenity-project",
+ "axcenity-release",
  "axcenity-save",
  "axcenity-script",
  "axcenity-sim",
@@ -952,7 +967,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-sim"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-anim",
  "axcenity-assets",
@@ -968,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-terrain"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-core",
  "axcenity-workspace-hack",
@@ -981,7 +996,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-testing"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-assets",
  "axcenity-character",
@@ -996,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-toolbox"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-workspace-hack",
  "log",
@@ -1011,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-ui"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-anim",
  "axcenity-core",
@@ -1025,7 +1040,7 @@ dependencies = [
 
 [[package]]
 name = "axcenity-workspace-hack"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "ahash",
  "arrayvec",
@@ -1086,6 +1101,8 @@ dependencies = [
  "syn 2.0.119",
  "syn 3.0.9",
  "thiserror 2.0.21",
+ "toml_datetime",
+ "toml_parser",
  "tracing",
  "tracing-core",
  "typenum",
@@ -1094,6 +1111,7 @@ dependencies = [
  "windows-core 0.62.2",
  "windows-sys 0.52.0",
  "windows-sys 0.61.2",
+ "winnow",
  "zeroize",
 ]
 
@@ -5414,6 +5432,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c187e0a369471c550af028cba56d4f4fa2a489ad28151ae95a4d340a2a8b782"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6074,10 +6101,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "toml_datetime"
-version = "1.1.2+spec-1.1.0"
+name = "toml"
+version = "1.2.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b86d767906c6c42421dcba507eb9d203e779497710a47782a224bb871653053"
+checksum = "d5755c51863cdac711f1956baf8eb9588e060755f7d3c4c979e70ea1e1f32cd7"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_parser",
+ "toml_writer",
+ "winnow",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "1.1.3+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "173f25c883cd2176a2d8212155638c0a60d484a9d84546d270866f40f56b6e49"
 dependencies = [
  "serde_core",
 ]
@@ -6102,6 +6144,12 @@ checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
  "winnow",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.2.0+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009dbb7700f11c55ef83aebbe4c0e9cf1f1ac0844bd8d6f00dc38f302026e13a"
 
 [[package]]
 name = "tracing"

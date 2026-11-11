@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Paul Janota and contributors"]
@@ -29,6 +29,7 @@ axcenity-physics = { path = "crates/physics" }
 axcenity-plugins = { path = "crates/plugins" }
 axcenity-procedural = { path = "crates/procedural" }
 axcenity-project = { path = "crates/project" }
+axcenity-release = { path = "crates/release" }
 axcenity-render = { path = "crates/render" }
 axcenity-render-types = { path = "crates/render-types" }
 axcenity-save = { path = "crates/save" }
@@ -150,6 +151,14 @@ tokio = { version = "1.53", default-features = false, features = ["rt", "sync", 
 rapier3d = "0.36"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Release versions and channels (`crates/release`): SemVer 2.0 parsing and
+# precedence, so `0.2.0-alpha.1 < 0.2.0-beta.1 < 0.2.0`. MIT OR Apache-2.0;
+# already in the tree through Cargo tooling crates.
+semver = "1"
+# Reads the hand-written release records in `releases/` (`crates/release`).
+# MIT OR Apache-2.0; the same toml_parser family is already in the tree.
+# `display` writes the record `axcenity-release prepare` starts.
+toml = { version = "1", default-features = false, features = ["display", "parse", "serde", "std"] }
 # Find in Scripts' regex option (MIT OR Apache-2.0); already in the tree through env_logger.
 regex = "1"
 # Reads zip archives (the Toolbox's ambientCG downloads). Deflate only: that is

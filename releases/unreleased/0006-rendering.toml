@@ -1,0 +1,7 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "feature"
+subsystem = "renderer"
+title = "Rendering: real-time GI with probes, water, weather, clouds and fog, TAA and motion blur, decals, GPU particles and painted forests"
+features = ["renderer.global-illumination", "renderer.water", "renderer.weather", "renderer.temporal", "renderer.decals", "renderer.foliage"]
+commits = ["e32375f9", "4f44c25b", "32f0f2d5", "74b65e7f", "4e4e111b", "fc6a12be", "29f7ec7a", "a5ab4034", "24cd566e", "4093f81e", "3382eb96"]
+evidence = "reconstructed"

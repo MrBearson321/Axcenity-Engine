@@ -1426,6 +1426,8 @@ declare extern type Workspace extends Instance with
 	Gravity: number
 	--- The most decals `workspace:SpawnDecal` keeps at once on each side: 200 by default. Past it, the oldest goes first.
 	MaxSpawnedDecals: number
+	--- On (the default), moving parts are drawn smoothly between physics steps, which run 60 times a second, so they don't move in steps on faster screens. What's drawn trails the simulation by under a step; scripts, touches and the network still see the stepped values. Off, parts are drawn where the last step left them.
+	PhysicsInterpolation: boolean
 	--- On, each device only has what's near it (world streaming): joined players' devices are sent only what's within their radius, and the rest stays off the GPU. Off by default, so a project plays exactly as before.
 	StreamingEnabled: boolean
 	--- Everything nearer than this many studs is always loaded: 64 by default.
@@ -2457,16 +2459,22 @@ end
 
 --- Lua code that runs on the server, from a `.server.lua` file.
 declare extern type Script extends Instance with
+	--- For a script inside an object: the project file its code is in, such as `objects/Door/Open.server.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.
+	SourceFile: string
 	[string]: any
 end
 
 --- Lua code that runs on the player's side (input, camera), from a `.client.lua` file.
 declare extern type LocalScript extends Instance with
+	--- For a script inside an object: the project file its code is in, such as `objects/Door/Open.client.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.
+	SourceFile: string
 	[string]: any
 end
 
 --- Lua code that scripts load with `require`, from a `.module.lua` file. It runs once per side and returns one value.
 declare extern type ModuleScript extends Instance with
+	--- For a script inside an object: the project file its code is in, such as `objects/Door/Open.module.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.
+	SourceFile: string
 	[string]: any
 end
 

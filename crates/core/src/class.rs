@@ -1020,15 +1020,19 @@ impl ClassName {
             | ClassName::Teams
             | ClassName::SoundService
             | ClassName::ForceField
-            | ClassName::Script
-            | ClassName::LocalScript
-            | ClassName::ModuleScript
             | ClassName::RemoteEvent
             | ClassName::RemoteFunction
             | ClassName::BindableEvent
             | ClassName::BindableFunction
             | ClassName::Folder
             | ClassName::AnimationTrack => Vec::new(),
+            // The project file holding its code, such as
+            // "objects/Door/Open.server.lua", for a script inside an object
+            // (G2, `docs/project/world.md`). Empty for the scripts made from
+            // `scripts/`, which world files never hold.
+            ClassName::Script | ClassName::LocalScript | ClassName::ModuleScript => {
+                vec![("SourceFile", Value::String(String::new()))]
+            }
             // How it streams (Phase 80): Default, Atomic or Persistent.
             ClassName::Model => vec![(
                 "ModelStreamingMode",
@@ -1099,6 +1103,9 @@ impl ClassName {
                 // The most decals `SpawnDecal` keeps at once: past it, the
                 // oldest goes first.
                 ("MaxSpawnedDecals", Value::Number(200.0)),
+                // On, moving parts are drawn between physics steps
+                // (roadmap G3, `physics::blend`); only drawing changes.
+                ("PhysicsInterpolation", Value::Bool(true)),
                 // World streaming (Phase 80). On, each device only has
                 // what's near it: the rest stays off it and off the GPU.
                 ("StreamingEnabled", Value::Bool(false)),

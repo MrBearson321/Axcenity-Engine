@@ -1230,6 +1230,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Workspace,
+        "PhysicsInterpolation",
+        "On (the default), moving parts are drawn smoothly between physics steps, which run 60 times a second, so they don't move in steps on faster screens. What's drawn trails the simulation by under a step; scripts, touches and the network still see the stepped values. Off, parts are drawn where the last step left them.",
+    ),
+    (
+        ClassName::Workspace,
         "StreamingEnabled",
         "On, each device only has what's near it (world streaming): joined players' devices are sent only what's within their radius, and the rest stays off the GPU. Off by default, so a project plays exactly as before.",
     ),
@@ -3066,6 +3071,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Players,
         "LeaderboardEnabled",
         "If false, the default leaderboard isn't drawn, for a game that makes its own. It shows each Player's `leaderstats` Folder of Value objects, top right, and Tab shows and hides it.",
+    ),
+    (
+        ClassName::Script,
+        "SourceFile",
+        "For a script inside an object: the project file its code is in, such as `objects/Door/Open.server.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.",
+    ),
+    (
+        ClassName::LocalScript,
+        "SourceFile",
+        "For a script inside an object: the project file its code is in, such as `objects/Door/Open.client.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.",
+    ),
+    (
+        ClassName::ModuleScript,
+        "SourceFile",
+        "For a script inside an object: the project file its code is in, such as `objects/Door/Open.module.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.",
     ),
     (
         ClassName::TextChatService,
