@@ -195,3 +195,19 @@ fn a_global_asset_shows_in_every_project_and_is_copied_in_when_used() {
         let _ = std::fs::remove_dir_all(folder);
     }
 }
+
+#[test]
+fn the_search_matches_every_word_in_the_path_or_kind() {
+    let door = AssetEntry {
+        kind: AssetKind::Audio,
+        path: "assets/sounds/Door Creak.ogg".to_owned(),
+        name: "Door Creak".to_owned(),
+    };
+    assert!(search_matches(&door, "door"));
+    assert!(search_matches(&door, "sound door"));
+    assert!(
+        search_matches(&door, "assets/sounds/door creak.ogg"),
+        "a revealed path"
+    );
+    assert!(!search_matches(&door, "texture door"));
+}

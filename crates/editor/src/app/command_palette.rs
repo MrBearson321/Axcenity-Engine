@@ -1,11 +1,10 @@
-//! The command palette's commands and Quick Open's entries (unified
-//! Phase 70). Every menu item and ribbon button is a [`Command`] here,
-//! listed by [`EditorApp::palette_commands`] and run by
-//! [`EditorApp::run_command`] the way its menu or button runs it. The list
-//! window is `command_palette.rs`.
+//! The command registry (unified Phase 70). Every menu item and ribbon
+//! button is a [`Command`] here, listed by [`EditorApp::palette_commands`]
+//! and run by [`EditorApp::run_command`] the way its menu or button runs
+//! it. Universal search lists them through `search.rs`; the window is
+//! `command_palette.rs`.
 
-use crate::command_palette::{Entry, Mode};
-use crate::find_in_scripts::FindAction;
+use crate::command_palette::Entry;
 use crate::ribbon_tabs::{ActiveTab, BuiltInTab};
 use crate::terrain_studio::TerrainTool;
 use crate::theme::ThemeChoice;
@@ -14,14 +13,16 @@ use super::files::ExportTarget;
 use super::settings;
 use super::solid::SolidAction;
 use super::*;
-use axcenity_project as project;
 
 /// Ctrl+Shift+P (Cmd+Shift+P on macOS) opens the command palette.
 pub(super) const PALETTE_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::P,
 );
-/// Ctrl+P opens Quick Open.
+/// Ctrl+K (Cmd+K on macOS) opens universal search.
+pub(super) const SEARCH_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K);
+/// Ctrl+P opens Quick Open: universal search too, by its older key.
 pub(super) const QUICK_OPEN_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::P);
 /// Ctrl+Shift+F opens Find in Scripts.
@@ -205,6 +206,8 @@ pub(super) enum Command {
     /// The command palette itself.
     Palette,
     QuickOpen,
+    /// Universal search (Ctrl+K).
+    Search,
     FindInScripts,
 }
 
@@ -569,6 +572,14 @@ impl EditorApp {
             &[],
             Some(DELETE_KEY_TEXT.to_owned()),
             when(deletable, "Select something to delete."),
+        );
+        add(
+            Command::Search,
+            "Search Everything…",
+            "Edit",
+            &["Search", "Find", "Go to"],
+            shortcut(&SEARCH_SHORTCUT),
+            Ok(()),
         );
         add(
             Command::Palette,
@@ -1091,8 +1102,8 @@ impl EditorApp {
             Command::PluginButton { plugin, button } if !playing => {
                 self.click_plugin_button(plugin, button);
             }
-            Command::Palette => self.palette.toggle(Mode::Commands),
-            Command::QuickOpen => self.open_quick_open(),
+            Command::Palette => self.palette.toggle_commands(),
+            Command::QuickOpen | Command::Search => self.palette.toggle(),
             Command::FindInScripts => self.find.show_and_focus(),
             Command::Insert(_)
             | Command::BakeProbes
@@ -1105,114 +1116,6 @@ impl EditorApp {
                 self.output.error("Press Stop to edit.");
             }
         }
-    }
-
-    /// The palette's keys, its window, Quick Open and Find in Scripts, run
-    /// before the other shortcuts so their keys reach them first.
-    pub(super) fn palette_frame(&mut self, ctx: &egui::Context) {
-        // Shift first: egui counts Ctrl+Shift+P as Ctrl+P too.
-        let (palette, find, quick) = ctx.input_mut(|input| {
-            let palette = input.consume_shortcut(&PALETTE_SHORTCUT);
-            let find = input.consume_shortcut(&FIND_SHORTCUT);
-            (palette, find, input.consume_shortcut(&QUICK_OPEN_SHORTCUT))
-        });
-        if palette {
-            self.palette.toggle(Mode::Commands);
-        }
-        if quick && self.project.is_some() {
-            self.open_quick_open();
-        }
-        if find && self.project.is_some() {
-            self.find.show_and_focus();
-            self.search_scripts();
-        }
-        match self.palette.open {
-            Some(Mode::Commands) => {
-                let commands = self.palette_commands(ctx);
-                let entries: Vec<Entry> = commands.iter().map(|c| c.entry.clone()).collect();
-                if let Some(index) = self.palette.ui(ctx, &entries) {
-                    let command = commands[index].command.clone();
-                    self.run_command(ctx, command);
-                }
-            }
-            Some(Mode::QuickOpen) => {
-                let entries: Vec<Entry> = self
-                    .quick_open
-                    .iter()
-                    .map(|(entry, _)| entry.clone())
-                    .collect();
-                if let Some(index) = self.palette.ui(ctx, &entries) {
-                    let target = self.quick_open[index].1.clone();
-                    self.open_target(ctx, target);
-                }
-            }
-            None => {}
-        }
-        let can_replace = !self.playing();
-        match self.find.ui(ctx, can_replace) {
-            Some(FindAction::Search) => self.search_scripts(),
-            Some(FindAction::GoTo(hit)) => self.go_to_hit(&hit),
-            Some(FindAction::ReplaceAll) => self.replace_all_in_scripts(),
-            None => {}
-        }
-    }
-
-    /// Opens Quick Open, listing what's in the project now.
-    pub(super) fn open_quick_open(&mut self) {
-        if self.project.is_none() {
-            return;
-        }
-        self.quick_open = self.quick_open_entries();
-        self.palette.toggle(Mode::QuickOpen);
-    }
-
-    /// Quick Open's rows: scripts, then assets, levels and Instances.
-    pub(super) fn quick_open_entries(&self) -> Vec<(Entry, OpenTarget)> {
-        let Some(project) = &self.project else {
-            return Vec::new();
-        };
-        let mut list = Vec::new();
-        for script in &project.scripts {
-            let mut entry = Entry::new(
-                format!("script {}", script.path),
-                project::script_name(&script.path),
-                &script.path,
-            );
-            entry.icon = theme::class_icon(project::script_class(&script.path));
-            list.push((entry, OpenTarget::Script(script.path.clone())));
-        }
-        for path in project::list_project_files(&project.folder) {
-            if !path.starts_with("assets/") || project::is_model_part(&path) {
-                continue;
-            }
-            let name = path.rsplit('/').next().unwrap_or(&path);
-            let mut entry = Entry::new(format!("asset {path}"), name, &path);
-            entry.icon = icons::FILE;
-            list.push((entry, OpenTarget::Asset(path.clone())));
-        }
-        let start = project.start_level.clone();
-        let mut entry = Entry::new(format!("level {start}"), &start, "Level (start)");
-        entry.icon = icons::MAP_TRIFOLD;
-        list.push((entry, OpenTarget::Level(None)));
-        for name in project::level_names(&project.folder) {
-            if name == start {
-                continue;
-            }
-            let mut entry = Entry::new(format!("level {name}"), &name, "Level");
-            entry.icon = icons::MAP_TRIFOLD;
-            list.push((entry, OpenTarget::Level(Some(name))));
-        }
-        let world = shown(&self.world, &self.play);
-        for id in world.descendants(world.root()) {
-            let Some(instance) = world.get(id) else {
-                continue;
-            };
-            let path = world.full_name(id).unwrap_or_default();
-            let mut entry = Entry::new(format!("instance {path}"), instance.name(), &path);
-            entry.icon = theme::class_icon(instance.class());
-            list.push((entry, OpenTarget::Instance(id)));
-        }
-        list
     }
 
     /// Opens or selects what a Quick Open row names: a script in its tab, a

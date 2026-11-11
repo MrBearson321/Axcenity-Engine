@@ -455,6 +455,10 @@ pub struct AssetBrowser {
     /// The project files nothing uses, as the app last worked out; `None`
     /// until it has (or after a change).
     unused: Option<HashSet<String>>,
+    /// Goes up each time the listed files change (a scan that found
+    /// something new, renamed or gone, or another project), so universal
+    /// search lists them again only then (`app/search.rs`).
+    generation: u64,
 }
 
 impl AssetBrowser {
@@ -463,6 +467,7 @@ impl AssetBrowser {
         self.folder = folder.map(Path::to_owned);
         self.files.clear();
         self.shared.clear();
+        self.generation += 1;
         self.thumbnails.open(folder);
         self.scanned_at = None;
         self.dialog = None;
@@ -530,13 +535,30 @@ impl AssetBrowser {
         self.files.iter().chain(&self.shared).cloned().collect()
     }
 
+    /// Scans the folders again if it's time (every couple of seconds, or
+    /// after [`refresh`](Self::refresh)), whether or not the panel shows.
+    pub fn poll(&mut self) {
+        self.rescan_if_due();
+    }
+
+    /// The project's files, then the global assets it hasn't got, as last
+    /// scanned (no built-in props).
+    pub fn listed(&self) -> impl Iterator<Item = &AssetEntry> {
+        self.files.iter().chain(&self.shared)
+    }
+
+    /// Changes whenever [`listed`](Self::listed) does.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// True if the library has the asset at `path`.
     pub fn is_global(&self, path: &str) -> bool {
         self.global_paths.contains(&path.to_lowercase())
     }
 
     /// True if the project has the asset at `path`.
-    fn is_local(&self, path: &str) -> bool {
+    pub fn is_local(&self, path: &str) -> bool {
         self.local_paths.contains(&path.to_lowercase())
     }
 
@@ -648,10 +670,13 @@ impl AssetBrowser {
             return;
         }
         self.scanned_at = Some(Instant::now());
-        self.files = match &self.folder {
+        let files = match &self.folder {
             Some(folder) => scan(folder),
             None => Vec::new(),
         };
+        let old_shared = std::mem::take(&mut self.shared);
+        let files_changed = files != self.files;
+        self.files = files;
         // Global assets show only with a project open, to use in it.
         let global = match (&self.folder, &self.library) {
             (Some(_), Some(library)) => scan(library),
@@ -669,6 +694,9 @@ impl AssetBrowser {
             .into_iter()
             .filter(|entry| !self.local_paths.contains(&entry.path.to_lowercase()))
             .collect();
+        if files_changed || old_shared != self.shared {
+            self.generation += 1;
+        }
         self.thumbnails.forget_missing();
         self.global_thumbnails.forget_missing();
     }
@@ -752,7 +780,7 @@ impl AssetBrowser {
             .into_iter()
             .filter(|entry| self.category.holds(entry.kind))
             .filter(|entry| self.category != Category::Global || self.is_global(&entry.path))
-            .filter(|entry| search.is_empty() || entry.path.to_lowercase().contains(&search))
+            .filter(|entry| search.is_empty() || search_matches(entry, &search))
             .filter(|entry| {
                 !self.unused_only
                     || self
@@ -1777,8 +1805,16 @@ pub fn prefab_file_stem(name: &str) -> String {
     }
 }
 
+/// Whether an asset matches the panel's search (already lower case): every
+/// word of it is in the asset's path or kind, so "sound door" finds
+/// `assets/sounds/door.ogg` and "texture" every texture.
+fn search_matches(entry: &AssetEntry, search: &str) -> bool {
+    let text = format!("{} {}", entry.kind.label(), entry.path).to_lowercase();
+    search.split_whitespace().all(|word| text.contains(word))
+}
+
 /// A category to filter by: quiet text, filled while it's picked.
-fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
+pub(crate) fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
     let palette = theme::palette(ui.ctx());
     let galley = ui.painter().layout_no_wrap(
         label.to_owned(),

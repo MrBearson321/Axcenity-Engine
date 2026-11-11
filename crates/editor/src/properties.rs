@@ -1392,6 +1392,12 @@ pub fn description(class: ClassName, name: &str) -> Option<&'static str> {
     }
 }
 
+/// Types `text` into the Properties filter, as universal search does to go
+/// straight to a property (`app/search.rs`). Every selection shares it.
+pub fn set_filter(ctx: &egui::Context, text: &str) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("properties filter"), text.to_owned()));
+}
+
 /// Whether a property `name` (or a section titled `name`) matches what's
 /// typed in the filter: letters in order, ignoring case and spaces, so
 /// "walk speed" finds WalkSpeed.
