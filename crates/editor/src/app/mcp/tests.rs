@@ -1243,3 +1243,49 @@ fn env_set_changes_the_look_in_one_step_and_makes_sky_objects_when_needed() {
     let error = call(host, "env_set", json!({"time": 30})).unwrap_err();
     assert_eq!(error.code, Code::BadValue);
 }
+
+#[test]
+fn game_run_plays_for_a_while_and_reports_errors_and_output() {
+    let mut opened = open("hello-part", "mcp-play");
+    let host = &mut opened.app;
+    ok(
+        host,
+        "script_write",
+        json!({"name": "Shout", "side": "server", "text": "print(\"hello from Shout\")\nworkspace.Block.Name = \"Changed\"\nerror(\"boom\")\n"}),
+    );
+    let before = objects(host);
+    let text = ok(host, "game_run", json!({"seconds": 0.5}));
+    assert!(
+        text.starts_with("played 0.5 s (30 frames; avg ") && text.contains("· 1 error ·"),
+        "{text}"
+    );
+    assert!(text.contains("\nerror ") && text.contains("boom"), "{text}");
+    assert!(text.contains("hello from Shout"), "{text}");
+    assert!(!text.contains("Playing \""), "{text}");
+    // What the game did is gone after.
+    assert!(!host.app.playing());
+    assert_eq!(objects(host), before);
+    assert!(call(host, "object_get", json!({"id": "Workspace/Block"})).is_ok());
+
+    let error = call(host, "game_run", json!({"seconds": 600})).unwrap_err();
+    assert_eq!(error.code, Code::BadValue);
+}
+
+#[test]
+fn game_run_runs_the_game_tests() {
+    let mut opened = open("hello-character", "mcp-game-tests");
+    let host = &mut opened.app;
+    let text = ok(host, "game_run", json!({"mode": "tests"}));
+    assert!(text.ends_with(" passed, 0 failed"), "{text}");
+    let error = call(
+        host,
+        "game_run",
+        json!({"mode": "tests", "file": "tests/nope.spec.lua"}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, Code::NotFound);
+    assert!(
+        error.fix.unwrap().contains("tests/walk.spec.lua"),
+        "lists the spec files"
+    );
+}

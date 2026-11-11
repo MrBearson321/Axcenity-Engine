@@ -64,13 +64,26 @@ pub struct Setup {
 
 /// The tool as `rmcp` sends it, with annotations from its class: clients
 /// skip confirmation for read-only tools and always ask for destructive ones.
+///
+/// Hints that only restate the spec's defaults are left out, since every
+/// listed byte costs tokens: `readOnlyHint` and `idempotentHint` default to
+/// false, and `destructiveHint` and `idempotentHint` mean nothing on a
+/// read-only tool. `destructiveHint` is always said for one that changes
+/// things (its default, true, would be wrong for most), and
+/// `openWorldHint` (default true) is always false: the tools touch only the
+/// project.
 pub fn rmcp_tool(spec: &ToolSpec) -> Tool {
     // The title is the tool's own; not repeated in the annotations.
-    let annotations = ToolAnnotations::new()
-        .read_only(spec.class == Class::Read)
-        .destructive(spec.class == Class::Destructive)
-        .idempotent(spec.idempotent)
-        .open_world(false);
+    let mut annotations = ToolAnnotations::new();
+    if spec.class == Class::Read {
+        annotations = annotations.read_only(true);
+    } else {
+        annotations = annotations.destructive(spec.class == Class::Destructive);
+        if spec.idempotent {
+            annotations = annotations.idempotent(true);
+        }
+    }
+    let annotations = annotations.open_world(false);
     Tool::new(spec.name, spec.summary, Arc::new(spec.input_schema()))
         .with_title(spec.title)
         .with_annotations(annotations)
