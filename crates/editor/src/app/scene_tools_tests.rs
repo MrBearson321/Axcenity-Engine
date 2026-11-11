@@ -13,7 +13,7 @@ fn frame(app: &mut EditorApp, ctx: &egui::Context, events: Vec<egui::Event>) -> 
         events,
         ..Default::default()
     };
-    ctx.run(input, |ctx| app.frame(ctx, None))
+    crate::theme::run(ctx, input, |ui| app.frame(ui, None))
 }
 
 fn settle(app: &mut EditorApp, ctx: &egui::Context) {

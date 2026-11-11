@@ -940,7 +940,7 @@ impl EditorApp {
         let spline_editing = self.spline_editing();
         let mut output = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show_inside(ui, |ui| match render_state {
+            .show(ui, |ui| match render_state {
                 Some(render_state) => {
                     self.viewport_rect = Some(ui.available_rect_before_wrap());
                     self.viewport.show(
@@ -1088,13 +1088,13 @@ impl EditorApp {
                 scripts::ScriptView::Blocks
             };
             let playing = self.playing();
-            let switch = egui::TopBottomPanel::top(egui::Id::new(("script mode", id)))
+            let switch = egui::Panel::top(egui::Id::new(("script mode", id)))
                 .frame(
                     egui::Frame::new()
                         .fill(palette.panel)
                         .inner_margin(egui::Margin::symmetric(10, 5)),
                 )
-                .show_inside(ui, |ui| scripts::mode_bar(ui, view, !playing))
+                .show(ui, |ui| scripts::mode_bar(ui, view, !playing))
                 .inner;
             if let Some(view) = switch {
                 self.switch_script_view(&path, view);
@@ -1106,16 +1106,16 @@ impl EditorApp {
         // the steps.
         if let Some(pause) = self.tabs.paused.clone().filter(|pause| pause.path == path) {
             let watches = &mut self.watches;
-            let resume = egui::TopBottomPanel::bottom(egui::Id::new(("paused", id)))
+            let resume = egui::Panel::bottom(egui::Id::new(("paused", id)))
                 .resizable(true)
-                .default_height(180.0)
-                .min_height(80.0)
+                .default_size(180.0)
+                .min_size(80.0)
                 .frame(
                     egui::Frame::new()
                         .fill(palette.panel)
                         .inner_margin(egui::Margin::symmetric(10, 6)),
                 )
-                .show_inside(ui, |ui| paused_panel(ui, &pause, watches))
+                .show(ui, |ui| paused_panel(ui, &pause, watches))
                 .inner;
             if self.watches.is_stale() {
                 self.evaluate_watches();
@@ -1140,10 +1140,11 @@ impl EditorApp {
                 self.block_tab_pointer = Some(path.clone());
             }
             // An edit is over once nothing is held or typed (`BlockUndo`).
-            let busy = ctx.wants_keyboard_input() || ctx.input(|input| input.pointer.any_down());
+            let busy =
+                ctx.egui_wants_keyboard_input() || ctx.input(|input| input.pointer.any_down());
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     if let Some(document) = self.project.as_mut().and_then(|project| {
                         project
                             .block_scripts
@@ -1178,7 +1179,7 @@ impl EditorApp {
         let previous_source = stylesheet
             .then(|| self.tabs.get(&path).map(|tab| tab.text.clone()))
             .flatten();
-        egui::CentralPanel::default().show_inside(ui, |ui| self.tabs.show(ui, &path));
+        egui::CentralPanel::default().show(ui, |ui| self.tabs.show(ui, &path));
         if let Some(previous_source) = previous_source {
             let current_source = self
                 .tabs

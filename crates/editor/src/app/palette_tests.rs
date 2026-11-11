@@ -31,21 +31,22 @@ fn chrome_frame(
         time: Some(*clock),
         ..Default::default()
     };
-    ctx.run(input, |ctx| {
+    crate::theme::run(ctx, input, |ui| {
+        let ctx = &ui.ctx().clone();
         // Nothing fills the Scene's place here: count it as shown, so the
         // ribbon's Scene tools can be pressed as in a whole frame.
         app.scene_drawn_pass = Some(theme::frame_number(ctx));
-        egui::TopBottomPanel::top("menu bar").show(ctx, |ui| {
+        egui::Panel::top("menu bar").show(ui, |ui| {
             app.menu_bar(ui);
         });
-        egui::TopBottomPanel::top("ribbon").show(ctx, |ui| app.toolbar(ui));
-        egui::CentralPanel::default().show(ctx, |_| {});
+        egui::Panel::top("ribbon").show(ui, |ui| app.toolbar(ui));
+        egui::CentralPanel::default().show(ui, |_| {});
     })
 }
 
 /// `ctx` after one frame, so it has fonts (shortcut text needs them).
 fn warm(ctx: egui::Context) -> egui::Context {
-    let _ = ctx.run(egui::RawInput::default(), |_| {});
+    let _ = crate::theme::run(&ctx, egui::RawInput::default(), |_ui| {});
     ctx
 }
 
@@ -263,7 +264,10 @@ fn palette_frame(app: &mut EditorApp, ctx: &egui::Context, events: Vec<egui::Eve
         events,
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| app.palette_frame(ctx));
+    let _ = crate::theme::run(ctx, input, |ui| {
+        let ctx = &ui.ctx().clone();
+        app.palette_frame(ctx)
+    });
 }
 
 fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
@@ -407,8 +411,9 @@ fn the_palette_and_find_windows_draw_on_screen() {
     app.find.show_and_focus();
     app.find.query = "Pad".to_owned();
     app.search_scripts();
-    let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |_| {});
+    let mut draw = |ui: &mut egui::Ui| {
+        let ctx = &ui.ctx().clone();
+        egui::CentralPanel::default().show(ui, |_| {});
         app.palette_frame(ctx);
     };
     let ctx = theme::test_context();
@@ -419,7 +424,7 @@ fn the_palette_and_find_windows_draw_on_screen() {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
             ..Default::default()
         };
-        output = Some(ctx.run(input, &mut draw));
+        output = Some(crate::theme::run(&ctx, input, |ui| draw(ui)));
     }
     if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         let path = std::path::PathBuf::from(snapshots).join("command-palette.png");
@@ -493,7 +498,7 @@ fn the_ribbon_keeps_one_height_across_tabs() {
         }
         let ribbon = egui::containers::panel::PanelState::load(&ctx, egui::Id::new("ribbon"))
             .expect("the ribbon was drawn")
-            .rect;
+            .outer_rect;
         heights.push((tab, ribbon.height()));
     }
     let first = heights[0].1;

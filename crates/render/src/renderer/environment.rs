@@ -142,8 +142,8 @@ impl Environment {
         let shader = shader_module(device, "environment bake", super::gpu::ENVIRONMENT_SHADER);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("environment bake"),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
         });
         let pipeline = |entry| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -164,7 +164,7 @@ impl Environment {
                     compilation_options: Default::default(),
                     targets: &[Some(ENVIRONMENT_FORMAT.into())],
                 }),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             })
         };
@@ -173,7 +173,7 @@ impl Environment {
             address_mode_u: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let blank = |label, layers, dimension| {
@@ -444,6 +444,7 @@ fn draw_faces(
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("environment face"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                depth_slice: None,
                 view: &view,
                 resolve_target: None,
                 ops: wgpu::Operations {

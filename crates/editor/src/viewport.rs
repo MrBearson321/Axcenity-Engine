@@ -1003,7 +1003,7 @@ impl Viewport {
         let wheel_taken = match pointer_pixels.filter(|_| tool.is_none() && response.hovered()) {
             Some(at) => {
                 let (smooth, raw) =
-                    ui.input(|input| (input.smooth_scroll_delta, input.raw_scroll_delta));
+                    ui.input(|input| (input.smooth_scroll_delta, crate::wheel::raw(input)));
                 if smooth == egui::Vec2::ZERO && raw == egui::Vec2::ZERO {
                     false
                 } else {
@@ -1546,7 +1546,7 @@ impl Viewport {
                 // Swung round smoothly, as in Fusion; at once when motion
                 // is reduced.
                 let to = view_cube::looking_from(&self.camera, side);
-                let seconds = if ui.ctx().style().animation_time > 0.0 {
+                let seconds = if ui.ctx().global_style().animation_time > 0.0 {
                     view_cube::SWING_SECONDS
                 } else {
                     0.0

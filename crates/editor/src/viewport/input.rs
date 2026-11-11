@@ -620,7 +620,10 @@ impl Viewport {
                     // The wheel without egui's smoothing, so each notch is
                     // exactly one speed step. egui turns Shift+wheel into
                     // sideways scrolling (and macOS already does), so add both.
-                    input.raw_scroll_delta.x + input.raw_scroll_delta.y,
+                    {
+                        let raw = crate::wheel::raw(input);
+                        raw.x + raw.y
+                    },
                     input.modifiers.alt,
                     input.modifiers.shift,
                     input.stable_dt.min(MAX_FRAME_SECONDS),
@@ -682,7 +685,7 @@ impl Viewport {
 
         // Keys fly the camera while the mouse is over the viewport, unless
         // some text box is taking the typing.
-        let flying = (response.contains_pointer() || looking) && !ctx.wants_keyboard_input();
+        let flying = (response.contains_pointer() || looking) && !ctx.egui_wants_keyboard_input();
         let keys = &self.keys;
         let moving = keys.forward || keys.back || keys.left || keys.right || keys.up || keys.down;
         if flying && moving {

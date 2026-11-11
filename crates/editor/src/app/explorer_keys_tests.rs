@@ -13,7 +13,7 @@ fn frame(app: &mut EditorApp, ctx: &egui::Context, events: Vec<egui::Event>) {
         events,
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| app.frame(ctx, None));
+    let _ = crate::theme::run(ctx, input, |ui| app.frame(ui, None));
 }
 
 fn press(app: &mut EditorApp, ctx: &egui::Context, key: egui::Key) {

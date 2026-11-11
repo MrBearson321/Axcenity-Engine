@@ -278,8 +278,8 @@ mod tests {
         }
     }
 
-    fn draw(ctx: &egui::Context, report: &DragReport) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    fn draw(ui: &mut egui::Ui, report: &DragReport) {
+        egui::CentralPanel::default().show(ui, |ui| {
             let rect = ui.max_rect();
             paint(ui.painter(), &Screen::new(camera(), rect), rect, report);
         });
@@ -289,7 +289,7 @@ mod tests {
     fn numbers_and_snap_points_show_only_once_the_part_has_moved() {
         let ctx = crate::theme::test_context();
         let count = |report: &DragReport| {
-            let output = ctx.run(Default::default(), |ctx| draw(ctx, report));
+            let output = crate::theme::run(&ctx, Default::default(), |ui| draw(ui, report));
             output.shapes.len()
         };
         count(&report());
@@ -309,12 +309,9 @@ mod tests {
         if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
             let path = std::path::PathBuf::from(snapshots).join("move-overlay.png");
             let report = report();
-            crate::snapshot::snapshot(
-                &path,
-                egui::vec2(640.0, 400.0),
-                vec![Vec::new(); 2],
-                |ctx| draw(ctx, &report),
-            );
+            crate::snapshot::snapshot(&path, egui::vec2(640.0, 400.0), vec![Vec::new(); 2], |ui| {
+                draw(ui, &report)
+            });
         }
     }
 
@@ -322,7 +319,7 @@ mod tests {
     fn a_resize_and_a_turn_draw_only_once_they_have_changed_something() {
         let ctx = crate::theme::test_context();
         let count = |report: &DragReport| {
-            let output = ctx.run(Default::default(), |ctx| draw(ctx, report));
+            let output = crate::theme::run(&ctx, Default::default(), |ui| draw(ui, report));
             output.shapes.len()
         };
         let resize = |pulled| DragReport {
@@ -358,7 +355,7 @@ mod tests {
                     &folder.join(format!("{name}-overlay.png")),
                     egui::vec2(640.0, 400.0),
                     vec![Vec::new(); 2],
-                    |ctx| draw(ctx, &report),
+                    |ui| draw(ui, &report),
                 );
             }
         }

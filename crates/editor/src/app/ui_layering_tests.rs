@@ -109,6 +109,7 @@ fn the_wheel_scrolls_a_scrolling_frame_on_the_artboard_without_changing_its_canv
     let wheel = egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
         delta: egui::vec2(0.0, -60.0),
+        phase: egui::TouchPhase::Move,
         modifiers: egui::Modifiers::NONE,
     };
     let board_before = app.ui_designer.board().unwrap().0;
@@ -169,7 +170,7 @@ fn run_designer_holding(
 ) {
     for events in frames {
         *clock += 0.05;
-        let events = events
+        let events: Vec<egui::Event> = events
             .into_iter()
             .map(|event| match event {
                 egui::Event::PointerButton {
@@ -188,15 +189,16 @@ fn run_designer_holding(
             .collect();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-            events,
-            modifiers,
+            events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+                .chain(events)
+                .collect(),
             time: Some(*clock),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+        let _ = crate::theme::run(ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
         });
-        if !ctx.is_using_pointer() && !ctx.wants_keyboard_input() {
+        if !ctx.egui_is_using_pointer() && !ctx.egui_wants_keyboard_input() {
             frame_ends(app);
         }
     }
@@ -312,9 +314,9 @@ fn a_frame_turned_with_the_rotate_knob_draws_turned_and_clicks_hit_its_turned_sh
             &folder.join("ui-designer-rotated.png"),
             size,
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 egui::CentralPanel::default()
-                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                    .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
             },
         );
         app.undo();
@@ -441,9 +443,9 @@ fn a_top_bar_in_a_device_safe_insets_gui_sits_below_the_notch_on_a_phone_preview
             &folder.join("ui-designer-safe-area.png"),
             size,
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 egui::CentralPanel::default()
-                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                    .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
             },
         );
     }

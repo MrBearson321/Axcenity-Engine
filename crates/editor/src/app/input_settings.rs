@@ -393,8 +393,9 @@ mod tests {
         let mut app = EditorApp::new(Some(&folder));
         app.input_settings.open = true;
         let ctx = theme::test_context();
-        let mut draw = |ctx: &egui::Context| {
-            egui::CentralPanel::default().show(ctx, |_| {});
+        let mut draw = |ui: &mut egui::Ui| {
+            let ctx = &ui.ctx().clone();
+            egui::CentralPanel::default().show(ui, |_| {});
             app.input_window(ctx);
         };
         match std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
@@ -405,7 +406,7 @@ mod tests {
                 &mut draw,
             ),
             None => {
-                let _ = ctx.run(Default::default(), &mut draw);
+                let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
             }
         }
         assert!(app.input_settings.open);

@@ -45,8 +45,8 @@ fn draw_properties(app: &mut EditorApp, ctx: &egui::Context) -> egui::FullOutput
         )),
         ..Default::default()
     };
-    ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| app.properties_pane(ui));
+    crate::theme::run(ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.properties_pane(ui));
     })
 }
 
@@ -182,20 +182,20 @@ fn snapshot_of_several_selected() {
     let folder = std::path::PathBuf::from(folder);
     let (mut app, parts) = three_parts();
     let size = egui::vec2(300.0, 820.0);
-    let draw = |app: &mut EditorApp, ctx: &egui::Context| {
+    let draw = |app: &mut EditorApp, ui: &mut egui::Ui| {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
-                    .fill(theme::palette(ctx).panel)
+                    .fill(theme::palette(ui.ctx()).panel)
                     .inner_margin(8),
             )
-            .show(ctx, |ui| app.properties_pane(ui));
+            .show(ui, |ui| app.properties_pane(ui));
     };
     crate::snapshot::snapshot(
         &folder.join("properties-three-parts.png"),
         size,
         vec![Vec::new(); 3],
-        |ctx| draw(&mut app, ctx),
+        |ui| draw(&mut app, ui),
     );
     // One alone, to compare.
     app.selection = vec![parts[2]];
@@ -203,7 +203,7 @@ fn snapshot_of_several_selected() {
         &folder.join("properties-one-part.png"),
         size,
         vec![Vec::new(); 3],
-        |ctx| draw(&mut app, ctx),
+        |ui| draw(&mut app, ui),
     );
     let model = app.world.create(ClassName::Model).unwrap();
     app.world
@@ -215,6 +215,6 @@ fn snapshot_of_several_selected() {
         &folder.join("properties-part-and-model.png"),
         size,
         vec![Vec::new(); 3],
-        |ctx| draw(&mut app, ctx),
+        |ui| draw(&mut app, ui),
     );
 }

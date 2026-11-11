@@ -213,8 +213,8 @@ fn the_tab_and_the_preview_draw() {
         &folder_out.join("sequencer-tab.png"),
         egui::vec2(900.0, 700.0),
         vec![Vec::new(); 3],
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| app.sequencer_pane(ui));
+        |ui| {
+            egui::CentralPanel::default().show(ui, |ui| app.sequencer_pane(ui));
         },
     );
     for (time, name) in [
@@ -231,8 +231,8 @@ fn the_tab_and_the_preview_draw() {
             &folder_out.join(name),
             egui::vec2(800.0, 450.0),
             vec![Vec::new(); 3],
-            |ctx, render| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui, render| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let _ = app.scene_pane(ui, Some(render));
                 });
             },
@@ -259,8 +259,8 @@ fn the_sequencer_says_to_turn_the_preview_off_to_move_things() {
                 )),
                 ..Default::default()
             };
-            output = Some(ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| app.sequencer_pane(ui));
+            output = Some(crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.sequencer_pane(ui));
             }));
         }
         drawn_texts(&output.unwrap())

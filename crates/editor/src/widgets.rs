@@ -302,7 +302,7 @@ pub fn dot_grid(painter: &egui::Painter, rect: Rect, color: Color32) {
 pub fn spotlight(ui: &egui::Ui, rect: Rect, id: egui::Id, strength: f32) {
     const RADIUS: f32 = 170.0;
     const SEGMENTS: u32 = 40;
-    if strength <= 0.0 || ui.ctx().style().animation_time <= 0.0 {
+    if strength <= 0.0 || ui.ctx().global_style().animation_time <= 0.0 {
         return;
     }
     let id = id.with("spotlight");
@@ -735,7 +735,7 @@ pub fn tool_window(icon: &str, title: &str) -> ToolWindow {
 }
 
 impl ToolWindow {
-    pub fn id(mut self, id: impl std::hash::Hash) -> Self {
+    pub fn id(mut self, id: impl std::hash::Hash + std::fmt::Debug) -> Self {
         self.id = egui::Id::new(id);
         self
     }
@@ -785,11 +785,11 @@ impl ToolWindow {
         // Escape before the frame starts), so that's from last frame.
         let typing = self.id.with("typing");
         let escape_is_taken = ctx.data(|data| data.get_temp(typing).unwrap_or(false))
-            || ctx.wants_keyboard_input()
-            || ctx.is_popup_open()
+            || ctx.egui_wants_keyboard_input()
+            || ctx.any_popup_open()
             || egui::Popup::is_any_open(ctx)
             || ctx.memory(|memory| memory.top_modal_layer().is_some());
-        let screen = ctx.screen_rect().shrink(theme::space::XL);
+        let screen = ctx.content_rect().shrink(theme::space::XL);
         let clamp = |size: egui::Vec2| size.min(screen.size()).max(vec2(160.0, 0.0));
         let mut window = egui::Window::new(self.title)
             .id(self.id)
@@ -826,7 +826,7 @@ impl ToolWindow {
             stack.top(pass) == Some(layer)
         });
         let shown = shown?;
-        let typing_now = ctx.wants_keyboard_input();
+        let typing_now = ctx.egui_wants_keyboard_input();
         ctx.data_mut(|data| data.insert_temp(typing, typing_now));
         if on_top
             && !escape_is_taken
@@ -856,8 +856,8 @@ mod tests {
             events,
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| draw(ui));
+        let _ = crate::theme::run(ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| draw(ui));
         });
     }
 
@@ -940,9 +940,10 @@ mod tests {
     #[test]
     fn the_logo_entrances_the_dots_and_the_spotlight_draw() {
         let pointer = egui::pos2(340.0, 200.0);
-        let mut draw = |ctx: &egui::Context| {
+        let mut draw = |ui: &mut egui::Ui| {
+            let ctx = &ui.ctx().clone();
             let brand = crate::start::Brand::load(ctx);
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let palette = theme::palette(ui.ctx());
                 let (top, ink) = (ui.max_rect().top() + 20.0, palette.text_strong);
                 dot_grid(ui.painter(), ui.max_rect(), ink.gamma_multiply(0.04));
@@ -983,7 +984,7 @@ mod tests {
             ),
             None => {
                 let ctx = theme::test_context();
-                let _ = ctx.run(Default::default(), &mut draw);
+                let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
             }
         }
     }
@@ -1004,8 +1005,8 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = crate::theme::run(ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let start = ui.cursor().min;
                     out = (segmented(ui, value, options), start);
                 });

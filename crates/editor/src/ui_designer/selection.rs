@@ -321,7 +321,7 @@ impl UiDesigner {
         gui: InstanceId,
         actions: &mut Vec<DesignerAction>,
     ) {
-        if !scene.editing || self.text_editing.is_some() || ctx.wants_keyboard_input() {
+        if !scene.editing || self.text_editing.is_some() || ctx.egui_wants_keyboard_input() {
             return;
         }
         let chosen = self.chosen(scene, gui);

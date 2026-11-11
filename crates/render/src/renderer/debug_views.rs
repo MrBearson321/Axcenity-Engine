@@ -167,8 +167,8 @@ impl DebugViews {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("debug view"),
-            bind_group_layouts: &[frame, material, skin, &layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(frame), Some(material), Some(skin), Some(&layout)],
+            immediate_size: 0,
         });
         let shader = shader_module(device, "debug view", DEBUG_SHADER);
         let pipeline = |overdraw: bool, double_sided: bool| {
@@ -184,11 +184,11 @@ impl DebugViews {
                     entry_point: Some("vs_debug"),
                     compilation_options: Default::default(),
                     // Only the instances: the corners are read by hand.
-                    buffers: &[wgpu::VertexBufferLayout {
+                    buffers: &[Some(wgpu::VertexBufferLayout {
                         array_stride: size_of::<InstanceRaw>() as u64,
                         step_mode: wgpu::VertexStepMode::Instance,
                         attributes: &INSTANCE_ATTRIBUTES,
-                    }],
+                    })],
                 },
                 primitive: wgpu::PrimitiveState {
                     front_face: wgpu::FrontFace::Ccw,
@@ -197,12 +197,12 @@ impl DebugViews {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
-                    depth_write_enabled: !overdraw,
-                    depth_compare: if overdraw {
+                    depth_write_enabled: Some(!overdraw),
+                    depth_compare: Some(if overdraw {
                         wgpu::CompareFunction::Always
                     } else {
                         wgpu::CompareFunction::Less
-                    },
+                    }),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
@@ -228,7 +228,7 @@ impl DebugViews {
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             })
         };
@@ -359,6 +359,7 @@ impl DebugViews {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("debug view"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                depth_slice: None,
                 view: target,
                 resolve_target: None,
                 ops: wgpu::Operations {

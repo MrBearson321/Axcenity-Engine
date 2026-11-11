@@ -103,15 +103,16 @@ fn frame(
             egui::Pos2::ZERO,
             egui::vec2(640.0, 480.0),
         )),
-        events,
-        modifiers,
+        events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+            .chain(events)
+            .collect(),
         ..Default::default()
     };
     let mut out = None;
-    let _ = ctx.run(input, |ctx| {
+    let _ = crate::theme::run(ctx, input, |ui| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let size = ui.available_size();
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
                 let screen = Screen::new(camera, rect);

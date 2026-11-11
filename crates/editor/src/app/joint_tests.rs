@@ -130,17 +130,17 @@ fn the_constraints_overlay_draws_joints_with_their_axes_and_limits() {
     let size = egui::vec2(640.0, 360.0);
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
     let screen = Screen::new(camera, rect);
-    let draw = |ctx: &egui::Context, world: &World, overlay: bool, selection: &[InstanceId]| {
+    let draw = |ui: &mut egui::Ui, world: &World, overlay: bool, selection: &[InstanceId]| {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(egui::Color32::from_gray(40)))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 crate::constraints::paint(ui.painter(), &screen, world, selection, overlay);
             });
     };
     let count = |world: &World, overlay: bool, selection: &[InstanceId]| {
         let ctx = theme::test_context();
-        let output = ctx.run(egui::RawInput::default(), |ctx| {
-            draw(ctx, world, overlay, selection)
+        let output = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+            draw(ui, world, overlay, selection)
         });
         output.shapes.len()
     };
@@ -158,8 +158,8 @@ fn the_constraints_overlay_draws_joints_with_their_axes_and_limits() {
     if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         let path = PathBuf::from(snapshots).join("constraints-overlay-joints.png");
         let world = &app.world;
-        crate::snapshot::snapshot(&path, size, vec![Vec::new(); 2], |ctx| {
-            draw(ctx, world, true, &[]);
+        crate::snapshot::snapshot(&path, size, vec![Vec::new(); 2], |ui| {
+            draw(ui, world, true, &[]);
         });
     }
 }

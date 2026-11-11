@@ -41,12 +41,8 @@ const BATCH_FRAMES: usize = 60;
 /// were decoded from their source files and the tools measured and drew
 /// the uncooked path.
 pub(crate) fn bench_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        ..Default::default()
-    }))
-    .ok()?;
+    let instance = axcenity_render::adapters::instance();
+    let adapter = pollster::block_on(axcenity_render::adapters::adapter(&instance, None)).ok()?;
     let info = adapter.get_info();
     println!(
         "adapter: {} ({:?}, {})",
@@ -100,7 +96,7 @@ fn run(
         steps.time("ScenePipeline::draw", || renderer.render(&list).unwrap());
         // Waiting isn't timed: each frame starts with the GPU idle, so
         // frames don't queue up behind each other.
-        device.poll(wgpu::PollType::Wait).unwrap();
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         Measured {
             steps: steps.0,
             stats: renderer.stats(),
@@ -893,7 +889,7 @@ fn shoot_project() {
         for _ in 0..24 {
             let list = build(&mut cache);
             renderer.render(&list).unwrap();
-            device.poll(wgpu::PollType::Wait).unwrap();
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         }
         println!(
             "{}: first 24 frames {:.2} s",
@@ -908,7 +904,7 @@ fn shoot_project() {
             let start = Instant::now();
             renderer.render(&list).unwrap();
             drawn.push(start.elapsed());
-            device.poll(wgpu::PollType::Wait).unwrap();
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             gpu.extend(renderer.stats().gpu_time);
         }
         let median = |times: &mut Vec<Duration>| {
@@ -952,7 +948,7 @@ fn shoot_project() {
             }));
             let list = build(&mut cache);
             renderer.render(&list).unwrap();
-            device.poll(wgpu::PollType::Wait).unwrap();
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         }
         let pixels = renderer.read_pixels();
         let name = out.join(format!("{}.png", parts[0]));

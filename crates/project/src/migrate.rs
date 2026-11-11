@@ -24,6 +24,31 @@ pub(crate) struct Upgrade {
     pub from: u32,
     /// The copy of the files from `from`, taken before any step ran.
     pub backup: PathBuf,
+    /// Whether this upgrade made that copy. An older copy for the same
+    /// format is kept as it was, so it may not match what was upgraded.
+    pub fresh: bool,
+}
+
+/// One step of an upgrade, for telling people what it will change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UpgradeStep {
+    /// The format this step upgrades to.
+    pub to: u32,
+    /// What it changes, in a line.
+    pub summary: &'static str,
+}
+
+/// The steps from format `from` to [`FORMAT_VERSION`], or `None` when this
+/// engine can't upgrade from `from`.
+pub fn upgrade_steps(from: u32) -> Option<Vec<UpgradeStep>> {
+    (from..FORMAT_VERSION)
+        .map(|version| {
+            step(version).map(|(summary, _)| UpgradeStep {
+                to: version + 1,
+                summary,
+            })
+        })
+        .collect()
 }
 
 /// Copies `folder` as format `from` and rewrites it up to [`FORMAT_VERSION`].
@@ -51,28 +76,47 @@ pub(crate) fn upgrade(folder: &Path, from: u32) -> Result<Upgrade, LoadError> {
         version += 1;
     }
 
+    let fresh = !previous_dir(folder, from).exists();
     let backup = keep_previous(folder, from)?;
     let mut version = from;
     while version < FORMAT_VERSION {
         if version != from {
             keep_previous(folder, version)?;
         }
-        let migrate = step(version).expect("the version was checked above");
+        let (_, migrate) = step(version).expect("the version was checked above");
         migrate(folder).map_err(|message| upgrade_error(folder, from, message))?;
         version += 1;
     }
-    Ok(Upgrade { from, backup })
+    Ok(Upgrade {
+        from,
+        backup,
+        fresh,
+    })
 }
 
 /// One format step. A later phase adds an arm here.
 type Migration = fn(&Path) -> Result<(), String>;
 
-/// The migration from `from` to `from + 1`, if this engine knows it.
-fn step(from: u32) -> Option<Migration> {
+/// The migration from `from` to `from + 1` and what it changes, if this
+/// engine knows it.
+fn step(from: u32) -> Option<(&'static str, Migration)> {
     match from {
-        1 => Some(migrate_v1_to_v2),
-        2 => Some(migrate_v2_to_v3),
-        3 => Some(migrate_v3_to_v4),
+        1 => Some((
+            "The manifest is marked as format 2; nothing else changes.",
+            migrate_v1_to_v2,
+        )),
+        2 => Some((
+            "Animation clips move to the one clip format, and Animators get state machines.",
+            migrate_v2_to_v3,
+        )),
+        3 => Some((
+            "Parts get physical properties; older Metal parts keep the physics they had.",
+            migrate_v3_to_v4,
+        )),
+        4 => Some((
+            "The manifest records the Axcenity version that saved the project.",
+            migrate_v4_to_v5,
+        )),
         _ => None,
     }
 }
@@ -96,7 +140,24 @@ fn migrate_v3_to_v4(folder: &Path) -> Result<(), String> {
     write_manifest_version(folder, 4)
 }
 
+/// The engine that saved the project (release system Phase 7). Who
+/// created it isn't known, so `created_with` stays out.
+fn migrate_v4_to_v5(folder: &Path) -> Result<(), String> {
+    let engine =
+        serde_json::json!({ "saved_with": axcenity_release::Version::current().to_string() });
+    write_manifest(folder, 5, Some(("engine", engine)))
+}
+
 fn write_manifest_version(folder: &Path, version: u32) -> Result<(), String> {
+    write_manifest(folder, version, None)
+}
+
+/// Sets the manifest's `format_version`, and `field` too when given.
+fn write_manifest(
+    folder: &Path,
+    version: u32,
+    field: Option<(&str, serde_json::Value)>,
+) -> Result<(), String> {
     let path = folder.join(MANIFEST_FILE);
     let text =
         fs::read_to_string(&path).map_err(|err| format!("could not read the manifest: {err}"))?;
@@ -109,6 +170,9 @@ fn write_manifest_version(folder: &Path, version: u32) -> Result<(), String> {
         "format_version".to_owned(),
         serde_json::Value::from(version),
     );
+    if let Some((key, value)) = field {
+        object.insert(key.to_owned(), value);
+    }
     let serialized = serde_json::to_string_pretty(&manifest)
         .map_err(|err| format!("could not write the manifest: {err}"))?;
     let temporary = path.with_extension("json.saving");
@@ -120,6 +184,73 @@ fn write_manifest_version(folder: &Path, version: u32) -> Result<(), String> {
         return Err(format!("could not replace the manifest: {err}"));
     }
     Ok(())
+}
+
+fn previous_dir(folder: &Path, version: u32) -> PathBuf {
+    folder.join(PREVIOUS_FORMAT_DIR).join(version.to_string())
+}
+
+/// Where [`put_back`] moves the files of an upgrade that didn't load.
+pub const FAILED_UPGRADE_DIR: &str = ".axcenity/failed-upgrade";
+
+/// After an upgrade whose world didn't load (`why`): moves the upgraded
+/// files to [`FAILED_UPGRADE_DIR`] and copies the ones from before back, so
+/// the project is as it was and an older engine still opens it. Returns the
+/// error to show.
+pub(crate) fn put_back(folder: &Path, upgrade: &Upgrade, why: &LoadError) -> LoadError {
+    let failed = folder.join(FAILED_UPGRADE_DIR);
+    let moved = (|| -> Result<(), String> {
+        if failed.exists() {
+            fs::remove_dir_all(&failed)
+                .map_err(|err| format!("could not clear `{}`: {err}", failed.display()))?;
+        }
+        fs::create_dir_all(&failed)
+            .map_err(|err| format!("could not create `{}`: {err}", failed.display()))?;
+        let entries = fs::read_dir(folder)
+            .map_err(|err| format!("could not read `{}`: {err}", folder.display()))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|err| format!("could not read `{}`: {err}", folder.display()))?;
+            let name = entry.file_name();
+            if SKIP_ROOT_DIRS.contains(&name.to_string_lossy().as_ref())
+                || entry.file_type().is_ok_and(|t| t.is_symlink())
+            {
+                continue;
+            }
+            fs::rename(entry.path(), failed.join(&name)).map_err(|err| {
+                format!("could not move `{}` aside: {err}", entry.path().display())
+            })?;
+        }
+        copy_project(&upgrade.backup, folder)
+    })();
+    let why = ErrorChain(why).to_string();
+    let message = match moved {
+        Ok(()) => format!(
+            "the upgraded project didn't load ({why}). Its files are back as they were; \
+             the upgraded ones are in `{FAILED_UPGRADE_DIR}`"
+        ),
+        Err(err) => format!(
+            "the upgraded project didn't load ({why}), and putting the files back failed \
+             ({err}). The files from before are in `{}`",
+            upgrade.backup.display()
+        ),
+    };
+    upgrade_error(folder, upgrade.from, message)
+}
+
+/// An error and its causes on one line.
+struct ErrorChain<'a>(&'a LoadError);
+
+impl std::fmt::Display for ErrorChain<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)?;
+        let mut source = std::error::Error::source(self.0);
+        while let Some(cause) = source {
+            write!(f, ": {cause}")?;
+            source = cause.source();
+        }
+        Ok(())
+    }
 }
 
 /// The folder holding format `version`, creating it from `folder` when it
@@ -436,5 +567,111 @@ mod tests {
         assert!(message.contains("format 0"), "{message}");
         assert_eq!(manifest_after, manifest);
         assert!(!copied);
+    }
+    fn v4_project(name: &str, world: &str) -> PathBuf {
+        let folder = temp_folder(name);
+        fs::write(
+            folder.join(MANIFEST_FILE),
+            "{\n  \"name\": \"Four\",\n  \"format_version\": 4\n}\n",
+        )
+        .unwrap();
+        fs::write(folder.join(WORLD_FILE), world).unwrap();
+        fs::write(folder.join("notes.txt"), "mine").unwrap();
+        folder
+    }
+
+    #[test]
+    fn format_5_records_the_engine_that_saved_it_but_not_who_made_it() {
+        let folder = v4_project("v4", "{\"format_version\": 1}\n");
+        let project = load(&folder).unwrap();
+        assert_eq!(project.migrated_from, Some(4));
+        let engine = project.manifest.engine.clone().unwrap();
+        assert_eq!(engine.created_with, None);
+        assert_eq!(
+            engine.saved_with,
+            axcenity_release::Version::current().to_string()
+        );
+        let on_disk = read_manifest(&folder).unwrap();
+        assert_eq!(on_disk.format_version, 5);
+        assert_eq!(on_disk.engine, Some(engine));
+
+        // Saving again with the same engine doesn't touch the manifest.
+        assert!(!crate::record_engine(&folder).unwrap());
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn every_step_says_what_it_changes() {
+        let steps = upgrade_steps(1).unwrap();
+        assert_eq!(steps.len() as u32, FORMAT_VERSION - 1);
+        assert!(steps.iter().all(|step| step.summary.ends_with('.')));
+        assert_eq!(upgrade_steps(FORMAT_VERSION), Some(Vec::new()));
+        assert_eq!(upgrade_steps(0), None);
+    }
+
+    #[test]
+    fn an_upgrade_whose_world_wont_read_is_put_back() {
+        let world = "{\"format_version\": 1}\n";
+        let folder = v4_project("put-back", world);
+        let manifest = fs::read_to_string(folder.join(MANIFEST_FILE)).unwrap();
+        let upgrade = upgrade(&folder, 4).unwrap();
+        assert!(upgrade.fresh);
+        // As if a step had written a world this engine can't read.
+        fs::write(folder.join(WORLD_FILE), "{ broken").unwrap();
+        fs::write(folder.join("made-by-the-step.json"), "{}").unwrap();
+        let Err(why) = crate::load_world(&folder) else {
+            panic!("the broken world read");
+        };
+        let err = put_back(&folder, &upgrade, &why).to_string();
+        assert!(err.contains("back as they were"), "{err}");
+
+        assert_eq!(
+            fs::read_to_string(folder.join(MANIFEST_FILE)).unwrap(),
+            manifest
+        );
+        assert_eq!(fs::read_to_string(folder.join(WORLD_FILE)).unwrap(), world);
+        assert_eq!(
+            fs::read_to_string(folder.join("notes.txt")).unwrap(),
+            "mine"
+        );
+        assert!(!folder.join("made-by-the-step.json").exists());
+        let failed = folder.join(FAILED_UPGRADE_DIR);
+        assert_eq!(
+            fs::read_to_string(failed.join(WORLD_FILE)).unwrap(),
+            "{ broken"
+        );
+        assert!(failed.join("made-by-the-step.json").is_file());
+        // The copy from before is still there too.
+        assert_eq!(
+            fs::read_to_string(upgrade.backup.join(WORLD_FILE)).unwrap(),
+            world
+        );
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_world_that_was_already_damaged_opens_upgraded_as_before() {
+        let folder = v4_project("damaged", "{ was already broken");
+        let project = load(&folder).unwrap();
+        assert_eq!(project.migrated_from, Some(4));
+        assert!(!project.world_loaded);
+        assert_eq!(read_manifest(&folder).unwrap().format_version, 5);
+        assert!(!folder.join(FAILED_UPGRADE_DIR).exists());
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_newer_manifest_this_engine_cant_parse_is_refused_not_opened() {
+        let folder = temp_folder("newer-fields");
+        let manifest = "{\"name\": \"Later\", \"format_version\": 6, \"something_new\": 1}\n";
+        fs::write(folder.join(MANIFEST_FILE), manifest).unwrap();
+        fs::write(folder.join(WORLD_FILE), "{\"format_version\": 1}\n").unwrap();
+        let result = load(&folder);
+        assert!(matches!(result, Err(LoadError::TooNew { found: 6, .. })));
+        assert_eq!(
+            fs::read_to_string(folder.join(MANIFEST_FILE)).unwrap(),
+            manifest
+        );
+        fs::remove_dir_all(&folder).unwrap();
     }
 }

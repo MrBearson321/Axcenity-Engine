@@ -28,8 +28,8 @@ fn frame(app: &mut EditorApp, ctx: &egui::Context, events: Vec<egui::Event>, tim
         ..Default::default()
     };
     *time += 1.0 / 30.0;
-    let _ = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| app.behavior_tree_pane(ui));
+    let _ = crate::theme::run(ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.behavior_tree_pane(ui));
     });
 }
 
@@ -261,8 +261,8 @@ fn hello_behavior_patrols_by_its_tree_and_the_courier_walks_where_its_script_sen
             &file,
             SIZE,
             vec![Vec::new(); 3],
-            &mut |ctx: &egui::Context| {
-                egui::CentralPanel::default().show(ctx, |ui| app.behavior_tree_pane(ui));
+            &mut |ui: &mut egui::Ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.behavior_tree_pane(ui));
             },
         );
     }

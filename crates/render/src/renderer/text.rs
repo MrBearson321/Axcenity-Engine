@@ -148,8 +148,8 @@ pub(super) fn shape(
     } else {
         Wrap::WordOrGlyph
     };
-    buffer.set_wrap(font_system, wrap);
-    buffer.set_size(font_system, Some(text.size[0].max(0.0)), None);
+    buffer.set_wrap(wrap);
+    buffer.set_size(Some(text.size[0].max(0.0)), None);
     let spacing = text.letter_spacing * ratio;
     let attrs: Vec<Attrs> = styled
         .runs
@@ -187,8 +187,8 @@ pub(super) fn shape(
         TextAlign::Right => Some(Align::Right),
     };
     let default = attrs.first().cloned().unwrap_or_else(Attrs::new);
+    // Setters only record what to lay out; `shape_until_scroll` below does it.
     buffer.set_rich_text(
-        font_system,
         styled
             .runs
             .iter()

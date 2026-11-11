@@ -293,6 +293,17 @@ The project format stays independent of the engine version: it changes only when
 
 The editor's own settings (eframe RON) have no version today. One is added only when a settings change first needs a migration (development policy rule 1).
 
+### As built in Phase 7
+
+User-facing and format details: `docs/project/layout.md` (the upgrade bullet). Differences from the plan above:
+
+- `created_with` is left out of a project upgraded from format 4, since nobody recorded it; only new projects have it. A format 5 manifest without `engine` still loads.
+- The classification is `project::compatibility` (no writes); "unreadable manifest" is `Damaged`, which the editor still opens as before (a broken manifest gives the folder's name), so only too old and too new are refused.
+- The dialog lists the steps and where the copy goes; it doesn't offer Back Up Project to a zip, which needs an open project.
+- "Validate afterwards" runs the Asset Check (`project::check_assets`) once after an upgrade and warns with the count. The files are put back only when the world read before the upgrade and doesn't after it, and only when this upgrade made the copy.
+- An engine from now on refuses a manifest it can't parse whose `format_version` is newer. Engines from before this phase open a format 5 manifest as damaged (its `engine` field is unknown to them) with the folder's name; they don't write `format_version` back, so the project stays format 5.
+- `prepare` doesn't yet fill a release's `formats` or check them against the change entries; that's left to Phase 8, with the first release.
+
 ## 9. Security and integrity (D7)
 
 | Threat | Defence |

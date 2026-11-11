@@ -619,7 +619,7 @@ fn paint_label(
     let room = 2.0 * (1.0 - ROUND) * HALF * 0.92;
     let scale = (room / size.x.max(1.0)).min(1.0);
     let mut mesh = egui::Mesh::default();
-    let font_size = ctx.fonts(|fonts| fonts.font_image_size());
+    let font_size = ctx.fonts_mut(|fonts| fonts.font_image_size());
     let mut tessellator = egui::epaint::Tessellator::new(
         ctx.pixels_per_point(),
         egui::epaint::TessellationOptions::default(),
@@ -930,10 +930,11 @@ mod tests {
                 Some(CubeHit::Home),
             ),
         ];
-        let mut draw = |ctx: &egui::Context| {
+        let mut draw = |ui: &mut egui::Ui| {
+            let ctx = &ui.ctx().clone();
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(theme::palette(ctx).inset))
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     for (index, (forward, hovered)) in views.iter().enumerate() {
                         let left = ui.max_rect().left() + index as f32 * 2.0 * INSET;
                         let rect = egui::Rect::from_min_size(
@@ -953,7 +954,7 @@ mod tests {
             ),
             None => {
                 let ctx = theme::test_context();
-                let _ = ctx.run(Default::default(), &mut draw);
+                let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
             }
         }
     }

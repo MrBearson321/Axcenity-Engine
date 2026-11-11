@@ -1,0 +1,66 @@
+---
+title: Animation
+type: system
+status: current
+implementation: implemented
+crates: [anim, assets, render]
+source: [crates/anim/src/lib.rs, crates/anim/src/animators.rs, crates/anim/src/clip.rs, crates/anim/src/controller.rs, crates/anim/src/blend_space.rs, crates/anim/src/ik.rs, crates/anim/src/ik_control.rs, crates/anim/src/feet.rs, crates/anim/src/ragdoll.rs, crates/anim/src/sequence.rs, crates/anim/src/easing.rs, crates/assets/src/model/rig.rs, crates/render/src/renderer/skinning.rs]
+docs: [docs/rendering/animation.md, docs/scripting/api-animation.md, docs/project/animation-files.md, docs/project/sequences.md, crates/anim/CLAUDE.md]
+verified: 2026-11-11
+verified_commit: 19c7179d
+tags: [system/animation]
+---
+
+# Animation
+
+> [!summary]
+> `anim` plays **one clip type** (`*.anim.json`: property tracks, bone keys, an optional linked FBX take) through **Animators** running **state machines** (`*.statemachine.json`) with transitions, 1D blend trees, 2D blend spaces (Delaunay), layers with masks, root motion and events; then **AnimationTracks** over them, **runtime IK** (`IKControl`, foot placement), and **ragdolls** blending in and out. Posing is on the CPU; skinning is on the **GPU** (graphics Phase 14). Cutscene **sequences** share `SequenceRun::apply` between the editor preview and the Sequence Instance. **Implemented.**
+
+## Execution flow
+
+```mermaid
+flowchart LR
+  F[FBX rig + takes<br/>assets::model/rig.rs] --> C[Clip: bind take + bone tracks to rig]
+  SM[statemachine.json] --> M[Compiled machine + layers]
+  subgraph AN["Animators::update (frame step: animators)"]
+    R1[runner per animated thing] --> R2[state machine: transitions,<br/>blend tree / blend space, layers]
+    R2 --> R3[AnimationTracks and played Animations<br/>over it, latest start wins]
+    R3 --> R4[IKControls, FootPlacement<br/>via character::foot_ground]
+    R4 --> R5[ragdoll pose override, blend back]
+  end
+  C & M --> R1
+  R5 --> PO["Poses (per MeshPart joint matrices)"]
+  PO --> S[scene::build_draw_list_posed] --> G["render skinning.rs:<br/>GPU blends joints per vertex"]
+```
+
+- Live state (`AnimatorState`, `AnimationTrackState`, `PropertyAnimationState`) is in the World, not saved properties.
+- Property tracks animate Parts, Model pivots and UI elements; reduced motion (a game UI setting) holds GUI animations.
+- `Posed::primitive` skins on the CPU only on request (tests, tools, the Model Studio's pose test), per LOD level.
+
+## Dependencies
+
+`anim`: `core`, `assets`. Easing curves are shared with TweenService (`anim::ease`) and UI transitions.
+
+## Performance
+
+**Measured** (graphics Phase 14, RX 9070 XT): GPU skinning cut 20 walking characters' CPU draw time from 4.85 to 0.38 ms and mesh memory from 13 to 2.3 MB (149 batches → 22); vertex-heavy scenes pay ~5% for wider instances. CPU posing of 20 simple characters is 0.05 ms. S10k's 20 animated characters cost 0.12 ms in Animation (9950X3D).
+
+## Testing
+
+`crates/anim/src/tests.rs` (canonical example files round-trip), `layer_tests.rs`; player `skinning_tests.rs`, `ragdoll_tests.rs`, `cutscene_tests.rs`; editor animation tests (the Animation tab).
+
+## Limitations
+
+- Format 1 clip files still read (converted).
+- Ragdolls can overshoot joint limits on hard landings (see [Physics](Physics.md)).
+- No GPU posing (state machines and IK run on the CPU each frame).
+
+## Development guidance
+
+- Read files through `Assets`; skeletal poses from `Model::pose`.
+- Keep example animation files canonical (`to_json` round-trips them).
+- The Model Studio's Pose test must skin exactly as `assets::Posed` does.
+
+## Related documentation
+
+`docs/rendering/animation.md`, `docs/scripting/api-animation.md`, `docs/project/animation-files.md`, `docs/project/sequences.md`; [Specialized editors](../Editor/Specialized-Editors.md#animation-tab-and-sequencer)

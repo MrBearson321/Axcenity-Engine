@@ -57,12 +57,13 @@ fn frame(app: &mut EditorApp, ctx: &egui::Context, tab: u64, time: f64, events: 
         time: Some(time),
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| {
+    let _ = crate::theme::run(ctx, input, |ui| {
+        let ctx = &ui.ctx().clone();
         app.shortcuts(ctx);
         app.block_tab_pointer = None;
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.script_pane(ui, tab));
+            .show(ui, |ui| app.script_pane(ui, tab));
     });
 }
 
@@ -105,7 +106,7 @@ fn ctrl_z_over_blocks_undoes_the_blocks_not_the_world() {
     // The bar that switches Code, Blocks and Graph is above the blocks.
     let top = egui::containers::panel::PanelState::load(&ctx, egui::Id::new(("script mode", tab)))
         .expect("the mode bar was drawn")
-        .rect
+        .outer_rect
         .bottom();
     assert_eq!(stacks(&app, &path), 1, "a new script is one stack");
 

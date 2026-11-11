@@ -154,6 +154,14 @@ pub(super) enum DepthUse {
     Filled,
 }
 
+/// `layouts` as a pipeline layout takes them: every bind group used (wgpu
+/// lets a pipeline leave a group out with `None`).
+pub(super) fn some<'a>(
+    layouts: &[&'a wgpu::BindGroupLayout],
+) -> Vec<Option<&'a wgpu::BindGroupLayout>> {
+    layouts.iter().copied().map(Some).collect()
+}
+
 /// [`create_pipeline`], with `depth` for what the pipeline does with depth.
 pub(super) fn create_pipeline_for(
     device: &wgpu::Device,
@@ -166,8 +174,8 @@ pub(super) fn create_pipeline_for(
 ) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("scene"),
-        bind_group_layouts: layouts,
-        push_constant_ranges: &[],
+        bind_group_layouts: &some(layouts),
+        immediate_size: 0,
     });
 
     let vertex_layout = wgpu::VertexBufferLayout {
@@ -215,7 +223,7 @@ pub(super) fn create_pipeline_for(
             module: shader,
             entry_point: Some(vertex_entry),
             compilation_options: Default::default(),
-            buffers: &[vertex_layout, instance_layout],
+            buffers: &[Some(vertex_layout), Some(instance_layout)],
         },
         primitive: wgpu::PrimitiveState {
             // Counter-clockwise triangles face the camera; the backs are
@@ -228,12 +236,12 @@ pub(super) fn create_pipeline_for(
             format: DEPTH_FORMAT,
             // See-through items are hidden behind solid ones, but don't hide
             // other see-through items behind them.
-            depth_write_enabled: !transparent && depth != DepthUse::Filled,
-            depth_compare: if depth == DepthUse::Filled {
+            depth_write_enabled: Some(!transparent && depth != DepthUse::Filled),
+            depth_compare: Some(if depth == DepthUse::Filled {
                 wgpu::CompareFunction::Equal
             } else {
                 wgpu::CompareFunction::Less
-            },
+            }),
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -258,7 +266,7 @@ pub(super) fn create_pipeline_for(
                 },
             })],
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }
@@ -416,8 +424,12 @@ pub(super) fn create_shadow_pipeline(
     // No material (group 1), but the skin (group 2) moves the corners.
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("shadow"),
-        bind_group_layouts: &[shadow_layout, &skinning.empty_layout, &skinning.layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[
+            Some(shadow_layout),
+            Some(&skinning.empty_layout),
+            Some(&skinning.layout),
+        ],
+        immediate_size: 0,
     });
     // Only the position, the model matrix, the skin and the sway matter here.
     let vertex_layout = wgpu::VertexBufferLayout {
@@ -469,7 +481,7 @@ pub(super) fn create_shadow_pipeline(
             module: &shader,
             entry_point: Some("vs_shadow"),
             compilation_options: Default::default(),
-            buffers: &[vertex_layout, instance_layout],
+            buffers: &[Some(vertex_layout), Some(instance_layout)],
         },
         primitive: wgpu::PrimitiveState {
             front_face: wgpu::FrontFace::Ccw,
@@ -479,8 +491,8 @@ pub(super) fn create_shadow_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: Default::default(),
             // Pushes steep surfaces' depth back a little, so they don't
             // shadow themselves in stripes ("shadow acne").
@@ -492,7 +504,7 @@ pub(super) fn create_shadow_pipeline(
         }),
         multisample: Default::default(),
         fragment: None,
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }

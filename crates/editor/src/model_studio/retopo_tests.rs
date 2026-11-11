@@ -262,8 +262,8 @@ fn snapshot_of_the_baked_low_poly_face_beside_the_sculpt() {
         &folder.join("model-studio-bake.png"),
         egui::vec2(1300.0, 760.0),
         vec![Vec::new(); 3],
-        |ctx, render| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui, render| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = studio.show(ui, Some(render), &[], crate::gizmo::Snap::default(), true);
             });
         },

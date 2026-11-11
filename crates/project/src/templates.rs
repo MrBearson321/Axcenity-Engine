@@ -333,7 +333,12 @@ pub fn create_project_from(
     }
     // `create_dir` (not `_all`) fails if the folder is already there.
     fs::create_dir(&folder).map_err(SaveError::new(&folder))?;
-    let manifest = serde_json::json!({ "name": name, "format_version": FORMAT_VERSION });
+    let engine = axcenity_release::Version::current().to_string();
+    let manifest = serde_json::json!({
+        "name": name,
+        "format_version": FORMAT_VERSION,
+        "engine": { "created_with": engine, "saved_with": engine },
+    });
     let manifest_text = serde_json::to_string_pretty(&manifest).unwrap_or_default();
     let mut written = fs::create_dir(folder.join(SCRIPTS_FOLDER))
         .map_err(SaveError::new(&folder))

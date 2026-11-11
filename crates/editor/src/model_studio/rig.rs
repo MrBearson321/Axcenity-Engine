@@ -1130,7 +1130,7 @@ impl ModelStudio {
         if roll_done
             || (roll_changed.is_none()
                 && self.rig.rolling.is_some()
-                && !ui.ctx().is_using_pointer())
+                && !ui.ctx().egui_is_using_pointer())
         {
             self.end_roll();
         }

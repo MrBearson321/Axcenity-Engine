@@ -186,7 +186,12 @@ impl Layout {
     /// the Scene on the next frame.
     pub fn use_preset(&mut self, preset: Preset) {
         let mut dock = preset.dock();
-        dock.set_active_tab((SurfaceIndex::main(), NodeIndex::root(), TabIndex(0)));
+        // Every preset's root holds tabs, so the first is always there.
+        let _ = dock.set_active_tab(egui_dock::TabPath::new(
+            SurfaceIndex::main(),
+            NodeIndex::root(),
+            TabIndex(0),
+        ));
         self.replace_dock(dock);
         // Scripting is for the scripts: they come back in front.
         self.switched = preset != Preset::Scripting;

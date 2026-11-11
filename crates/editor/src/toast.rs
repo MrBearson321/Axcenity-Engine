@@ -134,7 +134,7 @@ impl Toasts {
             return click;
         }
         let now = ctx.input(|input| input.time);
-        let reduce_motion = ctx.style().animation_time <= 0.0;
+        let reduce_motion = ctx.global_style().animation_time <= 0.0;
         self.toasts.retain(|toast| {
             toast.kind.stays()
                 || toast
@@ -142,7 +142,7 @@ impl Toasts {
                     .is_none_or(|at| now - at < SHOWN_SECONDS + FADE_SECONDS)
         });
         let palette = theme::palette(ctx);
-        let screen = ctx.screen_rect();
+        let screen = ctx.content_rect();
         let mut bottom = screen.bottom() - 16.0;
         if let Some(offer) = &self.offer {
             let area = egui::Area::new(egui::Id::new("toast offer"))
@@ -354,7 +354,8 @@ mod tests {
                 time: Some(time),
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| {
+            let _ = crate::theme::run(&ctx, input, |ui| {
+                let ctx = &ui.ctx().clone();
                 toasts.show(ctx);
             });
         }
@@ -383,7 +384,10 @@ mod staying_tests {
             ..Default::default()
         };
         let mut clicks = Clicks::default();
-        let _ = ctx.run(input, |ctx| clicks = toasts.show(ctx));
+        let _ = crate::theme::run(ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
+            clicks = toasts.show(ctx)
+        });
         clicks
     }
 

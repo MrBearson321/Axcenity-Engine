@@ -12,7 +12,7 @@ fn frame(app: &mut EditorApp, ctx: &egui::Context, events: Vec<egui::Event>) {
         events,
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| app.frame(ctx, None));
+    let _ = crate::theme::run(ctx, input, |ui| app.frame(ui, None));
 }
 
 fn escape() -> egui::Event {
@@ -85,15 +85,15 @@ fn every_tool_window_opens_and_escape_closes_it() {
         assert!(is_open(&app), "{name} opens");
         if name == "Find in Scripts" {
             assert!(
-                ctx.wants_keyboard_input(),
+                ctx.egui_wants_keyboard_input(),
                 "Find in Scripts focuses its field"
             );
         }
         // A focused text field takes the first Escape and lets go of focus.
-        if ctx.wants_keyboard_input() {
+        if ctx.egui_wants_keyboard_input() {
             frame(&mut app, &ctx, vec![escape()]);
             assert!(is_open(&app), "{name}: Escape leaves its text field first");
-            assert!(!ctx.wants_keyboard_input(), "{name}");
+            assert!(!ctx.egui_wants_keyboard_input(), "{name}");
         }
         frame(&mut app, &ctx, vec![escape()]);
         assert!(!is_open(&app), "Escape closes {name}");

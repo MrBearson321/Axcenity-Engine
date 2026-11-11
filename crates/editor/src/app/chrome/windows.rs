@@ -115,7 +115,7 @@ pub(in crate::app) fn paused_panel(
 }
 
 /// Names and values, one per row.
-fn variables(ui: &mut egui::Ui, id: impl std::hash::Hash, list: &[axcenity_script::Local]) {
+fn variables(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, list: &[axcenity_script::Local]) {
     crate::responsive::form(ui, id, |ui| {
         for local in list {
             ui.monospace(&local.name);
@@ -199,7 +199,7 @@ pub(in crate::app) fn playing_badge(ui: &mut egui::Ui, paused: bool) {
     };
     let pulse = if paused {
         1.0
-    } else if ui.ctx().style().animation_time > 0.0 {
+    } else if ui.ctx().global_style().animation_time > 0.0 {
         let time = ui.input(|input| input.time);
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(50));
@@ -356,7 +356,7 @@ impl EditorApp {
         // A text box being typed in has its own undo, and uses Delete and
         // Backspace itself, so leave those keys to it then. The Explorer
         // tabbed into takes only its own keys.
-        let typing = ctx.wants_keyboard_input() && !self.explorer.has_focus(ctx);
+        let typing = ctx.egui_wants_keyboard_input() && !self.explorer.has_focus(ctx);
         // The arrow keys, Home and End are the Explorer's while it has them,
         // taken before the viewport or the UI Designer can see them.
         let explorer_keys =
@@ -518,8 +518,8 @@ mod tests {
         let ctx = theme::test_context();
         let mut watches = watches();
         for error in [None, Some("scripts/door.server.lua:7: locked")] {
-            let _ = ctx.run(egui::RawInput::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = theme::run(&ctx, egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let resume = paused_panel(ui, &pause(error), &mut watches);
                     assert_eq!(resume, None, "nothing pressed");
                 });
@@ -539,8 +539,8 @@ mod tests {
                 &std::path::PathBuf::from(&folder).join(name),
                 egui::vec2(520.0, 330.0),
                 vec![Vec::new(); 3],
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         let _ = paused_panel(ui, &pause(error), &mut watches);
                     });
                 },

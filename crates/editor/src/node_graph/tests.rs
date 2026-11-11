@@ -51,15 +51,16 @@ impl Harness {
     fn run_with(&mut self, events: Vec<egui::Event>, modifiers: egui::Modifiers) {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SIZE)),
-            events,
-            modifiers,
+            events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+                .chain(events)
+                .collect(),
             time: Some(self.frames as f64 / 30.0),
             ..Default::default()
         };
         self.frames += 1;
         let errors = BTreeMap::new();
-        let output = self.ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let output = crate::theme::run(&self.ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let rect = ui.max_rect();
                 let response = self.view.show(
                     ui,
@@ -346,7 +347,7 @@ fn a_comment_goes_around_the_selection_and_moves_its_nodes() {
 fn a_node_with_errors_is_taller_and_lists_them() {
     let ctx = theme::test_context();
     // Fonts are there from the first frame.
-    let _ = ctx.run(Default::default(), |_| {});
+    let _ = crate::theme::run(&ctx, Default::default(), |_ui| {});
     let graph = two_nodes();
     let node = graph.node(2).unwrap();
     let plain = node_shape(&ctx, spec("show_page"), node, &graph, &[]);
@@ -361,7 +362,7 @@ fn a_node_with_errors_is_taller_and_lists_them() {
 #[test]
 fn a_long_value_widens_its_node_to_fit_up_to_a_limit() {
     let ctx = theme::test_context();
-    let _ = ctx.run(Default::default(), |_| {});
+    let _ = crate::theme::run(&ctx, Default::default(), |_ui| {});
     let mut graph = NodeGraph::default();
     let id = graph.add_node(spec("button_activated"), [0.0, 0.0]);
     let shape = |graph: &NodeGraph| {
@@ -412,8 +413,8 @@ fn the_editor_draws_with_errors_comments_and_every_node_kind() {
         vec!["Value isn't connected: wire a value in, or type one.".to_owned()],
     )]);
     let mut view = GraphView::default();
-    let draw = |ctx: &egui::Context, view: &mut GraphView, graph: &mut NodeGraph| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let draw = |ui: &mut egui::Ui, view: &mut GraphView, graph: &mut NodeGraph| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let rect = ui.max_rect();
             view.show(
                 ui,
@@ -436,11 +437,13 @@ fn the_editor_draws_with_errors_comments_and_every_node_kind() {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SIZE)),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| draw(ctx, &mut view, &mut graph));
+        let _ = crate::theme::run(&ctx, input, |ui| draw(ui, &mut view, &mut graph));
     }
     assert_eq!(view.rects.len(), UI_NODES.len());
     let before = graph.clone();
-    let _ = ctx.run(Default::default(), |ctx| draw(ctx, &mut view, &mut graph));
+    let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+        draw(ui, &mut view, &mut graph)
+    });
     assert_eq!(graph, before, "drawing never changes the graph");
     if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from) {
         let mut view = GraphView::default();
@@ -449,7 +452,7 @@ fn the_editor_draws_with_errors_comments_and_every_node_kind() {
             &folder.join("node-graph.png"),
             SIZE,
             vec![Vec::new(); 3],
-            |ctx| draw(ctx, &mut view, &mut graph),
+            |ui| draw(ui, &mut view, &mut graph),
         );
     }
 }

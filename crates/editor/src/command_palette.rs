@@ -305,7 +305,7 @@ impl Palette {
         self.selected = self.selected.min(ranked.len().saturating_sub(1));
 
         let mut picked = None;
-        let screen = ctx.screen_rect();
+        let screen = ctx.content_rect();
         let width = (screen.width() - 40.0).clamp(240.0, 640.0);
         let area = egui::Area::new(egui::Id::new("command palette"))
             .order(egui::Order::Foreground)
@@ -565,7 +565,7 @@ fn one_line(
     let mut job = egui::text::LayoutJob::simple(text.to_owned(), font, color, width);
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
-    ui.fonts(|fonts| fonts.layout_job(job))
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
 /// Under the list: what the highlighted row does (or why it's off), then

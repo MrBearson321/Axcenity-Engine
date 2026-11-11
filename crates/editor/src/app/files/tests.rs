@@ -514,15 +514,15 @@ fn every_way_in_opens_the_same_dialog_for_a_model() {
     let image = folder.join("..").join("import-ways-in-dropped.png");
     fs::write(&image, b"not checked until drawn").unwrap();
     let ctx = crate::theme::test_context();
-    let dropped = [&props, &image, &example_model()].map(|path| egui::DroppedFile {
-        path: Some(path.to_path_buf()),
-        ..Default::default()
-    });
+    let dropped = [&props, &image, &example_model()].map(|path| dropped_file(path));
     let input = egui::RawInput {
         dropped_files: dropped.to_vec(),
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| app.import_dropped(ctx));
+    let _ = crate::theme::run(&ctx, input, |ui| {
+        let ctx = &ui.ctx().clone();
+        app.import_dropped(ctx)
+    });
     assert_eq!(names(&app), direct);
     let copy = "assets/textures/import-ways-in-dropped.png";
     assert!(folder.join(copy).is_file());
@@ -546,13 +546,13 @@ fn a_sky_dropped_on_the_window_is_copied_in_and_asked_about() {
     fs::write(&sky, b"#?RADIANCE").unwrap();
     let ctx = crate::theme::test_context();
     let input = egui::RawInput {
-        dropped_files: vec![egui::DroppedFile {
-            path: Some(sky.clone()),
-            ..Default::default()
-        }],
+        dropped_files: vec![dropped_file(&sky)],
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| app.import_dropped(ctx));
+    let _ = crate::theme::run(&ctx, input, |ui| {
+        let ctx = &ui.ctx().clone();
+        app.import_dropped(ctx)
+    });
     let copy = "assets/sky/drop-sky-noon.hdr";
     assert!(folder.join(copy).is_file());
     assert_eq!(
@@ -1446,4 +1446,22 @@ fn deleting_a_model_deletes_its_asset_id_and_undo_brings_both_back() {
     assert!(folder.join(model).is_file());
     assert_eq!(axcenity_assets::read_asset_id(&folder, model), Some(id));
     let _ = fs::remove_dir_all(&folder);
+}
+
+/// A file dropped on the window, as the windowing system hands it over.
+#[derive(Debug)]
+struct Dropped(std::path::PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        fs::read(&self.0).map_err(|err| err.to_string())
+    }
+}
+
+fn dropped_file(path: &Path) -> egui::DroppedFileHandle {
+    std::sync::Arc::new(Dropped(path.to_path_buf()))
 }

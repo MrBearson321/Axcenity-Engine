@@ -53,8 +53,8 @@ fn pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: Default::default(),
             // Pulled toward the camera, so it wins over a surface it lies on.
             bias: wgpu::DepthBiasState {
@@ -77,7 +77,7 @@ fn pipeline(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }
@@ -112,8 +112,8 @@ impl GridPass {
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("grid"),
-            bind_group_layouts: &[&group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&group_layout)],
+            immediate_size: 0,
         });
         Self {
             pipeline: pipeline(device, &layout, samples),

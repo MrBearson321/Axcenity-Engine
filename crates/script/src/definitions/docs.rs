@@ -940,6 +940,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Sound,
+        "RollOffMode",
+        "How a spatial sound gets quieter between RollOffMinDistance and RollOffMaxDistance (`Enum.RollOffMode`): Inverse (the default, as sound behaves in the open: half as loud at twice the min distance), Linear, LinearSquare (quieter sooner) or InverseTapered (Inverse, fading out smoothly before the max distance).",
+    ),
+    (
+        ClassName::SoundService,
+        "Occlusion",
+        "If true (the default), solid parts between a spatial sound and the camera muffle it: each wall, up to three, halves it and takes off more of the highs.",
+    ),
+    (
+        ClassName::Sound,
         "SoundGroup",
         "The SoundGroup it plays through, so that group's Volume and effects (and its parent groups') apply to it. nil plays it straight out.",
     ),

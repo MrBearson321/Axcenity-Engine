@@ -102,8 +102,8 @@ impl DepthOfFieldPass {
         let shader = device.create_shader_module(wgpu::include_wgsl!("../depth_of_field.wgsl"));
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("depth of field"),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("depth of field"),
@@ -123,7 +123,7 @@ impl DepthOfFieldPass {
                 compilation_options: Default::default(),
                 targets: &[Some(HDR_FORMAT.into())],
             }),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
         Self {

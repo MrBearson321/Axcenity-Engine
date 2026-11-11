@@ -377,9 +377,9 @@ mod tests {
 
     #[test]
     fn the_preview_draws_the_material_on_its_sphere() {
-        use axcenity_render::wgpu;
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+        let instance = axcenity_render::adapters::instance();
+        let Ok(adapter) = pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
+        else {
             eprintln!("skipped: no graphics adapter on this machine");
             return;
         };
@@ -487,8 +487,8 @@ mod tests {
         app.materials
             .edit("shader", move |file| file.shader = Some(broken));
         let ctx = crate::theme::test_context();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| app.material_pane(ui, None));
+        let _ = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| app.material_pane(ui, None));
         });
         let error = app
             .materials
@@ -503,8 +503,8 @@ mod tests {
         assert!(app.materials.undo());
         let file = &app.materials.current().unwrap().file;
         assert_eq!(file.shader.as_deref(), Some(STARTER_SHADER));
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| app.material_pane(ui, None));
+        let _ = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| app.material_pane(ui, None));
         });
         assert_eq!(app.materials.shader_error(), None);
         let _ = std::fs::remove_dir_all(&folder);
@@ -531,8 +531,8 @@ mod tests {
     fn draw_tab(app: &mut EditorApp, view: crate::material_editor::MaterialView) {
         app.materials.view = view;
         let ctx = crate::theme::test_context();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| app.material_pane(ui, None));
+        let _ = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| app.material_pane(ui, None));
         });
     }
 
@@ -608,9 +608,9 @@ mod tests {
     type Gpu = (axcenity_render::wgpu::Device, axcenity_render::wgpu::Queue);
 
     fn gpu() -> Option<Gpu> {
-        use axcenity_render::wgpu;
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+        let instance = axcenity_render::adapters::instance();
+        let adapter =
+            pollster::block_on(axcenity_render::adapters::adapter(&instance, None)).ok()?;
         pollster::block_on(adapter.request_device(&Default::default())).ok()
     }
 
@@ -748,8 +748,8 @@ mod tests {
                 &path,
                 egui::vec2(900.0, 1100.0),
                 vec![Vec::new(); 3],
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| app.material_pane(ui, None));
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| app.material_pane(ui, None));
                 },
             );
         }
@@ -812,9 +812,9 @@ mod tests {
                 &path,
                 egui::vec2(1280.0, 640.0),
                 vec![Vec::new(); 3],
-                |ctx, render| {
+                |ui, render| {
                     egui::CentralPanel::default()
-                        .show(ctx, |ui| app.material_pane(ui, Some(render)));
+                        .show(ui, |ui| app.material_pane(ui, Some(render)));
                 },
             );
         }

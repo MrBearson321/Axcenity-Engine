@@ -160,8 +160,8 @@ fn the_tab_draws_the_chair_with_a_checker_and_its_uvs() {
         &folder.join("model-studio-uvs.png"),
         egui::vec2(1200.0, 600.0),
         vec![Vec::new(); 3],
-        |ctx, render| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui, render| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = studio.show(ui, Some(render), &[], crate::gizmo::Snap::default(), true);
             });
         },
@@ -173,8 +173,8 @@ fn the_tab_draws_the_chair_with_a_checker_and_its_uvs() {
         &folder.join("model-studio-uv-stretch.png"),
         egui::vec2(1200.0, 600.0),
         vec![Vec::new(); 3],
-        |ctx, render| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui, render| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = studio.show(ui, Some(render), &[], crate::gizmo::Snap::default(), true);
             });
         },

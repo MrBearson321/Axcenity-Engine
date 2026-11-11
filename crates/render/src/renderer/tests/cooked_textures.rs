@@ -56,8 +56,8 @@ impl TextureSource for Cooked {
 
 /// A test device that reads BC7, or `None` without one.
 fn bc7_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+    let instance = crate::adapters::instance();
+    let adapter = pollster::block_on(crate::adapters::adapter(&instance, None)).ok()?;
     if !adapter
         .features()
         .contains(wgpu::Features::TEXTURE_COMPRESSION_BC)

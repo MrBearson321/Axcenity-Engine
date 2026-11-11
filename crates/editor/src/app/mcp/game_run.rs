@@ -24,7 +24,7 @@ pub const SPEC: ToolSpec = ToolSpec {
     idempotent: false,
     params: &[
         Param::optional("mode", Kind::Enum(&["play", "tests"]), "default play"),
-        Param::optional("seconds", Kind::Number, "play time, default 3, max 60"),
+        Param::optional("seconds", Kind::Number, "default 3, max 60"),
         Param::optional("file", Kind::String, "one spec file (tests)"),
         LIMIT,
     ],

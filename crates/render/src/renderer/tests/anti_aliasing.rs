@@ -177,7 +177,7 @@ fn switching_anti_aliasing_frees_the_targets_it_no_longer_uses() {
     }
     renderer.set_graphics(&with_anti_aliasing(crate::AntiAliasing::Off));
     renderer.render(&list).unwrap();
-    device.poll(wgpu::PollType::Wait).unwrap();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     assert_eq!(renderer.scene.anti_aliasing_targets_alive(), (0, 0));
     assert_eq!(renderer.scene.targets_alive(), 1);
 }

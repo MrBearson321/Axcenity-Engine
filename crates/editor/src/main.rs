@@ -86,6 +86,7 @@ mod version_explorer;
 mod viewport;
 mod watcher;
 mod watches;
+mod wheel;
 mod widgets;
 mod window_frame;
 
@@ -119,7 +120,13 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     use axcenity_render::wgpu;
     use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
 
-    let mut setup = WgpuSetupCreateNew::default();
+    let mut setup = WgpuSetupCreateNew::without_display_handle();
+    // The same card and API as the player: DirectX 12 on Windows
+    // (`axcenity_render::adapters`).
+    setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters, surface| {
+        axcenity_render::adapters::pick(adapters, surface)
+            .ok_or_else(|| "no graphics card can draw to this window".to_owned())
+    }));
     let base = setup.device_descriptor.clone();
     setup.device_descriptor = std::sync::Arc::new(move |adapter| {
         let mut descriptor = base(adapter);

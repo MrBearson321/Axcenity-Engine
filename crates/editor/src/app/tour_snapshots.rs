@@ -65,9 +65,10 @@ fn shoot(app: &mut EditorApp, name: &str, setup: impl Fn(&mut EditorApp)) {
         &folder.join(format!("tour-{name}{suffix}.png")),
         egui::vec2(1600.0, 900.0),
         vec![Vec::new(); 8],
-        |ctx, rs| {
+        |ui, rs| {
+            let ctx = &ui.ctx().clone();
             crate::theme::apply(ctx, &appearance);
-            app.frame(ctx, Some(rs));
+            app.frame(ui, Some(rs));
         },
     );
 }
@@ -344,8 +345,8 @@ fn editor_tour_snapshots() {
             &PathBuf::from(&folder).join(format!("tour-{name}.png")),
             egui::vec2(width, 2400.0),
             vec![Vec::new(); 4],
-            |ctx, rs| {
-                egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, Some(rs)));
+            |ui, rs| {
+                egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, Some(rs)));
             },
         );
     }

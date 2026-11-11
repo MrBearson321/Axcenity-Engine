@@ -98,11 +98,12 @@ fn the_start_screen_draws_each_page_and_the_new_project_dialog() {
             theme,
             ..Default::default()
         };
-        let mut draw = |ctx: &egui::Context| {
+        let mut draw = |ui: &mut egui::Ui| {
+            let ctx = &ui.ctx().clone();
             theme::apply(ctx, &appearance);
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     let brand = Brand::load(ui.ctx());
                     assert!(start.show(ui, &mut projects, &brand).is_none());
                 });
@@ -117,7 +118,7 @@ fn the_start_screen_draws_each_page_and_the_new_project_dialog() {
             None => {
                 let ctx = theme::test_context();
                 for _ in 0..3 {
-                    let _ = ctx.run(Default::default(), &mut draw);
+                    let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
                 }
             }
         }
@@ -191,11 +192,12 @@ fn the_reference_draws_results_and_an_open_entry() {
         start.reference.query = query.to_owned();
         start.reference.open = open;
         let mut projects = Vec::new();
-        let mut draw = |ctx: &egui::Context| {
+        let mut draw = |ui: &mut egui::Ui| {
+            let ctx = &ui.ctx().clone();
             theme::apply(ctx, &theme::Appearance::default());
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     let brand = Brand::load(ui.ctx());
                     assert!(start.show(ui, &mut projects, &brand).is_none());
                 });
@@ -210,7 +212,7 @@ fn the_reference_draws_results_and_an_open_entry() {
             None => {
                 let ctx = theme::test_context();
                 for _ in 0..3 {
-                    let _ = ctx.run(Default::default(), &mut draw);
+                    let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
                 }
             }
         }
@@ -274,11 +276,12 @@ fn the_learn_page_draws_every_tutorial() {
                 ..Default::default()
             };
             let mut projects = Vec::new();
-            let mut draw = |ctx: &egui::Context| {
+            let mut draw = |ui: &mut egui::Ui| {
+                let ctx = &ui.ctx().clone();
                 theme::apply(ctx, &appearance);
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
-                    .show(ctx, |ui| {
+                    .show(ui, |ui| {
                         let brand = Brand::load(ui.ctx());
                         assert!(start.show(ui, &mut projects, &brand).is_none());
                     });
@@ -298,7 +301,7 @@ fn the_learn_page_draws_every_tutorial() {
                 None => {
                     let ctx = theme::test_context();
                     for _ in 0..3 {
-                        let _ = ctx.run(Default::default(), &mut draw);
+                        let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
                     }
                 }
             }
@@ -316,7 +319,8 @@ fn the_learn_window_shows_tutorials_and_the_reference_over_a_project() {
     for page in [Page::Learn, Page::Reference] {
         start.page = page;
         for _ in 0..3 {
-            let _ = ctx.run(Default::default(), |ctx| {
+            let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+                let ctx = &ui.ctx().clone();
                 theme::apply(ctx, &theme::Appearance::default());
                 let mut open = true;
                 let picked = start.learn_window(ctx, &mut open, Some(&sample), false);
@@ -359,10 +363,11 @@ fn the_global_assets_page_lists_the_library_with_a_models_files_as_one_card() {
     assert_eq!(names(&mut start, "walk"), ["Walk"]);
 
     let mut projects = Vec::new();
-    let mut draw = |ctx: &egui::Context| {
+    let mut draw = |ui: &mut egui::Ui| {
+        let ctx = &ui.ctx().clone();
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let brand = Brand::load(ui.ctx());
                 assert!(start.show(ui, &mut projects, &brand).is_none());
             });
@@ -377,7 +382,7 @@ fn the_global_assets_page_lists_the_library_with_a_models_files_as_one_card() {
         None => {
             let ctx = theme::test_context();
             for _ in 0..3 {
-                let _ = ctx.run(Default::default(), &mut draw);
+                let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
             }
         }
     }
@@ -450,11 +455,12 @@ fn recent_project_cards_stay_inside_the_page_at_every_window_width() {
                 time: Some(frame as f64 * 10.0),
                 ..Default::default()
             };
-            output = Some(ctx.run(input, |ctx| {
+            output = Some(crate::theme::run(&ctx, input, |ui| {
+                let ctx = &ui.ctx().clone();
                 theme::apply(ctx, &theme::Appearance::default());
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
-                    .show(ctx, |ui| {
+                    .show(ui, |ui| {
                         let brand = Brand::load(ui.ctx());
                         assert!(start.show(ui, &mut projects, &brand).is_none());
                     });
@@ -499,11 +505,12 @@ fn recent_project_cards_stay_inside_the_page_at_every_window_width() {
                 &folder.join("start-projects-wide.png"),
                 vec2(width, 1100.0),
                 vec![Vec::new(); 3],
-                |ctx| {
+                |ui| {
+                    let ctx = &ui.ctx().clone();
                     theme::apply(ctx, &theme::Appearance::default());
                     egui::CentralPanel::default()
                         .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
-                        .show(ctx, |ui| {
+                        .show(ui, |ui| {
                             let brand = Brand::load(ui.ctx());
                             assert!(start.show(ui, &mut projects, &brand).is_none());
                         });

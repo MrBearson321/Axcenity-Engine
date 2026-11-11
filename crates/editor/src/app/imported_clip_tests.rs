@@ -51,8 +51,8 @@ fn converted_take_bones(app: &EditorApp, mesh_id: &str) -> Vec<PropertyTrack> {
 /// Draws the Animation tab for a few frames, saved as `name` when
 /// `AXCENITY_SNAPSHOTS` names a folder.
 fn draw_tab(app: &mut EditorApp, name: &str) {
-    let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |ui| app.animation_pane(ui, None));
+    let mut draw = |ui: &mut egui::Ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.animation_pane(ui, None));
     };
     match std::env::var_os("AXCENITY_SNAPSHOTS") {
         Some(folder) => crate::snapshot::snapshot(
@@ -71,7 +71,7 @@ fn draw_tab(app: &mut EditorApp, name: &str) {
                     )),
                     ..Default::default()
                 };
-                let _ = ctx.run(input, &mut draw);
+                let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
             }
         }
     }

@@ -270,7 +270,9 @@ mod tests {
         let visuals = egui::Visuals::dark();
         let source = "a <b>b</b> <font color=\"#ff0000\" size=\"32\">c</font>";
         let job = layout_job(source, 16.0, 16.0, &visuals, f32::INFINITY);
-        let text_of = |section: &egui::text::LayoutSection| &source[section.byte_range.clone()];
+        let text_of = |section: &egui::text::LayoutSection| {
+            &source[section.byte_range.start.0..section.byte_range.end.0]
+        };
         let section = |text: &str| {
             job.sections
                 .iter()

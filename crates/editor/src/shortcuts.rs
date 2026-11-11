@@ -992,15 +992,17 @@ mod tests {
         let ctx = egui::Context::default();
         let mut out = None;
         let mut read = Some(read);
-        let _ = ctx.run(
+        let _ = crate::theme::run(
+            &ctx,
             egui::RawInput {
-                events,
-                modifiers,
+                events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+                    .chain(events)
+                    .collect(),
                 ..Default::default()
             },
-            |ctx| {
+            |ui| {
                 if let Some(read) = read.take() {
-                    out = Some(ctx.input_mut(read));
+                    out = Some(ui.input_mut(read));
                 }
             },
         );

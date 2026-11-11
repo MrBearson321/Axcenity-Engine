@@ -9,9 +9,12 @@
 //!
 //! A Sound with `Spatial` on is an emitter. Its place is the nearest ancestor
 //! `Part`, `MeshPart` or `Terrain`, or its own `Position` when it has none.
-//! The host's camera is the listener ([`Listener`]). Kira pans it in stereo
-//! and turns it down with distance, from full at `RollOffMinDistance` to
-//! silent at `RollOffMaxDistance`.
+//! The host's camera is the listener ([`Listener`]). Kira pans it in stereo;
+//! this crate turns it down with distance each frame, from full at
+//! `RollOffMinDistance` to silent at `RollOffMaxDistance`, along the
+//! Sound's `RollOffMode` curve ([`mix::RollOff`], roadmap G8), and muffles
+//! it (quieter, through a low-pass filter) by the walls the host found
+//! between it and the listener ([`GameAudio::set_walls`], [`mix::muffle`]).
 //!
 //! Buses (Phase 52): each SoundGroup is a Kira sub-track, inside its parent
 //! group's, at its `Volume`, through its effects ([`mix`], `effects`). Every
@@ -39,6 +42,7 @@ use std::time::Duration;
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
 use kira::backend::Backend;
+use kira::effect::filter::{FilterBuilder, FilterHandle, FilterMode};
 use kira::listener::ListenerHandle;
 use kira::sound::PlaybackState;
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
@@ -50,7 +54,7 @@ use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Tween};
 use thiserror::Error;
 
 use effects::{AddEffects, EffectChain, Level, Meter, ZoneReverb};
-use mix::{Effect, EffectShape, Group, Reverb};
+use mix::{Effect, EffectShape, Group, Reverb, RollOff};
 pub use mix::{Monitor, REVERB_TYPES};
 
 /// Full volume within this many studs, unless a Sound says otherwise.
@@ -63,6 +67,9 @@ const MAX_ROLLOFF: f64 = 100_000.0;
 const MIN_ROLLOFF_SPAN: f32 = 0.001;
 /// How strongly a spatial sound moves between the ears. Kira's own default.
 const SPATIALIZATION_STRENGTH: f32 = 0.75;
+/// How long a spatial Sound's distance and wall changes take to apply, so
+/// they never click.
+const ATTENUATION_GLIDE: Duration = Duration::from_millis(60);
 
 #[derive(Debug, Error)]
 pub enum AudioError {
@@ -132,6 +139,9 @@ pub struct GameAudio {
     failed: bool,
     /// The editor Mixer's mute and solo, kept for when the output opens.
     monitor: Monitor,
+    /// The walls between each spatial Sound and the listener, as the host
+    /// last found them ([`set_walls`](Self::set_walls)).
+    walls: HashMap<InstanceId, u32>,
 }
 
 /// How loud the mix has been since the levels were last taken: peak
@@ -174,6 +184,7 @@ impl GameAudio {
             return update;
         };
         engine.monitor.clone_from(&self.monitor);
+        engine.walls.clone_from(&self.walls);
         engine.set_listener(listener);
         for action in actions {
             if let Err(err) = engine.apply(action, world, assets) {
@@ -182,6 +193,13 @@ impl GameAudio {
         }
         engine.sync(world, assets, &mut update);
         update
+    }
+
+    /// The solid parts between each spatial Sound and the listener (up to
+    /// [`mix::MAX_WALLS`]), found by the host's rays (`sim::Occlusion`).
+    /// A Sound left out has none. Applied from the next update.
+    pub fn set_walls(&mut self, walls: &HashMap<InstanceId, u32>) {
+        self.walls.clone_from(walls);
     }
 
     /// Moves the listener without starting or stopping anything. Used after
@@ -262,6 +280,7 @@ struct SoundProperties {
     spatial: bool,
     min_distance: f32,
     max_distance: f32,
+    roll_off: RollOff,
     /// `Sound.Position`, before an ancestor part replaces it.
     position: [f32; 3],
     /// The SoundGroup it plays through ([`mix::sound_group`]).
@@ -298,6 +317,7 @@ impl SoundProperties {
             spatial: flag("Spatial"),
             min_distance,
             max_distance,
+            roll_off: RollOff::of(sound),
             position: vector(sound),
             group: None,
             effects: Vec::new(),
@@ -308,7 +328,7 @@ impl SoundProperties {
     /// and its effects.
     fn read(world: &World, id: InstanceId, sound: &Instance) -> Self {
         let mut properties = Self::of(sound);
-        properties.position = emitter_position(world, id, properties.position);
+        properties.position = vector3(mix::emitter_position(world, id));
         properties.group = mix::sound_group(world, sound);
         properties.effects = mix::effects(world, id);
         properties
@@ -364,34 +384,11 @@ fn rolloff(min: f64, max: f64) -> (f32, f32) {
 /// Where a spatial Sound is heard from, in studs: the nearest ancestor
 /// Part, MeshPart or Terrain, or the Sound's own `Position`.
 pub fn source_position(world: &World, sound: InstanceId) -> Vector3 {
-    let fallback = world.get(sound).map(vector).unwrap_or([0.0, 0.0, 0.0]);
-    let [x, y, z] = emitter_position(world, sound, fallback);
-    Vector3::new(x, y, z)
+    mix::emitter_position(world, sound)
 }
 
-/// Where a spatial Sound is heard from: the nearest ancestor part, or its
-/// own `Position` when nothing above it has one.
-fn emitter_position(world: &World, sound: InstanceId, fallback: [f32; 3]) -> [f32; 3] {
-    let mut id = world.get(sound).and_then(|instance| instance.parent());
-    while let Some(current) = id {
-        let Some(instance) = world.get(current) else {
-            break;
-        };
-        if matches!(
-            instance.class(),
-            ClassName::Part
-                | ClassName::MeshPart
-                | ClassName::Seat
-                | ClassName::VehicleSeat
-                | ClassName::DamageZone
-                | ClassName::Terrain
-        ) && instance.property("Position").is_some()
-        {
-            return vector(instance);
-        }
-        id = instance.parent();
-    }
-    fallback
+fn vector3(position: Vector3) -> [f32; 3] {
+    [position.x, position.y, position.z]
 }
 
 /// Every Sound in the game, wherever it is.
@@ -414,6 +411,11 @@ struct Playback {
     settings: SoundProperties,
     /// The Mixer's gain on it (0 while solo leaves its group out).
     gain: f64,
+    /// A spatial Sound's low-pass for the walls in front of it.
+    muffler: Option<FilterHandle>,
+    /// What distance and walls last set: the track's amplitude and the
+    /// low-pass cutoff in hertz.
+    heard: (f32, f64),
     /// The group tracks' generation it was played on, for a Sound in a group.
     generation: u64,
 }
@@ -475,6 +477,8 @@ pub struct AudioEngine<B: Backend = DefaultBackend> {
     master_volume: f64,
     zone: ZoneMix,
     monitor: Monitor,
+    /// The walls in front of each spatial Sound ([`GameAudio::set_walls`]).
+    walls: HashMap<InstanceId, u32>,
 }
 
 impl AudioEngine {
@@ -536,6 +540,7 @@ where
                 fade_time: 0.0,
             },
             monitor: Monitor::default(),
+            walls: HashMap::new(),
         })
     }
 
@@ -626,6 +631,7 @@ where
                         spatial: false,
                         min_distance: DEFAULT_MIN_DISTANCE as f32,
                         max_distance: DEFAULT_MAX_DISTANCE as f32,
+                        roll_off: RollOff::default(),
                         position: [0.0, 0.0, 0.0],
                         group: None,
                         effects: Vec::new(),
@@ -683,6 +689,57 @@ where
         for (id, sound) in sounds(world) {
             let wanted = SoundProperties::read(world, id, sound);
             self.sync_one(id, wanted, assets, update);
+        }
+        self.attenuate();
+    }
+
+    /// How loud a spatial Sound is heard now, and its low-pass cutoff:
+    /// its `RollOffMode` at its distance from the listener, and the walls
+    /// in front of it.
+    fn heard(&self, id: InstanceId, settings: &SoundProperties) -> (f32, f64) {
+        let [x, y, z] = settings.position;
+        let listener = self.listener_position;
+        let distance =
+            ((x - listener.x).powi(2) + (y - listener.y).powi(2) + (z - listener.z).powi(2)).sqrt();
+        let gain = settings
+            .roll_off
+            .gain(distance, settings.min_distance, settings.max_distance);
+        let (kept, cutoff) = mix::muffle(self.walls.get(&id).copied().unwrap_or(0));
+        (gain * kept, cutoff)
+    }
+
+    /// Turns each spatial Sound's track to how loud it's [`heard`]
+    /// (Self::heard) from where the listener is now, gliding there.
+    fn attenuate(&mut self) {
+        let tween = Tween {
+            duration: ATTENUATION_GLIDE,
+            ..Tween::default()
+        };
+        let ids: Vec<InstanceId> = self.sounds.keys().copied().collect();
+        for id in ids {
+            let Some(playback) = self.sounds.get(&id) else {
+                continue;
+            };
+            if !playback.settings.spatial {
+                continue;
+            }
+            let heard = self.heard(id, &playback.settings);
+            let Some(playback) = self.sounds.get_mut(&id) else {
+                continue;
+            };
+            let (gain, cutoff) = heard;
+            if (amplitude_db(gain) - amplitude_db(playback.heard.0)).abs() > 0.05 {
+                if let SoundTrack::Spatial(track) = &mut playback.track {
+                    track.set_volume(Decibels(amplitude_db(gain)), tween);
+                }
+                playback.heard.0 = gain;
+            }
+            if cutoff != playback.heard.1 {
+                if let Some(muffler) = &mut playback.muffler {
+                    muffler.set_cutoff(cutoff, tween);
+                }
+                playback.heard.1 = cutoff;
+            }
         }
     }
 
@@ -846,8 +903,6 @@ where
             return;
         }
         let route_changed = wanted.spatial != playback.settings.spatial
-            || wanted.min_distance != playback.settings.min_distance
-            || wanted.max_distance != playback.settings.max_distance
             || wanted.group != playback.settings.group
             || wanted.effect_shapes() != playback.settings.effect_shapes()
             || generation != playback.generation;
@@ -926,16 +981,26 @@ where
             message,
         };
         let generation = self.generation_for(settings.group);
+        let heard = self.heard(instance, &settings);
         let parent = settings.group.and_then(|group| self.buses.get_mut(&group));
-        let (handle, track, chain, zone) = if settings.spatial {
+        let (handle, track, chain, zone, muffler, heard) = if settings.spatial {
+            // Distance is applied here each frame (`attenuate`), along the
+            // Sound's RollOffMode, so Kira only pans it.
             let mut builder = SpatialTrackBuilder::new()
                 .sound_capacity(4)
                 .distances(SpatialTrackDistances {
                     min_distance: settings.min_distance,
                     max_distance: settings.max_distance,
                 })
+                .attenuation_function(None)
+                .volume(Decibels(amplitude_db(heard.0)))
                 .spatialization_strength(SPATIALIZATION_STRENGTH);
             let chain = EffectChain::build(&mut builder, &settings.effects);
+            let muffler = builder.add_effect(
+                FilterBuilder::new()
+                    .mode(FilterMode::LowPass)
+                    .cutoff(heard.1),
+            );
             let zone = ZoneReverb::build(&mut builder, self.zone.reverb, self.zone.blend);
             let position = mint_vec(settings.position);
             let mut track = match parent {
@@ -948,7 +1013,14 @@ where
             }
             .map_err(|err| failed(err.to_string()))?;
             let handle = track.play(data).map_err(|err| failed(err.to_string()))?;
-            (handle, SoundTrack::Spatial(track), chain, Some(zone))
+            (
+                handle,
+                SoundTrack::Spatial(track),
+                chain,
+                Some(zone),
+                Some(muffler),
+                heard,
+            )
         } else {
             let mut builder = TrackBuilder::new().sound_capacity(4);
             let chain = EffectChain::build(&mut builder, &settings.effects);
@@ -958,7 +1030,14 @@ where
             }
             .map_err(|err| failed(err.to_string()))?;
             let handle = track.play(data).map_err(|err| failed(err.to_string()))?;
-            (handle, SoundTrack::Plain(track), chain, None)
+            (
+                handle,
+                SoundTrack::Plain(track),
+                chain,
+                None,
+                None,
+                (1.0, mix::OPEN_CUTOFF),
+            )
         };
         self.sounds.insert(
             instance,
@@ -969,6 +1048,8 @@ where
                 zone,
                 settings,
                 gain,
+                muffler,
+                heard,
                 generation,
             },
         );
@@ -1009,6 +1090,15 @@ where
 }
 
 /// `Volume` (an amplitude, 1 the file's own level) as Kira's decibels.
+/// An amplitude (0 to 1) in decibels, silence below -80 dB.
+fn amplitude_db(amplitude: f32) -> f32 {
+    if amplitude <= 1e-4 {
+        Decibels::SILENCE.0
+    } else {
+        20.0 * amplitude.log10()
+    }
+}
+
 fn decibels(volume: f64) -> Decibels {
     if volume <= 0.0 {
         Decibels::SILENCE
@@ -1147,24 +1237,6 @@ mod tests {
         ]
     }
 
-    /// Kira's linear distance curve: full at `min_distance`, silent at
-    /// `max_distance`, and a blend from 0 dB to -60 dB in between.
-    fn distance_gain(distance: f32, min_distance: f32, max_distance: f32) -> f32 {
-        let distance = distance.clamp(min_distance, max_distance);
-        let span = max_distance - min_distance;
-        let relative = if span <= f32::EPSILON {
-            1.0
-        } else {
-            (distance - min_distance) / span
-        };
-        let db = -60.0 * relative;
-        if db <= -60.0 {
-            0.0
-        } else {
-            10f32.powf(db / 20.0)
-        }
-    }
-
     /// Left and right ear multipliers, matching Kira's stereo pan.
     fn ear_gains(listener: Listener, emitter: [f32; 3]) -> (f32, f32) {
         const EAR_DISTANCE: f32 = 0.1;
@@ -1246,16 +1318,6 @@ mod tests {
     }
 
     #[test]
-    fn distance_gain_is_full_nearby_and_silent_past_the_max() {
-        assert_eq!(distance_gain(0.0, 10.0, 150.0), 1.0);
-        assert_eq!(distance_gain(10.0, 10.0, 150.0), 1.0);
-        assert_eq!(distance_gain(150.0, 10.0, 150.0), 0.0);
-        assert_eq!(distance_gain(1_000.0, 10.0, 150.0), 0.0);
-        let mid = distance_gain(80.0, 10.0, 150.0);
-        assert!((mid - 10f32.powf(-1.5)).abs() < 1e-4, "{mid}");
-    }
-
-    #[test]
     fn a_sound_on_the_right_is_louder_in_the_right_ear() {
         let listener = Listener::default();
         assert_near(
@@ -1308,15 +1370,17 @@ mod tests {
             )
             .unwrap();
         world.set_parent(sound, Some(folder)).unwrap();
-        let own = SoundProperties::of(world.get(sound).unwrap()).position;
         assert_eq!(
-            emitter_position(&world, sound, own),
+            SoundProperties::read(&world, sound, world.get(sound).unwrap()).position,
             [3.0, 4.0, 5.0],
             "the part wins over Sound.Position"
         );
 
         world.set_parent(sound, Some(world.workspace())).unwrap();
-        assert_eq!(emitter_position(&world, sound, own), [9.0, 9.0, 9.0]);
+        assert_eq!(
+            SoundProperties::read(&world, sound, world.get(sound).unwrap()).position,
+            [9.0, 9.0, 9.0]
+        );
         assert_eq!(source_position(&world, sound), Vector3::new(9.0, 9.0, 9.0));
     }
 

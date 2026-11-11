@@ -338,15 +338,16 @@ fn compile(
     shader.check()?;
     // Errors in these scopes are handed back here rather than to the
     // device's handler (which would end the program).
-    device.push_error_scope(wgpu::ErrorFilter::Internal);
-    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(shader.material()),
         source: wgpu::ShaderSource::Wgsl(Cow::Owned(module_source(shader.code()))),
     });
     let pipelines = pipelines_of(device, &module, layouts, samples);
-    let validation = ready(device.pop_error_scope()).flatten();
-    let internal = ready(device.pop_error_scope()).flatten();
+    // Scopes pop in the opposite order to the one they were pushed in.
+    let validation = ready(validation.pop()).flatten();
+    let internal = ready(internal.pop()).flatten();
     match validation.or(internal) {
         Some(err) => Err(shader.error(None, None, with_causes(&err))),
         None => Ok(pipelines),

@@ -197,8 +197,8 @@ fn the_tab_draws_a_mirrored_smooth_head_and_its_stack() {
         &folder.join("model-studio-modifiers.png"),
         egui::vec2(1000.0, 700.0),
         vec![Vec::new(); 3],
-        |ctx, render| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui, render| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = studio.show(ui, Some(render), &[], Snap::default(), true);
             });
         },

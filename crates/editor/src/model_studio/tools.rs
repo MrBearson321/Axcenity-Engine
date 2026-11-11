@@ -371,9 +371,8 @@ impl ModelStudio {
                 })
                 .flatten()
                 .collect();
-            let wheel = input.raw_scroll_delta.y;
-            input.raw_scroll_delta = egui::Vec2::ZERO;
-            input.smooth_scroll_delta = egui::Vec2::ZERO;
+            let wheel = crate::wheel::raw(input).y;
+            crate::wheel::take(input);
             (
                 typed,
                 shortcuts::consume(input, Action::EraseAmountDigit),

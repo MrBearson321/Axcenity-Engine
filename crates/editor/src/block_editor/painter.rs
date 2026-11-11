@@ -75,7 +75,7 @@ impl<'a> BlockPainter<'a> {
     }
 
     pub(super) fn code_galley(&self, ui: &egui::Ui, code: &str) -> std::sync::Arc<egui::Galley> {
-        ui.fonts(|fonts| {
+        ui.fonts_mut(|fonts| {
             fonts.layout_no_wrap(
                 code.to_owned(),
                 FontId::monospace(FONT_SIZE * self.z * 0.95),
@@ -85,7 +85,7 @@ impl<'a> BlockPainter<'a> {
     }
 
     pub(super) fn text_width(&self, ui: &egui::Ui, text: &str) -> f32 {
-        ui.fonts(|fonts| {
+        ui.fonts_mut(|fonts| {
             fonts
                 .layout_no_wrap(text.to_owned(), self.font(), Color32::WHITE)
                 .size()
@@ -856,7 +856,8 @@ impl<'a> BlockPainter<'a> {
                     rect,
                     egui::TextEdit::singleline(text)
                         .id(id)
-                        .frame(false)
+                        // No box: the block is drawn behind it (egui's usual margin kept).
+                        .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))
                         .font(self.font())
                         .text_color(Color32::WHITE)
                         .horizontal_align(egui::Align::Center)
@@ -1025,7 +1026,10 @@ impl<'a> BlockPainter<'a> {
                             rect,
                             egui::TextEdit::singleline(value)
                                 .id(id)
-                                .frame(false)
+                                // No box: the block is drawn behind it (egui's usual margin kept).
+                                .frame(
+                                    egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)),
+                                )
                                 .font(font)
                                 .text_color(INPUT_TEXT)
                                 .horizontal_align(egui::Align::Center)
@@ -1226,7 +1230,8 @@ impl<'a> BlockPainter<'a> {
             rect,
             egui::TextEdit::singleline(&mut text)
                 .id(id)
-                .frame(false)
+                // No box: the block is drawn behind it (egui's usual margin kept).
+                .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))
                 .font(font)
                 .text_color(INPUT_TEXT)
                 .horizontal_align(egui::Align::Center)

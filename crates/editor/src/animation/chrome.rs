@@ -19,7 +19,7 @@ impl AnimationStudio {
             && ctx
                 .input(|input| input.pointer.latest_pos())
                 .is_some_and(|pointer| rect.contains(pointer))
-            && !ctx.wants_keyboard_input()
+            && !ctx.egui_wants_keyboard_input()
     }
 
     /// Draws the Animation tab. `selected` is the Explorer's primary
@@ -61,18 +61,18 @@ impl AnimationStudio {
 
         let narrow = ui.available_width() < OUTLINE_BELOW;
         let used = self.used_files(project, world);
-        let (mut go, pick, new) = egui::TopBottomPanel::top("animation breadcrumb")
-            .show_inside(ui, |ui| {
+        let (mut go, pick, new) = egui::Panel::top("animation breadcrumb")
+            .show(ui, |ui| {
                 self.breadcrumb(ui, subject.as_ref(), narrow, &used)
             })
             .inner;
         if !narrow && let Some(subject) = &subject {
             let room = ui.available_width();
-            let clicked = egui::SidePanel::left("animation outline")
+            let clicked = egui::Panel::left("animation outline")
                 .resizable(true)
-                .default_width(OUTLINE_WIDTH)
-                .max_width(room * 0.35)
-                .show_inside(ui, |ui| {
+                .default_size(OUTLINE_WIDTH)
+                .max_size(room * 0.35)
+                .show(ui, |ui| {
                     egui::ScrollArea::vertical()
                         .id_salt("animation outline scroll")
                         .show(ui, |ui| self.outline(ui, subject))
@@ -103,7 +103,7 @@ impl AnimationStudio {
             });
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 let open = match self.view {
                     View::Clip => self.clip.doc.is_some(),
                     View::StateMachine => self.machine.doc.is_some(),

@@ -4,7 +4,7 @@ use crate::animation::graph::words;
 /// A combo box picking one of the project's `clips` (or none) for `current`.
 pub(super) fn clip_picker(
     ui: &mut egui::Ui,
-    id: impl std::hash::Hash,
+    id: impl std::hash::Hash + std::fmt::Debug,
     current: &mut String,
     clips: &[String],
 ) {

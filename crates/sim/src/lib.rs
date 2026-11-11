@@ -9,6 +9,7 @@
 //! The order is written down in `docs/architecture/frame-loop.md`.
 
 mod host;
+pub mod occlusion;
 mod schedule;
 mod steps;
 
@@ -34,6 +35,7 @@ use axcenity_script::ScriptRuntime;
 /// Debris.
 pub use axcenity_gameplay::script_runtime;
 pub use host::{FrameCtx, HostIo};
+pub use occlusion::Occlusion;
 pub use schedule::{Hosts, Schedule, Stage, Step};
 
 /// The game's simulation: what the steps of a frame work on.
@@ -51,6 +53,9 @@ pub struct Sim {
     pub animators: Animators,
     /// The project's models and sounds.
     pub assets: Assets,
+    /// The walls between each spatial Sound and the listener (roadmap
+    /// G8); hosts with audio step it and pass it on.
+    pub occlusion: Occlusion,
 }
 
 impl Sim {
@@ -67,6 +72,7 @@ impl Sim {
             agents,
             animators: Animators::with_ground(axcenity_character::foot_ground),
             assets,
+            occlusion: Occlusion::default(),
         }
     }
 

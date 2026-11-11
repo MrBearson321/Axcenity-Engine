@@ -164,8 +164,9 @@ mod tests {
                 &std::path::PathBuf::from(folder).join("sky-prompt.png"),
                 egui::vec2(700.0, 420.0),
                 vec![Vec::new(); 3],
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |_| {});
+                |ui| {
+                    let ctx = &ui.ctx().clone();
+                    egui::CentralPanel::default().show(ui, |_| {});
                     shown.confirm_sky = Some("assets/sky/noon.hdr".into());
                     shown.sky_prompt(ctx);
                 },
@@ -184,7 +185,10 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| app.sky_prompt(ctx));
+            let _ = crate::theme::run(&ctx, input, |ui| {
+                let ctx = &ui.ctx().clone();
+                app.sky_prompt(ctx)
+            });
         }
         assert_eq!(app.confirm_sky, None);
         assert_eq!(sky_image(&app), "assets/sky/noon.hdr");

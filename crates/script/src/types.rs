@@ -536,6 +536,7 @@ pub enum EnumType {
     ProximityPromptExclusivity,
     HumanoidStateType,
     ReverbType,
+    RollOffMode,
     Precipitation,
     SplineTangentMode,
     SplineFollowMode,
@@ -546,7 +547,7 @@ pub enum EnumType {
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 41] = [
+    pub const ALL: [EnumType; 42] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -581,6 +582,7 @@ impl EnumType {
         EnumType::ProximityPromptExclusivity,
         EnumType::HumanoidStateType,
         EnumType::ReverbType,
+        EnumType::RollOffMode,
         EnumType::Precipitation,
         EnumType::SplineTangentMode,
         EnumType::SplineFollowMode,
@@ -626,6 +628,7 @@ impl EnumType {
             EnumType::ProximityPromptExclusivity => "ProximityPromptExclusivity",
             EnumType::HumanoidStateType => "HumanoidStateType",
             EnumType::ReverbType => "ReverbType",
+            EnumType::RollOffMode => "RollOffMode",
             EnumType::Precipitation => "Precipitation",
             EnumType::SplineTangentMode => "SplineTangentMode",
             EnumType::SplineFollowMode => "SplineFollowMode",
@@ -679,6 +682,7 @@ impl EnumType {
             EnumType::CollisionFidelity => vec!["Box", "Hull", "PreciseConvexDecomposition"],
             // The room a ReverbZone sounds like (Phase 52).
             EnumType::ReverbType => axcenity_core::sound::REVERB_TYPES.to_vec(),
+            EnumType::RollOffMode => axcenity_core::sound::ROLL_OFF_MODES.to_vec(),
             // What a Weather lets fall (graphics Phase 27).
             EnumType::Precipitation => vec!["None", "Rain", "Snow"],
             // How a SplinePoint's handles are made (Phase 73).
@@ -826,6 +830,7 @@ impl LuaEnumItem {
             | EnumType::ProximityPromptExclusivity
             | EnumType::HumanoidStateType
             | EnumType::ReverbType
+            | EnumType::RollOffMode
             | EnumType::Precipitation
             | EnumType::SplineTangentMode
             | EnumType::SplineFollowMode

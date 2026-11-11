@@ -129,6 +129,13 @@ mod tests {
         images.sort();
         images.dedup();
         assert!(!images.is_empty(), "the helmet has textures");
+        // Its metal/rough and occlusion maps are channel textures; they
+        // count too.
+        let material = &model.primitives[0].material;
+        for texture in [&material.roughness_texture, &material.occlusion_texture] {
+            let image = Arc::as_ptr(&texture.as_ref().unwrap().image);
+            assert!(images.contains(&image), "channel textures are counted");
+        }
         assert_eq!(memory.textures.count, images.len());
         let bytes: usize = model
             .primitives

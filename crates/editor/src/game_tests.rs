@@ -589,8 +589,8 @@ mod tests {
         let size = egui::vec2(260.0, 400.0);
         let mut asked = None;
         let mut fit = None;
-        let mut draw = |ctx: &egui::Context| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let mut draw = |ui: &mut egui::Ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let room = ui.max_rect();
                 asked = tests.show(ui, true);
                 fit = Some((ui.min_rect(), room));
@@ -601,7 +601,7 @@ mod tests {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
             };
-            let _ = ctx.run(input, &mut draw);
+            let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
         }
         if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
             let path = PathBuf::from(snapshots).join("tests-panel.png");

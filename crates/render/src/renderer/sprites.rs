@@ -125,15 +125,15 @@ impl SpritePass {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let white_group = texture_group(device, &texture_layout, white, &sampler);
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sprites"),
-            bind_group_layouts: &[&uniform_layout, &texture_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&uniform_layout), Some(&texture_layout)],
+            immediate_size: 0,
         });
         let pipeline = sprite_pipeline(device, &layout, samples);
         let capacity = 256;
@@ -310,19 +310,19 @@ fn sprite_pipeline(
             module: &shader,
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
-            buffers: &[wgpu::VertexBufferLayout {
+            buffers: &[Some(wgpu::VertexBufferLayout {
                 array_stride: size_of::<SpriteRaw>() as u64,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &wgpu::vertex_attr_array![
                     0 => Float32x4, 1 => Float32x4, 2 => Float32x4
                 ],
-            }],
+            })],
         },
         primitive: wgpu::PrimitiveState::default(),
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::LessEqual,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -343,7 +343,7 @@ fn sprite_pipeline(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }

@@ -42,8 +42,8 @@ fn the_drawer_lists_what_the_clip_moves_not_its_animator() {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
             ..Default::default()
         };
-        output = Some(ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| app.animation_pane(ui, None));
+        output = Some(crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| app.animation_pane(ui, None));
         }));
     }
     let texts = drawn_texts(&output.unwrap());

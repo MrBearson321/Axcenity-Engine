@@ -14,15 +14,15 @@ const WEAPONS: &str = "assets/data/weapons.data.json";
 
 /// Draws the Data Table tab a few times.
 fn draw(app: &mut EditorApp, ctx: &egui::Context, name: &str) {
-    let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |ui| app.data_table_pane(ui));
+    let mut draw = |ui: &mut egui::Ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.data_table_pane(ui));
     };
     for _ in 0..3 {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE)),
             ..Default::default()
         };
-        let _ = ctx.run(input, &mut draw);
+        let _ = crate::theme::run(ctx, input, |ui| draw(ui));
     }
     if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         crate::snapshot::snapshot(

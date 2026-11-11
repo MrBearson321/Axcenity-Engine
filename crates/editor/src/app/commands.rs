@@ -15,11 +15,11 @@ const LABEL_LENGTH: usize = 40;
 impl EditorApp {
     /// The Console: the command line at the bottom, the log above it.
     pub(super) fn console_pane(&mut self, ui: &mut egui::Ui) {
-        egui::TopBottomPanel::bottom("console command line")
+        egui::Panel::bottom("console command line")
             .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 4)))
             .show_separator_line(false)
             .resizable(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 widgets::divider(ui);
                 ui.add_space(4.0);
                 let world = shown(&self.world, &self.play);

@@ -37,15 +37,28 @@ impl EditorApp {
         self.begin_open_in_level(ctx, folder, None);
     }
     /// [`Self::begin_open`], in the level `level` (`None`: the start level).
+    /// A project from an older Axcenity waits for "Upgrade this project?",
+    /// and one this version can't open is refused (`project_upgrade.rs`).
     pub(super) fn begin_open_in_level(
         &mut self,
         ctx: &egui::Context,
         folder: &Path,
         level: Option<String>,
     ) {
-        if self.loading.is_some() {
+        if self.loading.is_some() || self.upgrade_prompt.is_some() {
             return;
         }
+        if self.may_open(folder, level.as_deref()) {
+            self.start_loading(ctx, folder, level);
+        }
+    }
+    /// Starts the loading thread for `folder`.
+    pub(super) fn start_loading(
+        &mut self,
+        ctx: &egui::Context,
+        folder: &Path,
+        level: Option<String>,
+    ) {
         let mut terrain = TerrainCache::new();
         terrain.view = self.viewport.terrain.view;
         terrain.detail_distance = self.viewport.terrain.detail_distance;
@@ -94,15 +107,16 @@ impl EditorApp {
         false
     }
     /// Only the header and the loading screen, while a project loads.
-    pub(super) fn loading_frame(&mut self, ctx: &egui::Context) {
+    pub(super) fn loading_frame(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
         let palette = theme::palette(ctx);
-        egui::TopBottomPanel::top("menu bar")
-            .exact_height(window_frame::HEIGHT)
+        egui::Panel::top("menu bar")
+            .exact_size(window_frame::HEIGHT)
             .frame(egui::Frame::new().fill(palette.app_bg))
-            .show(ctx, |ui| self.title_bar(ui));
+            .show(ui, |ui| self.title_bar(ui));
         let cancel = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let loading = self.loading.as_ref().expect("only drawn while loading");
                 let mark = self.brand.as_ref().map(|brand| brand.mark());
                 loading.show(ui, ui.max_rect(), mark)
@@ -128,7 +142,7 @@ impl EditorApp {
             self.cover_until = None;
             return;
         }
-        let mut rect = ctx.screen_rect();
+        let mut rect = ctx.content_rect();
         rect.min.y += window_frame::HEIGHT;
         let name = self
             .project
@@ -145,7 +159,7 @@ impl EditorApp {
             });
         ctx.request_repaint();
     }
-    fn open_failed(&mut self, folder: &Path, err: &str) {
+    pub(super) fn open_failed(&mut self, folder: &Path, err: &str) {
         self.output.error(format!(
             "Could not open the project in `{}`: {err}",
             folder.display()
@@ -159,16 +173,7 @@ impl EditorApp {
         level: Option<String>,
     ) {
         if let Some(from) = project.migrated_from {
-            let kept = project
-                .migration_backup
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| axcenity_project::PREVIOUS_FORMAT_DIR.to_owned());
-            self.output.info(format!(
-                "Upgraded \"{}\" from project format {from} to {}. The previous files are kept in `{kept}`.",
-                project.manifest.name,
-                axcenity_project::FORMAT_VERSION,
-            ));
+            self.report_upgrade(&project, from);
         }
 
         // The last project's cooking stops when it's dropped here.
@@ -1334,10 +1339,11 @@ impl EditorApp {
     }
     /// Fills the window under the menu bar with the start screen, and opens
     /// what's picked there.
-    pub(super) fn start_screen(&mut self, ctx: &egui::Context) {
+    pub(super) fn start_screen(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
         let picked = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let brand = self
                     .brand
                     .as_ref()

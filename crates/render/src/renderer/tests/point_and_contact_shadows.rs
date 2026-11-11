@@ -320,7 +320,7 @@ fn contact_shadows_alone_draw_the_prepass_but_not_ambient_occlusion() {
     assert_eq!(renderer.scene.occlusion_targets_alive(), 1);
     renderer.set_graphics(&settings(Off, false));
     renderer.render(&list).unwrap();
-    device.poll(wgpu::PollType::Wait).unwrap();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     assert_eq!(renderer.scene.occlusion_targets_alive(), 0);
     assert_eq!(renderer.stats().draw_calls, plain);
 }

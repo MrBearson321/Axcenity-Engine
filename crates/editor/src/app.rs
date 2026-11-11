@@ -55,6 +55,7 @@ mod nav_overlay;
 mod plugins;
 mod prefabs;
 mod probes;
+mod project_upgrade;
 mod search;
 mod sequencer;
 mod session;
@@ -215,6 +216,8 @@ pub struct EditorApp {
     build: BuildSettings,
     /// Something waiting for an answer to "Save changes?".
     asking: Option<Discard>,
+    /// An older project waiting for "Upgrade this project?".
+    upgrade_prompt: Option<project_upgrade::UpgradePrompt>,
     /// Set once closing has been allowed, so the window's close request
     /// isn't stopped again.
     closing: bool,
@@ -586,13 +589,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
     }
 
     /// A tab's right-click menu: egui_dock's Float and Close, and a way home.
-    fn context_menu(
-        &mut self,
-        ui: &mut egui::Ui,
-        pane: &mut Pane,
-        _surface: egui_dock::SurfaceIndex,
-        _node: egui_dock::NodeIndex,
-    ) {
+    fn context_menu(&mut self, ui: &mut egui::Ui, pane: &mut Pane, _path: egui_dock::NodePath) {
         if self.floating.is_some() && ui.button("Dock in Main Window").clicked() {
             self.app.pending_main_dock = Some(*pane);
             ui.close();
@@ -836,6 +833,7 @@ impl EditorApp {
             build: BuildSettings::default(),
             pending_emits: Vec::new(),
             asking: None,
+            upgrade_prompt: None,
             closing: false,
             output: Output::default(),
             console: Console::default(),
@@ -1061,17 +1059,19 @@ impl eframe::App for EditorApp {
     }
 
     /// Called by eframe to draw each frame (only when something changed,
-    /// such as mouse movement, unless a frame is requested).
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    /// such as mouse movement, unless a frame is requested). `ui` covers
+    /// the whole window.
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         // While dx serves the editor, through the newest code it patched in.
         let patched = self.rebuilds.patched_frames();
-        hot_patch::call(patched, || self.frame(ctx, frame.wgpu_render_state()));
+        hot_patch::call(patched, || self.frame(ui, frame.wgpu_render_state()));
         self.pace_frame();
         // Relaunching into a rebuilt editor saves the settings first.
-        self.launch(ctx, frame);
+        self.launch(&ctx, frame);
         // Tests call `frame` without a window, so the window's resize edges
         // live here.
-        window_frame::edges(ctx);
+        window_frame::edges(&ctx);
     }
 
     /// Saves the look, the layout and the recent projects. eframe calls
@@ -1232,7 +1232,11 @@ impl EditorApp {
     /// One frame: game time during Play, then the menu bar, the ribbon and
     /// the dock (or the start screen), then windows and overlays. Separate
     /// from `update` so tests can draw it without a window.
-    pub(crate) fn frame(&mut self, ctx: &egui::Context, render_state: Option<&RenderState>) {
+    /// One frame of the editor, drawn into `ui`, which covers the window.
+    pub(crate) fn frame(&mut self, ui: &mut egui::Ui, render_state: Option<&RenderState>) {
+        // `Context` is a cheap shared handle; this copy leaves `ui` free to
+        // lay out the panels below.
+        let ctx = &ui.ctx().clone();
         color_palette::install(ctx, &self.colors);
         // The window's close button: stop it and ask first if there are
         // unsaved changes. `closing` lets the close through once allowed.
@@ -1262,7 +1266,7 @@ impl EditorApp {
         self.engine_frame(ctx);
         // While a project loads, only the header and the loading screen.
         if self.follow_loading(ctx) {
-            self.loading_frame(ctx);
+            self.loading_frame(ui);
             return;
         }
         // A texture dropped on or set on something is read on other threads,
@@ -1329,12 +1333,12 @@ impl EditorApp {
             let (events, modifiers, focused) =
                 ctx.input(|input| (input.events.clone(), input.modifiers, input.focused));
             // F9 opens the Developer Console, which then has the keys.
-            let console = self.type_dev_console(&events, ctx.wants_keyboard_input());
-            self.type_chat(&events, ctx.wants_keyboard_input() || console);
+            let console = self.type_dev_console(&events, ctx.egui_wants_keyboard_input());
+            self.type_chat(&events, ctx.egui_wants_keyboard_input() || console);
             let typing = self.focused_text.is_some()
                 || self.chat_typing.is_some()
                 || console
-                || ctx.wants_keyboard_input();
+                || ctx.egui_wants_keyboard_input();
             if let Some(id) = self.focused_text
                 && let Some(session) = &mut self.play
             {
@@ -1436,17 +1440,17 @@ impl EditorApp {
         self.update_warnings();
         let palette = theme::palette(ctx);
         // The header is the window's only title bar (see `window_frame.rs`).
-        egui::TopBottomPanel::top("menu bar")
-            .exact_height(window_frame::HEIGHT)
+        egui::Panel::top("menu bar")
+            .exact_size(window_frame::HEIGHT)
             .frame(egui::Frame::new().fill(palette.app_bg))
-            .show(ctx, |ui| self.title_bar(ui));
+            .show(ui, |ui| self.title_bar(ui));
         if has_project {
             // The toolbar draws its own bands: the tabs on the app
             // background, the ribbon on a panel's (see `chrome.rs`).
-            egui::TopBottomPanel::top("toolbar")
+            egui::Panel::top("toolbar")
                 .frame(egui::Frame::new().fill(palette.app_bg))
                 .show_separator_line(false)
-                .show(ctx, |ui| self.toolbar(ui));
+                .show(ui, |ui| self.toolbar(ui));
         }
         // Every panel is a tab in the docking area, which fills the rest of
         // the window (see `layout.rs`). Each panel acts on what was done in
@@ -1466,19 +1470,19 @@ impl EditorApp {
             egui_dock::DockArea::new(&mut dock)
                 .id(floating::main_area(self.layout.dock_generation))
                 .style(layout::style(
-                    &ctx.style(),
+                    &ctx.global_style(),
                     &palette,
                     ctx.pixels_per_point(),
                 ))
                 .show_leaf_collapse_buttons(false)
                 .show_leaf_close_all_buttons(false)
-                .show(
-                    ctx,
+                .show_inside(
+                    ui,
                     &mut DockViewer {
                         app: self,
                         render_state,
                         viewport: &mut output,
-                        visuals: ctx.style().visuals.clone(),
+                        visuals: ctx.global_style().visuals.clone(),
                         ctx: ctx.clone(),
                         floating: None,
                     },
@@ -1492,7 +1496,7 @@ impl EditorApp {
                 ctx.request_repaint();
             }
         } else {
-            self.start_screen(ctx);
+            self.start_screen(ui);
         }
         if let Some(clicked) = output.clicked {
             if self.tool == Tool::Paint
@@ -1594,7 +1598,7 @@ impl EditorApp {
 
         // A drag or a typed value is one undo step: it ends when the mouse
         // is let go and no text box is being typed in.
-        let busy = ctx.is_using_pointer() || ctx.wants_keyboard_input();
+        let busy = ctx.egui_is_using_pointer() || ctx.egui_wants_keyboard_input();
         if output.drag_released || (!busy && !self.viewport.is_dragging()) {
             self.history.seal();
             self.ui_drag_baselines.clear();
@@ -1626,6 +1630,7 @@ impl EditorApp {
         self.save_layout_dialog(ctx);
         self.references_window(ctx);
         self.unsaved_changes_prompt(ctx);
+        self.upgrade_prompt(ctx);
         self.delete_script_prompt(ctx);
         self.sky_prompt(ctx);
         self.import_dropped(ctx);
