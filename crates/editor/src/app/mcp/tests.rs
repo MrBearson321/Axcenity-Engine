@@ -1301,7 +1301,11 @@ fn asset_find_lists_assets_by_kind_name_and_use() {
             && text.contains("\nassets/textures/moss.png · texture · "),
         "{text}"
     );
-    let materials = ok(host, "asset_find", json!({"kind": "material", "name": "moss"}));
+    let materials = ok(
+        host,
+        "asset_find",
+        json!({"kind": "material", "name": "moss"}),
+    );
     assert!(materials.starts_with("1 asset\n"), "{materials}");
     // Full detail says what uses each one.
     let full = ok(
@@ -1319,4 +1323,118 @@ fn asset_find_lists_assets_by_kind_name_and_use() {
     let unused = ok(host, "asset_find", json!({"unused": true}));
     assert!(unused.contains("Spare.material.json"), "{unused}");
     assert!(!unused.contains("moss.png"), "{unused}");
+}
+
+/// A folder outside the project with `files` copied from the examples, as
+/// a user's downloads would be.
+fn import_folder(test: &str, files: &[&str]) -> std::path::PathBuf {
+    let folder = std::env::temp_dir().join(format!("axcenity-mcp-import-{test}"));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    for file in files {
+        let from = examples.join(file);
+        std::fs::copy(&from, folder.join(from.file_name().unwrap())).unwrap();
+    }
+    folder
+}
+
+#[test]
+fn asset_import_copies_files_only_from_allowed_folders_as_an_undo_step() {
+    let mut opened = open("hello-part", "mcp-import");
+    let downloads = import_folder(
+        "texture",
+        &["hello-material-graph/assets/textures/moss.png"],
+    );
+    let host = &mut opened.app;
+    let png = downloads.join("moss.png");
+    let png_text = png.to_string_lossy().into_owned();
+    // No allowed folder: nothing is read.
+    let refused = call(host, "asset_import", json!({"file": png_text})).unwrap_err();
+    assert_eq!(refused.code, Code::NotAllowed, "{refused}");
+    assert!(refused.to_string().contains("--allow-import"), "{refused}");
+    // A file outside the allowed folders, even through `..`, is refused.
+    host.session.import_folders = vec![downloads.clone()];
+    let outside = downloads.join("..").join("elsewhere.png");
+    std::fs::write(&outside, b"not really").unwrap();
+    let refused = call(
+        host,
+        "asset_import",
+        json!({"file": outside.to_string_lossy()}),
+    )
+    .unwrap_err();
+    let _ = std::fs::remove_file(&outside);
+    assert_eq!(refused.code, Code::NotAllowed, "{refused}");
+    // Only a model is placed.
+    let wrong = call(
+        host,
+        "asset_import",
+        json!({"file": png_text, "position": [0, 5, 0]}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadArgs, "{wrong}");
+    // A file that isn't an asset is refused before anything happens.
+    let notes = downloads.join("notes.txt");
+    std::fs::write(&notes, "hello").unwrap();
+    let wrong = call(
+        host,
+        "asset_import",
+        json!({"file": notes.to_string_lossy()}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::Unsupported, "{wrong}");
+    // A texture is copied into the project, as one undo step.
+    let text = ok(host, "asset_import", json!({"file": png_text}));
+    assert!(text.starts_with("imported assets/textures/moss"), "{text}");
+    assert!(text.contains("undo \"AI (test): Import moss\""), "{text}");
+    let project = opened.folder.clone();
+    let copied = text
+        .trim_start_matches("imported ")
+        .split(" · ")
+        .next()
+        .unwrap()
+        .to_owned();
+    assert!(project.join(&copied).is_file(), "{copied}");
+    assert!(ok(host, "asset_find", json!({"kind": "texture"})).contains(&copied));
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(!project.join(&copied).exists(), "undo takes the copy away");
+    ok(host, "history", json!({"action": "redo"}));
+    assert!(project.join(&copied).is_file(), "redo puts it back");
+    let _ = std::fs::remove_dir_all(&downloads);
+}
+
+#[test]
+fn asset_import_places_a_model_where_asked() {
+    let mut opened = open("hello-part", "mcp-import-model");
+    let downloads = import_folder("model", &["hello-roads/assets/models/rock.glb"]);
+    let host = &mut opened.app;
+    host.session.import_folders = vec![downloads.clone()];
+    let before = objects(host);
+    let text = ok(
+        host,
+        "asset_import",
+        json!({"file": downloads.join("rock.glb").to_string_lossy(), "position": [10, 4, -6]}),
+    );
+    assert!(text.starts_with("imported "), "{text}");
+    assert!(text.contains(" · placed "), "{text}");
+    assert!(objects(host) > before, "{text}");
+    // Somewhere under the placed model, a part sits where it was asked.
+    let world = &host.app.world;
+    let at = world.descendants_iter(world.workspace()).find_map(|id| {
+        match world.get(id)?.property("Position") {
+            Some(axcenity_core::Value::Vector3(at))
+                if (at.x - 10.0).abs() < 1e-3 && (at.z + 6.0).abs() < 1e-3 =>
+            {
+                Some(*at)
+            }
+            _ => None,
+        }
+    });
+    assert!(at.is_some(), "{text}");
+    // One undo step takes the objects and the copied files away.
+    ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(objects(host), before);
+    let left = ok(host, "asset_find", json!({"name": "rock"}));
+    assert!(left.starts_with("0 assets"), "{left}");
+    let _ = std::fs::remove_dir_all(&downloads);
 }

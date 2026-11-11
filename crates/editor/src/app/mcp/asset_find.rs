@@ -74,7 +74,10 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
     let name = args.str("name").map(str::to_lowercase);
     let mut found: Vec<AssetEntry> = scan(&folder)
         .into_iter()
-        .filter(|entry| args.str("kind").is_none_or(|kind| kind_name(entry.kind) == kind))
+        .filter(|entry| {
+            args.str("kind")
+                .is_none_or(|kind| kind_name(entry.kind) == kind)
+        })
         .filter(|entry| {
             name.as_ref()
                 .is_none_or(|name| entry.path.to_lowercase().contains(name))
@@ -82,8 +85,7 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
         .collect();
     if args.bool("unused") == Some(true) {
         let paths: Vec<String> = found.iter().map(|entry| entry.path.clone()).collect();
-        let unused =
-            axcenity_project::unused_assets(&folder, &app.world, level.as_deref(), &paths);
+        let unused = axcenity_project::unused_assets(&folder, &app.world, level.as_deref(), &paths);
         found.retain(|entry| unused.contains(&entry.path));
     }
     let detail = args.detail(Detail::Std);
@@ -121,13 +123,13 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
                 out.push_str("\n  used by nothing");
             }
             for reference in references.iter().take(MAX_REFERENCES) {
-                out.push_str(&format!("\n  used by {} ({})", reference.owner, reference.what));
+                out.push_str(&format!(
+                    "\n  used by {} ({})",
+                    reference.owner, reference.what
+                ));
             }
             if references.len() > MAX_REFERENCES {
-                out.push_str(&format!(
-                    "\n  … {} more",
-                    references.len() - MAX_REFERENCES
-                ));
+                out.push_str(&format!("\n  … {} more", references.len() - MAX_REFERENCES));
             }
         }
     }
