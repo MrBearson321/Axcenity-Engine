@@ -58,6 +58,11 @@ fn weighted(a: f32, wa: f32, b: f32, wb: f32) -> f32 {
 }
 
 /// The contact hook for colliders with weights.
+///
+/// It must only set what depends on the two colliders, not on where they
+/// are: rapier keeps a pair's contacts (and what this set) for as long as
+/// the pair barely moves, without calling it again (our patch,
+/// vendor/README.md).
 pub(crate) struct Weighted;
 
 impl PhysicsHooks for Weighted {

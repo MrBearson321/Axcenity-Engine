@@ -1021,3 +1021,37 @@ fn a_heavy_block_on_a_short_stack_stays_up() {
         );
     }
 }
+
+/// Ten Ice blocks stack as well as ten Plastic ones. Ice's friction weight
+/// turns on the contact hook, and rapier didn't keep hooked pairs' contacts
+/// between steps, so the Ice stack toppled (vendor/README.md).
+#[test]
+fn a_stack_of_ice_blocks_stands_like_plastic() {
+    let top_of = |material: &str| {
+        let (mut world, _) = world_with_floor();
+        let mut top = None;
+        for i in 0..10 {
+            let block = part(&mut world, Vector3::new(0.0, 0.5 + i as f32, 0.0), false);
+            set(&mut world, block, "Size", vector(1.0, 1.0, 1.0));
+            set(
+                &mut world,
+                block,
+                "Material",
+                Value::Material(Material::from_name(material).unwrap()),
+            );
+            top = Some(block);
+        }
+        let mut physics = Physics::new();
+        run(&mut physics, &mut world, 10.0, 60.0);
+        position(&world, top.unwrap())
+    };
+    let (ice, plastic) = (top_of("Ice"), top_of("Plastic"));
+    assert!(
+        ice.y > 8.5 && ice.x.hypot(ice.z) < 0.3,
+        "the Ice stack stands: its top is at {ice:?}"
+    );
+    assert!(
+        (ice.y - plastic.y).abs() < 0.05,
+        "as high as Plastic's: {ice:?} and {plastic:?}"
+    );
+}

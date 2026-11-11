@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Patched copies of dependencies (vendor/README.md), not ours to lint.
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.2.0-alpha.1"
@@ -261,3 +263,8 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = "debuginfo"
+
+# rapier with one Axcenity fix: pairs whose contact hook only sets friction
+# and restitution keep their contacts between steps (vendor/README.md).
+[patch.crates-io]
+rapier3d = { path = "vendor/rapier3d" }
