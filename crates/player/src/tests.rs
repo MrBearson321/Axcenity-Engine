@@ -1484,29 +1484,79 @@ fn a_material_variant_saves_reloads_and_exports_with_its_material_files() {
     let _ = fs::remove_dir_all(&exported);
 }
 
+/// The example `name`, opened from a copy with its scripts started. The
+/// copy is deleted once it's open: use [`start_example_in`] to keep it for
+/// assets that load later.
 pub(super) fn start_example(name: &str) -> (World, ScriptRuntime) {
     let (world, scripts, _) = start_example_in(name);
     (world, scripts)
 }
 
-/// Like [`start_example`], with the folder of the copy it opened.
-pub(super) fn start_example_in(name: &str) -> (World, ScriptRuntime, PathBuf) {
+/// Like [`start_example`], with the copy it opened, which is deleted when
+/// it's dropped.
+pub(super) fn start_example_in(name: &str) -> (World, ScriptRuntime, TempCopy) {
     let example = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples")
         .join(name);
     // A copy, since opening a project from an older format upgrades it.
-    let folder = std::env::temp_dir().join(format!(
-        "axcenity-player-{name}-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&folder);
-    copy_folder(&example, &folder);
+    let folder = TempCopy::of(
+        &example,
+        &format!(
+            "axcenity-player-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ),
+    );
     let project = axcenity_project::load(&folder).unwrap();
     let mut world = project.world;
     let mut scripts = axcenity_sim::script_runtime();
     start_scripts(&mut scripts, &mut world, &project.scripts);
     (world, scripts, folder)
+}
+
+/// A copy of a project for one test, in the temp folder, deleted when it's
+/// dropped: at the end of the test, or as a failing test unwinds. The
+/// examples' copies add up to gigabytes a run if they're left behind.
+pub(super) struct TempCopy(PathBuf);
+
+impl TempCopy {
+    /// The project files in `from` (see [`copy_folder`]), copied to the
+    /// folder `name` in the temp folder, replacing what was there.
+    pub(super) fn of(from: &Path, name: &str) -> Self {
+        let folder = std::env::temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&folder);
+        copy_folder(from, &folder);
+        Self(folder)
+    }
+}
+
+// `Deref` lets a `TempCopy` be used wherever a `&Path` is, as in
+// `folder.join("saves")` or `load(&folder)`.
+impl std::ops::Deref for TempCopy {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TempCopy {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+// With this, `&TempCopy` turns into a `PathBuf`, as `Assets::new` takes.
+impl AsRef<std::ffi::OsStr> for TempCopy {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl Drop for TempCopy {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 /// Copies the project files in `from` to `to`, leaving out `.axcenity`.
@@ -2460,12 +2510,12 @@ fn files_in(folder: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
 
 /// hello-saves, opened from a copy as the player opens it, with its slots in
 /// `saves` instead of the player's data folder.
-fn start_hello_saves(copy: &str, saves: &Path) -> (World, ScriptRuntime, PathBuf) {
+fn start_hello_saves(copy: &str, saves: &Path) -> (World, ScriptRuntime, TempCopy) {
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-saves");
-    let folder =
-        std::env::temp_dir().join(format!("axcenity-player-{copy}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&folder);
-    copy_folder(&example, &folder);
+    let folder = TempCopy::of(
+        &example,
+        &format!("axcenity-player-{copy}-{}", std::process::id()),
+    );
     let project = axcenity_project::load(&folder).unwrap();
     let mut world = project.world;
     let mut scripts = axcenity_sim::script_runtime();
@@ -2580,7 +2630,7 @@ fn hello_saves_saves_loads_and_restores_its_checkpoint_from_lua_and_blocks_outsi
     assert_eq!(script_lines(&mut scripts), Vec::<String>::new());
 
     // The next run of the game starts from slot 1, with its checkpoint.
-    let (world, mut scripts, _) = start_hello_saves("hello-saves-again", &saves);
+    let (world, mut scripts, _copy) = start_hello_saves("hello-saves-again", &saves);
     assert_eq!(script_lines(&mut scripts), ["Loaded slot 1: 2 coins"]);
     assert_eq!(coin(&world, 1), Some(Value::Number(1.0)));
     assert_eq!(coin(&world, 3), Some(Value::Number(0.0)));
@@ -2595,7 +2645,7 @@ fn hello_saves_loading_a_missing_slot_from_blocks_fails_and_leaves_the_world_alo
     let saves =
         std::env::temp_dir().join(format!("axcenity-player-no-saves-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&saves);
-    let (mut world, mut scripts, _) = start_hello_saves("hello-saves-missing", &saves);
+    let (mut world, mut scripts, _copy) = start_hello_saves("hello-saves-missing", &saves);
     script_lines(&mut scripts);
     let before = axcenity_save::snapshot(&world);
     for pressed in [true, false] {

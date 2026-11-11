@@ -48,6 +48,7 @@ mod layouts;
 mod levels;
 mod material_files;
 mod material_tab;
+pub(crate) mod mcp;
 mod mixer;
 mod model_studio;
 mod nav_overlay;

@@ -13,20 +13,22 @@ use axcenity_render::{
 use axcenity_scene::CameraView;
 
 use super::tests::{
-    REFERENCE_TOLERANCE, difference_from, run_until, start_example_in, test_gpu, write_png,
+    REFERENCE_TOLERANCE, TempCopy, difference_from, run_until, start_example_in, test_gpu,
+    write_png,
 };
 use super::*;
 
 pub(super) const SIZE: (u32, u32) = (480, 270);
 
-/// hello-graphics after its scripts' first second, with its assets and
-/// the player's starting camera.
-fn hello_graphics() -> (World, ScriptRuntime, Assets, FlyCamera) {
+/// hello-graphics after its scripts' first second, with its assets, the
+/// player's starting camera, and the copy the assets load from (keep it
+/// until they're drawn).
+fn hello_graphics() -> (World, ScriptRuntime, Assets, FlyCamera, TempCopy) {
     let (mut world, mut scripts, folder) = start_example_in("hello-graphics");
     let (mut physics, mut clock) = (Physics::new(), 0);
     run_until(&mut world, &mut scripts, &mut physics, &mut clock, 1.0);
     let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
-    (world, scripts, Assets::new(&folder), camera)
+    (world, scripts, Assets::new(&folder), camera, folder)
 }
 
 /// `list` drawn by `renderer`, as RGBA rows. Models load the first time
@@ -115,7 +117,7 @@ fn hello_graphics_matches_each_presets_reference() {
     let Some((device, queue)) = test_gpu() else {
         return;
     };
-    let (world, _scripts, assets, camera) = hello_graphics();
+    let (world, _scripts, assets, camera, _copy) = hello_graphics();
     let write = std::env::var_os("AXCENITY_WRITE_REFERENCES").is_some();
     let mut frames = Vec::new();
     for quality in Quality::ALL {
@@ -155,7 +157,7 @@ fn lighting_changes_move_every_kind_of_material_the_same_way() {
     let Some((device, queue)) = test_gpu() else {
         return;
     };
-    let (mut world, _scripts, assets, camera) = hello_graphics();
+    let (mut world, _scripts, assets, camera, _copy) = hello_graphics();
     let names = ["Metal", "Plastic", "Glass", "PbrPanel", "Tiled"];
     let at = pixels_of(&world, &camera, &names);
     for (name, at) in names.iter().zip(&at) {
@@ -227,7 +229,7 @@ fn a_local_script_changes_shadows_anti_aliasing_exposure_and_tone_mapping() {
     let Some((device, queue)) = test_gpu() else {
         return;
     };
-    let (mut world, mut scripts, assets, camera) = hello_graphics();
+    let (mut world, mut scripts, assets, camera, _copy) = hello_graphics();
     let data = std::env::temp_dir().join(format!("axcenity-graphics-data-{}", std::process::id()));
     let _ = fs::remove_dir_all(&data);
     let mut renderer = TextureRenderer::new(&device, &queue, 160, 90);
@@ -287,7 +289,7 @@ fn a_gpu_that_cant_do_ultra_draws_hello_graphics_with_fallbacks_and_notes() {
     let Some((device, queue)) = test_gpu() else {
         return;
     };
-    let (world, _scripts, assets, camera) = hello_graphics();
+    let (world, _scripts, assets, camera, _copy) = hello_graphics();
     let mut renderer = TextureRenderer::new(&device, &queue, SIZE.0, SIZE.1);
     renderer.set_graphics(&GraphicsSettings::preset(Quality::Ultra));
     let full = frame(&mut renderer, &world, &assets, &camera);

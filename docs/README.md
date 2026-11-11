@@ -26,6 +26,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Build speed, test commands, or nextest settings | [development.md](development.md) |
 | Scope and priorities: CI (off on purpose), target platforms, determinism, the Vector3 caveat, dedicated hosting, and the development policy | [development-policy.md](development-policy.md) |
 | Whole-frame benchmarks, the S10k scene, `--bench`, profiler spans and Tracy | [benchmarks.md](benchmarks.md) |
+| How Axcenity compares with Unity, Unreal, Roblox Studio, Godot and s&box, the XB10k cross-engine results, and recommendations C1–C10 with their owners | [research/engine-comparison.md](research/engine-comparison.md) |
 | The editor window, ribbon, or theme | [editor/shell.md](editor/shell.md) |
 | Selection or Properties | [editor/selection.md](editor/selection.md) |
 | Move, scale, rotate, or undo | [editor/transforms.md](editor/transforms.md) |
@@ -39,11 +40,13 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Lua, the sandbox, blocks, or graphs | [scripting.md](scripting.md), then one file |
 | Drawing, materials, lights, or animation playback | [rendering.md](rendering.md), then one file |
 | Project files, export, licenses, or GitHub releases | [project-and-export.md](project-and-export.md), then one file |
+| Engine versioning, release notes, the updater or the Version Explorer (proposal, not built yet) | [research/release-system/README.md](research/release-system/README.md) |
 | Data tables, the Data Table tab, or `DataService` | [project/data-tables.md](project/data-tables.md) |
 | Dialogues, quests, `DialogueService`, `QuestService`, the Dialogue tab | [scripting/api-dialogue.md](scripting/api-dialogue.md) |
 | New Project's genre templates (`templates/`) | [project/templates.md](project/templates.md) |
 | Game tests (`tests/*.spec.lua`), the Tests panel, `axcenity-test` | [project/game-tests.md](project/game-tests.md) |
 | Editor plugins (`plugins/`, the plugin API, the Plugins panel) | [editor/plugins.md](editor/plugins.md) |
+| The MCP server for AI clients (`axcenity-editor --mcp`, its tools, connecting Claude Code, Cursor or Codex) | [editor/mcp.md](editor/mcp.md) |
 | In-game UI, the string table and languages | [ui.md](ui.md) |
 | Terrain algorithms | [terrain.md](terrain.md) |
 
