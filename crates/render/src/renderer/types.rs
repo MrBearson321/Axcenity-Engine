@@ -186,6 +186,11 @@ pub(super) const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Fl
 /// The finished, tone-mapped picture while FXAA is on, before FXAA smooths
 /// it into the output. sRGB, so 8 bits keep dark shades from banding.
 pub(super) const FXAA_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+/// The finished picture at the scene's size before it's upscaled, and the
+/// upscaled one before it's sharpened, while the render scale is below 1.
+/// Drawn into through an [`FXAA_FORMAT`] view and read through this plain
+/// one, so the upscaling passes see sRGB-encoded values.
+pub(super) const UPSCALE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// The prepass's view-space normals, which ambient occlusion reads.
 pub(super) const NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// Ambient occlusion: 1 in the open, toward 0 in corners.
@@ -648,6 +653,14 @@ pub(super) struct PostPasses {
     pub(super) composite: wgpu::RenderPipeline,
     pub(super) composite_for_fxaa: wgpu::RenderPipeline,
     pub(super) fxaa: wgpu::RenderPipeline,
+    /// FXAA into [`UpscaleTarget::view`] rather than the output.
+    pub(super) fxaa_for_upscale: wgpu::RenderPipeline,
+    /// One texture, for the upscaling passes (`upscale.wgsl`).
+    pub(super) upscale_layout: wgpu::BindGroupLayout,
+    /// The scene-sized picture to the output's size ([`UPSCALE_FORMAT`]).
+    pub(super) easu: wgpu::RenderPipeline,
+    /// The upscaled picture, sharpened, into the output.
+    pub(super) rcas: wgpu::RenderPipeline,
     /// Color grading's values and lookup table, for the composite pass.
     pub(super) grading: super::grading::GradingPass,
     /// Depth of field, drawn before bloom while the world has it.
@@ -704,6 +717,7 @@ pub(super) struct TargetsAlive {
     pub(super) sets: Arc<()>,
     pub(super) msaa: Arc<()>,
     pub(super) fxaa: Arc<()>,
+    pub(super) upscale: Arc<()>,
     /// Sets of [`OcclusionTargets`].
     pub(super) occlusion: Arc<()>,
     /// Sets of the volumetric fog's grids.
@@ -737,6 +751,21 @@ pub(super) struct FxaaTarget {
     pub(super) _alive: Arc<()>,
 }
 
+/// While the render scale is below 1: the finished picture at the scene's
+/// size, which the composite pass (or FXAA) draws into, and the output-sized
+/// one it's upscaled into before it's sharpened into the output.
+pub(super) struct UpscaleTarget {
+    /// Drawn into: [`FXAA_FORMAT`], encoding to sRGB.
+    pub(super) view: wgpu::TextureView,
+    /// `view`'s texture read as plain [`UPSCALE_FORMAT`].
+    pub(super) source_group: wgpu::BindGroup,
+    /// The upscaled picture, at the output's size.
+    pub(super) upscaled: wgpu::TextureView,
+    pub(super) upscaled_group: wgpu::BindGroup,
+    /// A clone of [`TargetsAlive::upscale`].
+    pub(super) _alive: Arc<()>,
+}
+
 /// Every target a frame draws into, at the scene's size (the output's times
 /// the render scale) unless said otherwise: the scene's HDR color and depth,
 /// the multisampled and FXAA targets, the prepass and ambient occlusion
@@ -763,6 +792,9 @@ pub(super) struct FrameTargets {
     pub(super) depth_view: wgpu::TextureView,
     /// Only while FXAA is on.
     pub(super) fxaa: Option<FxaaTarget>,
+    /// Only while the scene is smaller than the output (a render scale
+    /// below 1).
+    pub(super) upscale: Option<UpscaleTarget>,
     /// Only while ambient occlusion, contact shadows, volumetric fog,
     /// screen-space outlines or depth of field are on (all but the first
     /// read only what the prepass drew).

@@ -69,7 +69,7 @@ mod solid;
 mod spline_content;
 mod splines;
 mod tags;
-mod team;
+pub(crate) mod team;
 mod terrain;
 mod texture_set;
 mod to_terrain;
@@ -209,6 +209,9 @@ pub struct EditorApp {
     history: History,
     /// The Team Create session this editor is in, if any (`app/team.rs`).
     team: Option<team::Team>,
+    /// A session to start once the project opens (`--team-host`,
+    /// `--team-join`).
+    team_start: Option<team::TeamStart>,
     /// The tool picked in the toolbar, and its snapping settings. Both are
     /// preferences, so they stay when another project is opened.
     tool: Tool,
@@ -858,6 +861,7 @@ impl EditorApp {
             references: None,
             history: History::new(),
             team: None,
+            team_start: None,
             tool: Tool::default(),
             snap: Snap::default(),
             modes: Modes::default(),
@@ -1361,6 +1365,9 @@ impl EditorApp {
         self.terrain_frame(ctx);
         // Team Create: send what this frame's tools did, then catch up.
         self.team_frame();
+        if let Some(every) = self.team_wants_frames() {
+            ctx.request_repaint_after(every);
+        }
         self.generate_frame();
         self.palette_frame(ctx);
         self.shortcuts(ctx);

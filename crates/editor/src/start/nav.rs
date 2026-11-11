@@ -86,7 +86,7 @@ impl StartNav {
 
 /// The pages, in the order both layouts list them: the page, its icon, its
 /// name, and what its tooltip adds.
-const PAGES: [(Page, &str, &str, &str); 4] = [
+const PAGES: [(Page, &str, &str, &str); 5] = [
     (
         Page::Projects,
         icons::SQUARES_FOUR,
@@ -103,7 +103,13 @@ const PAGES: [(Page, &str, &str, &str); 4] = [
         Page::Learn,
         icons::BOOK_OPEN,
         "Learn",
-        "Tutorials with sample projects",
+        "A learning path through the engine, and tutorials with sample projects",
+    ),
+    (
+        Page::Docs,
+        icons::FILE_TEXT,
+        "Documentation",
+        "How each part of the engine works, with search",
     ),
     (
         Page::Reference,

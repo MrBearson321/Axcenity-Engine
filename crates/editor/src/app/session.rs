@@ -91,6 +91,7 @@ impl EditorApp {
                 self.cover_until = Some(ctx.cumulative_frame_nr() + FINISHING_FRAMES);
                 self.cover_shown = loading.shown();
                 self.follow_pending_handoff(true);
+                self.start_pending_team();
             }
             Err(err) => {
                 self.open_failed(&loading.folder, &err);

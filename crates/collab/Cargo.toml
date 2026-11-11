@@ -8,7 +8,16 @@ authors.workspace = true
 
 [dependencies]
 axcenity-core.workspace = true
+axcenity-net.workspace = true
+log.workspace = true
+postcard.workspace = true
+rcgen.workspace = true
+ring.workspace = true
 rustc-hash.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tungstenite.workspace = true
 thiserror.workspace = true
 axcenity-workspace-hack.workspace = true
 

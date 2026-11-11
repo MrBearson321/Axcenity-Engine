@@ -24,7 +24,8 @@ byteorder = { version = "1" }
 cipher = { version = "0.4", default-features = false, features = ["zeroize"] }
 crc32fast = { version = "1" }
 crossbeam-utils = { version = "0.8" }
-crypto-common = { version = "0.1", default-features = false, features = ["getrandom"] }
+crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
+digest = { version = "0.10", features = ["mac", "std"] }
 either = { version = "1", features = ["use_std"] }
 flate2 = { version = "1" }
 font-types = { version = "0.12", default-features = false, features = ["bytemuck", "serde", "std"] }
@@ -48,6 +49,7 @@ read-fonts = { version = "0.41", default-features = false, features = ["experime
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "std", "unicode"] }
 regex-syntax = { version = "0.8" }
+rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", default-features = false, features = ["alloc", "rc", "result", "std"] }
 serde_json = { version = "1", features = ["alloc", "raw_value"] }
@@ -73,8 +75,6 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-trai
 [target.x86_64-unknown-linux-gnu.dependencies]
 ahash = { version = "0.8", features = ["no-rng", "serde"] }
 bitflags = { version = "2", default-features = false, features = ["std"] }
-crypto-common = { version = "0.1", default-features = false, features = ["std"] }
-digest = { version = "0.10", features = ["mac", "std"] }
 fastrand = { version = "2" }
 futures-io = { version = "0.3" }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
@@ -91,6 +91,7 @@ toml_datetime = { version = "1", features = ["serde"] }
 toml_parser = { version = "1" }
 tracing = { version = "0.1", default-features = false, features = ["log"] }
 ttf-parser = { version = "0.25", default-features = false, features = ["apple-layout", "glyph-names", "gvar-alloc", "no-std-float", "opentype-layout", "variable-fonts"] }
+tungstenite = { version = "0.28" }
 winnow = { version = "1" }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
@@ -110,8 +111,6 @@ winnow = { version = "1" }
 [target.x86_64-apple-darwin.dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
 block2 = { version = "0.6" }
-crypto-common = { version = "0.1", default-features = false, features = ["std"] }
-digest = { version = "0.10", features = ["mac", "std"] }
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga", "tiff"] }
@@ -121,6 +120,7 @@ objc2-core-foundation = { version = "0.3", features = ["CFBase"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGDataProvider", "CGDirectDisplay", "CGEventTypes", "CGFont", "CGImage", "CGPath", "objc2", "std"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSException", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSItemProvider", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSProcessInfo", "NSRange", "NSSet", "NSString", "NSThread", "NSURL", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "block2", "objc2-core-foundation", "std"] }
 smallvec = { version = "1", default-features = false, features = ["union"] }
+tungstenite = { version = "0.28" }
 
 [target.x86_64-apple-darwin.build-dependencies]
 libc = { version = "0.2" }
@@ -128,8 +128,6 @@ libc = { version = "0.2" }
 [target.aarch64-apple-darwin.dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
 block2 = { version = "0.6" }
-crypto-common = { version = "0.1", default-features = false, features = ["std"] }
-digest = { version = "0.10", features = ["mac", "std"] }
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga", "tiff"] }
@@ -139,16 +137,16 @@ objc2-core-foundation = { version = "0.3", features = ["CFBase"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGDataProvider", "CGDirectDisplay", "CGEventTypes", "CGFont", "CGImage", "CGPath", "objc2", "std"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSException", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSItemProvider", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSProcessInfo", "NSRange", "NSSet", "NSString", "NSThread", "NSURL", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "block2", "objc2-core-foundation", "std"] }
 smallvec = { version = "1", default-features = false, features = ["union"] }
+tungstenite = { version = "0.28" }
 
 [target.aarch64-apple-darwin.build-dependencies]
 libc = { version = "0.2" }
 
 [target.x86_64-pc-windows-msvc.dependencies]
-crypto-common = { version = "0.1", default-features = false, features = ["std"] }
-digest = { version = "0.10", features = ["mac", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std"] }
 half = { version = "2", features = ["num-traits"] }
 smallvec = { version = "1", default-features = false, features = ["union"] }
+tungstenite = { version = "0.28" }
 windows = { version = "0.62", features = ["Devices_Power", "Foundation_Collections", "Gaming_Input_ForceFeedback", "System_Power", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Devices_Display", "Win32_Devices_Properties", "Win32_Globalization", "Win32_Graphics_Direct3D12", "Win32_Graphics_Direct3D_Dxc", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_DirectComposition", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Graphics_OpenGL", "Win32_Media_Audio", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_Security", "Win32_System_Com_StructuredStorage", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Ole", "Win32_System_Performance", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_System_Variant", "Win32_UI_Accessibility", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"] }
 windows-core = { version = "0.62" }
 windows-sys-b21d60becc0929df = { package = "windows-sys", version = "0.52", features = ["Win32_Devices_HumanInterfaceDevice", "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Media", "Win32_Security", "Win32_System_Com_StructuredStorage", "Win32_System_LibraryLoader", "Win32_System_Ole", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_Ime", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Input_Pointer", "Win32_UI_Input_Touch", "Win32_UI_Shell", "Win32_UI_TextServices", "Win32_UI_WindowsAndMessaging"] }

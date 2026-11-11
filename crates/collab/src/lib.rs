@@ -24,23 +24,34 @@
 //! has to be rewritten; every world here is in replica mode
 //! ([`World::make_replica`]).
 //!
-//! This crate has no network, files or UI: [`Host`] and [`Client`] take
-//! messages in and hand messages out, and whatever carries them (an
-//! in-memory queue in the tests, WebSocket over TLS later) is the caller's.
+//! [`Host`] and [`Client`] take messages in and hand messages out, with no
+//! network of their own. TC3 carries them between computers: [`wire`]
+//! turns them into bytes, [`socket`] sends those over WebSocket and TLS,
+//! [`handshake`] lets in only members (by their [`identity`] key, listed in
+//! [`access`]), and [`session`] puts it together for the host and for
+//! each member. The tests also use an in-memory queue.
 
+pub mod access;
 pub mod apply;
 pub mod capture;
 pub mod client;
+pub mod handshake;
 pub mod host;
+pub mod identity;
 pub mod ids;
 pub mod message;
 pub mod op;
 pub mod role;
+pub mod session;
+pub mod socket;
+pub mod wire;
 
 #[cfg(test)]
 mod capture_tests;
 #[cfg(test)]
 mod convergence_tests;
+#[cfg(test)]
+mod net_tests;
 #[cfg(test)]
 mod testing;
 #[cfg(test)]

@@ -13,7 +13,9 @@ use crate::role::Role;
 
 /// Who a member is within one hosted project. TC3 ties it to a signed-in
 /// identity; here the caller assigns it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct MemberId(pub u32);
 
 /// A whole World sent to a joining member. Its own type so `Debug` prints
