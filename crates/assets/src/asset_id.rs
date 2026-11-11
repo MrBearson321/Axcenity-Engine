@@ -3,9 +3,10 @@
 //! it's renamed or moved, kept in a sidecar next to it
 //! (`ship.glb` has `ship.glb.import.json`).
 //!
-//! References still name paths, so a project without sidecars loads as it
-//! always has. The IDs are how the editor notices a file that was renamed
-//! or moved outside it: `.axcenity/asset-ids.json` remembers each path's
+//! A reference can name a file by its ID (`ax://…`, `references.rs`), so
+//! it keeps working when the file moves; paths still work everywhere. The
+//! IDs are also how the editor notices a file that was renamed or moved
+//! outside it: `.axcenity/asset-ids.json` remembers each path's
 //! ID, and a path that's gone whose ID is now somewhere else was moved
 //! there ([`moved_assets`]), which Asset Check offers as the fix.
 
@@ -172,6 +173,28 @@ pub fn read_asset_id(project: &Path, relative: &str) -> Option<AssetId> {
     let bytes = fs::read(project.join(import_path(relative))).ok()?;
     let file: ImportFile = serde_json::from_slice(&bytes).ok()?;
     Some(file.uid)
+}
+
+/// The ID of the project file `relative`, giving it one first (writing its
+/// sidecar) if it's a file under `assets/` that takes one and has none:
+/// for the editor, before it writes a reference to a file just imported.
+/// `None` for a file that takes no ID or isn't there.
+pub fn give_asset_id(project: &Path, relative: &str) -> io::Result<Option<AssetId>> {
+    if let Some(id) = read_asset_id(project, relative) {
+        return Ok(Some(id));
+    }
+    if !relative.starts_with("assets/")
+        || !takes_asset_id(relative)
+        || !project.join(relative).is_file()
+    {
+        return Ok(None);
+    }
+    let id = AssetId::new();
+    write_whole(
+        &project.join(import_path(relative)),
+        &encode_import_file(id),
+    )?;
+    Ok(Some(id))
 }
 
 /// Every file under the project's `assets/` that takes an ID, as project

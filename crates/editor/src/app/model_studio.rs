@@ -56,13 +56,14 @@ impl EditorApp {
         }
     }
 
-    /// Opens the model at `mesh_id` (a project path, maybe with a `#`
-    /// pick, whose first object becomes the active one) in the Model
-    /// Studio. An FBX saves as a `.glb` beside it.
+    /// Opens the model at `mesh_id` (a project path or asset ID, maybe
+    /// with a `#` pick, whose first object becomes the active one) in the
+    /// Model Studio. An FBX saves as a `.glb` beside it.
     pub(in crate::app) fn open_in_model_studio(&mut self, mesh_id: &str) {
         let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
             return;
         };
+        let mesh_id = &*self.assets.resolve(mesh_id);
         let (file, pick) = mesh_id.split_once('#').unwrap_or((mesh_id, ""));
         let Some(format) = ModelFormat::of(std::path::Path::new(file)) else {
             self.output.error(format!("`{file}` isn't a model file."));

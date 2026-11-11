@@ -70,7 +70,7 @@ fn explorer_and_console_cost_at_100_1000_and_10000_rows() {
         }));
         let parts = world.descendants(world.workspace());
         properties_ms.push(time(egui::vec2(320.0, 900.0), |ui| {
-            let _ = properties::show_many(ui, &world, &parts, false);
+            let _ = properties::show_many(ui, &world, &Default::default(), &parts, false);
         }));
         let mut output = Output::default();
         for index in 0..count {

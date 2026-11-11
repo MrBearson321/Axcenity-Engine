@@ -257,15 +257,17 @@ impl EditorApp {
             .filter(|&id| is_part(&self.world, id))
             .unwrap_or(self.world.workspace());
         let id = self.world.create(ClassName::Sound).expect("not a service");
-        let _ = self
-            .world
-            .set_property(id, "SoundId", Value::String(entry.path.clone()));
+        let _ = self.world.set_property(
+            id,
+            "SoundId",
+            Value::String(self.reference_to(entry.path.clone())),
+        );
         let _ = self.world.set_name(id, display_name(&entry.path));
         self.place_new(parent, vec![id], format!("Add sound {}", entry.name));
     }
 
     fn drop_image(&mut self, entry: &AssetEntry, spot: Spot) {
-        let image = Value::String(entry.path.clone());
+        let image = Value::String(self.reference_to(entry.path.clone()));
         let has_image = |world: &World, id: InstanceId| {
             world
                 .get(id)
@@ -337,10 +339,11 @@ impl EditorApp {
             ));
             return;
         }
+        let texture = self.reference_to(entry.path.clone());
         let edits = surfaces
             .into_iter()
             .map(|id| {
-                let edit = Edit::Property("ColorMap", Value::String(entry.path.clone()));
+                let edit = Edit::Property("ColorMap", Value::String(texture.clone()));
                 (id, vec![edit])
             })
             .collect();
@@ -360,7 +363,7 @@ impl EditorApp {
                 .info("Drop a particle texture onto a part to give it a ParticleEmitter.");
             return;
         };
-        let texture = Value::String(entry.path.clone());
+        let texture = Value::String(self.reference_to(entry.path.clone()));
         let emitters =
             crate::build_tools::lights_in(&self.world, &[part], ClassName::ParticleEmitter);
         if emitters.is_empty() {
@@ -837,10 +840,10 @@ mod tests {
             b"sound"
         );
         let sound = app.selected.expect("the sound is selected");
-        assert_eq!(
-            app.world.get(sound).unwrap().property("SoundId"),
-            Some(&Value::String(entry.path.clone()))
-        );
+        let sound_id = app.world.get(sound).unwrap().property("SoundId");
+        let sound_id = sound_id.and_then(Value::as_str).unwrap();
+        assert!(axcenity_assets::is_asset_reference(sound_id), "by its ID");
+        assert_eq!(app.assets.asset_path(sound_id), Some(entry.path.clone()));
         assert!(
             app.output
                 .lines()

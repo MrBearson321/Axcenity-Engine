@@ -97,6 +97,7 @@ pub fn pack_game(folder: &Path) -> Result<Vec<u8>, PackError> {
     let mut files = Vec::new();
     collect_runtime_files(folder, folder, &mut files)?;
     add_cooked_textures(folder, &mut files)?;
+    add_asset_index(folder, &mut files);
     files.sort_by(|a, b| a.name.cmp(&b.name));
     if files.len() > MAX_FILES {
         return Err(PackError::TooManyFiles);
@@ -353,6 +354,22 @@ fn collect_runtime_files(
     Ok(())
 }
 
+/// Adds [`axcenity_assets::ASSET_INDEX_FILE`], each asset ID's path, so the
+/// player finds a file a reference names by its ID without the sidecars.
+/// A project with no IDs gets none.
+fn add_asset_index(root: &Path, files: &mut Vec<PackFile>) {
+    files.retain(|file| file.name != axcenity_assets::ASSET_INDEX_FILE);
+    let ids = axcenity_assets::asset_ids(root);
+    if ids.is_empty() {
+        return;
+    }
+    files.push(PackFile {
+        name: axcenity_assets::ASSET_INDEX_FILE.to_owned(),
+        contents: axcenity_assets::encode_asset_index(&ids),
+        modified: 0,
+    });
+}
+
 /// Adds the current cooked copy of each texture in `files`, at the same
 /// place in the project, so the player finds it (it checks the copy against
 /// the texture's length and modified time, which unpacking gives back).
@@ -401,8 +418,9 @@ fn include_runtime_file(root: &Path, path: &Path) -> bool {
         return false;
     };
     // The Model Studio's sidecars (and sidecar folders of paint layers)
-    // are editing state; games load the `.glb`. So are asset IDs' sidecars
-    // for now: games find files by path.
+    // are editing state; games load the `.glb`. Asset IDs' sidecars are
+    // left out too: the game gets them all in one index instead
+    // (`add_asset_index`).
     let lower = relative.to_string_lossy().to_ascii_lowercase();
     if lower.ends_with(axcenity_assets::MESH_EDIT_SUFFIX)
         || axcenity_assets::is_import_file(&lower)
@@ -672,6 +690,37 @@ mod tests {
         );
         let _ = fs::remove_dir_all(project);
         let _ = fs::remove_dir_all(unpacked);
+    }
+
+    #[test]
+    fn a_built_game_finds_a_file_by_its_asset_id_without_the_sidecars() {
+        let project = temp_folder("asset-ids");
+        fs::create_dir_all(project.join("assets/audio")).unwrap();
+        fs::write(project.join(crate::MANIFEST_FILE), "{}").unwrap();
+        let sound = "assets/audio/chime.wav";
+        fs::write(project.join(sound), b"RIFF").unwrap();
+        let id = axcenity_assets::AssetId::new();
+        fs::write(
+            project.join(axcenity_assets::import_path(sound)),
+            axcenity_assets::encode_import_file(id),
+        )
+        .unwrap();
+
+        let unpacked = temp_folder("asset-ids-unpacked");
+        unpack_game(&pack_game(&project).unwrap(), &unpacked).unwrap();
+        assert!(!unpacked.join(axcenity_assets::import_path(sound)).exists());
+        let assets = axcenity_assets::Assets::new(&unpacked);
+        assert_eq!(&*assets.resolve(&id.to_string()), sound);
+        assert_eq!(assets.read_file(&id.to_string()).unwrap(), b"RIFF");
+
+        // No IDs, no index.
+        fs::remove_file(project.join(axcenity_assets::import_path(sound))).unwrap();
+        let plain = temp_folder("asset-ids-none");
+        unpack_game(&pack_game(&project).unwrap(), &plain).unwrap();
+        assert!(!plain.join(axcenity_assets::ASSET_INDEX_FILE).exists());
+        for folder in [project, unpacked, plain] {
+            let _ = fs::remove_dir_all(folder);
+        }
     }
 
     #[test]
