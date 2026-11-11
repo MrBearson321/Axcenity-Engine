@@ -502,9 +502,8 @@ fn prompt_views(shown: &[axcenity_script::ShownPrompt]) -> Vec<axcenity_ui::Prom
 
 /// True while the player character has a Tool in hand, so the wheel goes
 /// through the hotbar instead of zooming (Phase 45).
-fn tool_in_hand(scripts: &ScriptRuntime, world: &World) -> bool {
-    scripts
-        .player_inventory(world)
+fn tool_in_hand(world: &World) -> bool {
+    axcenity_gameplay::player_inventory(world)
         .and_then(|inventory| axcenity_core::tool::equipped(world, inventory))
         .is_some()
 }
@@ -1537,7 +1536,7 @@ impl HostIo for App {
         }
         // The hotbar, the ability bar, the quest tracker and dialogue box,
         // the leaderboard, the chat window, then ProximityPrompts that show.
-        let inventory = self.sim.scripts.player_inventory(&self.sim.world);
+        let inventory = axcenity_gameplay::player_inventory(&self.sim.world);
         let abilities = axcenity_gameplay::ability_bar(&self.sim.scripts, &self.sim.world);
         let quests = axcenity_gameplay::quest_tracker(&self.sim.scripts, &self.sim.world);
         let dialogue = axcenity_gameplay::dialogue_view(&self.sim.scripts, &self.sim.world);
@@ -1853,7 +1852,7 @@ impl ApplicationHandler for App {
                         .wheel(&self.sim.world, pointer, wheel_pixels(delta))
                         .apply(&mut self.sim.world)
                 });
-                if !scrolled && !tool_in_hand(&self.sim.scripts, &self.sim.world) {
+                if !scrolled && !tool_in_hand(&self.sim.world) {
                     self.zoom += wheel_notches(delta);
                 }
                 self.input.push(InputEvent {

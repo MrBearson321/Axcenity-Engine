@@ -20,6 +20,7 @@ use axcenity_core::{ClassName, InstanceId, World};
 use axcenity_save::Saves;
 use mlua::{AnyUserData, Function, IntoLuaMulti, Lua, Table, Thread};
 
+pub use crate::cframe::{LuaCFrame, to_vec3};
 pub use crate::health::{HealthEvent, damage, heal, set_health};
 
 use crate::input::PromptInput;
@@ -134,6 +135,14 @@ pub const DESCRIBED_SYSTEM_METHODS: &[(ClassName, &str)] = &[
     (ClassName::Ability, "Activate"),
     (ClassName::Ability, "Cancel"),
     (ClassName::Model, "ApplyEffect"),
+    (ClassName::Inventory, "GetItems"),
+    (ClassName::Inventory, "Add"),
+    (ClassName::Inventory, "Remove"),
+    (ClassName::Inventory, "Equip"),
+    (ClassName::Inventory, "UnequipAll"),
+    (ClassName::Tool, "Drop"),
+    (ClassName::Humanoid, "EquipTool"),
+    (ClassName::Humanoid, "UnequipTools"),
 ];
 
 /// The systems added to one interpreter, in the order they were added.
@@ -303,6 +312,17 @@ pub fn destroyed() -> mlua::Error {
 pub fn local_player(lua: &Lua) -> Option<InstanceId> {
     lua.app_data_ref::<crate::client::LocalPlayer>()
         .map(|player| player.0)
+}
+
+/// The Inventory of the character whose Humanoid is `humanoid`, made (with
+/// the character's other pieces) if it has none. An error names `call`
+/// when the Humanoid is destroyed or isn't in a character's Model.
+pub fn humanoid_inventory(
+    lua: &Lua,
+    humanoid: InstanceId,
+    call: &str,
+) -> mlua::Result<Option<InstanceId>> {
+    crate::humanoid::inventory(lua, humanoid, call)
 }
 
 /// The Player whose `Character` is `character`, if any.

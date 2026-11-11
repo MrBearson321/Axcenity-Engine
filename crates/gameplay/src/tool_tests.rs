@@ -7,7 +7,9 @@ use axcenity_core::{
     ClassName, InstanceId, KeyCode, Parameter, UserInputType, Value, Vector3, World,
 };
 
-use super::*;
+use axcenity_script::{OutputKind, ScriptRuntime};
+
+use crate::{player_inventory, script_runtime, step_tools, tool};
 
 fn start(world: &mut World, runtime: &mut ScriptRuntime, source: &str) {
     let script = world.create(ClassName::Script).unwrap();
@@ -111,7 +113,7 @@ fn parent(world: &World, id: InstanceId) -> Option<InstanceId> {
 fn frame(runtime: &mut ScriptRuntime, world: &mut World, events: &[InputEvent]) {
     runtime.input_events(world, events);
     runtime.step_prompts(world, 1.0 / 60.0);
-    runtime.step_tools(world);
+    step_tools(runtime, world);
 }
 
 fn key(runtime: &mut ScriptRuntime, world: &mut World, key: KeyCode, pressed: bool) {
@@ -147,14 +149,14 @@ fn touching_a_tool_picks_it_up_one_equips_it_in_the_right_hand_and_clicking_acti
     let (_, inventory) = character(&mut world, 0.0, 10.0);
     // Lying across the character's feet.
     let sword = tool(&mut world, "Sword", Vector3::new(0.5, 0.2, 0.0));
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     start(&mut world, &mut runtime, LISTEN);
 
     frame(&mut runtime, &mut world, &[]);
     assert_eq!(parent(&world, sword), Some(inventory));
     assert_eq!(equipped(&world, inventory), None);
     assert_eq!(tool::items(&world, inventory), [sword]);
-    assert_eq!(runtime.player_inventory(&world), Some(inventory));
+    assert_eq!(player_inventory(&world), Some(inventory));
     assert!(output(&mut runtime).is_empty());
 
     key(&mut runtime, &mut world, KeyCode::One, true);
@@ -189,7 +191,7 @@ fn a_full_inventory_refuses_a_pickup_and_leaves_the_tool_on_the_ground() {
     let (_, inventory) = character(&mut world, 0.0, 1.0);
     let sword = tool(&mut world, "Sword", Vector3::new(0.5, 0.2, 0.0));
     let shield = tool(&mut world, "Shield", Vector3::new(-0.5, 0.2, 0.0));
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     for _ in 0..5 {
         frame(&mut runtime, &mut world, &[]);
     }
@@ -218,7 +220,7 @@ fn dropping_and_picking_up_again_gives_back_the_same_tool_with_its_attributes() 
     world
         .set_attribute(sword, "Sharpness", Some(Value::Number(3.0)))
         .unwrap();
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     start(&mut world, &mut runtime, LISTEN);
     frame(&mut runtime, &mut world, &[]);
     key(&mut runtime, &mut world, KeyCode::One, true);
@@ -303,7 +305,7 @@ fn scripts_add_equip_unequip_and_remove_tools() {
     // Away from the character, so only scripts pick them up.
     let sword = tool(&mut world, "Sword", Vector3::new(20.0, 0.2, 0.0));
     let torch = tool(&mut world, "Torch", Vector3::new(25.0, 0.2, 0.0));
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     start(&mut world, &mut runtime, LISTEN);
     let mut run = |world: &mut World, source: &str| {
         let source = format!(
@@ -391,7 +393,7 @@ fn equipping_sets_the_characters_animator_equipped_parameter() {
         .parameters
         .insert("Equipped".to_owned(), Parameter::Bool(false));
     let sword = tool(&mut world, "Sword", Vector3::new(0.5, 0.2, 0.0));
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     frame(&mut runtime, &mut world, &[]);
     assert_eq!(parent(&world, sword), Some(inventory));
     let parameter = |world: &World| world.animator(animator).unwrap().parameters["Equipped"];
@@ -409,7 +411,7 @@ fn bumpers_go_through_the_slots_and_a_turned_off_hotbar_ignores_its_keys() {
     let (_, inventory) = character(&mut world, 0.0, 10.0);
     let sword = tool(&mut world, "Sword", Vector3::new(0.5, 0.2, 0.0));
     let torch = tool(&mut world, "Torch", Vector3::new(-0.5, 0.2, 0.0));
-    let mut runtime = ScriptRuntime::new();
+    let mut runtime = script_runtime();
     frame(&mut runtime, &mut world, &[]);
     assert_eq!(tool::items(&world, inventory), [sword, torch]);
     let pad = |key, pressed| {

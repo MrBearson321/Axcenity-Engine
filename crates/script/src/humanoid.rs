@@ -287,6 +287,16 @@ fn requests_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, Requests>> {
 }
 
 /// The pieces of a Humanoid a method is called on.
+/// The Inventory of the Humanoid's character, made if it has none (for
+/// the Tools system's `EquipTool`).
+pub(crate) fn inventory(
+    lua: &Lua,
+    humanoid: InstanceId,
+    call: &str,
+) -> mlua::Result<Option<InstanceId>> {
+    Ok(pieces_for(lua, humanoid, call)?.inventory)
+}
+
 fn pieces_for(lua: &Lua, humanoid: InstanceId, call: &str) -> mlua::Result<Pieces> {
     let mut world = world_mut(lua)?;
     world.get(humanoid).ok_or_else(destroyed)?;
@@ -462,38 +472,6 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
             Ok(())
         },
     )?;
-    let equip = lua.create_function(|lua, (this, tool): (LuaInstance, mlua::Value)| {
-        let call = "EquipTool(tool)";
-        let tool = crate::tool::tool_arg(lua, tool, call)?;
-        let pieces = pieces_for(lua, this.0, call)?;
-        let Some(inventory) = pieces.inventory else {
-            return Ok(());
-        };
-        let assets = lua
-            .app_data_ref::<Assets>()
-            .map(|assets| assets.clone())
-            .unwrap_or_default();
-        let mut world = world_mut(lua)?;
-        let mut changes = crate::tool::changes_mut(lua)?;
-        if !crate::tool::add(&mut world, inventory, tool, &mut changes)
-            .map_err(mlua::Error::runtime)?
-        {
-            return Err(mlua::Error::runtime(
-                "EquipTool(tool): the character's Inventory is full",
-            ));
-        }
-        crate::tool::equip(&mut world, &assets, inventory, tool, &mut changes)
-            .map_err(mlua::Error::runtime)
-    })?;
-    let unequip = lua.create_function(|lua, this: LuaInstance| {
-        let pieces = pieces_for(lua, this.0, "UnequipTools()")?;
-        if let Some(inventory) = pieces.inventory {
-            let mut world = world_mut(lua)?;
-            let mut changes = crate::tool::changes_mut(lua)?;
-            crate::tool::unequip_all(&mut world, inventory, &mut changes);
-        }
-        Ok(())
-    })?;
     let get_state = lua.create_function(|lua, this: LuaInstance| {
         world(lua)?.get(this.0).ok_or_else(destroyed)?;
         let state = lua
@@ -549,8 +527,6 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
         (ClassName::Humanoid, "Move", walk),
         (ClassName::Humanoid, "Jump", jump),
         (ClassName::Humanoid, "TakeDamage", take_damage),
-        (ClassName::Humanoid, "EquipTool", equip),
-        (ClassName::Humanoid, "UnequipTools", unequip),
         (ClassName::Humanoid, "GetState", get_state),
         (ClassName::Humanoid, "ChangeState", change_state),
     ])

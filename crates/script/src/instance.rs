@@ -382,9 +382,6 @@ pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> m
         key if class == Some(ClassName::Humanoid) && crate::humanoid::is_field(key) => {
             crate::humanoid::set(lua, id, key, value)
         }
-        "Equipped" if class == Some(ClassName::Inventory) => {
-            Err(mlua::Error::runtime(crate::tool::EQUIPPED_READ_ONLY))
-        }
         "Occupant" if class.is_some_and(ClassName::is_seat) => {
             Err(mlua::Error::runtime(crate::seat::OCCUPANT_READ_ONLY))
         }
