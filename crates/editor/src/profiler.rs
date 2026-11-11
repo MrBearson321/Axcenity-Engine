@@ -14,7 +14,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use axcenity_core::bench::{Bound, FramePacing};
-use axcenity_render::{FramePass, LOD_LEVELS, RenderStats, ShaderError};
+use axcenity_render::{FramePass, LOD_LEVELS, RenderStats, SHADOW_CASCADE_COUNT, ShaderError};
 use eframe::egui::{self, RichText};
 
 use crate::responsive;
@@ -297,6 +297,14 @@ impl Profiler {
                     .collect();
                 mean(&times)
             }),
+            cascades: std::array::from_fn(|cascade| {
+                let times: Vec<Duration> = self
+                    .samples
+                    .iter()
+                    .filter_map(|s| s.render.stats.cascade_times[cascade])
+                    .collect();
+                mean(&times)
+            }),
             memory: self.memory,
             lua_bytes: newest.load.lua_bytes,
             scripts: average(|s| s.game.scripts),
@@ -462,6 +470,14 @@ impl Profiler {
             if summary.gpu_timing {
                 for (pass, time) in FramePass::ALL.iter().zip(summary.passes) {
                     row(ui, pass.label(), time.map_or("off".into(), millis));
+                    if *pass == FramePass::Shadows {
+                        // Within Shadows, each of the sun's cascades it drew.
+                        for (cascade, time) in summary.cascades.iter().enumerate() {
+                            if let Some(time) = time {
+                                row(ui, &format!("  Sun cascade {}", cascade + 1), millis(*time));
+                            }
+                        }
+                    }
                 }
             } else {
                 row(ui, "Per pass", "not available on this GPU".into());
@@ -550,6 +566,9 @@ struct Summary {
     /// Each pass's average GPU time, in [`FramePass::ALL`]'s order: `None`
     /// for one no recent frame drew.
     passes: [Option<Duration>; FramePass::COUNT],
+    /// Each sun cascade's average GPU time, nearest first: `None` for one
+    /// no recent frame drew.
+    cascades: [Option<Duration>; SHADOW_CASCADE_COUNT],
     memory: Option<usize>,
     lua_bytes: usize,
     scripts: Duration,

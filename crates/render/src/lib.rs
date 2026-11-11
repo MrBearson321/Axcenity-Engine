@@ -43,8 +43,8 @@ pub use overdraw::{MAX_LAYERS, OVERDRAW_BANDS, OVERDRAW_STEP, OverdrawStats, lay
 pub use renderer::DebugView;
 pub use renderer::{
     CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, LOD_SCREEN_SIZES,
-    MAX_GPU_PARTICLES, PROBE_BAKE_SIZE, RenderStats, Renderer, ShaderError, SurfaceShader,
-    TextureRenderer,
+    MAX_GPU_PARTICLES, PROBE_BAKE_SIZE, RenderStats, Renderer, SHADOW_CASCADE_COUNT, ShaderError,
+    SurfaceShader, TextureRenderer,
 };
 pub use tone_mapping::ToneMapping;
 pub use water::{WATER_GRID, Water, water_surface};

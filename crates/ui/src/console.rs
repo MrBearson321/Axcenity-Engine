@@ -686,6 +686,22 @@ pub fn render_lines(stats: &axcenity_render::RenderStats) -> Vec<String> {
         lines.push("GPU passes: not timed on this GPU".to_owned());
     }
     let millions = |count: u64| count as f64 / 1_000_000.0;
+    if stats.cascade_times.iter().any(Option::is_some) {
+        let cascades: Vec<String> = stats
+            .cascade_times
+            .iter()
+            .zip(stats.cascade_triangles)
+            .map(|(time, triangles)| match time {
+                Some(time) => format!(
+                    "{:.2} ms {:.1} M",
+                    time.as_secs_f64() * 1000.0,
+                    millions(triangles)
+                ),
+                None => "kept".to_owned(),
+            })
+            .collect();
+        lines.push(format!("Sun cascades: {}", cascades.join(" | ")));
+    }
     lines.push(format!(
         "Draws {} calls, {} batches; {:.2} M triangles, {:.2} M vertices",
         stats.draw_calls,

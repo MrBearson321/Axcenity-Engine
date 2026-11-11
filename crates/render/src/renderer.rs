@@ -149,6 +149,9 @@ pub struct TextureRenderer {
 /// (see [`RenderStats::lod_items`]).
 pub const LOD_LEVELS: usize = lod::LOD_SCREEN_SIZES.len() + 1;
 
+/// The most cascades the sun's shadows are drawn in (Ultra's four).
+pub const SHADOW_CASCADE_COUNT: usize = gpu_timer::CASCADES;
+
 /// Below these sizes on screen (the share of the view's height an item's
 /// bounding sphere covers), an item draws its first, then second, simpler
 /// copy; it switches back once 15% past the threshold.
@@ -172,6 +175,14 @@ pub struct RenderStats {
     /// How many GPU measurements have come back so far: a reader that keeps
     /// every frame's time (`--bench`) takes `gpu_time` only when this grows.
     pub gpu_readings: u64,
+    /// The GPU's time for each of the sun's shadow cascades (nearest
+    /// first), within the Shadows pass: `None` for one that frame didn't
+    /// draw (off, or kept from an earlier frame while the far cascades take
+    /// turns).
+    pub cascade_times: [Option<Duration>; SHADOW_CASCADE_COUNT],
+    /// Casters and triangles drawn into each cascade this frame.
+    pub cascade_casters: [u32; SHADOW_CASCADE_COUNT],
+    pub cascade_triangles: [u64; SHADOW_CASCADE_COUNT],
     /// The GPU's time for each pass of the frame `gpu_time` measured, in
     /// [`FramePass::ALL`]'s order: `None` for a pass that frame didn't draw
     /// (see [`RenderStats::pass_time`]).

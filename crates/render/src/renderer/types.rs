@@ -1059,6 +1059,10 @@ pub(super) struct FrameCounts {
     pub(super) decals_left_out: u32,
     /// Items in view with levels of detail, by level.
     pub(super) lod_items: [u32; crate::LOD_LEVELS],
+    /// Casters and triangles drawn into each sun cascade (0 for one kept
+    /// from an earlier frame).
+    pub(super) cascade_casters: [u32; SHADOW_CASCADES],
+    pub(super) cascade_triangles: [u64; SHADOW_CASCADES],
 }
 
 /// Turned UI text: glyphon only draws text upright, so each turned text is

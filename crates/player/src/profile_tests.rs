@@ -48,6 +48,15 @@ pub const VARIANTS: &[(&str, &str)] = &[
         "no-large-meshes",
         "meshes of more than 100,000 triangles left out",
     ),
+    (
+        "no-large-mesh-shadows",
+        "meshes of more than 100,000 triangles cast no shadow",
+    ),
+    (
+        "shadows-high",
+        "High's shadows (three 2048 maps) instead of the preset's",
+    ),
+    ("shadows-half-distance", "shadows reach half as far"),
     ("no-msaa", "anti-aliasing off"),
     ("no-ao", "ambient occlusion off"),
 ];
@@ -69,6 +78,9 @@ struct Measured {
     triangles: u64,
     draw_calls: u32,
     casters: u32,
+    cascades: [Option<Duration>; axcenity_render::SHADOW_CASCADE_COUNT],
+    cascade_casters: [u32; axcenity_render::SHADOW_CASCADE_COUNT],
+    cascade_triangles: [u64; axcenity_render::SHADOW_CASCADE_COUNT],
 }
 
 /// Draws `list` for a warm-up, then times it.
@@ -81,6 +93,7 @@ fn measure(renderer: &mut TextureRenderer, device: &wgpu::Device, list: &DrawLis
     }
     let (mut gpu, mut cpu) = (Vec::new(), Vec::new());
     let mut passes: Vec<Vec<Duration>> = vec![Vec::new(); FramePass::COUNT];
+    let mut cascades: Vec<Vec<Duration>> = vec![Vec::new(); axcenity_render::SHADOW_CASCADE_COUNT];
     let mut readings = renderer.stats().gpu_readings;
     for frame in 0..MEASURED_FRAMES {
         let start = Instant::now();
@@ -96,6 +109,9 @@ fn measure(renderer: &mut TextureRenderer, device: &wgpu::Device, list: &DrawLis
             for (index, pass) in FramePass::ALL.into_iter().enumerate() {
                 passes[index].extend(stats.pass_time(pass));
             }
+            for (index, time) in stats.cascade_times.iter().enumerate() {
+                cascades[index].extend(*time);
+            }
         }
     }
     device.poll(wgpu::PollType::Wait).unwrap();
@@ -107,6 +123,9 @@ fn measure(renderer: &mut TextureRenderer, device: &wgpu::Device, list: &DrawLis
         triangles: stats.triangles,
         draw_calls: stats.draw_calls,
         casters: stats.shadow_casters_drawn,
+        cascades: std::array::from_fn(|index| median(&mut cascades[index])),
+        cascade_casters: stats.cascade_casters,
+        cascade_triangles: stats.cascade_triangles,
     }
 }
 
@@ -122,7 +141,16 @@ fn vary_settings(name: &str, settings: &mut GraphicsSettings) {
         "no-shadows" => settings.shadow_quality = Some(ShadowQuality::Off),
         "no-msaa" => settings.anti_aliasing = Some(AntiAliasing::Off),
         "no-ao" => settings.ambient_occlusion = Some(AmbientOcclusion::Off),
+        "shadows-high" => settings.shadow_quality = Some(ShadowQuality::High),
         _ => {}
+    }
+}
+
+/// Whether `item` is a mesh of more than [`LARGE_MESH_TRIANGLES`].
+fn large(item: &DrawItem) -> bool {
+    match &item.shape {
+        Shape::Mesh(mesh) => mesh.indices().len() / 3 > LARGE_MESH_TRIANGLES,
+        _ => false,
     }
 }
 
@@ -140,10 +168,13 @@ fn vary_list(name: &str, list: &mut DrawList) {
         "no-cutout" => each_item(list, |item| item.material.alpha_cutoff = 0.0),
         "single-sided" => each_item(list, |item| item.material.double_sided = false),
         "no-foliage" => keep_items(list, |item| !foliage(item)),
-        "no-large-meshes" => keep_items(list, |item| match &item.shape {
-            Shape::Mesh(mesh) => mesh.indices().len() / 3 <= LARGE_MESH_TRIANGLES,
-            _ => true,
+        "no-large-meshes" => keep_items(list, |item| !large(item)),
+        "no-large-mesh-shadows" => each_item(list, |item| {
+            if large(item) {
+                item.casts_shadow = false;
+            }
         }),
+        "shadows-half-distance" => list.shadows.distance *= 0.5,
         _ => {}
     }
 }
@@ -300,6 +331,23 @@ fn profile_project() {
                 last.draw_calls,
                 last.casters,
             );
+            if *name == "base" {
+                let cascades: Vec<String> = (0..axcenity_render::SHADOW_CASCADE_COUNT)
+                    .map(|cascade| {
+                        let time = middle(rounds.iter().map(|m| m.cascades[cascade]).collect());
+                        format!(
+                            "{} ms, {} casters, {:.2} M triangles",
+                            ms(time),
+                            last.cascade_casters[cascade],
+                            last.cascade_triangles[cascade] as f64 / 1e6
+                        )
+                    })
+                    .collect();
+                println!(
+                    "|   base's sun cascades, nearest first: {} |",
+                    cascades.join("; ")
+                );
+            }
             if let Some(out) = &out {
                 renderer.set_graphics(settings);
                 renderer.render(list).unwrap();
