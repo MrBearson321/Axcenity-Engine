@@ -94,8 +94,8 @@ fn the_adjust_panel_draws_the_last_operations_settings() {
     let mut studio = studio_with(doc);
     let ctx = crate::theme::test_context();
     let mut drawn = false;
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let _ = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let _ = studio.show(ui, None, &[], Snap::default(), true);
             drawn = true;
         });
@@ -111,8 +111,8 @@ fn the_adjust_panel_draws_the_last_operations_settings() {
         .unwrap()
         .op
         .clone();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let _ = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             tools::settings_ui(ui, &mut op);
         });
     });
@@ -514,8 +514,8 @@ fn the_tab_draws_a_chair() {
         &folder.join("model-studio-chair.png"),
         egui::vec2(900.0, 600.0),
         vec![Vec::new(); 3],
-        |ctx, render| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui, render| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = studio.show(ui, Some(render), &[], Snap::default(), true);
             });
         },

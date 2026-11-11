@@ -88,8 +88,8 @@ fn overlay_shapes(world: &World, selection: &[InstanceId]) -> usize {
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 360.0));
     let screen = Screen::new(camera, rect);
     let ctx = theme::test_context();
-    let output = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let output = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             crate::constraints::paint(ui.painter(), &screen, world, selection, false);
         });
     });

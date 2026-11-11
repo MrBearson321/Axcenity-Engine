@@ -250,7 +250,7 @@ impl Renderer {
     ) -> Result<Self> {
         // `Instance` picks a graphics API: DirectX 12 or Vulkan on Windows,
         // Metal on macOS, Vulkan on Linux.
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance
             .create_surface(target)
             .context("could not create a drawing surface for the window")?;
@@ -260,6 +260,9 @@ impl Renderer {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                // Bucketing hides a GPU's exact limits from untrusted web
+                // content; a desktop engine wants the real ones.
+                apply_limit_buckets: false,
             })
             .await
             .context("no compatible graphics card found")?;
@@ -422,16 +425,24 @@ impl Renderer {
         let acquired = self.surface.get_current_texture();
         self.present_wait = acquiring.elapsed();
         let frame = match acquired {
-            Ok(frame) => frame,
+            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
             // The surface no longer matches the window (for example, it moved
             // to another monitor). Reconfigure and draw on the next frame.
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.scene.device, &self.config);
                 return Ok(());
             }
-            // The GPU took too long to hand over a frame. Skip this one.
-            Err(wgpu::SurfaceError::Timeout) => return Ok(()),
-            Err(err) => return Err(err).context("could not get the next frame to draw into"),
+            // Still drawable, though no longer an exact match for the window
+            // (wgpu 25 handed these over as `Ok` too). A resize reconfigures.
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            // The GPU took too long to hand over a frame, or the window is
+            // hidden. Skip this one.
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                anyhow::bail!("could not get the next frame to draw into (validation error)")
+            }
         };
 
         let view = frame
@@ -442,7 +453,7 @@ impl Renderer {
             .draw(list, &view, aspect, (self.config.width, self.config.height))?;
         before_present();
         let presenting = std::time::Instant::now();
-        frame.present();
+        self.scene.queue.present(frame);
         self.present_wait += presenting.elapsed();
         Ok(())
     }
@@ -632,8 +643,11 @@ impl TextureRenderer {
         buffer.slice(..).map_async(wgpu::MapMode::Read, |result| {
             result.expect("could not read the texture back");
         });
-        device.poll(wgpu::PollType::Wait).unwrap();
-        let mapped = buffer.slice(..).get_mapped_range();
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let mapped = buffer
+            .slice(..)
+            .get_mapped_range()
+            .expect("the buffer is mapped");
         mapped
             .chunks(row_bytes as usize)
             .flat_map(|row| &row[..(width * 4) as usize])

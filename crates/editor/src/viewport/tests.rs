@@ -200,15 +200,16 @@ fn spline_frame(
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
     let input = egui::RawInput {
         screen_rect: Some(rect),
-        events,
-        modifiers,
+        events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+            .chain(events)
+            .collect(),
         ..Default::default()
     };
     let mut result = (None, false, false);
-    let _ = ctx.run(input, |ctx| {
+    let _ = crate::theme::run(ctx, input, |ui| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
                 let screen = viewport.screen(viewport.camera.to_render_camera(), rect);
                 result = viewport.spline_input(ui, &response, &screen, world, editing);

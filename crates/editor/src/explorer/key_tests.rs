@@ -41,15 +41,16 @@ impl Panel {
             selection,
         } = self;
         let mut output = ExplorerOutput::default();
-        let _ = ctx.run(input, |ctx| {
-            let typing = ctx.wants_keyboard_input() && !explorer.has_focus(ctx);
+        let _ = crate::theme::run(ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
+            let typing = ctx.egui_wants_keyboard_input() && !explorer.has_focus(ctx);
             if !typing && explorer.has_keys(ctx) {
                 ctx.input_mut(|input| explorer.take_keys(input));
             }
-            egui::SidePanel::left("explorer")
-                .exact_width(300.0)
-                .show(ctx, |ui| output = explorer.show(ui, world, selection, true));
-            egui::CentralPanel::default().show(ctx, |_| {});
+            egui::Panel::left("explorer")
+                .exact_size(300.0)
+                .show(ui, |ui| output = explorer.show(ui, world, selection, true));
+            egui::CentralPanel::default().show(ui, |_| {});
         });
         if let Some(moved) = output.select {
             *selection = moved;
@@ -207,7 +208,7 @@ fn tab_reaches_the_explorer_after_its_filter() {
     let (world, ..) = car_world();
     let mut panel = Panel::new(world);
     panel.press(egui::Key::Tab, false);
-    assert!(panel.ctx.wants_keyboard_input(), "Filter first");
+    assert!(panel.ctx.egui_wants_keyboard_input(), "Filter first");
     assert!(!panel.explorer.has_focus(&panel.ctx));
     panel.press(egui::Key::Tab, false);
     assert!(panel.explorer.has_focus(&panel.ctx), "then the rows");
@@ -281,7 +282,7 @@ fn arrows_in_the_filter_move_its_cursor() {
     let mut panel = Panel::new(world);
     panel.click_at(egui::pos2(100.0, 15.0));
     assert!(
-        panel.ctx.wants_keyboard_input(),
+        panel.ctx.egui_wants_keyboard_input(),
         "the filter has the keyboard"
     );
     panel.frame(vec![egui::Event::Text("ab".into())]);
@@ -313,8 +314,8 @@ fn snapshot_of_the_focus_ring() {
         &std::path::PathBuf::from(folder).join("explorer-keys.png"),
         egui::vec2(260.0, 220.0),
         vec![Vec::new(); 3],
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = explorer.show(ui, world, selection, true);
             });
         },

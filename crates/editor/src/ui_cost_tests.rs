@@ -25,8 +25,8 @@ fn time(size: egui::Vec2, mut draw: impl FnMut(&mut egui::Ui)) -> f64 {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| draw(ui));
+        let _ = crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| draw(ui));
         });
     };
     for _ in 0..3 {

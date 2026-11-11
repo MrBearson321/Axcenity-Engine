@@ -15,8 +15,8 @@ impl AnimationStudio {
         actions: &mut Vec<StudioAction>,
     ) -> Option<Go> {
         let stacked = ui.available_width() < STACK_BELOW;
-        let pick = egui::TopBottomPanel::top("state machine toolbar")
-            .show_inside(ui, |ui| self.controller_toolbar(ui, stacked))
+        let pick = egui::Panel::top("state machine toolbar")
+            .show(ui, |ui| self.controller_toolbar(ui, stacked))
             .inner;
         if let Some(pick) = pick {
             self.act(pick, project, assets, world, output, actions);
@@ -25,7 +25,7 @@ impl AnimationStudio {
         let dt = f64::from(ui.input(|input| input.unstable_dt)).min(MAX_FRAME_SECONDS);
         let mut go = None;
         if stacked {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("state machine stacked")
                     .auto_shrink(false)
@@ -47,25 +47,25 @@ impl AnimationStudio {
             // parameters; the graph keeps at least half the height, and
             // starts with two thirds of a short tab.
             let room = ui.available_height();
-            egui::TopBottomPanel::bottom("state machine preview")
+            egui::Panel::bottom("state machine preview")
                 .resizable(true)
-                .default_height(CONTROLLER_PREVIEW.min(room / 3.0).max(100.0))
-                .min_height(100.0)
-                .max_height((room * 0.5).max(100.0))
-                .show_inside(ui, |ui| self.controller_live(ui, assets, render_state, dt));
+                .default_size(CONTROLLER_PREVIEW.min(room / 3.0).max(100.0))
+                .min_size(100.0)
+                .max_size((room * 0.5).max(100.0))
+                .show(ui, |ui| self.controller_live(ui, assets, render_state, dt));
             if !self.machine.hide_inspector {
                 let room = ui.available_width();
-                egui::SidePanel::right("state machine inspector")
+                egui::Panel::right("state machine inspector")
                     .resizable(true)
-                    .default_width(320.0)
-                    .max_width(room * 0.5)
-                    .show_inside(ui, |ui| {
+                    .default_size(320.0)
+                    .max_size(room * 0.5)
+                    .show(ui, |ui| {
                         egui::ScrollArea::vertical()
                             .id_salt("state machine inspector scroll")
                             .show(ui, |ui| self.controller_inspector(ui))
                     });
             }
-            egui::CentralPanel::default().show_inside(ui, |ui| go = self.controller_graph(ui));
+            egui::CentralPanel::default().show(ui, |ui| go = self.controller_graph(ui));
         }
         if self.machine.doc.as_ref().is_some_and(|doc| doc.playing) {
             ui.ctx().request_repaint();

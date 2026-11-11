@@ -124,7 +124,7 @@ fn the_examples_road_and_scatters_save_only_their_settings() {
 #[test]
 fn the_road_is_drawn_along_its_whole_curve_with_no_gaps() {
     use axcenity_render::{TextureRenderer, wgpu};
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
         return;
     };

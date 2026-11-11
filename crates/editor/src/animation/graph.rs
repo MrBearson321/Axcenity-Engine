@@ -904,8 +904,8 @@ mod chip_tests {
         let mut chips = Vec::new();
         let column = Rect::from_min_size(Pos2::ZERO, egui::vec2(132.0, 400.0));
         for _ in 0..2 {
-            let _ = ctx.run(Default::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
                         parameters_panel(ui, &parameters, &mut chips);
                     });

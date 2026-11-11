@@ -94,15 +94,16 @@ impl EditorApp {
         false
     }
     /// Only the header and the loading screen, while a project loads.
-    pub(super) fn loading_frame(&mut self, ctx: &egui::Context) {
+    pub(super) fn loading_frame(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
         let palette = theme::palette(ctx);
-        egui::TopBottomPanel::top("menu bar")
-            .exact_height(window_frame::HEIGHT)
+        egui::Panel::top("menu bar")
+            .exact_size(window_frame::HEIGHT)
             .frame(egui::Frame::new().fill(palette.app_bg))
-            .show(ctx, |ui| self.title_bar(ui));
+            .show(ui, |ui| self.title_bar(ui));
         let cancel = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let loading = self.loading.as_ref().expect("only drawn while loading");
                 let mark = self.brand.as_ref().map(|brand| brand.mark());
                 loading.show(ui, ui.max_rect(), mark)
@@ -128,7 +129,7 @@ impl EditorApp {
             self.cover_until = None;
             return;
         }
-        let mut rect = ctx.screen_rect();
+        let mut rect = ctx.content_rect();
         rect.min.y += window_frame::HEIGHT;
         let name = self
             .project
@@ -1265,10 +1266,11 @@ impl EditorApp {
     }
     /// Fills the window under the menu bar with the start screen, and opens
     /// what's picked there.
-    pub(super) fn start_screen(&mut self, ctx: &egui::Context) {
+    pub(super) fn start_screen(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
         let picked = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let brand = self
                     .brand
                     .as_ref()

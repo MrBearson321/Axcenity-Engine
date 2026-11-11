@@ -470,7 +470,7 @@ fn code_editor(
     let stylesheet = tab.is_stylesheet();
     // A stylesheet's colours each get a swatch before them, in a gap the
     // layout leaves.
-    let row = ui.fonts(|fonts| fonts.row_height(&font));
+    let row = ui.fonts_mut(|fonts| fonts.row_height(&font));
     let swatch = if stylesheet { row + 4.0 } else { 0.0 };
     let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
         let job = if stylesheet {
@@ -478,7 +478,7 @@ fn code_editor(
         } else {
             lua_syntax::layout_job(text.as_str(), font.clone(), ui.visuals())
         };
-        ui.fonts(|fonts| fonts.layout_job(job))
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
 
     egui::ScrollArea::both()
@@ -495,8 +495,7 @@ fn code_editor(
                     .id(id)
                     .font(font.clone())
                     .code_editor()
-                    .frame(false)
-                    .margin(egui::Margin::ZERO)
+                    .frame(egui::Frame::NONE)
                     .desired_width(f32::INFINITY)
                     .min_size(ui.available_size())
                     .layouter(&mut layouter)
@@ -658,8 +657,12 @@ fn color_swatches(
         tab.highlighted = None;
     }
     ui.data_mut(|data| match open {
-        Some(start) => data.insert_temp(open_id, start),
-        None => data.remove::<usize>(open_id),
+        Some(start) => {
+            data.insert_temp(open_id, start);
+        }
+        None => {
+            data.remove::<usize>(open_id);
+        }
     });
 }
 
@@ -674,7 +677,7 @@ fn gutter(
     paused_line: Option<usize>,
 ) -> Option<usize> {
     let palette = theme::palette(ui.ctx());
-    let (row, digit) = ui.fonts(|fonts| (fonts.row_height(font), fonts.glyph_width(font, '0')));
+    let (row, digit) = ui.fonts_mut(|fonts| (fonts.row_height(font), fonts.glyph_width(font, '0')));
     let numbers = digit * lines.to_string().len() as f32;
     let size = egui::vec2(MARKER_WIDTH + numbers + 4.0, row * lines as f32);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -813,8 +816,8 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| tabs.show(ui, "ui.css"));
+            let _ = crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| tabs.show(ui, "ui.css"));
             });
         };
         frame(&mut tabs, Vec::new());
@@ -855,8 +858,8 @@ mod tests {
                     vec![press(false)],
                     Vec::new(),
                 ],
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| tabs.show(ui, "ui.css"));
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| tabs.show(ui, "ui.css"));
                 },
             );
         }
@@ -910,9 +913,9 @@ mod tests {
             )),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
+        let _ = crate::theme::run(ctx, input, |ui| {
             let path = tabs.active_path().unwrap().to_owned();
-            egui::CentralPanel::default().show(ctx, |ui| tabs.show(ui, &path));
+            egui::CentralPanel::default().show(ui, |ui| tabs.show(ui, &path));
         });
     }
 
@@ -930,7 +933,7 @@ mod tests {
 
         let state = egui::TextEdit::load_state(&ctx, editor_id(path)).unwrap();
         let cursor = state.cursor.char_range().unwrap().primary;
-        assert_eq!(cursor.index, char_index_of_line(&code, 150));
+        assert_eq!(cursor.index.0, char_index_of_line(&code, 150));
         assert!(ctx.memory(|memory| memory.has_focus(editor_id(path))));
     }
 }

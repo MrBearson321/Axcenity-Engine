@@ -167,8 +167,8 @@ fn a_global_asset_shows_in_every_project_and_is_copied_in_when_used() {
     browser.category = Category::Global;
     let ctx = theme::test_context();
     for _ in 0..2 {
-        let _ = ctx.run(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| browser.show(ui, true, false, None));
+        let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| browser.show(ui, true, false, None));
         });
     }
     if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
@@ -178,8 +178,8 @@ fn a_global_asset_shows_in_every_project_and_is_copied_in_when_used() {
             &PathBuf::from(snapshots).join("assets-panel-global.png"),
             egui::vec2(720.0, 320.0),
             vec![Vec::new(); 4],
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| browser.show(ui, true, false, None));
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| browser.show(ui, true, false, None));
             },
         );
     }

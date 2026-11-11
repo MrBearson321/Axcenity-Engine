@@ -1654,8 +1654,9 @@ mod tests {
         let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
         for page in SettingsPage::ALL {
             app.settings.page = page;
-            let mut draw = |ctx: &egui::Context| {
-                egui::CentralPanel::default().show(ctx, |_| {});
+            let mut draw = |ui: &mut egui::Ui| {
+                let ctx = &ui.ctx().clone();
+                egui::CentralPanel::default().show(ui, |_| {});
                 app.settings_window(ctx);
             };
             match &snapshots {
@@ -1670,7 +1671,7 @@ mod tests {
                     )
                 }
                 _ => {
-                    let _ = ctx.run(Default::default(), &mut draw);
+                    let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
                 }
             }
         }
@@ -1681,11 +1682,12 @@ mod tests {
             accent: Accent::Orange,
             ..Appearance::default()
         };
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+            let ctx = &ui.ctx().clone();
             app.set_appearance(ctx, light.clone())
         });
         assert_eq!(app.appearance, light);
-        assert!(!ctx.style().visuals.dark_mode);
+        assert!(!ctx.global_style().visuals.dark_mode);
         assert_eq!(
             theme::palette(&ctx).accent,
             Palette::new(false, Accent::Orange).accent
@@ -1702,6 +1704,9 @@ mod tests {
         }
         fn set_string(&mut self, key: &str, value: String) {
             self.0.insert(key.to_owned(), value);
+        }
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
         }
         fn flush(&mut self) {}
     }
@@ -1769,14 +1774,14 @@ mod tests {
             &std::env::temp_dir().join(format!("axcenity-graphics-{}.png", std::process::id())),
             egui::vec2(320.0, 200.0),
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 match frame {
                     1 => app.graphics.shadow_quality = Some(ShadowQuality::Off),
                     2 => app.graphics.anti_aliasing = Some(AntiAliasing::Fxaa),
                     _ => {}
                 }
                 frame += 1;
-                egui::CentralPanel::default().show(ctx, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     app.scene_pane(ui, Some(render_state));
                 });
                 seen.push(
@@ -1813,7 +1818,7 @@ mod tests {
             &std::env::temp_dir().join(format!("axcenity-look-{}.png", std::process::id())),
             egui::vec2(320.0, 200.0),
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 match frame {
                     1 => app.apply(lighting, Edit::Property("Exposure", Value::Number(2.0))),
                     2 => app.apply(
@@ -1823,7 +1828,7 @@ mod tests {
                     _ => {}
                 }
                 frame += 1;
-                egui::CentralPanel::default().show(ctx, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     app.scene_pane(ui, Some(render_state));
                 });
                 drawn.extend(app.viewport.pixels());
@@ -1873,14 +1878,14 @@ mod tests {
                 .join(format!("axcenity-play-graphics-{}.png", std::process::id())),
             egui::vec2(320.0, 200.0),
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 match frame {
                     1 => app.play_frame(1.0 / 60.0, &[press.into()], None, None),
                     2 => app.stop(),
                     _ => app.play_frame(1.0 / 60.0, &[], None, None),
                 }
                 frame += 1;
-                egui::CentralPanel::default().show(ctx, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     app.scene_pane(ui, Some(render_state));
                 });
                 seen.push(app.viewport.graphics().map(|used| used.shadow_quality));

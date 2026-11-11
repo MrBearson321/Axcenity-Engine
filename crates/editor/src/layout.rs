@@ -250,13 +250,14 @@ impl Layout {
     /// Shows `pane`: makes it the active tab where it is, or opens it where
     /// it starts out (next to a panel that shares its place by default).
     pub fn open(&mut self, pane: Pane) {
-        if let Some((surface, node, tab)) = self.dock.find_tab(&pane) {
-            self.dock.set_active_tab((surface, node, tab));
+        if let Some(found) = self.dock.find_tab(&pane) {
+            // Fails only for a tab that isn't there, and this one was just found.
+            let _ = self.dock.set_active_tab(found);
             return;
         }
         if let Some(window) = self.windows.iter_mut().find(|w| w.holds(pane)) {
             if let Some(found) = window.dock.find_tab(&pane) {
-                window.dock.set_active_tab(found);
+                let _ = window.dock.set_active_tab(found);
             }
             window.focus = true;
             return;
@@ -342,15 +343,18 @@ impl Layout {
                 .and_then(|last| self.dock.find_tab(&Pane::Script(last)))
                 .or_else(|| self.dock.find_tab(&Pane::Scene));
             match beside {
-                Some((surface, node, _)) => {
+                Some(egui_dock::TabPath { surface, node, .. }) => {
                     let front = match &self.dock[surface][node] {
                         egui_dock::Node::Leaf(leaf) if self.switched => Some(leaf.active),
                         _ => None,
                     };
-                    self.dock.set_focused_node_and_surface((surface, node));
+                    self.dock
+                        .set_focused_node_and_surface(egui_dock::NodePath::new(surface, node));
                     self.dock.push_to_focused_leaf(pane);
                     if let Some(front) = front {
-                        self.dock.set_active_tab((surface, node, front));
+                        let _ = self
+                            .dock
+                            .set_active_tab(egui_dock::TabPath::new(surface, node, front));
                     }
                 }
                 None => self.dock.push_to_first_leaf(pane),
@@ -365,9 +369,10 @@ impl Layout {
         if let Some(id) = focus {
             let pane = Pane::Script(id);
             if let Some(found) = self.dock.find_tab(&pane) {
-                let (surface, node, _) = found;
-                self.dock.set_active_tab(found);
-                self.dock.set_focused_node_and_surface((surface, node));
+                let egui_dock::TabPath { surface, node, .. } = found;
+                let _ = self.dock.set_active_tab(found);
+                self.dock
+                    .set_focused_node_and_surface(egui_dock::NodePath::new(surface, node));
             } else if self.is_open(pane) {
                 self.open(pane);
             }
@@ -503,7 +508,7 @@ fn zero_nulls(json: &mut serde_json::Value) {
 /// right, and the Console, Assets and Profiler as tabs under the Scene.
 fn default_dock() -> DockState<Pane> {
     let mut dock = DockState::new(vec![Pane::Scene, Pane::Animation, Pane::UiDesigner]);
-    dock.set_active_tab((
+    let _ = dock.set_active_tab(egui_dock::TabPath::new(
         egui_dock::SurfaceIndex::main(),
         NodeIndex::root(),
         egui_dock::TabIndex(0),
@@ -658,8 +663,8 @@ mod tests {
     fn a_layout_with_the_old_animator_tab_keeps_one_animation_tab() {
         let layout = Layout::default();
         let mut dock = layout.dock.clone();
-        let (surface, node, _) = dock.find_tab(&Pane::Animation).unwrap();
-        dock.set_focused_node_and_surface((surface, node));
+        let egui_dock::TabPath { surface, node, .. } = dock.find_tab(&Pane::Animation).unwrap();
+        dock.set_focused_node_and_surface(egui_dock::NodePath::new(surface, node));
         dock.push_to_focused_leaf(Pane::Console);
         // Saved before v3 Phase 8: the second tab was the Animator.
         let text = serde_json::to_string(&dock)
@@ -678,7 +683,7 @@ mod tests {
 
     /// The leaf (surface and node) a panel is in.
     fn leaf_of(layout: &Layout, pane: Pane) -> (egui_dock::SurfaceIndex, NodeIndex) {
-        let (surface, node, _) = layout.dock.find_tab(&pane).unwrap();
+        let egui_dock::TabPath { surface, node, .. } = layout.dock.find_tab(&pane).unwrap();
         (surface, node)
     }
 
@@ -695,7 +700,9 @@ mod tests {
         let found = layout.dock.find_tab(&Pane::Script(0)).unwrap();
         layout.dock.remove_tab(found);
         let explorer = leaf_of(&layout, Pane::Explorer);
-        layout.dock.set_focused_node_and_surface(explorer);
+        layout
+            .dock
+            .set_focused_node_and_surface(egui_dock::NodePath::new(explorer.0, explorer.1));
         layout.dock.push_to_focused_leaf(Pane::Script(0));
         layout.sync_scripts(&[0, 1], Some(1), Some(1));
         assert_eq!(leaf_of(&layout, Pane::Script(1)), explorer);

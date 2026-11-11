@@ -128,7 +128,7 @@ fn switching_shadow_quality_fifty_times_leaves_one_shadow_map() {
         let size = renderer.scene.shadow_map.as_ref().map(|map| map.size);
         assert_eq!(size, quality.map());
     }
-    device.poll(wgpu::PollType::Wait).unwrap();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     assert_eq!(renderer.scene.shadow_maps_alive(), 1);
 }
 

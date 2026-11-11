@@ -133,11 +133,12 @@ impl Harness {
             ..Default::default()
         };
         let mut during = Some(during);
-        let _ = self.ctx.run(input, |ctx| {
+        let _ = crate::theme::run(&self.ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
             if let Some(during) = during.take() {
                 during(ctx);
             }
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 self.doc.graph_ui(ui, &self.clips);
             });
         });

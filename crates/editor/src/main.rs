@@ -84,6 +84,7 @@ mod ui_designer;
 mod ui_handles;
 mod viewport;
 mod watcher;
+mod wheel;
 mod widgets;
 mod window_frame;
 
@@ -117,7 +118,7 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     use axcenity_render::wgpu;
     use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
 
-    let mut setup = WgpuSetupCreateNew::default();
+    let mut setup = WgpuSetupCreateNew::without_display_handle();
     let base = setup.device_descriptor.clone();
     setup.device_descriptor = std::sync::Arc::new(move |adapter| {
         let mut descriptor = base(adapter);

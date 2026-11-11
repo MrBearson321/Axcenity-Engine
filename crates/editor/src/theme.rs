@@ -664,7 +664,7 @@ pub fn palette(ctx: &egui::Context) -> Palette {
     let high = ctx
         .data(|data| data.get_temp::<bool>(contrast_id()))
         .unwrap_or(false);
-    Palette::new(ctx.style().visuals.dark_mode, accent).with_contrast(high)
+    Palette::new(ctx.global_style().visuals.dark_mode, accent).with_contrast(high)
 }
 
 /// The font family of headings, panel titles and emphasis (Inter SemiBold).
@@ -894,7 +894,7 @@ pub fn arrival(
     seconds: f32,
     timing: (f32, f32, f32, f32),
 ) -> f32 {
-    if ctx.style().animation_time <= 0.0 {
+    if ctx.global_style().animation_time <= 0.0 {
         return 1.0;
     }
     let elapsed = (ctx.input(|input| input.time) - started) as f32 - delay;
@@ -989,7 +989,7 @@ fn visuals(p: &Palette) -> egui::Visuals {
 /// How far `id` is through its hover (or any on/off) transition, from 0 to
 /// 1, eased. Instant when motion is reduced.
 pub fn ease(ctx: &egui::Context, id: egui::Id, on: bool) -> f32 {
-    let time = ctx.style().animation_time;
+    let time = ctx.global_style().animation_time;
     let t = ctx.animate_bool_with_time(id, on, time);
     // Ease out: quick to respond, gentle to settle.
     1.0 - (1.0 - t) * (1.0 - t)
@@ -999,7 +999,7 @@ pub fn ease(ctx: &egui::Context, id: egui::Id, on: bool) -> f32 {
 /// changes, so switching doesn't flash. Call [`start_crossfade`] when it
 /// changes and [`paint_crossfade`] every frame.
 pub fn start_crossfade(ctx: &egui::Context, from: Color32) {
-    if ctx.style().animation_time <= 0.0 {
+    if ctx.global_style().animation_time <= 0.0 {
         return;
     }
     let now = ctx.input(|input| input.time);
@@ -1021,7 +1021,7 @@ pub fn paint_crossfade(ctx: &egui::Context) {
     let alpha = (1.0 - t) * (1.0 - t) * 0.9;
     // Painted only: clicks and keys go through to the UI underneath.
     ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, crossfade_id()))
-        .rect_filled(ctx.screen_rect(), 0, from.gamma_multiply(alpha));
+        .rect_filled(ctx.content_rect(), 0, from.gamma_multiply(alpha));
     ctx.request_repaint();
 }
 
@@ -1376,6 +1376,33 @@ pub fn test_context() -> egui::Context {
     ctx
 }
 
+/// Runs one frame of `ctx` without a GPU, for tests.
+///
+/// Each frame's input holds its own modifier keys, as egui's did before 0.36:
+/// with no `ModifiersChanged` event, none are held (egui itself now keeps
+/// the last ones until told otherwise). And since egui 0.36 a frame's texture
+/// changes must reach a renderer or be cleared before they're dropped (a
+/// debug check panics otherwise); with no renderer, this clears them.
+#[cfg(test)]
+pub fn run(
+    ctx: &egui::Context,
+    mut input: egui::RawInput,
+    ui: impl FnMut(&mut egui::Ui),
+) -> egui::FullOutput {
+    let held = input
+        .events
+        .iter()
+        .any(|event| matches!(event, egui::Event::ModifiersChanged(_)));
+    if !held && !ctx.input(|input| input.modifiers.is_none()) {
+        input
+            .events
+            .insert(0, egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    }
+    let mut output = ctx.run_ui(input, ui);
+    output.textures_delta.clear();
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1383,8 +1410,9 @@ mod tests {
     #[test]
     fn every_class_has_an_icon_and_every_text_style_a_font() {
         let ctx = test_context();
-        let _ = ctx.run(Default::default(), |ctx| {
-            ctx.fonts(|fonts| {
+        let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+            let ctx = &ui.ctx().clone();
+            ctx.fonts_mut(|fonts| {
                 for class in ClassName::ALL {
                     let icon = class_icon(class).chars().next().unwrap();
                     assert!(
@@ -1409,7 +1437,7 @@ mod tests {
             });
             for theme in [egui::Theme::Dark, egui::Theme::Light] {
                 ctx.set_theme(theme);
-                let style = ctx.style();
+                let style = ctx.global_style();
                 assert_eq!(
                     style.text_styles[&TextStyle::Heading].family,
                     heading_family()
@@ -1428,8 +1456,9 @@ mod tests {
         // the bundled copy is subset without them (see assets/fonts). An
         // icon drawn from Inter would be a different width from Phosphor's.
         let ctx = test_context();
-        let _ = ctx.run(Default::default(), |ctx| {
-            ctx.fonts(|fonts| {
+        let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+            let ctx = &ui.ctx().clone();
+            ctx.fonts_mut(|fonts| {
                 let mut icons_used: Vec<&str> =
                     ClassName::ALL.into_iter().map(class_icon).collect();
                 icons_used.extend([
@@ -1440,7 +1469,7 @@ mod tests {
                     icons::MAGNIFYING_GLASS,
                 ]);
                 for icon in icons_used {
-                    let width = |family: FontFamily| {
+                    let mut width = |family: FontFamily| {
                         fonts
                             .layout_no_wrap(
                                 icon.to_owned(),
@@ -1743,7 +1772,8 @@ mod tests {
                 time: Some(time),
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| {
+            let _ = crate::theme::run(ctx, input, |ui| {
+                let ctx = &ui.ctx().clone();
                 got = arrival(ctx, 1.0, 0.1, 0.5, curve::SETTLE);
             });
             got
@@ -1776,8 +1806,8 @@ mod tests {
             palette(&ctx).accent,
             Palette::new(true, Accent::Green).accent
         );
-        assert_eq!(ctx.style().spacing.interact_size.y, 20.0);
-        assert_eq!(ctx.style().animation_time, 0.0);
+        assert_eq!(ctx.global_style().spacing.interact_size.y, 20.0);
+        assert_eq!(ctx.global_style().animation_time, 0.0);
         // Reduced motion makes transitions instant.
         assert_eq!(ease(&ctx, egui::Id::new("x"), true), 1.0);
     }

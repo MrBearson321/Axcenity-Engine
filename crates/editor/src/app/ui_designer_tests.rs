@@ -414,14 +414,14 @@ fn draw_designer(
         events,
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let _ = crate::theme::run(ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let room = ui.max_rect();
             app.ui_designer_pane(ui, None);
             fit = Some((ui.min_rect(), room));
         });
     });
-    if !ctx.is_using_pointer() {
+    if !ctx.egui_is_using_pointer() {
         frame_ends(app);
     }
     fit.expect("drawn")
@@ -454,9 +454,9 @@ fn the_designer_fits_any_shape_and_its_artboard_drags_an_element() {
                 &folder.join(format!("ui-designer-{shape}.png")),
                 size,
                 vec![Vec::new(); 3],
-                |ctx, render_state| {
+                |ui, render_state| {
                     egui::CentralPanel::default()
-                        .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                        .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
                 },
             );
         }
@@ -548,10 +548,10 @@ pub(super) fn run_designer(
             time: Some(*clock),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+        let _ = crate::theme::run(ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
         });
-        if !ctx.is_using_pointer() && !ctx.wants_keyboard_input() {
+        if !ctx.egui_is_using_pointer() && !ctx.egui_wants_keyboard_input() {
             frame_ends(app);
         }
     }
@@ -974,9 +974,9 @@ fn the_artboard_previews_the_ui_on_another_screen() {
             &folder.join("ui-designer-ultrawide.png"),
             size,
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 egui::CentralPanel::default()
-                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                    .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
             },
         );
     }
@@ -1173,9 +1173,9 @@ fn dragging_the_horizontal_diamonds_to_both_edges_stretches_an_element_across() 
             &snapshots.join("ui-designer-anchor-drag.png"),
             size,
             frames,
-            |ctx, render_state| {
+            |ui, render_state| {
                 egui::CentralPanel::default()
-                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                    .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
             },
         );
     }
@@ -1205,10 +1205,10 @@ pub(super) fn designer_frame(
         time: Some(*clock),
         ..Default::default()
     };
-    let output = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+    let output = crate::theme::run(ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
     });
-    if !ctx.is_using_pointer() && !ctx.wants_keyboard_input() {
+    if !ctx.egui_is_using_pointer() && !ctx.egui_wants_keyboard_input() {
         frame_ends(app);
     }
     output

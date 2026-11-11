@@ -206,8 +206,8 @@ fn a_linked_clips_take_bones_are_locked_until_convert_to_keys_which_looks_the_sa
     assert_eq!(tracks[0].target, "Root/Mid/Top");
     // The drawer shows Mid locked and Top's key; with `AXCENITY_SNAPSHOTS`
     // it's saved as `animation-linked-bones.png`.
-    let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |ui| app.animation_pane(ui, None));
+    let mut draw = |ui: &mut egui::Ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.animation_pane(ui, None));
     };
     match std::env::var_os("AXCENITY_SNAPSHOTS") {
         Some(folder) => crate::snapshot::snapshot(
@@ -219,7 +219,7 @@ fn a_linked_clips_take_bones_are_locked_until_convert_to_keys_which_looks_the_sa
         None => {
             let ctx = theme::test_context();
             for _ in 0..3 {
-                let _ = ctx.run(Default::default(), &mut draw);
+                let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
             }
         }
     }

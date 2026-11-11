@@ -11,9 +11,9 @@ pub fn snapshot(
     path: &std::path::Path,
     size: Vec2,
     frames: Vec<Vec<egui::Event>>,
-    mut show: impl FnMut(&egui::Context),
+    mut show: impl FnMut(&mut egui::Ui),
 ) {
-    snapshot_rendered(path, size, frames, |ctx, _| show(ctx));
+    snapshot_rendered(path, size, frames, |ui, _| show(ui));
 }
 
 /// [`snapshot`], also handing `show` a GPU render state, so what draws with
@@ -22,23 +22,34 @@ pub fn snapshot_rendered(
     path: &std::path::Path,
     size: Vec2,
     frames: Vec<Vec<egui::Event>>,
-    mut show: impl FnMut(&egui::Context, &RenderState),
+    mut show: impl FnMut(&mut egui::Ui, &RenderState),
 ) {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
         eprintln!("skipped: no graphics adapter");
         return;
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
     let ctx = crate::theme::test_context();
-    let renderer = Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, None, 1, false);
+    let renderer = Renderer::new(
+        &device,
+        wgpu::TextureFormat::Rgba8Unorm,
+        eframe::egui_wgpu::RendererOptions {
+            msaa_samples: 1,
+            depth_stencil_format: None,
+            dithering: false,
+            predictable_texture_filtering: false,
+        },
+    );
     let render_state = RenderState {
         adapter: adapter.clone(),
         available_adapters: Vec::new(),
+        instance: instance.clone(),
         device: device.clone(),
         queue: queue.clone(),
         target_format: wgpu::TextureFormat::Rgba8Unorm,
         renderer: Arc::new(egui::mutex::RwLock::new(renderer)),
+        surface_config: eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY,
     };
     let mut last = None;
     for (index, events) in frames.into_iter().enumerate() {
@@ -50,10 +61,15 @@ pub fn snapshot_rendered(
             time: Some(index as f64 * 0.5),
             ..Default::default()
         };
-        let output = ctx.run(input, |ctx| show(ctx, &render_state));
+        let mut output = ctx.run_ui(input, |ui| show(ui, &render_state));
         let mut renderer = render_state.renderer.write();
-        for (id, delta) in &output.textures_delta.set {
-            renderer.update_texture(&device, &queue, *id, delta);
+        for (id, deltas) in output.textures_delta.set.drain() {
+            for delta in deltas {
+                renderer.update_texture(&device, &queue, id, &delta);
+            }
+        }
+        for id in output.textures_delta.free.drain() {
+            renderer.free_texture(&id);
         }
         last = Some(output);
     }
@@ -87,6 +103,7 @@ pub fn snapshot_rendered(
         let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                depth_slice: None,
                 view: &view,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -123,8 +140,11 @@ pub fn snapshot_rendered(
     );
     queue.submit(commands.into_iter().chain([encoder.finish()]));
     buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::PollType::Wait).unwrap();
-    let mapped = buffer.slice(..).get_mapped_range();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let mapped = buffer
+        .slice(..)
+        .get_mapped_range()
+        .expect("the buffer is mapped");
     let pixels: Vec<u8> = mapped
         .chunks(row as usize)
         .flat_map(|line| &line[..(width * 4) as usize])

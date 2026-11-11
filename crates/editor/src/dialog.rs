@@ -113,7 +113,7 @@ fn typing_id() -> egui::Id {
 
 /// The frame every dialog is drawn in.
 pub fn frame(ctx: &egui::Context) -> egui::Frame {
-    egui::Frame::popup(&ctx.style())
+    egui::Frame::popup(&ctx.global_style())
         .corner_radius(theme::radius::CARD)
         .inner_margin(egui::Margin::same(20))
 }
@@ -123,7 +123,7 @@ pub fn frame(ctx: &egui::Context) -> egui::Frame {
 /// Escape or a click outside asked to close it.
 pub fn modal<R>(
     ctx: &egui::Context,
-    id: impl std::hash::Hash,
+    id: impl std::hash::Hash + std::fmt::Debug,
     width: f32,
     body: impl FnOnce(&mut egui::Ui) -> R,
 ) -> (R, bool) {
@@ -133,7 +133,7 @@ pub fn modal<R>(
             ui.set_width(width);
             body(ui)
         });
-    let typing = ctx.wants_keyboard_input();
+    let typing = ctx.egui_wants_keyboard_input();
     ctx.data_mut(|data| data.insert_temp(typing_id(), typing));
     let dismissed = shown.should_close();
     (shown.inner, dismissed)
@@ -309,8 +309,9 @@ mod tests {
         let (icon, tone) = unsaved_style();
         // Shared with the drawing closure, which pushes each frame's outcome.
         let outcomes = std::cell::RefCell::new(Vec::new());
-        let mut draw = |ctx: &egui::Context| {
-            egui::CentralPanel::default().show(ctx, |_| {});
+        let mut draw = |ui: &mut egui::Ui| {
+            let ctx = &ui.ctx().clone();
+            egui::CentralPanel::default().show(ui, |_| {});
             outcomes.borrow_mut().push(ask(
                 ctx,
                 &Question {
@@ -353,7 +354,7 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let _ = ctx.run(input, &mut draw);
+            let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
         }
         assert_eq!(*outcomes.borrow(), [None, Some(Outcome::Dismissed)]);
     }
@@ -381,7 +382,8 @@ mod tests {
                     events,
                     ..Default::default()
                 };
-                let _ = ctx.run(input, |ctx| {
+                let _ = crate::theme::run(&ctx, input, |ui| {
+                    let ctx = &ui.ctx().clone();
                     let ((), _) = modal(ctx, "enter test", WIDTH, |ui| {
                         let field = ui.text_edit_singleline(&mut text);
                         if frame == 0 {
@@ -441,7 +443,8 @@ mod tests {
                     events,
                     ..Default::default()
                 };
-                let _ = ctx.run(input, |ctx| {
+                let _ = crate::theme::run(&ctx, input, |ui| {
+                    let ctx = &ui.ctx().clone();
                     picked = modal(ctx, "enter test", WIDTH, |ui| {
                         self::buttons(ui, &buttons, Enter::Main)
                     })

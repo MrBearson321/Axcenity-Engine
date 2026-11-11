@@ -760,8 +760,8 @@ mod tests {
             )),
             ..egui::RawInput::default()
         };
-        let output = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| profiler.show(ui));
+        let output = crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| profiler.show(ui));
         });
         output
             .shapes
@@ -976,8 +976,8 @@ mod tests {
         for (tab, name) in [(Tab::Game, "game"), (Tab::Graphics, "graphics")] {
             profiler.tab = tab;
             let mut fit = None;
-            let mut draw = |ctx: &egui::Context| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let mut draw = |ui: &mut egui::Ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let room = ui.max_rect();
                     profiler.show(ui);
                     fit = Some((ui.min_rect(), room));
@@ -989,7 +989,7 @@ mod tests {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                     ..Default::default()
                 };
-                let _ = ctx.run(input, &mut draw);
+                let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
             }
             if let Some(folder) = &snapshots {
                 let path = folder.join(format!("profiler-{name}.png"));
@@ -1023,7 +1023,7 @@ mod tests {
     #[test]
     fn the_graphics_tab_follows_the_renderers_stats_as_the_scene_changes() {
         use axcenity_render::wgpu;
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let Some((device, queue)) =
             pollster::block_on(instance.request_adapter(&Default::default()))
                 .ok()
@@ -1095,8 +1095,8 @@ mod tests {
                 )),
                 ..Default::default()
             };
-            let output = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| profiler.show(ui));
+            let output = crate::theme::run(&ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| profiler.show(ui));
             });
             texts = output
                 .shapes

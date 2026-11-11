@@ -14,7 +14,7 @@ pub(super) fn samples_along(samples: usize, width: f32, length: f32) -> usize {
 impl EditorApp {
     /// 1 to 0 pick tools, `[` and `]` size the brush, Escape puts it down.
     pub(super) fn terrain_keys(&mut self, ctx: &egui::Context) {
-        if self.terrain.tool.is_none() || ctx.wants_keyboard_input() {
+        if self.terrain.tool.is_none() || ctx.egui_wants_keyboard_input() {
             return;
         }
         let (tool, smaller, bigger, escape) = ctx.input_mut(|input| {

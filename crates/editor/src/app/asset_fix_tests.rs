@@ -133,8 +133,8 @@ fn the_fixes_fit_a_narrow_column() {
     app.run_asset_check();
     let size = egui::vec2(260.0, 900.0);
     let mut fit = None;
-    let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let mut draw = |ui: &mut egui::Ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let room = ui.max_rect();
             app.asset_check_pane(ui);
             fit = Some((ui.min_rect(), room));
@@ -146,7 +146,7 @@ fn the_fixes_fit_a_narrow_column() {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
             ..Default::default()
         };
-        let _ = ctx.run(input, &mut draw);
+        let _ = crate::theme::run(&ctx, input, |ui| draw(ui));
     }
     if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         let path = std::path::PathBuf::from(snapshots).join("asset-check-fixes.png");

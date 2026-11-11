@@ -656,7 +656,7 @@ pub(super) fn create_ui_pipeline(
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("UI overlay"),
         bind_group_layouts: &[],
-        push_constant_ranges: &[],
+        immediate_size: 0,
     });
     let vertex_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<UiVertex>() as u64,
@@ -670,7 +670,7 @@ pub(super) fn create_ui_pipeline(
             module: &shader,
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
-            buffers: &[vertex_layout],
+            buffers: &[Some(vertex_layout)],
         },
         primitive: wgpu::PrimitiveState::default(),
         depth_stencil: None,
@@ -685,7 +685,7 @@ pub(super) fn create_ui_pipeline(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }
@@ -735,8 +735,8 @@ pub(super) fn create_ui_image_pipeline(
     let shader = device.create_shader_module(wgpu::include_wgsl!("../ui.wgsl"));
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("UI image"),
-        bind_group_layouts: &[&bind_layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&bind_layout)],
+        immediate_size: 0,
     });
     let pipeline = |entry_point: &str| {
         let vertex_layout = wgpu::VertexBufferLayout {
@@ -751,7 +751,7 @@ pub(super) fn create_ui_image_pipeline(
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[vertex_layout],
+                buffers: &[Some(vertex_layout)],
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
@@ -766,7 +766,7 @@ pub(super) fn create_ui_image_pipeline(
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         })
     };
@@ -785,8 +785,8 @@ pub(super) fn create_sky_pipeline(
     let shader = super::gpu::shader_module(device, "sky", super::gpu::SCENE_SHADER);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("sky"),
-        bind_group_layouts: &[frame_layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(frame_layout)],
+        immediate_size: 0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("sky"),
@@ -802,8 +802,8 @@ pub(super) fn create_sky_pipeline(
             format: DEPTH_FORMAT,
             // Drawn after solid items, at the far plane: only where none
             // was drawn.
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::LessEqual,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -821,7 +821,7 @@ pub(super) fn create_sky_pipeline(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }

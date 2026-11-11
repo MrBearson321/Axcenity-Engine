@@ -284,12 +284,13 @@ fn the_levels_panel_lists_the_start_level_and_the_others_in_a_narrow_column() {
     app.open_in_level(&folder, Some("Castle".to_owned()));
     let size = egui::vec2(260.0, 220.0);
     let mut fit = None;
-    let mut draw = |ctx: &egui::Context| {
+    let mut draw = |ui: &mut egui::Ui| {
+        let ctx = &ui.ctx().clone();
         let palette = theme::palette(ctx);
         let frame = egui::Frame::new()
             .fill(palette.panel)
             .inner_margin(egui::Margin::symmetric(8, 6));
-        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             let room = ui.max_rect();
             app.levels_pane(ui);
             fit = Some((ui.min_rect(), room));
@@ -302,7 +303,7 @@ fn the_levels_panel_lists_the_start_level_and_the_others_in_a_narrow_column() {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
             ..Default::default()
         };
-        let output = ctx.run(input, &mut draw);
+        let output = crate::theme::run(&ctx, input, |ui| draw(ui));
         shown = format!("{:?}", output.shapes);
     }
     for name in [

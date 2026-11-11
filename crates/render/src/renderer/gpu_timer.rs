@@ -178,7 +178,11 @@ impl GpuTimer {
         match self.mapped.swap(PENDING, Ordering::AcqRel) {
             PENDING => return false,
             MAPPED => {
-                let bytes = self.readback.slice(..).get_mapped_range();
+                let bytes = self
+                    .readback
+                    .slice(..)
+                    .get_mapped_range()
+                    .expect("the buffer is mapped");
                 let stamps: [u64; STAMPS as usize] = bytemuck::pod_read_unaligned(&bytes);
                 drop(bytes);
                 self.readback.unmap();

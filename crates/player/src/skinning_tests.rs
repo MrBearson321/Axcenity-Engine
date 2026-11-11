@@ -40,7 +40,7 @@ impl MeshSource for CpuPosed {
 }
 
 fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
     pollster::block_on(adapter.request_device(&Default::default())).ok()
 }

@@ -99,7 +99,7 @@ fn rename_on_the_right_click_menu_types_over_the_name_in_the_inspector() {
     );
     designer_frame(&mut app, &ctx, &mut clock, SIZE, Vec::new());
     assert!(
-        ctx.wants_keyboard_input(),
+        ctx.egui_wants_keyboard_input(),
         "the Name field has the keyboard"
     );
     // The old name is all selected, so typing replaces it.

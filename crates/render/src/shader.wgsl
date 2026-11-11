@@ -759,7 +759,9 @@ fn toon_surface(
 // each pixel exactly once between them.
 fn dithered_out(fade: f32, pixel: vec2<f32>) -> bool {
     let noise = pixel_noise(pixel);
-    return select(noise >= fade, noise < fade - 1.0, fade > 1.0);
+    // The comparison is in brackets so WGSL doesn't read `noise < ... >` as a
+    // template list.
+    return select(noise >= fade, (noise < fade - 1.0), fade > 1.0);
 }
 
 // The depth and normal prepass, for ambient occlusion: solid items' depth

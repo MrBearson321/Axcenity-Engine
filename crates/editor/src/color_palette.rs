@@ -438,8 +438,8 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| add(ui));
+            let _ = crate::theme::run(ctx, input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| add(ui));
             });
         }
     }

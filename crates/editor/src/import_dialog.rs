@@ -393,7 +393,7 @@ impl ImportDialog {
         let mut answer = None;
         // The frame's margins and outline, around the contents.
         let edges = dialog::frame(ctx).total_margin().sum();
-        let room = ctx.screen_rect().size() - egui::Vec2::splat(2.0 * WINDOW_GAP) - edges;
+        let room = ctx.content_rect().size() - egui::Vec2::splat(2.0 * WINDOW_GAP) - edges;
         let width = room.x.clamp(260.0, DIALOG_WIDTH);
         // Whether to keep room for the problem line (the footer asks again,
         // after the tabs' edits).
@@ -491,7 +491,7 @@ impl ImportDialog {
                 egui::TextFormat::simple(font, palette.text_secondary),
             );
         }
-        ui.fonts(|fonts| fonts.layout_job(job))
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
     }
 
     /// The preview and what you'll get on the left, the tab on the right.

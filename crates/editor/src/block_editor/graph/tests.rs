@@ -275,8 +275,8 @@ fn nodes_are_laid_out_without_overlapping() {
     let mut script = sample_script(&objects);
     let ctx = theme::test_context();
     let mut boxes = Vec::new();
-    let _ = ctx.run(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let context = BlockContext {
                 key: "layout test",
                 client: true,
@@ -307,10 +307,10 @@ fn nodes_are_laid_out_without_overlapping() {
 
 fn run_graph(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &str) {
     let size = vec2(1500.0, 950.0);
-    let editor = |script: &mut BlockScript, ctx: &egui::Context| {
+    let editor = |script: &mut BlockScript, ui: &mut egui::Ui| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 show_graph(
                     ui,
                     script,
@@ -327,7 +327,7 @@ fn run_graph(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &str
         let mut replay = script.clone();
         let held = frames[..frames.len() - 2].to_vec();
         let path = std::path::PathBuf::from(folder).join(format!("{name}.png"));
-        crate::snapshot::snapshot(&path, size, held, |ctx| editor(&mut replay, ctx));
+        crate::snapshot::snapshot(&path, size, held, |ui| editor(&mut replay, ui));
     }
     let ctx = theme::test_context();
     for events in frames {
@@ -336,7 +336,7 @@ fn run_graph(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &str
             events,
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| editor(script, ctx));
+        let _ = crate::theme::run(&ctx, input, |ui| editor(script, ui));
     }
 }
 
@@ -344,8 +344,8 @@ fn run_graph(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &str
 fn pin_on_screen(script: &mut BlockScript, pin: &Pin) -> Pos2 {
     let ctx = theme::test_context();
     let mut found = None;
-    let _ = ctx.run(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let context = BlockContext {
                 key: "pin test",
                 client: true,
@@ -432,11 +432,12 @@ fn the_graph_draws_in_both_themes_without_changing_the_script() {
     let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from);
     for (theme, name) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
         let mut drawn = script.clone();
-        let mut show_all = |ctx: &egui::Context| {
+        let mut show_all = |ui: &mut egui::Ui| {
+            let ctx = &ui.ctx().clone();
             ctx.set_theme(theme);
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     show_graph(
                         ui,
                         &mut drawn,
@@ -463,7 +464,7 @@ fn the_graph_draws_in_both_themes_without_changing_the_script() {
                         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1500.0, 950.0))),
                         ..Default::default()
                     };
-                    let _ = ctx.run(input, &mut show_all);
+                    let _ = crate::theme::run(&ctx, input, |ui| show_all(ui));
                 }
             }
         }
@@ -637,8 +638,8 @@ fn a_typed_script_is_a_graph_of_real_nodes_and_wires() {
 
     // It draws.
     let ctx = theme::test_context();
-    let _ = ctx.run(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let context = BlockContext {
                 key: "typed script",
                 client: true,

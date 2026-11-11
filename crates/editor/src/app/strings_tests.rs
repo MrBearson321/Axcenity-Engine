@@ -128,8 +128,8 @@ fn a_label_bound_in_the_designer_shows_its_entry_in_the_designer_and_in_play() {
     }
     if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         let path = std::path::PathBuf::from(folder).join("strings-bound-label.png");
-        crate::snapshot::snapshot_rendered(&path, size, vec![Vec::new(); 3], |ctx, render| {
-            egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, Some(render)));
+        crate::snapshot::snapshot_rendered(&path, size, vec![Vec::new(); 3], |ui, render| {
+            egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, Some(render)));
         });
     }
 
@@ -262,7 +262,7 @@ fn the_strings_tab_lists_the_keys_and_fits_any_shape() {
         ] {
             assert!(drew_text(&output, text), "{text} is drawn at {size:?}");
         }
-        let used = ctx.used_rect();
+        let used = ctx.globally_used_rect();
         assert!(
             used.width() <= size.x + 0.5,
             "at {size:?} the Strings tab is {used:?}"
@@ -270,8 +270,8 @@ fn the_strings_tab_lists_the_keys_and_fits_any_shape() {
         if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
             let path = std::path::PathBuf::from(folder)
                 .join(format!("strings-tab-{}x{}.png", size.x, size.y));
-            crate::snapshot::snapshot(&path, size, vec![Vec::new(); 3], |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+            crate::snapshot::snapshot(&path, size, vec![Vec::new(); 3], |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
             });
         }
     }

@@ -317,7 +317,7 @@ impl GetTexture {
         let notice = self.poll(ctx);
         self.load_previews(ctx);
 
-        let screen = ctx.screen_rect().size();
+        let screen = ctx.content_rect().size();
         let width = (screen.x - 64.0).clamp(280.0, 800.0);
         let height = (screen.y - 260.0).clamp(200.0, 600.0);
         let mut close = false;

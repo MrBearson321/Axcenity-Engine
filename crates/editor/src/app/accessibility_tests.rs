@@ -61,8 +61,8 @@ fn the_designer_previews_game_ui_settings_play_starts_with_them_and_the_editor_t
     assert_eq!(ctx.zoom_factor(), zoom);
     if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         let path = std::path::PathBuf::from(folder).join("accessibility-preview.png");
-        crate::snapshot::snapshot_rendered(&path, size, vec![Vec::new(); 3], |ctx, render| {
-            egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, Some(render)));
+        crate::snapshot::snapshot_rendered(&path, size, vec![Vec::new(); 3], |ui, render| {
+            egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, Some(render)));
         });
     }
 

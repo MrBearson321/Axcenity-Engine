@@ -329,7 +329,7 @@ fn inventory_items(game: &Game) -> Vec<InstanceId> {
 
 fn snapshot(game: &Game, path: &Path) {
     use axcenity_render::{TextureRenderer, wgpu};
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
         return;
     };

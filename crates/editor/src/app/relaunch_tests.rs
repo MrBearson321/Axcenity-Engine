@@ -95,7 +95,7 @@ fn a_relaunch_carries_the_project_camera_selection_and_unsaved_edits() {
     assert_eq!(resumed_tabs.tabs.take_focus(), None);
     let resumed = resumed_tabs;
     let dock = &resumed.layout.dock;
-    let (surface, node, tab) = dock.find_tab(&Pane::Scene).unwrap();
+    let egui_dock::TabPath { surface, node, tab } = dock.find_tab(&Pane::Scene).unwrap();
     let leaf = dock[surface][node].get_leaf().unwrap();
     assert_eq!(leaf.active, tab, "the Scene is in front");
     assert!(
@@ -324,6 +324,9 @@ impl eframe::Storage for MemoryStorage {
     }
     fn set_string(&mut self, key: &str, value: String) {
         self.0.insert(key.to_owned(), value);
+    }
+    fn remove_string(&mut self, key: &str) {
+        self.0.remove(key);
     }
     fn flush(&mut self) {}
 }

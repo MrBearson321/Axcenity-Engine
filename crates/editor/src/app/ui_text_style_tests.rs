@@ -147,22 +147,23 @@ fn ctrl_b_i_u_toggle_the_selected_labels_text_unless_typing() {
         editing: true,
     };
     let press = |key: egui::Key| egui::RawInput {
-        modifiers: egui::Modifiers::COMMAND,
-        events: vec![egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::COMMAND,
-        }],
+        events: std::iter::once(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND))
+            .chain(vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            }])
+            .collect(),
         ..Default::default()
     };
     let ctx = crate::theme::test_context();
     let mut designer = crate::ui_designer::UiDesigner::default();
     let mut actions = Vec::new();
     for key in [egui::Key::B, egui::Key::I, egui::Key::U] {
-        let _ = ctx.run(press(key), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::theme::run(&ctx, press(key), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 actions.extend(designer.show(ui, &scene, None));
             });
         });
@@ -189,8 +190,8 @@ fn ctrl_b_i_u_toggle_the_selected_labels_text_unless_typing() {
     let mut typed = Vec::new();
     let mut text = String::new();
     for key in [egui::Key::B, egui::Key::I, egui::Key::U] {
-        let _ = ctx.run(press(key), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::theme::run(&ctx, press(key), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let field = ui.text_edit_singleline(&mut text);
                 field.request_focus();
                 typed.extend(designer.show(ui, &scene, None));
@@ -351,9 +352,9 @@ fn selected_text_in_the_typing_box_is_wrapped_in_rich_text_tags() {
             &snapshots.join("ui-designer-rich-text.png"),
             size,
             frames,
-            |ctx, render_state| {
+            |ui, render_state| {
                 egui::CentralPanel::default()
-                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                    .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
             },
         );
     }
@@ -549,9 +550,9 @@ fn the_states_editor_writes_hover_and_pressed_rules_that_show_in_its_preview_and
             &folder.join("ui-designer-states.png"),
             egui::vec2(1100.0, 1000.0),
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 egui::CentralPanel::default()
-                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                    .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
             },
         );
     }
@@ -645,7 +646,7 @@ fn brightness_of(
     (width, height): (u32, u32),
 ) -> Option<impl Fn(f32, f32) -> u32> {
     use axcenity_render::wgpu;
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
     let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
     let mut list = axcenity_scene::build_draw_list(
@@ -933,9 +934,9 @@ fn dragging_the_slice_editors_lines_changes_the_border_image_css() {
             &folder.join("ui-designer-slice.png"),
             egui::vec2(1100.0, 1300.0),
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 egui::CentralPanel::default()
-                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                    .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
             },
         );
         app.undo();

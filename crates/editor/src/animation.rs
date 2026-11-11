@@ -1215,8 +1215,8 @@ mod tests {
             ..Default::default()
         };
         let mut frame = |events: Vec<egui::Event>| {
-            ctx.run(at(events), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            crate::theme::run(&ctx, at(events), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     button.set(ui.cursor());
                     picker(ui, &mut search, paths, None, used);
                 });

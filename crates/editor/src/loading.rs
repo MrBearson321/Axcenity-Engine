@@ -333,7 +333,7 @@ fn paint(
     let mut y = rect.center().y - 90.0;
     if let Some(mark) = mark {
         let side = Rect::from_min_size(egui::pos2(left, y - 56.0), vec2(40.0, 40.0));
-        if ui.ctx().style().animation_time > 0.0 {
+        if ui.ctx().global_style().animation_time > 0.0 {
             let time = ui.input(|input| input.time) as f32;
             let position = theme::bezier(theme::curve::SWEEP, (time / SWEEP_SECONDS).fract());
             widgets::paint_mark_sweep(
@@ -417,7 +417,7 @@ fn paint(
             // Working, with no count to show: a short piece slides along,
             // or sits in the middle with Reduce motion on.
             let piece = width * 0.25;
-            let moving = ui.ctx().style().animation_time > 0.0;
+            let moving = ui.ctx().global_style().animation_time > 0.0;
             let at = if moving {
                 let time = ui.input(|input| input.time) as f32;
                 (time * 0.8).fract() * (width + piece) - piece
@@ -527,10 +527,10 @@ mod tests {
                 .map(|n| format!("assets/textures/stone_{n}.png"))
                 .collect(),
         };
-        let mut draw = |ctx: &egui::Context| {
+        let mut draw = |ui: &mut egui::Ui| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     let brand = crate::start::Brand::load(ui.ctx());
                     paint(
                         ui,
@@ -551,7 +551,7 @@ mod tests {
             ),
             None => {
                 let ctx = theme::test_context();
-                let _ = ctx.run(Default::default(), &mut draw);
+                let _ = crate::theme::run(&ctx, Default::default(), |ui| draw(ui));
             }
         }
     }

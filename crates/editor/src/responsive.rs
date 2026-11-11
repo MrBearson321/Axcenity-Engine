@@ -34,7 +34,7 @@ pub fn room_for(ui: &mut egui::Ui, width: f32) {
 /// goes under its name, and sliders fill the width.
 pub fn form<R>(
     ui: &mut egui::Ui,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
     rows: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
     let width = ui.available_width();
@@ -118,8 +118,8 @@ mod tests {
             )),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let room = ui.max_rect().width();
                 if let Some(add) = add.take() {
                     add(ui);

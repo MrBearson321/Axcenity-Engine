@@ -69,9 +69,6 @@ const PART: usize = 512;
 /// Below this many items, a job stays on the calling thread.
 const WORTH_SHARING: usize = 4096;
 
-/// Below this many bytes, a copy stays on the calling thread.
-const WORTH_SHARING_BYTES: usize = 1 << 20;
-
 /// Whether a job over `count` items is worth waking other threads for.
 pub(super) fn worth_sharing(count: usize) -> bool {
     count > WORTH_SHARING
@@ -125,9 +122,13 @@ pub(super) fn sort_unstable<T: Ord + Send>(items: &mut [T]) {
     }
 }
 
-/// Copies `pieces`, one after another, to the start of `buffer`, each piece
-/// on a thread of its own when there's enough of them to be worth it.
-pub(super) fn write_pieces<T: bytemuck::Pod + Sync>(
+/// Copies `pieces`, one after another, to the start of `buffer`.
+///
+/// One thread does the copy: since wgpu 29 a mapped buffer is a
+/// `wgpu::WriteOnly`, whose pieces can't be handed to other threads (it is
+/// `Send` only for sized values), and splitting it across threads would
+/// need `unsafe`.
+pub(super) fn write_pieces<T: bytemuck::Pod>(
     queue: &wgpu::Queue,
     buffer: &wgpu::Buffer,
     pieces: &[&[T]],
@@ -139,24 +140,12 @@ pub(super) fn write_pieces<T: bytemuck::Pod + Sync>(
     let Some(mut staging) = queue.write_buffer_with(buffer, 0, size) else {
         return;
     };
-    let mut rest: &mut [u8] = &mut staging;
-    let jobs: Vec<(&mut [u8], &[u8])> = pieces
-        .iter()
-        .map(|piece| {
-            let bytes: &[u8] = bytemuck::cast_slice(piece);
-            let (to, after) = std::mem::take(&mut rest).split_at_mut(bytes.len());
-            rest = after;
-            (to, bytes)
-        })
-        .collect();
-    if jobs.len() == 1 || total < WORTH_SHARING_BYTES {
-        jobs.into_iter()
-            .for_each(|(to, from)| to.copy_from_slice(from));
-    } else {
-        shared(|| {
-            jobs.into_par_iter()
-                .for_each(|(to, from)| to.copy_from_slice(from));
-        });
+    let mut rest = staging.slice(..);
+    for piece in pieces {
+        let bytes: &[u8] = bytemuck::cast_slice(piece);
+        let (mut to, after) = std::mem::take(&mut rest).split_at(bytes.len());
+        to.copy_from_slice(bytes);
+        rest = after;
     }
 }
 

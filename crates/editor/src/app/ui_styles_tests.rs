@@ -131,9 +131,9 @@ fn a_built_in_style_set_styles_every_state_in_one_step_and_stays_editable() {
             &snapshots.join("ui-designer-styles.png"),
             SIZE,
             vec![Vec::new(); 3],
-            |ctx, render_state| {
+            |ui, render_state| {
                 egui::CentralPanel::default()
-                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+                    .show(ui, |ui| app.ui_designer_pane(ui, Some(render_state)));
             },
         );
     }
@@ -141,8 +141,8 @@ fn a_built_in_style_set_styles_every_state_in_one_step_and_stays_editable() {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE)),
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+    let _ = crate::theme::run(&ctx, input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| app.ui_designer_pane(ui, None));
     });
     let _ = std::fs::remove_dir_all(&folder);
 }

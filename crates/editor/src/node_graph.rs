@@ -239,7 +239,7 @@ pub fn numbers_text(numbers: &[f32]) -> String {
 }
 
 fn text_width(ctx: &egui::Context, text: &str, size: f32) -> f32 {
-    ctx.fonts(|fonts| {
+    ctx.fonts_mut(|fonts| {
         fonts
             .layout_no_wrap(text.to_owned(), FontId::proportional(size), Color32::WHITE)
             .size()
@@ -289,7 +289,7 @@ pub fn node_shape(
     let errors_height = if errors.is_empty() {
         0.0
     } else {
-        ctx.fonts(|fonts| {
+        ctx.fonts_mut(|fonts| {
             errors
                 .iter()
                 .map(|error| {
@@ -435,8 +435,8 @@ impl GraphView {
         ui.advance_cursor_after_rect(rect);
 
         // A drag or typing is one step, from when it began.
-        let typing =
-            ui.ctx().memory(|memory| memory.focused().is_some()) && ui.ctx().wants_keyboard_input();
+        let typing = ui.ctx().memory(|memory| memory.focused().is_some())
+            && ui.ctx().egui_wants_keyboard_input();
         let ongoing = self.moving || self.comment_drag.is_some() || typing;
         let changed = *graph != before;
         if changed && self.before.is_none() {
@@ -993,7 +993,7 @@ impl GraphView {
     /// Delete, Ctrl+D, copy, cut and paste, select all and Escape, while
     /// nothing is being typed.
     fn keys(&mut self, ctx: &egui::Context, graph: &mut NodeGraph, pointer: Option<Pos2>) {
-        if ctx.wants_keyboard_input() {
+        if ctx.egui_wants_keyboard_input() {
             return;
         }
         let (delete, duplicate, all, escape, events) = ctx.input(|i| {

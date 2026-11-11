@@ -126,7 +126,7 @@ mod tests {
     fn each_mode_draws_hello_graphics_its_own_way_and_lit_comes_back() {
         use axcenity_render::glam::Vec3;
         use axcenity_render::{TextureRenderer, wgpu};
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let Some((device, queue)) =
             pollster::block_on(instance.request_adapter(&Default::default()))
                 .ok()

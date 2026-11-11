@@ -53,8 +53,9 @@ fn frame(
         time: Some(*clock),
         ..Default::default()
     };
-    ctx.run(input, |ctx| {
-        egui::CentralPanel::default().show(ctx, |_| {});
+    crate::theme::run(ctx, input, |ui| {
+        let ctx = &ui.ctx().clone();
+        egui::CentralPanel::default().show(ui, |_| {});
         app.version_window(ctx);
     })
 }
@@ -165,8 +166,9 @@ fn the_window_names_a_moved_part_and_an_edited_script_and_restores_only_when_ask
     let drawn = shown(&mut app, &ctx, &mut clock);
     if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         let path = PathBuf::from(snapshots).join("version-history.png");
-        crate::snapshot::snapshot(&path, SIZE, vec![Vec::new(); 3], |ctx| {
-            egui::CentralPanel::default().show(ctx, |_| {});
+        crate::snapshot::snapshot(&path, SIZE, vec![Vec::new(); 3], |ui| {
+            let ctx = &ui.ctx().clone();
+            egui::CentralPanel::default().show(ui, |_| {});
             app.version_window(ctx);
         });
     }

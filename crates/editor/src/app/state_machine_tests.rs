@@ -23,8 +23,8 @@ fn draw_tab(app: &mut EditorApp, ctx: &egui::Context, frames: Vec<Vec<egui::Even
             events,
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| app.animation_pane(ui, None));
+        let _ = crate::theme::run(ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| app.animation_pane(ui, None));
         });
     }
 }
@@ -105,8 +105,8 @@ fn a_wire_from_idle_to_walk_saying_speed_over_0_1_plays_in_the_preview_and_in_pl
             &path,
             SIZE,
             vec![Vec::new(); 3],
-            &mut |ctx: &egui::Context| {
-                egui::CentralPanel::default().show(ctx, |ui| app.animation_pane(ui, None));
+            &mut |ui: &mut egui::Ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.animation_pane(ui, None));
             },
         );
     }

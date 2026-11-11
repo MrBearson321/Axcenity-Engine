@@ -123,8 +123,17 @@ fn probes_held(renderer: &TextureRenderer) -> Vec<[[f32; 3]; 4]> {
     buffer
         .slice(..)
         .map_async(wgpu::MapMode::Read, |result| result.unwrap());
-    scene.device.poll(wgpu::PollType::Wait).unwrap();
-    let floats: Vec<f32> = bytemuck::cast_slice(&buffer.slice(..).get_mapped_range()).to_vec();
+    scene
+        .device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .unwrap();
+    let floats: Vec<f32> = bytemuck::cast_slice(
+        &buffer
+            .slice(..)
+            .get_mapped_range()
+            .expect("the buffer is mapped"),
+    )
+    .to_vec();
     floats
         .chunks(16)
         .map(|probe| std::array::from_fn(|k| [probe[k * 4], probe[k * 4 + 1], probe[k * 4 + 2]]))

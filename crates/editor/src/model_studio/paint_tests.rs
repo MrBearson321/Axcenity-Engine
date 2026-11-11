@@ -341,8 +341,8 @@ fn the_tab_draws_the_chair_being_painted() {
         &folder.join("model-studio-paint.png"),
         egui::vec2(1100.0, 700.0),
         vec![Vec::new(); 3],
-        |ctx, render| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        |ui, render| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let _ = studio.show(ui, Some(render), &[], crate::gizmo::Snap::default(), true);
             });
         },

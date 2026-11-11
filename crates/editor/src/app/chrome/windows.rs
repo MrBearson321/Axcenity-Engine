@@ -79,7 +79,7 @@ pub(in crate::app) fn playing_badge(ui: &mut egui::Ui, paused: bool) {
     };
     let pulse = if paused {
         1.0
-    } else if ui.ctx().style().animation_time > 0.0 {
+    } else if ui.ctx().global_style().animation_time > 0.0 {
         let time = ui.input(|input| input.time);
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(50));
@@ -219,7 +219,7 @@ impl EditorApp {
         // A text box being typed in has its own undo, and uses Delete and
         // Backspace itself, so leave those keys to it then. The Explorer
         // tabbed into takes only its own keys.
-        let typing = ctx.wants_keyboard_input() && !self.explorer.has_focus(ctx);
+        let typing = ctx.egui_wants_keyboard_input() && !self.explorer.has_focus(ctx);
         // The arrow keys, Home and End are the Explorer's while it has them,
         // taken before the viewport or the UI Designer can see them.
         let explorer_keys =

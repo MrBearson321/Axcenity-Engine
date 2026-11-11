@@ -122,8 +122,8 @@ fn renaming_a_tag_in_the_tags_panel_renames_it_everywhere_as_one_undo_step() {
             ..Default::default()
         };
         let mut result = TagAction::None;
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 result = panel.show(ui, &tags);
             });
         });

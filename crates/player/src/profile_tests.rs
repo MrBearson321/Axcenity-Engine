@@ -92,7 +92,7 @@ fn measure(renderer: &mut TextureRenderer, device: &wgpu::Device, list: &DrawLis
     for frame in 0..WARM_UP_FRAMES {
         renderer.render(list).unwrap();
         if frame % IN_FLIGHT == 0 {
-            device.poll(wgpu::PollType::Wait).unwrap();
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         }
     }
     let (mut gpu, mut cpu) = (Vec::new(), Vec::new());
@@ -104,7 +104,7 @@ fn measure(renderer: &mut TextureRenderer, device: &wgpu::Device, list: &DrawLis
         renderer.render(list).unwrap();
         cpu.push(start.elapsed());
         if frame % IN_FLIGHT == 0 {
-            device.poll(wgpu::PollType::Wait).unwrap();
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         }
         let stats = renderer.stats();
         if stats.gpu_readings != readings {
@@ -118,7 +118,7 @@ fn measure(renderer: &mut TextureRenderer, device: &wgpu::Device, list: &DrawLis
             }
         }
     }
-    device.poll(wgpu::PollType::Wait).unwrap();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     let stats = renderer.stats();
     Measured {
         gpu: median(&mut gpu),
@@ -370,7 +370,7 @@ fn profile_project() {
             if let Some(out) = &out {
                 renderer.set_graphics(settings);
                 renderer.render(list).unwrap();
-                device.poll(wgpu::PollType::Wait).unwrap();
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
                 save_png(
                     &out.join(format!("{}-{name}.png", parts[0])),
                     &renderer.read_pixels(),
@@ -390,7 +390,7 @@ fn profile_project() {
             &mut cache,
         );
         renderer.render(&list).unwrap();
-        device.poll(wgpu::PollType::Wait).unwrap();
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let pixels = renderer.read_pixels();
         renderer.set_debug_view(None);
         let overdraw = OverdrawStats::from_pixels(&pixels, width, height);
@@ -424,7 +424,7 @@ fn profile_project() {
                     |item| matches!(&item.shape, Shape::Mesh(mesh) if mesh.key() == key),
                 );
                 renderer.render(&only).unwrap();
-                device.poll(wgpu::PollType::Wait).unwrap();
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
                 let stats = OverdrawStats::from_pixels(&renderer.read_pixels(), width, height);
                 shares.push((name.clone(), count, stats));
             }

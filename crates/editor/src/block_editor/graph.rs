@@ -980,7 +980,7 @@ fn show_graph_canvas(
     if let Some((text, until)) = &state.notice {
         if now < *until {
             let at = pos2(rect.center().x, rect.bottom() - 24.0);
-            let galley = canvas.fonts(|fonts| {
+            let galley = canvas.fonts_mut(|fonts| {
                 fonts.layout_no_wrap(text.clone(), FontId::proportional(13.0), Color32::WHITE)
             });
             let back_rect = Rect::from_center_size(at, galley.size() + vec2(20.0, 10.0));

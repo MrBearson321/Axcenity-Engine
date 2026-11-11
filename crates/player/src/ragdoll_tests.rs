@@ -333,7 +333,7 @@ fn an_enabled_ragdoll_collapses_without_bending_a_joint_past_its_limit() {
 fn snapshot(sim: &Sim, at: Vec3, path: &Path) {
     use axcenity_render::{Camera, TextureRenderer, wgpu};
     const VIEW: (u32, u32) = (480, 360);
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
         return;
     };

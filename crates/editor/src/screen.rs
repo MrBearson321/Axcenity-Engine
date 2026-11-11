@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn picking_hits_the_part_drawn_under_the_pointer_at_half_render_scale() {
         use axcenity_render::{GraphicsSettings, TextureRenderer, wgpu};
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
             return;
         };

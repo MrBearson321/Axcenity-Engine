@@ -477,7 +477,7 @@ struct Measure {
 
 impl Measure {
     fn new(ui: &egui::Ui, font: &egui::FontId, width: f32) -> Self {
-        let (row, char_width, icon) = ui.fonts(|fonts| {
+        let (row, char_width, icon) = ui.fonts_mut(|fonts| {
             (
                 fonts.row_height(font),
                 fonts.glyph_width(font, 'M'),
@@ -704,15 +704,15 @@ mod unseen_tests {
     use super::*;
 
     fn draw(ctx: &egui::Context, output: &mut Output) {
-        let _ = ctx.run(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::theme::run(ctx, Default::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 output.show(ui);
             });
         });
     }
 
     fn hidden_frame(ctx: &egui::Context) {
-        let _ = ctx.run(Default::default(), |_| {});
+        let _ = crate::theme::run(ctx, Default::default(), |_ui| {});
     }
 
     #[test]
@@ -768,8 +768,8 @@ mod bounded_tests {
             )),
             ..Default::default()
         };
-        let drawn = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let drawn = crate::theme::run(ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 output.show(ui);
             });
         });

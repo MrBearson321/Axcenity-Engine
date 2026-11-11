@@ -221,8 +221,8 @@ fn run_curves(doc: &mut PropertyDoc, frames: Vec<Vec<egui::Event>>) {
             events,
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 doc.keys(ui, None);
             });
         });
@@ -283,8 +283,8 @@ fn read_only_keys_can_be_selected_but_never_moved_deleted_or_changed() {
     doc.show_curves = false;
     run_curves(&mut doc, press(egui::Key::Delete));
     let ctx = theme::test_context();
-    let _ = ctx.run(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    let _ = crate::theme::run(&ctx, Default::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             assert!(!doc.shortcuts(ui));
         });
     });
@@ -332,8 +332,8 @@ fn bezier_handles_dragged_in_the_curves_view_are_saved_and_reloaded() {
             &std::path::PathBuf::from(snapshots).join("curves-bezier.png"),
             egui::vec2(900.0, 360.0),
             vec![Vec::new(); 3],
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     shown.keys(ui, None);
                 });
             },

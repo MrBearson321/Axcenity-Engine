@@ -139,7 +139,8 @@ fn drawing_agent_paths_does_not_change_the_route() {
         // The overlay reads the paths and draws them every frame, as the
         // viewport does, in one game and not the other.
         let paths = drawn.play.as_ref().unwrap().agent_paths();
-        let output = ctx.run(egui::RawInput::default(), |ctx| {
+        let output = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+            let ctx = &ui.ctx().clone();
             let painter = ctx.layer_painter(egui::LayerId::background());
             crate::viewport::paint_agent_paths(&painter, &screen, &paths);
         });
@@ -175,7 +176,8 @@ fn the_path_overlay_draws_a_line_through_each_corner_and_a_ring_at_the_end() {
         Vector3::new(20.0, 0.0, -20.0),
     ];
     let paths = vec![(World::new().workspace(), path.clone())];
-    let output = ctx.run(egui::RawInput::default(), |ctx| {
+    let output = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+        let ctx = &ui.ctx().clone();
         let painter = ctx.layer_painter(egui::LayerId::background());
         crate::viewport::paint_agent_paths(&painter, &screen, &paths);
     });

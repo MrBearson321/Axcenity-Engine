@@ -136,6 +136,7 @@ impl GpuParticles {
         steps_buffer
             .slice(..)
             .get_mapped_range_mut()
+            .expect("the buffer is mapped")
             .copy_from_slice(bytemuck::cast_slice(&steps));
         steps_buffer.unmap();
         let steps_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -158,8 +159,8 @@ impl GpuParticles {
                 layout: Some(
                     &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: Some(label),
-                        bind_group_layouts: layouts,
-                        push_constant_ranges: &[],
+                        bind_group_layouts: &super::gpu::some(layouts),
+                        immediate_size: 0,
                     }),
                 ),
                 module: &shader,

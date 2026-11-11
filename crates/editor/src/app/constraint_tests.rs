@@ -220,17 +220,17 @@ fn the_constraints_overlay_draws_welds_and_attachments() {
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
     let screen = Screen::new(camera, rect);
     let world = &app.world;
-    let draw = |ctx: &egui::Context, overlay: bool, selection: &[InstanceId]| {
+    let draw = |ui: &mut egui::Ui, overlay: bool, selection: &[InstanceId]| {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(egui::Color32::from_gray(40)))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 crate::constraints::paint(ui.painter(), &screen, world, selection, overlay);
             });
     };
     let count = |overlay: bool, selection: &[InstanceId]| {
         let ctx = theme::test_context();
-        let output = ctx.run(egui::RawInput::default(), |ctx| {
-            draw(ctx, overlay, selection)
+        let output = crate::theme::run(&ctx, egui::RawInput::default(), |ui| {
+            draw(ui, overlay, selection)
         });
         output.shapes.len()
     };
@@ -242,8 +242,8 @@ fn the_constraints_overlay_draws_welds_and_attachments() {
 
     if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
         let path = PathBuf::from(snapshots).join("constraints-overlay.png");
-        crate::snapshot::snapshot(&path, size, vec![Vec::new(); 2], |ctx| {
-            draw(ctx, true, &[attachment]);
+        crate::snapshot::snapshot(&path, size, vec![Vec::new(); 2], |ui| {
+            draw(ui, true, &[attachment]);
         });
     }
 }

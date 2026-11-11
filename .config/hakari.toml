@@ -43,4 +43,10 @@ third-party = [
     # Windows (roadmap M8): the dedicated server links no window, GPU or
     # audio crates, and through the hack it would still build winit.
     { name = "winit" },
+    # Since wgpu 30, egui-wgpu turns on wgpu features the renderer doesn't,
+    # and the hack would then link wgpu into the dedicated server too.
+    { name = "wgpu" },
+    { name = "wgpu-core" },
+    { name = "wgpu-hal" },
+    { name = "wgpu-types" },
 ]

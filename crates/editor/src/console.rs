@@ -372,7 +372,7 @@ impl Console {
                 let cursor = egui::TextEdit::load_state(ui.ctx(), id)
                     .and_then(|state| state.cursor.char_range())
                     .map_or(self.input.len(), |range| {
-                        byte_index(&self.input, range.primary.index)
+                        byte_index(&self.input, range.primary.index.0)
                     });
                 move_cursor = Some(self.complete_at(cursor, world));
             }
