@@ -2,7 +2,7 @@
 title: "ADR-0020: Team Create uses one session authority and host-ordered operations"
 type: adr
 adr: 20
-adr_status: Proposed
+adr_status: Accepted
 date: 2026-11-11
 affects: [editor, core, net, project]
 source: [crates/editor/src/history.rs, crates/core/src/arena.rs, crates/core/src/world.rs, crates/net/src/handshake.rs]
@@ -12,7 +12,7 @@ tags: [adr, networking, editor, collaboration]
 
 # ADR-0020: Team Create uses one session authority and host-ordered operations
 
-- **Status:** Proposed (waiting for Paul's decisions D1–D5 in the proposal)
+- **Status:** Accepted (Paul, 2026-11-11: the recommended plan with defaults D1–D5)
 - **Date:** 2026-11-11
 - **Affected systems:** editor (undo history, panels), core (arena ID allocation), net (wire encoding, handshake checks), project (saving)
 

@@ -1,8 +1,8 @@
 # Team Create: architecture and sync-model proposal
 
-Section 8 of Paul's brief "Editor Usability, Core Features, Documentation & Collaboration Improvements" (2026-11-11), Phase 7. The brief asks for the architecture and synchronization model **before** any implementation. This is that proposal. Nothing here is built yet.
+Section 8 of Paul's brief "Editor Usability, Core Features, Documentation & Collaboration Improvements" (2026-11-11), Phase 7. The brief asks for the architecture and synchronization model **before** any implementation. This is that proposal. **Approved 2026-11-11:** Paul accepted the recommended plan with the defaults D1–D5 (decision card). TC1 is under way.
 
-- **Status:** Proposed, waiting for Paul's decisions ([§14](#14-decisions-for-paul)). The matching ADR is [ADR-0020](../../wiki/Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md) (Proposed).
+- **Status:** Approved (2026-11-11), with the recommended answer to every decision in [§14](#14-decisions-for-paul). The matching ADR is [ADR-0020](../../wiki/Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md) (Accepted).
 - **Date:** 2026-11-11
 - **Engine:** `main` at `1bdb77a` (PR #132)
 - **Relies on:** [ADR-0002](../../wiki/Architecture/Architecture-Decisions/ADR-0002-Instance-Tree-In-A-Generational-Arena.md) (arena IDs), [ADR-0010](../../wiki/Architecture/Architecture-Decisions/ADR-0010-Listen-Server-Replicas-And-Network-IDs.md) (replicas with shared IDs), [ADR-0016](../../wiki/Architecture/Architecture-Decisions/ADR-0016-Text-Project-Format-With-Migrations.md) (text project files), [ADR-0017](../../wiki/Architecture/Architecture-Decisions/ADR-0017-Editor-Play-In-Process-On-A-Cloned-World.md) (Play on a clone), [ADR-0008](../../wiki/Architecture/Architecture-Decisions/ADR-0008-Desktop-Texture-Cooking.md) (per-machine cooked cache), the [development policy](../development-policy.md) (no infrastructure before it's needed; internet hosting and M11 deferred), and the MCP toolkit's change log and undo rules ([editor/mcp.md](../editor/mcp.md)).
@@ -251,7 +251,7 @@ Each phase is one or more PRs against `main`, tested locally as the policy asks.
 
 | Phase | Builds | Done when |
 |---|---|---|
-| **TC0** | This proposal and ADR-0020 | Paul decides [§14](#14-decisions-for-paul) |
+| **TC0** | This proposal and ADR-0020 | Done: approved 2026-11-11 |
 | **TC1** Core | `collab` crate: operations, transactions, host and client state machines, ID blocks (`Arena` range allocation), in-memory transport | Conflict and convergence tests pass (no UI, no network) |
 | **TC2** Editor over loopback | `History` step to transaction, remote transactions into the edit World, own-step undo, unsynced-edit check, in-editor host | Two headless editors stay identical through the editor tests |
 | **TC3** Network and identity | WebSocket over TLS, device keys, sign in and out, invites, roles enforced, handshake refusals | LAN test on Paul's PC and laptop |

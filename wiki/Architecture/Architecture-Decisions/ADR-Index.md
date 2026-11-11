@@ -33,7 +33,7 @@ Decisions with long-term consequences, so later work doesn't silently reverse th
 | [ADR-0017](ADR-0017-Editor-Play-In-Process-On-A-Cloned-World.md) | Editor Play runs in-process on a cloned World | Accepted | 2026-10 (v1 Phase 12) |
 | [ADR-0018](ADR-0018-Actions-For-Release-Tags-Only.md) | GitHub Actions runs for release tags only; CI by hand | Accepted (amends ADR-0011) | 2026-11-11 |
 | [ADR-0019](ADR-0019-Gameplay-Systems-Through-GameSystem.md) | Gameplay systems in their own crate behind `GameSystem`; Players stays in `script` | Accepted | 2026-11-11 |
-| [ADR-0020](ADR-0020-Team-Create-Session-Authority-And-Operations.md) | Team Create: one session authority ordering typed operations; device-key identities until accounts exist | **Proposed** | 2026-11-11 |
+| [ADR-0020](ADR-0020-Team-Create-Session-Authority-And-Operations.md) | Team Create: one session authority ordering typed operations; device-key identities until accounts exist | Accepted | 2026-11-11 |
 
 ## Superseded and changed decisions found in the plans
 
