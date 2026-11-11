@@ -14,6 +14,24 @@ pub fn safe_asset_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
+/// A relative path a source gave (a file inside a bundle) with `/`
+/// separators, or `None` if it could leave its folder: empty, absolute, a
+/// drive or URL, or any `.` or `..` part.
+pub fn safe_relative_path(path: &str) -> Option<String> {
+    let path = path.replace('\\', "/");
+    if path.starts_with('/') || path.contains(':') {
+        return None;
+    }
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts
+        .iter()
+        .any(|part| part.is_empty() || *part == "." || *part == "..")
+    {
+        return None;
+    }
+    Some(parts.join("/"))
+}
+
 /// Extracts the files of the zip at `zip_path` whose extension (any case)
 /// is in `extensions` straight into `dest`, by file name only, and returns
 /// their names in archive order.
@@ -151,6 +169,30 @@ mod tests {
             Err(SourceError::BadResponse(_))
         ));
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn relative_paths_must_stay_inside_their_folder() {
+        assert_eq!(
+            safe_relative_path("textures/a_2k.jpg").as_deref(),
+            Some("textures/a_2k.jpg")
+        );
+        assert_eq!(
+            safe_relative_path("textures\\a.jpg").as_deref(),
+            Some("textures/a.jpg")
+        );
+        for bad in [
+            "",
+            "../a.jpg",
+            "a/../../b",
+            "/etc/a",
+            "C:/a.jpg",
+            "https://x/a",
+            "a//b",
+            "./a",
+        ] {
+            assert_eq!(safe_relative_path(bad), None, "{bad}");
+        }
     }
 
     #[test]
