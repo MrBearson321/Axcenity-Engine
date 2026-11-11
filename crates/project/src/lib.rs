@@ -96,8 +96,8 @@ pub use object_scripts::{
 };
 pub use package::{
     Clashes, Contents, ImportPlan, PACKAGE_EXTENSION, Package, PackageError, PackageManifest,
-    package_contents, package_contents_with_scripts, plan_import, read_package, script_tables,
-    write_package,
+    package_contents, package_contents_with_scripts, package_scripts, plan_import, read_package,
+    script_tables, without_scripts, write_package,
 };
 pub use packed::{PackError, pack_game, unpack_game};
 pub use prefabs::{PrefabError, Prefabs, applied_text, prefab_references, variant_text};

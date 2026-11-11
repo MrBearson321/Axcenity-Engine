@@ -18,8 +18,14 @@ pub struct PackageImport {
     /// The project it goes into.
     folder: PathBuf,
     pub clashes: Clashes,
-    /// What importing does with `clashes` as they are, worked out again
-    /// when they change.
+    /// Its scripts inside objects (G2): code from elsewhere that would run
+    /// in this project's game.
+    pub scripts: Vec<String>,
+    /// Whether to bring `scripts` in. Off until ticked: without them, the
+    /// package's prefabs come without those scripts.
+    pub keep_scripts: bool,
+    /// What importing does with `clashes` and `keep_scripts` as they are,
+    /// worked out again when they change.
     pub plan: ImportPlan,
 }
 
@@ -27,20 +33,41 @@ impl PackageImport {
     /// `package`, going into the project in `folder`, with clashes kept
     /// both ways to begin with.
     pub fn new(folder: &Path, package: Package) -> Self {
-        let clashes = Clashes::default();
-        Self {
-            plan: project::plan_import(folder, &package, clashes),
+        let mut import = Self {
+            scripts: project::package_scripts(&package),
             package,
             folder: folder.to_owned(),
-            clashes,
-        }
+            clashes: Clashes::default(),
+            keep_scripts: false,
+            plan: ImportPlan::default(),
+        };
+        import.replan();
+        import
+    }
+
+    /// Works out what importing does now.
+    fn replan(&mut self) {
+        self.plan = if self.keep_scripts || self.scripts.is_empty() {
+            project::plan_import(&self.folder, &self.package, self.clashes)
+        } else {
+            let plain = project::without_scripts(&self.package);
+            project::plan_import(&self.folder, &plain, self.clashes)
+        };
     }
 
     /// Settles clashes as `clashes` says from now on.
     pub fn set_clashes(&mut self, clashes: Clashes) {
         if clashes != self.clashes {
             self.clashes = clashes;
-            self.plan = project::plan_import(&self.folder, &self.package, clashes);
+            self.replan();
+        }
+    }
+
+    /// Brings the package's scripts in, or leaves them out.
+    pub fn set_keep_scripts(&mut self, keep: bool) {
+        if keep != self.keep_scripts {
+            self.keep_scripts = keep;
+            self.replan();
         }
     }
 
@@ -171,10 +198,49 @@ impl PackageImport {
                 }
             }));
         }
+        if !self.scripts.is_empty() {
+            ui.add_space(8.0);
+            widgets::section_label(ui, "Scripts");
+            ui.label(format!(
+                "{} inside the package's objects {} code from another project, which runs in \
+                 your game.",
+                plural(self.scripts.len(), "script"),
+                if self.scripts.len() == 1 { "is" } else { "are" }
+            ));
+            for path in &self.scripts {
+                ui.label(
+                    egui::RichText::new(path)
+                        .monospace()
+                        .size(theme::type_scale::SMALL),
+                );
+            }
+            let mut keep = self.keep_scripts;
+            ui.checkbox(&mut keep, "Keep its scripts")
+                .on_hover_text("Only if you trust where the package came from.");
+            self.set_keep_scripts(keep);
+            ui.label(quiet(if self.keep_scripts {
+                "The scripts come in with their objects. Read them before you press Play."
+            } else {
+                "The objects come in without these scripts."
+            }));
+        }
         ui.add_space(8.0);
         widgets::section_label(ui, "In the package");
         let written: Vec<&str> = self.plan.writes.iter().map(|(p, _)| p.as_str()).collect();
         for path in self.package.files.keys() {
+            if !self.keep_scripts && self.scripts.contains(path) {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 5.0;
+                    ui.label(egui::RichText::new(icons::MINUS).color(palette.text_secondary));
+                    ui.label(
+                        egui::RichText::new(path)
+                            .monospace()
+                            .size(theme::type_scale::SMALL),
+                    );
+                    ui.label(quiet("left out: a script"));
+                });
+                continue;
+            }
             let moved = self.moved(path).map(|to| format!("as {to}"));
             let (icon, note) = if self.plan.clashes.contains(path) {
                 let note = match self.clashes {

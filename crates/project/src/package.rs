@@ -528,5 +528,72 @@ fn rewrite(path: &str, bytes: Vec<u8>, old: &str, new: &str) -> Vec<u8> {
     text.into_bytes()
 }
 
+/// The code of scripts inside objects in `package` (its files in
+/// `objects/`, G2): code from another project that runs in this one's game
+/// once imported, so the Import dialog lists it and asks first.
+pub fn package_scripts(package: &Package) -> Vec<String> {
+    package
+        .files
+        .keys()
+        .filter(|path| is_object_script(path))
+        .cloned()
+        .collect()
+}
+
+/// `package` without its scripts inside objects: their files are left out,
+/// and so is every script node in its prefabs that names one, so the
+/// prefabs' copies carry none. A prefab that can't be read stays as it is.
+pub fn without_scripts(package: &Package) -> Package {
+    let scripts = package_scripts(package);
+    let mut files = BTreeMap::new();
+    for (path, bytes) in &package.files {
+        if scripts.contains(path) {
+            continue;
+        }
+        let bytes = if path.to_ascii_lowercase().ends_with(PREFAB_SUFFIX) {
+            prefab_without(bytes, &scripts).unwrap_or_else(|| bytes.clone())
+        } else {
+            bytes.clone()
+        };
+        files.insert(path.clone(), bytes);
+    }
+    let mut manifest = package.manifest.clone();
+    manifest.files.retain(|path| !scripts.contains(path));
+    Package { manifest, files }
+}
+
+/// Whether `path` is the code of a script inside an object.
+fn is_object_script(path: &str) -> bool {
+    path.strip_prefix(crate::OBJECTS_FOLDER)
+        .is_some_and(|rest| rest.starts_with('/'))
+        && (path.ends_with(".lua") || crate::is_block_script(path))
+}
+
+/// The prefab in `bytes` without the scripts naming any of `scripts`, or
+/// `None` when it has none of them (or can't be read).
+fn prefab_without(bytes: &[u8], scripts: &[String]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let roots = parse_prefab(text, &mut world, workspace).ok()?;
+    let doomed: Vec<_> = world
+        .descendants_iter(workspace)
+        .filter(|&id| {
+            world
+                .get(id)
+                .and_then(|instance| instance.source_file())
+                .is_some_and(|path| scripts.iter().any(|script| script == path))
+        })
+        .collect();
+    if doomed.is_empty() {
+        return None;
+    }
+    for id in doomed {
+        let _ = world.destroy(id);
+    }
+    let roots: Vec<_> = roots.into_iter().filter(|&id| world.contains(id)).collect();
+    Some(crate::world_file::write_prefab(&world, &roots).into_bytes())
+}
+
 #[cfg(test)]
 mod tests;
