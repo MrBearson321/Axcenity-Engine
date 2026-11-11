@@ -121,7 +121,7 @@ pub struct Install {
 
 /// An open metadata database.
 pub struct Database {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 /// Seconds since 1970, UTC.
@@ -131,11 +131,11 @@ pub fn now() -> i64 {
         .map_or(0, |time| time.as_secs() as i64)
 }
 
-fn json<T: Serialize>(value: &T) -> String {
+pub(crate) fn json<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned())
 }
 
-fn from_json<T: for<'a> Deserialize<'a> + Default>(text: &str) -> T {
+pub(crate) fn from_json<T: for<'a> Deserialize<'a> + Default>(text: &str) -> T {
     serde_json::from_str(text).unwrap_or_default()
 }
 

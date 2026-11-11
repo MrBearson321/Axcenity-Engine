@@ -62,7 +62,7 @@ fn type_name(kind: Kind) -> Option<&'static str> {
         Kind::Texture => Some("textures"),
         Kind::Hdri => Some("hdris"),
         Kind::Model => Some("models"),
-        Kind::Sound => None,
+        Kind::Sound | Kind::Sprites => None,
     }
 }
 

@@ -140,7 +140,7 @@ fn rules(kind: Kind) -> KindRules {
             extract: &AUDIO_EXTENSIONS,
             licenses: &[license::CC0, license::PD, license::CC_BY],
         },
-        Kind::Texture | Kind::Model => KindRules {
+        Kind::Texture | Kind::Model | Kind::Sprites => KindRules {
             label: "Textures",
             noun: "materials",
             formats: &FORMATS,
