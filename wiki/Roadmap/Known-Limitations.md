@@ -40,6 +40,7 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 
 ## Editor
 
+- Script completion follows chains and declarations but doesn't type-check: a value it can't follow (a function's result, a table field, a module's return) offers nothing, and there are no error squiggles yet (G4 stage 2).
 - Panics while drawing the Play world aren't caught.
 - Model files aren't watched for changes while the editor runs (read again on open).
 - Bakes (reflection probes, light probe volumes) go stale and must be rebaked by hand (flagged).

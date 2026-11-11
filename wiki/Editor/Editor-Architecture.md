@@ -4,7 +4,7 @@ type: system
 status: current
 implementation: implemented
 crates: [editor, plugins]
-source: [crates/editor/src/main.rs, crates/editor/src/app.rs, crates/editor/src/play.rs, crates/editor/src/play/multi.rs, crates/editor/src/viewport.rs, crates/editor/src/layout.rs, crates/editor/src/theme.rs, crates/editor/src/widgets.rs, crates/editor/src/responsive.rs, crates/editor/src/history.rs, crates/editor/src/cooking.rs, crates/editor/src/profiler.rs, crates/plugins/src/lib.rs, crates/plugins/src/api.rs]
+source: [crates/editor/src/main.rs, crates/editor/src/script_completion.rs, crates/editor/src/scripts/assist.rs, crates/editor/src/app.rs, crates/editor/src/play.rs, crates/editor/src/play/multi.rs, crates/editor/src/viewport.rs, crates/editor/src/layout.rs, crates/editor/src/theme.rs, crates/editor/src/widgets.rs, crates/editor/src/responsive.rs, crates/editor/src/history.rs, crates/editor/src/cooking.rs, crates/editor/src/profiler.rs, crates/plugins/src/lib.rs, crates/plugins/src/api.rs]
 docs: [docs/architecture.md, docs/editor/shell.md, docs/architecture/play-mode.md, docs/editor/selection.md, docs/editor/transforms.md, docs/editor/tree.md, docs/editor/scripts.md, docs/editor/plugins.md, crates/editor/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -49,6 +49,7 @@ Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin
 
 - **Universal search** (Ctrl+K; `command_palette.rs`, `app/search.rs`): one fuzzy-ranked list over commands, tools, scripts, assets, levels, objects and settings, each provider re-listed only when its stamp changes; the command palette (Ctrl+Shift+P) and Quick Open (Ctrl+P) are views of it.
 - **Design system Phases 2–5**: errors stay until seen; one way to open and close windows and dialogs; Explorer and Console draw only what's visible; Properties edits every selected item; Explorer arrow keys; a **shortcut table** (`shortcuts.rs`, every shortcut one `Action` with a context); layout presets; Increase contrast.
+- **Script completion** (G4 stage 1; `crates/editor/src/script_completion.rs`, `crates/editor/src/scripts/assist.rs`): code tabs list members after `.`/`:` and names on Ctrl+Space, and show an engine call's signature after `(`/`,`. It reads `axcenity_script::api_reference()` (the luau-lsp definitions' tables) and follows chains and locals' declarations against the edit world; no type checking. Diagnostics (stage 2, luau-lsp) are still to come.
 - **Scripts inside objects** editor support (Insert Script into a selected object creates `objects/<name>/Script.server.lua`).
 - [MCP server](MCP-Server.md) and [Toolbox](Toolbox.md).
 - **UI prefabs** (G5): Save prefab and Export Package take ScreenGuis and UI elements with their `SourceFile` LocalScripts.
