@@ -36,6 +36,14 @@ Right-click a tile for **Find References** (what uses it), **Rename or Move…**
 
 The **Toolbox** tab (the Assets panel's Toolbox button, or **Ctrl+K**) searches free libraries online, **ambientCG**, **Poly Haven** and **Openverse**, for **Textures**, **Skies**, **Models** and **Sounds**. Get one and it's downloaded once to your computer and copied into the project, with where it came from and its licence remembered. **Favourites** and **Recent** work offline.
 
+- For **Textures** and **Skies**, the source menu's **All sources** (the default) searches every library at once. Each card names its source, and chips above the results show each source's count and narrow the grid to one. If one library is down, the others' results still show.
+- The **Sounds** tab shows a licence notice: many sounds aren't cleared for commercial games unless their own licence says so. Each card shows its own licence.
+- **Packs ▸ Import plugin…** installs a shared editor plugin (see [Editor interface](editor-interface.md#plugins)).
+
+### Downloaded and imported assets
+
+The **Downloaded / Imported Assets** tab (the Toolbox's view menu, **View > Panels** or **Ctrl+K**) lists every asset that came from outside the editor, whether you downloaded it with the Toolbox, imported it into this project, or both, one row each. Rows are grouped into Models, Textures, Materials, HDRIs, Sounds, Animations and Other, with badges for **Downloaded**, **Imported**, **In project** and **Removed from project**. Filter them by kind, source or a search. Click a row for its source page, authors, licence in plain words, **Copy credit line**, its files, and **Remove download**, which deletes the library's copy (projects keep their own).
+
 Build Game writes a `CREDITS.txt` with the credit lines those licences ask for, and warns about anything not cleared for a commercial game.
 
 ## Prefabs

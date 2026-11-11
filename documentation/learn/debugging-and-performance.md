@@ -36,7 +36,7 @@ Games can add their own commands with `ConsoleService:RegisterCommand()`. Built 
 
 ## Seeing what the engine sees
 
-**View > Overlays** draws debug information over the Scene: **Colliders** (collision shapes), **Constraints** (welds, joints and movers), **Raycasts**, **Emitters** (where sounds play from), the **Navigation mesh** and **agent paths**, and what's **culled**. **View > View Mode** shows the scene as wireframe, lighting only, normals and other debug views.
+**Viewport > Overlays** draws debug information over the Scene: **Colliders** (collision shapes), **Constraints** (welds, joints and movers), **Raycasts**, **Emitters** (where sounds play from), the **Navigation mesh** and **agent paths**, and what's **culled**. **Viewport > View Mode** shows the scene as wireframe, lighting only, normals and other debug views.
 
 ## Game tests
 

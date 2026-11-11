@@ -34,6 +34,6 @@ Every major system, what it covers and how finished it is. "Partly built" means 
 
 ## Not built
 
-These are common in other engines but Axcenity doesn't have them yet: export to web, mobile or consoles; internet matchmaking, relays or encrypted connections; HRTF (3D-positioned) audio; UI drawn on a part's surface; importing animation from glTF files; and real-time collaboration in the editor (designed, not built).
+These are common in other engines but Axcenity doesn't have them yet: export to web, mobile or consoles; internet matchmaking, relays or encrypted connections; HRTF (3D-positioned) audio; UI drawn on a part's surface; importing animation from glTF files; and real-time collaboration in the editor (Team Create is being built, but you can't start or join a session from the editor yet).
 
 The source repository's wiki keeps the full [system inventory](https://github.com/MrBearson321/axcenity-engine/blob/main/wiki/Architecture/System-Inventory.md) and [known limitations](https://github.com/MrBearson321/axcenity-engine/blob/main/wiki/Roadmap/Known-Limitations.md).
