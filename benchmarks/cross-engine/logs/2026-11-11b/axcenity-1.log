@@ -1,0 +1,32 @@
+XB10K_CHECK count=10000 sum=98894.50
+player: xb10k (600 frames)
+  stage                       mean ms  median ms     p95 ms     max ms
+  Network                       0.004      0.004      0.005      0.031
+  Characters                    0.009      0.009      0.010      0.015
+  Agents                        0.001      0.001      0.001      0.002
+  Input                         0.015      0.015      0.017      0.060
+  Scripts                       0.039      0.011      0.198      0.450
+  Physics                       1.479      1.456      1.834      2.096
+  Heartbeat                     0.299      0.295      0.328      0.360
+  Animation                     0.003      0.003      0.004      0.009
+  Draw list                     1.346      1.338      1.401      1.946
+  UI                            0.020      0.020      0.024      0.032
+  Render                        1.759      1.755      2.000      2.348
+  Present wait                  0.218      0.206      0.305      0.497
+  frame                         5.191      5.145      5.730      6.360
+  FPS average 192.6, 1% low 162.9, 0.1% low 157.2; frame time std dev 0.280 ms, p99 5.971 ms
+GPU, from timestamps (600 frames)
+  stage                       mean ms  median ms     p95 ms     max ms
+  Shadows                       0.305      0.300      0.345      0.420
+  Depth prepass                 0.159      0.155      0.188      0.265
+  Ambient occlusion             0.059      0.058      0.060      0.145
+  Scene                         1.296      1.267      1.380      1.422
+  Post-processing               0.114      0.111      0.112      0.224
+  UI                            0.065      0.069      0.073      0.211
+  frame                         2.010      1.998      2.089      2.122
+  CPU-bound
+  first frame                  74.288
+  worst warm-up frame          74.288
+  launch to first frame      3670.075
+  launch to assets loaded    3670.075
+{"host":"player","scene":"xb10k","frames":600,"stages":[{"name":"Network","mean_ms":0.0041,"median_ms":0.0038,"p95_ms":0.0050,"max_ms":0.0312},{"name":"Characters","mean_ms":0.0088,"median_ms":0.0085,"p95_ms":0.0105,"max_ms":0.0152},{"name":"Agents","mean_ms":0.0008,"median_ms":0.0007,"p95_ms":0.0011,"max_ms":0.0015},{"name":"Input","mean_ms":0.0147,"median_ms":0.0146,"p95_ms":0.0168,"max_ms":0.0599},{"name":"Scripts","mean_ms":0.0392,"median_ms":0.0112,"p95_ms":0.1980,"max_ms":0.4502},{"name":"Physics","mean_ms":1.4787,"median_ms":1.4559,"p95_ms":1.8339,"max_ms":2.0962},{"name":"Heartbeat","mean_ms":0.2987,"median_ms":0.2950,"p95_ms":0.3276,"max_ms":0.3600},{"name":"Animation","mean_ms":0.0032,"median_ms":0.0031,"p95_ms":0.0038,"max_ms":0.0095},{"name":"Draw list","mean_ms":1.3456,"median_ms":1.3383,"p95_ms":1.4007,"max_ms":1.9460},{"name":"UI","mean_ms":0.0196,"median_ms":0.0198,"p95_ms":0.0241,"max_ms":0.0319},{"name":"Render","mean_ms":1.7594,"median_ms":1.7550,"p95_ms":2.0004,"max_ms":2.3480},{"name":"Present wait","mean_ms":0.2181,"median_ms":0.2058,"p95_ms":0.3053,"max_ms":0.4974},{"name":"frame","mean_ms":5.1909,"median_ms":5.1449,"p95_ms":5.7302,"max_ms":6.3602}],"pacing":{"average_fps":192.65,"low_1pct_fps":162.86,"low_01pct_fps":157.23,"stddev_ms":0.2796,"p99_ms":5.9714},"gpu":[{"name":"Shadows","mean_ms":0.3047,"median_ms":0.2997,"p95_ms":0.3448,"max_ms":0.4199},{"name":"Depth prepass","mean_ms":0.1588,"median_ms":0.1549,"p95_ms":0.1875,"max_ms":0.2648},{"name":"Ambient occlusion","mean_ms":0.0593,"median_ms":0.0582,"p95_ms":0.0598,"max_ms":0.1450},{"name":"Scene","mean_ms":1.2962,"median_ms":1.2672,"p95_ms":1.3802,"max_ms":1.4224},{"name":"Post-processing","mean_ms":0.1139,"median_ms":0.1108,"p95_ms":0.1119,"max_ms":0.2243},{"name":"UI","mean_ms":0.0646,"median_ms":0.0687,"p95_ms":0.0735,"max_ms":0.2112},{"name":"frame","mean_ms":2.0098,"median_ms":1.9982,"p95_ms":2.0885,"max_ms":2.1217}],"bound":"CPU-bound","startup":{"first frame":74.2884,"worst warm-up frame":74.2884,"launch to first frame":3670.0747,"launch to assets loaded":3670.0751}}

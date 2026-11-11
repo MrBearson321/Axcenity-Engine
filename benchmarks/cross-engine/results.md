@@ -9,6 +9,14 @@ Measured 2026-11-11 (01:50 UTC) with [`run-all.ps1`](run-all.ps1): three runs pe
 | Axcenity main | wgpu (player) | 3 | 6.70 | 149 | 7.36 | 8.9 | yes |
 | Godot 4.7.2-stable (official) | forward_plus | 3 | 10.27 | 97 | 11.33 | 12.0 | yes |
 
+**Update, 2026-11-11 05:23 UTC: Axcenity re-timed on `main` at b3297ca**, after the physics step work (PRs #84, #86, #93) and render planning's own thread pool (#88), same machine and settings, three pinned runs ([`logs/2026-11-11b/`](logs/2026-11-11b)). The other engines weren't re-run.
+
+| Engine | Renderer | Runs | Median frame (ms) | FPS | p95 (ms) | Worst (ms) | Fixed step |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Axcenity main b3297ca | wgpu (player) | 3 | **5.14** | 194 | 5.73 | 6.6 | yes |
+
+Runs: 5.14, 5.12, 5.25 ms. By stage (run 1, medians in ms): physics 1.46 (was 2.43), draw list 1.34 (was 1.38), render 1.76 (was 1.91), Heartbeat scripts 0.30 (was 0.74). The GPU frame is about 2.0 ms, so Axcenity is still CPU-bound here; the draw list is now the stage that changed least.
+
 The table's median is the median of the three runs' medians, p95 the median of their p95s, and worst the worst of all frames.
 
 Each run's median frame (ms), then the scene build and the first frame after it:
