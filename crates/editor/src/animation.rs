@@ -36,7 +36,7 @@ pub mod store;
 #[cfg(test)]
 mod testing;
 pub(crate) mod timeline;
-mod transport;
+pub(crate) mod transport;
 
 #[cfg(test)]
 pub use graph::{Node, words::when_words};

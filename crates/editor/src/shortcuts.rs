@@ -48,7 +48,7 @@ pub enum Context {
     Brushes,
     /// Typing in the Console's command line.
     Console,
-    /// Over the Animation tab's clip.
+    /// Over the Animation tab's clip or the Sequencer's sequence.
     Animation,
     /// Over a graph: a block script's Graph view, a material graph, a UI
     /// Event Graph, the Animation tab's state machine.
@@ -104,7 +104,7 @@ impl Context {
             Context::Terrain => "Terrain Studio",
             Context::Brushes => "Brushes",
             Context::Console => "Console command line",
-            Context::Animation => "Animation clip",
+            Context::Animation => "Animation and Sequencer",
             Context::Graphs => "Graphs",
             Context::UiDesigner => "UI Designer",
             Context::UiPages => "UI Designer's Pages",
@@ -129,7 +129,7 @@ impl Context {
             Context::Terrain => "While a terrain tool is picked.",
             Context::Brushes => "The terrain brush, and Sculpt, Paint and Weights.",
             Context::Console => "While its command line has the cursor.",
-            Context::Animation => "With the mouse over a clip.",
+            Context::Animation => "With the mouse over a clip or a sequence.",
             Context::Graphs => {
                 "Over a block script's Graph view, a material, a UI Event Graph or a state \
                  machine."
