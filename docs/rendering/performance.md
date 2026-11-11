@@ -197,7 +197,7 @@ AXCENITY_BENCH_PROJECT=<absolute folder> AXCENITY_SHOT_VIEWS='walker:-39.6,5.5,3
 
 Each variant's list is built once and drawn again and again with three frames in flight, so the GPU is never idle between frames: drawing a new list each frame left the GPU waiting on the CPU, it clocked down, and its timestamps read up to 70% slower (a first version of the tool had removals "costing" 3 to 4 ms). Variants are measured in three rounds through all of them, and each cell is the median of the rounds' medians. `AXCENITY_PROFILE_VARIANTS` picks some. After the table it reads the overdraw view back (`OverdrawStats`, below), and `AXCENITY_SHOT_DIR` saves a PNG of every variant to compare by eye.
 
-`lod_report_project`, beside it, lists every model a project's MeshParts show with its levels of detail and their warnings (`assets::LodReport`), biggest first.
+`lod_report_project`, beside it, lists every model a project's MeshParts show or its terrains have painted with its levels of detail and their warnings (`assets::LodReport`), biggest first.
 
 ## Overdraw, as numbers (`OverdrawStats`)
 
@@ -411,6 +411,19 @@ What it says:
 - **Wind is free.** Every variant without it is within 0.15 ms: the sway is a few vertex instructions on the GPU, with one shared `GlobalWind` in the frame uniform and no CPU work per plant (see [wind.md](wind.md)). Nothing to optimize.
 - **Ambient occlusion is cheap** (0.1–0.2 ms). Anti-aliasing costs 0.7–1.5 ms and double-sided materials 0.7–1.3 ms, but turning either off changes the picture (jagged leaf edges, missing leaf backs), so neither is a saving to take at Ultra.
 - **Shadows are the largest single pass** (3.0–3.6 ms; 4.4–5.0 ms with the lookups). Painted foliage's share is about 1 ms, even though `SHADOW_REACH` already limits it to 35% of its cull distance.
+
+### Whose overdraw it is
+
+`profile_project` with `AXCENITY_PROFILE_OVERDRAW_GROUPS=<n>` draws the overdraw view again with only one model primitive's items at a time (named `file: material` from the models the world's MeshParts and terrains show) and lists the `n` biggest by their share of all the layers. Temperate Dry Patch, Ultra 2560 × 1440:
+
+| Share of the layers | Demo camera | Along the ground |
+|---|---|---|
+| The five grass models (13,180 tufts, 28–108 triangles each) | 73.8% | 80.4% |
+| Both oaks' leaves | 5.2% | 10.4% |
+| Oak bark | under 1% | 2.4% |
+| Shrubs, rocks, thistles and the rest | the remainder | the remainder |
+
+So the bright bands in the overdraw view are grass seen at a low angle, 6 to 12 layers where each grass model covers anything and 40 to 50 where they all overlap along the horizon. The canopy is a small share. What a grass layer costs is its corners and the depth tests (the alpha sample of the depth fill and the prepass), not lighting; leaving all painted foliage out saved 1.7–2.9 ms of GPU, a third of it their shadows. Fewer layers there means fewer tufts far away (density by distance), which changes how full the ground looks; a choice for the project or the preset, not a fix.
 
 ### Shadows on the patch, cascade by cascade
 

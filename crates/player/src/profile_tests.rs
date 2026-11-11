@@ -376,6 +376,54 @@ fn profile_project() {
         renderer.set_debug_view(None);
         let overdraw = OverdrawStats::from_pixels(&pixels, width, height);
         println!("\noverdraw ({}):\n{}", parts[0], overdraw.report());
+        // Each model primitive's share: the overdraw view with only its
+        // items, biggest first (`AXCENITY_PROFILE_OVERDRAW_GROUPS` of them).
+        if let Some(groups) = std::env::var("AXCENITY_PROFILE_OVERDRAW_GROUPS")
+            .ok()
+            .and_then(|n| n.parse::<usize>().ok())
+        {
+            let names = mesh_names(&world, &assets);
+            let mut counts: std::collections::HashMap<u64, usize> = Default::default();
+            for item in list
+                .items
+                .iter()
+                .chain(list.chunks.iter().flat_map(|c| c.items.iter()))
+            {
+                if let Shape::Mesh(mesh) = &item.shape {
+                    *counts.entry(mesh.key()).or_default() += 1;
+                }
+            }
+            renderer.set_debug_view(Some(DebugView::Overdraw));
+            let mut shares: Vec<(String, usize, OverdrawStats)> = Vec::new();
+            for (&key, &count) in &counts {
+                let Some(name) = names.get(&key) else {
+                    continue;
+                };
+                let mut only = list.clone();
+                keep_items(
+                    &mut only,
+                    |item| matches!(&item.shape, Shape::Mesh(mesh) if mesh.key() == key),
+                );
+                renderer.render(&only).unwrap();
+                device.poll(wgpu::PollType::Wait).unwrap();
+                let stats = OverdrawStats::from_pixels(&renderer.read_pixels(), width, height);
+                shares.push((name.clone(), count, stats));
+            }
+            renderer.set_debug_view(None);
+            shares.sort_by_key(|(_, _, stats)| std::cmp::Reverse(stats.layers));
+            println!(
+                "| model and material | items | layers (share of all) | pixels covered | layers where covered |"
+            );
+            println!("|---|---|---|---|---|");
+            for (name, count, stats) in shares.iter().take(groups) {
+                println!(
+                    "| {name} | {count} | {:.1}% | {:.1}% | {:.1} |",
+                    stats.layers as f64 * 100.0 / overdraw.layers.max(1) as f64,
+                    stats.covered as f64 * 100.0 / (f64::from(width) * f64::from(height)),
+                    stats.mean_per_covered()
+                );
+            }
+        }
         if let Some(out) = &out {
             save_png(
                 &out.join(format!("{}-overdraw.png", parts[0])),
@@ -387,6 +435,47 @@ fn profile_project() {
     for error in assets.take_errors() {
         eprintln!("asset error: {error}");
     }
+}
+
+/// Each model primitive's mesh key (as its draw items' `Shape::Mesh` has
+/// it), named `file: material`, for every model the world's MeshParts and
+/// terrains show.
+fn mesh_names(
+    world: &axcenity_core::World,
+    assets: &axcenity_assets::Assets,
+) -> std::collections::HashMap<u64, String> {
+    let mut files = std::collections::BTreeSet::new();
+    for id in world.descendants(world.workspace()) {
+        if let Some(terrain) = world.terrain(id) {
+            for plant in terrain.foliage() {
+                if let axcenity_core::FoliageSource::Model(mesh) = &plant.source {
+                    files.insert(mesh.clone());
+                }
+            }
+        }
+        if let Some(mesh) = world
+            .get(id)
+            .and_then(|instance| instance.property("MeshId"))
+            .and_then(axcenity_core::Value::as_str)
+            .filter(|mesh| !mesh.is_empty())
+        {
+            files.insert(mesh.to_owned());
+        }
+    }
+    let mut names = std::collections::HashMap::new();
+    for file in files {
+        let Some(model) = assets.model_ready(&file) else {
+            continue;
+        };
+        let short = file.rsplit('/').next().unwrap_or(&file).to_owned();
+        for primitive in &model.primitives {
+            names.insert(
+                primitive.key(),
+                format!("{short}: {}", primitive.material.name),
+            );
+        }
+    }
+    names
 }
 
 fn save_png(path: &std::path::Path, pixels: &[u8], (width, height): (u32, u32)) {
@@ -419,7 +508,7 @@ fn the_settings_variants_turn_their_setting_off() {
     assert!(VARIANTS.iter().any(|(name, _)| *name == "base"));
 }
 
-/// Every model a project's MeshParts show, with its levels of detail and
+/// Every model a project's MeshParts show or its terrains have painted, with its levels of detail and
 /// their warnings ([`axcenity_assets::LodReport`]), biggest first.
 ///
 /// `AXCENITY_BENCH_PROJECT=<folder> cargo test -p axcenity-player --release -- --ignored lod_report_project --nocapture`
@@ -438,6 +527,14 @@ fn lod_report_project() {
         let Some(instance) = world.get(id) else {
             continue;
         };
+        // Models painted on a terrain count once per copy.
+        if let Some(terrain) = world.terrain(id) {
+            for plant in terrain.foliage() {
+                if let axcenity_core::FoliageSource::Model(mesh) = &plant.source {
+                    *uses.entry(mesh.clone()).or_default() += 1;
+                }
+            }
+        }
         if instance.class() != axcenity_core::ClassName::MeshPart {
             continue;
         }
