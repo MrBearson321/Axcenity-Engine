@@ -58,6 +58,8 @@ const CARD_RADIUS: u8 = 8;
 /// The page's margin around its content, and the widest the content gets.
 const PAGE_MARGIN: f32 = 40.0;
 const MAX_PAGE_WIDTH: f32 = 1160.0;
+/// How far the reading glass reaches round the content column.
+const GLASS_MARGIN: f32 = 24.0;
 /// How far a page rises as it arrives, how long that takes, and the gap
 /// between one project card's fade and the next. Cards past
 /// [`STAGGERED_CARDS`] fade with the last of them.
@@ -65,6 +67,10 @@ const PAGE_RISE: f32 = 12.0;
 const PAGE_SECONDS: f32 = 0.34;
 const CARD_STAGGER: f32 = 0.04;
 const STAGGERED_CARDS: usize = 12;
+/// How many of the last opened projects Recent shows, and how many All
+/// projects shows before "Show more" (and how many more each click adds).
+const RECENT_PROJECTS: usize = 4;
+const ALL_PROJECTS_SHOWN: usize = 8;
 
 /// The logo, for the header, start screen and About box. Both are
 /// white on a transparent background, so a tint draws them in any colour
@@ -256,6 +262,8 @@ pub struct StartScreen {
     intro: Option<f64>,
     /// Sidebar or top bar, and whether the sidebar is folded. Saved.
     nav: StartNav,
+    /// How many projects past the first page All projects shows.
+    more: usize,
 }
 
 impl StartScreen {
@@ -341,6 +349,14 @@ impl StartScreen {
         if settings {
             action = Some(StartAction::Settings);
         }
+        // The page's text reads off hazy glass, not the moving scene: a
+        // panel behind the content column, the scene showing round it.
+        let glass = Rect::from_min_max(
+            pos2(room.left - GLASS_MARGIN, page.top() + GLASS_MARGIN),
+            pos2(room.left + room.width + GLASS_MARGIN, page.bottom() + 8.0),
+        )
+        .intersect(page.shrink2(vec2(8.0, 0.0)));
+        backdrop::reading_glass(&ui.painter_at(page), glass, &theme::palette(&ctx));
         let now = ctx.input(|input| input.time);
         if self.arrived.is_none_or(|(shown, _)| shown != self.page) {
             self.arrived = Some((self.page, now));
@@ -474,10 +490,32 @@ impl StartScreen {
         });
 
         ui.add_space(32.0);
+        let now = SystemTime::now();
+        let mut chosen = None;
+        // Recent: the last few opened, newest first, whatever the sort.
+        let recent = projects.len().min(RECENT_PROJECTS);
+        if recent > 0 {
+            widgets::section_label(ui, "Recent");
+            ui.add_space(12.0);
+            let links = projects[..recent].to_vec();
+            if let Some(picked) = self.project_grid(ui, ctx, &links, "recent", 0, now) {
+                chosen = Some(picked);
+            }
+            ui.add_space(36.0);
+        }
+
+        // All projects: searchable, sorted, a page at a time.
         let mut filter = std::mem::take(&mut self.filter);
         let (mut view, mut sort) = (self.view, self.sort);
         ui.horizontal(|ui| {
-            widgets::section_label(ui, "Recent projects");
+            widgets::section_label(ui, "All projects");
+            if !projects.is_empty() {
+                ui.label(
+                    RichText::new(projects.len().to_string())
+                        .size(type_scale::SMALL)
+                        .color(theme::palette(ui.ctx()).text_weak),
+                );
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 widgets::segmented(
@@ -503,6 +541,10 @@ impl StartScreen {
                 widgets::search_field(ui, &mut filter, "Search projects", 220.0);
             });
         });
+        if filter != self.filter {
+            // A new search starts from its first page.
+            self.more = 0;
+        }
         self.filter = filter;
         (self.view, self.sort) = (view, sort);
         ui.add_space(12.0);
@@ -535,37 +577,14 @@ impl StartScreen {
                 "No project's name or description has that in it.",
             );
         }
+        let matching = shown.len();
+        let limit = ALL_PROJECTS_SHOWN + self.more;
+        shown.truncate(limit);
 
-        let mut chosen = None;
-        let now = SystemTime::now();
         match self.view {
             View::Grid => {
-                let (columns, card_width) = grid_columns(ui.available_width());
-                let arrived_at = self.arrived.map_or(0.0, |(_, at)| at);
-                ui.spacing_mut().item_spacing.y = CARD_SPACING + 4.0;
-                // Rows of `columns` cards each, laid out here rather than by
-                // `horizontal_wrapped`: each card fades in inside its own
-                // scope, and a wrapping row never breaks before a scope, so
-                // the cards ran off the page's right edge.
-                for (row, links) in shown.chunks(columns).enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = CARD_SPACING;
-                        for (column, link) in links.iter().enumerate() {
-                            let index = row * columns + column;
-                            let thumbnail = self.thumbnail(ctx, &link.folder);
-                            let edited = self.edited(&link.folder).map(|time| ago(time, now));
-                            let delay = index.min(STAGGERED_CARDS) as f32 * CARD_STAGGER;
-                            let fade =
-                                theme::arrival(ctx, arrived_at, delay, 0.5, theme::curve::SETTLE);
-                            let card = ui.scope(|ui| {
-                                ui.multiply_opacity(fade);
-                                project_card(ui, link, thumbnail.as_ref(), edited, card_width)
-                            });
-                            if let Some(picked) = card.inner {
-                                chosen = Some((link.clone(), picked));
-                            }
-                        }
-                    });
+                if let Some(picked) = self.project_grid(ui, ctx, &shown, "all", recent, now) {
+                    chosen = Some(picked);
                 }
             }
             View::List => {
@@ -578,6 +597,52 @@ impl StartScreen {
                     }
                 }
             }
+        }
+        if matching > limit || self.more > 0 {
+            ui.add_space(16.0);
+            let palette = theme::palette(ctx);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let hidden = matching.saturating_sub(limit);
+                if hidden > 0 {
+                    let next = hidden.min(ALL_PROJECTS_SHOWN);
+                    if ui
+                        .add(widgets::button(
+                            Role::Secondary,
+                            Some(icons::CARET_DOWN),
+                            &format!("Show {next} more"),
+                            &palette,
+                        ))
+                        .clicked()
+                    {
+                        self.more += ALL_PROJECTS_SHOWN;
+                    }
+                    if hidden > next
+                        && ui
+                            .add(widgets::button(
+                                Role::Ghost,
+                                None,
+                                &format!("Show all {matching}"),
+                                &palette,
+                            ))
+                            .clicked()
+                    {
+                        self.more = matching;
+                    }
+                }
+                if self.more > 0
+                    && ui
+                        .add(widgets::button(
+                            Role::Ghost,
+                            Some(icons::CARET_UP),
+                            "Show fewer",
+                            &palette,
+                        ))
+                        .clicked()
+                {
+                    self.more = 0;
+                }
+            });
         }
         if let Some((link, picked)) = chosen {
             self.notice = None;
@@ -607,6 +672,48 @@ impl StartScreen {
             }
         }
         action
+    }
+
+    /// `links` as rows of project cards that fill the page's width, fading
+    /// in one after another from `first` (their place on the page). The
+    /// `section` keeps the same project's cards apart when it shows twice.
+    fn project_grid(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        links: &[ProjectLink],
+        section: &str,
+        first: usize,
+        now: SystemTime,
+    ) -> Option<(ProjectLink, CardAction)> {
+        let mut chosen = None;
+        let (columns, card_width) = grid_columns(ui.available_width());
+        let arrived_at = self.arrived.map_or(0.0, |(_, at)| at);
+        ui.spacing_mut().item_spacing.y = CARD_SPACING + 4.0;
+        // Rows of `columns` cards each, laid out here rather than by
+        // `horizontal_wrapped`: each card fades in inside its own scope, and
+        // a wrapping row never breaks before a scope, so the cards ran off
+        // the page's right edge.
+        for (row, links) in links.chunks(columns).enumerate() {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = CARD_SPACING;
+                for (column, link) in links.iter().enumerate() {
+                    let index = first + row * columns + column;
+                    let thumbnail = self.thumbnail(ctx, &link.folder);
+                    let edited = self.edited(&link.folder).map(|time| ago(time, now));
+                    let delay = index.min(STAGGERED_CARDS) as f32 * CARD_STAGGER;
+                    let fade = theme::arrival(ctx, arrived_at, delay, 0.5, theme::curve::SETTLE);
+                    let card = ui.scope(|ui| {
+                        ui.multiply_opacity(fade);
+                        project_card(ui, link, thumbnail.as_ref(), edited, card_width, section)
+                    });
+                    if let Some(picked) = card.inner {
+                        chosen = Some((link.clone(), picked));
+                    }
+                }
+            });
+        }
+        chosen
     }
 
     /// Does what the Learn page asked for. Returns a sample to open.
