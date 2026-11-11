@@ -581,3 +581,62 @@ fn a_pile_lands_the_same_way_every_time() {
     let first = run();
     assert_eq!(first, run());
 }
+
+#[test]
+fn a_part_moved_every_frame_still_takes_its_other_changes() {
+    let mut world = World::new();
+    // An anchored platform a script slides along every frame, with a block
+    // resting on it.
+    let platform = part(&mut world, Vector3::new(0.0, 0.0, 0.0), true);
+    set(
+        &mut world,
+        platform,
+        "Size",
+        Value::Vector3(Vector3::new(8.0, 1.0, 8.0)),
+    );
+    let block = part(&mut world, Vector3::new(0.0, 1.0, 0.0), false);
+    let mut physics = Physics::new();
+    for frame in 0..30 {
+        let x = frame as f32 * 0.01;
+        set(
+            &mut world,
+            platform,
+            "Position",
+            Value::Vector3(Vector3::new(x, 0.0, 0.0)),
+        );
+        physics.step(&mut world, STEP_SECONDS);
+    }
+    assert!((height(&world, block) - 1.0).abs() < 0.05, "it rests on it");
+
+    // Moved and, in the same frame, turned into a sensor: the block falls
+    // through, so the change wasn't lost to only the move being read.
+    set(
+        &mut world,
+        platform,
+        "Position",
+        Value::Vector3(Vector3::new(0.5, 0.0, 0.0)),
+    );
+    set(&mut world, platform, "CanCollide", Value::Bool(false));
+    for _ in 0..30 {
+        physics.step(&mut world, STEP_SECONDS);
+    }
+    assert!(height(&world, block) < 0.0, "it falls through");
+
+    // Solid again while moving every frame: a new block lands on it.
+    set(&mut world, platform, "CanCollide", Value::Bool(true));
+    let second = part(&mut world, Vector3::new(0.5, 3.0, 0.0), false);
+    for frame in 0..60 {
+        let x = 0.5 + frame as f32 * 0.01;
+        set(
+            &mut world,
+            platform,
+            "Position",
+            Value::Vector3(Vector3::new(x, 0.0, 0.0)),
+        );
+        physics.step(&mut world, STEP_SECONDS);
+    }
+    assert!(
+        (height(&world, second) - 1.0).abs() < 0.05,
+        "it lands on it"
+    );
+}

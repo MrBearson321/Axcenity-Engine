@@ -173,14 +173,26 @@ impl Physics {
                 continue;
             };
             let revision = instance.revision();
-            if part.revision == revision && !part.seen.shape.outdated(world, id, assets_changed) {
+            let outdated = part.seen.shape.outdated(world, id, assets_changed);
+            if part.revision == revision && !outdated {
                 continue;
             }
             // Read below, with the rest of what the tree's changes touched.
             if touched.parts.contains(&id) {
                 continue;
             }
-            let Some(mut state) = PartState::read(world, id, &self.assets) else {
+            // A part that only moved (a script turning it every frame) has
+            // just its motion read again.
+            let static_revision = instance.revision_without_motion();
+            let only_moved = !outdated
+                && static_revision == part.static_revision
+                && instance.class() != ClassName::Terrain;
+            let state = if only_moved {
+                part.seen.moved(instance)
+            } else {
+                PartState::read(world, id, &self.assets)
+            };
+            let Some(mut state) = state else {
                 touched.parts.insert(id);
                 continue;
             };
@@ -188,10 +200,11 @@ impl Physics {
             self.stats.parts_read += 1;
             if state == part.seen {
                 part.revision = revision;
+                part.static_revision = static_revision;
             } else if part.welded {
                 touched.parts.insert(id);
             } else {
-                changed.push((id, state, revision));
+                changed.push((id, state, (revision, static_revision)));
             }
         }
 
@@ -203,10 +216,11 @@ impl Physics {
             self.sync_assemblies(world, &scope, &synced, &mut moved);
             self.synced = Some(synced);
         }
-        for (id, state, revision) in changed {
+        for (id, state, (revision, static_revision)) in changed {
             self.apply_part_change(id, state, false, &mut moved);
             if let Some(part) = self.parts.get_mut(&id) {
                 part.revision = revision;
+                part.static_revision = static_revision;
             }
         }
         moved
@@ -290,7 +304,7 @@ impl Physics {
         // A part that comes back (moved into the Workspace again) touches anew.
         if !gone.is_empty() {
             self.touching
-                .retain(|(a, b), _| !gone.contains(a) && !gone.contains(b));
+                .retain(|((a, b), _)| !gone.contains(a) && !gone.contains(b));
         }
 
         for ((members, root), rebuild) in groups.iter().zip(rebuild) {
@@ -314,7 +328,9 @@ impl Physics {
         // What the next frame compares with.
         for id in scope {
             if let Some(part) = self.parts.get_mut(id) {
-                part.revision = world.get(*id).map_or(0, Instance::revision);
+                let instance = world.get(*id);
+                part.revision = instance.map_or(0, Instance::revision);
+                part.static_revision = instance.map_or(0, Instance::revision_without_motion);
             }
         }
     }
@@ -337,7 +353,7 @@ impl Physics {
         self.apply_change(&mut part, state, weightless);
         self.wake_overlapping(part.body);
         moved.insert(part.body);
-        self.owners.insert(part.collider, id);
+        self.owners.insert(part.collider, id, part.seen.can_touch);
         self.attach_foliage(id, &mut part);
         self.parts.insert(id, part);
     }
@@ -526,7 +542,7 @@ impl Physics {
             let collider = rapier
                 .colliders
                 .insert_with_parent(collider, body, &mut rapier.bodies);
-            self.owners.insert(collider, id);
+            self.owners.insert(collider, id, state.can_touch);
             let mut part = Body {
                 body,
                 collider,
@@ -536,6 +552,7 @@ impl Physics {
                 seen: state,
                 welded,
                 revision: 0,
+                static_revision: 0,
                 settled: false,
             };
             self.attach_foliage(id, &mut part);
@@ -570,7 +587,7 @@ impl Physics {
                 part.body,
                 &mut self.rapier.bodies,
             );
-            self.owners.insert(handle, id);
+            self.owners.insert(handle, id, part.seen.can_touch);
             part.foliage.push(handle);
         }
     }
@@ -663,6 +680,15 @@ impl Physics {
                 "an assembly shares a body"
             );
             assert!(bodies.insert(body), "a body is one assembly's");
+        }
+        for (&id, part) in &self.parts {
+            for handle in std::iter::once(&part.collider).chain(&part.foliage) {
+                assert_eq!(
+                    self.owners.touchable(handle),
+                    Some((id, part.seen.can_touch)),
+                    "a collider's owner and CanTouch"
+                );
+            }
         }
     }
 }

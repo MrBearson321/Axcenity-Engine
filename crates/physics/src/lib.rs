@@ -60,6 +60,7 @@ pub mod joints;
 mod mass;
 mod material;
 mod movers;
+mod owners;
 mod query;
 mod shapes;
 mod sync;
@@ -131,16 +132,20 @@ pub struct Physics {
     /// after [`step`](Self::step).
     unsimulated_seconds: f64,
     /// Which part each collider belongs to, to name the parts in a contact.
-    owners: HashMap<ColliderHandle, InstanceId>,
+    owners: owners::Owners,
     /// Pairs of parts that count as touching (smaller ID first), with how
     /// many steps in a row they've been apart (see [`SEPARATE_STEPS`]).
-    touching: BTreeMap<(InstanceId, InstanceId), u32>,
+    /// Sorted by pair, so `find_touches` merges it with a step's contacts.
+    touching: Vec<((InstanceId, InstanceId), u32)>,
     /// False until the first step has run. Contacts found in that step were
     /// there when the game started, so they aren't reported (decided in Phase 7).
     started: bool,
     /// Pairs that started touching since the last
     /// [`take_touches`](Self::take_touches).
     touches: Vec<(InstanceId, InstanceId)>,
+    /// The bodies given a force or torque for the last step (by the wind
+    /// or movers), which the next step resets.
+    pushed: Vec<RigidBodyHandle>,
     /// Pairs that stopped touching since the last
     /// [`take_touch_ends`](Self::take_touch_ends).
     touch_ends: Vec<(InstanceId, InstanceId)>,
@@ -247,6 +252,12 @@ struct Body {
     welded: bool,
     /// Its Instance's revision when `seen` was last compared with it.
     revision: u64,
+    /// Its Instance's [`revision_without_motion`] when `seen` was last
+    /// read whole: while it's the same, only the part's motion can have
+    /// changed, so a part a script moves every frame isn't read whole.
+    ///
+    /// [`revision_without_motion`]: Instance::revision_without_motion
+    static_revision: u64,
     /// True once its pose was written while its body slept: a body can
     /// fall asleep in any of a frame's steps, so the first write-back after
     /// that still copies where it came to rest.
@@ -448,6 +459,29 @@ impl PartState {
             .then_some(state)
     }
 
+    /// `self`, with the part's motion ([`MOTION_PROPERTIES`]) read again
+    /// from `instance`, for a part none of whose other properties changed
+    /// since `self` was [`read`](Self::read). The same as reading it whole.
+    ///
+    /// [`MOTION_PROPERTIES`]: axcenity_core::MOTION_PROPERTIES
+    pub(crate) fn moved(&self, instance: &Instance) -> Option<Self> {
+        let vector = |name| instance.property(name).and_then(Value::as_vector3);
+        let position = vector("Position")?;
+        let orientation = vector("Orientation")?;
+        if !finite(position) || !finite(orientation) {
+            return None;
+        }
+        // A NaN or infinite velocity is ignored, as in `read`.
+        let velocity = |name| vector(name).filter(|v| finite(*v)).unwrap_or_default();
+        Some(Self {
+            position,
+            orientation,
+            velocity: velocity("AssemblyLinearVelocity"),
+            spin: velocity("AssemblyAngularVelocity"),
+            ..self.clone()
+        })
+    }
+
     pub(crate) fn pose(&self) -> Pose {
         Pose::from_parts(
             to_vec3(self.position),
@@ -480,10 +514,11 @@ impl Physics {
             rapier,
             parts: BTreeMap::new(),
             unsimulated_seconds: 0.0,
-            owners: HashMap::new(),
-            touching: BTreeMap::new(),
+            owners: owners::Owners::default(),
+            touching: Vec::new(),
             started: false,
             touches: Vec::new(),
+            pushed: Vec::new(),
             touch_ends: Vec::new(),
             assets,
             joints: BTreeMap::new(),
@@ -602,6 +637,7 @@ impl Physics {
                 self.rapier.gravity,
                 &mut self.learned,
             );
+            self.pushed.extend(movers::bodies(&self.movers));
             vehicles::drive(&mut self.rapier, &mut self.vehicles, &mut self.rolling);
             let before = self.motions_before_step();
             // The hook only runs for colliders with friction or
@@ -836,20 +872,18 @@ impl Physics {
     }
 
     /// Sets the wind's push on every unanchored part for the next step. A
-    /// body's force stays until it's reset, so every body's is reset first,
-    /// in case its WindAffected was just turned off or the wind stopped.
+    /// body's force stays until it's reset, so the last step's pushes are
+    /// reset first, in case its WindAffected was just turned off, the wind
+    /// stopped or a mover was disabled.
     /// Each welded part pushes its assembly by its own faces.
     fn blow(&mut self, wind: Vec3) {
-        // Read first: `get_mut` tells rapier the body changed, and looking
-        // at every body costs the step more than these forces do.
-        for part in self.parts.values() {
-            let pushed = self
-                .rapier
-                .bodies
-                .get(part.body)
-                .is_some_and(|body| body.is_dynamic() && body.user_force() != Vec3::ZERO);
-            if pushed && let Some(body) = self.rapier.bodies.get_mut(part.body) {
+        // Only the bodies pushed in the last step can have a force, so
+        // rather than looking at every body, those are reset. Torques too,
+        // or a Torque mover's, added every step, would pile up.
+        for handle in self.pushed.drain(..) {
+            if let Some(body) = self.rapier.bodies.get_mut(handle) {
                 body.reset_forces(false);
+                body.reset_torques(false);
             }
         }
         if wind == Vec3::ZERO {
@@ -869,6 +903,7 @@ impl Physics {
             let area = (size.x * size.y + size.y * size.z + size.z * size.x) / 3.0;
             // Waking the part means a resting part feels the wind too.
             body.add_force((wind - body.linvel()) * (WIND_DRAG * area), true);
+            self.pushed.push(part.body);
         }
     }
 
@@ -876,15 +911,13 @@ impl Physics {
     /// before, and records the pairs that are new and those that ended.
     fn find_touches(&mut self) {
         // Only contacts the solver acts on count, not pairs whose bounding
-        // boxes merely overlap. A set, so the order is the same every run.
+        // boxes merely overlap. Sorted, so the order is the same every run.
         // Parts with CanCollide off are sensors: their overlaps count too.
         // Parts with CanTouch off touch nothing.
-        let touchable =
-            |id: InstanceId| self.parts.get(&id).is_some_and(|part| part.seen.can_touch);
         let pair_of = |one: &ColliderHandle, two: &ColliderHandle| {
-            let a = *self.owners.get(one)?;
-            let b = *self.owners.get(two)?;
-            if !touchable(a) || !touchable(b) {
+            let (a, a_touches) = self.owners.touchable(one)?;
+            let (b, b_touches) = self.owners.touchable(two)?;
+            if !a_touches || !b_touches {
                 return None;
             }
             Some(if a < b { (a, b) } else { (b, a) })
@@ -899,39 +932,56 @@ impl Physics {
             .intersection_pairs()
             .filter(|(_, _, _, _, intersecting)| *intersecting)
             .filter_map(|(one, _, two, _, _)| pair_of(&one, &two));
-        let now: BTreeSet<(InstanceId, InstanceId)> = contacts.chain(overlaps).collect();
+        let mut now: Vec<(InstanceId, InstanceId)> = contacts.chain(overlaps).collect();
+        now.sort_unstable();
+        now.dedup();
 
-        for &(a, b) in &now {
-            // `insert` returns the old value: `None` means the pair is new.
-            let was_touching = self.touching.insert((a, b), 0).is_some();
-            if !was_touching && self.started {
-                self.touches.push((a, b));
+        // Both lists are sorted by pair: walk them together. A pair in
+        // `now` touches (and is new if it wasn't in `touching`); a pair only
+        // in `touching` is apart this step, and stops counting once it's
+        // been apart for long enough. A pair that can't touch any more
+        // (CanTouch off, or set not to collide) stops at once.
+        let parts = &self.parts;
+        let can_touch = |(a, b): (InstanceId, InstanceId)| match (parts.get(&a), parts.get(&b)) {
+            (Some(a), Some(b)) => {
+                a.seen.can_touch && b.seen.can_touch && a.seen.groups.collide(b.seen.groups)
+            }
+            _ => false,
+        };
+        let old = std::mem::take(&mut self.touching);
+        let mut touching = Vec::with_capacity(old.len().max(now.len()));
+        let (mut i, mut j) = (0, 0);
+        while i < old.len() || j < now.len() {
+            match (old.get(i), now.get(j)) {
+                (Some(&(pair, _)), Some(&touch)) if pair == touch => {
+                    touching.push((pair, 0));
+                    i += 1;
+                    j += 1;
+                }
+                (before, Some(&touch)) if before.is_none_or(|&(pair, _)| touch < pair) => {
+                    if self.started {
+                        self.touches.push(touch);
+                    }
+                    touching.push((touch, 0));
+                    j += 1;
+                }
+                (Some(&(pair, steps_apart)), _) => {
+                    let steps_apart = if can_touch(pair) {
+                        steps_apart + 1
+                    } else {
+                        SEPARATE_STEPS
+                    };
+                    if steps_apart >= SEPARATE_STEPS {
+                        self.touch_ends.push(pair);
+                    } else {
+                        touching.push((pair, steps_apart));
+                    }
+                    i += 1;
+                }
+                (None, _) => unreachable!("the loop runs while either list has more"),
             }
         }
-        // Pairs that are apart this step stop counting once they've been
-        // apart for long enough. A pair that can't touch any more (CanTouch
-        // off, or set not to collide) stops at once.
-        let parts = &self.parts;
-        let ends = &mut self.touch_ends;
-        self.touching.retain(|&(a, b), steps_apart| {
-            if !now.contains(&(a, b)) {
-                *steps_apart += 1;
-                let can_touch = match (parts.get(&a), parts.get(&b)) {
-                    (Some(a), Some(b)) => {
-                        a.seen.can_touch && b.seen.can_touch && a.seen.groups.collide(b.seen.groups)
-                    }
-                    _ => false,
-                };
-                if !can_touch {
-                    *steps_apart = SEPARATE_STEPS;
-                }
-            }
-            let ended = *steps_apart >= SEPARATE_STEPS;
-            if ended {
-                ends.push((a, b));
-            }
-            !ended
-        });
+        self.touching = touching;
         self.started = true;
     }
 
@@ -1006,11 +1056,11 @@ fn write_part(world: &mut World, id: InstanceId, part: &mut Body, body: &RigidBo
     };
     if velocity != part.seen.velocity {
         part.seen.velocity = velocity;
-        let _ = world.set_property(id, "AssemblyLinearVelocity", Value::Vector3(velocity));
+        let _ = world.set_known_property(id, "AssemblyLinearVelocity", Value::Vector3(velocity));
     }
     if spin != part.seen.spin {
         part.seen.spin = spin;
-        let _ = world.set_property(id, "AssemblyAngularVelocity", Value::Vector3(spin));
+        let _ = world.set_known_property(id, "AssemblyAngularVelocity", Value::Vector3(spin));
     }
     if !body.is_dynamic() {
         return;
@@ -1034,11 +1084,11 @@ fn write_part(world: &mut World, id: InstanceId, part: &mut Body, body: &RigidBo
         part.seen.position = position;
         // The part was checked to exist this frame, and scripts don't
         // run between physics steps, so this can't fail.
-        let _ = world.set_property(id, "Position", Value::Vector3(position));
+        let _ = world.set_known_property(id, "Position", Value::Vector3(position));
     }
     if orientation != part.seen.orientation {
         part.seen.orientation = orientation;
-        let _ = world.set_property(id, "Orientation", Value::Vector3(orientation));
+        let _ = world.set_known_property(id, "Orientation", Value::Vector3(orientation));
     }
 }
 
