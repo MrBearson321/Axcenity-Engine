@@ -30,6 +30,7 @@ flowchart BT
   save --> core
   mesh_edit --> core & assets
   cook --> assets
+  collab --> core
   blocks --> br
   character --> core & assets & anim & physics
   nav --> core & assets & physics & character

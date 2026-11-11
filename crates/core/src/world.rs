@@ -1002,6 +1002,23 @@ impl World {
         replica
     }
 
+    /// Turns this world into one that several writers fill (Team Create):
+    /// from now on [`create`](Self::create) gives IDs from 2³¹ up, which no
+    /// other computer uses, as in a replica, and Instances other writers
+    /// made go in at their own IDs with [`create_at`](Self::create_at).
+    /// What's already here keeps its IDs. Calling it again does nothing.
+    pub fn make_replica(&mut self) {
+        self.instances.make_replica();
+    }
+
+    /// The first arena index no Instance in this world has had, so IDs from
+    /// there up (generation 0) are new everywhere. Team Create's host hands
+    /// out blocks of IDs from here for each writer's
+    /// [`create_at`](Self::create_at).
+    pub fn next_unused_index(&self) -> u32 {
+        self.instances.next_unused_index()
+    }
+
     /// Creates an Instance at `id`, with default properties and no parent,
     /// as the server has it, in a world made by
     /// [`empty_replica`](Self::empty_replica).
