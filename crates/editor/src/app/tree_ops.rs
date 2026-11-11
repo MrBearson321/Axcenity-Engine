@@ -491,10 +491,16 @@ impl EditorApp {
         // `insert_position` needs to borrow `self` while that lasts.
         let position = self.insert_position();
         let id = tree::create(&mut self.world, what, position);
+        let placed = properties
+            .iter()
+            .any(|(property, _)| *property == "Position");
         for (property, value) in properties {
             self.world
                 .set_property(id, property, value)
                 .expect("callers pass properties the class has");
+        }
+        if !placed {
+            self.put_in_front_of_camera(id);
         }
         let name = tree::unique_name(&self.world, parent, wanted);
         self.world.set_name(id, &name).expect("just created");
@@ -504,6 +510,35 @@ impl EditorApp {
             self.select_from_viewport(Some(id));
         }
     }
+    /// Moves the new part `id` (not yet in the world's tree) in front of
+    /// the camera: resting on what the middle of the view looks at, on the
+    /// move grid, and lifted out of any solid part already there
+    /// (`spawning`). Anything that isn't a part is left where it is.
+    fn put_in_front_of_camera(&mut self, id: InstanceId) {
+        let Some(instance) = self.world.get(id) else {
+            return;
+        };
+        if !instance.class().is_base_part() || instance.class() == ClassName::Terrain {
+            return;
+        }
+        let Some(size) = instance.property("Size").and_then(Value::as_vector3) else {
+            return;
+        };
+        let spot = self.viewport.spawn_spot(&self.world);
+        // Rounded to 3 decimals so the numbers stay tidy; `+ 0.0` turns -0 into 0.
+        let tidy = |value: f32| (self.snap.studs(value) * 1000.0).round() / 1000.0 + 0.0;
+        let size = axcenity_render::glam::Vec3::new(size.x, size.y, size.z);
+        let at = crate::spawning::center(spot, size, tidy);
+        let _ = self.world.set_property(
+            id,
+            "Position",
+            Value::Vector3(Vector3::new(at.x, at.y, at.z)),
+        );
+        if !spot.floating {
+            crate::spawning::lift_clear(&mut self.world, id, spot.normal);
+        }
+    }
+
     /// The state machine Insert > Character's Animator plays:
     /// `assets/animations/Character/Character.statemachine.json`, made the
     /// first time with an empty clip for each of [`tree::CHARACTER_STATES`].
