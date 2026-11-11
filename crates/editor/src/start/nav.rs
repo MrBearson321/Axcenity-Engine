@@ -3,8 +3,9 @@
 //! pages and Settings; which one shows, and whether the sidebar is folded,
 //! is saved between runs ([`StartNav::to_text`]).
 //!
-//! Folding slides the rail and crossfades its labels instead of flipping
-//! layout mid-way, so the open and closed looks meet without a pop.
+//! Folding slides the rail. Labels only appear once the rail is wide enough
+//! to hold them, so nothing is clipped mid-slide; the open and folded
+//! headers never draw on top of each other.
 
 use eframe::egui::{self, Rect, RichText, Stroke, pos2, vec2};
 
@@ -14,10 +15,14 @@ use crate::widgets;
 
 /// How wide the sidebar is when open, and folded to its icons.
 pub(super) const SIDEBAR_WIDTH: f32 = 220.0;
-pub(super) const FOLDED_WIDTH: f32 = 60.0;
-/// How long the sidebar takes to fold or open. Longer than a hover so the
-/// width and label crossfade can settle together.
-const SIDEBAR_SECONDS: f32 = 0.28;
+pub(super) const FOLDED_WIDTH: f32 = 64.0;
+/// How long the sidebar takes to fold or open.
+const SIDEBAR_SECONDS: f32 = 0.32;
+/// Open chrome height (wordmark + buttons on one row).
+const HEADER_OPEN: f32 = 36.0;
+/// Folded chrome height (mark, then the open button under it — room so
+/// neither is clipped).
+const HEADER_FOLDED: f32 = 72.0;
 /// The top bar's height.
 pub(super) const TOP_BAR_HEIGHT: f32 = 52.0;
 /// Narrower than this, the top bar's tabs drop their names (each keeps a
@@ -139,6 +144,8 @@ fn about_line() -> String {
 }
 
 /// How far the sidebar is through folding open (1) or closed (0), eased.
+/// Requests a repaint while the slide is in progress so the animation runs
+/// even when the editor would otherwise sit idle between inputs.
 fn sidebar_open(ctx: &egui::Context, folded: bool) -> f32 {
     let time = if ctx.global_style().animation_time <= 0.0 {
         0.0
@@ -146,12 +153,16 @@ fn sidebar_open(ctx: &egui::Context, folded: bool) -> f32 {
         SIDEBAR_SECONDS
     };
     let t = ctx.animate_bool_with_time(egui::Id::new("start sidebar open"), !folded, time);
+    if time > 0.0 && t > 0.0 && t < 1.0 {
+        ctx.request_repaint();
+    }
     theme::bezier(theme::curve::SETTLE, t)
 }
 
-/// How strongly labels and the open header read, from the rail's open amount.
+/// How strongly labels read. They stay off until the rail is wide enough
+/// that titles aren't clipped against the page edge.
 fn label_amount(open: f32) -> f32 {
-    let t = ((open - 0.28) / 0.44).clamp(0.0, 1.0);
+    let t = ((open - 0.55) / 0.35).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
@@ -197,9 +208,8 @@ impl StartScreen {
         }
     }
 
-    /// The sidebar: one continuous rail whose width, padding, header and
-    /// labels all follow `open` (0 folded, 1 open), so folding never flips
-    /// between two layouts mid-slide. Returns true when Settings was clicked.
+    /// The sidebar: width follows `open`; labels and the open header only
+    /// appear once there's room. Returns true when Settings was clicked.
     fn sidebar(
         &mut self,
         ui: &mut egui::Ui,
@@ -219,7 +229,7 @@ impl StartScreen {
         let pad_x = 8.0 + 4.0 * open;
         let inner = rect.shrink2(vec2(pad_x, 18.0));
         let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-        // Nothing drawn while it slides spills over the page.
+        // Clip to the sliding rail so nothing spills onto the page.
         bar.set_clip_rect(rect);
         let ctx = ui.ctx().clone();
         let intro = *self.intro.get_or_insert(ctx.input(|input| input.time));
@@ -228,7 +238,7 @@ impl StartScreen {
 
         self.sidebar_header(&mut bar, brand, &palette, labels, cut, wipe);
 
-        bar.add_space(14.0 + 8.0 * open);
+        bar.add_space(12.0 + 6.0 * open);
         bar.spacing_mut().item_spacing.y = 2.0;
         for (page, icon, title, about) in PAGES {
             let count = (page == Page::Projects).then_some(tracked);
@@ -246,8 +256,6 @@ impl StartScreen {
             }
         }
 
-        // Settings and the version, from the bottom up. The version fades
-        // with the labels so it never pops in or out.
         let mut top_of_version = inner.bottom();
         if labels > 0.01 {
             let mut version = ui.new_child(
@@ -282,8 +290,9 @@ impl StartScreen {
         settings.on_hover_text(settings_tooltip(&ctx)).clicked()
     }
 
-    /// The sidebar's logo and fold / layout controls. Open and folded chrome
-    /// share one header band and crossfade, so the pages below don't jump.
+    /// One header at a time: open chrome when labels are up, folded chrome
+    /// (mark + open button stacked with room) when they're down. They never
+    /// draw together, so the fold doesn't flash two overlapping layouts.
     fn sidebar_header(
         &mut self,
         bar: &mut egui::Ui,
@@ -294,17 +303,20 @@ impl StartScreen {
         wipe: f32,
     ) {
         let width = bar.available_width();
-        let (header, _) = bar.allocate_exact_size(vec2(width, 40.0), egui::Sense::hover());
-        // Open chrome: wordmark and the two layout buttons on the right.
-        if labels > 0.01 {
+        // Prefer the open header once labels are mostly in; otherwise the
+        // stacked folded chrome. A hard pick (not a dual overlay) avoids the
+        // mid-slide collision that looked like a glitch.
+        if labels >= 0.5 {
+            let (header, _) =
+                bar.allocate_exact_size(vec2(width, HEADER_OPEN), egui::Sense::hover());
             let mut open_ui = bar.new_child(
                 egui::UiBuilder::new()
                     .max_rect(header)
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
             );
             open_ui.set_clip_rect(header);
-            open_ui.multiply_opacity(labels);
-            open_ui.add_space(6.0);
+            open_ui.multiply_opacity(labels.max(0.001));
+            open_ui.add_space(4.0);
             widgets::wordmark(&mut open_ui, brand.mark(), 15.0, cut, wipe)
                 .on_hover_text(about_line());
             open_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -325,41 +337,47 @@ impl StartScreen {
                     self.nav.folded = true;
                 }
             });
+            return;
         }
-        // Folded chrome: centred mark and the open button under it, fading
-        // in as the rail closes. Drawn over the same band without taking
-        // more layout space.
-        if labels < 0.99 {
-            let folded = 1.0 - labels;
-            let mark_size = 22.0;
-            let mark = Rect::from_center_size(
-                pos2(header.center().x, header.top() + 4.0 + mark_size / 2.0),
-                vec2(mark_size, mark_size),
-            );
-            let response = bar.interact(mark, bar.id().with("folded mark"), egui::Sense::hover());
-            let mark_color = palette.text_strong.gamma_multiply(folded * cut.max(0.001));
-            widgets::paint_mark(bar.painter(), mark, brand.mark(), mark_color);
-            response.on_hover_text(about_line());
 
-            let button_rect = Rect::from_center_size(
-                pos2(header.center().x, header.bottom() - 2.0),
-                vec2(28.0, 22.0),
-            );
-            let mut folded_ui = bar.new_child(egui::UiBuilder::new().max_rect(button_rect).layout(
-                egui::Layout::centered_and_justified(egui::Direction::TopDown),
-            ));
-            folded_ui.set_clip_rect(header);
-            folded_ui.multiply_opacity(folded);
-            if widgets::icon_button(
-                &mut folded_ui,
-                icons::SIDEBAR_SIMPLE,
-                "Open the sidebar",
-                false,
-            )
-            .clicked()
-            {
-                self.nav.folded = false;
-            }
+        // Folded: mark on top, open button under it. Height is fixed so the
+        // button is never clipped by the header band.
+        let (header, _) = bar.allocate_exact_size(vec2(width, HEADER_FOLDED), egui::Sense::hover());
+        let fade = (1.0 - labels).clamp(0.0, 1.0);
+        let mark_size = 24.0;
+        let mark = Rect::from_center_size(
+            pos2(header.center().x, header.top() + 6.0 + mark_size / 2.0),
+            vec2(mark_size, mark_size),
+        );
+        let mark_response = bar.interact(mark, bar.id().with("folded mark"), egui::Sense::hover());
+        widgets::paint_mark(
+            bar.painter(),
+            mark,
+            brand.mark(),
+            palette.text_strong.gamma_multiply(fade * cut.max(0.001)),
+        );
+        mark_response.on_hover_text(about_line());
+
+        let button_top = mark.bottom() + 10.0;
+        let button_rect = Rect::from_center_size(
+            pos2(header.center().x, button_top + 14.0),
+            vec2(width.min(40.0), 28.0),
+        );
+        // Clip to the rail, not the mark row — the button sits below the mark.
+        let mut folded_ui = bar.new_child(egui::UiBuilder::new().max_rect(button_rect).layout(
+            egui::Layout::centered_and_justified(egui::Direction::TopDown),
+        ));
+        folded_ui.set_clip_rect(header);
+        folded_ui.multiply_opacity(fade);
+        if widgets::icon_button(
+            &mut folded_ui,
+            icons::SIDEBAR_SIMPLE,
+            "Open the sidebar",
+            false,
+        )
+        .clicked()
+        {
+            self.nav.folded = false;
         }
     }
 
@@ -450,17 +468,16 @@ mod tests {
                 assert_eq!(StartNav::from_text(&nav.to_text()), nav);
             }
         }
-        // Nothing saved yet, or something unknown: an open sidebar.
         assert_eq!(StartNav::from_text(""), StartNav::default());
         assert_eq!(StartNav::from_text("sideways"), StartNav::default());
     }
 
     #[test]
-    fn labels_fade_across_the_fold_instead_of_cutting() {
+    fn labels_stay_off_until_the_rail_is_wide_enough() {
         assert!(label_amount(0.0) < 0.01);
+        assert!(label_amount(0.5) < 0.01);
+        assert!(label_amount(0.7) > 0.1);
         assert!(label_amount(1.0) > 0.99);
-        let mid = label_amount(0.5);
-        assert!(mid > 0.2 && mid < 0.9, "{mid}");
-        assert!(label_amount(0.4) < label_amount(0.6));
+        assert!(label_amount(0.65) < label_amount(0.85));
     }
 }

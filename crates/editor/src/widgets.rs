@@ -398,9 +398,9 @@ pub fn nav_item(
     response
 }
 
-/// A sidebar page item that folds without a hard cut: `open` 0 centres the
-/// icon, 1 shows the title beside it, and values in between lerp the
-/// highlight and fade the label so the rail doesn't pop mid-slide.
+/// A sidebar page item that folds without a hard cut. Icons stay centred
+/// until labels have room (`open` past ~0.55); then the icon slides left
+/// and the title fades in, so nothing is clipped mid-slide.
 pub fn nav_rail(
     ui: &mut egui::Ui,
     icon: &str,
@@ -410,9 +410,11 @@ pub fn nav_rail(
     open: f32,
 ) -> egui::Response {
     let open = open.clamp(0.0, 1.0);
+    // Labels only once the rail is wide enough (matches start/nav.rs).
+    let label = smoothstep(0.55, 0.90, open);
     let palette = theme::palette(ui.ctx());
     let width = ui.available_width();
-    let height = 34.0 - 4.0 * open;
+    let height = 34.0 - 4.0 * label;
     let (row, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, title)
@@ -420,12 +422,12 @@ pub fn nav_rail(
     let chip = Rect::from_center_size(row.center(), vec2(36.0_f32.min(width), height));
     let highlight = Rect {
         min: egui::pos2(
-            chip.min.x + (row.min.x - chip.min.x) * open,
-            chip.min.y + (row.min.y - chip.min.y) * open,
+            chip.min.x + (row.min.x - chip.min.x) * label,
+            chip.min.y + (row.min.y - chip.min.y) * label,
         ),
         max: egui::pos2(
-            chip.max.x + (row.max.x - chip.max.x) * open,
-            chip.max.y + (row.max.y - chip.max.y) * open,
+            chip.max.x + (row.max.x - chip.max.x) * label,
+            chip.max.y + (row.max.y - chip.max.y) * label,
         ),
     };
     let hovered = response.hovered();
@@ -456,10 +458,10 @@ pub fn nav_rail(
     let icon_open = row.left_center() + vec2(18.0, 0.0);
     let icon_folded = row.center();
     let icon_pos = egui::pos2(
-        icon_folded.x + (icon_open.x - icon_folded.x) * open,
-        icon_folded.y + (icon_open.y - icon_folded.y) * open,
+        icon_folded.x + (icon_open.x - icon_folded.x) * label,
+        icon_folded.y + (icon_open.y - icon_folded.y) * label,
     );
-    let icon_size = theme::size::ICON_MEDIUM + 2.0 * (1.0 - open);
+    let icon_size = theme::size::ICON_MEDIUM + 2.0 * (1.0 - label);
     ui.painter().text(
         icon_pos,
         egui::Align2::CENTER_CENTER,
@@ -467,9 +469,6 @@ pub fn nav_rail(
         FontId::proportional(icon_size),
         icon_color,
     );
-    // Labels stay readable past the halfway fold, then fade out before the
-    // rail is too narrow for them to sit beside the icon.
-    let label = smoothstep(0.28, 0.72, open);
     if label > 0.01 {
         ui.painter().text(
             row.left_center() + vec2(34.0, 0.0),
@@ -500,54 +499,98 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Soft atmosphere behind a start page: two quiet accent pools in the
-/// corners (static) and a larger pointer-led wash (only while the pointer
-/// is over `rect`, so an idle window isn't woken on a timer). Off with
-/// Reduce motion for the pointer wash; the corner pools stay.
+/// Soft atmosphere behind a start page: drifting accent pools, a slow band,
+/// and a pointer wash. While motion is on it asks for the next frame so the
+/// drift keeps moving on the start screen; Reduce motion keeps only the
+/// static pools.
 pub fn atmosphere(ui: &egui::Ui, rect: Rect) {
     let palette = theme::palette(ui.ctx());
     let painter = ui.painter_at(rect);
     let accent = palette.accent;
     let ink = palette.text_strong;
-    let corner = |center: egui::Pos2, radius: f32, color: Color32, alpha: f32| {
+    let motion = ui.ctx().global_style().animation_time > 0.0;
+    let time = ui.ctx().input(|input| input.time) as f32;
+
+    let drift = |phase: f32, amp: f32| {
+        if motion {
+            egui::vec2(
+                (time * 0.22 + phase).sin() * amp,
+                (time * 0.17 + phase * 1.3).cos() * amp * 0.7,
+            )
+        } else {
+            egui::vec2(0.0, 0.0)
+        }
+    };
+    let pool = |center: egui::Pos2, radius: f32, color: Color32, alpha: f32| {
         soft_pool(&painter, center, radius, color.gamma_multiply(alpha));
     };
-    // Static pools: a little colour without motion.
-    let (a_dark, a_light) = if palette.dark {
-        (0.055, 0.03)
-    } else {
-        (0.045, 0.035)
-    };
-    corner(
+
+    let span = rect.width().min(rect.height());
+    let a_accent = if palette.dark { 0.10 } else { 0.08 };
+    let a_ink = if palette.dark { 0.055 } else { 0.045 };
+    pool(
         egui::pos2(
-            rect.right() - rect.width() * 0.12,
-            rect.top() + rect.height() * 0.18,
-        ),
-        rect.width().min(rect.height()) * 0.55,
+            rect.right() - rect.width() * 0.14,
+            rect.top() + rect.height() * 0.2,
+        ) + drift(0.4, span * 0.04),
+        span * 0.58,
         accent,
-        if palette.dark { a_dark } else { a_light },
+        a_accent,
     );
-    corner(
+    pool(
         egui::pos2(
-            rect.left() + rect.width() * 0.08,
-            rect.bottom() - rect.height() * 0.1,
-        ),
-        rect.width().min(rect.height()) * 0.42,
+            rect.left() + rect.width() * 0.1,
+            rect.bottom() - rect.height() * 0.12,
+        ) + drift(2.1, span * 0.035),
+        span * 0.45,
         ink,
-        if palette.dark { 0.03 } else { 0.025 },
+        a_ink,
     );
-    // A faint rising band across the middle, still static.
-    let band = Rect::from_min_max(
-        egui::pos2(rect.left(), rect.center().y - 80.0),
-        egui::pos2(rect.right(), rect.center().y + 80.0),
+    pool(
+        egui::pos2(
+            rect.center().x + rect.width() * 0.18,
+            rect.center().y - rect.height() * 0.05,
+        ) + drift(4.0, span * 0.03),
+        span * 0.32,
+        accent,
+        if palette.dark { 0.06 } else { 0.05 },
     );
+
+    // Slow vertical wash that breathes.
+    let breathe = if motion {
+        0.5 + 0.5 * (time * 0.35).sin()
+    } else {
+        0.5
+    };
+    let band_h = 70.0 + 40.0 * breathe;
+    let band = Rect::from_center_size(rect.center() + drift(1.2, 12.0), vec2(rect.width(), band_h));
     painter.rect_filled(
         band,
         0,
-        accent.gamma_multiply(if palette.dark { 0.018 } else { 0.022 }),
+        accent.gamma_multiply(if palette.dark { 0.028 } else { 0.032 } * (0.7 + 0.3 * breathe)),
     );
 
-    if ui.ctx().global_style().animation_time <= 0.0 {
+    // A few faint drifting motes.
+    if motion {
+        for i in 0..8 {
+            let phase = i as f32 * 0.9;
+            let x = rect.left()
+                + rect.width() * (0.12 + 0.76 * (0.5 + 0.5 * (time * 0.08 + phase).sin()));
+            let y = rect.top()
+                + rect.height() * (0.15 + 0.7 * (0.5 + 0.5 * (time * 0.11 + phase * 1.7).cos()));
+            let r = 2.0 + (time * 0.6 + phase).sin().abs() * 2.5;
+            pool(
+                egui::pos2(x, y),
+                r * 6.0,
+                if i % 2 == 0 { accent } else { ink },
+                if palette.dark { 0.08 } else { 0.06 },
+            );
+        }
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(32));
+    }
+
+    if !motion {
         return;
     }
     let id = egui::Id::new("start atmosphere pointer");
@@ -562,17 +605,17 @@ pub fn atmosphere(ui: &egui::Ui, rect: Rect) {
     let Some(center) = ui.ctx().data(|data| data.get_temp::<egui::Pos2>(id)) else {
         return;
     };
-    soft_pool(
-        &painter,
+    pool(
         center,
-        280.0,
-        ink.gamma_multiply(if palette.dark { 0.07 } else { 0.05 } * strength),
+        300.0,
+        ink,
+        if palette.dark { 0.08 } else { 0.06 } * strength,
     );
-    soft_pool(
-        &painter,
-        center + egui::vec2(90.0, -40.0),
-        140.0,
-        accent.gamma_multiply(if palette.dark { 0.06 } else { 0.04 } * strength),
+    pool(
+        center + egui::vec2(70.0, -50.0) + drift(3.0, 18.0),
+        150.0,
+        accent,
+        if palette.dark { 0.09 } else { 0.07 } * strength,
     );
 }
 
