@@ -58,6 +58,9 @@ pub struct GraphicsBenchmark {
     pub error: Option<String>,
     /// The settings Apply replaced, while Undo can bring them back.
     pub previous: Option<GraphicsSettings>,
+    /// Scroll back to the recommendation on the next frame drawn: set on
+    /// opening and when a run finishes.
+    pub scroll_to_top: bool,
 }
 
 impl GraphicsBenchmark {
@@ -66,6 +69,19 @@ impl GraphicsBenchmark {
         serde_json::from_str::<Report>(text)
             .ok()
             .filter(|report| report.version == report::REPORT_VERSION)
+    }
+
+    /// Opens the window at its top.
+    pub fn show(&mut self) {
+        self.open = true;
+        self.scroll_to_top = true;
+    }
+
+    /// What Apply sets on top of `current`, once there's a report.
+    pub fn applied(&self, current: &GraphicsSettings) -> Option<GraphicsSettings> {
+        self.report
+            .as_ref()
+            .map(|report| recommend::apply_to(current, report))
     }
 
     pub fn saved(&self) -> Option<String> {
@@ -96,12 +112,15 @@ impl GraphicsBenchmark {
                     (true, false) => 52.0,
                     (true, true) => 88.0,
                 };
-                egui::ScrollArea::vertical()
+                let mut scroll = egui::ScrollArea::vertical()
                     .auto_shrink([false, true])
-                    .max_height((ui.available_height() - footer_height).max(120.0))
-                    .show(ui, |ui| {
-                        action = self.contents(ui, current, adapter, playing);
-                    });
+                    .max_height((ui.available_height() - footer_height).max(120.0));
+                if std::mem::take(&mut self.scroll_to_top) {
+                    scroll = scroll.vertical_scroll_offset(0.0);
+                }
+                scroll.show(ui, |ui| {
+                    action = self.contents(ui, current, adapter, playing);
+                });
                 if footer {
                     ui.separator();
                     action = self.footer(ui, current, playing).or(action);
@@ -232,7 +251,8 @@ impl GraphicsBenchmark {
         }
         ui.add_space(space::M);
 
-        let changes = changes(current, &advice.settings);
+        let applied = recommend::apply_to(current, report);
+        let changes = changes(current, &applied);
         widgets::section_label(ui, "What Apply changes");
         if changes.is_empty() {
             ui.label(
@@ -257,6 +277,15 @@ impl GraphicsBenchmark {
                     }
                 });
         }
+        ui.add_space(space::XS);
+        ui.label(
+            RichText::new(
+                "Kept as you have them: real-time GI and the lens effects (the test worlds \
+                 don't use them), and a texture memory budget your card can hold.",
+            )
+            .size(type_scale::SMALL)
+            .color(palette.text_weak),
+        );
         ui.add_space(space::M);
         results(ui, report);
         action
@@ -273,9 +302,8 @@ impl GraphicsBenchmark {
         let palette = theme::palette(ui.ctx());
         let mut action = None;
         let changes = self
-            .report
-            .as_ref()
-            .map(|report| changes(current, &report.recommendation.settings))
+            .applied(current)
+            .map(|applied| changes(current, &applied))
             .unwrap_or_default();
         ui.horizontal_wrapped(|ui| {
             let apply = widgets::button(
@@ -442,7 +470,12 @@ fn results(ui: &mut egui::Ui, report: &Report) {
                     for stress in &report.stress {
                         ui.label(stress.workload.label())
                             .on_hover_text(stress.workload.about());
-                        ui.label(ms(stress.frame.p95));
+                        let color = if recommend::fits(stress) {
+                            palette.success
+                        } else {
+                            palette.warning
+                        };
+                        ui.label(RichText::new(ms(stress.frame.p95)).color(color));
                         ui.label(gpu(stress));
                         ui.label(ms(stress.cpu.p95));
                         ui.label(ms(stress.draw_list.p95));
@@ -456,7 +489,21 @@ fn results(ui: &mut egui::Ui, report: &Report) {
         .filter(|tuned| tuned.settings == report.recommendation.settings)
         .or_else(|| report.preset(report.recommendation.tier));
     if let Some(chosen) = chosen.filter(|chosen| !chosen.passes.is_empty()) {
-        widgets::section(icons::GAUGE, "Where the GPU's time goes")
+        let title = format!(
+            "Where the GPU's time goes: {}",
+            if chosen.workload == workloads::Workload::Town
+                && Tier::of(chosen.settings.quality).label() == chosen.label
+            {
+                chosen.label.clone()
+            } else {
+                format!(
+                    "{}, {}",
+                    Tier::of(chosen.settings.quality).label(),
+                    chosen.label
+                )
+            }
+        );
+        widgets::section(icons::GAUGE, &title)
             .id_salt("benchmark passes")
             .default_open(false)
             .show(ui, |ui| {
@@ -533,7 +580,7 @@ type Row = (&'static str, fn(&GraphicsSettings) -> String);
 /// The settings that differ between `now` and `recommended`, as they'd be
 /// drawn (each the override or its preset's value).
 pub fn changes(now: &GraphicsSettings, recommended: &GraphicsSettings) -> Vec<Change> {
-    let rows: [Row; 15] = [
+    let rows: [Row; 20] = [
         ("Preset", |s| {
             let preset = Tier::of(s.quality).label();
             if s.automatic {
@@ -561,9 +608,14 @@ pub fn changes(now: &GraphicsSettings, recommended: &GraphicsSettings) -> Vec<Ch
         ("Post-processing", |s| on_off(s.post_processing())),
         ("Contact shadows", |s| on_off(s.contact_shadows())),
         ("Volumetric fog", |s| on_off(s.volumetric_fog())),
+        ("Real-time GI", |s| on_off(s.realtime_gi())),
         ("Clouds", |s| s.cloud_quality().label().to_owned()),
         ("Depth of field", |s| s.depth_of_field().label().to_owned()),
         ("Motion blur", |s| s.motion_blur().label().to_owned()),
+        ("Vignette", |s| on_off(s.vignette())),
+        ("Film grain", |s| on_off(s.film_grain())),
+        ("Chromatic aberration", |s| on_off(s.chromatic_aberration())),
+        ("Sharpen", |s| on_off(s.sharpen())),
     ];
     rows.into_iter()
         .filter_map(|(setting, value)| {
