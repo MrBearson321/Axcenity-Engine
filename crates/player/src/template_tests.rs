@@ -167,7 +167,7 @@ impl App {
             self.sim
                 .scripts
                 .step_prompts(&mut self.sim.world, f64::from(seconds));
-            self.sim.scripts.step_tools(&mut self.sim.world);
+            axcenity_gameplay::step_tools(&mut self.sim.scripts, &mut self.sim.world);
         }
         self.sim
             .scripts
@@ -220,9 +220,11 @@ impl App {
                 .fire_instance_event(&mut self.sim.world, animator, name, &args);
         }
         problems.extend(self.sim.animators.take_errors());
-        self.sim
-            .scripts
-            .place_tools(&mut self.sim.world, self.sim.animators.poses());
+        axcenity_gameplay::place_tools(
+            &mut self.sim.scripts,
+            &mut self.sim.world,
+            self.sim.animators.poses(),
+        );
         self.render_step(seconds);
         self.end_camera(seconds);
         problems.extend(self.sim.assets.take_errors());

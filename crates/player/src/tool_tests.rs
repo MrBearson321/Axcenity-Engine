@@ -85,14 +85,17 @@ impl Game {
         }
         self.scripts.input_events(&mut self.world, events);
         self.scripts.step_prompts(&mut self.world, f64::from(FRAME));
-        self.scripts.step_tools(&mut self.world);
+        axcenity_gameplay::step_tools(&mut self.scripts, &mut self.world);
         self.scripts.step(&mut self.world, f64::from(FRAME));
         self.characters.keep_kinematic(&mut self.world);
         self.physics.step(&mut self.world, f64::from(FRAME));
         let touches = self.physics.take_touches();
         self.scripts.fire_touched(&mut self.world, &touches);
-        self.scripts
-            .place_tools(&mut self.world, &axcenity_anim::Poses::new());
+        axcenity_gameplay::place_tools(
+            &mut self.scripts,
+            &mut self.world,
+            &axcenity_anim::Poses::new(),
+        );
         self.take_printed();
     }
 
@@ -179,7 +182,7 @@ impl Game {
 
     /// The texts the hotbar draws.
     fn hotbar(&self) -> Vec<String> {
-        let inventory = self.scripts.player_inventory(&self.world).unwrap();
+        let inventory = axcenity_gameplay::player_inventory(&self.world).unwrap();
         axcenity_ui::hotbar_items(&self.world, inventory, &self.stylesheets, VIEW.0, VIEW.1)
             .into_iter()
             .filter_map(|item| match item {
@@ -345,7 +348,7 @@ fn snapshot(game: &Game, path: &Path) {
     }
     .render_camera();
     let mut renderer = TextureRenderer::new(&device, &queue, VIEW.0, VIEW.1);
-    let inventory = game.scripts.player_inventory(&game.world).unwrap();
+    let inventory = axcenity_gameplay::player_inventory(&game.world).unwrap();
     for _ in 0..2 {
         let mut draw_list = axcenity_scene::build_draw_list_with_ui(
             &game.world,

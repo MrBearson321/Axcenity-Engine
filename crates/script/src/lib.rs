@@ -102,7 +102,6 @@ mod spec;
 mod spline;
 pub mod system;
 mod task;
-mod tool;
 mod tree;
 mod tween;
 mod types;
@@ -175,8 +174,9 @@ pub struct OutputLine {
 /// How many rounds of change events [`ScriptRuntime::fire_changes`] runs in
 /// one call. Handlers that change things fire more change events (the next
 /// round); a handler that keeps changing what it listens to would never
-/// stop, so after this many rounds the rest wait for the next call.
-const MAX_CHANGE_ROUNDS: usize = 10;
+/// stop, so after this many rounds the rest wait for the next call. Game
+/// systems that fire their own rounds keep to it too.
+pub const MAX_CHANGE_ROUNDS: usize = 10;
 
 /// The output lines waiting for the host. A named type, so that this is the
 /// only `Vec<OutputLine>` stored in Lua's app data.
@@ -251,9 +251,6 @@ pub struct ScriptRuntime {
     prompts: prompt::Prompts,
     /// What the mouse points at and presses, for ClickDetectors.
     clicks: click::Clicks,
-    /// The Tools in hand last fired, dropped Tools, and the hotbar's keys
-    /// (Phase 45).
-    tools: tool::Tools,
     /// Humanoids' walks and states (Phase 46).
     humanoids: humanoid::Humanoids,
     /// Respawns, spawn ForceFields and the leaderboard's Tab (Phase 47).
@@ -417,7 +414,6 @@ impl ScriptRuntime {
             systems: Vec::new(),
             prompts: prompt::Prompts::default(),
             clicks: click::Clicks::default(),
-            tools: tool::Tools::default(),
             humanoids: humanoid::Humanoids::default(),
             players: players::Players::default(),
             player_events: Vec::new(),
@@ -1597,63 +1593,6 @@ impl ScriptRuntime {
         }
     }
 
-    /// Frame step 1, after [`step_prompts`](Self::step_prompts) (Phase 45):
-    /// characters with an Inventory pick up the dropped Tools they touch,
-    /// while there's room; the player's number keys, mouse wheel and
-    /// controller bumpers pick a hotbar slot, Drop drops the Tool in hand,
-    /// and Primary fires its `Activated` and `Deactivated`, in Scripts and
-    /// then in LocalScripts, after `Equipped` and `Unequipped`.
-    pub fn step_tools(&mut self, world: &mut World) {
-        self.fire_changes(world);
-        let input = self.client.prompt_input();
-        let assets = self.server.assets();
-        let fired = self.tools.step(world, &assets, &input);
-        // Equipped and Unequipped first, then Activated.
-        self.fire_tool_events(world);
-        self.fire_fired(world, &fired);
-    }
-
-    /// Frame step 4, after the Animators pose the characters: each Tool in
-    /// hand moves to its character's right hand (Phase 45), the bone posed
-    /// as `poses` has it.
-    pub fn place_tools(&mut self, world: &mut World, poses: &axcenity_anim::Poses) {
-        self.fire_changes(world);
-        let assets = self.server.assets();
-        tool::place_held(world, &assets, poses);
-        self.fire_changes(world);
-    }
-
-    /// The player character's Inventory, which the default hotbar shows
-    /// unless its `HotbarEnabled` is off.
-    pub fn player_inventory(&self, world: &World) -> Option<InstanceId> {
-        tool::player_inventory(world)
-    }
-
-    /// Fires `Unequipped` and `Equipped` for the Inventories scripts and
-    /// the tools step changed, on both sides, for up to
-    /// [`MAX_CHANGE_ROUNDS`] rounds of handlers that change more.
-    fn fire_tool_events(&mut self, world: &mut World) {
-        for _ in 0..MAX_CHANGE_ROUNDS {
-            if self.tools.dirty.is_empty() {
-                return;
-            }
-            let fired = self.tools.sync(world);
-            self.fire_fired(world, &fired);
-        }
-    }
-
-    /// Fires events with no arguments on their Instances, on both sides.
-    fn fire_fired(&mut self, world: &mut World, fired: &[prompt::Fired]) {
-        if fired.is_empty() {
-            return;
-        }
-        for side in [Side::Server, Side::Client] {
-            self.context(side).fire_prompt_events(world, fired, None);
-            self.collect(side);
-            self.fire_change_rounds(world);
-        }
-    }
-
     /// The ProximityPrompts showing, as of [`step_prompts`](Self::step_prompts).
     pub fn shown_prompts(&self) -> &[ShownPrompt] {
         if self.input_held() {
@@ -1918,7 +1857,6 @@ impl ScriptRuntime {
         // Abilities' first, so Health events their Effects cause fire here.
         self.fire_system_events(world, true);
         self.fire_health_events(world);
-        self.fire_tool_events(world);
         self.fire_player_events(world);
         self.fire_level_events(world);
         self.fire_system_events(world, false);
@@ -2156,7 +2094,6 @@ impl ScriptRuntime {
         self.particle_emits.extend(context.take_particle_emits());
         self.shatters.extend(context.take_shatters());
         self.health.pending.extend(context.take_health_events());
-        self.tools.note(context.take_tool_changes());
         self.humanoids.note(context.take_humanoid_requests());
         self.player_events
             .extend(self.players.note(context.take_spawned()));
@@ -2380,8 +2317,6 @@ mod query_tests;
 mod seat_tests;
 #[cfg(test)]
 mod spline_tests;
-#[cfg(test)]
-mod tool_tests;
 #[cfg(test)]
 mod utilities_tests;
 

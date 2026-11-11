@@ -29,12 +29,18 @@ fn described_system_methods_are_the_installed_ones_and_exist() {
 
     let lua = mlua::Lua::new();
     let abilities = crate::AbilitySystem::default();
+    let tools = crate::ToolSystem::default();
     let story = crate::Story::default();
-    let installed: Vec<(ClassName, &str)> = [&crate::Debris as &dyn GameSystem, &abilities, &story]
-        .iter()
-        .flat_map(|system| system.methods(&lua).unwrap())
-        .map(|(class, name, _)| (class, name))
-        .collect();
+    let installed: Vec<(ClassName, &str)> = [
+        &crate::Debris as &dyn GameSystem,
+        &abilities,
+        &tools,
+        &story,
+    ]
+    .iter()
+    .flat_map(|system| system.methods(&lua).unwrap())
+    .map(|(class, name, _)| (class, name))
+    .collect();
     assert_eq!(installed, DESCRIBED_SYSTEM_METHODS);
 
     let checks: Vec<String> = DESCRIBED_SYSTEM_METHODS
@@ -75,11 +81,17 @@ fn described_system_services_are_the_installed_ones_and_their_members_exist() {
     use axcenity_script::{ApiKind, GameSystem, api_reference};
 
     let abilities = crate::AbilitySystem::default();
+    let tools = crate::ToolSystem::default();
     let story = crate::Story::default();
-    let installed: Vec<&str> = [&crate::Debris as &dyn GameSystem, &abilities, &story]
-        .iter()
-        .flat_map(|system| system.services().iter().copied())
-        .collect();
+    let installed: Vec<&str> = [
+        &crate::Debris as &dyn GameSystem,
+        &abilities,
+        &tools,
+        &story,
+    ]
+    .iter()
+    .flat_map(|system| system.services().iter().copied())
+    .collect();
     assert_eq!(installed, DESCRIBED_SYSTEM_SERVICES);
 
     let reference = api_reference();

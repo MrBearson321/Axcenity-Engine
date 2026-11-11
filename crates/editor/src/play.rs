@@ -227,7 +227,7 @@ impl Session {
     /// The player character's Inventory (Phase 45), whose hotbar the
     /// viewport draws.
     pub fn hotbar(&self) -> Option<InstanceId> {
-        self.sim.scripts.player_inventory(&self.sim.world)
+        axcenity_gameplay::player_inventory(&self.sim.world)
     }
 
     /// The player's Abilities and their cooldowns (Phase 76), for the
