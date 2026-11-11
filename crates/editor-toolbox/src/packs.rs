@@ -284,7 +284,7 @@ impl ToolboxPanel {
 mod tests {
     use super::*;
 
-    const GOLDEN: &str = include_str!("../../../toolbox/tests/fixtures/pack_manifest.json");
+    const GOLDEN: &str = include_str!("../../toolbox/tests/fixtures/pack_manifest.json");
 
     #[test]
     fn an_imported_pack_is_kept_as_a_collection_and_planned() {

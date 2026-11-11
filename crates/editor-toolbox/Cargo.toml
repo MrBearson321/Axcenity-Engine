@@ -1,0 +1,27 @@
+[package]
+name = "axcenity-editor-toolbox"
+description = "The Axcenity editor's Toolbox tab: find online assets and bring them into a project."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-assets.workspace = true
+axcenity-core.workspace = true
+axcenity-editor-kit.workspace = true
+axcenity-toolbox.workspace = true
+eframe.workspace = true
+image.workspace = true
+log.workspace = true
+rfd.workspace = true
+serde_json.workspace = true
+zip.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[dev-dependencies]
+# `theme::test_context`, `theme::run` and `snapshot` for drawing tests.
+axcenity-editor-kit = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

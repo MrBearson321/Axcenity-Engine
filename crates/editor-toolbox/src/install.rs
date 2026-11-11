@@ -13,7 +13,7 @@ use super::*;
 
 /// How a download ended.
 #[derive(Debug)]
-pub(crate) enum DownloadResult {
+pub enum DownloadResult {
     /// It's in: `text` for the Console, and what's in the project now.
     Saved {
         text: String,
@@ -24,7 +24,7 @@ pub(crate) enum DownloadResult {
 
 /// What a download put where.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Installed {
+pub enum Installed {
     /// A texture set's `.texture.json`, in the project.
     TextureSet { path: String, name: String },
     /// A sky image, in the project.
@@ -136,7 +136,7 @@ pub(super) fn download(
 /// of `id_files` its `ax://` ID first (keeping the first's), then writes the install to the database
 /// and the project's `.axcenity/asset-sources.json`. A failure is logged;
 /// the files are in either way.
-pub(crate) fn record_install(
+pub fn record_install(
     db: &Database,
     project: &Path,
     path: &str,
@@ -169,7 +169,7 @@ pub(crate) fn record_install(
 
 /// Records a Toolbox model the Import dialog copied to `copy` (its file in
 /// the project, such as `assets/models/chair/chair.gltf`).
-pub(crate) fn record_model_install(project: &Path, copy: &str, key: &str, variant: &str) {
+pub fn record_model_install(project: &Path, copy: &str, key: &str, variant: &str) {
     let Ok((_, db)) = library() else {
         return;
     };
@@ -211,7 +211,7 @@ pub(super) fn model_file(dir: &AssetDirectory, fetched: &db::Download) -> Result
 }
 
 /// A material file using a texture set's maps, for Make material.
-pub(crate) fn material_from_set(set: &TextureSet) -> MaterialFile {
+pub fn material_from_set(set: &TextureSet) -> MaterialFile {
     let map = |slot: MapSlot, channelled: bool| {
         set.maps.iter().find(|map| map.slot == slot).map(|found| {
             let mut file = MapFile::of(found.path.clone());
