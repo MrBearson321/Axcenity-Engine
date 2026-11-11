@@ -721,6 +721,9 @@ dependencies = [
  "axcenity-collab",
  "axcenity-cook",
  "axcenity-core",
+ "axcenity-editor-benchmark",
+ "axcenity-editor-kit",
+ "axcenity-editor-toolbox",
  "axcenity-gameplay",
  "axcenity-mcp",
  "axcenity-mesh-edit",
@@ -762,6 +765,59 @@ dependencies = [
  "serde_json",
  "subsecond",
  "tar",
+ "zip",
+]
+
+[[package]]
+name = "axcenity-editor-benchmark"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "axcenity-assets",
+ "axcenity-core",
+ "axcenity-editor-kit",
+ "axcenity-render",
+ "axcenity-scene",
+ "axcenity-workspace-hack",
+ "eframe",
+ "pollster 0.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "axcenity-editor-kit"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-anim",
+ "axcenity-assets",
+ "axcenity-core",
+ "axcenity-project",
+ "axcenity-render",
+ "axcenity-scene",
+ "axcenity-workspace-hack",
+ "eframe",
+ "egui-phosphor",
+ "png",
+ "pollster 0.4.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "axcenity-editor-toolbox"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-assets",
+ "axcenity-core",
+ "axcenity-editor-kit",
+ "axcenity-toolbox",
+ "axcenity-workspace-hack",
+ "eframe",
+ "image",
+ "log",
+ "rfd",
+ "serde_json",
  "zip",
 ]
 

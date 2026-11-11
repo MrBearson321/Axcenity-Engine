@@ -7,6 +7,15 @@
 //! Built on eframe (egui's app framework), which owns the window and the GPU
 //! device; the viewport draws with the same renderer as the player.
 
+// The shared UI base lives in the editor kit crate; these keep its modules
+// at `crate::theme`, `crate::widgets` and so on (roadmap G11).
+#[cfg(test)]
+use axcenity_editor_kit::snapshot;
+use axcenity_editor_kit::{color_palette, lua_syntax, responsive, screen, wheel, widgets};
+// Panel families in crates of their own, under their old module names.
+use axcenity_editor_benchmark as graphics_benchmark;
+use axcenity_editor_toolbox as toolbox_panel;
+
 mod angular;
 mod anim_import;
 mod animation;
@@ -19,7 +28,6 @@ mod behavior_tree;
 mod block_editor;
 mod build_game;
 mod build_tools;
-mod color_palette;
 mod command_palette;
 mod console;
 mod constraints;
@@ -33,7 +41,6 @@ mod find_in_scripts;
 mod game_tests;
 mod gizmo;
 mod global_assets;
-mod graphics_benchmark;
 mod history;
 mod hot_patch;
 mod import_dialog;
@@ -41,7 +48,6 @@ mod layout;
 mod levels;
 mod loading;
 mod lod_inspector;
-mod lua_syntax;
 mod luau_check;
 mod material_editor;
 mod material_graph;
@@ -59,18 +65,14 @@ mod props;
 mod prototype;
 mod rebuild;
 mod relaunch;
-mod responsive;
 mod ribbon;
 mod ribbon_tabs;
-mod screen;
 mod script_completion;
 mod scripts;
 mod sequencer;
 mod shortcuts;
 mod side_warnings;
 mod snapping;
-#[cfg(test)]
-mod snapshot;
 mod spawning;
 mod splines;
 mod start;
@@ -81,7 +83,6 @@ mod terrain_studio;
 mod theme;
 mod thumbnail;
 mod toast;
-mod toolbox_panel;
 mod tree;
 #[cfg(test)]
 mod ui_cost_tests;
@@ -91,8 +92,6 @@ mod version_explorer;
 mod viewport;
 mod watcher;
 mod watches;
-mod wheel;
-mod widgets;
 mod window_frame;
 
 use std::path::PathBuf;

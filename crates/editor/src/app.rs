@@ -1261,10 +1261,14 @@ impl EditorApp {
         if input || woke {
             self.last_active_at = Some(now);
         }
+        // The start screen's backdrop moves all the time, so while it shows
+        // (and the window has focus) frames keep coming on the steady grid
+        // rather than on a timer of its own. Reduce motion stills it.
+        let start_moving = self.project.is_none() && !self.appearance.reduce_motion;
         let steady = self
             .last_active_at
             .is_some_and(|at| now - at < STEADY_FRAME_SECONDS)
-            || (self.appearance.hold_refresh && focused);
+            || ((self.appearance.hold_refresh || start_moving) && focused);
         self.frame_pace = Some((now, steady));
         if steady {
             ctx.request_repaint();

@@ -1,0 +1,36 @@
+[package]
+name = "axcenity-editor-kit"
+description = "The Axcenity editor's shared UI base: theme, widgets, responsive layouts and test helpers."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-anim.workspace = true
+axcenity-core.workspace = true
+axcenity-render.workspace = true
+axcenity-scene.workspace = true
+eframe.workspace = true
+egui-phosphor.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Drawing tests' offscreen snapshots (`snapshot.rs`), for the editor's tests.
+png = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+axcenity-workspace-hack.workspace = true
+
+[features]
+# `theme::test_context`, `theme::run` and `snapshot`, for crates whose tests
+# draw editor UI. Turn it on from `[dev-dependencies]` only.
+test-support = ["dep:png", "dep:pollster"]
+
+[dev-dependencies]
+# `screen.rs`'s test projects a sample project's parts.
+axcenity-assets.workspace = true
+axcenity-project.workspace = true
+png.workspace = true
+pollster.workspace = true
+
+[lints]
+workspace = true

@@ -15,16 +15,18 @@ mod run;
 mod video_memory;
 mod workloads;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing;
 #[cfg(test)]
-pub(crate) mod tests;
+mod tests;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axcenity_render::GraphicsSettings;
 use eframe::egui::{self, RichText};
 
-use crate::theme::{self, icons, space, type_scale};
-use crate::widgets;
+use axcenity_editor_kit::theme::{self, icons, space, type_scale};
+use axcenity_editor_kit::widgets;
 
 pub use recommend::FRAME_BUDGET_MS;
 pub use report::{Report, Tier};
