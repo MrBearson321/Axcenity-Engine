@@ -91,6 +91,8 @@ pub enum Kind {
     /// A list of objects with these two string fields, such as
     /// `[{"find":…,"replace":…}]`.
     Pairs(&'static str, &'static str),
+    /// A list of objects, such as `batch`'s steps.
+    Objects,
 }
 
 /// One parameter. Tools share the common ones as constants (`ID`, `DETAIL`,
@@ -146,6 +148,7 @@ impl Param {
                     "required": [first, second]
                 }
             }),
+            Kind::Objects => json!({ "type": "array", "items": { "type": "object" } }),
         };
         if !self.about.is_empty() {
             schema["description"] = Value::String(self.about.to_owned());

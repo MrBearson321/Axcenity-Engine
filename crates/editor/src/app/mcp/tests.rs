@@ -878,3 +878,414 @@ fn project_check_lists_script_problems_worst_first() {
         "{report}"
     );
 }
+
+#[test]
+fn object_duplicate_copies_in_place_or_as_a_row() {
+    let mut opened = open("hello-part", "mcp-duplicate");
+    let host = &mut opened.app;
+    ok(
+        host,
+        "object_create",
+        json!({"kind": "Model", "name": "Post"}),
+    );
+    ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "name": "Pole", "parent": "Workspace/Post", "position": [0, 2, 0]}),
+    );
+    // Something placed on its part doesn't move by itself.
+    ok(
+        host,
+        "object_create",
+        json!({"kind": "Attachment", "parent": "Workspace/Post/Pole", "props": {"Position": [0, 1, 0]}}),
+    );
+    let before = objects(host);
+    let text = ok(
+        host,
+        "object_duplicate",
+        json!({"id": "Workspace/Post", "count": 3, "offset": [0, 0, 6]}),
+    );
+    assert!(
+        text.starts_with("made ")
+            && text.contains("Model \"Post2\"")
+            && text.contains("Model \"Post4\"")
+            && text.ends_with("· undo \"AI (test): Duplicate Post\""),
+        "{text}"
+    );
+    assert_eq!(objects(host), before + 9, "three copies of three objects");
+    for (name, z) in [("Post2", 6), ("Post3", 12), ("Post4", 18)] {
+        let pole = ok(
+            host,
+            "object_get",
+            json!({"id": format!("Workspace/{name}/Pole"), "props": ["Position"]}),
+        );
+        assert!(pole.contains(&format!("Position [0,2,{z}]")), "{pole}");
+        let attachment = ok(
+            host,
+            "object_get",
+            json!({"id": format!("Workspace/{name}/Pole/Attachment"), "props": ["Position"]}),
+        );
+        assert!(attachment.contains("Position [0,1,0]"), "{attachment}");
+    }
+    // Copies go right after the original, in order.
+    let world = &host.app.world;
+    let names: Vec<String> = world
+        .get(world.workspace())
+        .unwrap()
+        .children()
+        .iter()
+        .map(|&id| world.get(id).unwrap().name().to_owned())
+        .filter(|name| name.starts_with("Post"))
+        .collect();
+    assert_eq!(names, ["Post", "Post2", "Post3", "Post4"]);
+
+    ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(objects(host), before);
+
+    // Scripts and services can't be copied, as in the editor.
+    let error = call(host, "object_duplicate", json!({"id": "Workspace"})).unwrap_err();
+    assert_eq!(error.code, Code::NotAllowed, "{error}");
+    let error = call(
+        host,
+        "object_duplicate",
+        json!({"id": "Workspace/Post", "count": 500}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, Code::BadValue, "{error}");
+}
+
+#[test]
+fn batch_runs_steps_as_one_undo_step_with_names_for_results() {
+    let mut opened = open("hello-part", "mcp-batch");
+    let host = &mut opened.app;
+    let before = objects(host);
+    let text = ok(
+        host,
+        "batch",
+        json!({"label": "Build a hut", "ops": [
+            {"op": "create", "kind": "Model", "name": "Hut", "as": "hut"},
+            {"op": "create", "kind": "Block", "name": "Floor", "parent": "$hut", "size": [10, 1, 10], "as": "floor"},
+            {"op": "create", "kind": "Block", "name": "Wall", "parent": "$hut", "position": [0, 3, -5], "size": [10, 5, 1], "as": "wall"},
+            {"op": "duplicate", "id": "$wall", "offset": [0, 0, 10]},
+            {"op": "set", "ids": ["$floor", "$wall"], "props": {"Anchored": true}},
+            {"op": "create", "kind": "ObjectValue", "name": "Door", "parent": "$hut", "props": {"Value": "$wall"}},
+            {"op": "delete", "id": "Workspace/Block"}
+        ]}),
+    );
+    assert!(
+        text.starts_with("ran 7 steps · undo \"AI (test): Build a hut\"\n1. created "),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n4. made ") && text.contains("Part \"Wall2\""),
+        "{text}"
+    );
+    assert!(text.contains("\n7. deleted 1 object"), "{text}");
+    // Hut, Floor, Wall, Wall2, Door; the Block went.
+    assert_eq!(objects(host), before + 5 - 1);
+    let wall2 = ok(
+        host,
+        "object_get",
+        json!({"id": "Workspace/Hut/Wall2", "props": ["Position"]}),
+    );
+    assert!(wall2.contains("Position [0,3,5]"), "{wall2}");
+    let door = ok(
+        host,
+        "object_get",
+        json!({"id": "Workspace/Hut/Door", "props": ["Value"]}),
+    );
+    assert!(door.contains("Wall"), "{door}");
+
+    // The whole batch is one step.
+    let undone = ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(undone, "undid \"AI (test): Build a hut\"");
+    assert_eq!(objects(host), before);
+}
+
+#[test]
+fn a_failing_batch_step_changes_nothing_and_says_which() {
+    let mut opened = open("hello-part", "mcp-batch-fail");
+    let host = &mut opened.app;
+    let before = objects(host);
+    let revision = host.app.history.revision();
+    let error = call(
+        host,
+        "batch",
+        json!({"ops": [
+            {"op": "create", "kind": "Block", "name": "A"},
+            {"op": "set", "id": "Workspace/A", "props": {"Colour": [1, 0, 0]}}
+        ]}),
+    )
+    .unwrap_err();
+    assert!(
+        error.message.starts_with("step 2 (set): ")
+            && error.message.ends_with("nothing was changed"),
+        "{error}"
+    );
+    assert_eq!(objects(host), before);
+    assert_eq!(host.app.history.revision(), revision);
+
+    // Bad steps are caught before anything runs.
+    for (ops, says) in [
+        (json!([{"kind": "Block"}]), "step 1 needs op"),
+        (
+            json!([{"op": "create", "kind": "Block", "sise": [1, 1, 1]}]),
+            "step 1 (create): object_create has no parameter \"sise\"",
+        ),
+        (
+            json!([{"op": "create", "kind": "Block", "parent": "$nope"}]),
+            "no earlier step is \"as\":\"nope\"",
+        ),
+        (
+            json!([{"op": "delete", "id": "Workspace/Block", "confirm": "abcdef"}]),
+            "confirm goes on the batch",
+        ),
+    ] {
+        let error = call(host, "batch", json!({"ops": ops})).unwrap_err();
+        assert!(error.message.contains(says), "{error}");
+    }
+    let too_many: Vec<Value> = (0..101)
+        .map(|_| json!({"op": "create", "kind": "Block"}))
+        .collect();
+    let error = call(host, "batch", json!({"ops": too_many})).unwrap_err();
+    assert_eq!(error.code, Code::TooLarge);
+    assert_eq!(objects(host), before);
+}
+
+#[test]
+fn a_batch_with_a_big_delete_asks_first() {
+    let mut opened = open("hello-part", "mcp-batch-ask");
+    let host = &mut opened.app;
+    let ops = json!([
+        {"op": "create", "kind": "Model", "name": "Pile", "as": "pile"},
+        {"op": "create", "kind": "Block", "parent": "$pile", "as": "brick"},
+        {"op": "duplicate", "id": "$brick", "count": 6},
+        {"op": "delete", "id": "$pile"}
+    ]);
+    let before = objects(host);
+    let error = call(host, "batch", json!({"ops": ops})).unwrap_err();
+    assert!(error.message.contains("step 4 deletes "), "{error}");
+    assert_eq!(objects(host), before, "asking changed nothing");
+    let token = token(&error);
+    let text = ok(host, "batch", json!({"ops": ops, "confirm": token}));
+    assert!(text.contains("\n4. deleted 8 objects"), "{text}");
+    assert_eq!(objects(host), before);
+}
+
+#[test]
+fn material_edit_makes_changes_and_assigns_material_files_undoably() {
+    let mut opened = open("hello-part", "mcp-material");
+    let folder = opened.folder.clone();
+    let host = &mut opened.app;
+    let text = ok(
+        host,
+        "material_edit",
+        json!({"action": "create", "name": "Rust", "values": {"color": [0.5, 0.2, 0.1], "roughness": 0.8}, "id": "Workspace/Block"}),
+    );
+    let path = "assets/materials/Rust.material.json";
+    assert!(
+        text.starts_with(&format!("created {path} · drew "))
+            && text.contains("\"AI (test): Create material Rust\"")
+            && text.contains("\"roughness\":0.8"),
+        "{text}"
+    );
+    let file = std::fs::read_to_string(folder.join(path)).unwrap();
+    assert!(file.contains("\"roughness\": 0.8"), "{file}");
+    let block = ok(
+        host,
+        "object_get",
+        json!({"id": "Workspace/Block", "props": ["MaterialVariant", "Color"]}),
+    );
+    assert!(
+        block.contains(&format!("MaterialVariant \"{path}\"")) && block.contains("Color [1,1,1]"),
+        "{block}"
+    );
+
+    // A change keeps what it doesn't name; null takes a value away.
+    let text = ok(
+        host,
+        "material_edit",
+        json!({"action": "change", "path": path, "values": {"metalness": 1, "roughness": null}}),
+    );
+    assert!(
+        text.starts_with(&format!("changed {path} · undo")),
+        "{text}"
+    );
+    let file = std::fs::read_to_string(folder.join(path)).unwrap();
+    assert!(
+        file.contains("\"metalness\": 1")
+            && file.contains("\"color\"")
+            && !file.contains("roughness"),
+        "{file}"
+    );
+
+    // Undo puts the file back as it was, then takes it and the part's look away.
+    ok(host, "history", json!({"action": "undo"}));
+    let file = std::fs::read_to_string(folder.join(path)).unwrap();
+    assert!(file.contains("\"roughness\": 0.8"), "{file}");
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(!folder.join(path).exists());
+    let block = ok(
+        host,
+        "object_get",
+        json!({"id": "Workspace/Block", "props": ["MaterialVariant"]}),
+    );
+    assert!(!block.contains("Rust"), "{block}");
+
+    // Mistakes say what to do and change nothing.
+    for (args, code, says) in [
+        (
+            json!({"action": "create", "name": "X", "values": {"colour": [1, 0, 0]}}),
+            Code::BadValue,
+            "no field \"colour\"",
+        ),
+        (
+            json!({"action": "create", "name": "X", "values": {"maps": {"color": "assets/nope.png"}}}),
+            Code::NotFound,
+            "isn't in the project",
+        ),
+        (
+            json!({"action": "create", "name": "X", "values": {"base": "../outside.material.json"}}),
+            Code::BadValue,
+            "isn't a path in the project",
+        ),
+        (
+            json!({"action": "assign", "path": path, "id": "Workspace/Block"}),
+            Code::NotFound,
+            "",
+        ),
+        (
+            json!({"action": "assign", "path": "world.json", "id": "Workspace/Block"}),
+            Code::BadValue,
+            "isn't a material file",
+        ),
+        (
+            json!({"action": "create", "name": "X", "id": "Workspace"}),
+            Code::BadValue,
+            "isn't a part",
+        ),
+    ] {
+        let error = call(host, "material_edit", args).unwrap_err();
+        assert_eq!(error.code, code, "{error}");
+        assert!(error.message.contains(says), "{error}");
+    }
+    assert!(!folder.join("assets/materials/X.material.json").exists());
+}
+
+#[test]
+fn env_set_changes_the_look_in_one_step_and_makes_sky_objects_when_needed() {
+    let mut opened = open("hello-part", "mcp-env");
+    let host = &mut opened.app;
+    let before = objects(host);
+    let text = ok(
+        host,
+        "env_set",
+        json!({"preset": "foggy", "time": 7.5, "weather": "rain", "intensity": 0.8}),
+    );
+    assert!(
+        text.contains("Lighting ClockTime")
+            && text.contains("FogEnd")
+            && text.contains("made Clouds in Lighting")
+            && text.contains("Weather")
+            && text.ends_with("· undo \"AI (test): Environment: foggy\""),
+        "{text}"
+    );
+    let lighting = ok(
+        host,
+        "object_get",
+        json!({"id": "Lighting", "props": ["ClockTime", "FogEnd"]}),
+    );
+    assert!(
+        lighting.contains("ClockTime 7.5") && lighting.contains("FogEnd 180"),
+        "{lighting}"
+    );
+    let weather = ok(
+        host,
+        "object_get",
+        json!({"id": "Lighting/Weather", "props": ["Precipitation", "Intensity"]}),
+    );
+    assert!(
+        weather.contains("Precipitation.Rain") && weather.contains("Intensity 0.8"),
+        "{weather}"
+    );
+
+    // Enum items go by their names alone, and a wrong one lists the right ones.
+    ok(
+        host,
+        "object_set",
+        json!({"id": "Lighting/Weather", "props": {"Precipitation": "snow"}}),
+    );
+    let error = call(
+        host,
+        "object_set",
+        json!({"id": "Lighting/Weather", "props": {"Precipitation": "Hail"}}),
+    )
+    .unwrap_err();
+    assert!(error.message.contains("one of None, Rain, Snow"), "{error}");
+    ok(host, "history", json!({"action": "undo"}));
+
+    // A second call changes those objects rather than making more.
+    let made = objects(host);
+    assert!(made > before);
+    let text = ok(
+        host,
+        "env_set",
+        json!({"clouds": 0.9, "weather": "none", "fog": 0}),
+    );
+    assert!(text.contains("Clouds Cover"), "{text}");
+    assert_eq!(objects(host), made);
+
+    ok(host, "history", json!({"action": "undo", "steps": 2}));
+    assert_eq!(objects(host), before);
+
+    let error = call(host, "env_set", json!({})).unwrap_err();
+    assert_eq!(error.code, Code::BadArgs);
+    let error = call(host, "env_set", json!({"time": 30})).unwrap_err();
+    assert_eq!(error.code, Code::BadValue);
+}
+
+#[test]
+fn game_run_plays_for_a_while_and_reports_errors_and_output() {
+    let mut opened = open("hello-part", "mcp-play");
+    let host = &mut opened.app;
+    ok(
+        host,
+        "script_write",
+        json!({"name": "Shout", "side": "server", "text": "print(\"hello from Shout\")\nworkspace.Block.Name = \"Changed\"\nerror(\"boom\")\n"}),
+    );
+    let before = objects(host);
+    let text = ok(host, "game_run", json!({"seconds": 0.5}));
+    assert!(
+        text.starts_with("played 0.5 s (30 frames; avg ") && text.contains("· 1 error ·"),
+        "{text}"
+    );
+    assert!(text.contains("\nerror ") && text.contains("boom"), "{text}");
+    assert!(text.contains("hello from Shout"), "{text}");
+    assert!(!text.contains("Playing \""), "{text}");
+    // What the game did is gone after.
+    assert!(!host.app.playing());
+    assert_eq!(objects(host), before);
+    assert!(call(host, "object_get", json!({"id": "Workspace/Block"})).is_ok());
+
+    let error = call(host, "game_run", json!({"seconds": 600})).unwrap_err();
+    assert_eq!(error.code, Code::BadValue);
+}
+
+#[test]
+fn game_run_runs_the_game_tests() {
+    let mut opened = open("hello-character", "mcp-game-tests");
+    let host = &mut opened.app;
+    let text = ok(host, "game_run", json!({"mode": "tests"}));
+    assert!(text.ends_with(" passed, 0 failed"), "{text}");
+    let error = call(
+        host,
+        "game_run",
+        json!({"mode": "tests", "file": "tests/nope.spec.lua"}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, Code::NotFound);
+    assert!(
+        error.fix.unwrap().contains("tests/walk.spec.lua"),
+        "lists the spec files"
+    );
+}

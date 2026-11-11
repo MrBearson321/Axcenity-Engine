@@ -27,10 +27,15 @@ use axcenity_mcp::{
 
 use super::EditorApp;
 
+mod batch;
 mod docs;
+mod env_set;
+mod game_run;
 mod history;
+mod material_edit;
 mod object_create;
 mod object_delete;
+mod object_duplicate;
 mod object_get;
 mod object_set;
 mod ops;
@@ -81,6 +86,8 @@ pub(super) struct Session {
     pub last_undo: Option<String>,
     /// Tells this run's lines in the log apart.
     pub id: String,
+    /// Asset files this session wrote, read again after an undo or redo.
+    pub files: Vec<String>,
 }
 
 impl Session {
@@ -94,6 +101,7 @@ impl Session {
             confirms: Confirms::default(),
             checkpointed: false,
             last_undo: None,
+            files: Vec::new(),
             id: format!(
                 "{:x}",
                 u64::from(std::process::id()) << 32 | u64::from(nanos)
@@ -148,6 +156,22 @@ pub(super) const TOOLS: &[Tool] = &[
         call: object_delete::call,
     },
     Tool {
+        spec: &object_duplicate::SPEC,
+        call: object_duplicate::call,
+    },
+    Tool {
+        spec: &batch::SPEC,
+        call: batch::call,
+    },
+    Tool {
+        spec: &material_edit::SPEC,
+        call: material_edit::call,
+    },
+    Tool {
+        spec: &env_set::SPEC,
+        call: env_set::call,
+    },
+    Tool {
         spec: &script_read::SPEC,
         call: script_read::call,
     },
@@ -158,6 +182,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &project_check::SPEC,
         call: project_check::call,
+    },
+    Tool {
+        spec: &game_run::SPEC,
+        call: game_run::call,
     },
     Tool {
         spec: &history::SPEC,
