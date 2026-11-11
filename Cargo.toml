@@ -155,6 +155,10 @@ serde_json = "1"
 # precedence, so `0.2.0-alpha.1 < 0.2.0-beta.1 < 0.2.0`. MIT OR Apache-2.0;
 # already in the tree through Cargo tooling crates.
 semver = "1"
+# SHA-256 of release packages for the signed manifest (`crates/release`), and
+# later the updater's download checks. MIT OR Apache-2.0; already in the tree
+# through rmcp.
+sha2 = "0.11"
 # Reads the hand-written release records in `releases/` (`crates/release`).
 # MIT OR Apache-2.0; the same toml_parser family is already in the tree.
 # `display` writes the record `axcenity-release prepare` starts.

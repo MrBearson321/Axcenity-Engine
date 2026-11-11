@@ -1,9 +1,10 @@
 name: CI
 
+# By hand only (Actions > CI > Run workflow). Local runs are the project's
+# checks (docs/development-policy.md); this is for when someone wants the
+# same jobs on GitHub's machines. Never on pushes or pull requests.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always

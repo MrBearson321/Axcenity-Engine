@@ -35,6 +35,8 @@ contents:
     dst: /opt/axcenity/NOTICE
   - src: ${STAGE}/INSTALL.txt
     dst: /opt/axcenity/INSTALL.txt
+  - src: ${INSTALL_JSON}
+    dst: /opt/axcenity/install.json
   - src: /opt/axcenity/axcenity-editor
     dst: /usr/bin/axcenity-editor
     type: symlink

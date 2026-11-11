@@ -30,12 +30,12 @@ Don't let future compatibility requirements dictate the engine's architecture be
 
 ### Continuous integration
 
-GitHub Actions is **intentionally disabled**. Both workflows, `CI` (`.github/workflows/ci.yml`) and `Release` (`.github/workflows/release.yml`), are turned off in the repository's Actions settings. The engine is going through substantial architectural changes, and the priority is engine stability and development speed, not maintaining CI infrastructure.
+GitHub Actions is **on for releases only** (decided 2026-11-11; on 2026-11-10 it was off entirely). Cost comes first: nothing runs per push or per pull request, and releases are not pushed often.
 
-- Testing and verification happen locally during development: the commands in [development.md](development.md) and the platform check scripts (`scripts/check-platform.sh`, `scripts/check-platform.ps1`).
-- The workflow files stay in the repository so they can be turned back on. Keep their toolchain pin in step with `rust-toolchain.toml`, but don't add jobs to them.
+- `Release` (`.github/workflows/release.yml`) runs for a `v*` tag, or by hand, and ends in a draft release that a person publishes ([releases.md](project/releases.md#cutting-a-release)). **Tell Paul before anything sets a release run going**: which version, which platforms, and roughly how long.
+- `CI` (`.github/workflows/ci.yml`) runs only by hand. Testing and verification happen locally during development: the commands in [development.md](development.md) and the platform check scripts (`scripts/check-platform.sh`, `scripts/check-platform.ps1`).
+- Test a workflow change locally before pushing it: `python3 scripts/check-workflows.py`, and the scripts its steps call. Keep the toolchain pin in step with `rust-toolchain.toml`.
 - "CI will catch it" is not verification. Say in the pull request what was run and on which OS.
-- **Revisit** once the architecture and core systems are stable.
 
 ### Deterministic simulation
 
@@ -78,7 +78,7 @@ Internet-hosted dedicated servers are a **future objective, not an immediate pri
 
 | Capability | Status | Revisit when |
 |---|---|---|
-| GitHub Actions CI and release workflow | Off on purpose; local testing instead | The architecture and core systems are stable |
+| GitHub Actions CI on pushes and pull requests | Off on purpose (CI runs by hand only); local testing instead | The architecture and core systems are stable |
 | Cross-machine determinism (lockstep, deterministic replay) | Not a requirement | Lockstep or deterministic replay is actually planned |
 | Mobile (Android, iOS) and web | Not a priority; Milestone 20 deferred | The desktop engine is reliable |
 | Internet-hosted dedicated servers, secure netcode (M11), hosting and server management | Future objective | Local multiplayer and server/client fundamentals are mature |
