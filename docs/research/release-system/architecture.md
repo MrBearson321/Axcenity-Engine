@@ -233,7 +233,7 @@ The editor-facing topic is `docs/editor/shell.md` ("Versions and updates"). Diff
 |---|---|---|
 | Windows setup (per user) | **Yes** | |
 | Linux `.tar.gz` | **Yes** | |
-| Linux AppImage | **Yes** (replace the one file) | |
+| Linux AppImage | **Yes** (replace the one file); not yet, see Phase 6 | |
 | Linux `.deb` / `.rpm` / pacman | No | Notification links the new package and shows the `apt`/`dnf`/`pacman` command |
 | macOS `.dmg` | No, for now | Notification links the new `.dmg` (in-app later, once builds are signed) |
 | Built from source | No | "Built from source at `<commit>`" |
@@ -264,6 +264,17 @@ One previous install is kept; Settings > Updates > Roll back swaps it back with 
 ### What the updater never touches
 
 Only the install folder and `<app data>/Updates/`. Projects, settings, plugins, Global Assets, saves and the Toolbox directory are outside both. The updater refuses an install path that is a filesystem root, the user's home, or any folder without the `install.json` marker, and it never follows symlinks out of the install folder. A test installs into a scratch folder surrounded by fake user data and checks that every byte of it is unchanged afterwards.
+
+### As built in Phase 6
+
+`crates/updater` (`docs/editor/shell.md`, "Versions and updates", for what people see; `docs/project/releases.md`, "Checking the updater"). Differences from the plan above:
+
+- The download, safe extraction and staging live in `crates/updater` (`download.rs`, `extract.rs`, `stage.rs`) rather than `crates/release`, so the release crate stays light for the player and server; the editor uses them from a thread. The download is `Updates/<version>/<file>.part` beside the archive.
+- The AppImage doesn't update itself yet: Settings > Updates tells it to download the new one. Only the Windows setup and the Linux tar.gz do.
+- The updater copies the staged folder to `<install>.new` before the editor has to close, then swaps by renames (`.previous`, `.failed`, `.rollback` beside the install). It refuses a relative path, a filesystem root, the home folder, a link, a folder without `install.json` and an install kind that doesn't update itself, and it deletes a sibling only when it is an Axcenity install.
+- The Windows setup's `Uninstall.exe` isn't in the update zip, so the updater carries it to the new folder; the uninstaller removes `<install>.previous` as well. The uninstall entry's `DisplayVersion` is updated only when the entry's `InstallLocation` is this folder; `EstimatedSize` isn't.
+- Roll back swaps `.previous` and the install, keeping the newer one as `.previous`, and checks only that the version put back runs.
+- The relaunched editor opens the project folder that was open, if any. It reads `Updates/result.json` on its next start and removes update folders up to its own version. A downloaded `axcenity-history.json` still isn't used.
 
 ## 8. Project compatibility and migration (D10)
 

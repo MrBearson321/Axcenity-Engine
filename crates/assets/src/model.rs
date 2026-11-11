@@ -228,6 +228,32 @@ pub struct Primitive {
 }
 
 impl Primitive {
+    /// The bytes its corners, triangles and simpler copies hold (G7); its
+    /// material's images aren't counted.
+    pub fn heap_bytes(&self) -> usize {
+        std::mem::size_of_val(self.positions.as_slice())
+            + std::mem::size_of_val(self.normals.as_slice())
+            + std::mem::size_of_val(self.uvs.as_slice())
+            + std::mem::size_of_val(self.tangents.as_slice())
+            + std::mem::size_of_val(self.indices.as_slice())
+            + std::mem::size_of_val(self.joints.as_slice())
+            + std::mem::size_of_val(self.weights.as_slice())
+            + self.lods.iter().map(Primitive::heap_bytes).sum::<usize>()
+    }
+
+    /// The images its material draws with.
+    pub fn images(&self) -> impl Iterator<Item = &Arc<Image>> {
+        let material = &self.material;
+        [
+            &material.base_color_texture,
+            &material.normal_texture,
+            &material.emissive_texture,
+            &material.specular_texture,
+        ]
+        .into_iter()
+        .flatten()
+    }
+
     /// Triangles made by hand (the Model Studio's), in the file's units,
     /// to put together with [`Model::from_primitives`]. `normals` and
     /// `uvs` are one per position (`uvs` may be empty); `indices` three
@@ -600,6 +626,16 @@ impl Image {
     /// returns at once.
     pub fn has_pixels(&self) -> bool {
         self.pixels.get().is_some()
+    }
+
+    /// The bytes its decoded pixels and cooked mip levels hold (G7).
+    pub fn heap_bytes(&self) -> usize {
+        let pixels = self.pixels.get().map_or(0, Vec::len);
+        let cooked = self
+            .cooked
+            .as_ref()
+            .map_or(0, |cooked| cooked.levels.iter().map(Vec::len).sum());
+        pixels + cooked
     }
 
     /// Its mip levels in a GPU format, if its file was cooked.

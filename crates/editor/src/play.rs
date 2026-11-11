@@ -646,6 +646,13 @@ impl Session {
         }
     }
 
+    /// The game's memory by kind, for the Profiler's Memory tab (G7).
+    pub fn memory(&self) -> axcenity_core::memory::MemoryBreakdown {
+        let mut memory = self.sim.memory();
+        memory.sounds = self.audio.memory();
+        memory
+    }
+
     /// The posed models of the animated MeshParts, for the viewport.
     pub fn poses(&self) -> &axcenity_scene::Poses {
         self.sim.animators.poses()

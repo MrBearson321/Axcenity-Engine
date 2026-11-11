@@ -216,6 +216,14 @@ impl GameAudio {
         self.engine.as_ref().map_or(0, AudioEngine::playing_count)
     }
 
+    /// The decoded sounds kept to play again (G7): how many and their
+    /// samples' bytes. None before the output opens.
+    pub fn memory(&self) -> axcenity_core::memory::MemoryUse {
+        self.engine
+            .as_ref()
+            .map_or_else(Default::default, AudioEngine::memory)
+    }
+
     /// Mutes and solos SoundGroups from the next update on, as the editor's
     /// Mixer asks. The world doesn't change.
     pub fn set_monitor(&mut self, monitor: Monitor) {
@@ -546,6 +554,16 @@ where
                 .map(|(&id, bus)| (id, bus.level.take()))
                 .collect(),
         }
+    }
+
+    /// The decoded sounds kept to play again: how many and their samples'
+    /// bytes (each frame is two `f32`s).
+    pub fn memory(&self) -> axcenity_core::memory::MemoryUse {
+        let mut used = axcenity_core::memory::MemoryUse::default();
+        for data in self.decoded.values() {
+            used.add(std::mem::size_of_val(&*data.frames));
+        }
+        used
     }
 
     /// How many sounds are playing now: `Playing` and not yet at their end.

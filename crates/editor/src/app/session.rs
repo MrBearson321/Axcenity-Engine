@@ -877,6 +877,9 @@ impl EditorApp {
             session.frame(seconds, input, motion, camera, &mut self.output)
         });
         if let Some(cost) = session.cost() {
+            if self.profiler.memory_due() {
+                self.profiler.record_memory(session.memory());
+            }
             self.profiler.record_game(cost, session.load());
         }
         let network = session
@@ -1056,7 +1059,8 @@ impl EditorApp {
             | Discard::OpenSample(_)
             | Discard::CloseProject
             | Discard::NewProject
-            | Discard::OpenLevel(_) => self.unsaved(),
+            | Discard::OpenLevel(_)
+            | Discard::Update(_) => self.unsaved(),
         };
         if unsaved {
             self.asking = Some(discard);
@@ -1078,7 +1082,8 @@ impl EditorApp {
                 | Discard::OpenSample(_)
                 | Discard::CloseProject
                 | Discard::NewProject
-                | Discard::OpenLevel(_) => self.save().then_some(discard),
+                | Discard::OpenLevel(_)
+                | Discard::Update(_) => self.save().then_some(discard),
             },
             Answer::DontSave => {
                 if let Discard::CloseTab(path) = &discard {
@@ -1125,6 +1130,7 @@ impl EditorApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Discard::OpenAnother => self.open_with_dialog(ctx),
+            Discard::Update(action) => self.hand_over_update(ctx, action),
             Discard::OpenSample(folder) => self.begin_open(ctx, &folder),
             Discard::CloseProject => self.close_project(),
             // The start screen's New Project dialog, once this one closes.
@@ -1230,6 +1236,7 @@ impl EditorApp {
             }
             Discard::CloseProject => (project, "closing it"),
             Discard::OpenLevel(_) => (project, "opening another level"),
+            Discard::Update(_) => (project, "restarting to update"),
             Discard::CloseTab(path) => (axcenity_project::script_name(path), "closing it"),
         };
         // What isn't saved: only the tab, when closing a tab.

@@ -393,3 +393,13 @@ fn a_wall_between_makes_a_sound_quieter_and_duller() {
         "it opens up again: {clear} vs {open_rms}"
     );
 }
+
+#[test]
+fn the_decoded_sounds_memory_is_their_samples() {
+    let rig = Rig::new();
+    let used = rig.engine.memory();
+    assert_eq!(used.count, 2);
+    // A second of noise and half a second of steps, two f32s a frame.
+    let frames = RATE as usize + STEP_PERIOD;
+    assert_eq!(used.bytes, frames * 8);
+}

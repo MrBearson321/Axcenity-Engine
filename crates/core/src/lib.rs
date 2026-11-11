@@ -20,6 +20,7 @@ pub mod dialogue;
 mod enums;
 mod index;
 pub mod input;
+pub mod memory;
 pub mod prefab;
 pub mod sound;
 pub mod spline;

@@ -17,10 +17,13 @@ mod steps;
 mod blend_tests;
 #[cfg(test)]
 mod golden;
+#[cfg(test)]
+mod memory_tests;
 
 use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_character::Controllers;
+use axcenity_core::memory::{MemoryBreakdown, MemoryUse};
 use axcenity_core::{ClassName, World};
 use axcenity_nav::Agents;
 use axcenity_physics::Physics;
@@ -70,6 +73,27 @@ impl Sim {
             animators: Animators::with_ground(axcenity_character::foot_ground),
             assets,
             occlusion: Occlusion::default(),
+        }
+    }
+
+    /// The game's memory by kind (roadmap G7), for the profilers: Lua, the
+    /// Instances by class, the asset caches and physics. Sounds are the
+    /// host's (`GameAudio::memory`), so they're left at zero. Walks every
+    /// Instance and cache, so hosts ask every few frames.
+    pub fn memory(&self) -> MemoryBreakdown {
+        let assets = self.assets.memory();
+        let cache = |used: axcenity_assets::CacheUse| MemoryUse {
+            count: used.count,
+            bytes: used.bytes,
+        };
+        MemoryBreakdown {
+            lua: self.scripts.used_memory(),
+            instances: self.world.memory(),
+            models: cache(assets.models),
+            textures: cache(assets.textures),
+            lighting: cache(assets.lighting),
+            sounds: MemoryUse::default(),
+            physics: self.physics.memory(),
         }
     }
 

@@ -1,0 +1,31 @@
+[package]
+name = "axcenity-updater"
+description = "Installs a verified Axcenity update after the editor exits, and rolls it back on failure; the editor's download and staging steps."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "axcenity-updater"
+path = "src/main.rs"
+
+[features]
+default = []
+# The editor's resumable HTTPS download (`download::HttpFetch`).
+http = ["dep:ureq"]
+
+[dependencies]
+axcenity-release.workspace = true
+flate2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+ureq = { workspace = true, optional = true }
+zip.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true
