@@ -3,18 +3,19 @@
   "machines": {
     "desktop-9950x3d": {
       "about": "AMD Ryzen 9 9950X3D (16 cores), 62 GB, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Pinned to CPUs 0-15 (the V-cache CCD). Recorded at main 15965da with nothing else running; the dry-patch runs were added on the rendering-initiative branch (Phase 1), where the player benchmarks with vertical sync off. A full check on that branch matched every older baseline within 4%.",
-      "commit": "15965da (dry-patch: rendering Phase 1)",
+      "commit": "15965da (dry-patch: rendering initiative, oak bark one-sided)",
       "results": {
         "dry-patch-test": {
-          "frame_ms": 0.026
+          "frame_ms": 0.028
         },
         "dry-patch-ultra-1440p": {
-          "assets_ms": 1502.363,
+          "assets_ms": 1558.673,
           "bound": "GPU-bound",
-          "first_frame_ms": 279.712,
-          "frame_ms": 11.742,
-          "gpu_ms": 11.471,
-          "low_1pct_fps": 70.3
+          "first_frame_ms": 281.753,
+          "frame_ms": 11.043,
+          "gpu_ms": 10.914,
+          "low_1pct_fps": 76.4,
+          "known": "Recorded after the owner's oaks' Bark materials were made one-sided (2026-11-11): about 0.6 ms faster than with double-sided bark, pictures the same. Copy the project again with --fresh after its assets change."
         },
         "farmhouse-player": {
           "assets_ms": 1579.117,

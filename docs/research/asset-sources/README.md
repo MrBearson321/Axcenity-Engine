@@ -50,7 +50,22 @@ The engine has **no Poly Haven code** today (the brief assumed it had); it fetch
 
 No local Python service and no hosted backend, which follows the [development policy](../../development-policy.md): desktop first, no infrastructure before it's needed, and extension points (the trait, the record, the CLI's JSON, the manifest) that cost little now.
 
-## Decisions for Paul
+## Paul's decisions (2026-11-11)
+
+Paul answered: "Build it into the editor with a shared backend. Use a rust core and a python blender integration. Conditional migration with a centralized axcenity asset directory. Make the source and license records persistent per-asset metadata database." Read as follows; where a reading was a judgement call it says so.
+
+| # | Decision | What it means for the design |
+|---|---|---|
+| 1 | **Built into the editor, with a shared backend** | The Toolbox is the `toolbox` Rust crate inside the editor. "Shared backend" is read as the same crate, the same asset directory and the same metadata database serving both the editor and Blender, not a hosted server |
+| 2 | **Rust core, Python Blender integration** | The providers, downloads and database live only in Rust. The Blender side is a thin Python package that runs the `axcenity-toolbox` CLI and reads the metadata database with Python's built-in `sqlite3` |
+| 3 | **Conditional migration** | Judgement call, read as two conditions: (a) each of the Blender pipeline's Python providers is retired only once the Rust source passes the same fixtures and its existing tests; (b) the pipeline's existing `asset_library/` is imported into the central directory only entry by entry, and only where its files still verify (size, MD5), leaving the old folder untouched. Porting Paul's Toolbox and 3D Models logic into the Apache-2.0 engine is taken as approved by the choice of a Rust core |
+| 4 | **A centralized Axcenity asset directory** | One per-user directory for downloaded originals, previews, the API cache and the database: `%LOCALAPPDATA%\Axcenity\Assets` on Windows, `$XDG_DATA_HOME/axcenity/assets` (else `~/.local/share/axcenity/assets`) on Linux, `~/Library/Application Support/Axcenity/Assets` on macOS. `AXCENITY_ASSET_DIR` or an editor setting overrides it. Not the editor's roaming data folder, since it holds gigabytes |
+| 5 | **A persistent per-asset metadata database** for source and licence records | `metadata.db`, an SQLite database in the asset directory, one row per asset (`provider:id`) that is never dropped when its files are removed, plus its downloads, the project files installed from it, favourites, collections and recents. It replaces the Blender pipeline's `registry.json` and the proposed sidecar `source` blocks. Projects keep a generated snapshot of their own assets' records (`.axcenity/asset-sources.json`) so credits survive moving a project to another machine; the database stays the source of truth |
+| 6 | First sound source | Settled by Paul's follow-up, "implement all the providers from the website into the toolbox": Openverse is built alongside ambientCG and Poly Haven. Freesound (with a user's own key) stays a later option |
+
+The details are in [provider-interface.md](provider-interface.md), sections 3 to 5.
+
+## The decisions as they were put
 
 1. **Architecture.** The Toolbox as a native module embedded in the editor, with the Django site linked by its manifest file (recommended), rather than the Django app as a local companion service, a hosted backend, or a live link to it. See [architecture-options.md](architecture-options.md).
 2. **Rust as the one implementation.** The Blender pipeline moves its provider calls onto the `axcenity-toolbox` CLI, source by source, and its Python providers are retired once each passes the same fixtures (recommended). The alternative keeps two implementations held together only by the shared record and fixtures.

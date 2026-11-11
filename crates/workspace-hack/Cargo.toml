@@ -21,10 +21,16 @@ arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 bytemuck = { version = "1", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "wasm_simd"] }
 byteorder = { version = "1" }
+crc32fast = { version = "1" }
 crossbeam-utils = { version = "0.8" }
 either = { version = "1" }
+flate2 = { version = "1" }
+futures-channel = { version = "0.3", features = ["sink"] }
+futures-core = { version = "0.3" }
+futures-sink = { version = "0.3" }
 glam = { version = "0.34", features = ["mint-05"] }
 hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
+indexmap = { version = "2", features = ["serde"] }
 libm = { version = "0.2" }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
@@ -40,44 +46,50 @@ regex-automata = { version = "0.4", default-features = false, features = ["dfa-o
 regex-syntax = { version = "0.8" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", default-features = false, features = ["alloc", "rc", "result", "std"] }
-serde_json = { version = "1", features = ["raw_value"] }
+serde_json = { version = "1", features = ["alloc", "raw_value"] }
+simd-adler32 = { version = "0.3" }
+slab = { version = "0.4" }
 slotmap = { version = "1", features = ["serde"] }
 smol_str = { version = "0.2" }
 thiserror = { version = "2" }
 tracing = { version = "0.1" }
 tracing-core = { version = "0.1", default-features = false, features = ["std"] }
+typenum = { version = "1", default-features = false, features = ["const-generics"] }
+uuid = { version = "1", features = ["v4"] }
 zeroize = { version = "1" }
 
 [build-dependencies]
 cc = { version = "1", default-features = false, features = ["parallel"] }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3" }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["full"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "full", "visit", "visit-mut"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 ahash = { version = "0.8", features = ["no-rng", "serde"] }
 bitflags = { version = "2", default-features = false, features = ["std"] }
 crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
-getrandom = { version = "0.3", default-features = false, features = ["std"] }
+futures-io = { version = "0.3" }
+futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3", default-features = false, features = ["std"] }
 half = { version = "2", features = ["num-traits"] }
-indexmap = { version = "2" }
 libc = { version = "0.2", features = ["extra_traits"] }
+mio = { version = "1", features = ["net", "os-ext"] }
 proc-macro2 = { version = "1" }
 quote = { version = "1" }
 smallvec = { version = "1", default-features = false, features = ["const_new", "union"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 tracing = { version = "0.1", default-features = false, features = ["log"] }
-uuid = { version = "1", features = ["serde"] }
+uuid = { version = "1", default-features = false, features = ["serde"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
-indexmap = { version = "2" }
+indexmap = { version = "2", features = ["serde"] }
 libc = { version = "0.2", features = ["extra_traits"] }
 memchr = { version = "2" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", default-features = false, features = ["alloc", "rc", "result", "std"] }
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "visit", "visit-mut"] }
 
 [target.x86_64-apple-darwin.dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
@@ -88,7 +100,7 @@ crypto-common = { version = "0.1", default-features = false, features = ["getran
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga", "tiff"] }
-indexmap = { version = "2" }
+libc = { version = "0.2" }
 objc2 = { version = "0.6" }
 objc2-app-kit = { version = "0.2", features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSDragging", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSTextInputClient", "NSTextInputContext", "NSView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup"] }
 objc2-core-foundation = { version = "0.3", features = ["CFBase"] }
@@ -96,7 +108,8 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["NSA
 smallvec = { version = "1", default-features = false, features = ["const_generics"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "full", "visit"] }
+libc = { version = "0.2" }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "visit"] }
 
 [target.aarch64-apple-darwin.dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
@@ -107,7 +120,7 @@ crypto-common = { version = "0.1", default-features = false, features = ["getran
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga", "tiff"] }
-indexmap = { version = "2" }
+libc = { version = "0.2" }
 objc2 = { version = "0.6" }
 objc2-app-kit = { version = "0.2", features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSDragging", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSTextInputClient", "NSTextInputContext", "NSView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup"] }
 objc2-core-foundation = { version = "0.3", features = ["CFBase"] }
@@ -115,19 +128,21 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["NSA
 smallvec = { version = "1", default-features = false, features = ["const_generics"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "full", "visit"] }
+libc = { version = "0.2" }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "visit"] }
 
 [target.x86_64-pc-windows-msvc.dependencies]
 crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
+getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std"] }
 half = { version = "2", features = ["num-traits"] }
-indexmap = { version = "2" }
 smallvec = { version = "1", default-features = false, features = ["const_generics", "union"] }
 windows = { version = "0.62", features = ["Devices_Power", "Foundation_Collections", "Gaming_Input_ForceFeedback", "System_Power", "Win32_Devices_Properties", "Win32_Media_Audio", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_Security", "Win32_System_Com_StructuredStorage", "Win32_System_Performance", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_System_Variant", "Win32_UI_Shell_PropertiesSystem"] }
 windows-core = { version = "0.62" }
 windows-sys-b21d60becc0929df = { package = "windows-sys", version = "0.52", features = ["Win32_Devices_HumanInterfaceDevice", "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Media", "Win32_Security", "Win32_System_Com_StructuredStorage", "Win32_System_LibraryLoader", "Win32_System_Ole", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_System_WindowsProgramming", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_Ime", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Input_Pointer", "Win32_UI_Input_Touch", "Win32_UI_Shell", "Win32_UI_TextServices", "Win32_UI_WindowsAndMessaging"] }
-windows-sys-d4189bed749088b6 = { package = "windows-sys", version = "0.61", features = ["Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_WindowsProgramming", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
+windows-sys-d4189bed749088b6 = { package = "windows-sys", version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Wdk_System_IO", "Win32_Graphics_Gdi", "Win32_Networking_WinSock", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Pipes", "Win32_System_SystemInformation", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_System_WindowsProgramming", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
 
 [target.x86_64-pc-windows-msvc.build-dependencies]
+getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["extra-traits", "fold", "visit"] }
 

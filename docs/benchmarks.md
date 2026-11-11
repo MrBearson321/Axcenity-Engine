@@ -355,6 +355,23 @@ Same desktop, unpinned, three alternating rounds of 600 frames (medians of the r
 
 Every own-pool run beat every main run. With `AXCENITY_PHYSICS_THREADS=8` the test runner's Physics was 2.09–2.12 ms (as good as 12, within noise) and with 16 it was 2.30. The player's Render step also gets faster (2.43 → 2.06 ms) when the global pool is capped too (`RAYON_NUM_THREADS=12`): the renderer's parallel work has the same oversubscription, left for its own change since it also moves cooking and the editor.
 
+### Physics step, part 3: rapier's solver settings
+
+Taken on 2026-11-11 in the Linux cloud container (4 vCPUs), release build. Times are S10k test-runner Physics medians over alternating runs of 600 frames, which swing by about ±20% here. Behavior is from a temporary test of 1×1×1 blocks on a floor at the default 196.2 gravity: stacks built six slightly different ways and stepped for 10 s, a chain of 12 ball sockets swinging down with a 1× or 8× end block, and a 300-block pile after 6 s.
+
+| rapier setting (default) | Physics | What changed |
+|---|---|---|
+| 4 solver iterations, stabilization 1, recycle distance 0.05 | 4.5–5.8 ms | 2×2×2 block on 5 blocks stands in 2 of 6 builds, 10 blocks in 5 of 6; heavy chain's worst joint gap 1.4 m |
+| 3 solver iterations | 4.2–4.5 | heavy chain gap 5.3 m; one terrain test fails |
+| 2 solver iterations | 3.9 (about −20%) | 10 blocks fall in every build; heavy chain gap 7.2 m; one terrain test fails |
+| no stabilization pass | 3.8–5.0 | about two thirds of the pile still jitters at 6 s; 4 tests fail |
+| 6 solver iterations | within noise of 4 | heavy chain gap 0.7 m; stacks as with 4 |
+| 8 solver iterations | not timed | heavy chain gap 0.4 m |
+| **recycle distance 0.1** | same as 0.05 over 6 rounds | **both stacks stand in 6 of 6 builds**; all tests pass |
+| recycle distance 0.2 | possibly faster, too noisy to say | a ball landing on edited terrain misses the edit |
+
+Making rapier's step cheaper costs too much behavior, so the solver keeps its 4 iterations and its stabilization pass. The recycle distance is now 0.1 (`CONTACT_RECYCLE_DISTANCE` in `physics/src/lib.rs`, `a_heavy_block_on_a_short_stack_stays_up`): rapier keeps a touching pair's contact points, with the impulses carried over from the last step, until the pair has moved this far, rather than working them out again. Stacks of 15 blocks still fall at every setting tried.
+
 ### UI layout (M14)
 
 S10k has no GUI, so the UI is timed on its own: `cargo test -p axcenity-ui --release --test bench_inventory_ui -- --ignored --nocapture` lays out a 500-element inventory (a ScreenGui with a titled panel and a ScrollingFrame of 10 rows of 10 slots, each an icon, a count, a name and a Use button; 499 elements shown) styled by a 16-rule stylesheet with custom properties, descendant selectors and `:hover`/`:active` rules, with the pointer moving over the slots. No GPU. Same cloud container, main (7f29f1a) and the branch built into one target folder and run alternately, three runs each; medians of 5 batches of 60 frames, milliseconds:
@@ -585,3 +602,5 @@ Absolute numbers depend on the machine. Compare runs on one machine, and run the
 ## Against other engines (XB10k)
 
 `benchmarks/cross-engine/` holds XB10k: S10k's parts, physics and scripts (no sounds, characters or agents) rebuilt from the same formulas in Godot, Unity, Unreal, s&box and Roblox, with one timing rule and one result line for all of them. Its README is the spec; results go in `benchmarks/cross-engine/results.md`. For the player's part, `AXCENITY_VSYNC=off` turns vsync off (the player otherwise uses the surface's default, vsync, so `--bench` frames wait for the display) and `AXCENITY_WINDOW_SIZE=1920x1080` sets the window size in physical pixels.
+
+Results on Paul's desktop (11 Nov 2026, median frame): Unity 3.11 ms, Axcenity 5.14 ms (6.70 ms before the physics PRs #84/#86/#93 and render pool #88), Godot 10.27 ms, s&box 2.05 ms (real time, not ranked); Unreal and Roblox not timed yet. What the numbers mean against each engine's features: [research/engine-comparison.md](research/engine-comparison.md).

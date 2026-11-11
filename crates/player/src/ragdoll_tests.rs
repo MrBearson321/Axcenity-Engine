@@ -381,17 +381,20 @@ pub(super) struct Game {
     agents: Agents,
     physics: Physics,
     animators: Animators,
+    /// The example's copy, which its assets load from.
+    _copy: super::tests::TempCopy,
 }
 
 impl Game {
     pub fn start() -> Self {
-        let folder = std::env::temp_dir().join(format!(
-            "axcenity-player-ragdoll-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&folder);
-        super::tests::copy_folder(&example("hello-character"), &folder);
+        let folder = super::tests::TempCopy::of(
+            &example("hello-character"),
+            &format!(
+                "axcenity-player-ragdoll-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ),
+        );
         let project = axcenity_project::load(&folder).unwrap();
         let mut world = project.world;
         let assets = Assets::new(&folder);
@@ -408,6 +411,7 @@ impl Game {
             characters: Controllers::default(),
             agents: Agents::default(),
             animators,
+            _copy: folder,
         }
     }
 

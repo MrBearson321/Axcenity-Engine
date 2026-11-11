@@ -29,7 +29,7 @@ function Step($name, [scriptblock]$run) {
 Step "Build" { cargo build --workspace --all-targets --locked }
 Step "The player has no editor code" {
     $tree = cargo tree -p axcenity-player -e normal --prefix none --locked
-    $editor = $tree | Select-String -Pattern '^(axcenity-editor|axcenity-blocks|axcenity-plugins|axcenity-cook|intel_tex_2|eframe|egui|subsecond) '
+    $editor = $tree | Select-String -Pattern '^(axcenity-editor|axcenity-blocks|axcenity-plugins|axcenity-cook|axcenity-toolbox|axcenity-mcp|rmcp|intel_tex_2|eframe|egui|subsecond) '
     if ($editor) { $editor; $global:LASTEXITCODE = 1 }
 }
 Step "Clippy" { cargo clippy --workspace --all-targets --locked -- -D warnings }

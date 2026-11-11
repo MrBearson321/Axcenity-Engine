@@ -15,6 +15,7 @@ axcenity-blocks.workspace = true
 axcenity-character.workspace = true
 axcenity-core.workspace = true
 axcenity-gameplay.workspace = true
+axcenity-mcp.workspace = true
 axcenity-mesh-edit.workspace = true
 axcenity-nav.workspace = true
 axcenity-physics.workspace = true
@@ -30,6 +31,7 @@ axcenity-script.workspace = true
 axcenity-sim.workspace = true
 axcenity-terrain.workspace = true
 axcenity-testing.workspace = true
+axcenity-toolbox.workspace = true
 axcenity-ui.workspace = true
 anyhow.workspace = true
 eframe.workspace = true
@@ -45,7 +47,6 @@ regex.workspace = true
 rfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-ureq.workspace = true
 zip.workspace = true
 dioxus-cli-config = { workspace = true, optional = true }
 dioxus-devtools = { workspace = true, optional = true }

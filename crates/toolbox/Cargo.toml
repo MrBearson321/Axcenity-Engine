@@ -1,0 +1,21 @@
+[package]
+name = "axcenity-toolbox"
+description = "The Axcenity Toolbox: finding and fetching assets from online sources (ambientCG, Poly Haven, Openverse) for the editor. Editor only."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+log.workspace = true
+md-5.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
+zip.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true
