@@ -63,8 +63,16 @@ impl FramePass {
     }
 }
 
-/// A stamp before each pass and one after the last.
-const STAMPS: u32 = FramePass::COUNT as u32 + 1;
+/// The sun's cascades, timed within the Shadows pass.
+pub(super) const CASCADES: usize = super::types::SHADOW_CASCADES;
+
+/// A stamp before each pass and one after the last, then one before each
+/// cascade and one after the last cascade.
+const STAMPS: u32 = FramePass::COUNT as u32 + 1 + CASCADES as u32 + 1;
+/// The stamp after the last pass.
+const FRAME_END: u32 = FramePass::COUNT as u32;
+/// The first cascade's stamp.
+const CASCADE_STAMPS: u32 = FramePass::COUNT as u32 + 1;
 const RESULT_BYTES: u64 = STAMPS as u64 * size_of::<u64>() as u64;
 
 /// What became of the last request to read the results.
@@ -82,7 +90,7 @@ pub(super) struct GpuTimer {
     period: f64,
     /// While waiting for `readback` to be read: which passes that frame
     /// drew. No new frame is timed meanwhile, since the buffer is in use.
-    waiting: Option<[bool; FramePass::COUNT]>,
+    waiting: Option<([bool; FramePass::COUNT], [bool; CASCADES])>,
     /// [`PENDING`], [`MAPPED`] or [`FAILED`]: set by the map callback, on
     /// whichever thread polls the device.
     mapped: Arc<AtomicU8>,
@@ -90,6 +98,12 @@ pub(super) struct GpuTimer {
     last: Option<Duration>,
     /// Its passes, `None` for any it didn't draw.
     last_passes: [Option<Duration>; FramePass::COUNT],
+    /// Its sun cascades, `None` for any it didn't draw (off, or kept from
+    /// an earlier frame while the far cascades take turns).
+    last_cascades: [Option<Duration>; CASCADES],
+    /// How many measurements have been read, so a reader can tell a new
+    /// one from the last one again.
+    readings: u64,
 }
 
 impl GpuTimer {
@@ -126,6 +140,8 @@ impl GpuTimer {
             mapped: Arc::new(AtomicU8::new(PENDING)),
             last: None,
             last_passes: [None; FramePass::COUNT],
+            last_cascades: [None; CASCADES],
+            readings: 0,
         })
     }
 
@@ -140,11 +156,21 @@ impl GpuTimer {
         self.last_passes
     }
 
+    /// The GPU time of each sun cascade of the last frame measured.
+    pub(super) fn last_cascades(&self) -> [Option<Duration>; CASCADES] {
+        self.last_cascades
+    }
+
+    /// How many measurements have been read so far.
+    pub(super) fn readings(&self) -> u64 {
+        self.readings
+    }
+
     /// Reads a finished measurement, if one is ready. Returns true if this
     /// frame can be timed (call [`Self::mark`] before each pass, then
     /// [`Self::end`]).
     pub(super) fn collect(&mut self, device: &wgpu::Device) -> bool {
-        let Some(drawn) = self.waiting else {
+        let Some((drawn, cascades)) = self.waiting else {
             return true;
         };
         // Runs the map callback if the GPU has finished, without waiting.
@@ -162,11 +188,23 @@ impl GpuTimer {
                     (end >= start)
                         .then(|| Duration::from_nanos(((end - start) as f64 * self.period) as u64))
                 };
-                if let Some(whole) = between(stamps[0], stamps[STAMPS as usize - 1]) {
+                if let Some(whole) = between(stamps[0], stamps[FRAME_END as usize]) {
                     self.last = Some(whole);
+                    self.readings += 1;
                     for (index, time) in self.last_passes.iter_mut().enumerate() {
                         *time = drawn[index]
                             .then(|| between(stamps[index], stamps[index + 1]))
+                            .flatten();
+                    }
+                    // Each drawn cascade runs to the next drawn one's stamp,
+                    // or to the stamp after the last.
+                    let stamp = |cascade: usize| stamps[CASCADE_STAMPS as usize + cascade];
+                    for index in 0..CASCADES {
+                        let end = (index + 1..CASCADES)
+                            .find(|&next| cascades[next])
+                            .unwrap_or(CASCADES);
+                        self.last_cascades[index] = cascades[index]
+                            .then(|| between(stamp(index), stamp(end)))
                             .flatten();
                     }
                 }
@@ -183,17 +221,27 @@ impl GpuTimer {
         self.stamp(encoder, pass as u32);
     }
 
+    /// Writes the timestamp before sun cascade `cascade`, or after the last
+    /// cascade for `CASCADES`.
+    pub(super) fn mark_cascade(&self, encoder: &mut wgpu::CommandEncoder, cascade: usize) {
+        self.stamp(encoder, CASCADE_STAMPS + cascade as u32);
+    }
+
     /// Writes the timestamp after the last pass, and copies them all where
     /// the CPU can read them.
     pub(super) fn end(&self, encoder: &mut wgpu::CommandEncoder) {
-        self.stamp(encoder, STAMPS - 1);
+        self.stamp(encoder, FRAME_END);
         encoder.resolve_query_set(&self.queries, 0..STAMPS, &self.resolve, 0);
         encoder.copy_buffer_to_buffer(&self.resolve, 0, &self.readback, 0, RESULT_BYTES);
     }
 
     /// Asks to read the timestamps once the frame just submitted is done.
     /// `drawn` says which of its passes drew anything.
-    pub(super) fn submitted(&mut self, drawn: [bool; FramePass::COUNT]) {
+    pub(super) fn submitted(
+        &mut self,
+        drawn: [bool; FramePass::COUNT],
+        cascades: [bool; CASCADES],
+    ) {
         let mapped = self.mapped.clone();
         self.readback
             .slice(..)
@@ -201,7 +249,7 @@ impl GpuTimer {
                 let state = if result.is_ok() { MAPPED } else { FAILED };
                 mapped.store(state, Ordering::Release);
             });
-        self.waiting = Some(drawn);
+        self.waiting = Some((drawn, cascades));
     }
 
     /// An empty compute pass that only writes timestamp `index`.

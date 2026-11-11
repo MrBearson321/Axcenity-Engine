@@ -59,6 +59,9 @@ pub enum Pane {
     /// Missing files, invalid references, import failures, and broken
     /// dependencies (`asset_check.rs`). Starts closed; Check Assets opens it.
     AssetCheck,
+    /// The selected MeshPart's levels of detail (`lod_inspector.rs`).
+    /// Starts closed.
+    LodInspector,
     /// A NavigationAgent's behavior tree in the graph editor
     /// (`behavior_tree.rs`). Starts closed; opening a tree opens it.
     BehaviorTree,
@@ -97,7 +100,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 20] = [
+    pub const CLOSABLE: [Pane; 21] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -108,6 +111,7 @@ impl Pane {
         Pane::Profiler,
         Pane::Mixer,
         Pane::AssetCheck,
+        Pane::LodInspector,
         Pane::BehaviorTree,
         Pane::Dialogue,
         Pane::DataTable,
@@ -133,6 +137,7 @@ impl Pane {
             Pane::Profiler => "Profiler",
             Pane::Mixer => "Mixer",
             Pane::AssetCheck => "Asset Check",
+            Pane::LodInspector => "LOD Inspector",
             Pane::BehaviorTree => "Behavior Tree",
             Pane::Dialogue => "Dialogue",
             Pane::DataTable => "Data Table",
@@ -161,6 +166,7 @@ impl Pane {
             Pane::Profiler => icons::GAUGE,
             Pane::Mixer => icons::FADERS,
             Pane::AssetCheck => icons::LIST,
+            Pane::LodInspector => icons::MAGNIFYING_GLASS,
             Pane::BehaviorTree => icons::BRAIN,
             Pane::Dialogue => icons::CHAT_CIRCLE_TEXT,
             Pane::DataTable => icons::TABLE,
@@ -273,9 +279,12 @@ impl Layout {
             | Pane::Sequencer
             | Pane::ModelStudio => Some(Pane::Scene),
             // A tab beside Properties, down the right.
-            Pane::Terrain | Pane::Tags | Pane::Levels | Pane::Plugins | Pane::Plugin(_) => {
-                Some(Pane::Properties)
-            }
+            Pane::Terrain
+            | Pane::Tags
+            | Pane::Levels
+            | Pane::Plugins
+            | Pane::LodInspector
+            | Pane::Plugin(_) => Some(Pane::Properties),
             Pane::Script(_) => Some(Pane::Scene),
         };
         let beside = neighbor
@@ -594,6 +603,7 @@ mod tests {
             if matches!(
                 pane,
                 Pane::AssetCheck
+                    | Pane::LodInspector
                     | Pane::BehaviorTree
                     | Pane::Dialogue
                     | Pane::DataTable

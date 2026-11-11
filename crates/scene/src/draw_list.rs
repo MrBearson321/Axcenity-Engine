@@ -1354,6 +1354,13 @@ pub(crate) fn model_pieces(model: &Arc<Model>) -> Vec<ModelPiece> {
         .collect()
 }
 
+/// The [`DrawItem::id`] of an Instance's items (a MeshPart's every
+/// primitive shares it), for asking the renderer about them (the editor's
+/// LOD inspector: `TextureRenderer::lod_level_of`, `preview_lod`).
+pub fn item_id(id: InstanceId) -> u64 {
+    draw_id(id)
+}
+
 /// A [`DrawItem::id`] for `thing`: the same for the same thing, and never
 /// 0 (which is none).
 pub(crate) fn draw_id(thing: impl Hash) -> u64 {

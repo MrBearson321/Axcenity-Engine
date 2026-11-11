@@ -28,6 +28,8 @@ Time is `DrawList::time`. The editor keeps drawing frames while the wind blows s
 
 One more instance attribute per item (16 bytes) and a few instructions per corner for items that sway. No pass, target or draw call is added. Items that don't sway skip it on one test.
 
+Measured on Temperate Dry Patch at Ultra 2560 × 1440 (`profile_project`'s `no-wind` and `no-sway`, three cameras; [performance.md](performance.md)): the wind costs 0.01 to 0.14 ms of a 9 ms GPU frame, inside the run-to-run noise. There's nothing per plant on the CPU and nothing updated per object: one `GlobalWind` goes into the frame uniform, and the vertex shader works out each corner's lean, gust and flutter from its world position and the time. Plants out of view, or past their cull distance, aren't drawn, so they cost nothing at all; shadows sway in the shadow pass from the same function, so a plant coming into view or into a cascade is already where it should be. Distance-based wind quality, slower updates far away and visibility-aware simulation were considered and not built, since there's no simulation to schedule and the shader's share of the frame can't be measured apart from noise.
+
 ## Tests
 
 - `render/src/renderer/tests/wind.rs` (GPU): a plant leans toward +X in a wind to +X and toward −X in one to −X, less in a breeze than in a gale, not sideways in a wind toward the camera, and its foot stays put. With no wind, or with no sway, the frame is exactly as still. Its shadow's end moves as many studs as its top does (within 35%; about 1.06 studs each in a 40-stud-a-second wind). A swaying plant just out of view isn't culled where a still one is.

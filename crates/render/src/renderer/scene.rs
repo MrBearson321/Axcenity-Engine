@@ -362,6 +362,7 @@ impl ScenePipeline {
             terrain,
             frame: 0,
             gpu_timer,
+            time_gpu: true,
             counts: FrameCounts::default(),
             frozen_view: None,
             culling_bounds: Vec::new(),
@@ -1066,8 +1067,8 @@ impl ScenePipeline {
             });
         // Times this frame unless the last measurement is still being read.
         let timed = match &mut self.gpu_timer {
-            Some(timer) => timer.collect(&self.device),
-            None => false,
+            Some(timer) if self.time_gpu => timer.collect(&self.device),
+            _ => false,
         };
         let timer = self.gpu_timer.as_ref().filter(|_| timed);
         let mark = |encoder: &mut wgpu::CommandEncoder, pass| {
@@ -1117,11 +1118,24 @@ impl ScenePipeline {
             .iter()
             .flat_map(|map| map.layers.iter().zip(point_casters).enumerate())
             .map(|(index, view)| (SHADOW_CASCADES + MAX_SPOT_SHADOWS + index, view));
+        let mut cascades_timed = [false; SHADOW_CASCADES];
+        let mut cascade_counts = [(0u32, 0u64); SHADOW_CASCADES];
+        let mut after_cascades = false;
         for (index, (layer, (casters, _))) in cascades.chain(spots).chain(points) {
             // A cascade waiting its turn keeps what it drew: not even cleared.
             if index < SHADOW_CASCADES && !cascade_drawn[index] {
                 continue;
             }
+            if let Some(timer) = timer {
+                if index < SHADOW_CASCADES {
+                    timer.mark_cascade(&mut encoder, index);
+                    cascades_timed[index] = true;
+                } else if !after_cascades {
+                    timer.mark_cascade(&mut encoder, SHADOW_CASCADES);
+                    after_cascades = true;
+                }
+            }
+            let (mut view_casters, mut view_triangles) = (0u32, 0u64);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow view"),
                 color_attachments: &[],
@@ -1150,8 +1164,20 @@ impl ScenePipeline {
                 pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
                 count(mesh, instances);
                 shadow_casters_drawn += instances.end - instances.start;
+                view_casters += instances.end - instances.start;
+                view_triangles +=
+                    u64::from(mesh.index_count / 3) * u64::from(instances.end - instances.start);
                 pass.draw_indexed(0..mesh.index_count, 0, instances.clone());
             }
+            drop(pass);
+            if index < SHADOW_CASCADES {
+                cascade_counts[index] = (view_casters, view_triangles);
+            }
+        }
+        if let Some(timer) = timer
+            && !after_cascades
+        {
+            timer.mark_cascade(&mut encoder, SHADOW_CASCADES);
         }
         let frame_bind_group = &self.frame_bind_group;
         mark(&mut encoder, FramePass::Prepass);
@@ -1493,18 +1519,23 @@ impl ScenePipeline {
                 || self.spot_shadow_map.is_some()
                 || self.point_shadow_map.is_some();
             let prepass = self.frame_targets.occlusion.is_some();
-            timer.submitted([
-                shadows,
-                prepass,
-                prepass && ambient_occlusion,
-                self.volumetric_fog.is_some(),
-                self.gpu_particles.is_some(),
-                true,
-                true,
-                turned.drawn || ui_drawn,
-            ]);
+            timer.submitted(
+                [
+                    shadows,
+                    prepass,
+                    prepass && ambient_occlusion,
+                    self.volumetric_fog.is_some(),
+                    self.gpu_particles.is_some(),
+                    true,
+                    true,
+                    turned.drawn || ui_drawn,
+                ],
+                cascades_timed,
+            );
         }
         counts.shadow_casters_drawn = shadow_casters_drawn;
+        counts.cascade_casters = cascade_counts.map(|(casters, _)| casters);
+        counts.cascade_triangles = cascade_counts.map(|(_, triangles)| triangles);
         self.counts = counts;
         match &self.frame_targets.temporal {
             Some(temporal) => self.history.finish(list, view_proj, temporal.has_taa()),
@@ -1809,11 +1840,27 @@ impl ScenePipeline {
             draw_calls: counts.draw_calls,
             triangles: counts.triangles,
             vertices: counts.vertices,
-            gpu_time: self.gpu_timer.as_ref().and_then(gpu_timer::GpuTimer::last),
-            gpu_timing: self.gpu_timer.is_some(),
+            gpu_time: self
+                .gpu_timer
+                .as_ref()
+                .filter(|_| self.time_gpu)
+                .and_then(gpu_timer::GpuTimer::last),
+            gpu_timing: self.gpu_timer.is_some() && self.time_gpu,
+            gpu_readings: self
+                .gpu_timer
+                .as_ref()
+                .map_or(0, gpu_timer::GpuTimer::readings),
+            cascade_times: self
+                .gpu_timer
+                .as_ref()
+                .filter(|_| self.time_gpu)
+                .map_or([None; SHADOW_CASCADES], gpu_timer::GpuTimer::last_cascades),
+            cascade_casters: counts.cascade_casters,
+            cascade_triangles: counts.cascade_triangles,
             pass_times: self
                 .gpu_timer
                 .as_ref()
+                .filter(|_| self.time_gpu)
                 .map_or([None; FramePass::COUNT], gpu_timer::GpuTimer::last_passes),
             items_submitted: counts.items_submitted,
             items_drawn: counts.items_drawn,

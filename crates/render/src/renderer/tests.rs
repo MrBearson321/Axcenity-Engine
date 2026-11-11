@@ -960,6 +960,30 @@ fn stats_time_each_pass_the_frame_draws() {
     }
     let passes: Duration = stats.pass_times.iter().flatten().sum();
     assert!(passes <= stats.gpu_time.unwrap(), "{stats:?}");
+    // Each cascade the preset draws is timed within the shadow pass, and
+    // counts what it drew.
+    let cascades = renderer
+        .graphics()
+        .shadow_quality
+        .map()
+        .map_or(0, |size| size.cascades as usize);
+    assert!(cascades > 0);
+    for cascade in 0..crate::SHADOW_CASCADE_COUNT {
+        assert_eq!(
+            stats.cascade_times[cascade].is_some(),
+            cascade < cascades,
+            "{cascade}"
+        );
+    }
+    // Passes with nothing between them can overlap on the GPU, so a
+    // cascade's time is only bounded by the frame's.
+    for time in stats.cascade_times.iter().flatten() {
+        assert!(*time <= stats.gpu_time.unwrap(), "{stats:?}");
+    }
+    assert!(
+        stats.cascade_casters[0] > 0 && stats.cascade_triangles[0] > 0,
+        "{stats:?}"
+    );
 
     // Both off: no shadow, prepass or occlusion time.
     renderer.set_graphics(&with_occlusion(crate::AmbientOcclusion::Off));
@@ -970,6 +994,7 @@ fn stats_time_each_pass_the_frame_draws() {
         .filter(|&pass| stats.pass_time(pass).is_some())
         .collect();
     assert_eq!(timed, [FramePass::Scene, FramePass::PostProcessing]);
+    assert!(stats.cascade_times.iter().all(Option::is_none));
 }
 
 #[test]

@@ -167,6 +167,8 @@ pub struct EditorApp {
     /// Every selected Instance, in the order they were added. The viewport and
     /// Explorer highlight all of them. Ctrl toggles; Shift extends.
     selection: Vec<InstanceId>,
+    /// The LOD Inspector's preview: this MeshPart drawn at this level.
+    lod_preview: Option<(InstanceId, usize)>,
     /// File > Version History (its timeline, checkpoints, restores and
     /// backups), and the same window after a restore.
     version_history: version_history::VersionHistory,
@@ -463,6 +465,7 @@ impl DockViewer<'_> {
             Pane::Profiler => self.app.profiler.show(ui),
             Pane::Mixer => self.app.mixer_pane(ui),
             Pane::AssetCheck => self.app.asset_check_pane(ui),
+            Pane::LodInspector => self.app.lod_inspector_pane(ui),
             Pane::BehaviorTree => self.app.behavior_tree_pane(ui),
             Pane::Dialogue => self.app.dialogue_pane(ui),
             Pane::DataTable => self.app.data_table_pane(ui),
@@ -782,6 +785,7 @@ impl EditorApp {
             generators: Default::default(),
             selected: None,
             selection: Vec::new(),
+            lod_preview: None,
             version_history: Default::default(),
             input_settings: Default::default(),
             collision_groups: Default::default(),
@@ -1350,6 +1354,15 @@ impl EditorApp {
                 play.mouse()
             });
         self.viewport.hold_cursor(ctx, mouse);
+        // The LOD Inspector's preview lasts while it's open on the part.
+        if let Some((id, _)) = self.lod_preview
+            && (self.selected != Some(id) || !self.layout.is_open(Pane::LodInspector))
+        {
+            self.lod_preview = None;
+        }
+        self.viewport.lod_preview = self
+            .lod_preview
+            .map(|(id, level)| (axcenity_scene::item_id(id), level));
         // However Play ended (Stop, a crash, another project), the
         // Profiler's readings freeze.
         if !self.playing() {

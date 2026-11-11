@@ -127,6 +127,9 @@ pub struct Renderer {
     /// True while the window is minimized (zero-sized), when there's nothing to draw.
     minimized: bool,
     scene: ScenePipeline,
+    /// How long the last frame was blocked getting its picture from the
+    /// window and handing it back (vertical sync, or the GPU behind).
+    present_wait: Duration,
 }
 
 /// Draws a scene into a texture instead of a window, using a GPU device that
@@ -146,6 +149,14 @@ pub struct TextureRenderer {
 /// (see [`RenderStats::lod_items`]).
 pub const LOD_LEVELS: usize = lod::LOD_SCREEN_SIZES.len() + 1;
 
+/// The most cascades the sun's shadows are drawn in (Ultra's four).
+pub const SHADOW_CASCADE_COUNT: usize = gpu_timer::CASCADES;
+
+/// Below these sizes on screen (the share of the view's height an item's
+/// bounding sphere covers), an item draws its first, then second, simpler
+/// copy; it switches back once 15% past the threshold.
+pub const LOD_SCREEN_SIZES: [f32; LOD_LEVELS - 1] = lod::LOD_SCREEN_SIZES;
+
 /// What the last frame drawn cost, for the editor's profiler.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RenderStats {
@@ -161,6 +172,17 @@ pub struct RenderStats {
     /// False when the device can't take timestamps, so `gpu_time` and
     /// `pass_times` stay `None`.
     pub gpu_timing: bool,
+    /// How many GPU measurements have come back so far: a reader that keeps
+    /// every frame's time (`--bench`) takes `gpu_time` only when this grows.
+    pub gpu_readings: u64,
+    /// The GPU's time for each of the sun's shadow cascades (nearest
+    /// first), within the Shadows pass: `None` for one that frame didn't
+    /// draw (off, or kept from an earlier frame while the far cascades take
+    /// turns).
+    pub cascade_times: [Option<Duration>; SHADOW_CASCADE_COUNT],
+    /// Casters and triangles drawn into each cascade this frame.
+    pub cascade_casters: [u32; SHADOW_CASCADE_COUNT],
+    pub cascade_triangles: [u64; SHADOW_CASCADE_COUNT],
     /// The GPU's time for each pass of the frame `gpu_time` measured, in
     /// [`FramePass::ALL`]'s order: `None` for a pass that frame didn't draw
     /// (see [`RenderStats::pass_time`]).
@@ -247,8 +269,12 @@ impl Renderer {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("axcenity device"),
                 // Cooked textures go up as BC7 where the GPU reads it
-                // (every desktop GPU); otherwise they're decoded.
-                required_features: adapter.features() & wgpu::Features::TEXTURE_COMPRESSION_BC,
+                // (every desktop GPU); otherwise they're decoded. Timestamps
+                // are asked for where the GPU has them, for the frame-rate
+                // readout and `--bench`; frames are only timed while
+                // `set_gpu_timing` is on.
+                required_features: adapter.features()
+                    & (wgpu::Features::TEXTURE_COMPRESSION_BC | wgpu::Features::TIMESTAMP_QUERY),
                 ..Default::default()
             })
             .await
@@ -273,13 +299,59 @@ impl Renderer {
         }
         surface.configure(&device, &config);
         let capabilities = read_capabilities(&device, Some(&adapter.get_info()));
+        let mut scene =
+            ScenePipeline::new(device, queue, config.format, width, height, capabilities);
+        scene.time_gpu = false;
 
         Ok(Self {
             surface,
             minimized: false,
-            scene: ScenePipeline::new(device, queue, config.format, width, height, capabilities),
+            scene,
             config,
+            present_wait: Duration::ZERO,
         })
+    }
+
+    /// Times the GPU's frame and passes (in [`Renderer::stats`]) while on,
+    /// where the GPU can take timestamps. Off at first: a timed frame
+    /// costs a few tiny GPU passes and a readback.
+    pub fn set_gpu_timing(&mut self, on: bool) {
+        self.scene.time_gpu = on;
+    }
+
+    /// Whether the GPU can be timed at all.
+    pub fn can_time_gpu(&self) -> bool {
+        self.scene.gpu_timer.is_some()
+    }
+
+    /// Waits for the display's refresh before showing each frame (on, the
+    /// default), or shows frames as soon as they're drawn. `--bench` turns
+    /// it off so frame times are the engine's, not the display's.
+    pub fn set_vsync(&mut self, on: bool) {
+        let mode = if on {
+            wgpu::PresentMode::AutoVsync
+        } else {
+            wgpu::PresentMode::AutoNoVsync
+        };
+        if self.config.present_mode != mode {
+            self.config.present_mode = mode;
+            if !self.minimized {
+                self.surface.configure(&self.scene.device, &self.config);
+            }
+        }
+    }
+
+    /// What the last frame drawn cost: counts, memory and, while
+    /// [`Renderer::set_gpu_timing`] is on, the GPU's times.
+    pub fn stats(&self) -> RenderStats {
+        self.scene.stats()
+    }
+
+    /// How long the last frame was blocked on the window: getting a picture
+    /// to draw into and presenting it. Vertical sync, or a GPU frames
+    /// behind, shows up here rather than as work.
+    pub fn present_wait(&self) -> Duration {
+        self.present_wait
     }
 
     /// Call when the window changes size. Sizes are in physical pixels.
@@ -342,10 +414,14 @@ impl Renderer {
     /// `winit`'s `Window::pre_present_notify`).
     pub fn render(&mut self, list: &DrawList, before_present: impl FnOnce()) -> Result<()> {
         if self.minimized {
+            self.present_wait = Duration::ZERO;
             return Ok(());
         }
 
-        let frame = match self.surface.get_current_texture() {
+        let acquiring = std::time::Instant::now();
+        let acquired = self.surface.get_current_texture();
+        self.present_wait = acquiring.elapsed();
+        let frame = match acquired {
             Ok(frame) => frame,
             // The surface no longer matches the window (for example, it moved
             // to another monitor). Reconfigure and draw on the next frame.
@@ -365,7 +441,9 @@ impl Renderer {
         self.scene
             .draw(list, &view, aspect, (self.config.width, self.config.height))?;
         before_present();
+        let presenting = std::time::Instant::now();
         frame.present();
+        self.present_wait += presenting.elapsed();
         Ok(())
     }
 }
@@ -469,6 +547,19 @@ impl TextureRenderer {
         if camera.is_none() {
             self.scene.culling_bounds = Vec::new();
         }
+    }
+
+    /// The editor's LOD preview: draws the item with this
+    /// [`crate::DrawItem::id`] (`scene::item_id`) at this level whatever its
+    /// size, or every item as usual for `None`. Only what's drawn changes.
+    pub fn preview_lod(&mut self, item: Option<(u64, usize)>) {
+        self.scene.lods.forced = item;
+    }
+
+    /// The level of detail the item with this [`crate::DrawItem::id`] was
+    /// last drawn at, if its mesh has levels and it was drawn lately.
+    pub fn lod_level_of(&self, id: u64) -> Option<usize> {
+        self.scene.lods.level_of(id)
     }
 
     /// Shows `view` in place of the lit scene from the next frame, or the

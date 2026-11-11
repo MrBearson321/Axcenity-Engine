@@ -188,6 +188,13 @@ fn the_built_in_commands_change_the_game_and_bad_ones_say_why() {
     app.tap(KeyCode::F9);
     app.type_line("fps");
     assert!(app.dev.show_fps && app.console_said("fps on"));
+    // `fps full` switches to the detailed readout; typed again it hides.
+    app.type_line("fps full");
+    assert!(app.dev.show_fps && app.dev.fps_full && app.console_said("fps full on"));
+    app.type_line("fps full");
+    assert!(!app.dev.show_fps && app.console_said("fps full off"));
+    app.type_line("fps");
+    assert!(app.dev.show_fps && !app.dev.fps_full);
     app.type_line("collisions");
     assert!(app.dev.collisions);
     app.type_line("wireframe");

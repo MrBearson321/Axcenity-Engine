@@ -143,6 +143,9 @@ type LodKey = (u64, u64);
 #[derive(Default)]
 pub(super) struct LodStates {
     states: FxHashMap<LodKey, Mutex<LodState>>,
+    /// The editor's LOD preview: the item with this [`DrawItem::id`] is
+    /// drawn at this level whatever its size, with no fade.
+    pub(super) forced: Option<(u64, usize)>,
 }
 
 /// What [`LodStates::resolve`] gives a frame.
@@ -166,6 +169,14 @@ struct Part<'a> {
 }
 
 impl LodStates {
+    /// The level the item with this [`DrawItem::id`] was last drawn at (the
+    /// one coming in, while it cross-fades), if it has levels.
+    pub(super) fn level_of(&self, id: u64) -> Option<usize> {
+        self.states.iter().find_map(|(&(item, _), state)| {
+            (item == id).then(|| state.lock().unwrap_or_else(PoisonError::into_inner).level)
+        })
+    }
+
     /// The copies of `list`'s items that frame `frame` draws, each with its
     /// level and fade. A group of items outside `reach` (what the frame's
     /// views see, or `None` to keep everything) is passed over whole, and
@@ -179,6 +190,7 @@ impl LodStates {
     ) -> Resolved<'a> {
         let camera = &list.camera;
         let states = &self.states;
+        let forced = self.forced;
         let mut parts = map_parts(&list.items, |items| {
             let mut part = Part {
                 draws: Vec::with_capacity(items.len()),
@@ -186,7 +198,7 @@ impl LodStates {
                 ..Part::default()
             };
             for item in items {
-                resolve_item(states, item, camera, frame, &mut part);
+                resolve_item(states, item, camera, frame, forced, &mut part);
             }
             part
         });
@@ -219,7 +231,7 @@ impl LodStates {
                         continue;
                     }
                 }
-                resolve_item(states, item, camera, frame, &mut part);
+                resolve_item(states, item, camera, frame, forced, &mut part);
             }
             part
         }));
@@ -254,6 +266,7 @@ fn resolve_item<'a>(
     item: &'a DrawItem,
     camera: &Camera,
     frame: u64,
+    forced: Option<(u64, usize)>,
     part: &mut Part<'a>,
 ) {
     let mut draw = Draw::of(item);
@@ -285,6 +298,12 @@ fn resolve_item<'a>(
         level: Some(level),
         ..draw.clone()
     };
+    if let Some((id, level)) = forced
+        && id == item.id
+    {
+        part.draws.push(with_level(level.min(levels)));
+        return;
+    }
     if item.id == 0 {
         part.draws.push(with_level(lod_level(size, None, levels)));
         return;
@@ -384,7 +403,7 @@ mod tests {
                 decal_role: Default::default(),
             };
             let mut part = Part::default();
-            resolve_item(&FxHashMap::default(), &item, &camera, 0, &mut part);
+            resolve_item(&FxHashMap::default(), &item, &camera, 0, None, &mut part);
             part.draws.first().map(|draw| draw.casts_shadow)
         };
         assert_eq!(casts(20.0, 100.0), Some(true), "near");
