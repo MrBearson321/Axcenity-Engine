@@ -792,8 +792,26 @@ fn script_write_makes_and_edits_scripts_as_undoable_file_changes() {
         json!({"path": "scripts/Spinner.server.lua", "text": "local x = \nprint(\n"}),
     );
     assert!(
-        text.contains("· syntax error scripts/Spinner.server.lua:"),
+        text.starts_with("syntax error scripts/Spinner.server.lua:"),
         "{text}"
+    );
+    assert!(text.contains("won't run"), "{text}");
+    assert!(
+        text.contains("\nwrote scripts/Spinner.server.lua"),
+        "{text}"
+    );
+    // Sending the same broken code again is an error that still names it.
+    let error = call(
+        host,
+        "script_write",
+        json!({"path": "scripts/Spinner.server.lua", "text": "local x = \nprint(\n"}),
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("still has a syntax error scripts/Spinner.server.lua:"),
+        "{error}"
     );
     // A Script using an API only clients have is warned about.
     let text = ok(
@@ -2457,4 +2475,73 @@ fn render_stats_reads_the_viewports_last_frame_and_says_why_without_a_window() {
     assert!(text.contains("Draws 42 calls"), "{text}");
     assert!(text.contains("GPU memory"), "{text}");
     assert!(!text.contains("Play"), "nothing played: {text}");
+}
+
+/// What a small local model tripped on (gpt-oss-20b on Paul's PC): each
+/// message now says where to go next.
+#[test]
+fn errors_a_small_model_tripped_on_point_to_the_right_tool() {
+    let mut opened = open("hello-part", "mcp-small-model");
+    let host = &mut opened.app;
+    // Scripts aren't object kinds: object_create says to use script_write.
+    let error = call(
+        host,
+        "object_create",
+        json!({"kind": "script", "parent": "Workspace/Block"}),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("use script_write"), "{error}");
+    assert!(
+        ok(host, "docs", json!({"class": "Script"})).contains("use script_write"),
+        "docs class=Script"
+    );
+    assert!(ok(host, "docs", json!({})).contains("scripts: script_write"));
+    // An empty filter is no filter: the tree, not "0 matches".
+    let tree = ok(
+        host,
+        "scene_inspect",
+        json!({"root": "Workspace", "tag": ""}),
+    );
+    assert!(tree.contains("\"Block\""), "{tree}");
+    // A kind given as a class says which class it makes.
+    let error = call(host, "scene_inspect", json!({"class": "Block"})).unwrap_err();
+    assert!(error.to_string().contains("its class is Part"), "{error}");
+    // Setting what's already set says so, without "changed".
+    let text = ok(
+        host,
+        "object_set",
+        json!({"id": "Workspace/Block", "props": {"Anchored": true}}),
+    );
+    let again = ok(
+        host,
+        "object_set",
+        json!({"id": "Workspace/Block", "props": {"Anchored": true}}),
+    );
+    assert!(!again.starts_with("changed"), "{text}\n{again}");
+    assert!(again.contains("already had those values"), "{again}");
+    // Saving with nothing to save asks nothing (Block was anchored already).
+    let saved = ok(host, "project_save", json!({}));
+    assert!(saved.starts_with("nothing to save"), "{saved}");
+    // A bare name says where the object called that is.
+    let error = call(host, "object_get", json!({"id": "Block"})).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("did you mean \"Workspace/Block\" (ID "),
+        "{error}"
+    );
+    // A name searched as a tag says to search by name.
+    let found = ok(host, "scene_inspect", json!({"tag": "Block"}));
+    assert!(
+        found.contains("no object has the tag \"Block\"; 1 is named that"),
+        "{found}"
+    );
+    // A new script given a path under a part says how to make one.
+    let error = call(
+        host,
+        "script_write",
+        json!({"path": "Workspace/Block/TouchScript", "text": "print(1)"}),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("give name and side"), "{error}");
 }

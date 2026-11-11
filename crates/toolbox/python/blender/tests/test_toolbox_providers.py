@@ -72,7 +72,9 @@ class FakeToolbox:
 @unittest.skipIf(PACKAGE is None, "set AXCENITY_TOOLBOX_PYTHON to the engine's crates/toolbox/python")
 class ToolboxBackedTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="pipeline_toolbox_"))
+        # Resolved: Windows' %TEMP% can be an 8.3 short path (LONGNA~1), and
+        # AssetLibrary stores resolved paths.
+        self.tmp = Path(tempfile.mkdtemp(prefix="pipeline_toolbox_")).resolve()
         self.lib = AssetLibrary(self.tmp / "library")
         self.lib.ensure_layout()
         self.central = self.tmp / "central"
@@ -135,6 +137,15 @@ class ToolboxBackedTests(unittest.TestCase):
         self.lib.add_download(rec.key, res, folder, files, maps, urls)
         self.assertTrue(self.lib.has_download(rec.key, "1k"))
         self.assertEqual(self.lib.maps(rec.key, "1k")[pb.ROUGHNESS], maps[pb.ROUGHNESS])
+
+    def test_a_model_asks_for_its_gltf_bundle(self):
+        crate = dict(BRICK, id="wooden_crate_01", kind="model", name="Wooden Crate 01")
+        provider = self.provider(rows=[crate])
+        rec = provider.info("wooden_crate_01")
+        # The stand-in only has maps, so there's no model file: an error, not a crate.
+        with self.assertRaises(providers.PipelineError):
+            provider.download(rec, "1k")
+        self.assertEqual(provider._tb.calls[-1], ("fetch", "polyhaven:wooden_crate_01", "1k", "gltf"))
 
     def test_without_the_toolbox_the_python_provider_answers(self):
         provider = tb.backed(PolyHaven)(self.lib, offline=True)

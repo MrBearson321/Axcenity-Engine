@@ -182,7 +182,19 @@ fn main() -> eframe::Result {
     }
     if first.as_deref() == Some(app::mcp::FLAG.as_ref()) {
         // An MCP server for AI clients, without a window (`app/mcp.rs`).
-        let served = app::mcp::run_from_command_line(args);
+        // It builds the whole editor state, which a debug build keeps on
+        // the stack for a while: more than the 1 MB Windows gives the main
+        // thread. So it runs on a thread of its own with room to spare.
+        let args: Vec<std::ffi::OsString> = args.collect();
+        let served = std::thread::Builder::new()
+            .name("mcp main".into())
+            .stack_size(app::mcp::STACK_SIZE)
+            .spawn(move || app::mcp::run_from_command_line(args.into_iter()))
+            .map(|thread| thread.join().unwrap_or(false))
+            .unwrap_or_else(|error| {
+                eprintln!("axcenity-editor --mcp: could not start: {error}");
+                false
+            });
         std::process::exit(if served { 0 } else { 1 });
     }
     if first.as_deref() == Some(build_game::BUILD_FLAG.as_ref()) {

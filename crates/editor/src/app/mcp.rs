@@ -74,6 +74,12 @@ pub(crate) use render_stats::LastDrawn;
 /// The command-line flag that starts the server.
 pub(crate) const FLAG: &str = "--mcp";
 
+/// The stack the server's thread gets (`main.rs`): the editor's state is
+/// built on it, which takes more than Windows' 1 MB main-thread stack in a
+/// debug build. `mcp_stdio`'s tests start the binary with a 1 MB stack
+/// limit to keep it honest.
+pub(crate) const STACK_SIZE: usize = 64 * 1024 * 1024;
+
 /// The toolkit's own version, separate from the engine's: tool names and
 /// what their parameters mean only change with its major version.
 pub(crate) const TOOLKIT_VERSION: &str = "0.1.0";

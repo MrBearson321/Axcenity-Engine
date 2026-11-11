@@ -321,6 +321,7 @@ fn every_searchable_setting_is_found_on_its_page() {
             "Steady frame rate" => Some("settings-found.png"),
             "Show the movement guide" => Some("settings-viewport.png"),
             "Input…" => Some("settings-project.png"),
+            "Your name and colour" => Some("settings-team-create.png"),
             _ => None,
         };
         if let Some(picture) = picture

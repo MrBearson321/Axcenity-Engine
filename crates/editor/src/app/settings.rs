@@ -31,6 +31,8 @@ pub(super) enum SettingsPage {
     Updates,
     /// MCP clients working in this window (`app/mcp/live.rs`).
     Ai,
+    /// Name, colour and invite defaults (`app/team_panel.rs`).
+    TeamCreate,
     /// Only in a debug editor run from the source tree (`engine.rs`).
     Engine,
     /// The open project's own settings, which live in its folder. Listed
@@ -39,7 +41,7 @@ pub(super) enum SettingsPage {
 }
 
 impl SettingsPage {
-    const ALL: [SettingsPage; 11] = [
+    const ALL: [SettingsPage; 12] = [
         SettingsPage::Appearance,
         SettingsPage::Typography,
         SettingsPage::Layout,
@@ -49,6 +51,7 @@ impl SettingsPage {
         SettingsPage::Accessibility,
         SettingsPage::Updates,
         SettingsPage::Ai,
+        SettingsPage::TeamCreate,
         SettingsPage::Engine,
         SettingsPage::Project,
     ];
@@ -64,6 +67,7 @@ impl SettingsPage {
             SettingsPage::Accessibility => "Accessibility",
             SettingsPage::Updates => "Updates",
             SettingsPage::Ai => "AI connections",
+            SettingsPage::TeamCreate => "Team Create",
             SettingsPage::Engine => "Engine",
             SettingsPage::Project => "This project",
         }
@@ -80,6 +84,7 @@ impl SettingsPage {
             SettingsPage::Accessibility => icons::EYE,
             SettingsPage::Updates => icons::ARROW_CIRCLE_UP,
             SettingsPage::Ai => icons::ROBOT,
+            SettingsPage::TeamCreate => icons::USERS_THREE,
             SettingsPage::Engine => icons::HAMMER,
             SettingsPage::Project => icons::FOLDER_SIMPLE,
         }
@@ -173,6 +178,7 @@ impl EditorApp {
                                 }
                                 SettingsPage::Updates => self.updates_page(ui),
                                 SettingsPage::Ai => self.ai_page(ui),
+                                SettingsPage::TeamCreate => self.team_settings_page(ui),
                                 SettingsPage::Engine => self.engine_page(ui),
                                 SettingsPage::Project => self.project_page(ui),
                             });
@@ -945,6 +951,23 @@ pub(super) const SEARCHABLE: &[SearchableSetting] = {
             "Allow AI connections",
             &["MCP", "Claude Code", "Cursor", "Codex", "AI agent"],
             "Let AI clients work in this window instead of a copy without one.",
+        ),
+        setting(
+            TeamCreate,
+            "Your name and colour",
+            &[
+                "Team Create name",
+                "Collaborator colour",
+                "Identity",
+                "Device key",
+            ],
+            "How others see you in a Team Create session.",
+        ),
+        setting(
+            TeamCreate,
+            "New invites",
+            &["Invite link", "Invite expiry", "Default invite role"],
+            "The role new Team Create invites give, and how long they work.",
         ),
     ]
 };

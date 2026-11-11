@@ -55,12 +55,12 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
     let written = write(host, &format!("Change {what}"), |world| {
         apply(world, &change)
     })?;
-    Ok(format!(
-        "changed {}: {}{}",
-        objects(&host.app.world, &change.ids),
-        written.value.join(", "),
-        written.undo_note()
-    ))
+    let what = objects(&host.app.world, &change.ids);
+    let props = written.value.join(", ");
+    Ok(match written.undo {
+        Some(_) => format!("changed {what}: {props}{}", written.undo_note()),
+        None => format!("{what} already had those values ({props}) · nothing changed"),
+    })
 }
 
 /// `17 Part "Door"` for one object, `3 objects` for more.

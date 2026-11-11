@@ -28,6 +28,13 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
         return Err(ToolError::new(Code::Busy, "the game is playing")
             .with_fix("stop Play in the editor, then save"));
     }
+    // Nothing to write: say so, with no token to come back with.
+    if !host.app.unsaved() {
+        return Ok(format!(
+            "nothing to save: {} has no changes since it was saved",
+            quoted(&name)
+        ));
+    }
     let steps = host.app.history.undo_labels().len();
     let preview = if host.app.history.is_saved() {
         format!(

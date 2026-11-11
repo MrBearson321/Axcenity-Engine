@@ -79,7 +79,7 @@ pub fn call(_host: &mut Host, args: &Args) -> Outcome {
     }
     let classes: Vec<&str> = ClassName::ALL.iter().map(|class| class.as_str()).collect();
     Ok(format!(
-        "docs: give class (its properties), class + property, or query (search the script API).\nclasses: {}\nobject_create kinds: {}",
+        "docs: give class (its properties), class + property, or query (search the script API).\nclasses: {}\nobject_create kinds: {}\nscripts: script_write makes and changes them",
         classes.join(", "),
         super::object_create::offered().join(", ")
     ))
@@ -151,6 +151,12 @@ fn class_page(class: ClassName) -> String {
         line.push_str(&format!(": {doc}"));
     }
     let mut text = line;
+    if super::object_create::is_script_class(class.as_str()) {
+        text.push_str(&format!(
+            "\nto make one: {}",
+            super::object_create::SCRIPT_FIX
+        ));
+    }
     let mut properties = class.default_properties();
     properties.sort_by_key(|(name, _)| *name);
     text.push_str("\nproperties (name type default · meaning):");
