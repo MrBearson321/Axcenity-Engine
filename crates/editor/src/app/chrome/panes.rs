@@ -998,6 +998,13 @@ impl EditorApp {
                             poses: sequence
                                 .map(crate::sequencer::Preview::poses)
                                 .or(self.play.as_ref().map(|play| play.poses())),
+                            // A Sequencer preview draws its own poses, not
+                            // the game's.
+                            blends: self
+                                .play
+                                .as_ref()
+                                .filter(|_| sequence.is_none())
+                                .map(|play| play.blends()),
                             terrain_brush,
                             constraint_pick: self
                                 .constraint_tool

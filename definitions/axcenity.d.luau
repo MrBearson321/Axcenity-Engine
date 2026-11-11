@@ -1426,6 +1426,8 @@ declare extern type Workspace extends Instance with
 	Gravity: number
 	--- The most decals `workspace:SpawnDecal` keeps at once on each side: 200 by default. Past it, the oldest goes first.
 	MaxSpawnedDecals: number
+	--- On (the default), moving parts are drawn smoothly between physics steps, which run 60 times a second, so they don't move in steps on faster screens. What's drawn trails the simulation by under a step; scripts, touches and the network still see the stepped values. Off, parts are drawn where the last step left them.
+	PhysicsInterpolation: boolean
 	--- On, each device only has what's near it (world streaming): joined players' devices are sent only what's within their radius, and the rest stays off the GPU. Off by default, so a project plays exactly as before.
 	StreamingEnabled: boolean
 	--- Everything nearer than this many studs is always loaded: 64 by default.

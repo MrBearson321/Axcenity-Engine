@@ -1854,6 +1854,13 @@ impl ScriptRuntime {
         self.client.step_camera(world, seconds)
     }
 
+    /// What a Follow or Track camera follows (`CameraSubject`), if it's one
+    /// of those: physics keeps it drawn where it's stepped, with
+    /// everything welded to it (roadmap G3).
+    pub fn camera_followed(&self) -> Option<InstanceId> {
+        self.client.camera_followed()
+    }
+
     /// Whether scripts hold the camera (`CameraType` isn't Custom): the
     /// host then leaves its fly camera where it is, and doesn't draw from
     /// a character controller.

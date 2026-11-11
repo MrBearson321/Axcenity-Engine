@@ -1099,6 +1099,9 @@ impl ClassName {
                 // The most decals `SpawnDecal` keeps at once: past it, the
                 // oldest goes first.
                 ("MaxSpawnedDecals", Value::Number(200.0)),
+                // On, moving parts are drawn between physics steps
+                // (roadmap G3, `physics::blend`); only drawing changes.
+                ("PhysicsInterpolation", Value::Bool(true)),
                 // World streaming (Phase 80). On, each device only has
                 // what's near it: the rest stays off it and off the GPU.
                 ("StreamingEnabled", Value::Bool(false)),

@@ -6,6 +6,7 @@
 //! - [`FlyCamera`] is the camera both of them look through.
 //! - [`Particles`] moves ParticleEmitters' particles and draws them as sprites.
 //! - [`TerrainCache`] keeps Terrains' chunk meshes and weights between frames.
+//! - [`Blends`] draws moving parts between physics steps.
 //! - [`sun_direction`] is where the sun is at a time of day and latitude.
 //! - [`asset_files`] lists the models, textures and material files drawing a
 //!   world reads.
@@ -14,6 +15,9 @@
 //! - [`rotation_from_orientation`] and back turn a Part's `Orientation` into
 //!   a rotation, for drawing and for the editor's rotate tool.
 
+mod blend;
+#[cfg(test)]
+mod blend_tests;
 mod camera;
 mod clouds;
 mod color_grading;
@@ -41,6 +45,7 @@ mod terrain;
 mod time_of_day;
 mod weather;
 
+pub use blend::Blends;
 pub use camera::{FlyCamera, MoveKeys};
 pub use draw_list::{
     LightMarker, MarkerKind, Mount, Poses, UiFrame, attach_ui_textures, build_draw_list,
