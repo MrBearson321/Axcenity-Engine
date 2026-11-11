@@ -37,15 +37,28 @@ impl EditorApp {
         self.begin_open_in_level(ctx, folder, None);
     }
     /// [`Self::begin_open`], in the level `level` (`None`: the start level).
+    /// A project from an older Axcenity waits for "Upgrade this project?",
+    /// and one this version can't open is refused (`project_upgrade.rs`).
     pub(super) fn begin_open_in_level(
         &mut self,
         ctx: &egui::Context,
         folder: &Path,
         level: Option<String>,
     ) {
-        if self.loading.is_some() {
+        if self.loading.is_some() || self.upgrade_prompt.is_some() {
             return;
         }
+        if self.may_open(folder, level.as_deref()) {
+            self.start_loading(ctx, folder, level);
+        }
+    }
+    /// Starts the loading thread for `folder`.
+    pub(super) fn start_loading(
+        &mut self,
+        ctx: &egui::Context,
+        folder: &Path,
+        level: Option<String>,
+    ) {
         let mut terrain = TerrainCache::new();
         terrain.view = self.viewport.terrain.view;
         terrain.detail_distance = self.viewport.terrain.detail_distance;
@@ -145,7 +158,7 @@ impl EditorApp {
             });
         ctx.request_repaint();
     }
-    fn open_failed(&mut self, folder: &Path, err: &str) {
+    pub(super) fn open_failed(&mut self, folder: &Path, err: &str) {
         self.output.error(format!(
             "Could not open the project in `{}`: {err}",
             folder.display()
@@ -159,16 +172,7 @@ impl EditorApp {
         level: Option<String>,
     ) {
         if let Some(from) = project.migrated_from {
-            let kept = project
-                .migration_backup
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| axcenity_project::PREVIOUS_FORMAT_DIR.to_owned());
-            self.output.info(format!(
-                "Upgraded \"{}\" from project format {from} to {}. The previous files are kept in `{kept}`.",
-                project.manifest.name,
-                axcenity_project::FORMAT_VERSION,
-            ));
+            self.report_upgrade(&project, from);
         }
 
         // The last project's cooking stops when it's dropped here.

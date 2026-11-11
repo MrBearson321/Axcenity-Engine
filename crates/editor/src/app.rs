@@ -55,6 +55,7 @@ mod nav_overlay;
 mod plugins;
 mod prefabs;
 mod probes;
+mod project_upgrade;
 mod search;
 mod sequencer;
 mod session;
@@ -215,6 +216,8 @@ pub struct EditorApp {
     build: BuildSettings,
     /// Something waiting for an answer to "Save changes?".
     asking: Option<Discard>,
+    /// An older project waiting for "Upgrade this project?".
+    upgrade_prompt: Option<project_upgrade::UpgradePrompt>,
     /// Set once closing has been allowed, so the window's close request
     /// isn't stopped again.
     closing: bool,
@@ -834,6 +837,7 @@ impl EditorApp {
             build: BuildSettings::default(),
             pending_emits: Vec::new(),
             asking: None,
+            upgrade_prompt: None,
             closing: false,
             output: Output::default(),
             console: Console::default(),
@@ -1623,6 +1627,7 @@ impl EditorApp {
         self.save_layout_dialog(ctx);
         self.references_window(ctx);
         self.unsaved_changes_prompt(ctx);
+        self.upgrade_prompt(ctx);
         self.delete_script_prompt(ctx);
         self.sky_prompt(ctx);
         self.import_dropped(ctx);

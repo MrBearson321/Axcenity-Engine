@@ -11,6 +11,7 @@ axcenity-anim.workspace = true
 axcenity-assets.workspace = true
 axcenity-blocks-runtime.workspace = true
 axcenity-core.workspace = true
+axcenity-release.workspace = true
 axcenity-terrain.workspace = true
 notify.workspace = true
 serde.workspace = true
