@@ -24,6 +24,7 @@ use super::view::{bounds, pick_face};
 use super::{Mode, ModelStudio, Snapshot, StudioDoc};
 use crate::responsive;
 use crate::screen::Screen;
+use crate::shortcuts::{self, Action};
 use crate::theme::{self, icons};
 use crate::widgets::{self, Role};
 
@@ -801,9 +802,10 @@ impl ModelStudio {
             if let Some(at) = pointer {
                 self.follow_bone_move(screen, at);
             }
-            if pressed || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if pressed || ui.input(|i| shortcuts::pressed(i, Action::FinishBoneMove)) {
                 self.finish_bone_move();
-            } else if response.secondary_clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            } else if response.secondary_clicked()
+                || ui.input(|i| shortcuts::pressed(i, Action::CancelBoneMove))
             {
                 self.cancel_bone_move();
             }
@@ -857,20 +859,20 @@ impl ModelStudio {
         if self.rig.moving.is_some() {
             return;
         }
-        let none = egui::Modifiers::NONE;
-        let key = |ui: &mut egui::Ui, key| ui.input_mut(|input| input.consume_key(none, key));
+        let key =
+            |ui: &mut egui::Ui, action| ui.input_mut(|input| shortcuts::consume(input, action));
         match mode {
             Mode::Armature => {
-                if key(ui, egui::Key::E) {
+                if key(ui, Action::ExtrudeBone) {
                     self.extrude_bone(Some(at));
-                } else if key(ui, egui::Key::G) {
+                } else if key(ui, Action::MoveBone) {
                     self.begin_bone_move(at, "Move Bone", None);
-                } else if key(ui, egui::Key::X) || key(ui, egui::Key::Delete) {
+                } else if key(ui, Action::DeleteBone) {
                     self.delete_bone();
                 }
             }
             Mode::Pose => {
-                if key(ui, egui::Key::R)
+                if key(ui, Action::TurnBone)
                     && let Some(bone) = self.active_bone()
                 {
                     let count = self
@@ -893,10 +895,8 @@ impl ModelStudio {
                 }
             }
             Mode::Weights => {
-                let (smaller, bigger) = (
-                    key(ui, egui::Key::OpenBracket),
-                    key(ui, egui::Key::CloseBracket),
-                );
+                let (smaller, bigger) =
+                    (key(ui, Action::BrushSmaller), key(ui, Action::BrushBigger));
                 let brush = &mut self.rig.brush;
                 if smaller {
                     brush.radius = (brush.radius / 1.15).max(1.0);

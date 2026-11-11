@@ -275,7 +275,7 @@ impl UiDesigner {
         if ui
             .add(
                 egui::Button::new(theme::with_icon(icons::COPY, "Duplicate"))
-                    .shortcut_text(ui.ctx().format_shortcut(&crate::app::DUPLICATE_SHORTCUT)),
+                    .shortcut_text(crate::shortcuts::Action::Duplicate.menu_text(ui.ctx())),
             )
             .clicked()
         {
@@ -298,7 +298,7 @@ impl UiDesigner {
         if ui
             .add(
                 egui::Button::new(theme::with_icon(icons::TRASH, "Delete"))
-                    .shortcut_text(crate::app::DELETE_KEY_TEXT),
+                    .shortcut_text(crate::shortcuts::Action::Delete.menu_text(ui.ctx())),
             )
             .on_hover_text("Ctrl+Z brings it back")
             .clicked()
@@ -328,18 +328,21 @@ impl UiDesigner {
         let mut by = [0.0_f32; 2];
         let mut ten = false;
         ctx.input_mut(|input| {
-            for (key, step) in [
-                (egui::Key::ArrowLeft, [-1.0, 0.0]),
-                (egui::Key::ArrowRight, [1.0, 0.0]),
-                (egui::Key::ArrowUp, [0.0, -1.0]),
-                (egui::Key::ArrowDown, [0.0, 1.0]),
-            ] {
-                // Shift first: a plain arrow's pattern matches it too.
-                let far = input.count_and_consume_key(egui::Modifiers::SHIFT, key);
-                let near = input.count_and_consume_key(egui::Modifiers::NONE, key);
-                ten |= far > 0;
-                for axis in 0..2 {
-                    by[axis] += step[axis] * (far as f32 * 10.0 + near as f32);
+            use crate::shortcuts::{Action, count};
+            // Shift first: a plain arrow's pattern matches it too.
+            for (action, pixels) in [(Action::NudgeTen, 10.0), (Action::Nudge, 1.0)] {
+                for (key, times) in count(input, action) {
+                    let step = match key {
+                        egui::Key::ArrowLeft => [-1.0, 0.0],
+                        egui::Key::ArrowRight => [1.0, 0.0],
+                        egui::Key::ArrowUp => [0.0, -1.0],
+                        egui::Key::ArrowDown => [0.0, 1.0],
+                        _ => [0.0, 0.0],
+                    };
+                    ten |= pixels > 1.0 && times > 0;
+                    for axis in 0..2 {
+                        by[axis] += step[axis] * pixels * times as f32;
+                    }
                 }
             }
         });
@@ -359,19 +362,17 @@ impl UiDesigner {
 
         // Ctrl+C and Ctrl+V come as Copy and Paste events from the window;
         // the keys themselves are taken too.
-        let copy_key = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);
-        let paste_key = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::V);
         let ours = self
             .clipboard
             .as_ref()
             .map(|clipboard| clipboard.prefab.clone());
         let (copy, paste) = ctx.input_mut(|input| {
-            let copy = input.consume_shortcut(&copy_key)
+            let copy = crate::shortcuts::consume(input, crate::shortcuts::Action::CopyElements)
                 || input
                     .events
                     .iter()
                     .any(|event| matches!(event, egui::Event::Copy));
-            let paste = input.consume_shortcut(&paste_key)
+            let paste = crate::shortcuts::consume(input, crate::shortcuts::Action::PasteElements)
                 || input.events.iter().any(|event| match event {
                     egui::Event::Paste(text) => ours
                         .as_deref()

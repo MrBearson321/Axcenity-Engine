@@ -24,6 +24,7 @@ use axcenity_render::glam::{Affine2, Vec2};
 use eframe::egui;
 
 use super::{ModalKind, Mode, ModelStudio, Snapshot, StudioDoc};
+use crate::shortcuts::{self, Action};
 use crate::theme::{self, icons};
 use crate::widgets;
 
@@ -496,7 +497,7 @@ impl ModelStudio {
     /// U in the 3D view, in Edit mode: opens the UV menu at the mouse.
     pub(super) fn uv_keys(&mut self, ui: &mut egui::Ui, pointer: egui::Pos2) -> bool {
         let edit = self.doc.as_ref().is_some_and(|doc| doc.mode == Mode::Edit);
-        if edit && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::U)) {
+        if edit && ui.input_mut(|i| shortcuts::consume(i, Action::UvMenu)) {
             self.uv.menu = Some(pointer);
             return true;
         }
@@ -607,19 +608,19 @@ impl ModelStudio {
 
     /// The pane's keys while the mouse is over it.
     fn uv_pane_keys(&mut self, ui: &mut egui::Ui, screen: &UvScreen) {
-        let none = egui::Modifiers::NONE;
         let pointer = ui
             .input(|i| i.pointer.latest_pos())
             .unwrap_or(screen.rect.center());
         if let Some(modal) = &mut self.uv.modal {
             let (lock, enter, escape) = ui.input_mut(|i| {
-                let lock = [egui::Key::X, egui::Key::Y]
+                // U, then V.
+                let lock = shortcuts::consume_each(i, Action::LockUvAxis)
                     .into_iter()
-                    .position(|key| i.consume_key(none, key));
+                    .position(|pressed| pressed);
                 (
                     lock,
-                    i.consume_key(none, egui::Key::Enter),
-                    i.consume_key(none, egui::Key::Escape),
+                    shortcuts::consume(i, Action::FinishUvMove),
+                    shortcuts::consume(i, Action::CancelUvMove),
                 )
             });
             if let Some(axis) = lock {
@@ -637,16 +638,17 @@ impl ModelStudio {
             return;
         }
         let keys = ui.input_mut(|i| {
+            // Alt+P before P, whose pattern takes Alt too.
             [
-                (egui::Modifiers::ALT, egui::Key::P),
-                (none, egui::Key::P),
-                (none, egui::Key::V),
-                (none, egui::Key::A),
-                (none, egui::Key::G),
-                (none, egui::Key::R),
-                (none, egui::Key::S),
+                Action::Unpin,
+                Action::Pin,
+                Action::Stitch,
+                Action::SelectAllUvs,
+                Action::GrabUvs,
+                Action::TurnUvs,
+                Action::ResizeUvs,
             ]
-            .map(|(modifiers, key)| i.consume_key(modifiers, key))
+            .map(|action| shortcuts::consume(i, action))
         });
         let [unpin, pin, stitch, all, grab, rotate, scale] = keys;
         if unpin {

@@ -6,6 +6,7 @@
 
 use crate::command_palette::Entry;
 use crate::ribbon_tabs::{ActiveTab, BuiltInTab};
+use crate::shortcuts;
 use crate::terrain_studio::TerrainTool;
 use crate::theme::ThemeChoice;
 
@@ -14,22 +15,6 @@ use super::settings;
 use super::solid::SolidAction;
 use super::*;
 
-/// Ctrl+Shift+P (Cmd+Shift+P on macOS) opens the command palette.
-pub(super) const PALETTE_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
-    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-    egui::Key::P,
-);
-/// Ctrl+K (Cmd+K on macOS) opens universal search.
-pub(super) const SEARCH_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K);
-/// Ctrl+P opens Quick Open: universal search too, by its older key.
-pub(super) const QUICK_OPEN_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::P);
-/// Ctrl+Shift+F opens Find in Scripts.
-pub(super) const FIND_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
-    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-    egui::Key::F,
-);
 /// Where the recent commands are saved between runs.
 pub(super) const RECENT_COMMANDS_KEY: &str = "recent commands";
 
@@ -171,6 +156,11 @@ pub(super) enum Command {
     TogglePane(Pane),
     ShowScene,
     ResetLayout,
+    /// View ▸ Layout's presets (design system V17).
+    LayoutPreset(crate::layout::Preset),
+    /// A layout saved by name.
+    SavedLayout(String),
+    SaveLayout,
     LightCones,
     ViewCube,
     Grid,
@@ -302,7 +292,6 @@ impl EditorApp {
         } else {
             "Open a project first."
         };
-        let shortcut = |shortcut: &egui::KeyboardShortcut| Some(ctx.format_shortcut(shortcut));
         let mut add = |command: Command,
                        title: &str,
                        detail: &str,
@@ -313,6 +302,9 @@ impl EditorApp {
                 Command::PluginButton { .. } => format!("plugin {detail} {title}"),
                 other => format!("{other:?}"),
             };
+            // Keys from the shortcut table (design system V16).
+            let shortcut = shortcut
+                .or_else(|| shortcuts::for_command(&key).map(|action| action.menu_text(ctx)));
             let mut entry = Entry::new(key, title, detail);
             entry.aliases = aliases.iter().map(|alias| (*alias).to_owned()).collect();
             entry.shortcut = shortcut;
@@ -346,7 +338,7 @@ impl EditorApp {
             "Save",
             "File",
             &[],
-            shortcut(&SAVE_SHORTCUT),
+            None,
             when(project, "Open a project first."),
         );
         add(
@@ -509,7 +501,7 @@ impl EditorApp {
             "Settings…",
             "File",
             &["Settings"],
-            shortcut(&settings::SETTINGS_SHORTCUT),
+            None,
             Ok(()),
         );
         add(Command::Quit, "Quit", "File", &[], None, Ok(()));
@@ -529,7 +521,7 @@ impl EditorApp {
             undo.as_deref().unwrap_or("Undo"),
             "Edit",
             &["Undo"],
-            shortcut(&UNDO_SHORTCUT),
+            None,
             when(undo.is_some() && !busy, "Nothing to undo."),
         );
         add(
@@ -537,7 +529,7 @@ impl EditorApp {
             redo.as_deref().unwrap_or("Redo"),
             "Edit",
             &["Redo"],
-            shortcut(&REDO_SHORTCUT),
+            None,
             when(redo.is_some() && !busy, "Nothing to redo."),
         );
         let selected = self.selected;
@@ -554,7 +546,7 @@ impl EditorApp {
             "Rename",
             "Edit",
             &[],
-            Some(RENAME_KEY.name().to_owned()),
+            None,
             when(renamable, "Select something to rename."),
         );
         add(
@@ -562,7 +554,7 @@ impl EditorApp {
             "Duplicate",
             "Edit",
             &[],
-            shortcut(&DUPLICATE_SHORTCUT),
+            None,
             when(editable, "Select something to duplicate."),
         );
         add(
@@ -570,7 +562,7 @@ impl EditorApp {
             "Delete",
             "Edit",
             &[],
-            Some(DELETE_KEY_TEXT.to_owned()),
+            None,
             when(deletable, "Select something to delete."),
         );
         add(
@@ -578,7 +570,7 @@ impl EditorApp {
             "Search Everything…",
             "Edit",
             &["Search", "Find", "Go to"],
-            shortcut(&SEARCH_SHORTCUT),
+            None,
             Ok(()),
         );
         add(
@@ -586,7 +578,7 @@ impl EditorApp {
             "Command Palette",
             "Edit",
             &[],
-            shortcut(&PALETTE_SHORTCUT),
+            None,
             Ok(()),
         );
         add(
@@ -594,7 +586,7 @@ impl EditorApp {
             "Quick Open…",
             "Edit",
             &["Go to file"],
-            shortcut(&QUICK_OPEN_SHORTCUT),
+            None,
             when(project, "Open a project first."),
         );
         add(
@@ -602,7 +594,7 @@ impl EditorApp {
             "Find in Scripts…",
             "Edit",
             &["Search", "Replace"],
-            shortcut(&FIND_SHORTCUT),
+            None,
             when(project, "Open a project first."),
         );
 
@@ -657,6 +649,34 @@ impl EditorApp {
             "Reset Layout",
             "View › Panels",
             &[],
+            None,
+            Ok(()),
+        );
+        for preset in crate::layout::Preset::ALL {
+            add(
+                Command::LayoutPreset(preset),
+                &format!("Layout: {}", preset.label()),
+                "View › Layout",
+                &[preset.label(), "Workspace"],
+                None,
+                Ok(()),
+            );
+        }
+        for (name, _) in &self.saved_layouts.0 {
+            add(
+                Command::SavedLayout(name.clone()),
+                &format!("Layout: {name}"),
+                "View › Layout",
+                &[name.as_str()],
+                None,
+                Ok(()),
+            );
+        }
+        add(
+            Command::SaveLayout,
+            "Save Current Layout…",
+            "View › Layout",
+            &["Workspace"],
             None,
             Ok(()),
         );
@@ -746,7 +766,7 @@ impl EditorApp {
             play,
             &ribbon("Game"),
             &[play_alias],
-            shortcut(&PLAY_SHORTCUT),
+            None,
             when(
                 (!playing || self.paused()) && project,
                 "Open a project, and press Stop.",
@@ -757,7 +777,7 @@ impl EditorApp {
             "Stop",
             &ribbon("Game"),
             &[],
-            shortcut(&STOP_SHORTCUT),
+            None,
             when(playing, "The game isn't playing."),
         );
         for tool in Tool::ALL {
@@ -1044,6 +1064,9 @@ impl EditorApp {
             Command::TogglePane(pane) => self.layout.toggle(pane),
             Command::ShowScene => self.layout.open(Pane::Scene),
             Command::ResetLayout => self.layout.reset(),
+            Command::LayoutPreset(preset) => self.layout.use_preset(preset),
+            Command::SavedLayout(name) => self.use_saved_layout(&name),
+            Command::SaveLayout => self.layout_name = Some(Default::default()),
             Command::LightCones => self.light_cones = !self.light_cones,
             Command::ViewCube => self.view_cube = !self.view_cube,
             Command::Grid => self.grid = !self.grid,

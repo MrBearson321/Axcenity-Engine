@@ -72,6 +72,7 @@ use eframe::egui_wgpu::RenderState;
 
 use crate::gizmo::{MoveAxes, Snap, Tool};
 use crate::responsive;
+use crate::shortcuts::{self, Action};
 use crate::theme::{self, icons};
 use crate::widgets::{self, Role};
 
@@ -883,11 +884,14 @@ impl ModelStudio {
         self.toolbar(ui, models, editable, &mut actions);
         ui.separator();
         if self.doc.is_none() {
-            ui.add_space(12.0);
-            ui.vertical_centered(|ui| {
-                ui.weak("Open a model, or make a New shape, to edit it here.");
-                ui.weak("Edit in Model Studio on a MeshPart or a model in Assets opens it too.");
-            });
+            crate::widgets::empty_state(
+                ui,
+                icons::POLYGON,
+                "No model open",
+                "Open a model, or make a New shape, to edit it here. Edit in Model Studio on a \
+                 MeshPart or a model in Assets opens it too.",
+                None,
+            );
             return actions;
         };
         responsive::split(ui, 420.0, 0.28, |ui, pane| {
@@ -1361,7 +1365,7 @@ impl ModelStudio {
                         .unwrap_or(rect.center());
                     self.rig_keys(ui, at);
                 }
-                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+                if ui.input_mut(|i| shortcuts::consume(i, Action::StudioMode))
                     && let Some(doc) = &mut self.doc
                 {
                     doc.toggle_mode();
@@ -1460,17 +1464,18 @@ impl ModelStudio {
         if let Some((modal, _)) = &mut self.modal {
             let proportional = self.moves.proportional.on;
             let (grab_again, wider) = ui.input_mut(|input| {
-                let grab_again = modal.kind == ModalKind::Grab
-                    && input.consume_key(egui::Modifiers::NONE, egui::Key::G);
+                let grab_again =
+                    modal.kind == ModalKind::Grab && shortcuts::consume(input, Action::EdgeSlide);
                 // Proportional editing's radius: Page Up and Down, or the
                 // wheel (which then doesn't zoom).
                 let mut wider = 0.0;
                 if proportional {
-                    if input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
-                        wider += 1.0;
-                    }
-                    if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
-                        wider -= 1.0;
+                    // The first key widens, the second narrows.
+                    let keys = shortcuts::consume_each(input, Action::ProportionalRadius);
+                    for (pressed, by) in keys.into_iter().zip([1.0, -1.0]) {
+                        if pressed {
+                            wider += by;
+                        }
                     }
                     if input.raw_scroll_delta.y != 0.0 {
                         wider += input.raw_scroll_delta.y.signum();
@@ -1494,15 +1499,12 @@ impl ModelStudio {
                 return;
             };
             let (axes, typed, back, enter, escape) = ui.input_mut(|input| {
-                let mut axes = Vec::new();
-                for (axis, key) in [egui::Key::X, egui::Key::Y, egui::Key::Z]
+                // X, Y and Z, in that order.
+                let axes: Vec<usize> = shortcuts::consume_each(input, Action::LockAxis)
                     .into_iter()
                     .enumerate()
-                {
-                    if input.consume_key(egui::Modifiers::NONE, key) {
-                        axes.push(axis);
-                    }
-                }
+                    .filter_map(|(axis, pressed)| pressed.then_some(axis))
+                    .collect();
                 let typed: Vec<char> = input
                     .events
                     .iter()
@@ -1515,9 +1517,9 @@ impl ModelStudio {
                 (
                     axes,
                     typed,
-                    input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
-                    input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
-                    input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+                    shortcuts::consume(input, Action::EraseDigit),
+                    shortcuts::consume(input, Action::FinishMove),
+                    shortcuts::consume(input, Action::CancelMove),
                 )
             });
             for axis in axes {
@@ -1539,20 +1541,21 @@ impl ModelStudio {
         if self.uv_keys(ui, pointer) || self.op_keys(ui, pointer) {
             return;
         }
-        let none = egui::Modifiers::NONE;
-        let command = egui::Modifiers::COMMAND;
-        let pressed = ui.input_mut(|input| StudioKeys {
-            tab: input.consume_key(none, egui::Key::Tab),
-            modes: [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3]
-                .map(|key| input.consume_key(none, key)),
-            grab: input.consume_key(none, egui::Key::G),
-            rotate: input.consume_key(none, egui::Key::R),
-            scale: input.consume_key(none, egui::Key::S),
-            linked: input.consume_key(none, egui::Key::L),
-            all: input.consume_key(none, egui::Key::A),
-            grow: input.consume_key(command, egui::Key::Plus)
-                || input.consume_key(command, egui::Key::Equals),
-            shrink: input.consume_key(command, egui::Key::Minus),
+        let pressed = ui.input_mut(|input| {
+            let take = |input: &mut egui::InputState, action| shortcuts::consume(input, action);
+            // Vertices, edges, faces.
+            let modes = shortcuts::consume_each(input, Action::SelectMode);
+            StudioKeys {
+                tab: take(input, Action::StudioMode),
+                modes: [0, 1, 2].map(|mode| modes.get(mode) == Some(&true)),
+                grab: take(input, Action::Grab),
+                rotate: take(input, Action::Turn),
+                scale: take(input, Action::Resize),
+                linked: take(input, Action::SelectLinked),
+                all: take(input, Action::SelectAll),
+                grow: take(input, Action::GrowSelection),
+                shrink: take(input, Action::ShrinkSelection),
+            }
         });
         let Some(doc) = &mut self.doc else {
             return;

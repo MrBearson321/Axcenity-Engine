@@ -274,11 +274,11 @@ impl ModelStudio {
         let Some(points) = &mut self.retopo.poly_build else {
             return false;
         };
-        let none = egui::Modifiers::NONE;
         let (back, escape) = ui.input_mut(|input| {
+            use crate::shortcuts::{Action, consume};
             (
-                input.consume_key(none, egui::Key::Backspace),
-                input.consume_key(none, egui::Key::Escape),
+                consume(input, Action::DropPoint),
+                consume(input, Action::EndPolyBuild),
             )
         });
         if back {

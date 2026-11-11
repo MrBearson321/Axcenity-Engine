@@ -132,22 +132,13 @@ impl TerrainTool {
         }
     }
 
-    /// Its key while the Terrain Studio has a tool: 1 to 9, then 0.
+    /// Its key while the Terrain Studio has a tool, from the shortcut
+    /// table: 1 to 9, then 0.
     pub fn key(self) -> Option<egui::Key> {
-        Some(match self {
-            TerrainTool::Raise => egui::Key::Num1,
-            TerrainTool::Smooth => egui::Key::Num2,
-            TerrainTool::Flatten => egui::Key::Num3,
-            TerrainTool::Sculpt => egui::Key::Num4,
-            TerrainTool::Stamp => egui::Key::Num5,
-            TerrainTool::Noise => egui::Key::Num6,
-            TerrainTool::Paint => egui::Key::Num7,
-            TerrainTool::Foliage => return None,
-            TerrainTool::Auto => egui::Key::Num8,
-            TerrainTool::Generate => egui::Key::Num9,
-            TerrainTool::Erode => egui::Key::Num0,
-            TerrainTool::Masks => return None,
-        })
+        crate::shortcuts::Action::TerrainTool(self)
+            .keys()
+            .first()
+            .map(|chord| chord.logical_key)
     }
 
     pub fn all() -> impl Iterator<Item = TerrainTool> {

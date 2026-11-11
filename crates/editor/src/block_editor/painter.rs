@@ -289,7 +289,10 @@ impl<'a> BlockPainter<'a> {
     /// The row of an event block, with its rounded cap.
     pub(super) fn hat(&mut self, ui: &mut egui::Ui, block: &mut Block, at: Pos2) -> Drawn {
         let category = block_category(&block.kind);
-        let (fill, edge) = (category.fill(), category.edge());
+        let (fill, edge) = {
+            let palette = theme::palette(ui.ctx());
+            (category.fill(&palette), category.edge(&palette))
+        };
         let id = self.id.with(block.id);
         let block_id = block.id;
         let highlighted = self.highlighted == Some(block_id);
@@ -368,7 +371,10 @@ impl<'a> BlockPainter<'a> {
         loose: bool,
     ) -> Drawn {
         let category = block_category(&block.kind);
-        let (fill, edge) = (category.fill(), category.edge());
+        let (fill, edge) = {
+            let palette = theme::palette(ui.ctx());
+            (category.fill(&palette), category.edge(&palette))
+        };
         let id = self.id.with(block.id);
         let block_id = block.id;
         let cap = block.kind.is_cap();
@@ -953,7 +959,10 @@ impl<'a> BlockPainter<'a> {
             }
         }
         let category = reporter_category(expression);
-        let (fill, edge) = (category.fill(), category.edge());
+        let (fill, edge) = {
+            let palette = theme::palette(ui.ctx());
+            (category.fill(&palette), category.edge(&palette))
+        };
         let boolean = expression.shape() == BlockShape::Boolean;
         if boolean {
             self.painter.add(Shape::convex_polygon(

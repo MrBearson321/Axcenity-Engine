@@ -9,7 +9,8 @@
 //! `TOUR_THEME=light` draws them in the light theme and `TOUR_DENSITY=compact`
 //! at Compact density, for the design-system audit
 //! (`docs/research/usability/design-system.md`); the files then end in
-//! `-light` or `-compact`.
+//! `-light` or `-compact`. `TOUR_CONTRAST=high` turns Increase contrast on
+//! (`-contrast`).
 //! The examples are copied to a temporary folder first, so nothing in
 //! `examples/` changes.
 
@@ -55,6 +56,10 @@ fn shoot(app: &mut EditorApp, name: &str, setup: impl Fn(&mut EditorApp)) {
     if std::env::var("TOUR_DENSITY").is_ok_and(|density| density == "compact") {
         appearance.density = crate::theme::Density::Compact;
         suffix.push_str("-compact");
+    }
+    if std::env::var("TOUR_CONTRAST").is_ok_and(|contrast| contrast == "high") {
+        appearance.increase_contrast = true;
+        suffix.push_str("-contrast");
     }
     crate::snapshot::snapshot_rendered(
         &folder.join(format!("tour-{name}{suffix}.png")),
@@ -190,6 +195,23 @@ fn editor_tour_snapshots() {
     });
     run("85-blocks", Some("hello-touched-blocks"), &|app| {
         app.open_script("scripts/pad.server.blocks.json", None)
+    });
+    // Design system Phase 5: the layout presets and the shortcut table.
+    for preset in crate::layout::Preset::ALL {
+        let name = format!(
+            "90-layout-{}",
+            preset.label().to_lowercase().replace([' ', '&'], "")
+        );
+        run(&name, Some("hello-script"), &|app| {
+            app.open_script("scripts/greet.server.lua", Some(1));
+            // Opened before switching, not just now.
+            let _ = app.tabs.take_focus();
+            app.layout.use_preset(preset);
+        });
+    }
+    run("91-shortcuts", Some("hello-part"), &|app| {
+        app.settings.open = true;
+        app.settings.page = settings::SettingsPage::Shortcuts;
     });
     run("10-anim-empty", Some("hello-animation"), &|app| {
         app.layout.open(Pane::Animation)

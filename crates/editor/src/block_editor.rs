@@ -212,8 +212,13 @@ impl Category {
         }
     }
 
-    /// Scratch's colours for its categories.
-    fn fill(self) -> Color32 {
+    /// Scratch's colours for its categories, darkened with Increase
+    /// contrast until their white labels reach 4.5:1.
+    fn fill(self, palette: &theme::Palette) -> Color32 {
+        palette.under_white_text(self.scratch_fill())
+    }
+
+    fn scratch_fill(self) -> Color32 {
         match self {
             Category::Events => Color32::from_rgb(255, 191, 0),
             Category::Control => Color32::from_rgb(255, 171, 25),
@@ -231,7 +236,11 @@ impl Category {
     }
 
     /// The darker outline, and the background of menus on the block.
-    fn edge(self) -> Color32 {
+    fn edge(self, palette: &theme::Palette) -> Color32 {
+        palette.under_white_text(self.scratch_edge())
+    }
+
+    fn scratch_edge(self) -> Color32 {
         match self {
             Category::Events => Color32::from_rgb(204, 153, 0),
             Category::Control => Color32::from_rgb(207, 139, 23),
@@ -2178,8 +2187,8 @@ fn show_categories(ui: &mut egui::Ui, rect: Rect, state: &mut State) {
         ui.painter().circle(
             center,
             10.0,
-            category.fill(),
-            Stroke::new(1.0_f32, category.edge()),
+            category.fill(&theme::palette(ui.ctx())),
+            Stroke::new(1.0_f32, category.edge(&theme::palette(ui.ctx()))),
         );
         ui.painter().text(
             pos2(item.center().x, item.top() + 40.0),

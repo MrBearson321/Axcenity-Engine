@@ -489,11 +489,11 @@ impl ModelStudio {
 
     /// `[` and `]` change the brush's radius.
     pub(super) fn sculpt_keys(&mut self, ui: &mut egui::Ui) {
-        let none = egui::Modifiers::NONE;
         let (smaller, bigger) = ui.input_mut(|input| {
+            use crate::shortcuts::{Action, consume};
             (
-                input.consume_key(none, egui::Key::OpenBracket),
-                input.consume_key(none, egui::Key::CloseBracket),
+                consume(input, Action::BrushSmaller),
+                consume(input, Action::BrushBigger),
             )
         });
         let brush = &mut self.sculpt.brush;

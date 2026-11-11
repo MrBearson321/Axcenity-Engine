@@ -6,6 +6,7 @@
 
 use super::*;
 
+use crate::shortcuts;
 use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, space, type_scale};
 use crate::widgets;
 use axcenity_render::{
@@ -13,10 +14,6 @@ use axcenity_render::{
     GraphicsSettings, MotionBlurQuality, Quality, RENDER_SCALE_RANGE, ReflectionQuality,
     ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
-
-/// Ctrl+, (Cmd+, on macOS) opens Settings, as in most desktop apps.
-pub(super) const SETTINGS_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma);
 
 /// The pages of the Settings window.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -178,6 +175,56 @@ impl EditorApp {
             .clicked()
         {
             self.layout.reset();
+        }
+        ui.add_space(space::L);
+        // The presets and saved layouts of View › Layout (design system V17).
+        section(ui, "Layouts");
+        ui.horizontal_wrapped(|ui| {
+            for preset in crate::layout::Preset::ALL {
+                if ui
+                    .button(theme::with_icon(preset.icon(), preset.label()))
+                    .on_hover_text(preset.about())
+                    .clicked()
+                {
+                    self.layout.use_preset(preset);
+                }
+            }
+        });
+        let mut delete = None;
+        let mut switch = None;
+        for (name, _) in &self.saved_layouts.0 {
+            ui.horizontal(|ui| {
+                if ui
+                    .button(theme::with_icon(icons::BOOKMARK_SIMPLE, name))
+                    .on_hover_text("Switch to this saved layout.")
+                    .clicked()
+                {
+                    switch = Some(name.clone());
+                }
+                if widgets::icon_button(ui, icons::TRASH, "Delete this saved layout", false)
+                    .clicked()
+                {
+                    delete = Some(name.clone());
+                }
+            });
+        }
+        if let Some(name) = switch {
+            self.use_saved_layout(&name);
+        }
+        if let Some(name) = delete {
+            self.saved_layouts.delete(&name);
+        }
+        if ui
+            .add(widgets::button(
+                widgets::Role::Secondary,
+                Some(icons::FLOPPY_DISK),
+                "Save Current Layout…",
+                &palette,
+            ))
+            .on_hover_text("Keep where the panels are now, by name, to switch back to later.")
+            .clicked()
+        {
+            self.layout_name = Some(Default::default());
         }
         ui.add_space(space::L);
         section(ui, "Viewport");
@@ -391,6 +438,19 @@ pub(super) const SEARCHABLE: &[SearchableSetting] = {
             "Panels",
             &["Show panel", "Hide panel", "Docking", "Windows"],
             "Which panels show.",
+        ),
+        setting(
+            Layout,
+            "Layouts",
+            &[
+                "Layout presets",
+                "Workspaces",
+                "Save layout",
+                "Scripting layout",
+                "Animation layout",
+                "Modeling layout",
+            ],
+            "Switch to a preset for a task or a layout you saved, or save this one.",
         ),
         setting(
             Layout,
@@ -610,6 +670,12 @@ pub(super) const SEARCHABLE: &[SearchableSetting] = {
         ),
         setting(
             Accessibility,
+            "Increase contrast",
+            &["High contrast", "Contrast", "Low vision", "Outlines"],
+            "Stronger outlines, borders, faint text and focus rings.",
+        ),
+        setting(
+            Accessibility,
             "Steady frame rate",
             &[
                 "FPS cap",
@@ -820,117 +886,47 @@ fn typography_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
 /// The keyboard shortcuts, as a table. Shortcuts are fixed for now, so this
 /// is a reference.
 fn shortcuts_page(ui: &mut egui::Ui) {
-    page_title(ui, "Shortcuts", "The keys the editor knows.");
-    let ctx = ui.ctx().clone();
-    let format = |shortcut: &egui::KeyboardShortcut| ctx.format_shortcut(shortcut);
-    let mut groups: Vec<(&str, Vec<(String, String)>)> = vec![
-        (
-            "General",
-            vec![
-                ("Save".into(), format(&SAVE_SHORTCUT)),
-                ("Settings".into(), format(&SETTINGS_SHORTCUT)),
-                ("Play".into(), format(&PLAY_SHORTCUT)),
-                ("Stop".into(), format(&STOP_SHORTCUT)),
-                (
-                    "Search everything".into(),
-                    format(&super::command_palette::SEARCH_SHORTCUT),
-                ),
-                (
-                    "Command palette".into(),
-                    format(&super::command_palette::PALETTE_SHORTCUT),
-                ),
-                (
-                    "Quick Open".into(),
-                    format(&super::command_palette::QUICK_OPEN_SHORTCUT),
-                ),
-                (
-                    "Find in Scripts".into(),
-                    format(&super::command_palette::FIND_SHORTCUT),
-                ),
-            ],
-        ),
-        (
-            "Editing",
-            vec![
-                ("Undo".into(), format(&UNDO_SHORTCUT)),
-                (
-                    "Redo".into(),
-                    format!(
-                        "{}  or  {}",
-                        format(&REDO_SHORTCUT),
-                        format(&REDO_SHIFT_SHORTCUT)
-                    ),
-                ),
-                ("Duplicate".into(), format(&DUPLICATE_SHORTCUT)),
-                ("Rename".into(), RENAME_KEY.name().to_owned()),
-                ("Delete".into(), DELETE_KEY_TEXT.to_owned()),
-            ],
-        ),
-    ];
-    let tools = Tool::ALL
-        .into_iter()
-        .filter_map(|tool| {
-            let key = match tool {
-                Tool::Select => Some(egui::Key::Escape.name().to_owned()),
-                _ => tool.key().map(|key| key.name().to_owned()),
-            };
-            key.map(|key| (format!("{} tool", tool.label()), key))
-        })
-        .collect();
-    groups.push(("Tools", tools));
-    groups.push((
-        "Explorer (once clicked)",
-        vec![
-            ("Move the selection".into(), "Up, Down".into()),
-            ("Extend the selection".into(), "Shift + Up, Down".into()),
-            ("Close, or go to the parent".into(), "Left".into()),
-            ("Open, or go to the first child".into(), "Right".into()),
-            ("First and last rows".into(), "Home, End".into()),
-            ("Rename".into(), format!("Enter  or  {}", RENAME_KEY.name())),
-        ],
-    ));
-    groups.push((
-        "Viewport camera",
-        vec![
-            ("Look around".into(), "Right-drag".into()),
-            ("Fly".into(), "W A S D, E, Q".into()),
-            ("Fly slower".into(), "Shift".into()),
-            ("Pan".into(), "Middle-drag".into()),
-            ("Orbit".into(), "Alt + left-drag".into()),
-            ("Fly speed".into(), "Shift + wheel".into()),
-        ],
-    ));
-    let command = |key| format(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key));
-    groups.push((
-        "UI Designer",
-        vec![
-            (
-                "Add to the selection".into(),
-                "Shift or Ctrl + click".into(),
-            ),
-            ("Select with a box".into(), "Drag on empty artboard".into()),
-            ("Nudge 1 pixel".into(), "Arrow keys".into()),
-            ("Nudge 10 pixels".into(), "Shift + arrow keys".into()),
-            ("Copy elements".into(), command(egui::Key::C)),
-            ("Paste elements".into(), command(egui::Key::V)),
-        ],
-    ));
+    page_title(
+        ui,
+        "Shortcuts",
+        "Every key the editor knows, by where it works.",
+    );
     let palette = theme::palette(ui.ctx());
-    for (title, rows) in groups {
-        widgets::section_label(ui, title);
-        egui::Grid::new(title)
+    let actions = shortcuts::Action::all();
+    // One width for every group's names, so the keys line up down the page;
+    // a longer name wraps.
+    let name_width = (ui.available_width() * 0.55).clamp(160.0, 320.0);
+    for context in shortcuts::Context::ALL {
+        widgets::section_label(ui, context.label());
+        ui.label(
+            egui::RichText::new(context.about())
+                .size(type_scale::SMALL)
+                .color(palette.text_weak),
+        );
+        ui.add_space(space::XS);
+        egui::Grid::new(("shortcuts", context.label()))
             .num_columns(2)
-            .min_col_width(200.0)
+            .min_col_width(name_width)
             .spacing([12.0, 6.0])
             .show(ui, |ui| {
-                for (action, keys) in rows {
-                    ui.label(egui::RichText::new(action).color(palette.text_secondary));
-                    keycap(ui, &keys);
+                for action in actions.iter().filter(|action| action.context() == context) {
+                    let name = egui::RichText::new(action.label()).color(palette.text_secondary);
+                    ui.vertical(|ui| {
+                        ui.set_max_width(name_width);
+                        ui.add(egui::Label::new(name).wrap());
+                    });
+                    keycap(ui, &action.text(ui.ctx()));
                     ui.end_row();
                 }
             });
         ui.add_space(space::M);
     }
+    ui.label(
+        egui::RichText::new(
+            "In any field, menu or dialog, Enter confirms and Esc cancels or closes.",
+        )
+        .color(palette.text_weak),
+    );
 }
 
 /// Keys drawn like a key on a keyboard.
@@ -1400,7 +1396,7 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
     page_title(
         ui,
         "Accessibility",
-        "Motion, and other ways to make the editor easier to use.",
+        "Motion, contrast, and other ways to make the editor easier to use.",
     );
     let palette = theme::palette(ui.ctx());
     section(ui, "Motion");
@@ -1410,6 +1406,17 @@ fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
         egui::RichText::new(
             "Turns off hover fades, popup and window fades, smooth scrolling and the theme \
              crossfade. The viewport camera is never animated by the interface.",
+        )
+        .color(palette.text_secondary),
+    );
+    ui.add_space(space::L);
+    section(ui, "Contrast");
+    let row = ui.checkbox(&mut appearance.increase_contrast, "Increase contrast");
+    found(ui, &row, "Increase contrast");
+    ui.label(
+        egui::RichText::new(
+            "Stronger outlines around buttons and fields, stronger borders and faint text, a \
+             thicker focus ring, and block colours dark enough for their white labels.",
         )
         .color(palette.text_secondary),
     );
@@ -1697,6 +1704,24 @@ mod tests {
             self.0.insert(key.to_owned(), value);
         }
         fn flush(&mut self) {}
+    }
+
+    /// Layouts saved by name (design system V17) are there after a restart.
+    #[test]
+    fn saved_layouts_survive_a_restart() {
+        let ctx = theme::test_context();
+        let mut app = EditorApp::new(None);
+        app.layout.use_preset(crate::layout::Preset::Modeling);
+        app.save_layout("Props").unwrap();
+        let mut storage = MemoryStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+
+        let mut restarted = EditorApp::new(None);
+        assert!(restarted.saved_layouts.0.is_empty());
+        restarted.load_settings(&ctx, Some(&storage));
+        assert_eq!(restarted.saved_layouts, app.saved_layouts);
+        restarted.use_saved_layout("Props");
+        assert!(restarted.layout.is_open(Pane::ModelStudio));
     }
 
     #[test]

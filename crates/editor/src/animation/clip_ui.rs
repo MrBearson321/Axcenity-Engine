@@ -53,7 +53,9 @@ impl AnimationStudio {
         if let Some(Clip::Take(doc)) = &mut self.clip.doc
             && keys
             && let Some(bone) = self.clip.bones.selected
-            && ui.input(|input| input.modifiers.is_none() && input.key_pressed(egui::Key::K))
+            && ui.input(|input| {
+                crate::shortcuts::pressed(input, crate::shortcuts::Action::KeySelected)
+            })
             && let Err(problem) = doc.key_selected(assets, bone)
         {
             output.warning(problem);

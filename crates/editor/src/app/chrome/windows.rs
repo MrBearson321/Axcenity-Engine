@@ -1,4 +1,5 @@
 use super::*;
+use crate::shortcuts::{self, Action};
 
 /// The panel under a script paused at a breakpoint: the line, Continue, and
 /// each script function on the paused call stack with its locals, the
@@ -17,7 +18,7 @@ pub(in crate::app) fn paused_panel(ui: &mut egui::Ui, pause: &axcenity_script::P
         ui.button(theme::with_icon(filled_icons::PLAY, "Continue"))
             .on_hover_text(format!(
                 "Run on from here ({})",
-                ui.ctx().format_shortcut(&PLAY_SHORTCUT)
+                crate::shortcuts::Action::Play.menu_text(ui.ctx())
             ))
             .clicked()
     });
@@ -199,11 +200,14 @@ impl EditorApp {
     /// The keyboard shortcuts for undo, redo, the tools, and renaming,
     /// duplicating and deleting the selection.
     pub(in crate::app) fn shortcuts(&mut self, ctx: &egui::Context) {
-        // Stop first: egui counts Shift+F5 as F5 too.
-        let (stop, play) = ctx.input_mut(|input| {
-            let stop = input.consume_shortcut(&STOP_SHORTCUT);
-            (stop, input.consume_shortcut(&PLAY_SHORTCUT))
+        // Stop is taken first: egui counts Shift+F5 as F5 too.
+        let pressed = ctx.input_mut(|input| {
+            shortcuts::consume_first(input, &[shortcuts::Action::Play, shortcuts::Action::Stop])
         });
+        let (stop, play) = (
+            pressed == Some(shortcuts::Action::Stop),
+            pressed == Some(shortcuts::Action::Play),
+        );
         if stop {
             self.stop();
         } else if play && self.paused() {
@@ -230,6 +234,13 @@ impl EditorApp {
         // Over a block script, Delete, Ctrl+D, F2 and the tools' keys would
         // change the world out of sight, so they're left alone.
         let blocks = self.block_tab_pointer.is_some();
+        // Over a node graph (a material, a UI Event Graph, a behavior tree,
+        // a dialogue), Delete and Ctrl+D are the graph's.
+        let graph = blocks
+            || self.ui_designer.graph_has_pointer()
+            || self.materials.has_pointer()
+            || self.behavior.has_pointer()
+            || self.dialogues.has_pointer();
         let animating = self.animation.wants_keys(ctx) || studio || blocks;
         // With no Scene View showing, a tool picked by its key would act on
         // a scene the user can't see, as its ribbon button would.
@@ -241,35 +252,33 @@ impl EditorApp {
             if playing || animating || !scene {
                 return None;
             }
-            Tool::ALL
-                .into_iter()
-                .find(|tool| {
-                    tool.key()
-                        .is_some_and(|key| input.consume_key(egui::Modifiers::NONE, key))
-                })
-                .or_else(|| input.key_pressed(egui::Key::Escape).then_some(Tool::Select))
+            let tools: Vec<Action> = Tool::ALL.into_iter().map(Action::Tool).collect();
+            match shortcuts::consume_first(input, &tools) {
+                Some(Action::Tool(tool)) => Some(tool),
+                _ => shortcuts::pressed(input, Action::PutToolDown).then_some(Tool::Select),
+            }
         };
         let keys = ctx.input_mut(|input| {
             if typing {
                 return Keys::default();
             }
-            // Redo first: egui counts Ctrl+Shift+Z as Ctrl+Z too.
-            let redo = input.consume_shortcut(&REDO_SHIFT_SHORTCUT)
-                || input.consume_shortcut(&REDO_SHORTCUT);
-            let none = egui::Modifiers::NONE;
+            // Redo's Ctrl+Shift+Z is taken first: egui counts it as Ctrl+Z too.
+            let history = shortcuts::consume_first(input, &[Action::Undo, Action::Redo]);
             Keys {
-                redo,
-                undo: input.consume_shortcut(&UNDO_SHORTCUT),
+                redo: history == Some(Action::Redo),
+                undo: history == Some(Action::Undo),
                 tool: tool_key(input),
-                toggle: !playing && !studio && input.consume_key(none, egui::Key::Enter),
+                // The Anchor or Angular tool's Enter, else the Explorer's
+                // rename (see below).
+                toggle: !playing
+                    && !studio
+                    && shortcuts::consume_first(input, &[Action::UseTool, Action::ExplorerRename])
+                        .is_some(),
                 // Taken before the viewport sees them, so Ctrl+D doesn't
                 // also fly the camera right.
-                duplicate: !blocks && input.consume_shortcut(&DUPLICATE_SHORTCUT),
-                rename: !blocks && input.consume_key(none, RENAME_KEY),
-                delete: !animating
-                    && (input.consume_key(none, egui::Key::Delete)
-                        || (cfg!(target_os = "macos")
-                            && input.consume_key(none, egui::Key::Backspace))),
+                duplicate: !graph && shortcuts::consume(input, Action::Duplicate),
+                rename: !blocks && shortcuts::consume(input, Action::Rename),
+                delete: !animating && !graph && shortcuts::consume(input, Action::Delete),
             }
         });
         if keys.redo {

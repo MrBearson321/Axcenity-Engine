@@ -18,11 +18,11 @@ pub enum Format {
     Color([u8; 3]),
 }
 
-/// Ctrl+B, Ctrl+I and Ctrl+U (Cmd on a Mac).
-pub const SHORTCUTS: [(egui::Key, Toggle); 3] = [
-    (egui::Key::B, Toggle::Bold),
-    (egui::Key::I, Toggle::Italic),
-    (egui::Key::U, Toggle::Underline),
+/// Ctrl+B, Ctrl+I and Ctrl+U (Cmd on a Mac), from the shortcut table.
+pub const SHORTCUTS: [(crate::shortcuts::Action, Toggle); 3] = [
+    (crate::shortcuts::Action::Bold, Toggle::Bold),
+    (crate::shortcuts::Action::Italic, Toggle::Italic),
+    (crate::shortcuts::Action::Underline, Toggle::Underline),
 ];
 
 /// The colours offered over the box: white, black, red, orange, yellow,
