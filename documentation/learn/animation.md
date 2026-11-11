@@ -27,7 +27,9 @@ The Animation tab (beside the Scene) follows the selection: select something tha
 
 - The **outline** on the left lists the object's Animator, its state machine's states and its Animations. The **breadcrumb** on top says where you are, such as **Hero ▸ State Machine ▸ Walk**.
 - The **preview** shows a copy of the object, so changes here don't move the real one until you save. Drag to turn the view and scroll to zoom.
-- The **timeline** has the play controls, the playhead and the clip's length. Under it, the **dope sheet** shows a row per animated property or bone, with a diamond for each key.
+- Above the timeline, the **transport** plays the clip like a media player: go to the start, back a frame, play (pause, then resume), on a frame, go to the end and stop; then where the playhead is, a seek bar to click or drag, the clip's length and the frame number. The rate box (0.25× to 4×) changes only how fast the preview plays, not the clip's own Speed.
+- With the mouse over the clip and nothing being typed, **Space** plays or pauses, **Left** and **Right** step a frame (**Shift** for ten), and **Home** and **End** go to the start and end. They're listed in **Settings > Shortcuts** under Animation clip.
+- The **timeline** shows the playhead and the clip's length. Under it, the **dope sheet** shows a row per animated property or bone, with a diamond for each key.
 - Move, rotate or resize the copy in the preview with the buttons above it. With **Record** on, each change sets keys at the playhead. With Record off, **Key selected** (**K**) keys the object where it is, and **Add track** keys any other property.
 - **Dope sheet · Curves** switches to curves: the values over time, X red, Y green and Z blue. Drag points and handles to shape the motion.
 - In the dope sheet, drag a box to select keys, drag them to move them, and copy (**Ctrl+C**), cut (**Ctrl+X**) and paste at the playhead (**Ctrl+V**). **Snap** keeps keys on whole frames.
