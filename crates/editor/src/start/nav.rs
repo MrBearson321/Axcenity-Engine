@@ -9,7 +9,7 @@
 
 use eframe::egui::{self, Rect, RichText, Stroke, pos2, vec2};
 
-use super::{Brand, Page, StartScreen, version_label};
+use super::{Brand, MAX_PAGE_WIDTH, PAGE_MARGIN, Page, StartScreen, version_label};
 use crate::theme::{self, icons, type_scale};
 use crate::widgets;
 
@@ -143,20 +143,63 @@ fn about_line() -> String {
     format!("Axcenity Engine {}\nApache-2.0", version_label())
 }
 
-/// How far the sidebar is through folding open (1) or closed (0), eased.
-/// Requests a repaint while the slide is in progress so the animation runs
-/// even when the editor would otherwise sit idle between inputs.
+/// How far the sidebar is through folding open (1) or closed (0), eased
+/// out both ways: it starts quickly and settles, whether opening or
+/// folding. (Easing egui's own 0-to-1 value would run the curve backwards
+/// when folding, so the sidebar hung still for a moment and then snapped
+/// shut.) Turning round mid-slide starts from wherever it is. Requests a
+/// repaint while it moves so the slide runs even when the editor would
+/// otherwise sit idle between inputs.
 fn sidebar_open(ctx: &egui::Context, folded: bool) -> f32 {
-    let time = if ctx.global_style().animation_time <= 0.0 {
-        0.0
-    } else {
-        SIDEBAR_SECONDS
-    };
-    let t = ctx.animate_bool_with_time(egui::Id::new("start sidebar open"), !folded, time);
-    if time > 0.0 && t > 0.0 && t < 1.0 {
+    let target = if folded { 0.0 } else { 1.0 };
+    let now = ctx.input(|input| input.time);
+    if ctx.global_style().animation_time <= 0.0 {
+        ctx.data_mut(|data| data.remove::<Slide>(slide_id()));
+        return target;
+    }
+    let slide = ctx.data_mut(|data| {
+        let slide = data.get_temp_mut_or(
+            slide_id(),
+            Slide {
+                from: target,
+                to: target,
+                started: now,
+            },
+        );
+        if slide.to != target {
+            *slide = Slide {
+                from: slide.at(now),
+                to: target,
+                started: now,
+            };
+        }
+        *slide
+    });
+    let open = slide.at(now);
+    if open != target {
         ctx.request_repaint();
     }
-    theme::bezier(theme::curve::SETTLE, t)
+    open
+}
+
+fn slide_id() -> egui::Id {
+    egui::Id::new("start sidebar slide")
+}
+
+/// The sidebar's slide: from where, to where, and when it began.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Slide {
+    from: f32,
+    to: f32,
+    started: f64,
+}
+
+impl Slide {
+    /// Where the slide is at `now`.
+    fn at(self, now: f64) -> f32 {
+        let t = ((now - self.started) as f32 / SIDEBAR_SECONDS).clamp(0.0, 1.0);
+        self.from + (self.to - self.from) * theme::bezier(theme::curve::SETTLE, t)
+    }
 }
 
 /// How strongly labels read. They stay off until the rail is wide enough
@@ -164,6 +207,47 @@ fn sidebar_open(ctx: &egui::Context, folded: bool) -> f32 {
 fn label_amount(open: f32) -> f32 {
     let t = ((open - 0.55) / 0.35).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// Where a page goes beside the navigation: the page's rectangle, and the
+/// column its content is laid out in. While the sidebar slides, the column
+/// keeps the width it will have once the slide ends and only moves, so the
+/// cards are pushed along with the sidebar's edge instead of reflowing
+/// into a different number of columns every frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct PageRoom {
+    /// What the page fills now: its background and scroll area.
+    pub page: Rect,
+    /// The content column's left edge, and its width.
+    pub left: f32,
+    pub width: f32,
+}
+
+impl PageRoom {
+    /// A page that isn't moving: the column centred in it.
+    pub fn still(page: Rect) -> Self {
+        let (left, width) = column(page);
+        Self { page, left, width }
+    }
+
+    /// A page beside a sliding sidebar `open` of the way between `folded`
+    /// and `opened`, heading for folded when `folding`.
+    pub fn sliding(page: Rect, folded: Rect, opened: Rect, open: f32, folding: bool) -> Self {
+        let (folded_left, folded_width) = column(folded);
+        let (opened_left, opened_width) = column(opened);
+        Self {
+            page,
+            left: folded_left + (opened_left - folded_left) * open,
+            width: if folding { folded_width } else { opened_width },
+        }
+    }
+}
+
+/// The content column centred in `page`: `PAGE_MARGIN` either side, and no
+/// wider than `MAX_PAGE_WIDTH`.
+fn column(page: Rect) -> (f32, f32) {
+    let width = (page.width() - 2.0 * PAGE_MARGIN).clamp(1.0, MAX_PAGE_WIDTH);
+    (page.left() + (page.width() - width) / 2.0, width)
 }
 
 impl StartScreen {
@@ -178,32 +262,40 @@ impl StartScreen {
     }
 
     /// The navigation, in the layout picked, at the edge of `full`. Returns
-    /// the rest of `full` for the page, and whether Settings was clicked.
+    /// the room left for the page, and whether Settings was clicked.
     pub(super) fn navigation(
         &mut self,
         ui: &mut egui::Ui,
         full: Rect,
         tracked: usize,
         brand: &Brand,
-    ) -> (Rect, bool) {
+    ) -> (PageRoom, bool) {
         match self.nav.layout {
             NavLayout::Sidebar => {
                 let open = sidebar_open(ui.ctx(), self.nav.folded);
-                let width = FOLDED_WIDTH + (SIDEBAR_WIDTH - FOLDED_WIDTH) * open;
-                let rect = Rect::from_min_size(full.min, vec2(width, full.height()));
+                let page_beside = |open: f32| {
+                    let width = FOLDED_WIDTH + (SIDEBAR_WIDTH - FOLDED_WIDTH) * open;
+                    Rect::from_min_max(pos2(full.left() + width, full.top()), full.max)
+                };
+                let page = page_beside(open);
+                let rect = Rect::from_min_max(full.min, pos2(page.left(), full.bottom()));
                 let settings = self.sidebar(ui, rect, tracked, brand, open);
                 (
-                    Rect::from_min_max(pos2(rect.right(), full.top()), full.max),
+                    PageRoom::sliding(
+                        page,
+                        page_beside(0.0),
+                        page_beside(1.0),
+                        open,
+                        self.nav.folded,
+                    ),
                     settings,
                 )
             }
             NavLayout::TopBar => {
                 let rect = Rect::from_min_size(full.min, vec2(full.width(), TOP_BAR_HEIGHT));
                 let settings = self.top_bar(ui, rect, tracked, brand);
-                (
-                    Rect::from_min_max(pos2(full.left(), rect.bottom()), full.max),
-                    settings,
-                )
+                let page = Rect::from_min_max(pos2(full.left(), rect.bottom()), full.max);
+                (PageRoom::still(page), settings)
             }
         }
     }
@@ -219,7 +311,12 @@ impl StartScreen {
         open: f32,
     ) -> bool {
         let palette = theme::palette(ui.ctx());
-        ui.painter().rect_filled(rect, 0, palette.app_bg);
+        // Frosted: the background shows through a little.
+        ui.painter().rect_filled(
+            rect,
+            theme::radius::NONE,
+            palette.app_bg.gamma_multiply(0.82),
+        );
         ui.painter().vline(
             rect.right() - 0.5,
             rect.y_range(),
@@ -379,7 +476,12 @@ impl StartScreen {
     /// their icons. Returns true when Settings was clicked.
     fn top_bar(&mut self, ui: &mut egui::Ui, rect: Rect, tracked: usize, brand: &Brand) -> bool {
         let palette = theme::palette(ui.ctx());
-        ui.painter().rect_filled(rect, 0, palette.app_bg);
+        // Frosted: the background shows through a little.
+        ui.painter().rect_filled(
+            rect,
+            theme::radius::NONE,
+            palette.app_bg.gamma_multiply(0.82),
+        );
         ui.painter().hline(
             rect.x_range(),
             rect.bottom() - 0.5,
@@ -463,6 +565,66 @@ mod tests {
         }
         assert_eq!(StartNav::from_text(""), StartNav::default());
         assert_eq!(StartNav::from_text("sideways"), StartNav::default());
+    }
+
+    #[test]
+    fn the_page_column_slides_without_changing_width() {
+        let full = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0));
+        let beside = |open: f32| {
+            let width = FOLDED_WIDTH + (SIDEBAR_WIDTH - FOLDED_WIDTH) * open;
+            Rect::from_min_max(pos2(width, 0.0), full.max)
+        };
+        let (folded, opened) = (beside(0.0), beside(1.0));
+        for folding in [true, false] {
+            let at = |open: f32| PageRoom::sliding(beside(open), folded, opened, open, folding);
+            // The ends are where a still page puts its column.
+            let end = if folding { folded } else { opened };
+            let settled = at(if folding { 0.0 } else { 1.0 });
+            assert_eq!((settled.left, settled.width), column(end));
+            // In between, one width throughout, and the column moves steadily
+            // with the sidebar's edge.
+            let mut last = at(0.0).left;
+            for step in 1..=20 {
+                let room = at(step as f32 / 20.0);
+                assert_eq!(room.width, settled.width);
+                assert!(room.left >= last, "{} < {last}", room.left);
+                last = room.left;
+            }
+        }
+        // Wide enough for the widest column either way: nothing changes but
+        // where it is.
+        let wide = Rect::from_min_size(pos2(0.0, 0.0), vec2(2400.0, 800.0));
+        let (_, open_width) = column(Rect::from_min_max(pos2(SIDEBAR_WIDTH, 0.0), wide.max));
+        let (_, folded_width) = column(Rect::from_min_max(pos2(FOLDED_WIDTH, 0.0), wide.max));
+        assert_eq!(open_width, folded_width);
+    }
+
+    #[test]
+    fn the_sidebar_starts_moving_at_once_both_ways() {
+        for (from, to) in [(1.0, 0.0), (0.0, 1.0)] {
+            let slide = Slide {
+                from,
+                to,
+                started: 0.0,
+            };
+            // A tenth of the way through the time, well over a tenth of the way.
+            let early = (slide.at(f64::from(SIDEBAR_SECONDS) * 0.1) - from).abs();
+            assert!(early > 0.2, "{from} to {to}: {early}");
+            assert_eq!(slide.at(f64::from(SIDEBAR_SECONDS)), to);
+        }
+        // Turning round halfway starts from where it was.
+        let opening = Slide {
+            from: 0.0,
+            to: 1.0,
+            started: 0.0,
+        };
+        let halfway = opening.at(0.1);
+        let folding = Slide {
+            from: halfway,
+            to: 0.0,
+            started: 0.1,
+        };
+        assert_eq!(folding.at(0.1), halfway);
     }
 
     #[test]

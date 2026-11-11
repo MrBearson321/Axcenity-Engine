@@ -64,9 +64,22 @@ pub(super) fn page_header(
     action
 }
 
-/// A card's surface: a thin outline that strengthens on hover (`hover`
-/// from 0 to 1), a faint fill, and the focus ring.
+/// A card's surface with a spotlight under the pointer, for cards that
+/// don't lean ([`tilt`]).
 pub(super) fn card_frame(
+    ui: &egui::Ui,
+    rect: Rect,
+    response: &egui::Response,
+    hover: f32,
+    palette: &Palette,
+) {
+    card_surface(ui, rect, response, hover, palette);
+    widgets::spotlight(ui, rect, response.id, hover);
+}
+
+/// A card's surface: a thin outline that strengthens on hover (`hover`
+/// from 0 to 1) toward the accent, a faint fill, and the focus ring.
+pub(super) fn card_surface(
     ui: &egui::Ui,
     rect: Rect,
     response: &egui::Response,
@@ -79,11 +92,14 @@ pub(super) fn card_frame(
         theme::mix(palette.panel, palette.surface, 0.6 + 0.4 * hover),
         Stroke::new(
             1.0_f32,
-            theme::mix(palette.border, palette.border_strong, hover),
+            theme::mix(
+                palette.border,
+                theme::mix(palette.border_strong, palette.accent, 0.45),
+                hover,
+            ),
         ),
         egui::StrokeKind::Inside,
     );
-    widgets::spotlight(ui, rect, response.id, hover);
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect.expand(2.0),
@@ -94,20 +110,52 @@ pub(super) fn card_frame(
     }
 }
 
+/// A soft accent glow behind an icon at `center`, `radius` wide, by the
+/// hover's fade.
+pub(super) fn icon_glow(
+    ui: &egui::Ui,
+    center: egui::Pos2,
+    radius: f32,
+    hover: f32,
+    palette: &Palette,
+) {
+    if hover <= 0.0 {
+        return;
+    }
+    let alpha = if palette.dark { 0.30 } else { 0.20 };
+    widgets::soft_pool(
+        ui.painter(),
+        center,
+        radius,
+        palette.accent.gamma_multiply(alpha * hover),
+    );
+}
+
 /// A project's picture: its thumbnail, or a quiet placeholder with its
-/// initials on a faint grid.
+/// initials on a faint grid. `float` is the hover's parallax: the picture
+/// pans inside its frame, zoomed in by as much so no edge shows, and the
+/// initials drift.
 pub(super) fn thumbnail_image(
     ui: &egui::Ui,
     rect: Rect,
     radius: CornerRadius,
     name: &str,
     thumbnail: Option<&egui::TextureHandle>,
+    float: egui::Vec2,
 ) {
     let palette = theme::palette(ui.ctx());
     match thumbnail {
         Some(texture) => {
+            let room = (float.abs() / rect.size()).max_elem().min(0.2);
+            let half = 0.5 - room;
+            let pan = -float / rect.size();
+            let center = pos2(
+                0.5 + pan.x.clamp(-room, room),
+                0.5 + pan.y.clamp(-room, room),
+            );
             egui::Image::new(texture)
                 .corner_radius(radius)
+                .uv(Rect::from_center_size(center, vec2(2.0 * half, 2.0 * half)))
                 .paint_at(ui, rect);
         }
         None => {
@@ -132,7 +180,7 @@ pub(super) fn thumbnail_image(
                 .flat_map(char::to_uppercase)
                 .collect();
             painter.text(
-                rect.center(),
+                rect.center() + float * 1.5,
                 egui::Align2::CENTER_CENTER,
                 if initials.is_empty() {
                     "?".to_owned()
@@ -240,42 +288,53 @@ pub(super) fn project_card(
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &link.name));
     let palette = theme::palette(ui.ctx());
     let hovered = ui.rect_contains_pointer(rect);
-    let hover = theme::ease(ui.ctx(), response.id.with("hover"), hovered);
+    let lean = tilt::lean(ui, rect, response.id, hovered);
+    let hover = lean.hover;
     let picture = Rect::from_min_size(rect.min, vec2(width, picture_height));
-    thumbnail_image(
-        ui,
-        picture,
-        CornerRadius::same(CARD_RADIUS),
-        &link.name,
-        thumbnail,
-    );
-    ui.painter().rect_stroke(
-        picture,
-        CARD_RADIUS,
-        Stroke::new(
-            1.0_f32,
-            theme::mix(palette.border, palette.border_strong, hover),
-        ),
-        egui::StrokeKind::Inside,
-    );
-    // A faint wash over the picture on hover, so it reads as clickable.
-    if hover > 0.0 {
-        ui.painter().rect_filled(
+    let mut action = tilt::leaning(ui, picture, CARD_RADIUS, lean, |ui| {
+        thumbnail_image(
+            ui,
+            picture,
+            CornerRadius::same(CARD_RADIUS),
+            &link.name,
+            thumbnail,
+            lean.drift(4.0),
+        );
+        ui.painter().rect_stroke(
             picture,
             CARD_RADIUS,
-            palette.text_strong.gamma_multiply(0.04 * hover),
-        );
-    }
-    widgets::spotlight(ui, picture, response.id, hover);
-    if response.has_focus() {
-        ui.painter().rect_stroke(
-            picture.expand(2.0),
-            CARD_RADIUS + 2,
-            Stroke::new(1.5_f32, palette.accent),
+            Stroke::new(
+                1.0_f32,
+                theme::mix(
+                    palette.border,
+                    theme::mix(palette.border_strong, palette.accent, 0.45),
+                    hover,
+                ),
+            ),
             egui::StrokeKind::Inside,
         );
-    }
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                picture.expand(2.0),
+                CARD_RADIUS + 2,
+                Stroke::new(1.5_f32, palette.accent),
+                egui::StrokeKind::Inside,
+            );
+        }
+        let menu = Rect::from_min_size(
+            pos2(picture.right() - 36.0, picture.top() + 8.0),
+            vec2(28.0, 24.0),
+        );
+        card_menu(
+            ui,
+            menu,
+            egui::Id::new(("card menu", &link.folder)),
+            hovered,
+        )
+    });
 
+    // The name and details sit under the picture, lifting with it.
+    let rise = if lean.motion { -2.0 * hover } else { 0.0 };
     let text_left = rect.left() + 2.0;
     let text_width = width - 4.0;
     let name = widgets::elided(
@@ -286,7 +345,7 @@ pub(super) fn project_card(
         text_width,
         1,
     );
-    let name_top = picture.bottom() + 10.0;
+    let name_top = picture.bottom() + 10.0 + rise;
     ui.painter()
         .galley(pos2(text_left, name_top), name, palette.text_strong);
     let detail = match &edited {
@@ -313,16 +372,6 @@ pub(super) fn project_card(
     ui.painter()
         .galley(pos2(text_left, name_top + 20.0), detail, palette.text_weak);
 
-    let menu = Rect::from_min_size(
-        pos2(picture.right() - 36.0, picture.top() + 8.0),
-        vec2(28.0, 24.0),
-    );
-    let mut action = card_menu(
-        ui,
-        menu,
-        egui::Id::new(("card menu", &link.folder)),
-        hovered,
-    );
     let response = response
         .on_hover_text(format!("Open {}", link.folder.display()))
         .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -351,7 +400,14 @@ pub(super) fn project_row(
         ui.painter().rect_filled(rect, 8, palette.control_hover);
     }
     let picture = Rect::from_min_size(rect.min + vec2(8.0, 8.0), vec2(36.0 * 16.0 / 9.0, 36.0));
-    thumbnail_image(ui, picture, CornerRadius::same(5), &link.name, thumbnail);
+    thumbnail_image(
+        ui,
+        picture,
+        CornerRadius::same(5),
+        &link.name,
+        thumbnail,
+        egui::Vec2::ZERO,
+    );
     ui.painter().rect_stroke(
         picture,
         5,

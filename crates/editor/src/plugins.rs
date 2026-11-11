@@ -227,7 +227,8 @@ pub fn show(
 ) -> Option<PluginAction> {
     let palette = theme::palette(ui.ctx());
     let mut action = None;
-    ui.horizontal(|ui| {
+    // Wraps in a narrow column rather than running past it.
+    crate::responsive::toolbar(ui, |ui| {
         if widgets::icon_button(ui, icons::ARROWS_CLOCKWISE, "Look for plugins again", false)
             .clicked()
         {

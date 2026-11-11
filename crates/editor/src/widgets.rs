@@ -275,27 +275,6 @@ pub fn section_label(ui: &mut egui::Ui, text: &str) {
     ui.label(micro(text, palette.text_weak));
 }
 
-/// A faint grid of dots over `rect`, behind a page's content. One mesh
-/// rather than a shape per dot, because a large window has thousands.
-pub fn dot_grid(painter: &egui::Painter, rect: Rect, color: Color32) {
-    const STEP: f32 = 24.0;
-    const DOT: f32 = 1.5;
-    let mut mesh = egui::Mesh::default();
-    let mut y = rect.top() + STEP / 2.0;
-    while y < rect.bottom() {
-        let mut x = rect.left() + STEP / 2.0;
-        while x < rect.right() {
-            mesh.add_colored_rect(
-                Rect::from_center_size(egui::pos2(x, y), vec2(DOT, DOT)),
-                color,
-            );
-            x += STEP;
-        }
-        y += STEP;
-    }
-    painter.add(mesh);
-}
-
 /// A soft pool of light under the pointer, inside `rect`, `strength` from 0
 /// to 1 (a hover's fade). Off with Reduce motion. The last position is kept
 /// so the pool fades where it was when the pointer leaves.
@@ -398,6 +377,45 @@ pub fn nav_item(
     response
 }
 
+/// The hover of a navigation icon at `at`: a soft accent glow behind it
+/// (faint while `selected`), and the icon drawn toward the pointer and a
+/// little larger, as if it floats over the bar. Returns where to draw the
+/// icon and how far it has lifted (0 to 1). Reduce motion keeps the glow
+/// and leaves the icon still.
+fn icon_hover(
+    ui: &egui::Ui,
+    id: egui::Id,
+    at: egui::Pos2,
+    hovered: bool,
+    selected: bool,
+) -> (egui::Pos2, f32) {
+    const PULL: f32 = 2.5;
+    let palette = theme::palette(ui.ctx());
+    let lift = theme::ease(ui.ctx(), id.with("icon lift"), hovered);
+    let glow = (lift + if selected { 0.35 } else { 0.0 }).min(1.0);
+    if glow > 0.0 {
+        let alpha = if palette.dark { 0.26 } else { 0.18 };
+        soft_pool(
+            ui.painter(),
+            at,
+            20.0 + 4.0 * lift,
+            palette.accent.gamma_multiply(alpha * glow),
+        );
+    }
+    if lift <= 0.0 || ui.ctx().global_style().animation_time <= 0.0 {
+        return (at, 0.0);
+    }
+    let toward =
+        ui.ctx()
+            .pointer_latest_pos()
+            .filter(|_| hovered)
+            .map_or(egui::Vec2::ZERO, |pointer| {
+                let offset = (pointer - at) / 16.0;
+                offset * (1.0 / offset.length().max(1.0))
+            });
+    (at + toward * PULL * lift, lift)
+}
+
 /// A sidebar page item that folds without a hard cut. Icons stay centred
 /// until labels have room (`open` past ~0.55); then the icon slides left
 /// and the title fades in, so nothing is clipped mid-slide.
@@ -462,11 +480,12 @@ pub fn nav_rail(
         icon_folded.y + (icon_open.y - icon_folded.y) * label,
     );
     let icon_size = theme::size::ICON_MEDIUM + 2.0 * (1.0 - label);
+    let (icon_pos, lift) = icon_hover(ui, response.id, icon_pos, hovered, selected);
     ui.painter().text(
         icon_pos,
         egui::Align2::CENTER_CENTER,
         icon,
-        FontId::proportional(icon_size),
+        FontId::proportional(icon_size + 1.5 * lift),
         icon_color,
     );
     if label > 0.01 {
@@ -499,128 +518,9 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Soft atmosphere behind a start page: drifting accent pools, a slow band,
-/// and a pointer wash. While motion is on it asks for the next frame so the
-/// drift keeps moving on the start screen; Reduce motion keeps only the
-/// static pools.
-pub fn atmosphere(ui: &egui::Ui, rect: Rect) {
-    let palette = theme::palette(ui.ctx());
-    let painter = ui.painter_at(rect);
-    let accent = palette.accent;
-    let ink = palette.text_strong;
-    let motion = ui.ctx().global_style().animation_time > 0.0;
-    let time = ui.ctx().input(|input| input.time) as f32;
-
-    let drift = |phase: f32, amp: f32| {
-        if motion {
-            egui::vec2(
-                (time * 0.22 + phase).sin() * amp,
-                (time * 0.17 + phase * 1.3).cos() * amp * 0.7,
-            )
-        } else {
-            egui::vec2(0.0, 0.0)
-        }
-    };
-    let pool = |center: egui::Pos2, radius: f32, color: Color32, alpha: f32| {
-        soft_pool(&painter, center, radius, color.gamma_multiply(alpha));
-    };
-
-    let span = rect.width().min(rect.height());
-    let a_accent = if palette.dark { 0.10 } else { 0.08 };
-    let a_ink = if palette.dark { 0.055 } else { 0.045 };
-    pool(
-        egui::pos2(
-            rect.right() - rect.width() * 0.14,
-            rect.top() + rect.height() * 0.2,
-        ) + drift(0.4, span * 0.04),
-        span * 0.58,
-        accent,
-        a_accent,
-    );
-    pool(
-        egui::pos2(
-            rect.left() + rect.width() * 0.1,
-            rect.bottom() - rect.height() * 0.12,
-        ) + drift(2.1, span * 0.035),
-        span * 0.45,
-        ink,
-        a_ink,
-    );
-    pool(
-        egui::pos2(
-            rect.center().x + rect.width() * 0.18,
-            rect.center().y - rect.height() * 0.05,
-        ) + drift(4.0, span * 0.03),
-        span * 0.32,
-        accent,
-        if palette.dark { 0.06 } else { 0.05 },
-    );
-
-    // Slow vertical wash that breathes.
-    let breathe = if motion {
-        0.5 + 0.5 * (time * 0.35).sin()
-    } else {
-        0.5
-    };
-    let band_h = 70.0 + 40.0 * breathe;
-    let band = Rect::from_center_size(rect.center() + drift(1.2, 12.0), vec2(rect.width(), band_h));
-    painter.rect_filled(
-        band,
-        0,
-        accent.gamma_multiply(if palette.dark { 0.028 } else { 0.032 } * (0.7 + 0.3 * breathe)),
-    );
-
-    // A few faint drifting motes.
-    if motion {
-        for i in 0..8 {
-            let phase = i as f32 * 0.9;
-            let x = rect.left()
-                + rect.width() * (0.12 + 0.76 * (0.5 + 0.5 * (time * 0.08 + phase).sin()));
-            let y = rect.top()
-                + rect.height() * (0.15 + 0.7 * (0.5 + 0.5 * (time * 0.11 + phase * 1.7).cos()));
-            let r = 2.0 + (time * 0.6 + phase).sin().abs() * 2.5;
-            pool(
-                egui::pos2(x, y),
-                r * 6.0,
-                if i % 2 == 0 { accent } else { ink },
-                if palette.dark { 0.08 } else { 0.06 },
-            );
-        }
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(32));
-    }
-
-    if !motion {
-        return;
-    }
-    let id = egui::Id::new("start atmosphere pointer");
-    let over = ui.rect_contains_pointer(rect);
-    if over && let Some(pointer) = ui.ctx().pointer_latest_pos() {
-        ui.ctx().data_mut(|data| data.insert_temp(id, pointer));
-    }
-    let strength = theme::ease(ui.ctx(), id.with("strength"), over);
-    if strength <= 0.0 {
-        return;
-    }
-    let Some(center) = ui.ctx().data(|data| data.get_temp::<egui::Pos2>(id)) else {
-        return;
-    };
-    pool(
-        center,
-        300.0,
-        ink,
-        if palette.dark { 0.08 } else { 0.06 } * strength,
-    );
-    pool(
-        center + egui::vec2(70.0, -50.0) + drift(3.0, 18.0),
-        150.0,
-        accent,
-        if palette.dark { 0.09 } else { 0.07 } * strength,
-    );
-}
-
-/// A soft radial pool as a triangle fan, for atmosphere and spotlights.
-fn soft_pool(painter: &egui::Painter, center: egui::Pos2, radius: f32, color: Color32) {
+/// A soft radial pool as a triangle fan: glows, spotlights and the start
+/// screen's background light.
+pub fn soft_pool(painter: &egui::Painter, center: egui::Pos2, radius: f32, color: Color32) {
     const SEGMENTS: u32 = 48;
     if color.a() == 0 || radius <= 0.0 {
         return;
@@ -709,11 +609,18 @@ pub fn nav_tab(
         palette.text_secondary
     };
     let mut x = rect.left() + 12.0;
-    ui.painter().text(
+    let (icon_pos, lift) = icon_hover(
+        ui,
+        response.id,
         egui::pos2(x + icon_width / 2.0, rect.center().y),
+        hovered,
+        selected,
+    );
+    ui.painter().text(
+        icon_pos,
         egui::Align2::CENTER_CENTER,
         icon,
-        FontId::proportional(theme::size::ICON_MEDIUM),
+        FontId::proportional(theme::size::ICON_MEDIUM + 1.5 * lift),
         if selected { palette.accent } else { color },
     );
     x += icon_width;
@@ -1281,7 +1188,7 @@ mod tests {
     }
 
     #[test]
-    fn the_logo_entrances_the_dots_and_the_spotlight_draw() {
+    fn the_logo_entrances_and_the_spotlight_draw() {
         let pointer = egui::pos2(340.0, 200.0);
         let mut draw = |ui: &mut egui::Ui| {
             let ctx = &ui.ctx().clone();
@@ -1289,7 +1196,6 @@ mod tests {
             egui::CentralPanel::default().show(ui, |ui| {
                 let palette = theme::palette(ui.ctx());
                 let (top, ink) = (ui.max_rect().top() + 20.0, palette.text_strong);
-                dot_grid(ui.painter(), ui.max_rect(), ink.gamma_multiply(0.04));
                 let at = |index: usize, y: f32| {
                     Rect::from_min_size(
                         egui::pos2(20.0 + index as f32 * 100.0, y),
@@ -1315,7 +1221,6 @@ mod tests {
                     egui::Id::new("card"),
                     1.0,
                 );
-                atmosphere(ui, ui.max_rect());
                 ui.horizontal(|ui| {
                     let _ = nav_rail(ui, icons::SQUARES_FOUR, "Projects", Some(3), true, 1.0);
                     let _ = nav_rail(ui, icons::GEAR_SIX, "Settings", None, false, 0.0);
