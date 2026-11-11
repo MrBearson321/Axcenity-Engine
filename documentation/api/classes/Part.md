@@ -31,10 +31,10 @@ bridge.Anchored = false -- it falls
 #### Shape
 
 ```luau
-Part.Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+Part.Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule" | "CornerWedge"
 ```
 
-Block, Ball, Cylinder (along X) or Wedge.
+Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).
 
 #### Position
 

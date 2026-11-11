@@ -464,6 +464,16 @@ fn hit_surface(shape: PartType, transform: Mat4, ray: Ray) -> Option<(f32, Vec3)
             inside_box(origin, direction)?,
             inside_flat_side(origin, direction, Vec3::new(0.0, 1.0, -1.0), 0.0)?,
         ),
+        // A corner wedge is the box cut by its two slopes, both rising to
+        // the top back right corner (0.5, 0.5, 0.5): the wedge's (y <= z)
+        // and one rising from the left edge (y <= x).
+        PartType::CornerWedge => overlap(
+            overlap(
+                inside_box(origin, direction)?,
+                inside_flat_side(origin, direction, Vec3::new(0.0, 1.0, -1.0), 0.0)?,
+            )?,
+            inside_flat_side(origin, direction, Vec3::new(-1.0, 1.0, 0.0), 0.0)?,
+        ),
         PartType::Ball => inside_radius(origin, direction),
         // Split into pieces above.
         PartType::Capsule => None,
@@ -699,6 +709,10 @@ mod tests {
                 // The wedge's top front corner is cut away by its slope,
                 // but the ray still hits the slope further back.
                 PartType::Wedge => assert_eq!(corner, Some(id)),
+                // So is the corner wedge's: (0.9, 0.9) is on its edge up
+                // to the point; `a_corner_wedge_is_hit_on_its_slopes` looks
+                // closer.
+                PartType::CornerWedge => {}
             }
             assert_eq!(middle, Some(id), "{shape:?}");
             world.destroy(id).unwrap();
@@ -753,6 +767,37 @@ mod tests {
         };
         let distance = hit_distance(shape, transform, down).unwrap();
         assert!((distance - 10.9).abs() < 1e-4, "{distance}");
+    }
+
+    #[test]
+    fn a_corner_wedge_is_hit_on_its_slopes() {
+        let mut world = World::new();
+        let id = part(
+            &mut world,
+            PartType::CornerWedge,
+            Vec3::ZERO,
+            Vec3::splat(2.0),
+        );
+        let (shape, transform) = part_placement(world.get(id).unwrap()).unwrap();
+        // Seen from above, its top is as high as the lower of x and z: it
+        // rises toward +X and +Z to the point over the back right corner.
+        let down = |x: f32, z: f32| Ray {
+            origin: Vec3::new(x, 10.0, z),
+            direction: Vec3::NEG_Y,
+        };
+        for (x, z) in [(0.5, -0.5), (-0.9, 0.9), (0.9, 0.9), (0.2, 0.6)] {
+            let distance = hit_distance(shape, transform, down(x, z)).unwrap();
+            let top = f32::min(x, z);
+            assert!(
+                (distance - (10.0 - top)).abs() < 1e-4,
+                "({x}, {z}): {distance}"
+            );
+        }
+        // From the front, the box's top left corner is cut away, the top
+        // right one isn't (it's under the right side's upright edge).
+        assert_eq!(pick(&world, ray_along_z(-0.9, 0.9)), None);
+        assert_eq!(pick(&world, ray_along_z(0.95, 0.9)), Some(id));
+        assert_eq!(pick(&world, ray_along_z(0.0, -0.5)), Some(id));
     }
 
     #[test]

@@ -10,7 +10,7 @@ Worlds are built from **parts**: blocks, balls, cylinders and wedges you can siz
 
 ## Insert a part
 
-On the **Home** tab, the **Parts** group inserts a **Block**, **Sphere**, **Cylinder** or **Wedge**. The new part goes in front of the camera, resting on whatever the middle of the view looks at (a part, the baseplate or terrain); looking at the sky, it goes a short way ahead. If that spot is taken it's lifted until it's clear, so inserting several in a row piles them up instead of overlapping. It goes inside the selected Model or Folder (or the Workspace) and becomes the selection. New parts are named `Part`, unanchored and plastic, and are drawn with a grid texture while you edit so their size is easy to read (choose a material to replace it).
+On the **Home** tab, the **Parts** group inserts a **Block**, **Sphere**, **Cylinder**, **Wedge**, **Corner Wedge** (a slope rising to one corner, for roof corners) or **Capsule** (a cylinder with round ends). The new part goes in front of the camera, resting on whatever the middle of the view looks at (a part, the baseplate or terrain); looking at the sky, it goes a short way ahead. If that spot is taken it's lifted until it's clear, so inserting several in a row piles them up instead of overlapping. It goes inside the selected Model or Folder (or the Workspace) and becomes the selection. New parts are named `Part`, unanchored and plastic, and are drawn with a grid texture while you edit so their size is easy to read (choose a material to replace it).
 
 The Explorer's right-click **Insert** menu has every kind of object, grouped: parts, Model, Folder and Attachment, then lighting, effects, audio, gameplay, UI, values, scripts and events.
 

@@ -796,8 +796,8 @@ mod tests {
     fn a_dropped_prop_rests_on_the_surface_it_is_dropped_on() {
         let mut world = World::new();
         let workspace = world.workspace();
-        let lamp = PROPS.iter().find(|prop| prop.name == "Lamp").unwrap();
-        let ids = project::parse_prefab(lamp.prefab, &mut world, workspace).unwrap();
+        let tree = PROPS.iter().find(|prop| prop.name == "Tree").unwrap();
+        let ids = project::parse_prefab(tree.prefab, &mut world, workspace).unwrap();
         let (min, max) = bounds(&world, &ids).unwrap();
         // Dropped on a floor whose top is at Y = 3.
         let target = Vec3::new(10.0, 3.0, -4.0);
@@ -817,8 +817,8 @@ mod tests {
         let before = app.world.get(workspace).unwrap().children().len();
         let entry = AssetEntry {
             kind: AssetKind::Prop,
-            path: "Table".to_owned(),
-            name: "Table".to_owned(),
+            path: "Tree".to_owned(),
+            name: "Tree".to_owned(),
         };
         let target = DropTarget {
             point: Vec3::new(5.0, 2.0, 0.0),
@@ -828,16 +828,16 @@ mod tests {
             released: true,
         };
         app.drop_asset(&entry, Some(target));
-        let table = app.selected.expect("the placed prop is selected");
-        assert_eq!(app.world.get(table).unwrap().name(), "Table");
+        let tree = app.selected.expect("the placed prop is selected");
+        assert_eq!(app.world.get(tree).unwrap().name(), "Tree");
         assert_eq!(
             app.world.get(workspace).unwrap().children().len(),
             before + 1
         );
-        let (min, max) = bounds(&app.world, &[table]).unwrap();
+        let (min, max) = bounds(&app.world, &[tree]).unwrap();
         assert!((min.y - 2.0).abs() < 1e-4);
         assert!(((min.x + max.x) / 2.0 - 5.0).abs() < 1e-4);
-        assert_eq!(app.history.undo_label(), Some("Place Table"));
+        assert_eq!(app.history.undo_label(), Some("Place Tree"));
         app.undo();
         assert_eq!(app.world.get(workspace).unwrap().children().len(), before);
     }

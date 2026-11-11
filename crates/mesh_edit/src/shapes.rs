@@ -79,6 +79,47 @@ impl Mesh {
         mesh
     }
 
+    /// Axcenity's CornerWedge at `size`: a full bottom rectangle, rising to a
+    /// point above the back right corner (+X, +Z), with two upright
+    /// triangles (right and back) and two sloping ones.
+    pub fn corner_wedge(size: Vec3) -> Mesh {
+        let half = size / 2.0;
+        let corner = |x: f32, y: f32, z: f32| Vec3::new(x, y, z) * half;
+        let mut mesh = Mesh::default();
+        let bottom = [(1, -1, -1), (1, -1, 1), (-1, -1, 1), (-1, -1, -1)]
+            .map(|(x, y, z)| corner(x as f32, y as f32, z as f32));
+        mesh.push_face(&bottom, &SQUARE_UVS);
+        let [front_left, front_right, back_right, back_left] = [
+            corner(-1.0, -1.0, -1.0),
+            corner(1.0, -1.0, -1.0),
+            corner(1.0, -1.0, 1.0),
+            corner(-1.0, -1.0, 1.0),
+        ];
+        let top = corner(1.0, 1.0, 1.0);
+        let inside = corner(0.5, -0.5, 0.5);
+        for [a, b, c] in [
+            [front_right, back_right, top],
+            [back_right, back_left, top],
+            [front_left, front_right, top],
+            [back_left, front_left, top],
+        ] {
+            // Counter-clockwise seen from outside.
+            let mut corners = [a, b, c];
+            if (b - a).cross(c - a).dot((a + b + c) / 3.0 - inside) < 0.0 {
+                corners.swap(1, 2);
+            }
+            // Uvs across the unit box, along the face's first edge and up it.
+            let [a, b, _] = corners;
+            let u = (b - a).normalize_or_zero();
+            let normal = (b - a).cross(corners[2] - a).normalize_or_zero();
+            let v = normal.cross(u);
+            let span = size.max_element().max(f32::EPSILON);
+            let uv = |p: Vec3| Vec2::new((p - a).dot(u) / span, (p - a).dot(v) / span);
+            mesh.push_face(&corners, &corners.map(uv));
+        }
+        mesh
+    }
+
     /// A sphere as wide as the smallest side of `size`, centered on the
     /// origin, with smooth normals.
     pub fn ball(size: Vec3) -> Mesh {

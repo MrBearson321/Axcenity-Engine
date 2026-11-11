@@ -304,6 +304,36 @@
       },
       {
         "class": "Part",
+        "name": "CornerWedge",
+        "properties": {
+          "Anchored": true,
+          "AssemblyAngularVelocity": [0, 0, 0],
+          "AssemblyLinearVelocity": [0, 0, 0],
+          "CanCollide": true,
+          "CanQuery": true,
+          "CanTouch": true,
+          "CastShadow": true,
+          "CollisionGroup": "Default",
+          "Color": [0.95, 0.55, 0.2],
+          "CustomPhysicalProperties": null,
+          "Emission": 0,
+          "EmissiveColor": [1, 1, 1],
+          "Massless": false,
+          "Material": "Plastic",
+          "MaterialVariant": "",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [10.5, 1, 4.5],
+          "Roughness": 0.5,
+          "Shape": "CornerWedge",
+          "Size": [3, 2, 3],
+          "TileSize": 8,
+          "Transparency": 0,
+          "WindAffected": false
+        }
+      },
+      {
+        "class": "Part",
         "name": "SmoothPlasticSample",
         "properties": {
           "Anchored": true,

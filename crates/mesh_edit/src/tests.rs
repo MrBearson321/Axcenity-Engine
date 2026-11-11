@@ -95,6 +95,9 @@ fn shapes_are_closed_and_face_outward() {
     assert_eq!(block.bounds(), (-size / 2.0, size / 2.0));
     // Half the box.
     assert!(close(Mesh::wedge(size).volume(), 12.0, 1e-5));
+    // A pyramid on the whole bottom: a third of the box.
+    assert!(close(Mesh::corner_wedge(size).volume(), 8.0, 1e-5));
+    assert_eq!(Mesh::corner_wedge(size).bounds(), (-size / 2.0, size / 2.0));
     // Slightly less than a true sphere's or cylinder's, being faceted.
     let ball = Mesh::ball(size).volume();
     assert!(ball > 0.9 * 4.0 / 3.0 * std::f32::consts::PI && ball < 4.19);
@@ -105,6 +108,7 @@ fn shapes_are_closed_and_face_outward() {
     for mesh in [
         block,
         Mesh::wedge(size),
+        Mesh::corner_wedge(size),
         Mesh::ball(size),
         Mesh::cylinder(size),
     ] {
@@ -151,6 +155,7 @@ fn cutting_slanted_keeps_the_volume() {
     for mesh in [
         Mesh::block(size),
         Mesh::wedge(size),
+        Mesh::corner_wedge(size),
         Mesh::ball(size),
         Mesh::cylinder(size),
     ] {
@@ -300,7 +305,12 @@ fn voronoi_pieces_tile_a_block_with_convex_pieces() {
 #[test]
 fn round_shapes_break_into_closed_pieces() {
     let size = Vec3::new(3.0, 2.0, 2.0);
-    for mesh in [Mesh::ball(size), Mesh::cylinder(size), Mesh::wedge(size)] {
+    for mesh in [
+        Mesh::ball(size),
+        Mesh::cylinder(size),
+        Mesh::wedge(size),
+        Mesh::corner_wedge(size),
+    ] {
         for pattern in [Pattern::Uniform, Pattern::Impact] {
             let pieces = fracture(&mesh, 20, 3, pattern);
             assert!(pieces.len() >= 15, "{} pieces", pieces.len());

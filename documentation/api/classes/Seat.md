@@ -25,10 +25,10 @@ If true, the part stays where it is. If false, it falls and collides with other 
 #### Shape
 
 ```luau
-Seat.Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+Seat.Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule" | "CornerWedge"
 ```
 
-Block, Ball, Cylinder (along X) or Wedge.
+Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).
 
 #### Position
 
