@@ -36,9 +36,7 @@ impl AnimationStudio {
             && ctx
                 .input(|input| input.pointer.latest_pos())
                 .is_some_and(|pointer| rect.contains(pointer))
-            && !ctx.egui_wants_keyboard_input()
-            && ctx.memory(|memory| memory.focused()).is_none()
-            && !egui::Popup::is_any_open(ctx)
+            && super::transport::keys_free(ctx)
     }
 
     /// Draws the Animation tab. `selected` is the Explorer's primary
