@@ -286,7 +286,8 @@ fn summary(id: &str, info: &Value, kind: Kind) -> AssetRecord {
             .get("download_count")
             .and_then(Value::as_f64)
             .unwrap_or(0.0),
-        thumbnail_url: json::text(info.get("thumbnail_url")),
+        // The CDN sends WebP by default; ask for PNG, which every reader decodes.
+        thumbnail_url: json::text(info.get("thumbnail_url")).replace("format=webp", "format=png"),
         name,
         ..AssetRecord::default()
     }
@@ -415,7 +416,7 @@ mod tests {
         "red_brick_03": {"name": "Red Brick 03", "type": 1, "tags": ["brick", "wall", "red"],
             "categories": ["brick", "outdoor"], "authors": {"Rob Tuytel": "All"},
             "download_count": 900, "max_resolution": [8192, 8192], "dimensions": [2000, 2000],
-            "thumbnail_url": "https://cdn.polyhaven.com/asset_img/thumbs/red_brick_03.png"},
+            "thumbnail_url": "https://cdn.polyhaven.com/asset_img/thumbs/red_brick_03.png?width=256&format=webp"},
         "brick_wall_001": {"name": "Brick Wall 001", "type": 1, "tags": ["wall"],
             "categories": ["brick"], "download_count": 5000, "max_resolution": [4096, 4096]},
         "rusty_metal": {"name": "Rusty Metal", "type": 1, "tags": ["metal"], "download_count": 99999},
@@ -459,6 +460,10 @@ mod tests {
         let record = &page.records[0];
         assert_eq!(record.authors, ["Rob Tuytel"]);
         assert_eq!(record.physical_size, Some(vec![2.0, 2.0]));
+        assert_eq!(
+            record.thumbnail_url,
+            "https://cdn.polyhaven.com/asset_img/thumbs/red_brick_03.png?width=256&format=png"
+        );
         assert_eq!(record.resolutions, ["1k", "2k", "4k", "8k"]);
         assert_eq!(
             record.attribution,

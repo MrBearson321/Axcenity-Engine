@@ -31,9 +31,10 @@ use axcenity_toolbox::db::{self, Database, Install};
 use axcenity_toolbox::directory::{self, AssetDirectory};
 use axcenity_toolbox::download::Fetcher;
 use axcenity_toolbox::http::{self, Http};
+use axcenity_toolbox::polyhaven::POLYHAVEN;
 use axcenity_toolbox::variants::{self, Choice};
 use axcenity_toolbox::{
-    AssetRecord, AssetSource, Kind, Package, Query, SourceError, Variant, files, guard,
+    AssetRecord, AssetSource, Kind, Package, Query, SourceError, Variant, files,
 };
 use eframe::egui;
 
@@ -65,18 +66,24 @@ struct Listing {
     category: String,
     maps: Vec<String>,
     preview: Option<String>,
-    /// Its zip downloads, such as "2K JPG", each one file from ambientCG.
+    /// Its JPG and PNG packages, such as "2K JPG": one zip each from
+    /// ambientCG, loose maps from Poly Haven.
     packages: Vec<Variant>,
+    /// The source lists its packages only in the full record (Poly Haven),
+    /// so Get looks them up first.
+    lookup: bool,
     /// The source's record, kept in the metadata database on download.
     record: AssetRecord,
 }
 
 impl Listing {
-    /// A search result from the Toolbox's ambientCG source.
+    /// A search result from one of the Toolbox's texture sources.
     fn from_record(record: AssetRecord) -> Self {
         let kept = record.clone();
+        let lookup = record.variants.is_empty() && record.provider == POLYHAVEN.info().key;
         Self {
             record: kept,
+            lookup,
             category: record.categories.first().cloned().unwrap_or_default(),
             maps: record
                 .maps
@@ -84,15 +91,56 @@ impl Listing {
                 .map(|map| map_label(map).to_owned())
                 .collect(),
             preview: Some(record.thumbnail_url).filter(|url| url.starts_with("https://")),
-            packages: record
-                .variants
-                .into_iter()
-                .filter(|variant| variant.package == Package::Archive && variant.files.len() == 1)
-                .collect(),
+            packages: record.variants.into_iter().filter(usable).collect(),
             id: record.id,
             name: record.name,
         }
     }
+}
+
+/// Whether Get can make a texture set from a package: one zip, or loose
+/// maps, of JPG or PNG images (the formats the engine reads).
+fn usable(variant: &Variant) -> bool {
+    let images = FORMATS
+        .iter()
+        .any(|format| variant.format.eq_ignore_ascii_case(format));
+    let shape = match variant.package {
+        Package::Archive => variant.files.len() == 1,
+        Package::Maps => !variant.files.is_empty(),
+        Package::Bundle | Package::Single => false,
+    };
+    images && shape
+}
+
+/// Leaves out loose maps the texture set doesn't need: a DirectX normal
+/// map when there's an OpenGL one, and a packed AO/roughness/metalness map
+/// when the separate maps are there.
+fn needed_maps(variant: &Variant) -> Variant {
+    let has = |map: &str| {
+        variant
+            .files
+            .iter()
+            .any(|file| file.map.as_deref() == Some(map))
+    };
+    let mut variant = variant.clone();
+    if variant.package == Package::Maps {
+        let skip_dx = has("normal");
+        let skip_arm = has("ao") && has("roughness");
+        variant.files.retain(|file| match file.map.as_deref() {
+            Some("normal_dx") => !skip_dx,
+            Some("arm") => !skip_arm,
+            _ => true,
+        });
+    }
+    variant
+}
+
+/// A source's id as a folder name: letters, digits, `_` and `-`.
+fn folder_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// How a map's name reads on a card.
@@ -142,6 +190,8 @@ struct Card {
 
 /// The Get texture dialog.
 pub struct GetTexture {
+    /// Where materials come from: ambientCG or Poly Haven.
+    source: &'static dyn AssetSource,
     query: String,
     resolution: String,
     format: String,
@@ -172,6 +222,7 @@ impl GetTexture {
     fn idle() -> Self {
         let (preview_tx, preview_rx) = mpsc::channel();
         Self {
+            source: &AMBIENTCG,
             query: String::new(),
             resolution: "2K".to_owned(),
             format: "JPG".to_owned(),
@@ -202,15 +253,21 @@ impl GetTexture {
         let width = (screen.x - 64.0).clamp(280.0, 800.0);
         let height = (screen.y - 260.0).clamp(200.0, 600.0);
         let mut close = false;
+        let source = self.source.info();
+        let subtitle = format!(
+            "Materials from {}. Saved files are CC0 and work offline.",
+            source.name
+        );
         let ((), dismissed) = dialog::modal(ctx, "get texture", width, |ui| {
             dialog::header(
                 ui,
                 icons::DOWNLOAD_SIMPLE,
                 dialog::Tone::Question,
                 "Get texture",
-                Some("Materials from ambientCG. Saved files are CC0 and work offline."),
+                Some(&subtitle),
             );
             ui.horizontal_wrapped(|ui| {
+                self.source_choice(ui);
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
                         .hint_text("Search materials")
@@ -237,6 +294,8 @@ impl GetTexture {
             }
             ui.add_space(4.0);
             self.results(ui, project, height);
+            // Where the results come from (Poly Haven's API terms ask for it).
+            ui.label(egui::RichText::new(source.credit).weak().small());
             close |= dialog::buttons(
                 ui,
                 &[dialog::Button::new(icons::X, "Close", dialog::Kind::Plain)],
@@ -249,6 +308,27 @@ impl GetTexture {
             self.cancel.store(true, Ordering::Relaxed);
         }
         (close || notice.is_some()).then_some(TextureEvent { close, notice })
+    }
+
+    /// The source menu. Picking another source searches it.
+    fn source_choice(&mut self, ui: &mut egui::Ui) {
+        let mut picked = None;
+        egui::ComboBox::from_id_salt("texture source")
+            .selected_text(self.source.info().name)
+            .show_ui(ui, |ui| {
+                for source in axcenity_toolbox::sources_for(Kind::Texture) {
+                    let current = source.info().key == self.source.info().key;
+                    if ui.selectable_label(current, source.info().name).clicked() && !current {
+                        picked = Some(source);
+                    }
+                }
+            });
+        if let Some(source) = picked
+            && self.search.is_none()
+        {
+            self.source = source;
+            self.start_search(ui.ctx(), 0);
+        }
     }
 
     fn choice(&mut self, ui: &mut egui::Ui, salt: &str, options: &[&str], resolution: bool) {
@@ -300,7 +380,14 @@ impl GetTexture {
                     id: listing.id.clone(),
                     name: listing.name.clone(),
                     detail,
-                    plan: self.package(listing).map(|choice| choice.describe()),
+                    plan: self
+                        .package(listing)
+                        .map(|choice| choice.describe())
+                        .or_else(|| {
+                            listing.lookup.then(|| {
+                                format!("Gets the nearest to {} {}.", self.resolution, self.format)
+                            })
+                        }),
                 }
             })
             .collect();
@@ -382,9 +469,7 @@ impl GetTexture {
     /// The package Get fetches for `listing`: the chosen resolution and
     /// format, else the nearest there is (`variants::choose`).
     fn package<'a>(&self, listing: &'a Listing) -> Option<Choice<'a>> {
-        let resolution = self.resolution.to_ascii_lowercase();
-        let format = self.format.to_ascii_lowercase();
-        variants::choose(&listing.packages, &resolution, &format, &["jpg", "png"])
+        pick(listing, &self.resolution, &self.format)
     }
 
     fn start_search(&mut self, ctx: &egui::Context, offset: usize) {
@@ -396,10 +481,11 @@ impl GetTexture {
         self.status = Some("Searching…".to_owned());
         let generation = self.generation;
         let query = self.query.trim().to_owned();
+        let source = self.source;
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = search(&query, offset).map(|(total, listings)| SearchResult {
+            let result = search(source, &query, offset).map(|(total, listings)| SearchResult {
                 generation,
                 offset,
                 total,
@@ -419,35 +505,62 @@ impl GetTexture {
         else {
             return;
         };
-        let Some(choice) = self.package(listing) else {
+        // Known now, or (Poly Haven) once the full record is looked up.
+        let known = self
+            .package(listing)
+            .map(|choice| (choice.variant.clone(), choice.notes.join(" ")));
+        if known.is_none() && !listing.lookup {
             self.error = Some(format!("{} has no download.", listing.name));
             return;
-        };
-        let variant = choice.variant.clone();
-        let label = variant.label.clone();
-        let notes = choice.notes.join(" ");
+        }
         let name = listing.name.clone();
         let record = listing.record.clone();
         let project = project.to_owned();
+        let source = self.source;
+        let (resolution, format) = (self.resolution.clone(), self.format.clone());
         self.error = None;
-        self.status = Some(
-            format!("Downloading {name} ({label})… {notes}")
+        self.status = Some(match &known {
+            Some((variant, notes)) => format!("Downloading {name} ({})… {notes}", variant.label)
                 .trim_end()
                 .to_owned(),
-        );
+            None => format!("Downloading {name}…"),
+        });
         self.cancel = Arc::new(AtomicBool::new(false));
         let cancel = Arc::clone(&self.cancel);
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let client = http::Client::new(Duration::from_secs(15 * 60));
-            let outcome = match directory::locate() {
-                Some(assets) => download(&client, &assets, &project, &record, &variant, &cancel),
-                None => Err(format!(
-                    "there is no asset directory; set {} to a folder",
-                    directory::ENV
-                )),
-            };
+            let mut notes = String::new();
+            let outcome = (|| {
+                let (record, variant) = match known {
+                    Some((variant, known_notes)) => {
+                        notes = known_notes;
+                        (record, variant)
+                    }
+                    None => {
+                        let full = source
+                            .record(&client, &record.id)
+                            .map_err(|err| err.to_string())?;
+                        let listing = Listing::from_record(full.clone());
+                        let choice = pick(&listing, &resolution, &format)
+                            .ok_or_else(|| "it has no JPG or PNG maps".to_owned())?;
+                        notes = choice.notes.join(" ");
+                        let variant = choice.variant.clone();
+                        (full, variant)
+                    }
+                };
+                let assets = directory::locate().ok_or_else(|| {
+                    format!(
+                        "there is no asset directory; set {} to a folder",
+                        directory::ENV
+                    )
+                })?;
+                let variant = needed_maps(&variant);
+                download(
+                    &client, source, &assets, &project, &record, &variant, &cancel,
+                )
+            })();
             let result = match outcome {
                 Ok(DownloadResult::Cancelled) => Ok(DownloadResult::Cancelled),
                 Ok(DownloadResult::Saved(text)) if !notes.is_empty() => {
@@ -556,14 +669,26 @@ impl GetTexture {
     }
 }
 
-/// One page of popular materials matching `query`, through the Toolbox's
-/// ambientCG source.
-fn search(query: &str, offset: usize) -> Result<(usize, Vec<Listing>), String> {
+/// The package Get fetches for `listing` at a resolution and format such as
+/// "2K" and "JPG": that one, else the nearest there is (`variants::choose`).
+fn pick<'a>(listing: &'a Listing, resolution: &str, format: &str) -> Option<Choice<'a>> {
+    let resolution = resolution.to_ascii_lowercase();
+    let format = format.to_ascii_lowercase();
+    variants::choose(&listing.packages, &resolution, &format, &["jpg", "png"])
+}
+
+/// One page of materials matching `query` from one of the Toolbox's
+/// texture sources (most popular first).
+fn search(
+    source: &dyn AssetSource,
+    query: &str,
+    offset: usize,
+) -> Result<(usize, Vec<Listing>), String> {
     let client = http::Client::new(Duration::from_secs(30));
     let mut wanted = Query::new(query, Kind::Texture);
     wanted.per_page = PAGE as u32;
     wanted.page = (offset / PAGE) as u32 + 1;
-    let page = AMBIENTCG
+    let page = source
         .search(&client, &wanted)
         .map_err(|err| err.to_string())?;
     let shown = offset + page.records.len();
@@ -625,6 +750,7 @@ fn preview_image(client: &http::Client, url: &str) -> Option<egui::ColorImage> {
 /// is set before the files are moved into place.
 fn download(
     http: &dyn Http,
+    source: &dyn AssetSource,
     assets: &Path,
     project: &Path,
     record: &AssetRecord,
@@ -632,7 +758,7 @@ fn download(
     cancel: &AtomicBool,
 ) -> Result<DownloadResult, String> {
     let id = record.id.as_str();
-    if !guard::safe_asset_id(id) {
+    if !folder_id(id) {
         return Err("the asset id is not a file name".to_owned());
     }
     let dir = AssetDirectory::open(assets).map_err(|err| err.to_string())?;
@@ -642,17 +768,12 @@ fn download(
         dir: &dir,
         db: &db,
     };
-    let fetched = match fetcher.fetch_variant(
-        AMBIENTCG.info(),
-        record,
-        variant,
-        &TEXTURE_EXTENSIONS,
-        cancel,
-    ) {
-        Ok(fetched) => fetched,
-        Err(SourceError::Cancelled) => return Ok(DownloadResult::Cancelled),
-        Err(err) => return Err(err.to_string()),
-    };
+    let fetched =
+        match fetcher.fetch_variant(source.info(), record, variant, &TEXTURE_EXTENSIONS, cancel) {
+            Ok(fetched) => fetched,
+            Err(SourceError::Cancelled) => return Ok(DownloadResult::Cancelled),
+            Err(err) => return Err(err.to_string()),
+        };
     if cancel.load(Ordering::Relaxed) {
         return Ok(DownloadResult::Cancelled);
     }
@@ -816,7 +937,10 @@ mod tests {
         let cancel = AtomicBool::new(false);
 
         let first = temp.0.join("First");
-        let saved = download(&http, &assets, &first, &record, &variant, &cancel).unwrap();
+        let saved = download(
+            &http, &AMBIENTCG, &assets, &first, &record, &variant, &cancel,
+        )
+        .unwrap();
         assert!(
             matches!(&saved, DownloadResult::Saved(text) if text.starts_with("Saved Fabric 086"))
         );
@@ -829,6 +953,7 @@ mod tests {
         let second = temp.0.join("Second");
         download(
             &Fixture::default(),
+            &AMBIENTCG,
             &assets,
             &second,
             &record,
@@ -865,6 +990,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let err = download(
             &Fixture::default(),
+            &AMBIENTCG,
             &temp.0.join("Assets"),
             &project,
             &record,
@@ -885,7 +1011,7 @@ mod tests {
     #[ignore = "reaches ambientCG"]
     fn get_downloads_a_real_material_into_a_project() {
         let temp = Temp::new("live");
-        let (_, listings) = search("ground", 0).unwrap();
+        let (_, listings) = search(&AMBIENTCG, "ground", 0).unwrap();
         let listing = listings
             .into_iter()
             .find(|l| !l.packages.is_empty())
@@ -896,6 +1022,7 @@ mod tests {
         let client = http::Client::new(Duration::from_secs(600));
         let saved = download(
             &client,
+            &AMBIENTCG,
             &temp.0.join("Assets"),
             &project,
             &listing.record,
@@ -947,5 +1074,134 @@ mod tests {
         assert_eq!(dialog.package(&listing).unwrap().variant.label, "4K PNG");
         let empty = Listing::from_record(record(Vec::new()));
         assert!(dialog.package(&empty).is_none());
+    }
+
+    fn poly_haven_maps() -> (AssetRecord, Variant) {
+        let map = |name: &str, map: &str| RemoteFile {
+            url: format!("https://dl.polyhaven.org/file/{name}"),
+            path: name.to_owned(),
+            size: Some(name.len() as u64),
+            md5: None,
+            map: Some(map.to_owned()),
+        };
+        let variant = Variant {
+            label: "2K JPG".into(),
+            resolution: Some("2k".into()),
+            format: "jpg".into(),
+            package: Package::Maps,
+            files: vec![
+                map("red_brick_03_diff_2k.jpg", "base_color"),
+                map("red_brick_03_nor_dx_2k.jpg", "normal_dx"),
+                map("red_brick_03_nor_gl_2k.jpg", "normal"),
+                map("red_brick_03_rough_2k.jpg", "roughness"),
+                map("red_brick_03_ao_2k.jpg", "ao"),
+                map("red_brick_03_arm_2k.jpg", "arm"),
+            ],
+        };
+        let record = AssetRecord {
+            provider: "polyhaven".into(),
+            id: "red_brick_03".into(),
+            name: "Red Brick 03".into(),
+            url: "https://polyhaven.com/a/red_brick_03".into(),
+            license: "CC0".into(),
+            ..AssetRecord::default()
+        };
+        (record, variant)
+    }
+
+    #[test]
+    fn a_poly_haven_result_is_looked_up_before_get() {
+        let (record, _) = poly_haven_maps();
+        let listing = Listing::from_record(record);
+        assert!(listing.lookup);
+        assert!(listing.packages.is_empty());
+        let mut dialog = GetTexture::idle();
+        dialog.page = Some(Page {
+            total: 1,
+            listings: vec![listing],
+        });
+        assert!(
+            dialog
+                .package(&dialog.page.as_ref().unwrap().listings[0])
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn poly_haven_maps_install_as_a_texture_set_without_the_spare_maps() {
+        let temp = Temp::new("polyhaven");
+        let (record, variant) = poly_haven_maps();
+        let variant = needed_maps(&variant);
+        let kept: Vec<_> = variant
+            .files
+            .iter()
+            .filter_map(|f| f.map.as_deref())
+            .collect();
+        assert_eq!(kept, ["base_color", "normal", "roughness", "ao"]);
+        let http = variant.files.iter().fold(Fixture::default(), |http, file| {
+            http.with(&file.url, file.path.as_bytes())
+        });
+        let project = temp.0.join("Project");
+        let cancel = AtomicBool::new(false);
+        let saved = download(
+            &http,
+            &POLYHAVEN,
+            &temp.0.join("Assets"),
+            &project,
+            &record,
+            &variant,
+            &cancel,
+        );
+        assert!(
+            matches!(saved, Ok(DownloadResult::Saved(_))),
+            "{:?}",
+            saved.err()
+        );
+        let folder = project.join("assets").join("textures").join("red_brick_03");
+        let set =
+            axcenity_assets::read_texture_set(&folder.join("red_brick_03.texture.json")).unwrap();
+        assert_eq!(set.source, "polyhaven");
+        assert_eq!(set.maps.len(), 4);
+        assert!(set.maps.iter().all(|map| !map.flip_green));
+        assert!(!folder.join("red_brick_03_nor_dx_2k.jpg").exists());
+    }
+
+    /// Get against the real Poly Haven: search, look the record up, choose
+    /// the nearest to 1K JPG, download and save the texture set. Reaches the
+    /// network, so run it by hand (see the ambientCG one above).
+    #[test]
+    #[ignore = "reaches Poly Haven"]
+    fn get_downloads_a_real_poly_haven_texture_into_a_project() {
+        let temp = Temp::new("polyhaven-live");
+        let (_, listings) = search(&POLYHAVEN, "brick", 0).unwrap();
+        let listing = &listings[0];
+        assert!(listing.lookup);
+        let client = http::Client::new(Duration::from_secs(600));
+        let full = POLYHAVEN.record(&client, &listing.id).unwrap();
+        let listing = Listing::from_record(full.clone());
+        let choice = pick(&listing, "1K", "JPG").unwrap();
+        let variant = needed_maps(choice.variant);
+        let project = temp.0.join("Project");
+        let cancel = AtomicBool::new(false);
+        let saved = download(
+            &client,
+            &POLYHAVEN,
+            &temp.0.join("Assets"),
+            &project,
+            &full,
+            &variant,
+            &cancel,
+        );
+        assert!(
+            matches!(saved, Ok(DownloadResult::Saved(_))),
+            "{:?}",
+            saved.err()
+        );
+        let set_file = project
+            .join("assets")
+            .join("textures")
+            .join(&full.id)
+            .join(format!("{}{TEXTURE_SET_SUFFIX}", full.id));
+        assert!(set_file.is_file());
     }
 }
