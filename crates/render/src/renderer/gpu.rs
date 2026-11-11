@@ -125,6 +125,10 @@ const MESH_READ: wgpu::BufferUsages = wgpu::BufferUsages::empty();
 /// `std::thread::scope` lets the jobs borrow from the caller, since every
 /// thread it starts has finished before it returns.
 pub(super) fn in_parallel<T: Send, const N: usize>(jobs: [&(dyn Fn() -> T + Sync); N]) -> [T; N] {
+    // PROBE ONLY: AXCENITY_SERIAL_PIPELINES=1 makes them one after another.
+    if std::env::var_os("AXCENITY_SERIAL_PIPELINES").is_some() {
+        return jobs.map(|job| job());
+    }
     std::thread::scope(|scope| {
         jobs.map(|job| scope.spawn(job)).map(|thread| {
             thread
