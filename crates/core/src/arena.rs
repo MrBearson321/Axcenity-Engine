@@ -145,6 +145,12 @@ impl<T> Arena<T> {
                 }
             }
         }
+        self.insert_unshared(value)
+    }
+
+    /// Stores `value` without taking an index from the blocks: in a
+    /// replica, at an index only this copy uses.
+    pub fn insert_unshared(&mut self, value: T) -> Id {
         self.len += 1;
         let (slots, free, base) = if self.replica {
             (&mut self.local_slots, &mut self.local_free, LOCAL_BASE)

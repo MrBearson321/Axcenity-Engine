@@ -201,6 +201,9 @@ pub struct BlobChange {
 pub struct Restored {
     pub texts: Vec<TextChange>,
     pub blobs: Vec<BlobChange>,
+    /// In a Team Create session, how many fields and moves were left alone
+    /// because someone else changed them since ([`History::set_shared`]).
+    pub skipped: usize,
 }
 
 /// One property changed as part of an asset step, such as an Animator's
@@ -334,6 +337,9 @@ pub struct History {
     /// The number of the top undo step when the world was last saved (or
     /// opened), or 0 if there were no steps then.
     saved_at: u64,
+    /// In a Team Create session others edit the world too, so undo and redo
+    /// leave alone a field or a move someone changed since.
+    shared: bool,
 }
 
 impl History {
@@ -914,6 +920,43 @@ impl History {
         self.open = None;
     }
 
+    /// True while a gesture (a drag, typing a name) is still adding to the
+    /// newest step.
+    pub fn is_open(&self) -> bool {
+        self.open.is_some()
+    }
+
+    /// What the newest step changed that Team Create doesn't share yet
+    /// (it shares Instances), such as "terrain".
+    pub fn top_unshared(&self) -> Option<&'static str> {
+        match &self.undo.last()?.kind {
+            StepKind::Fields { texts, .. } | StepKind::Many { texts, .. } if !texts.is_empty() => {
+                Some("stylesheets")
+            }
+            StepKind::Files { .. } => Some("project files"),
+            StepKind::World { texts, .. } if !texts.is_empty() => Some("project files"),
+            StepKind::Blobs { .. } => Some("imported files"),
+            StepKind::Terrain { .. } => Some("terrain"),
+            StepKind::Strings { .. } => Some("the string table"),
+            _ => None,
+        }
+    }
+
+    /// True if the next undo (or redo) swaps the whole world.
+    pub fn swaps_world(&self, redo: bool) -> bool {
+        let steps = if redo { &self.redo } else { &self.undo };
+        steps
+            .last()
+            .is_some_and(|step| matches!(step.kind, StepKind::World { .. }))
+    }
+
+    /// Turns on Team Create's undo rule: undo and redo change only what's
+    /// still as this member's step left it ([`Restored::skipped`] counts
+    /// the rest).
+    pub fn set_shared(&mut self, shared: bool) {
+        self.shared = shared;
+    }
+
     /// Renames the newest undo step, for one recorded by a path that names
     /// its own steps on behalf of a caller that labels them differently
     /// (an AI client's import). Nothing happens with no steps.
@@ -955,6 +998,8 @@ impl History {
     /// `before` to its `after`.
     pub fn undo(&mut self, world: &mut World) -> Option<Restored> {
         self.seal();
+        let shared = self.shared;
+        let mut skipped = 0;
         let mut step = self.undo.pop()?;
         let mut undone = Vec::new();
         let mut blobs = Vec::new();
@@ -962,7 +1007,12 @@ impl History {
             StepKind::Fields {
                 id, changes, texts, ..
             } => {
-                restore(world, *id, changes.iter().map(|c| (c.field, &c.before)));
+                skipped += restore(
+                    world,
+                    shared,
+                    *id,
+                    changes.iter().map(|c| (c.field, &c.before, &c.after)),
+                );
                 undone = texts
                     .iter()
                     .map(|text| TextChange {
@@ -975,12 +1025,17 @@ impl History {
             // Backwards, so each Instance goes back to where it was at the time.
             StepKind::Tree(moves) => {
                 for step in moves.iter().rev() {
-                    put_back(world, step.id, step.before);
+                    skipped += put_back(world, shared, step.id, step.before, step.after);
                 }
             }
             StepKind::Many { parts, texts, .. } => {
                 for (id, changes) in parts {
-                    restore(world, *id, changes.iter().map(|c| (c.field, &c.before)));
+                    skipped += restore(
+                        world,
+                        shared,
+                        *id,
+                        changes.iter().map(|c| (c.field, &c.before, &c.after)),
+                    );
                 }
                 undone = texts
                     .iter()
@@ -997,10 +1052,15 @@ impl History {
                 moves,
             } => {
                 for edit in properties {
-                    restore(world, edit.id, std::iter::once((edit.field, &edit.before)));
+                    skipped += restore(
+                        world,
+                        shared,
+                        edit.id,
+                        std::iter::once((edit.field, &edit.before, &edit.after)),
+                    );
                 }
                 for step in moves.iter().rev() {
-                    put_back(world, step.id, step.before);
+                    skipped += put_back(world, shared, step.id, step.before, step.after);
                 }
                 undone = texts
                     .iter()
@@ -1012,7 +1072,12 @@ impl History {
                     .collect();
             }
             StepKind::Terrain { id, change, fields } => {
-                restore(world, *id, fields.iter().map(|c| (c.field, &c.before)));
+                skipped += restore(
+                    world,
+                    shared,
+                    *id,
+                    fields.iter().map(|c| (c.field, &c.before, &c.after)),
+                );
                 if let Some(data) = world.terrain_mut(*id) {
                     match change {
                         TerrainChange::Stroke(edit) => edit.undo(data),
@@ -1026,10 +1091,15 @@ impl History {
                 properties,
             } => {
                 for edit in properties {
-                    restore(world, edit.id, std::iter::once((edit.field, &edit.before)));
+                    skipped += restore(
+                        world,
+                        shared,
+                        edit.id,
+                        std::iter::once((edit.field, &edit.before, &edit.after)),
+                    );
                 }
                 for step in moves.iter().rev() {
-                    put_back(world, step.id, step.before);
+                    skipped += put_back(world, shared, step.id, step.before, step.after);
                 }
                 blobs = changes
                     .iter()
@@ -1046,7 +1116,7 @@ impl History {
                     put_annotations(world, *id, before);
                 }
             }
-            StepKind::Edits(edits) => edits.undo(world),
+            StepKind::Edits(edits) => skipped += edits.undo(world, shared),
             StepKind::World { other, texts } => {
                 std::mem::swap(world, &mut *other.0);
                 undone = texts
@@ -1063,6 +1133,7 @@ impl History {
         Some(Restored {
             texts: undone,
             blobs,
+            skipped,
         })
     }
 
@@ -1070,6 +1141,8 @@ impl History {
     /// there was nothing to redo, or the files to change, as [`History::undo`].
     pub fn redo(&mut self, world: &mut World) -> Option<Restored> {
         self.seal();
+        let shared = self.shared;
+        let mut skipped = 0;
         let mut step = self.redo.pop()?;
         let mut redone = Vec::new();
         let mut blobs = Vec::new();
@@ -1077,17 +1150,27 @@ impl History {
             StepKind::Fields {
                 id, changes, texts, ..
             } => {
-                restore(world, *id, changes.iter().map(|c| (c.field, &c.after)));
+                skipped += restore(
+                    world,
+                    shared,
+                    *id,
+                    changes.iter().map(|c| (c.field, &c.after, &c.before)),
+                );
                 redone = texts.clone();
             }
             StepKind::Tree(moves) => {
                 for step in moves {
-                    put_back(world, step.id, step.after);
+                    skipped += put_back(world, shared, step.id, step.after, step.before);
                 }
             }
             StepKind::Many { parts, texts, .. } => {
                 for (id, changes) in parts {
-                    restore(world, *id, changes.iter().map(|c| (c.field, &c.after)));
+                    skipped += restore(
+                        world,
+                        shared,
+                        *id,
+                        changes.iter().map(|c| (c.field, &c.after, &c.before)),
+                    );
                 }
                 redone = texts.clone();
             }
@@ -1097,15 +1180,25 @@ impl History {
                 moves,
             } => {
                 for step in moves.iter() {
-                    put_back(world, step.id, step.after);
+                    skipped += put_back(world, shared, step.id, step.after, step.before);
                 }
                 for edit in properties {
-                    restore(world, edit.id, std::iter::once((edit.field, &edit.after)));
+                    skipped += restore(
+                        world,
+                        shared,
+                        edit.id,
+                        std::iter::once((edit.field, &edit.after, &edit.before)),
+                    );
                 }
                 redone = texts.clone();
             }
             StepKind::Terrain { id, change, fields } => {
-                restore(world, *id, fields.iter().map(|c| (c.field, &c.after)));
+                skipped += restore(
+                    world,
+                    shared,
+                    *id,
+                    fields.iter().map(|c| (c.field, &c.after, &c.before)),
+                );
                 if let Some(data) = world.terrain_mut(*id) {
                     match change {
                         TerrainChange::Stroke(edit) => edit.redo(data),
@@ -1119,10 +1212,15 @@ impl History {
                 properties,
             } => {
                 for step in moves.iter() {
-                    put_back(world, step.id, step.after);
+                    skipped += put_back(world, shared, step.id, step.after, step.before);
                 }
                 for edit in properties {
-                    restore(world, edit.id, std::iter::once((edit.field, &edit.after)));
+                    skipped += restore(
+                        world,
+                        shared,
+                        edit.id,
+                        std::iter::once((edit.field, &edit.after, &edit.before)),
+                    );
                 }
                 blobs = changes.clone();
             }
@@ -1132,7 +1230,7 @@ impl History {
                     put_annotations(world, *id, after);
                 }
             }
-            StepKind::Edits(edits) => edits.redo(world),
+            StepKind::Edits(edits) => skipped += edits.redo(world, shared),
             StepKind::World { other, texts } => {
                 std::mem::swap(world, &mut *other.0);
                 redone = texts.clone();
@@ -1142,6 +1240,7 @@ impl History {
         Some(Restored {
             texts: redone,
             blobs,
+            skipped,
         })
     }
 
@@ -1196,23 +1295,50 @@ fn differences(before: Snapshot, after: Snapshot) -> Vec<Change> {
 }
 
 /// [`put`] for undo and redo, which can only fail if the history is wrong.
-fn put_back(world: &mut World, id: InstanceId, place: Option<Place>) {
+/// Puts `id` at `place`, unless `shared` and it's no longer at `now` (where
+/// the step left it). Returns 1 if it was left alone.
+fn put_back(
+    world: &mut World,
+    shared: bool,
+    id: InstanceId,
+    place: Option<Place>,
+    now: Option<Place>,
+) -> usize {
+    if shared && place_of(world, id) != now {
+        return 1;
+    }
     if let Err(err) = put(world, id, place) {
         log::warn!("Could not put {id:?} back at {place:?}: {err}");
     }
+    0
 }
 
 /// Sets each field of `id` to its value. `Material` goes first, because
 /// setting it resets `Metalness` and `Roughness`, which come after it and
 /// put their own recorded values back. A missing Instance is skipped.
+///
+/// Each value comes with the one the field should have now (the step's
+/// other side). When `shared`, a field that no longer has it (someone else
+/// changed it since) is left alone; returns how many were.
 fn restore<'a>(
     world: &mut World,
+    shared: bool,
     id: InstanceId,
-    values: impl Iterator<Item = (Field, &'a Value)>,
-) {
+    values: impl Iterator<Item = (Field, &'a Value, &'a Value)>,
+) -> usize {
     // `'a` says the values are borrowed from the step for as long as this
     // call runs; they're cloned into the world one by one.
-    let mut values: Vec<(Field, &Value)> = values.collect();
+    let mut skipped = 0;
+    let mut values: Vec<(Field, &Value)> = values
+        .filter_map(|(field, value, now)| {
+            if shared && current(world, id, field).as_ref() != Some(now) {
+                skipped += 1;
+                None
+            } else {
+                Some((field, value))
+            }
+        })
+        .collect();
     // `sort_by_key` keeps the order otherwise; `false` sorts before `true`.
     values.sort_by_key(|(_, value)| value.as_material().is_none());
     for (field, value) in values {
@@ -1226,6 +1352,16 @@ fn restore<'a>(
         if !restored {
             log::warn!("Could not put back {field:?} on {id:?}");
         }
+    }
+    skipped
+}
+
+/// The value `field` of `id` has now.
+fn current(world: &World, id: InstanceId, field: Field) -> Option<Value> {
+    let instance = world.get(id)?;
+    match field {
+        Field::Name => Some(Value::String(instance.name().to_owned())),
+        Field::Property(name) => instance.property(name).cloned(),
     }
 }
 

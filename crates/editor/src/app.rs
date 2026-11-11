@@ -67,6 +67,7 @@ mod solid;
 mod spline_content;
 mod splines;
 mod tags;
+mod team;
 mod terrain;
 mod texture_set;
 mod to_terrain;
@@ -204,6 +205,8 @@ pub struct EditorApp {
     /// Every change made to `world` since it was opened, for undo and redo.
     /// It also knows whether the world is as saved.
     history: History,
+    /// The Team Create session this editor is in, if any (`app/team.rs`).
+    team: Option<team::Team>,
     /// The tool picked in the toolbar, and its snapping settings. Both are
     /// preferences, so they stay when another project is opened.
     tool: Tool,
@@ -833,6 +836,7 @@ impl EditorApp {
             find: Default::default(),
             references: None,
             history: History::new(),
+            team: None,
             tool: Tool::default(),
             snap: Snap::default(),
             modes: Modes::default(),
@@ -1326,6 +1330,8 @@ impl EditorApp {
             self.settings.open = !self.settings.open;
         }
         self.terrain_frame(ctx);
+        // Team Create: send what this frame's tools did, then catch up.
+        self.team_frame();
         self.generate_frame();
         self.palette_frame(ctx);
         self.shortcuts(ctx);
@@ -1808,6 +1814,8 @@ mod solid_tests;
 mod state_machine_tests;
 #[cfg(test)]
 mod strings_tests;
+#[cfg(test)]
+mod team_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

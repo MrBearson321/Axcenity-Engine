@@ -1362,12 +1362,17 @@ fn a_clone_of_a_recording_world_records_its_own_edits_only() {
 }
 
 #[test]
-fn a_replica_mode_world_makes_instances_at_ids_from_its_blocks_first() {
+fn a_recording_replica_mode_world_makes_instances_at_ids_from_its_blocks_first() {
     let mut world = World::new();
     world.make_replica();
+    world.record_edits();
     let start = world.next_unused_index() + 10;
     world.add_id_block(start, 2);
     assert_eq!(world.ids_left(), 2);
+    // What the editor makes for itself isn't sent, so it doesn't use them.
+    let generated = world.unrecorded(|world| world.create(ClassName::Part).unwrap());
+    assert!(generated.is_local());
+    assert!(world.is_recording_edits());
     let a = world.create(ClassName::Part).unwrap();
     assert_eq!(a.to_bits(), u64::from(start));
     let taken = world.take_id().unwrap();

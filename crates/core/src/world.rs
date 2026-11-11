@@ -711,6 +711,27 @@ impl World {
         std::mem::take(&mut self.journal.edits)
     }
 
+    /// Runs `f` with the journal paused: its edits aren't kept, and
+    /// Instances it makes get IDs only this computer uses, so Team Create
+    /// never sends them. For what the editor makes for itself, such as the
+    /// pieces SplineMeshes generate.
+    pub fn unrecorded<R>(&mut self, f: impl FnOnce(&mut World) -> R) -> R {
+        let recording = std::mem::replace(&mut self.journal.recording, false);
+        let result = f(self);
+        self.journal.recording = recording;
+        result
+    }
+
+    /// Stores a new Instance. While edits are kept it takes an ID from this
+    /// world's blocks, if it has any, so the Instance can be sent.
+    fn store(&mut self, instance: Instance) -> InstanceId {
+        if self.journal.recording {
+            InstanceId(self.instances.insert(instance))
+        } else {
+            InstanceId(self.instances.insert_unshared(instance))
+        }
+    }
+
     /// Notes `edit`, if edits are being kept. Callers build the edit only
     /// when `self.journal.recording` is true, so a world nobody shares
     /// clones no values.
@@ -1053,10 +1074,10 @@ impl World {
 
     /// Lets this world make Instances at arena indices `start..start + len`
     /// (generation 0): a block a Team Create host handed this writer. In a
-    /// replica-mode world, [`create`](Self::create) (and `duplicate` and
-    /// `copy_from`) take these first, so what the user makes can be sent
-    /// as is; once they run out it falls back to IDs only this computer
-    /// uses.
+    /// replica-mode world that keeps edits ([`record_edits`](Self::record_edits)),
+    /// [`create`](Self::create) (and `duplicate` and `copy_from`) take
+    /// these first, so what the user makes can be sent as is; once they run
+    /// out it falls back to IDs only this computer uses.
     pub fn add_id_block(&mut self, start: u32, len: u32) {
         self.instances.add_block(start, len);
     }
@@ -1109,7 +1130,7 @@ impl World {
         if class.is_service() {
             return Err(TreeError::Service(class));
         }
-        let id = InstanceId(self.instances.insert(Instance::new(class)));
+        let id = self.store(Instance::new(class));
         if class == ClassName::Terrain {
             self.terrains.insert(id, Arc::new(TerrainData::default()));
         }
@@ -1242,7 +1263,7 @@ impl World {
         let mut copy = original.clone();
         copy.parent = None;
         copy.children.clear();
-        let root = InstanceId(self.instances.insert(copy));
+        let root = self.store(copy);
         self.copy_terrain(id, root);
         self.journal(Edit::Created(root));
 
@@ -1254,7 +1275,7 @@ impl World {
             let parent = copies[&copy.parent.expect("a descendant has a parent")];
             copy.parent = Some(parent);
             copy.children.clear();
-            let new = InstanceId(self.instances.insert(copy));
+            let new = self.store(copy);
             self.instances
                 .get_mut(parent.0)
                 .expect("copied above")
@@ -1311,7 +1332,7 @@ impl World {
             let mut copy = instance.clone();
             copy.parent = parent;
             copy.children.clear();
-            let new = InstanceId(self.instances.insert(copy));
+            let new = self.store(copy);
             if let Some(parent) = parent {
                 self.instances
                     .get_mut(parent.0)
