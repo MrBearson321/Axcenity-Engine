@@ -993,3 +993,31 @@ fn a_hull_is_built_once_for_a_model_and_size() {
         &collider(&reloaded, size).shared_shape().0
     ));
 }
+
+/// A 2x2x2 block on a stack of five 1x1x1 blocks stays up for 10 s, built
+/// six slightly different ways (`CONTACT_RECYCLE_DISTANCE`).
+#[test]
+fn a_heavy_block_on_a_short_stack_stays_up() {
+    for build in 0..6 {
+        let (mut world, _) = world_with_floor();
+        // Each block a few thousandths off the line, differently per build.
+        let nudge = |i: usize| build as f32 * 0.002 * (((i * 7 + build) % 3) as f32 - 1.0);
+        for i in 0..5 {
+            let block = part(
+                &mut world,
+                Vector3::new(nudge(i), 0.5 + i as f32, nudge(i + 1)),
+                false,
+            );
+            set(&mut world, block, "Size", vector(1.0, 1.0, 1.0));
+        }
+        let heavy = part(&mut world, Vector3::new(0.0, 6.0, 0.0), false);
+        set(&mut world, heavy, "Size", vector(2.0, 2.0, 2.0));
+        let mut physics = Physics::new();
+        run(&mut physics, &mut world, 10.0, 60.0);
+        let at = position(&world, heavy);
+        assert!(
+            at.y > 5.0 && at.x.hypot(at.z) < 0.5,
+            "build {build}: the heavy block fell to {at:?}"
+        );
+    }
+}
