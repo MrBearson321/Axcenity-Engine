@@ -57,9 +57,10 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             .map_err(|_| ToolError::bad_args("cursor should be the text a cut result gave"))?,
         None => 0,
     };
-    let searching = ["class", "name", "tag", "near"]
+    let searching = ["class", "name", "tag"]
         .iter()
-        .any(|name| args.get(name).is_some());
+        .any(|name| filter(args, name).is_some())
+        || args.get("near").is_some();
     let (header, lines) = if searching {
         search(world, root, args)?
     } else {
@@ -161,20 +162,28 @@ fn search(
     root: InstanceId,
     args: &Args,
 ) -> Result<(String, Vec<String>), ToolError> {
-    let class = args.str("class");
+    let class = filter(args, "class");
     if let Some(name) = class
         && !ClassName::ALL.iter().any(|class| class.is_a(name))
     {
-        let names: Vec<&str> = ClassName::ALL.iter().map(|class| class.as_str()).collect();
-        let near = closest(name, names, 3);
         let mut error = ToolError::new(Code::NotFound, format!("no class {}", quoted(name)));
-        if !near.is_empty() {
-            error = error.with_fix(format!("did you mean {}?", near.join(" or ")));
+        if let Some(made) = super::object_create::class_of_kind(name) {
+            // `Block` is a kind object_create makes, not a class.
+            error = error.with_fix(format!(
+                "{name} is an object_create kind; its class is {} (or search by name)",
+                made.as_str()
+            ));
+        } else {
+            let names: Vec<&str> = ClassName::ALL.iter().map(|class| class.as_str()).collect();
+            let near = closest(name, names, 3);
+            if !near.is_empty() {
+                error = error.with_fix(format!("did you mean {}?", near.join(" or ")));
+            }
         }
         return Err(error);
     }
-    let name = args.str("name").map(str::to_lowercase);
-    let tag = args.str("tag");
+    let name = filter(args, "name").map(str::to_lowercase);
+    let tag = filter(args, "tag");
     let near = args.vector3("near");
     let radius = args.f64("radius").unwrap_or(50.0);
     let candidates: Vec<InstanceId> = match tag {
@@ -217,4 +226,12 @@ fn search(
         .map(|&id| format!("{}  {}", label(world, id), path(world, id)))
         .collect();
     Ok((header, lines))
+}
+
+/// A search filter's text: an empty one counts as not given (small models
+/// send `"tag": ""` for filters they don't want).
+fn filter<'a>(args: &'a Args, name: &str) -> Option<&'a str> {
+    args.str(name)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
 }
