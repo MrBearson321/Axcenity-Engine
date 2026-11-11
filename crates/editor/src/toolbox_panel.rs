@@ -612,13 +612,13 @@ impl ToolboxPanel {
         }
     }
 
-    fn choice(&mut self, ui: &mut egui::Ui, salt: &str, options: &[&str], resolution: bool) {
+    fn choice(&mut self, ui: &mut egui::Ui, id: &str, options: &[&str], resolution: bool) {
         let selected = if resolution {
             self.resolution.clone()
         } else {
             self.format.clone()
         };
-        egui::ComboBox::from_id_salt(salt)
+        egui::ComboBox::from_id_salt(id)
             .selected_text(&selected)
             .width(56.0)
             .show_ui(ui, |ui| {
