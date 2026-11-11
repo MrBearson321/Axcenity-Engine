@@ -556,6 +556,24 @@ fn the_write_back_looks_only_at_awake_bodies() {
 /// number of threads.
 #[test]
 fn a_pile_lands_the_same_way_every_time() {
+    let first = pile(None);
+    assert_eq!(first, pile(None));
+}
+
+/// Physics' own pool (`threads`) of any size lands it the same way.
+#[cfg(feature = "parallel")]
+#[test]
+fn a_pile_lands_the_same_way_on_any_number_of_threads() {
+    let one = pile(Some(1));
+    assert_eq!(one, pile(Some(3)));
+    assert_eq!(one, pile(Some(8)));
+}
+
+/// Where 150 parts dropped on a block on a floor are after 90 steps, with
+/// rapier's step on `threads` threads of a pool of its own, or the shared
+/// pool.
+#[cfg_attr(not(feature = "parallel"), allow(unused_variables))]
+fn pile(threads: Option<usize>) -> Vec<Vector3> {
     let run = || {
         let mut world = World::new();
         block_on_a_floor(&mut world, 0.0);
@@ -570,6 +588,10 @@ fn a_pile_lands_the_same_way_every_time() {
             })
             .collect();
         let mut physics = Physics::new();
+        #[cfg(feature = "parallel")]
+        if let Some(threads) = threads {
+            physics.use_threads(threads);
+        }
         for _ in 0..90 {
             physics.step(&mut world, STEP_SECONDS);
         }
@@ -578,8 +600,7 @@ fn a_pile_lands_the_same_way_every_time() {
             .map(|&id| position(&world, id))
             .collect::<Vec<_>>()
     };
-    let first = run();
-    assert_eq!(first, run());
+    run()
 }
 
 #[test]

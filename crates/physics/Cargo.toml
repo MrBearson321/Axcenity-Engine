@@ -10,18 +10,20 @@ authors.workspace = true
 axcenity-assets.workspace = true
 axcenity-core.workspace = true
 rapier3d.workspace = true
+# Physics' own thread pool for rapier's step (`threads`).
+rayon = { workspace = true, optional = true }
 profiling.workspace = true
 axcenity-workspace-hack.workspace = true
 
 [features]
 default = ["parallel"]
-# rapier's multi-threaded solver and collision detection, on rayon's global
-# pool. Same results as without it, whatever the number of threads
+# rapier's multi-threaded solver and collision detection, on physics' own
+# rayon pool of at most 12 threads (`threads.rs`). Same results as without it, whatever the number of threads
 # (`a_pile_lands_the_same_way_every_time`). On S10k it takes rapier's step
 # from about 5.9 to 4.9 ms on 4 cores; in tiny scenes it adds about 0.1 ms
 # (docs/benchmarks.md, M3). The workspace hack turns it on for every crate,
 # so to turn it off, drop it from `default` and run `cargo hakari generate`.
-parallel = ["rapier3d/parallel"]
+parallel = ["rapier3d/parallel", "dep:rayon"]
 
 [dev-dependencies]
 # Tests generate Fractures' pieces to shatter.

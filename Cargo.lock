@@ -766,6 +766,7 @@ dependencies = [
  "axcenity-workspace-hack",
  "profiling",
  "rapier3d",
+ "rayon",
 ]
 
 [[package]]
