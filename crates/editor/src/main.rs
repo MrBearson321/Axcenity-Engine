@@ -61,6 +61,7 @@ mod responsive;
 mod ribbon;
 mod ribbon_tabs;
 mod screen;
+mod script_completion;
 mod scripts;
 mod sequencer;
 mod shortcuts;

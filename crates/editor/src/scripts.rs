@@ -18,13 +18,17 @@ use std::collections::{BTreeSet, HashMap};
 
 use axcenity_script::{Breakpoints, Pause};
 
-use axcenity_core::ClassName;
+use axcenity_core::{ClassName, World};
 use axcenity_project::{is_stylesheet, script_name};
 use eframe::egui;
 
 use crate::side_warnings::SideWarning;
 use crate::theme::{self, icons};
 use crate::{css_syntax, lua_syntax};
+
+mod assist;
+
+pub use assist::Assist;
 
 /// What a new script starts with, as in Roblox Studio.
 pub const NEW_SCRIPT_SOURCE: &str = "print(\"Hello world!\")\n";
@@ -72,6 +76,8 @@ pub struct ScriptTab {
     go_to_line: Option<usize>,
     /// The line last jumped to, highlighted until the code is edited.
     highlighted: Option<usize>,
+    /// The completion list and signature hint.
+    pub assist: Assist,
 }
 
 impl ScriptTab {
@@ -151,6 +157,7 @@ impl ScriptTabs {
             disk: Disk::Same,
             go_to_line: None,
             highlighted: None,
+            assist: Assist::default(),
         });
         self.next_id += 1;
         self.tabs.len() - 1
@@ -325,7 +332,8 @@ impl ScriptTabs {
     }
 
     /// Draws the code editor for the tab at `path`.
-    pub fn show(&mut self, ui: &mut egui::Ui, path: &str) {
+    /// Draws the tab for `path`. `world` gives completion its Instances.
+    pub fn show(&mut self, ui: &mut egui::Ui, path: &str, world: &World) {
         let Some(tab) = self.tabs.iter_mut().find(|tab| tab.path == path) else {
             return;
         };
@@ -385,7 +393,7 @@ impl ScriptTabs {
             .filter(|pause| pause.path == tab.path)
             .map(|pause| pause.line);
         let lines = self.breakpoints.get(&tab.path).cloned().unwrap_or_default();
-        if let Some(line) = code_editor(ui, tab, &lines, paused_line) {
+        if let Some(line) = code_editor(ui, tab, &lines, paused_line, world) {
             let path = tab.path.clone();
             self.toggle_breakpoint(&path, line);
         }
@@ -456,6 +464,7 @@ fn code_editor(
     tab: &mut ScriptTab,
     breakpoints: &BTreeSet<usize>,
     paused_line: Option<usize>,
+    world: &World,
 ) -> Option<usize> {
     let font = egui::TextStyle::Monospace.resolve(ui.style());
     let id = editor_id(&tab.path);
@@ -491,6 +500,9 @@ fn code_editor(
                 // A placeholder painted before the text, so the jump
                 // highlight can go behind it once the text is laid out.
                 let behind = ui.painter().add(egui::Shape::Noop);
+                // The list's keys are taken before the text box sees them.
+                let focused = !stylesheet && ui.memory(|memory| memory.has_focus(id));
+                let keys = tab.assist.take_keys(ui, focused);
                 let output = egui::TextEdit::multiline(&mut tab.text)
                     .id(id)
                     .font(font.clone())
@@ -502,6 +514,9 @@ fn code_editor(
                     .show(ui);
                 if output.response.changed() {
                     tab.highlighted = None;
+                }
+                if !stylesheet {
+                    assist(ui, tab, &output, keys, world);
                 }
                 if stylesheet {
                     let galley_pos = output.galley_pos.to_vec2();
@@ -549,6 +564,53 @@ fn code_editor(
             });
         });
     clicked
+}
+
+/// Follows the text box for the completion list and signature hint, puts
+/// a pick in, and draws them at the cursor.
+fn assist(
+    ui: &egui::Ui,
+    tab: &mut ScriptTab,
+    output: &egui::text_edit::TextEditOutput,
+    keys: assist::Keys,
+    world: &World,
+) {
+    let id = output.response.id;
+    let cursor = output
+        .cursor_range
+        .filter(|_| output.response.has_focus())
+        .map(|range| assist::byte_of_char(&tab.text, range.primary.index.0));
+    let changed = output.response.changed();
+    let list = Assist::list_layer(id);
+    let pointer_on_list = ui
+        .ctx()
+        .pointer_latest_pos()
+        .is_some_and(|pos| ui.ctx().layer_id_at(pos).is_some_and(|layer| layer == list));
+    let mut moved_to =
+        tab.assist
+            .update(&mut tab.text, cursor, changed, keys, world, pointer_on_list);
+    let char_cursor = output.cursor_range.map_or(0, |range| range.primary.index.0);
+    let at = output
+        .galley
+        .pos_from_cursor(egui::text::CCursor::new(char_cursor))
+        .translate(output.galley_pos.to_vec2());
+    if let Some(index) = tab.assist.show(ui, id, at)
+        && let Some(cursor) = cursor.or(tab.assist.last_cursor())
+    {
+        moved_to = Some(tab.assist.accept(&mut tab.text, cursor, index));
+    }
+    if let Some(byte) = moved_to {
+        let chars = tab.text[..byte].chars().count();
+        let mut state = output.state.clone();
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(
+                egui::text::CCursor::new(chars),
+            )));
+        state.store(ui.ctx(), id);
+        ui.memory_mut(|memory| memory.request_focus(id));
+        tab.highlighted = None;
+    }
 }
 
 /// A swatch before each colour in a stylesheet (`at` is where the text at
@@ -817,7 +879,8 @@ mod tests {
                 ..Default::default()
             };
             let _ = crate::theme::run(&ctx, input, |ui| {
-                egui::CentralPanel::default().show(ui, |ui| tabs.show(ui, "ui.css"));
+                egui::CentralPanel::default()
+                    .show(ui, |ui| tabs.show(ui, "ui.css", &World::default()));
             });
         };
         frame(&mut tabs, Vec::new());
@@ -859,7 +922,8 @@ mod tests {
                     Vec::new(),
                 ],
                 |ui| {
-                    egui::CentralPanel::default().show(ui, |ui| tabs.show(ui, "ui.css"));
+                    egui::CentralPanel::default()
+                        .show(ui, |ui| tabs.show(ui, "ui.css", &World::default()));
                 },
             );
         }
@@ -915,7 +979,7 @@ mod tests {
         };
         let _ = crate::theme::run(ctx, input, |ui| {
             let path = tabs.active_path().unwrap().to_owned();
-            egui::CentralPanel::default().show(ui, |ui| tabs.show(ui, &path));
+            egui::CentralPanel::default().show(ui, |ui| tabs.show(ui, &path, &World::default()));
         });
     }
 

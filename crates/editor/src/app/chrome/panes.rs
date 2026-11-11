@@ -1174,7 +1174,7 @@ impl EditorApp {
         let previous_source = stylesheet
             .then(|| self.tabs.get(&path).map(|tab| tab.text.clone()))
             .flatten();
-        egui::CentralPanel::default().show(ui, |ui| self.tabs.show(ui, &path));
+        egui::CentralPanel::default().show(ui, |ui| self.tabs.show(ui, &path, &self.world));
         if let Some(previous_source) = previous_source {
             let current_source = self
                 .tabs
