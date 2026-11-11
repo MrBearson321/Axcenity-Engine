@@ -41,7 +41,7 @@ pub fn object_scripts(
         }
         let source = read
             .entry(path)
-            .or_insert_with(|| match read_source_file(folder, path) {
+            .or_insert_with(|| match read_object_file(folder, path) {
                 Ok(source) => Some(source),
                 Err(err) => {
                     problems.push(err);
@@ -101,6 +101,20 @@ pub fn in_start_order(
     all.into_iter().map(|(_, script)| script).collect()
 }
 
+/// `path` with ` <n>` before its script ending, for Make Unique:
+/// `objects/Door/Open.server.lua` with 2 is `objects/Door/Open 2.server.lua`.
+pub fn numbered_path(path: &str, n: u32) -> String {
+    let name = script_name(path);
+    let (folder, file) = path.rsplit_once('/').unwrap_or(("", path));
+    let ending = &file[name.len()..];
+    let file = format!("{name} {n}{ending}");
+    if folder.is_empty() {
+        file
+    } else {
+        format!("{folder}/{file}")
+    }
+}
+
 /// Whether a script of `class` can take its code from the file at `path`:
 /// `.server.lua` (or `.server.blocks.json`) for a Script, `.client.lua` (or
 /// `.client.blocks.json`) for a LocalScript, `.module.lua` for a
@@ -123,8 +137,11 @@ fn fitting_endings(class: ClassName) -> &'static str {
     }
 }
 
-/// The code in the file at `path`, which must be inside the project.
-fn read_source_file(folder: &Path, path: &str) -> Result<String, LoadError> {
+/// The code in the file at `path` (a `SourceFile`), which must be inside
+/// the project; a block script's is translated. A built game has a block
+/// script as the Lua it translates to (`Open.server.lua` for
+/// `Open.server.blocks.json`), which is read when the blocks aren't there.
+pub fn read_object_file(folder: &Path, path: &str) -> Result<String, LoadError> {
     let inside = Path::new(path)
         .components()
         .all(|part| matches!(part, Component::Normal(_)));
@@ -133,6 +150,12 @@ fn read_source_file(folder: &Path, path: &str) -> Result<String, LoadError> {
             path: path.to_owned(),
             message: "a SourceFile must be a path inside the project folder".to_owned(),
         });
+    }
+    if is_block_script(path) && !folder.join(path).exists() {
+        let translated = format!("{}.lua", path.trim_end_matches(".blocks.json"));
+        if folder.join(&translated).is_file() {
+            return read_script(folder, &translated);
+        }
     }
     read_script(folder, path)
 }

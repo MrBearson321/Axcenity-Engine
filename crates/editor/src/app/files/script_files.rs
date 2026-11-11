@@ -83,11 +83,52 @@ impl EditorApp {
         }
     }
 
-    /// Opens the Script `id` in a tab.
+    /// Opens the Script `id` in a tab: its file, or for a script inside an
+    /// object, the file its `SourceFile` names, which its copies share.
     pub(in crate::app) fn open_script_instance(&mut self, id: InstanceId) {
         if let Some(path) = self.script_path(id) {
             self.open_script(&path, None);
+            return;
         }
+        let Some(path) = self
+            .world
+            .get(id)
+            .and_then(|instance| instance.source_file())
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        if project::is_block_script(&path) {
+            self.output.info(format!(
+                "`{path}` is a block script: block scripts inside objects can't be \
+                 edited in the editor yet. Its copies still run it."
+            ));
+            return;
+        }
+        if self.object_file_source(&path).is_some() {
+            self.open_script(&path, None);
+        }
+    }
+
+    /// The code in the file at `path`, which a script inside an object
+    /// takes its code from: as the editor has it, or read now (and kept)
+    /// for a file it hasn't read yet. `None`, with the reason in Output, if
+    /// it can't be read.
+    pub(in crate::app) fn object_file_source(&mut self, path: &str) -> Option<String> {
+        let project = self.project.as_mut()?;
+        if let Some(source) = project.object_files.get(path) {
+            return Some(source.clone());
+        }
+        let source = match project::read_object_file(&project.folder, path) {
+            Ok(source) => source,
+            Err(err) => {
+                self.output
+                    .error(format!("Can't open `{path}`: {}", chain(&err)));
+                return None;
+            }
+        };
+        project.object_files.insert(path.to_owned(), source.clone());
+        Some(source)
     }
 
     /// Opens the script at `path` in a tab (or shows its tab), with the
@@ -98,11 +139,14 @@ impl EditorApp {
             self.open_ui_graph(path);
             return;
         }
-        let known = self
-            .project
-            .as_ref()
-            .and_then(|project| project.scripts.iter().find(|script| script.path == path))
-            .map(|script| script.source.clone());
+        let known = self.project.as_ref().and_then(|project| {
+            project
+                .scripts
+                .iter()
+                .find(|script| script.path == path)
+                .map(|script| script.source.clone())
+                .or_else(|| project.object_files.get(path).cloned())
+        });
         if project::is_block_script(path)
             && let Some(document) = self.project.as_mut().and_then(|project| {
                 project
@@ -130,6 +174,10 @@ impl EditorApp {
     /// `scripts/LocalScript.client.lua` for a LocalScript (or `Script2` and
     /// so on), with its Instance, then selects it and opens it.
     pub(in crate::app) fn insert_script(&mut self, class: ClassName) {
+        if let Some(object) = self.object_for_script() {
+            self.insert_object_script(object, class);
+            return;
+        }
         let Some(project) = &self.project else {
             return;
         };
@@ -160,6 +208,144 @@ impl EditorApp {
                 }
             }
         }
+    }
+
+    /// The selected object, if Insert Script puts a script inside it (G2):
+    /// a part, a Model or a Folder (what has a place in the world, or holds
+    /// such things) that's saved and editable. Anything else, such as a
+    /// RemoteEvent, gets a script in its service as before.
+    fn object_for_script(&self) -> Option<InstanceId> {
+        let id = self.selected?;
+        let instance = self.world.get(id)?;
+        let fits = instance.class().can_lock() && tree::check_editable(&self.world, id).is_ok();
+        fits.then_some(id)
+    }
+
+    /// Puts a new script of `class` inside `object`, with a new file for it
+    /// in `objects/` named after the object (`objects/Door/Script.server.lua`),
+    /// then selects it and opens the file. One undo step, which takes the
+    /// file away too.
+    fn insert_object_script(&mut self, object: InstanceId, class: ClassName) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let folder = project.folder.clone();
+        let object_name = self
+            .world
+            .get(object)
+            .map(|instance| instance.name().to_owned())
+            .unwrap_or_default();
+        let source = new_script_source(class);
+        for name in tree::numbered_names(class.as_str()) {
+            if self.world.find_first_child(object, &name).is_some() {
+                continue;
+            }
+            let path =
+                match project::create_object_script(&folder, &object_name, &name, class, source) {
+                    Ok(path) => path,
+                    // That file is there already: next name.
+                    Err(err) if err.already_exists() => continue,
+                    Err(err) => {
+                        self.output
+                            .error(format!("Could not make a new script: {}", chain(&err)));
+                        return;
+                    }
+                };
+            let before = self.world.clone();
+            let Ok(id) = self.world.create(class) else {
+                return;
+            };
+            let _ = self.world.set_name(id, &name);
+            let _ = self
+                .world
+                .set_property(id, "SourceFile", Value::String(path.clone()));
+            let _ = self.world.set_parent(id, Some(object));
+            if let Some(project) = &mut self.project {
+                project.object_files.insert(path.clone(), source.to_owned());
+            }
+            self.history.record_world_and_files(
+                &mut self.world,
+                format!("Insert {name}"),
+                before,
+                vec![crate::history::TextChange {
+                    path: path.clone(),
+                    before: None,
+                    after: Some(source.to_owned()),
+                }],
+            );
+            self.select_from_viewport(Some(id));
+            self.tabs.open(&path, source, None);
+            self.output.info(format!(
+                "Made a new script inside {object_name}, `{path}`. Copies of {object_name} \
+                 share this file."
+            ));
+            return;
+        }
+    }
+
+    /// Make Unique (G2): copies the file of the script inside an object
+    /// `id` next to it (`Open 2.server.lua`, or the next free number) and
+    /// points `id` at the copy, so changing it leaves the other copies
+    /// alone. One undo step, which takes the new file away too.
+    pub(in crate::app) fn make_unique(&mut self, id: InstanceId) {
+        let Some(path) = self
+            .world
+            .get(id)
+            .and_then(|instance| instance.source_file())
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        let text = match std::fs::read_to_string(folder.join(&path)) {
+            Ok(text) => text,
+            Err(err) => {
+                self.output.error(format!(
+                    "Can't make it unique: `{path}` can't be read: {err}"
+                ));
+                return;
+            }
+        };
+        let Some(new_path) = (2..)
+            .map(|n| project::numbered_path(&path, n))
+            .find(|candidate| !folder.join(candidate).exists())
+        else {
+            return;
+        };
+        if let Err(err) = project::write_script(&folder, &new_path, &text) {
+            self.output
+                .error(format!("Can't make it unique: {}", chain(&err)));
+            return;
+        }
+        let before = self.world.clone();
+        let _ = self
+            .world
+            .set_property(id, "SourceFile", Value::String(new_path.clone()));
+        if let Some(project) = &mut self.project
+            && let Ok(source) = project::read_object_file(&folder, &new_path)
+        {
+            project.object_files.insert(new_path.clone(), source);
+        }
+        let name = self
+            .world
+            .get(id)
+            .map(|instance| instance.name().to_owned())
+            .unwrap_or_default();
+        self.history.record_world_and_files(
+            &mut self.world,
+            format!("Make {name} Unique"),
+            before,
+            vec![crate::history::TextChange {
+                path: new_path.clone(),
+                before: None,
+                after: Some(text),
+            }],
+        );
+        self.output.info(format!(
+            "{name} now uses its own file, `{new_path}`; the other copies still use `{path}`."
+        ));
     }
 
     /// Shows the Script or LocalScript at `path` as `view`. Code ↔ Blocks or

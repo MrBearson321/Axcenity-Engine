@@ -909,6 +909,15 @@ impl AssetBrowser {
         action
     }
 
+    /// Opens Rename or Move… for the project file at `path`, such as the
+    /// code of a script inside an object, which has no tile here.
+    pub fn start_move(&mut self, path: String) {
+        self.dialog = Some(AssetDialog::Move {
+            to: path.clone(),
+            from: path,
+        });
+    }
+
     /// Does what a tile's right-click menu asked for, or opens its dialog.
     fn follow_menu(&mut self, menu: Option<ItemMenu>) -> Option<BrowserAction> {
         match menu? {
@@ -1171,11 +1180,20 @@ impl AssetBrowser {
                     }
                 }
                 AssetDialog::Move { from, to } => {
-                    let message = format!(
-                        "A new name, or a path under assets/ to move `{from}`. Every \
-                         Instance, script, material, prefab, level and data table that uses \
-                         it is changed to match, as one undo step."
-                    );
+                    let objects = format!("{}/", axcenity_project::OBJECTS_FOLDER);
+                    let message = if from.starts_with(&objects) {
+                        format!(
+                            "A new name, or a path under {objects} to move `{from}`. Every \
+                             script inside an object that runs it is changed to match, as one \
+                             undo step."
+                        )
+                    } else {
+                        format!(
+                            "A new name, or a path under assets/ to move `{from}`. Every \
+                             Instance, script, material, prefab, level and data table that \
+                             uses it is changed to match, as one undo step."
+                        )
+                    };
                     dialog::header(
                         ui,
                         icons::PENCIL_SIMPLE,

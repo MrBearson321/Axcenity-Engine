@@ -273,16 +273,18 @@ impl EditorApp {
             .collect();
         let ui_graphs = ui_graphs::documents(&project.world, project.ui_graphs);
         // Scripts inside objects (G2) are found again in the world each
-        // Play, as copies come and go while editing.
+        // Play, as copies come and go while editing; their files are kept
+        // by path.
         let world = &project.world;
-        let scripts: Vec<_> = project
-            .scripts
-            .into_iter()
-            .filter(|script| {
+        let (objects, scripts): (Vec<_>, Vec<_>) =
+            project.scripts.into_iter().partition(|script| {
                 world
                     .get(script.instance)
-                    .is_none_or(|instance| instance.source_file().is_none())
-            })
+                    .is_some_and(|instance| instance.source_file().is_some())
+            });
+        let object_files = objects
+            .into_iter()
+            .map(|script| (script.path, script.source))
             .collect();
         // A level that's the start level by name is opened as it.
         let start_level = project.manifest.start_level;
@@ -308,6 +310,7 @@ impl EditorApp {
             stylesheet_texts,
             scripts,
             block_scripts,
+            object_files,
             ui_graphs,
             remembered_blocks: HashMap::new(),
             world_text,

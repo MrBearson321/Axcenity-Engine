@@ -467,6 +467,12 @@ impl EditorApp {
         }
         tab.mark_saved();
         let source = tab.text.clone();
+        // A script inside an object's file: its copies come from the world.
+        if let Some(known) = project.object_files.get_mut(path) {
+            *known = source;
+            self.reload_in_play(path);
+            return true;
+        }
         match project
             .scripts
             .iter_mut()

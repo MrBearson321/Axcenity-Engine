@@ -1181,9 +1181,11 @@ pub fn check_editable(world: &World, id: InstanceId) -> Result<(), &'static str>
     if instance.class().is_service() {
         return Err("Services are always there, so they can't be deleted, copied or moved.");
     }
-    if instance.class().is_script() {
+    if is_file_script(instance) {
         // A script is its `.lua` file, and its Instance always sits in its
-        // service; copying it would mean copying the file.
+        // service; copying it would mean copying the file. A script inside
+        // an object (G2) is copied and moved like anything else: its copies
+        // share the file.
         return Err("Scripts can't be copied or moved yet. Insert a new one instead.");
     }
     if instance.class() == ClassName::Player {
@@ -1199,6 +1201,13 @@ pub fn check_editable(world: &World, id: InstanceId) -> Result<(), &'static str>
         return Err("It's locked. Right-click it in the Explorer to unlock it.");
     }
     Ok(())
+}
+
+/// Whether `instance` is a script from the `scripts` folder: its Instance
+/// stands for its file, so renaming or deleting it renames or deletes the
+/// file. A script inside an object (one with a `SourceFile`, G2) isn't.
+pub fn is_file_script(instance: &axcenity_core::Instance) -> bool {
+    instance.class().is_script() && instance.source_file().is_none()
 }
 
 /// Whether `id` can be deleted, or why not. Scripts can, unlike in

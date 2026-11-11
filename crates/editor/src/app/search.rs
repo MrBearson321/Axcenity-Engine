@@ -567,8 +567,13 @@ impl SearchProvider for Scripts {
         let paths: Vec<&str> = app
             .project
             .iter()
-            .flat_map(|project| &project.scripts)
-            .map(|script| script.path.as_str())
+            .flat_map(|project| {
+                project
+                    .scripts
+                    .iter()
+                    .map(|script| script.path.as_str())
+                    .chain(project.object_files.keys().map(String::as_str))
+            })
             .collect();
         Some(stamp_of((&app.project.as_ref().map(|p| &p.folder), paths)))
     }
@@ -591,6 +596,19 @@ impl SearchProvider for Scripts {
                 entry,
                 SearchTarget::Open(OpenTarget::Script(script.path.clone())),
             );
+        }
+        // The code of scripts inside objects (G2), once per file.
+        for path in project.object_files.keys() {
+            if project::is_block_script(path) {
+                continue;
+            }
+            let class = project::script_class(path);
+            let mut entry = Entry::new(format!("script {path}"), project::script_name(path), path)
+                .in_category(Category::Script);
+            entry.icon = theme::class_icon(class);
+            entry.description =
+                format!("The code of a {class} inside an object. Opens in its own tab.");
+            out.push(entry, SearchTarget::Open(OpenTarget::Script(path.clone())));
         }
     }
 }
