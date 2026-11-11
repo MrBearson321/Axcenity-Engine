@@ -6,11 +6,12 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
 use thiserror::Error;
 
-use crate::history::{HISTORY_DIR, History, LoadError, Problem, UNRELEASED_DIR};
+use crate::history::{HISTORY_DIR, History, ISSUES_FILE, LoadError, Problem, UNRELEASED_DIR};
 use crate::records::{Evidence, ReleaseRecord};
-use crate::version::Version;
+use crate::version::{Channel, Version};
 
 /// The folder of release files, at the repository root.
 pub const RELEASES_DIR: &str = "releases";
@@ -90,6 +91,39 @@ pub fn set_lock_versions(lock: &str, version: &Version) -> String {
     out
 }
 
+/// `issues.toml` with `status = "fixed"` for each issue in `ids`, all else
+/// kept as written.
+pub fn mark_issues_fixed(issues: &str, ids: &[&str]) -> String {
+    let mut out = String::with_capacity(issues.len());
+    for block in split_keep(issues, "[[issue]]") {
+        let named = block.lines().any(|l| {
+            let l = l.trim();
+            l.strip_prefix("id")
+                .map(str::trim_start)
+                .and_then(|r| r.strip_prefix('='))
+                .and_then(|r| quoted(r.trim()))
+                .is_some_and(|id| ids.contains(&id))
+        });
+        if !named {
+            out.push_str(block);
+            continue;
+        }
+        for line in block.split_inclusive('\n') {
+            let trimmed = line.trim_start();
+            let is_status = trimmed
+                .strip_prefix("status")
+                .is_some_and(|r| r.trim_start().starts_with('='));
+            if is_status {
+                out.push_str("status = \"fixed\"");
+                out.push_str(&line[line.trim_end_matches(['\r', '\n']).len()..]);
+            } else {
+                out.push_str(line);
+            }
+        }
+    }
+    out
+}
+
 /// Everything wrong for the repository at `repo`: the history's own
 /// problems, a `Cargo.toml` version that is older than a release, and, for
 /// `tag`, a tag that isn't Cargo.toml's version or has no record.
@@ -142,6 +176,21 @@ pub fn check(repo: &Path, tag: Option<&str>) -> Result<Vec<Problem>, PrepareErro
                             "{version} has no record in {RELEASES_DIR}/{HISTORY_DIR}/: run `axcenity-release prepare {version}` first"
                         ),
                     });
+                } else {
+                    let file = format!("{RELEASES_DIR}/{HISTORY_DIR}/{version}.toml");
+                    if let Err(err) = crate::publish::written_record(&history, &version) {
+                        problems.push(Problem {
+                            file: file.clone(),
+                            message: err.to_string(),
+                        });
+                    }
+                    if history.release(&version).is_some_and(|r| !r.published) {
+                        problems.push(Problem {
+                            file,
+                            message: "`published = false`, but it is being tagged for release"
+                                .to_owned(),
+                        });
+                    }
                 }
             }
         }
@@ -151,8 +200,9 @@ pub fn check(repo: &Path, tag: Option<&str>) -> Result<Vec<Problem>, PrepareErro
 
 /// Starts the release record for `version`: moves every unreleased entry
 /// into `releases/history/<version>.toml` (title and summary left for a
-/// person), sets the version in `Cargo.toml` and `Cargo.lock`, and deletes
-/// the moved entries. Returns the new record's path.
+/// person), sets the version in `Cargo.toml` and `Cargo.lock`, marks the
+/// issues those entries fix as fixed, and deletes the moved entries.
+/// Returns the new record's path.
 pub fn prepare(repo: &Path, version: &Version, date: &str) -> Result<PathBuf, PrepareError> {
     let releases = repo.join(RELEASES_DIR);
     let history = History::load(&releases)?;
@@ -208,6 +258,16 @@ pub fn prepare(repo: &Path, version: &Version, date: &str) -> Result<PathBuf, Pr
         let lock = read(&lock_path)?;
         write(&lock_path, &set_lock_versions(&lock, version))?;
     }
+    let fixed: Vec<&str> = history
+        .unreleased()
+        .iter()
+        .flat_map(|(_, c)| c.fixes.iter().map(String::as_str))
+        .collect();
+    let issues_path = releases.join(ISSUES_FILE);
+    if !fixed.is_empty() && issues_path.exists() {
+        let issues = read(&issues_path)?;
+        write(&issues_path, &mark_issues_fixed(&issues, &fixed))?;
+    }
     for (name, _) in history.unreleased() {
         let path = releases.join(UNRELEASED_DIR).join(format!("{name}.toml"));
         fs::remove_file(&path).map_err(|source| PrepareError::Io {
@@ -217,6 +277,40 @@ pub fn prepare(repo: &Path, version: &Version, date: &str) -> Result<PathBuf, Pr
         })?;
     }
     Ok(record_path)
+}
+
+/// What the release workflow does for a version
+/// (`docs/research/release-system/architecture.md` §5).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ReleasePlan {
+    pub version: Version,
+    pub tag: String,
+    pub channel: Channel,
+    /// GitHub's pre-release flag: everything but Stable.
+    pub prerelease: bool,
+    /// The Cargo profile: `release` (thin LTO) for Development, the
+    /// fat-LTO `dist` for releases meant for wider use.
+    pub profile: &'static str,
+    /// The operating systems built. Every package carries a player for
+    /// each, so Build Game can target any of them from any package.
+    pub platforms: Vec<&'static str>,
+}
+
+impl ReleasePlan {
+    pub fn for_version(version: &Version) -> ReleasePlan {
+        let channel = version.channel();
+        ReleasePlan {
+            version: version.clone(),
+            tag: version.tag(),
+            channel,
+            prerelease: version.is_prerelease(),
+            profile: match channel {
+                Channel::Development => "release",
+                Channel::Beta | Channel::Stable => "dist",
+            },
+            platforms: vec!["windows", "linux", "macos"],
+        }
+    }
 }
 
 /// Today's date (UTC) as `YYYY-MM-DD`.

@@ -58,6 +58,7 @@ features = ["terrain.studio"]
 version = "0.2.0-alpha.1"
 date = "2026-11-20"
 title = "Multiplayer"
+summary = "Host and join games over the network."
 [formats]
 project = 5
 network_protocol = 10
@@ -706,6 +707,29 @@ fn check_with_a_tag_needs_the_same_version_and_a_record() {
     );
     let bad = prepare::check(&root, Some("0.2.0-alpha.1")).unwrap();
     assert!(bad[0].message.contains("not a release tag"), "{bad:?}");
+    // The record being tagged must be written and published.
+    let records = root.join("releases/history/0.2.0-alpha.1.toml");
+    let text = fs::read_to_string(&records).unwrap();
+    fs::write(
+        &records,
+        text.replace(
+            "summary = \"Host and join games over the network.\"\n",
+            "published = false\n",
+        ),
+    )
+    .unwrap();
+    let unwritten: Vec<String> = prepare::check(&root, Some("v0.2.0-alpha.1"))
+        .unwrap()
+        .into_iter()
+        .map(|p| p.message)
+        .collect();
+    assert_eq!(
+        unwritten,
+        [
+            "the record for 0.2.0-alpha.1 has no summary: write it before tagging",
+            "`published = false`, but it is being tagged for release"
+        ]
+    );
     let unrecorded = repo("check-unrecorded", "0.3.0");
     let problems = prepare::check(&unrecorded, Some("v0.3.0")).unwrap();
     assert!(
@@ -736,13 +760,11 @@ fn prepare_moves_unreleased_entries_into_a_new_record() {
         history.fixed_in(issue),
         Some(VersionRef::Release(v("0.2.0-alpha.2")))
     );
-    // Until a person writes the title, check says so.
-    let problems = history.validate();
-    assert!(
-        problems
-            .iter()
-            .any(|p| p.message == "write a title for this release")
-    );
+    // ...and the issues it fixes are marked fixed in issues.toml.
+    assert_eq!(issue.status, crate::IssueStatus::Fixed);
+    // Until a person writes the title, check says so, and nothing else.
+    let problems: Vec<String> = history.validate().into_iter().map(|p| p.message).collect();
+    assert_eq!(problems, ["write a title for this release"]);
 
     let cargo = fs::read_to_string(root.join("Cargo.toml")).unwrap();
     assert_eq!(
@@ -796,6 +818,15 @@ fn prepare_refuses_old_versions_existing_records_and_empty_releases() {
 }
 
 #[test]
+fn prepare_marks_the_issues_it_releases_fixes_for_as_fixed() {
+    let text = "# Known issues.\n\n[[issue]]\nid = \"AX-0001\"\nstatus = \"open\"  # until 0.2\r\n\n[[issue]]\nid = \"AX-0010\"\nstatus = \"open\"\n";
+    assert_eq!(
+        prepare::mark_issues_fixed(text, &["AX-0001"]),
+        "# Known issues.\n\n[[issue]]\nid = \"AX-0001\"\nstatus = \"fixed\"\r\n\n[[issue]]\nid = \"AX-0010\"\nstatus = \"open\"\n"
+    );
+}
+
+#[test]
 fn prepare_refuses_an_invalid_history() {
     let root = repo("prepare-invalid", "0.2.0-alpha.1");
     write(
@@ -826,4 +857,235 @@ fn the_repositorys_own_release_files_are_consistent() {
     for (_, change) in history.public().changes() {
         assert!(change.is_public(), "{}", change.title);
     }
+}
+
+// What a release publishes (`publish`).
+
+use crate::publish::{self, BuildFacts, HistoryFile, Manifest, PublishError};
+
+#[test]
+fn release_notes_list_public_changes_by_kind_then_known_issues() {
+    let history = History::load(&sample("notes")).unwrap();
+    let install = "## Install\n\nDownload `AxcenityEditor-__VERSION__-windows-x86_64.exe`.\n";
+    let notes = publish::release_notes(&history, &v("0.2.0-alpha.1"), install).unwrap();
+    assert_eq!(
+        notes,
+        "Host and join games over the network.\n\n\
+         This is a **Development** (alpha) release, for testing: expect bugs and breaking changes.\n\n\
+         ## Breaking changes\n\n\
+         - **Projects**: Project format 5\n  \
+         Projects saved by 0.2 can't be opened by 0.1. Keep the backup in .axcenity/previous.\n\n\
+         ## New features\n\n\
+         - **Multiplayer**: Host and join games (#34)\n\n\
+         ## Bug fixes\n\n\
+         - **Terrain**: Terrain layers load in the right order\n\n\
+         ## Known issues\n\n\
+         - AX-0002: Shadows flicker at dawn\n\n\
+         ## Install\n\nDownload `AxcenityEditor-0.2.0-alpha.1-windows-x86_64.exe`.\n"
+    );
+    // A record still waiting for its title or summary can't be published.
+    let root = sample("notes-unwritten");
+    let record = root.join("history/0.2.0-alpha.1.toml");
+    let text = fs::read_to_string(&record).unwrap();
+    fs::write(
+        &record,
+        text.replace("title = \"Multiplayer\"", "title = \"\""),
+    )
+    .unwrap();
+    let history = History::load(&root).unwrap();
+    assert!(matches!(
+        publish::release_notes(&history, &v("0.2.0-alpha.1"), ""),
+        Err(PublishError::Unwritten(_, "title"))
+    ));
+    assert!(matches!(
+        publish::release_notes(&history, &v("9.0.0"), ""),
+        Err(PublishError::NoRecord(_))
+    ));
+}
+
+#[test]
+fn experimental_changes_are_listed_apart_from_finished_features() {
+    let root = sample("notes-experimental");
+    let record = root.join("history/0.2.0-alpha.1.toml");
+    let text = fs::read_to_string(&record).unwrap();
+    fs::write(
+        &record,
+        text.replace("prs = [34]\n", "prs = [34]\nstability = \"experimental\"\n"),
+    )
+    .unwrap();
+    let history = History::load(&root).unwrap();
+    let notes = publish::Notes::of(history.release(&v("0.2.0-alpha.1")).unwrap());
+    assert!(notes.features.is_empty());
+    assert_eq!(notes.experimental[0].title, "Host and join games");
+    let text = publish::release_notes(&history, &v("0.2.0-alpha.1"), "").unwrap();
+    assert!(text.contains("## Experimental\n\n- **Multiplayer**: Host and join games (#34)\n"));
+    assert!(!text.contains("## New features"));
+}
+
+#[test]
+fn the_history_file_holds_only_public_released_entries() {
+    let history = History::load(&sample("history-file")).unwrap();
+    let file = HistoryFile::from_history(&history);
+    let json = serde_json::to_string(&file).unwrap();
+    assert_eq!(file.releases.len(), 2);
+    assert!(json.contains("Host and join games"));
+    for hidden in [
+        "Refactor the build script",
+        "Hidden experiment",
+        "AX-0003",
+        "Private crash",
+        // Unreleased entries belong to the next release, not this file.
+        "Shadows no longer flicker at dawn",
+    ] {
+        assert!(
+            !json.contains(hidden),
+            "{hidden} leaked into the history file"
+        );
+    }
+    let back: HistoryFile = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, file);
+}
+
+/// The packages a release's `dist/` holds, and the history file.
+fn dist(name: &str, version: &str) -> PathBuf {
+    let dir = scratch(name);
+    for (file, text) in [
+        (
+            format!("AxcenityEditor-{version}-windows-x86_64.exe"),
+            "abc",
+        ),
+        (
+            format!("AxcenityEditor-{version}-windows-x86_64-update.zip"),
+            "zip",
+        ),
+        (
+            format!("AxcenityEditor-{version}-linux-x86_64.tar.gz"),
+            "tar",
+        ),
+        (
+            format!("AxcenityEditor-{version}-linux-x86_64.AppImage"),
+            "app",
+        ),
+        (format!("AxcenityEditor-{version}-macos-universal.dmg"), ""),
+        ("axcenity-history.json".to_owned(), "{}"),
+        ("SHA256SUMS.txt".to_owned(), "ignored"),
+    ] {
+        write(&dir, &file, text);
+    }
+    dir
+}
+
+#[test]
+fn the_manifest_names_and_hashes_every_package() {
+    let history = History::load(&sample("manifest")).unwrap();
+    let dir = dist("manifest-dist", "0.2.0-alpha.1");
+    let facts = BuildFacts {
+        commit: "0123456789abcdef0123456789abcdef01234567".to_owned(),
+        published: "2026-11-20T18:04:11Z".to_owned(),
+        ..BuildFacts::default()
+    };
+    let manifest = Manifest::build(&history, &v("0.2.0-alpha.1"), &dir, facts).unwrap();
+    assert_eq!(manifest.tag, "v0.2.0-alpha.1");
+    assert_eq!(manifest.channel, crate::Channel::Development);
+    assert_eq!(manifest.known_issues, ["AX-0002"]);
+    assert_eq!(manifest.formats["network_protocol"], 10);
+    assert_eq!(
+        manifest.compatibility.min_update_protocol,
+        publish::UPDATE_PROTOCOL
+    );
+    assert_eq!(manifest.provenance.reproducible, "not verified");
+    let windows = &manifest.artifacts["windows-x86_64"];
+    // SHA-256 of "abc", from FIPS 180-2.
+    assert_eq!(
+        windows["installer"].sha256,
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(windows["installer"].size, 3);
+    assert_eq!(
+        windows["update"].file,
+        "AxcenityEditor-0.2.0-alpha.1-windows-x86_64-update.zip"
+    );
+    let platforms: Vec<&str> = manifest.artifacts.keys().map(String::as_str).collect();
+    assert_eq!(
+        platforms,
+        ["linux-x86_64", "macos-universal", "windows-x86_64"]
+    );
+    assert_eq!(
+        manifest.artifacts["linux-x86_64"]
+            .keys()
+            .collect::<Vec<_>>(),
+        ["appimage", "update"]
+    );
+    assert_eq!(manifest.history.file, "axcenity-history.json");
+    assert_eq!(manifest.notes.breaking[0].title, "Project format 5");
+
+    // The same manifest after a round trip, with a field a later schema adds.
+    let mut json = serde_json::to_value(&manifest).unwrap();
+    json["added_later"] = serde_json::json!(true);
+    let back: Manifest = serde_json::from_value(json).unwrap();
+    assert_eq!(back, manifest);
+}
+
+#[test]
+fn the_manifest_refuses_packages_it_does_not_know() {
+    let history = History::load(&sample("manifest-unknown")).unwrap();
+    for stray in [
+        "AxcenityEditor-0.2.0-alpha.1-windows-arm64.exe",
+        // Left over from another version's build.
+        "AxcenityEditor-0.1.0-alpha.3-windows-x86_64.exe",
+    ] {
+        let dir = dist(&format!("manifest-stray-{}", stray.len()), "0.2.0-alpha.1");
+        write(&dir, stray, "x");
+        let err = Manifest::build(&history, &v("0.2.0-alpha.1"), &dir, BuildFacts::default())
+            .unwrap_err();
+        assert!(
+            matches!(err, PublishError::UnknownPackage(ref f) if f == stray),
+            "{err}"
+        );
+    }
+    let empty = scratch("manifest-empty");
+    write(&empty, "axcenity-history.json", "{}");
+    assert!(matches!(
+        Manifest::build(&history, &v("0.2.0-alpha.1"), &empty, BuildFacts::default()),
+        Err(PublishError::NoPackages(..))
+    ));
+}
+
+#[test]
+fn package_names_say_platform_and_role() {
+    let version = v("1.0.0-rc.2");
+    assert_eq!(
+        publish::package_kind(
+            "AxcenityEditor-1.0.0-rc.2-linux-x86_64.pkg.tar.zst",
+            &version
+        ),
+        Some(("linux-x86_64", "pacman"))
+    );
+    assert_eq!(
+        publish::package_kind("AxcenityEditor-1.0.0-rc.2-linux-x86_64.deb", &version),
+        Some(("linux-x86_64", "deb"))
+    );
+    // A version that only starts the same way is a different version.
+    assert_eq!(
+        publish::package_kind("AxcenityEditor-1.0.0-rc.20-linux-x86_64.deb", &version),
+        None
+    );
+}
+
+#[test]
+fn the_release_plan_follows_the_channel() {
+    let alpha = prepare::ReleasePlan::for_version(&v("0.2.0-alpha.1"));
+    assert_eq!((alpha.profile, alpha.prerelease), ("release", true));
+    assert_eq!(alpha.tag, "v0.2.0-alpha.1");
+    let beta = prepare::ReleasePlan::for_version(&v("0.2.0-rc.1"));
+    assert_eq!((beta.profile, beta.prerelease), ("dist", true));
+    let stable = prepare::ReleasePlan::for_version(&v("1.0.0"));
+    assert_eq!((stable.profile, stable.prerelease), ("dist", false));
+    assert_eq!(
+        serde_json::to_value(&stable).unwrap(),
+        serde_json::json!({
+            "version": "1.0.0", "tag": "v1.0.0", "channel": "stable", "prerelease": false,
+            "profile": "dist", "platforms": ["windows", "linux", "macos"]
+        })
+    );
 }

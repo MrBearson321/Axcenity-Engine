@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Builds this computer's editor packages and checks them, without GitHub.
 
-The same packaging steps as `.github/workflows/release.yml` (turned off on
-purpose), run here, then checked: the files every package must hold, the
+The same packaging steps as `.github/workflows/release.yml`, run here, then
+checked: the files every package must hold, the
 packaged editor building a game for each OS it has a player for
 (`axcenity-editor --build-game`), and the built game for this OS starting
 and drawing frames. See docs/project/releases.md ("Checking packages").
@@ -22,6 +22,7 @@ step failed.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import plistlib
@@ -140,8 +141,16 @@ def check_payload(folder: Path, host: str, players: dict) -> None:
         else:
             need(not player.exists(), f"`{player}` is there but wasn't staged")
             print(f"  players/{os_name}: not in this local package (no {os_name} player given)")
-    for name in ("LICENSE", "NOTICE", "INSTALL.txt"):
+    for name in ("LICENSE", "NOTICE", "INSTALL.txt", "install.json"):
         need((folder / name).is_file(), f"`{name}` is missing from `{folder}`")
+    marker = folder / "install.json"
+    if marker.is_file():
+        kinds = ("windows-setup", "linux-tarball", "appimage", "deb", "rpm", "pacman", "macos-dmg")
+        try:
+            kind = json.loads(marker.read_text(encoding="utf-8")).get("kind")
+        except ValueError:
+            kind = None
+        need(kind in kinds, f"`{marker}` doesn't name an install kind: {kind!r}")
 
 
 # ------------------------------------------------------- Build Game smoke

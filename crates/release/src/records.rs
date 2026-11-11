@@ -120,6 +120,30 @@ impl Subsystem {
             Subsystem::Release => "release",
         }
     }
+
+    /// The name in release notes.
+    pub fn name(self) -> &'static str {
+        match self {
+            Subsystem::Renderer => "Renderer",
+            Subsystem::Physics => "Physics",
+            Subsystem::Animation => "Animation",
+            Subsystem::Terrain => "Terrain",
+            Subsystem::Materials => "Materials",
+            Subsystem::Assets => "Assets",
+            Subsystem::Audio => "Audio",
+            Subsystem::Ui => "UI",
+            Subsystem::Scripting => "Scripting",
+            Subsystem::Editor => "Editor",
+            Subsystem::Project => "Projects",
+            Subsystem::Networking => "Multiplayer",
+            Subsystem::Player => "Player",
+            Subsystem::Gameplay => "Gameplay",
+            Subsystem::Navigation => "Navigation",
+            Subsystem::Build => "Build and export",
+            Subsystem::Toolbox => "Toolbox",
+            Subsystem::Release => "Versions and updates",
+        }
+    }
 }
 
 impl fmt::Display for Subsystem {
