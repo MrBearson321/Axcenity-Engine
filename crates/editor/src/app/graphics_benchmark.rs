@@ -12,7 +12,7 @@ use super::*;
 impl EditorApp {
     /// Opens the benchmark's window.
     pub(super) fn open_graphics_benchmark(&mut self) {
-        self.benchmark.open = true;
+        self.benchmark.show();
     }
 
     /// Each frame: the window, and a batch of a run in progress.
@@ -28,6 +28,7 @@ impl EditorApp {
                     self.benchmark.run = None;
                     self.benchmark.previous = None;
                     self.benchmark.report = Some(*report);
+                    self.benchmark.scroll_to_top = true;
                     ctx.request_repaint();
                 }
                 Progress::Failed(error) => {
@@ -86,17 +87,17 @@ impl EditorApp {
         ));
     }
 
-    /// Uses the recommendation as the editor's graphics settings, keeping
-    /// the old ones for Undo. The viewport draws with them from the next
+    /// Uses the recommendation as the editor's graphics settings (keeping
+    /// what it doesn't weigh, `recommend::apply_to`), and the old ones for
+    /// Undo. The viewport draws with them from the next
     /// frame, and they're saved as Settings › Graphics changes always are.
     pub(super) fn apply_graphics_benchmark(&mut self) {
-        let Some(report) = &self.benchmark.report else {
+        let Some(applied) = self.benchmark.applied(&self.graphics) else {
             return;
         };
-        let recommended = report.recommendation.settings.clone();
-        if recommended == self.graphics {
+        if applied == self.graphics {
             return;
         }
-        self.benchmark.previous = Some(std::mem::replace(&mut self.graphics, recommended));
+        self.benchmark.previous = Some(std::mem::replace(&mut self.graphics, applied));
     }
 }
