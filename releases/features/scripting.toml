@@ -1,0 +1,61 @@
+# The scripting subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "editor.script-editor"
+name = "Script editor"
+subsystem = "scripting"
+description = "Edit scripts with syntax colours and autocomplete."
+status = "active"
+docs = "docs/editor/scripts.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/editor/src/scripts.rs and autocomplete.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "scripting.scripts"
+name = "Scripting"
+subsystem = "scripting"
+description = "Sandboxed scripts with a Roblox-inspired Instance API, events and a watchdog. Lua 5.4 in 0.1.0-alpha.3; Luau since."
+status = "active"
+docs = "docs/scripting.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/script in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "scripting.client-server"
+name = "Server and client scripts"
+subsystem = "scripting"
+description = "Scripts and LocalScripts on separate sides, talking through RemoteEvents."
+status = "active"
+docs = "docs/scripting/client-server.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/script/src/sides.rs and remote.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "scripting.blocks"
+name = "Block scripts"
+subsystem = "scripting"
+description = "Scratch-style block scripts that translate to Luau."
+status = "active"
+docs = "docs/scripting/blocks.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/blocks and crates/editor/src/block_editor.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "scripting.native-code"
+name = "Native code for scripts"
+subsystem = "scripting"
+description = "Scripts marked --!native or @native compile to machine code."
+status = "experimental"
+docs = "docs/scripting/execution.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "PR #58 (L3 part 1: fast builtins for scripts, opt-in native code), after v0.1.0-alpha.3"

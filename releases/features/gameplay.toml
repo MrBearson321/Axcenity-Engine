@@ -1,0 +1,49 @@
+# The gameplay subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "gameplay.humanoid"
+name = "Humanoids"
+subsystem = "gameplay"
+description = "Humanoid characters with walking, jumping and health."
+status = "active"
+docs = "docs/scripting/api-character.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 91f825d5 (Humanoid), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "gameplay.tools"
+name = "Tools and inventories"
+subsystem = "gameplay"
+description = "Tools characters can hold, and inventories."
+status = "active"
+docs = "docs/architecture/game-systems.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 9aa0c1d8 (Tools and Inventory), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "gameplay.abilities"
+name = "Abilities and effects"
+subsystem = "gameplay"
+description = "Abilities with costs and cooldowns, and timed effects."
+status = "active"
+docs = "docs/scripting/api-abilities.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 8a1bebec (Abilities and Effects), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "gameplay.dialogue"
+name = "Dialogue and quests"
+subsystem = "gameplay"
+description = "Branching dialogues and quests, with a Dialogue tab."
+status = "active"
+docs = "docs/scripting/api-dialogue.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit fcd181d7 (Dialogue and Quests), after v0.1.0-alpha.3"

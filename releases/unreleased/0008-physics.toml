@@ -1,0 +1,7 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "feature"
+subsystem = "physics"
+title = "Joints, motors, springs, movers, ragdolls, destruction, vehicles and seats"
+features = ["physics.constraints", "physics.ragdolls", "physics.destruction", "physics.vehicles"]
+commits = ["8ae590c8", "e9a3ceea", "97e1af22", "03468e53", "2e7fb31b", "96e4b31a"]
+evidence = "reconstructed"

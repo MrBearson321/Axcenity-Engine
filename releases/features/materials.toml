@@ -1,0 +1,25 @@
+# The materials subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "materials.material-editor"
+name = "Material editor"
+subsystem = "materials"
+description = "Material files, instances and the Material tab."
+status = "active"
+docs = "docs/editor/assets.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 7048b335 (Material Editor), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "materials.material-graph"
+name = "Material graphs"
+subsystem = "materials"
+description = "Node graphs that compile to shader code, and custom shader code."
+status = "active"
+docs = "docs/rendering/models.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 46cf196c (Material Graph), after v0.1.0-alpha.3"

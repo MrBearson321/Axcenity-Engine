@@ -1,0 +1,6 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "improvement"
+subsystem = "editor"
+title = "The editor's design system: tokens, one way to open windows and dialogs, a shortcut table, layout presets and Increase contrast"
+prs = [63, 66, 71, 73, 74, 79]
+evidence = "reconstructed"

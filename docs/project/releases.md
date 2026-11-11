@@ -4,18 +4,33 @@ How a tagged build becomes the installers on [GitHub Releases](https://github.co
 
 ## Version numbers
 
-Public releases use **SemVer** with a channel suffix while the engine is in alpha:
+**The one version is `[workspace.package] version` in the root `Cargo.toml`**, including its pre-release suffix (`0.2.0-alpha.1`). Every crate inherits it, so the editor's About box, the start page, `--version` on the editor, player and server, and the release tag all show the same number. The tag must be `v` plus that version; `axcenity-release check --tag v…` refuses anything else. Between releases, `main` carries the version of the next release, and a local build says so with its commit ("0.2.0-alpha.1 · Development · local build of 1a2b3c4d5").
 
-| Tag | Meaning |
-|---|---|
-| `v0.1.0-alpha.1` | First alpha. Bump the last number for each alpha (`-alpha.2`, …). |
-| `v0.1.0-beta.1` | Beta, later. |
-| `v0.1.0-rc.1` | Release candidate, later. |
-| `v0.1.0` | First stable 0.1. GitHub marks it as a full release, not a pre-release. |
+SemVer 2.0, with one of three pre-release tags. The channel follows from the version and is never written separately:
 
-The first packaged alpha is **`v0.1.0-alpha.1`**; bump the last number when a tag is retried (`-alpha.2`, `-alpha.3`, …). Anything with `-alpha`, `-beta` or `-rc` is uploaded as a GitHub pre-release.
+| Version | Channel | GitHub release |
+|---|---|---|
+| `0.2.0` | Stable | full release |
+| `0.2.0-rc.1`, `0.2.0-beta.1` | Beta | pre-release |
+| `0.2.0-alpha.1` | Development | pre-release |
 
-The crate version in `Cargo.toml` stays `0.1.0` until 0.1 is stable. The tag is the product version shown in the installer and on the release.
+While the engine is 0.x, a breaking change (an old engine can't open new projects, a script API removed) bumps the minor number, new features bump the minor number, and fixes alone bump the patch. Bump the last number of a pre-release (`-alpha.2`, …) for each new build of the same version, including a retried tag.
+
+History so far: `v0.1.0-alpha.1` and `v0.1.0-alpha.2` are tags that never became releases, and `v0.1.0-alpha.3` (2026-10-21) is the one published release. Its editor reported itself as `0.1.0` (known issue AX-0002). The next release is `0.2.0-alpha.1`.
+
+## Release notes and history
+
+Every pull request that changes something a user would notice adds one change entry to `releases/unreleased/`. How to write one, and the feature and issue files beside it: [releases/README.md](../../releases/README.md). `axcenity-release` (`crates/release`) checks them and answers questions about the history:
+
+```bash
+cargo run -p axcenity-release -- check                       # releases/ and Cargo.toml agree
+cargo run -p axcenity-release -- prepare 0.2.0-alpha.1       # start the release record from releases/unreleased/
+cargo run -p axcenity-release -- query compare 0.1.0-alpha.3 unreleased
+cargo run -p axcenity-release -- query introduced terrain.studio
+cargo run -p axcenity-release -- query search physics --json
+```
+
+The design (the manifest, the update flow, the Version Explorer) is in [research/release-system](../research/release-system/README.md).
 
 ## What a release contains
 

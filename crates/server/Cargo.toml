@@ -15,6 +15,7 @@ axcenity-assets.workspace = true
 axcenity-core.workspace = true
 axcenity-net.workspace = true
 axcenity-project.workspace = true
+axcenity-release.workspace = true
 axcenity-save.workspace = true
 axcenity-script.workspace = true
 axcenity-sim.workspace = true

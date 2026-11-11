@@ -90,7 +90,7 @@ const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
 const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | --join address:port] \
                      [--password text] [--bench frames] [--size WxH] [--quality preset] \
-                     [project-folder | game.axgame]\n\
+                     [project-folder | game.axgame]  (or --version [--json])\n\
                      example: cargo run -p axcenity-player -- examples/hello-part\n\
                      --watch reloads a project folder's changed assets while it plays\n\
                      --dev turns on the F9 Developer Console in a built game\n\
@@ -100,6 +100,16 @@ const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | -
                      --quality draws with that preset (Low, Medium, High, Ultra) for this run only";
 
 fn main() -> Result<()> {
+    // `--version` (and `--version --json`): this build's version, channel,
+    // commit and toolchain, then exit.
+    let all: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    if let Some(text) = axcenity_release::version_flag("axcenity-player", &all) {
+        println!("{text}");
+        return Ok(());
+    }
     // `--bench` reports its launch times (first frame, assets loaded) from here.
     let launched = Instant::now();
     // Show warnings and errors by default. `wgpu_hal` relays harmless graphics

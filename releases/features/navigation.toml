@@ -1,0 +1,25 @@
+# The navigation subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "navigation.pathfinding"
+name = "Navigation and pathfinding"
+subsystem = "navigation"
+description = "A navigation mesh, agents, obstacle avoidance and perception."
+status = "active"
+docs = "docs/architecture/navigation.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit e9a15012 (Navigation Mesh), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "navigation.behavior-trees"
+name = "Behavior trees"
+subsystem = "navigation"
+description = "AI behavior trees with their own editor tab."
+status = "active"
+docs = "docs/architecture/navigation.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 7b5b8e39 (Behavior Trees), after v0.1.0-alpha.3"

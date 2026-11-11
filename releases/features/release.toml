@@ -1,0 +1,13 @@
+# The release subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "release.version-info"
+name = "Version and build information"
+subsystem = "release"
+description = "--version on every program; the About box shows the version, channel and commit."
+status = "active"
+docs = "docs/project/releases.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "verified"
+source = "this change: crates/release"

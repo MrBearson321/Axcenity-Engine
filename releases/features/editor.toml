@@ -1,0 +1,145 @@
+# The editor subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "editor.explorer"
+name = "Explorer"
+subsystem = "editor"
+description = "The tree of Instances: select, rename, reparent and filter."
+status = "active"
+docs = "docs/editor/tree.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/editor/src/explorer.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.properties"
+name = "Properties"
+subsystem = "editor"
+description = "Edit the selected Instances' properties."
+status = "active"
+docs = "docs/editor/selection.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/editor/src/properties.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.building-tools"
+name = "Building tools"
+subsystem = "editor"
+description = "Move, scale, rotate and angular tools for parts, with undo."
+status = "active"
+docs = "docs/editor/transforms.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/editor/src/build_tools.rs and history.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.asset-browser"
+name = "Assets panel"
+subsystem = "editor"
+description = "Browse and drop a project's models, textures and sounds."
+status = "active"
+docs = "docs/editor/assets.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/editor/src/asset_browser.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.play-mode"
+name = "Play mode"
+subsystem = "editor"
+description = "Run the game inside the editor and stop back to the edit world."
+status = "active"
+docs = "docs/architecture/play-mode.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/editor/src/play.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.model-studio"
+name = "Model Studio"
+subsystem = "editor"
+description = "Model, UV unwrap, paint, sculpt, retopologize, bake and rig meshes in the editor."
+status = "active"
+docs = "docs/editor/model-studio.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 82489c5c (Model Studio and Editable Meshes), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.plugins"
+name = "Editor plugins"
+subsystem = "editor"
+description = "Extend the editor with Lua plugins."
+status = "active"
+docs = "docs/editor/plugins.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 38e87310 (Lua Editor Plugins), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.game-tests"
+name = "Game tests"
+subsystem = "editor"
+description = "Write and run game tests (tests/*.spec.lua) in the Tests panel or axcenity-test."
+status = "active"
+docs = "docs/project/game-tests.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 28f49eb3 (Game Test Runner), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.engine-rebuild"
+name = "Rebuild and relaunch"
+subsystem = "editor"
+description = "A source-built editor rebuilds itself when engine code changes and relaunches without losing the session."
+status = "active"
+docs = "docs/editor/scripts.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 07fbbd96 (Rebuilding and Relaunching the Engine), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.developer-console"
+name = "Developer Console"
+subsystem = "editor"
+description = "The F9 console and logs."
+status = "active"
+docs = "docs/developer-console.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit e2d34488 (Developer Console and Logs), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.universal-search"
+name = "Universal search"
+subsystem = "editor"
+description = "Ctrl+K finds commands, files, Instances and settings."
+status = "active"
+docs = "docs/editor/shell.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "PR #76 (Universal search (Ctrl+K)), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.mcp"
+name = "MCP server for AI tools"
+subsystem = "editor"
+description = "`axcenity-editor --mcp <project>` lets AI clients read a project's scene, objects and API docs over the Model Context Protocol."
+status = "experimental"
+docs = "docs/editor/mcp.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "PR #102 (MCP toolkit: axcenity-mcp crate and a read-only server), after v0.1.0-alpha.3"
