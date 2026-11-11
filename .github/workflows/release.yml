@@ -4,6 +4,12 @@ name: Release
 # A tag run checks everything cheap on Linux first, then builds, packages,
 # signs and ends in a DRAFT release that a person publishes. Nothing here
 # publishes on its own. How to cut a release: docs/project/releases.md.
+#
+# No build cache, on purpose: a cache saved by one tag can't be restored by
+# the next (caches are per ref), and a run started by hand runs in main's
+# context while building a tag, where saving a cache would let that code
+# feed later runs. Releases are rare and the runners are free, so every
+# release builds from scratch.
 on:
   push:
     tags:
@@ -77,10 +83,6 @@ jobs:
         with:
           ref: ${{ steps.mode.outputs.ref }}
       - uses: dtolnay/rust-toolchain@1.97.0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: release-validate
-          save-if: ${{ github.event_name == 'push' }}
       - name: Check releases/, Cargo.toml and the tag
         env:
           TAG: ${{ steps.mode.outputs.tag }}
@@ -216,10 +218,6 @@ jobs:
         if: matrix.host == 'macos'
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: release-${{ matrix.host }}-${{ needs.validate.outputs.profile }}
-          save-if: ${{ github.event_name == 'push' }}
       - name: Install Linux audio libraries
         if: matrix.host == 'linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libdbus-1-dev libudev-dev pkg-config
@@ -452,10 +450,6 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.ref }}
       - uses: dtolnay/rust-toolchain@1.97.0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: release-validate
-          save-if: false
       - name: Install minisign
         run: sudo apt-get update -q && sudo apt-get install -y -q minisign
       - uses: actions/download-artifact@v4

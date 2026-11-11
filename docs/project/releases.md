@@ -68,7 +68,7 @@ GitHub Actions runs only for release tags, so each release run is deliberate ([d
 
 4. [.github/workflows/release.yml](../../.github/workflows/release.yml) runs:
    - **Validate** (Linux, about two minutes): `check --tag`, the release tool's tests, the plan (channel, profile, platforms), that the tag isn't already a published release, and that the signing key's public half is committed. Nothing else starts if it fails.
-   - **Build** on Windows, macOS and Linux with the profile for the channel: `release` for Development, the fat-LTO `dist` for Beta and Stable. Each build is official (`AXCENITY_OFFICIAL_BUILD=1`, the tag and the commit), and `scripts/check-release-build.py` checks that every binary's `--version --json` says so. One failing build cancels the others.
+   - **Build** on Windows, macOS and Linux, from scratch, with the profile for the channel: `release` for Development, the fat-LTO `dist` for Beta and Stable. Each build is official (`AXCENITY_OFFICIAL_BUILD=1`, the tag and the commit), and `scripts/check-release-build.py` checks that every binary's `--version --json` says so. One failing build cancels the others.
    - **Package** each OS as before, plus the Windows update zip.
    - **Sign and draft**, in the `release` environment: writes `axcenity-history.json` and `axcenity-release.json`, signs the manifest with minisign, verifies the signature with `packaging/axcenity-release.pub`, writes `SHA256SUMS.txt`, and creates a **draft** release with the notes from `axcenity-release notes`. With a required reviewer on the environment, this job waits for that person's approval first.
 5. **Publish**: open the draft on GitHub, read it, and press **Publish release**. Nothing reaches users before this. A published release never changes; a mistake is fixed by the next release (and a `[[corrections]]` entry in its record).
@@ -77,7 +77,7 @@ To build an existing tag again (for example after a runner failure), run **Actio
 
 ### Costs
 
-The repository is public, so GitHub's standard runners cost nothing. Runs are still kept rare and short: nothing runs on pushes or pull requests, the cheap Linux checks run before any other machine starts, a failure stops the rest, and the Rust caches are saved only by tag runs. A full run takes roughly an hour of runner time across the three OSes.
+The repository is public, so GitHub's standard runners cost nothing. Runs are still kept rare and short: nothing runs on pushes or pull requests, the cheap Linux checks run before any other machine starts, and a failure stops the rest. Every release builds from scratch without a cache: caches are per tag, so one tag's cache wouldn't help the next, and skipping them keeps a run started by hand from writing a cache that later runs trust. A full run takes roughly an hour of runner time across the three OSes.
 
 ### Signing key
 
