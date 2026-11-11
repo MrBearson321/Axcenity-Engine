@@ -221,6 +221,10 @@ It reads `History`: the compiled-in copy, replaced by a newer cached `axcenity-h
 
 **Copy diagnostics** (About box, and Help > Report a Problem) puts on the clipboard: version, channel, build kind, commit, tag, built at, rustc, target, profile, OS name and version, CPU, GPU adapter and driver (from wgpu's adapter info, which the renderer already has), the open project's format and the engine that last saved it, known issues affecting this version, and the path of the latest log. No project contents, no paths beyond the log's. The player and server print the same through `--version --json`.
 
+### As built in Phase 5
+
+The editor-facing topic is `docs/editor/shell.md` ("Versions and updates"). Differences from the plan above: the update dot is a chip with the version beside the Settings gear, since the editor has no status bar; the Version Explorer reads the compiled-in history only (a downloaded `axcenity-history.json` comes with the updater); its Overview and the start page don't offer an Update button until the updater exists (Phase 6), and Settings > Updates links the release page instead; Copy diagnostics leaves out the OS version, CPU, the open project's format and the log path for now, and Help > Report a Problem isn't there yet.
+
 ## 7. Updater and installation (D8, D9)
 
 ### Which installs update themselves

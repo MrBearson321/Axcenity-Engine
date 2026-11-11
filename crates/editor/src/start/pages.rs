@@ -22,7 +22,7 @@ pub(super) fn reveal(folder: &Path) -> std::io::Result<()> {
 }
 
 /// "3 days ago", for when a project was last saved.
-pub(super) fn ago(then: SystemTime, now: SystemTime) -> String {
+pub(crate) fn ago(then: SystemTime, now: SystemTime) -> String {
     let seconds = now
         .duration_since(then)
         .map_or(0, |elapsed| elapsed.as_secs());

@@ -26,6 +26,7 @@ use cards::*;
 use dialogs::*;
 use global::GlobalPage;
 use learn::{Learn, LearnAction, SampleState};
+pub(crate) use pages::ago;
 use pages::*;
 use reference::Reference;
 
@@ -780,8 +781,9 @@ pub fn version_label() -> String {
 }
 
 /// The About box: the logo, the version, channel and build, and the
-/// licences of what's built in. Returns false once it's closed.
-pub fn about(ctx: &egui::Context, brand: &Brand) -> bool {
+/// licences of what's built in. Returns false once it's closed. `gpu` names
+/// the graphics adapter for Copy diagnostics.
+pub fn about(ctx: &egui::Context, brand: &Brand, gpu: Option<&str>) -> bool {
     let build = axcenity_release::BuildInfo::current();
     let (close, dismissed) = dialog::modal(ctx, "about", ABOUT_WIDTH, |ui| {
         let palette = theme::palette(ui.ctx());
@@ -829,17 +831,43 @@ pub fn about(ctx: &egui::Context, brand: &Brand) -> bool {
         let picked = dialog::buttons(
             ui,
             &[
-                dialog::Button::new(icons::COPY, "Copy version info", dialog::Kind::Plain),
+                dialog::Button::new(icons::COPY, "Copy diagnostics", dialog::Kind::Plain),
                 dialog::Button::new(icons::X, "Close", dialog::Kind::Plain),
             ],
             dialog::Enter::Main,
         );
         if picked == Some(0) {
-            ui.ctx().copy_text(format!("Axcenity Editor {build}"));
+            ui.ctx().copy_text(diagnostics(&build, gpu));
         }
         picked == Some(1)
     });
     !(close || dismissed)
+}
+
+/// What Copy diagnostics copies, for a bug report: the build, the system,
+/// the GPU, how it was installed and the known issues of this version.
+/// Nothing personal: no paths, user or project names.
+pub fn diagnostics(build: &axcenity_release::BuildInfo, gpu: Option<&str>) -> String {
+    let install = axcenity_release::InstallKind::current();
+    let history = crate::version_explorer::built_in_history();
+    let issues: Vec<&str> = history
+        .issues_affecting(&build.version)
+        .into_iter()
+        .map(|(issue, _)| issue.id.as_str())
+        .collect();
+    let issues = if issues.is_empty() {
+        "none recorded".to_owned()
+    } else {
+        issues.join(", ")
+    };
+    format!(
+        "Axcenity Editor {build}\nchannel: {}\nos: {} {}\ngpu: {}\ninstall: {}\nknown issues: {issues}\n",
+        build.version.channel(),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        gpu.unwrap_or("not started yet"),
+        install.label(),
+    )
 }
 
 /// The About box's build line: how it was built, from which commit, with

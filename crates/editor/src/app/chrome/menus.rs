@@ -529,6 +529,22 @@ impl EditorApp {
                     self.learn_open = !self.learn_open;
                 }
                 if ui
+                    .button(theme::with_icon(icons::GIT_BRANCH, "Version Explorer"))
+                    .on_hover_text(
+                        "This build's version, the releases, features, known issues, \
+                         and what changed between two versions",
+                    )
+                    .clicked()
+                {
+                    self.layout.open(Pane::VersionExplorer);
+                }
+                if ui
+                    .button(theme::with_icon(icons::ARROW_CIRCLE_UP, "Check for Updates…"))
+                    .clicked()
+                {
+                    self.open_updates();
+                }
+                if ui
                     .button(theme::with_icon(icons::INFO, "About Axcenity"))
                     .clicked()
                 {
@@ -542,6 +558,7 @@ impl EditorApp {
                 {
                     self.settings.open = !self.settings.open;
                 }
+                self.update_chip(ui);
                 if self.playing() {
                     playing_badge(ui, self.paused());
                 }
