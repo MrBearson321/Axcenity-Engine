@@ -105,7 +105,7 @@ pub fn overdraw_lines(stats: Option<&OverdrawStats>) -> Vec<(Option<Color32>, St
     lines
 }
 
-/// Draws the legend for `view_mode` at the bottom left of `rect`, if it
+/// Draws the legend for `view_mode` at the top left of `rect`, if it
 /// has one. True when Measure was clicked (Overdraw only).
 pub fn paint(
     ui: &egui::Ui,
@@ -122,12 +122,12 @@ pub fn paint(
     let mut measure = false;
     egui::Area::new(egui::Id::new("view mode legend"))
         .order(egui::Order::Foreground)
-        .pivot(egui::Align2::LEFT_BOTTOM)
-        .fixed_pos(rect.left_bottom() + egui::vec2(10.0, -10.0))
+        .fixed_pos(rect.left_top() + egui::vec2(10.0, 10.0))
         .constrain_to(rect)
         .show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_max_width(360.0);
+                ui.set_max_width(320.0);
+                ui.spacing_mut().item_spacing.y = 2.0;
                 ui.label(RichText::new(title).strong());
                 for (swatch, text) in &lines {
                     ui.horizontal(|ui| {
@@ -186,5 +186,60 @@ mod tests {
             with.iter().any(|(_, text)| text.contains("max 50+")),
             "{with:?}"
         );
+    }
+
+    #[test]
+    fn the_legend_draws_in_the_viewports_corner_for_its_two_views_only() {
+        let stats = RenderStats {
+            lod_items: [12, 5, 3],
+            ..RenderStats::default()
+        };
+        let draw = |mode: ViewMode| {
+            let ctx = crate::theme::test_context();
+            let run = || {
+                ctx.run(Default::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        paint(ui, ui.max_rect(), mode, &stats, None);
+                    });
+                })
+            };
+            // An area measures itself on its first frame, unseen.
+            run();
+            let output = run();
+            output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let lod = draw(ViewMode::Debug(DebugView::LodLevels));
+        assert!(
+            lod.iter().any(|t| t == "LOD0, its own mesh: 12 in view"),
+            "{lod:?}"
+        );
+        let overdraw = draw(ViewMode::Debug(DebugView::Overdraw));
+        assert!(overdraw.iter().any(|t| t == "8 surfaces"), "{overdraw:?}");
+        assert!(overdraw.iter().any(|t| t == "Measure"), "{overdraw:?}");
+        assert!(draw(ViewMode::Lit).is_empty());
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            for (mode, name) in [
+                (ViewMode::Debug(DebugView::LodLevels), "legend-lod.png"),
+                (ViewMode::Debug(DebugView::Overdraw), "legend-overdraw.png"),
+            ] {
+                crate::snapshot::snapshot(
+                    &std::path::Path::new(&folder).join(name),
+                    egui::vec2(480.0, 320.0),
+                    vec![Vec::new(); 2],
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            paint(ui, ui.max_rect(), mode, &stats, None);
+                        });
+                    },
+                );
+            }
+        }
     }
 }

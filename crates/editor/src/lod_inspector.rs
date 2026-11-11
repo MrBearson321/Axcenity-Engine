@@ -117,7 +117,7 @@ pub fn show(
         let thresholds: Vec<String> = LOD_SCREEN_SIZES
             .iter()
             .enumerate()
-            .map(|(index, size)| format!("LOD{} below {}", index + 1, percent(*size)))
+            .map(|(index, size)| format!("LOD{} <{}", index + 1, percent(*size)))
             .collect();
         row("Thresholds", thresholds.join(", "));
         row(
@@ -169,10 +169,10 @@ pub fn show(
             }
         });
     ui.label(
-        RichText::new(format!(
-            "{} primitives; levels are kept per primitive and switch together.",
-            report.primitives.len()
-        ))
+        RichText::new(match report.primitives.len() {
+            1 => "1 primitive.".to_owned(),
+            n => format!("{n} primitives, which switch level together."),
+        })
         .small(),
     );
     ui.separator();
@@ -237,5 +237,104 @@ mod tests {
         assert!((seen.screen_size - expected).abs() < 1e-4);
         assert_eq!(seen.drawn_level, Some(2));
         assert!(seen.report.is_none(), "no model loaded");
+    }
+
+    /// A model of a strip of `count` quads with copies of half and a
+    /// quarter of them, as the inspector shows one.
+    fn inspected() -> Inspection {
+        let strip = |count: usize| {
+            let (mut positions, mut indices) = (Vec::new(), Vec::new());
+            for quad in 0..count {
+                let x = quad as f32 / count as f32;
+                let base = positions.len() as u32;
+                positions.extend([
+                    [x, 0.0, 0.0],
+                    [x + 0.01, 0.0, 0.0],
+                    [x, 1.0, 0.0],
+                    [x + 0.01, 1.0, 0.0],
+                ]);
+                indices.extend([base, base + 1, base + 2, base + 1, base + 3, base + 2]);
+            }
+            let normals = vec![[0.0, 0.0, 1.0]; positions.len()];
+            axcenity_assets::Primitive::new(
+                positions,
+                normals,
+                Vec::new(),
+                indices,
+                Default::default(),
+            )
+        };
+        let mut model =
+            axcenity_assets::Model::from_primitives(vec![strip(4000), strip(2000), strip(1000)])
+                .unwrap();
+        let copies: Vec<_> = model.primitives.drain(1..).collect();
+        model.primitives[0].lods = copies;
+        Inspection {
+            name: "Oak".into(),
+            mesh_id: "assets/models/oak.glb".into(),
+            report: Some(LodReport::of(&model)),
+            distance: 42.0,
+            screen_size: 0.2,
+            expected_level: 1,
+            drawn_level: Some(1),
+        }
+    }
+
+    #[test]
+    fn the_panel_lists_every_level_and_its_preview_buttons_pick_one() {
+        let ctx = crate::theme::test_context();
+        let inspection = inspected();
+        let mut picked = None;
+        let mut frame = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(360.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut texts = Vec::new();
+            let output = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    if let Some(change) = show(ui, Some(&inspection), None) {
+                        picked = Some(change);
+                    }
+                });
+            });
+            for shape in output.shapes {
+                if let egui::epaint::Shape::Text(text) = shape.shape {
+                    texts.push(text.galley.text().to_owned());
+                }
+            }
+            texts
+        };
+        let texts = frame(Vec::new());
+        for wanted in [
+            "LOD0", "LOD1", "LOD2", "8000", "4000", "2000", "50%", "Auto",
+        ] {
+            assert!(
+                texts.iter().any(|text| text == wanted),
+                "{wanted} in {texts:?}"
+            );
+        }
+        assert!(
+            texts.iter().any(|text| text.contains("42.0 studs")),
+            "{texts:?}"
+        );
+        // Nothing is picked until a button is pressed.
+        assert_eq!(picked, None);
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            crate::snapshot::snapshot(
+                &std::path::Path::new(&folder).join("lod-inspector.png"),
+                egui::vec2(360.0, 600.0),
+                vec![Vec::new(); 2],
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        show(ui, Some(&inspection), Some(2));
+                    });
+                },
+            );
+        }
     }
 }
