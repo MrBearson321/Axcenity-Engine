@@ -1266,6 +1266,8 @@ pub fn part_icon(shape: PartType) -> &'static str {
         PartType::Cylinder => icons::CYLINDER,
         PartType::Wedge => icons::TRIANGLE,
         PartType::Capsule => icons::PILL,
+        // Phosphor has no pyramid; its polygon reads as a faceted solid.
+        PartType::CornerWedge => icons::POLYGON,
     }
 }
 

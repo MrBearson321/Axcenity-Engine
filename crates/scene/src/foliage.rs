@@ -288,7 +288,7 @@ pub fn brush_color(source: &FoliageSource) -> [f32; 3] {
 
 fn mesh_scale(shape: PartType, size: Vec3) -> Vec3 {
     match shape {
-        PartType::Block | PartType::Wedge => size,
+        PartType::Block | PartType::Wedge | PartType::CornerWedge => size,
         PartType::Ball => Vec3::splat(size.min_element()),
         PartType::Cylinder | PartType::Capsule => {
             let diameter = size.y.min(size.z);
@@ -303,6 +303,7 @@ fn shape_of(part: PartType) -> Shape {
         PartType::Ball => Shape::Sphere,
         PartType::Cylinder | PartType::Capsule => Shape::Cylinder,
         PartType::Wedge => Shape::Wedge,
+        PartType::CornerWedge => Shape::CornerWedge,
     }
 }
 

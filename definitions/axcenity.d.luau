@@ -678,6 +678,7 @@ declare extern type EnumPartTypeItems with
 	Cylinder: EnumPartType
 	Wedge: EnumPartType
 	Capsule: EnumPartType
+	CornerWedge: EnumPartType
 end
 
 --- One choice of `Enum.KeyCode`.
@@ -1567,8 +1568,8 @@ end
 declare extern type Part extends Instance with
 	--- If true, the part stays where it is. If false, it falls and collides with other parts.
 	Anchored: boolean
-	--- Block, Ball, Cylinder (along X) or Wedge.
-	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule" | "CornerWedge"
 	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 	Position: Vector3
 	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
@@ -1836,8 +1837,8 @@ end
 declare extern type NegateOperation extends Instance with
 	--- If true, the part stays where it is. If false, it falls and collides with other parts.
 	Anchored: boolean
-	--- Block, Ball, Cylinder (along X) or Wedge.
-	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule" | "CornerWedge"
 	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 	Position: Vector3
 	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
@@ -1935,8 +1936,8 @@ end
 declare extern type Seat extends Instance with
 	--- If true, the part stays where it is. If false, it falls and collides with other parts.
 	Anchored: boolean
-	--- Block, Ball, Cylinder (along X) or Wedge.
-	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule" | "CornerWedge"
 	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 	Position: Vector3
 	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
@@ -2042,8 +2043,8 @@ end
 declare extern type VehicleSeat extends Instance with
 	--- If true, the part stays where it is. If false, it falls and collides with other parts.
 	Anchored: boolean
-	--- Block, Ball, Cylinder (along X) or Wedge.
-	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule" | "CornerWedge"
 	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 	Position: Vector3
 	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
@@ -2163,8 +2164,8 @@ end
 declare extern type DamageZone extends Instance with
 	--- If true, the part stays where it is. If false, it falls and collides with other parts.
 	Anchored: boolean
-	--- Block, Ball, Cylinder (along X) or Wedge.
-	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule" | "CornerWedge"
 	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 	Position: Vector3
 	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
@@ -2264,8 +2265,8 @@ end
 declare extern type ReverbZone extends Instance with
 	--- If true, the part stays where it is. If false, it falls and collides with other parts.
 	Anchored: boolean
-	--- Block, Ball, Cylinder (along X) or Wedge.
-	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule" | "CornerWedge"
 	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 	Position: Vector3
 	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
@@ -2367,8 +2368,8 @@ end
 declare extern type SpawnLocation extends Instance with
 	--- If true, the part stays where it is. If false, it falls and collides with other parts.
 	Anchored: boolean
-	--- Block, Ball, Cylinder (along X) or Wedge.
-	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule" | "CornerWedge"
 	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 	Position: Vector3
 	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
@@ -3709,8 +3710,8 @@ end
 declare extern type GraphicsVolume extends Instance with
 	--- If true, the part stays where it is. If false, it falls and collides with other parts.
 	Anchored: boolean
-	--- Block, Ball, Cylinder (along X) or Wedge.
-	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Block, Ball, Cylinder (along X), Wedge, Capsule (along X, with round ends) or CornerWedge (rising to a point over its back right corner).
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule" | "CornerWedge"
 	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 	Position: Vector3
 	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.

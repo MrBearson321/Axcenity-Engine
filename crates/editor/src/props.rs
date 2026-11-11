@@ -2,6 +2,11 @@
 //! as prefab text (the same layout as `assets/prefabs/*.prefab.json`), so
 //! they can be placed in any project without files.
 //!
+//! Floor, Wall, Stairs, Ramp, Lamp and Table were taken out on request: each
+//! was a part or two anyone builds faster from Insert, and they crowded the
+//! browser. A world that already has one keeps it: placing a prop copies
+//! its parts in, nothing points back here.
+//!
 //! Positions only say where each part is relative to the others: placing a
 //! prop moves it, as a whole, onto the surface it's dropped on.
 
@@ -17,43 +22,7 @@ pub struct Prop {
     pub prefab: &'static str,
 }
 
-pub const PROPS: [Prop; 8] = [
-    Prop {
-        name: "Floor",
-        icon: icons::SQUARE,
-        hover: "A 16 × 16 stud anchored floor plate.",
-        prefab: FLOOR,
-    },
-    Prop {
-        name: "Wall",
-        icon: icons::WALL,
-        hover: "A 16 stud wide, 8 stud high anchored wall.",
-        prefab: WALL,
-    },
-    Prop {
-        name: "Stairs",
-        icon: icons::STEPS,
-        hover: "Six steps, each 1 stud up, in a Model.",
-        prefab: STAIRS,
-    },
-    Prop {
-        name: "Ramp",
-        icon: icons::TRIANGLE,
-        hover: "A wedge 4 studs high and 8 long.",
-        prefab: RAMP,
-    },
-    Prop {
-        name: "Lamp",
-        icon: icons::LAMP,
-        hover: "A street lamp with a PointLight in its bulb.",
-        prefab: LAMP,
-    },
-    Prop {
-        name: "Table",
-        icon: icons::TABLE,
-        hover: "A wooden table: a top and four legs, in a Model.",
-        prefab: TABLE,
-    },
+pub const PROPS: [Prop; 2] = [
     Prop {
         name: "Tree",
         icon: icons::TREE,
@@ -67,51 +36,6 @@ pub const PROPS: [Prop; 8] = [
         prefab: CRATE,
     },
 ];
-
-const FLOOR: &str = r#"{ "format_version": 1, "instances": [
-  { "class": "Part", "name": "Floor", "properties": {
-      "Anchored": true, "Size": [16, 1, 16], "Position": [0, 0.5, 0], "Color": [0.39, 0.6, 0.34] } }
-] }"#;
-
-const WALL: &str = r#"{ "format_version": 1, "instances": [
-  { "class": "Part", "name": "Wall", "properties": {
-      "Anchored": true, "Size": [16, 8, 1], "Position": [0, 4, 0], "Color": [0.82, 0.79, 0.72] } }
-] }"#;
-
-const STAIRS: &str = r#"{ "format_version": 1, "instances": [
-  { "class": "Model", "name": "Stairs", "children": [
-    { "class": "Part", "name": "Step", "properties": { "Anchored": true, "Size": [4, 1, 1.5], "Position": [0, 0.5, 0], "Color": [0.6, 0.6, 0.62] } },
-    { "class": "Part", "name": "Step", "properties": { "Anchored": true, "Size": [4, 2, 1.5], "Position": [0, 1, -1.5], "Color": [0.6, 0.6, 0.62] } },
-    { "class": "Part", "name": "Step", "properties": { "Anchored": true, "Size": [4, 3, 1.5], "Position": [0, 1.5, -3], "Color": [0.6, 0.6, 0.62] } },
-    { "class": "Part", "name": "Step", "properties": { "Anchored": true, "Size": [4, 4, 1.5], "Position": [0, 2, -4.5], "Color": [0.6, 0.6, 0.62] } },
-    { "class": "Part", "name": "Step", "properties": { "Anchored": true, "Size": [4, 5, 1.5], "Position": [0, 2.5, -6], "Color": [0.6, 0.6, 0.62] } },
-    { "class": "Part", "name": "Step", "properties": { "Anchored": true, "Size": [4, 6, 1.5], "Position": [0, 3, -7.5], "Color": [0.6, 0.6, 0.62] } }
-  ] }
-] }"#;
-
-const RAMP: &str = r#"{ "format_version": 1, "instances": [
-  { "class": "Part", "name": "Ramp", "properties": {
-      "Anchored": true, "Shape": "Wedge", "Size": [4, 4, 8], "Position": [0, 2, 0], "Color": [0.6, 0.6, 0.62] } }
-] }"#;
-
-const LAMP: &str = r#"{ "format_version": 1, "instances": [
-  { "class": "Model", "name": "Lamp", "children": [
-    { "class": "Part", "name": "Base", "properties": { "Anchored": true, "Size": [1.6, 0.4, 1.6], "Position": [0, 0.2, 0], "Color": [0.17, 0.17, 0.19], "Material": "Metal" } },
-    { "class": "Part", "name": "Pole", "properties": { "Anchored": true, "Shape": "Cylinder", "Orientation": [0, 0, 90], "Size": [8, 0.4, 0.4], "Position": [0, 4.4, 0], "Color": [0.17, 0.17, 0.19], "Material": "Metal" } },
-    { "class": "Part", "name": "Bulb", "properties": { "Anchored": true, "Shape": "Ball", "Size": [1.2, 1.2, 1.2], "Position": [0, 8.9, 0], "Color": [1, 0.86, 0.55], "Material": "Neon" },
-      "children": [ { "class": "PointLight", "name": "PointLight", "properties": { "Color": [1, 0.86, 0.55], "Brightness": 1.5, "Range": 20 } } ] }
-  ] }
-] }"#;
-
-const TABLE: &str = r#"{ "format_version": 1, "instances": [
-  { "class": "Model", "name": "Table", "children": [
-    { "class": "Part", "name": "Top", "properties": { "Anchored": true, "Size": [6, 0.4, 4], "Position": [0, 3.2, 0], "Color": [0.55, 0.38, 0.22] } },
-    { "class": "Part", "name": "Leg", "properties": { "Anchored": true, "Size": [0.4, 3, 0.4], "Position": [2.6, 1.5, 1.6], "Color": [0.55, 0.38, 0.22] } },
-    { "class": "Part", "name": "Leg", "properties": { "Anchored": true, "Size": [0.4, 3, 0.4], "Position": [-2.6, 1.5, 1.6], "Color": [0.55, 0.38, 0.22] } },
-    { "class": "Part", "name": "Leg", "properties": { "Anchored": true, "Size": [0.4, 3, 0.4], "Position": [2.6, 1.5, -1.6], "Color": [0.55, 0.38, 0.22] } },
-    { "class": "Part", "name": "Leg", "properties": { "Anchored": true, "Size": [0.4, 3, 0.4], "Position": [-2.6, 1.5, -1.6], "Color": [0.55, 0.38, 0.22] } }
-  ] }
-] }"#;
 
 const TREE: &str = r#"{ "format_version": 1, "instances": [
   { "class": "Model", "name": "Tree", "children": [
@@ -130,6 +54,13 @@ mod tests {
     use axcenity_core::World;
 
     use super::PROPS;
+
+    /// The base models taken out stay out; Tree and Crate stay in.
+    #[test]
+    fn only_the_tree_and_crate_are_built_in() {
+        let names: Vec<&str> = PROPS.iter().map(|prop| prop.name).collect();
+        assert_eq!(names, ["Tree", "Crate"]);
+    }
 
     #[test]
     fn every_prop_is_a_valid_prefab() {

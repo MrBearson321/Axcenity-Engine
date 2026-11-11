@@ -172,11 +172,12 @@ pub(crate) fn part_mesh(part: &Instance, verb: &str) -> Result<Mesh, String> {
     Ok(match shape {
         PartType::Block => Mesh::block(size),
         PartType::Wedge => Mesh::wedge(size),
+        PartType::CornerWedge => Mesh::corner_wedge(size),
         PartType::Ball => Mesh::ball(size),
         PartType::Cylinder => Mesh::cylinder(size),
         PartType::Capsule => {
             return Err(format!(
-                "Capsules can't be {verb} yet; use a Block, Wedge, Ball or Cylinder"
+                "Capsules can't be {verb} yet; use a Block, Wedge, Corner Wedge, Ball or Cylinder"
             ));
         }
     })

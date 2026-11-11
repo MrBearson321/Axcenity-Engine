@@ -1344,6 +1344,9 @@ pub enum Shape {
     /// A ramp: full bottom and back (+Z) faces, and a slope rising from the
     /// bottom front edge to the top back edge.
     Wedge,
+    /// A corner wedge: full bottom face, rising to a point at the top back
+    /// right corner (+X, +Y, +Z).
+    CornerWedge,
     /// Uploaded to the GPU the first time it's drawn, and kept while it's
     /// drawn. `Arc` shares one copy of the data between draw items.
     Mesh(Arc<dyn MeshSource>),

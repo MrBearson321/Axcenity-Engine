@@ -19,15 +19,20 @@ pub enum PartType {
     /// `Size.X` is its whole length, ends included, and its diameter is the
     /// smaller of `Size.Y` and `Size.Z`. Ragdolls are made of these.
     Capsule,
+    /// A corner of a roof: the bottom is a full rectangle, and four faces
+    /// rise from its edges to a point above the back right corner (+X, +Z),
+    /// two of them upright (right and back) and two sloping.
+    CornerWedge,
 }
 
 impl PartType {
-    pub const ALL: [PartType; 5] = [
+    pub const ALL: [PartType; 6] = [
         PartType::Block,
         PartType::Ball,
         PartType::Cylinder,
         PartType::Wedge,
         PartType::Capsule,
+        PartType::CornerWedge,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -37,6 +42,7 @@ impl PartType {
             PartType::Cylinder => "Cylinder",
             PartType::Wedge => "Wedge",
             PartType::Capsule => "Capsule",
+            PartType::CornerWedge => "CornerWedge",
         }
     }
 
