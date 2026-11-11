@@ -1,0 +1,16 @@
+[package]
+name = "axcenity-collab"
+description = "Team Create: the operations, transactions and host and client state machines that keep several editors on one project in step. No network, UI or GPU code."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-core.workspace = true
+rustc-hash.workspace = true
+thiserror.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[lints]
+workspace = true

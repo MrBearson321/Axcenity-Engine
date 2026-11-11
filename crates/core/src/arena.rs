@@ -78,6 +78,13 @@ impl<T> Arena<T> {
         self.replica = true;
     }
 
+    /// The first index no value has had yet: every index from here up is
+    /// free and has never been used, so an ID there with generation 0 can't
+    /// match a stale one. Team Create hands out blocks of IDs from here.
+    pub fn next_unused_index(&self) -> u32 {
+        u32::try_from(self.slots.len()).expect("slots stay below LOCAL_BASE")
+    }
+
     /// Stores `value` and returns its new ID.
     pub fn insert(&mut self, value: T) -> Id {
         self.len += 1;
@@ -236,6 +243,26 @@ mod tests {
         assert_eq!(arena.remove(id), None);
         assert!(!arena.contains(id));
         assert!(arena.is_empty());
+    }
+
+    #[test]
+    fn next_unused_index_is_past_every_slot_ever_used() {
+        let mut arena = Arena::new();
+        assert_eq!(arena.next_unused_index(), 0);
+        let a = arena.insert("a");
+        arena.insert("b");
+        arena.remove(a);
+        // A freed slot is still "used": its generation went up.
+        assert_eq!(arena.next_unused_index(), 2);
+        arena.make_replica();
+        arena.insert("local");
+        assert_eq!(
+            arena.next_unused_index(),
+            2,
+            "a replica's own values are elsewhere"
+        );
+        assert!(arena.insert_at(Id::from_bits(5), "theirs"));
+        assert_eq!(arena.next_unused_index(), 6);
     }
 
     #[test]
