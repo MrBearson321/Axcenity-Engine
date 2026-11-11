@@ -25,7 +25,6 @@ use std::time::{Duration, Instant};
 use axcenity_core::FoliageSource;
 use eframe::egui;
 
-use crate::ambient_cg::GetTexture;
 use crate::dialog::{self, Button, Enter, Kind, Tone};
 use crate::global_assets;
 use crate::props::{PROPS, Prop};
@@ -373,6 +372,8 @@ impl Category {
 /// What the panel asks the app to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BrowserAction {
+    /// Show the Toolbox tab.
+    OpenToolbox,
     /// Place this at the camera's focus point (a double-click).
     Place(AssetEntry),
     /// A click while [`Picking`]: use this as the Terrain Studio's foliage
@@ -436,7 +437,6 @@ pub struct AssetBrowser {
     scanned_at: Option<Instant>,
     thumbnails: Thumbnails,
     dialog: Option<AssetDialog>,
-    get_texture: Option<GetTexture>,
     /// The imported model's folder shown (by its name), if one is open.
     open_package: Option<String>,
     /// The paths of the assets picked with a click (Ctrl or Cmd adds),
@@ -459,6 +459,9 @@ pub struct AssetBrowser {
     /// something new, renamed or gone, or another project), so universal
     /// search lists them again only then (`app/search.rs`).
     generation: u64,
+    /// Where the project's Toolbox assets came from
+    /// (`.axcenity/asset-sources.json`), read with each scan.
+    sources: axcenity_toolbox::provenance::Snapshot,
 }
 
 impl AssetBrowser {
@@ -471,7 +474,6 @@ impl AssetBrowser {
         self.thumbnails.open(folder);
         self.scanned_at = None;
         self.dialog = None;
-        self.get_texture = None;
         self.open_package = None;
     }
 
@@ -481,6 +483,25 @@ impl AssetBrowser {
         self.global_thumbnails.open(library.as_deref());
         self.library = library;
         self.scanned_at = None;
+    }
+
+    /// Where the asset at `path` came from and its licence, for its
+    /// tooltip: "From Poly Haven · CC0 · by Rob Tuytel".
+    pub fn source_line(&self, path: &str) -> Option<String> {
+        use axcenity_toolbox::{license, provenance};
+        let record = self.sources.source_of(path)?;
+        let mut line = format!(
+            "From {} · {}",
+            provenance::source_name(&record.provider),
+            license::display(&record.license, &record.license_version)
+        );
+        if !record.authors.is_empty() {
+            line.push_str(&format!(" · by {}", record.authors.join(", ")));
+        }
+        if let Some(why) = license::commercial_block(&record.license) {
+            line.push_str(&format!("\n{why}"));
+        }
+        Some(line)
     }
 
     /// Walks the folder again on the next frame the panel is shown.
@@ -677,6 +698,11 @@ impl AssetBrowser {
         let old_shared = std::mem::take(&mut self.shared);
         let files_changed = files != self.files;
         self.files = files;
+        self.sources = self
+            .folder
+            .as_deref()
+            .and_then(|folder| axcenity_toolbox::provenance::Snapshot::read(folder).ok())
+            .unwrap_or_default();
         // Global assets show only with a project open, to use in it.
         let global = match (&self.folder, &self.library) {
             (Some(_), Some(library)) => scan(library),
@@ -903,9 +929,6 @@ impl AssetBrowser {
         if let Some(done) = self.asset_dialog(ui.ctx()) {
             action = Some(done);
         }
-        if let Some(done) = self.texture_dialog(ui.ctx()) {
-            action = Some(done);
-        }
         action
     }
 
@@ -1061,22 +1084,26 @@ impl AssetBrowser {
     ) -> Option<BrowserAction> {
         let palette = theme::palette(ui.ctx());
         let mut action = None;
+        let mut toolbox = false;
         let mut get_texture = |ui: &mut egui::Ui| {
             if ui
                 .add_enabled(
-                    can_edit && self.folder.is_some(),
+                    self.folder.is_some(),
                     widgets::button(
                         widgets::Role::Secondary,
-                        Some(icons::IMAGE_SQUARE),
-                        "Get texture",
+                        Some(icons::TOOLBOX),
+                        "Toolbox",
                         &palette,
                     )
                     .min_size(egui::vec2(0.0, 24.0)),
                 )
-                .on_hover_text("Search ambientCG and save a texture set into assets/textures.")
+                .on_hover_text(
+                    "Find textures, skies, models and sounds on ambientCG, Poly Haven and \
+                     Openverse, and get them into the project.",
+                )
                 .clicked()
             {
-                self.get_texture = Some(GetTexture::open(ui.ctx()));
+                toolbox = true;
             }
         };
         let mut import = |ui: &mut egui::Ui| {
@@ -1130,6 +1157,9 @@ impl AssetBrowser {
         };
         if saved {
             action = Some(BrowserAction::SavePrefab);
+        }
+        if toolbox {
+            action = Some(BrowserAction::OpenToolbox);
         }
         action
     }
@@ -1304,29 +1334,6 @@ impl AssetBrowser {
         action
     }
 
-    /// The ambientCG search. A finished download refreshes the tiles and
-    /// asks Output to say so.
-    fn texture_dialog(&mut self, ctx: &egui::Context) -> Option<BrowserAction> {
-        let Some(folder) = self.folder.clone() else {
-            self.get_texture = None;
-            return None;
-        };
-        let event = self
-            .get_texture
-            .as_mut()
-            .and_then(|dialog| dialog.show(ctx, &folder))?;
-        let action = event.notice.map(|(error, text)| {
-            if !error {
-                self.refresh();
-            }
-            BrowserAction::Notice { error, text }
-        });
-        if event.close {
-            self.get_texture = None;
-        }
-        action
-    }
-
     /// Draws one asset: a tile, or a row of the list when `list`. The first
     /// bool is a double-click (place); the second is a pick ([`Picking`]).
     fn item(
@@ -1355,6 +1362,10 @@ impl AssetBrowser {
                 None => format!("{}\n{}", entry.path, entry.kind.hover()),
             }
         };
+        if let Some(line) = self.source_line(&entry.path) {
+            hover.push('\n');
+            hover.push_str(&line);
+        }
         if global && !self.is_local(&entry.path) {
             hover.push_str("\nGlobal asset: copied into this project the first time it's used.");
         } else if global {

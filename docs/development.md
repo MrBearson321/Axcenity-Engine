@@ -2,7 +2,7 @@
 
 How to keep builds and test runs short, down to a laptop (the numbers below are from a 6-core Ryzen 5 5500U with 14 GB of RAM).
 
-**Testing is local.** GitHub Actions is intentionally turned off while the architecture changes ([development policy](development-policy.md#continuous-integration)), so the checks on this page, run on your own machine, are the only verification. Significant engine changes need local tests, and a pull request says what ran and on which OS.
+**Testing is local.** GitHub Actions runs only for releases, and CI only by hand, while the architecture changes ([development policy](development-policy.md#continuous-integration)), so the checks on this page, run on your own machine, are the only verification. Significant engine changes need local tests, and a pull request says what ran and on which OS.
 
 ## Tools
 
@@ -38,7 +38,7 @@ Keep single tests short. `axcenity-player`'s `every_example_renders` draws every
 
 ## Checking another platform
 
-GitHub Actions is **intentionally disabled**. The CI workflow (`.github/workflows/ci.yml`: format, the workspace-hack check, and build, the player having no editor code, clippy and every test on Windows, macOS and Linux) and the Release workflow are both turned off in the repository's Actions settings. The engine is going through large architectural changes, and the priority is stability and development speed over keeping CI infrastructure running. The workflow files stay so CI can be turned back on once the architecture and core systems are stable ([development policy](development-policy.md#continuous-integration)); until then, don't add jobs to them.
+GitHub Actions runs only for releases. The CI workflow (`.github/workflows/ci.yml`: format, the workspace-hack check, and build, the player having no editor code, clippy and every test on Windows, macOS and Linux) runs only when started by hand (**Actions > CI > Run workflow**), never on pushes or pull requests. The Release workflow runs for release tags ([releases.md](project/releases.md#cutting-a-release)). The priority is stability and development speed over keeping CI infrastructure running, and minutes are spent only on purpose ([development policy](development-policy.md#continuous-integration)). Don't add jobs to `ci.yml`; check any workflow change locally with `python3 scripts/check-workflows.py` first.
 
 Check on the computers themselves instead. Windows and Linux are the primary platforms; macOS is secondary. The scripts also cover what CI never could (the game on a real GPU). From the repository root:
 

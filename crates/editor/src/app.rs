@@ -68,6 +68,7 @@ mod tags;
 mod terrain;
 mod texture_set;
 mod to_terrain;
+mod toolbox;
 mod tree_ops;
 mod ui_graphs;
 mod ui_links;
@@ -123,6 +124,7 @@ use crate::terrain_studio::TerrainStudio;
 use crate::theme::{self, Appearance, filled_icons, icons};
 use crate::thumbnail;
 use crate::toast::{self, Toasts};
+use crate::toolbox_panel::ToolboxPanel;
 use crate::tree::{self, Insertable};
 use crate::ui_designer::{DesignerAction, DesignerScene, GraphPane, UiDesigner};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
@@ -346,6 +348,11 @@ pub struct EditorApp {
     sound_preview: Option<axcenity_audio::AudioEngine>,
     /// The Assets panel, which shares the bottom of the window with Output.
     asset_browser: AssetBrowser,
+    /// The Toolbox tab (`toolbox_panel.rs`, its actions `app/toolbox.rs`).
+    toolbox: ToolboxPanel,
+    /// Models the Toolbox got, waiting for the Import dialog: each file in
+    /// the asset directory and the asset key and package it came from.
+    toolbox_imports: HashMap<PathBuf, (String, String)>,
     /// The Animation panel's clips, open clip and preview.
     animation: AnimationStudio,
     /// The Behavior Tree tab and the trees open in it.
@@ -477,6 +484,7 @@ impl DockViewer<'_> {
             Pane::Tests => self.app.tests_pane(ui),
             Pane::Plugins => self.app.plugins_pane(ui),
             Pane::ModelStudio => self.app.model_studio_pane(ui, self.render_state),
+            Pane::Toolbox => self.app.toolbox_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, id),
             Pane::Plugin(id) => self.app.plugin_pane(ui, id, self.render_state),
         }
@@ -872,6 +880,8 @@ impl EditorApp {
             learn_open: false,
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
+            toolbox: ToolboxPanel::default(),
+            toolbox_imports: HashMap::new(),
             animation: AnimationStudio::default(),
             behavior: BehaviorTreeStudio::default(),
             dialogues: DialogueStudio::default(),

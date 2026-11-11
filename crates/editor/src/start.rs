@@ -434,7 +434,7 @@ impl StartScreen {
         foot.horizontal(|ui| {
             ui.add_space(10.0);
             ui.label(
-                RichText::new(format!("Axcenity Engine {}", env!("CARGO_PKG_VERSION")))
+                RichText::new(format!("Axcenity Engine {}", version_label()))
                     .size(type_scale::CAPTION)
                     .color(palette.text_weak),
             );
@@ -773,9 +773,16 @@ pub fn tutorial_samples() -> Vec<&'static str> {
         .collect()
 }
 
-/// The About box: the logo, the version, and the licences of what's built in.
-/// Returns false once it's closed.
+/// "0.2.0-alpha.1 · Development": the version and the channel it's on.
+pub fn version_label() -> String {
+    let version = axcenity_release::Version::current();
+    format!("{version} · {}", version.channel())
+}
+
+/// The About box: the logo, the version, channel and build, and the
+/// licences of what's built in. Returns false once it's closed.
 pub fn about(ctx: &egui::Context, brand: &Brand) -> bool {
+    let build = axcenity_release::BuildInfo::current();
     let (close, dismissed) = dialog::modal(ctx, "about", ABOUT_WIDTH, |ui| {
         let palette = theme::palette(ui.ctx());
         dialog::header(
@@ -783,7 +790,7 @@ pub fn about(ctx: &egui::Context, brand: &Brand) -> bool {
             icons::INFO,
             dialog::Tone::Question,
             "About Axcenity",
-            Some(&format!("Version {}", env!("CARGO_PKG_VERSION"))),
+            Some(&format!("Version {}", version_label())),
         );
         ui.vertical_centered(|ui| {
             let texture = brand.wordmark();
@@ -812,15 +819,53 @@ pub fn about(ctx: &egui::Context, brand: &Brand) -> bool {
                 .size(type_scale::SMALL)
                 .color(palette.text_weak),
             );
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new(build_line(&build))
+                    .size(type_scale::SMALL)
+                    .color(palette.text_weak),
+            );
         });
-        dialog::buttons(
+        let picked = dialog::buttons(
             ui,
-            &[dialog::Button::new(icons::X, "Close", dialog::Kind::Plain)],
+            &[
+                dialog::Button::new(icons::COPY, "Copy version info", dialog::Kind::Plain),
+                dialog::Button::new(icons::X, "Close", dialog::Kind::Plain),
+            ],
             dialog::Enter::Main,
-        )
-        .is_some()
+        );
+        if picked == Some(0) {
+            ui.ctx().copy_text(format!("Axcenity Editor {build}"));
+        }
+        picked == Some(1)
     });
     !(close || dismissed)
+}
+
+/// The About box's build line: how it was built, from which commit, with
+/// which toolchain.
+fn build_line(build: &axcenity_release::BuildInfo) -> String {
+    let how = match build.kind {
+        axcenity_release::BuildKind::Official => {
+            format!(
+                "Official build {}",
+                build.tag.as_deref().unwrap_or_default()
+            )
+        }
+        axcenity_release::BuildKind::Local => "Local build".to_owned(),
+    };
+    let rustc = build
+        .rustc
+        .split_whitespace()
+        .nth(1)
+        .map(|v| format!(" · rustc {v}"))
+        .unwrap_or_default();
+    format!(
+        "{how} · commit {}{rustc} · {} ({})",
+        build.short_commit(),
+        build.target,
+        build.profile
+    )
 }
 
 #[cfg(test)]

@@ -1,0 +1,97 @@
+# The project subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "project.format-migration"
+name = "Project format upgrades"
+subsystem = "project"
+description = "Older projects are upgraded to the current format, keeping a copy of the previous files."
+status = "active"
+docs = "docs/project/world.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/project/src/migrate.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "project.version-history"
+name = "Version History"
+subsystem = "project"
+description = "A project's saved checkpoints, to look back and restore."
+status = "active"
+docs = "docs/project/export.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/project/src/versions.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "project.build-game"
+name = "Build Game"
+subsystem = "project"
+description = "Pack a project into a game that runs in the player on Windows, macOS or Linux."
+status = "active"
+docs = "docs/project/export.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/project/src/packed.rs and packaging/stage.py in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "project.levels"
+name = "Levels"
+subsystem = "project"
+description = "Several levels per project."
+status = "active"
+docs = "docs/project/levels.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 4d4ed53f (Levels), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "project.prefab-variants"
+name = "Nested prefabs and variants"
+subsystem = "project"
+description = "Prefabs inside prefabs, and variants of a prefab."
+status = "active"
+docs = "docs/project/world.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 6a7e542f (Nested Prefabs and Variants), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "project.asset-packages"
+name = "Asset packages"
+subsystem = "project"
+description = "Share assets between projects as .axpkg files."
+status = "active"
+docs = "docs/project/packages.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 5fdbdb4a (Asset Packages), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "project.save-games"
+name = "Save slots"
+subsystem = "project"
+description = "Games save and load slots and checkpoints, with save migration."
+status = "active"
+docs = "docs/architecture/saves.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit ceda19b2 (Save Slots and Checkpoints), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "project.templates"
+name = "Genre templates"
+subsystem = "project"
+description = "New Project starts from a genre template."
+status = "active"
+docs = "docs/project/templates.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 66f4e073 (Genre Templates), after v0.1.0-alpha.3"

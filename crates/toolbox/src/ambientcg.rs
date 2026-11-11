@@ -48,7 +48,7 @@ fn type_filter(kind: Kind) -> Option<&'static str> {
         Kind::Texture => Some("material"),
         Kind::Hdri => Some("hdri"),
         Kind::Model => Some("3d-model"),
-        Kind::Sound => None,
+        Kind::Sound | Kind::Sprites => None,
     }
 }
 

@@ -144,11 +144,31 @@ Exec=sh -c \"exec \\\\\"\\\\$(dirname \\\\\"\\\\$0\\\\\")/AxcenityPlayer\\\\\"\"
 Terminal=false\n\
 Categories=Game;\n";
 
+/// `CREDITS.txt` for the Toolbox assets still in the project at `folder`,
+/// from its `.axcenity/asset-sources.json`; `None` when it has none.
+fn asset_credits(folder: &Path) -> Result<Option<String>, String> {
+    use axcenity_toolbox::provenance::{self, Snapshot};
+    let mut snapshot = Snapshot::read(folder)
+        .map_err(|err| format!("could not read the project's asset sources: {err}"))?;
+    // A file deleted since its install needs no credit.
+    snapshot
+        .files
+        .retain(|file| folder.join(&file.path).exists());
+    let name = project::project_name(folder).unwrap_or_else(|| {
+        folder
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Game".to_owned())
+    });
+    Ok(provenance::credits(&name, &snapshot.records()))
+}
+
 /// Builds the game in the project at `folder` into `destination` for
 /// `target`, with the player at `player`: cooks textures that aren't yet,
 /// packs `game.axgame` and copies the player beside it (inside
 /// `AxcenityPlayer.app` for macOS, with the game in `Contents/Resources`),
-/// with `LICENSES.txt`. With `archive`,
+/// with `LICENSES.txt` (and `CREDITS.txt` when Toolbox assets need
+/// crediting). With `archive`,
 /// also writes those files as `AxcenityPlayer-<os>.zip` in `destination`.
 pub fn build_game(
     folder: &Path,
@@ -231,6 +251,13 @@ pub fn build_game(
         Contents::Bytes(notices.as_bytes()),
         false,
     )?;
+    if let Some(text) = asset_credits(folder)? {
+        write(
+            credits.join("CREDITS.txt"),
+            Contents::Bytes(text.as_bytes()),
+            false,
+        )?;
+    }
 
     // The copied player keeps only the linker's signature, which seals no
     // bundle: `codesign --verify --deep --strict` rejects the app ("code
@@ -442,6 +469,46 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn a_build_credits_the_toolbox_assets_still_in_the_project() {
+        use axcenity_toolbox::provenance::{Snapshot, SourcedFile};
+        use axcenity_toolbox::record::{AssetRecord, Kind};
+        let scratch = Scratch::new("credits");
+        let project = scratch.root.join("project");
+        fs::create_dir_all(project.join("assets/textures/Rock030")).unwrap();
+        fs::write(project.join("assets/textures/Rock030/Rock030.png"), b"x").unwrap();
+        let mut snapshot = Snapshot::default();
+        for (id, name, license) in [("Rock030", "Rock 030", "CC0"), ("gone", "Gone", "CC-BY")] {
+            let record = AssetRecord {
+                provider: "ambientcg".into(),
+                id: id.into(),
+                kind: Kind::Texture,
+                name: name.into(),
+                license: license.into(),
+                ..AssetRecord::default()
+            };
+            snapshot.files.push(SourcedFile {
+                path: format!("assets/textures/{id}"),
+                key: record.key(),
+                variant: "1K-PNG".into(),
+                uid: None,
+            });
+            snapshot.assets.insert(record.key(), record);
+        }
+        snapshot.write(&project).unwrap();
+        scratch.build(ExportTarget::Windows, false);
+        let credits = fs::read_to_string(scratch.out("CREDITS.txt")).unwrap();
+        assert!(credits.contains("Rock 030"), "{credits}");
+        assert!(!credits.contains("Gone"), "{credits}");
+    }
+
+    #[test]
+    fn a_build_without_toolbox_assets_has_no_credits_file() {
+        let scratch = Scratch::new("no-credits");
+        scratch.build(ExportTarget::Windows, false);
+        assert!(!scratch.out("CREDITS.txt").exists());
     }
 
     #[test]

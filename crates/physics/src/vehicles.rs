@@ -379,6 +379,18 @@ pub(crate) fn drive(
     }
 }
 
+/// Each wheel's part, with its car's body.
+pub(crate) fn wheel_parts(
+    vehicles: &[Vehicle],
+) -> impl Iterator<Item = (RigidBodyHandle, InstanceId)> + '_ {
+    vehicles.iter().flat_map(|vehicle| {
+        vehicle
+            .wheels
+            .iter()
+            .filter_map(|wheel| wheel.part.map(|(part, _)| (vehicle.chassis, part)))
+    })
+}
+
 /// After a fixed step: moves each wheel's body to where its wheel is now,
 /// and notes the pose in `placed` (the last step's pose wins) for
 /// [`write_wheels`] to copy into the world once the frame's steps are done.

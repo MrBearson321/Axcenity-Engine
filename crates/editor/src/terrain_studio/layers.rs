@@ -34,15 +34,24 @@ pub(super) fn layer_editor(
                 ui,
                 &sets,
                 search,
-                "No texture sets in the project yet. Get texture in the Assets panel downloads one.",
+                "No texture sets in the project yet. From Toolbox… below gets one.",
             ) {
                 actions.push(TerrainAction::UseTextureSet(layer, entry));
+            }
+            ui.separator();
+            if ui
+                .button(theme::with_icon(icons::TOOLBOX, "From Toolbox…"))
+                .on_hover_text("Find a texture on ambientCG or Poly Haven; the one you get fills this layer.")
+                .clicked()
+            {
+                actions.push(TerrainAction::FromToolbox(layer));
+                ui.close();
             }
         })
         .response
         .on_hover_text(
-            "Fill every map from a texture set in the project. You can also drag a set here \
-             from the Assets panel.",
+            "Fill every map from a texture set in the project, or from the Toolbox. You can \
+             also drag a set here from the Assets panel.",
         );
     });
     ui.add_space(2.0);

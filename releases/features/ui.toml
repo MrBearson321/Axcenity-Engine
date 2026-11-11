@@ -1,0 +1,49 @@
+# The ui subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "ui.game-ui"
+name = "Game UI"
+subsystem = "ui"
+description = "ScreenGuis and UI Instances styled with CSS."
+status = "active"
+docs = "docs/ui.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/ui and crates/editor/src/style_panel.rs in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "editor.ui-designer"
+name = "UI Designer"
+subsystem = "ui"
+description = "Lay out game UI on an artboard with anchors, rulers and an event graph."
+status = "active"
+docs = "docs/ui.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 71ca326e (UI Designer Artboard), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "ui.localization"
+name = "Localization"
+subsystem = "ui"
+description = "A string table and languages for game UI."
+status = "active"
+docs = "docs/ui.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 61ed52a3 (Localization), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "ui.tweens"
+name = "TweenService"
+subsystem = "ui"
+description = "Animate properties with tweens."
+status = "active"
+docs = "docs/scripting/api-tween.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 4e924204 (TweenService), after v0.1.0-alpha.3"

@@ -85,6 +85,83 @@ pub fn extract_files(
     Ok(names)
 }
 
+/// Checks a downloaded model before anything imports it: a `.glb` must
+/// start with `glTF`; a `.gltf` must be JSON whose buffers and images are
+/// embedded (`data:`) or files beside it, inside its folder, and present.
+/// An `.fbx` must be a file. Anything else isn't a model.
+pub fn check_model(path: &Path) -> Result<(), SourceError> {
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    match extension.as_str() {
+        "glb" => {
+            let mut magic = [0u8; 4];
+            let mut file = fs::File::open(path)?;
+            io::Read::read_exact(&mut file, &mut magic)
+                .map_err(|_| SourceError::Refused("the model isn't a glTF binary"))?;
+            if &magic != b"glTF" {
+                return Err(SourceError::Refused("the model isn't a glTF binary"));
+            }
+            Ok(())
+        }
+        "gltf" => {
+            let text = fs::read_to_string(path)?;
+            let json: serde_json::Value = serde_json::from_str(&text)
+                .map_err(|_| SourceError::Refused("the model isn't valid glTF"))?;
+            let folder = path.parent().unwrap_or(Path::new("."));
+            for list in ["buffers", "images"] {
+                let entries = json.get(list).and_then(|v| v.as_array());
+                for entry in entries.into_iter().flatten() {
+                    let Some(uri) = entry.get("uri").and_then(|uri| uri.as_str()) else {
+                        continue;
+                    };
+                    if uri.starts_with("data:") {
+                        continue;
+                    }
+                    let decoded = percent_decode(uri);
+                    let relative = safe_relative_path(&decoded).ok_or(SourceError::Refused(
+                        "the model refers to a file outside its folder",
+                    ))?;
+                    let file = relative
+                        .split('/')
+                        .fold(folder.to_owned(), |p, part| p.join(part));
+                    if !file.is_file() {
+                        return Err(SourceError::Refused("a file the model needs is missing"));
+                    }
+                }
+            }
+            Ok(())
+        }
+        "fbx" if path.is_file() => Ok(()),
+        "fbx" => Err(SourceError::Refused("the model file is missing")),
+        _ => Err(SourceError::Refused(
+            "the file isn't a model the engine imports",
+        )),
+    }
+}
+
+/// `%20` and the like in a glTF URI, as bytes, read as UTF-8.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(byte) = u8::from_str_radix(&text[i + 1..i + 3], 16)
+        {
+            out.push(byte);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -201,5 +278,34 @@ mod tests {
         assert!(!safe_asset_id(""));
         assert!(!safe_asset_id("../nope"));
         assert!(!safe_asset_id("a b"));
+    }
+
+    #[test]
+    fn a_model_must_keep_its_files_beside_it() {
+        let dir = temp_dir("model");
+        fs::create_dir_all(dir.join("textures")).unwrap();
+        fs::write(dir.join("chair.bin"), b"buf").unwrap();
+        fs::write(dir.join("textures").join("chair diff.jpg"), b"img").unwrap();
+        let gltf = |uris: &str| {
+            let path = dir.join("chair.gltf");
+            fs::write(
+                &path,
+                format!(r#"{{"asset": {{"version": "2.0"}}, {uris}}}"#),
+            )
+            .unwrap();
+            check_model(&path)
+        };
+        assert!(gltf(r#""buffers": [{"uri": "chair.bin"}], "images": [{"uri": "textures/chair%20diff.jpg"}, {"uri": "data:image/png;base64,AA=="}]"#).is_ok());
+        assert!(gltf(r#""buffers": [{"uri": "../secret.bin"}]"#).is_err());
+        assert!(gltf(r#""images": [{"uri": "C:/Windows/x.png"}]"#).is_err());
+        assert!(gltf(r#""buffers": [{"uri": "missing.bin"}]"#).is_err());
+        fs::write(dir.join("not.gltf"), b"{oops").unwrap();
+        assert!(check_model(&dir.join("not.gltf")).is_err());
+        fs::write(dir.join("good.glb"), b"glTF\x02\x00\x00\x00").unwrap();
+        fs::write(dir.join("bad.glb"), b"PK\x03\x04").unwrap();
+        assert!(check_model(&dir.join("good.glb")).is_ok());
+        assert!(check_model(&dir.join("bad.glb")).is_err());
+        assert!(check_model(&dir.join("chair.blend")).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

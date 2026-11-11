@@ -1,0 +1,7 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "feature"
+subsystem = "networking"
+title = "Multiplayer: host and join games, replication, network ownership, chat, multiplayer saves and a dedicated server"
+features = ["networking.multiplayer", "networking.dedicated-server"]
+commits = ["0e529208", "4bd9c050", "30672d74", "b0eb7b22", "8ebdb5c7"]
+evidence = "reconstructed"

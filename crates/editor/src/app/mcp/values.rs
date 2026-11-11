@@ -4,8 +4,10 @@
 
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use axcenity_mcp::text::number;
+use axcenity_mcp::{Code, ToolError, closest};
+use serde_json::{Map, Value as Json};
 
-use super::refs::{id_text, quoted};
+use super::refs::{id_text, quoted, resolve};
 
 fn list(numbers: &[f64]) -> String {
     let parts: Vec<String> = numbers.iter().map(|&n| number(n)).collect();
@@ -114,6 +116,123 @@ pub fn changed_properties(world: &World, id: InstanceId) -> Vec<(&'static str, V
         .filter(|(name, value)| differs(class, name, value))
         .map(|(name, value)| (name, value.clone()))
         .collect()
+}
+
+/// The error for `name`, which `class` doesn't have, with the closest of
+/// its `known` properties.
+pub fn unknown_property<'a>(
+    class: ClassName,
+    name: &str,
+    known: impl IntoIterator<Item = &'a str>,
+) -> ToolError {
+    let near = closest(name, known, 3);
+    let error = ToolError::new(
+        Code::UnknownProperty,
+        format!("{} has no property {}", class.as_str(), quoted(name)),
+    );
+    error.with_fix(if near.is_empty() {
+        format!(
+            "docs with class \"{}\" lists its properties",
+            class.as_str()
+        )
+    } else {
+        format!("did you mean {}?", near.join(" or "))
+    })
+}
+
+/// Reads `json` as a value for `property` of `id`, in the `world.json`
+/// form (`project::json_to_value`); an object reference is an ID, a path or
+/// `null`.
+pub fn read_value(
+    world: &World,
+    id: InstanceId,
+    property: &str,
+    json: &Json,
+) -> Result<Value, ToolError> {
+    let instance = world
+        .get(id)
+        .ok_or_else(|| ToolError::internal("object vanished"))?;
+    let class = instance.class();
+    let Some(current) = instance.property(property) else {
+        return Err(unknown_property(
+            class,
+            property,
+            instance.properties().map(|(name, _)| name),
+        ));
+    };
+    let bad = |message: String| {
+        ToolError::new(Code::BadValue, format!("{property}: {message}")).with_fix(format!(
+            "docs with {{\"class\":\"{}\",\"property\":\"{property}\"}} shows its type",
+            class.as_str()
+        ))
+    };
+    if let Value::Instance(_) = current {
+        return match json {
+            Json::Null => Ok(Value::Instance(None)),
+            Json::String(text) => Ok(Value::Instance(Some(resolve(world, text)?))),
+            _ => Err(bad("expected an object's ID or path, or null".to_owned())),
+        };
+    }
+    // An enum item can be given by its name alone: "Rain" for
+    // "Precipitation.Rain".
+    if let (Value::EnumItem(item), Json::String(text)) = (current, json) {
+        let wanted = text
+            .strip_prefix(&format!("{}.", item.enum_name))
+            .unwrap_or(text);
+        if let Some(items) = crate::properties::enum_items(&item.enum_name) {
+            let found = items
+                .iter()
+                .find(|known| known.eq_ignore_ascii_case(wanted))
+                .ok_or_else(|| bad(format!("one of {}", items.join(", "))))?;
+            return Ok(Value::EnumItem(axcenity_core::EnumItem {
+                enum_name: item.enum_name.clone(),
+                item: (*found).to_owned(),
+            }));
+        }
+        if !wanted.contains('.') {
+            return Ok(Value::EnumItem(axcenity_core::EnumItem {
+                enum_name: item.enum_name.clone(),
+                item: wanted.to_owned(),
+            }));
+        }
+    }
+    axcenity_project::json_to_value(json, current.kind()).map_err(bad)
+}
+
+/// Sets each of `props` (property name to `world.json` value) on `id`.
+/// `Name` renames it. Returns the names set.
+pub fn set_props(
+    world: &mut World,
+    id: InstanceId,
+    props: &Map<String, Json>,
+) -> Result<Vec<String>, ToolError> {
+    let mut names = Vec::new();
+    for (name, json) in props {
+        match name.as_str() {
+            "Name" => {
+                let text = json
+                    .as_str()
+                    .ok_or_else(|| ToolError::new(Code::BadValue, "Name: expected a string"))?;
+                world
+                    .set_name(id, text)
+                    .map_err(|error| ToolError::new(Code::BadValue, format!("Name: {error}")))?;
+            }
+            "Parent" | "ClassName" => {
+                return Err(
+                    ToolError::bad_args(format!("{name} isn't set through props"))
+                        .with_fix("object_set's parent moves an object; a class can't change"),
+                );
+            }
+            _ => {
+                let value = read_value(world, id, name, json)?;
+                world
+                    .set_property(id, name, value)
+                    .map_err(|error| ToolError::new(Code::BadValue, format!("{name}: {error}")))?;
+            }
+        }
+        names.push(name.clone());
+    }
+    Ok(names)
 }
 
 #[cfg(test)]

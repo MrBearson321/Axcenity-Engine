@@ -240,8 +240,14 @@ impl DrawCache {
             if hiding && streaming.is_hidden(entry.id) {
                 continue;
             }
+            // Moving parts are drawn between physics steps, without
+            // moving the items kept for them.
+            let id = entry.id;
+            let shift =
+                |drawn: &mut [DrawItem]| frame.blends.shift_items(world, id, instance, drawn);
             if entry.per_frame {
                 if entry.inventory.is_none() || !out_of_world(world, entry.id) {
+                    let first = items.len();
                     add_instance(
                         frame,
                         entry.id,
@@ -251,6 +257,7 @@ impl DrawCache {
                         items,
                         other,
                     );
+                    shift(&mut items[first..]);
                 }
                 continue;
             }
@@ -260,6 +267,7 @@ impl DrawCache {
                 entry.items.clear();
                 entry.epoch = 0;
                 if entry.inventory.is_none() || !out_of_world(world, entry.id) {
+                    let first = items.len();
                     add_instance(
                         frame,
                         entry.id,
@@ -269,6 +277,7 @@ impl DrawCache {
                         items,
                         other,
                     );
+                    shift(&mut items[first..]);
                 }
                 continue;
             }
@@ -306,7 +315,9 @@ impl DrawCache {
                     .and_then(|item| mesh_address(&item.shape));
                 model_use_changed |= before != after;
             }
+            let first = items.len();
             items.extend_from_slice(&entry.items);
+            shift(&mut items[first..]);
         }
         self.rebuilt = rebuilt;
         // Whichever models the kept items hold are the ones in use.

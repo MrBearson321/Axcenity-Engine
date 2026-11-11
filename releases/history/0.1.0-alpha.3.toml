@@ -1,0 +1,22 @@
+# Checked 2026-11-11 against the GitHub release, the tag and the tree at the tag.
+version = "0.1.0-alpha.3"
+date = "2026-10-21"
+title = "Axcenity Engine 0.1.0-alpha.3"
+summary = """
+The first published build: the editor and player as installers for Windows,
+macOS and Linux, with players for File > Build Game on all three. An alpha:
+expect bugs, missing polish and breaking changes.
+"""
+note = "Published as a GitHub pre-release on 2026-10-21T04:37Z. The features it contained are in releases/features/ with this version as their introduction, checked against the tree at the tag."
+commit = "a897631ffd3b27e5e491e521932aac1f2947c65a"
+
+[formats]
+project = 2
+world = 1
+axgame = 1
+
+[[changes]]
+category = "feature"
+subsystem = "build"
+title = "Installers for Windows (NSIS), macOS (universal .dmg) and Linux (.deb, .rpm, .pkg.tar.zst, .tar.gz, AppImage)"
+features = ["build.installers"]

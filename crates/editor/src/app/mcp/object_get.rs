@@ -6,19 +6,17 @@
 //! `props` list narrows any level to those properties.
 
 use axcenity_core::{InstanceId, World};
-use axcenity_mcp::{
-    Args, Class, Code, Detail, Kind, Outcome, Param, Profile, ToolError, ToolSpec, closest,
-};
+use axcenity_mcp::{Args, Class, Code, Detail, Kind, Outcome, Param, Profile, ToolError, ToolSpec};
 
-use super::super::EditorApp;
+use super::Host;
 use super::refs::{id_text, label, path, quoted, resolve};
-use super::values::{changed_properties, show_in};
+use super::values::{changed_properties, show_in, unknown_property};
 use super::{DETAIL, ID, IDS};
 
 pub const SPEC: ToolSpec = ToolSpec {
     name: "object_get",
     title: "Get objects",
-    summary: "An object's class, place and properties (by default only those that differ from the class defaults).",
+    summary: "Objects' class, place and properties (by default only the non-default ones).",
     profile: Profile::Lite,
     class: Class::Read,
     idempotent: true,
@@ -33,8 +31,8 @@ pub const SPEC: ToolSpec = ToolSpec {
 /// The most objects one call reads.
 const MAX_OBJECTS: usize = 50;
 
-pub fn call(app: &mut EditorApp, args: &Args) -> Outcome {
-    let world = &app.world;
+pub fn call(host: &mut Host, args: &Args) -> Outcome {
+    let world = &host.app.world;
     let mut names: Vec<&str> = args.strings("ids").unwrap_or_default();
     if let Some(id) = args.str("id") {
         names.insert(0, id);
@@ -90,21 +88,11 @@ fn describe(
                     // asked for as if they were.
                     None if name == "Name" || name == "ClassName" || name == "Parent" => {}
                     None => {
-                        let known: Vec<&str> = instance.properties().map(|(n, _)| n).collect();
-                        let near = closest(name, known.iter().copied(), 3);
-                        let mut error = ToolError::new(
-                            Code::UnknownProperty,
-                            format!("{} has no property {}", class.as_str(), quoted(name)),
-                        );
-                        error = error.with_fix(if near.is_empty() {
-                            format!(
-                                "docs with class \"{}\" lists its properties",
-                                class.as_str()
-                            )
-                        } else {
-                            format!("did you mean {}?", near.join(" or "))
-                        });
-                        return Err(error);
+                        return Err(unknown_property(
+                            class,
+                            name,
+                            instance.properties().map(|(n, _)| n),
+                        ));
                     }
                 }
             }

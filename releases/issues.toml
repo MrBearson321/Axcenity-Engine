@@ -1,0 +1,20 @@
+# Known issues. Format and the "does it affect my version" rules: README.md.
+
+[[issue]]
+id = "AX-0001"
+title = "Builds are unsigned, so Windows SmartScreen and macOS Gatekeeper warn on first run"
+subsystem = "build"
+status = "open"
+introduced = "0.1.0-alpha.3"
+confirmed_affected = ["0.1.0-alpha.3"]
+workaround = "Windows: More info, then Run anyway. macOS: Control-click the app, then Open. Checksums are in SHA256SUMS.txt."
+details = "Code signing and notarization need paid certificates; see docs/project/releases.md."
+
+[[issue]]
+id = "AX-0002"
+title = "The editor shows version 0.1.0 in a 0.1.0-alpha.3 build"
+subsystem = "release"
+status = "open"
+introduced = "0.1.0-alpha.3"
+confirmed_affected = ["0.1.0-alpha.3"]
+details = "The About box and start page read Cargo.toml's version (0.1.0); the tag and installer said 0.1.0-alpha.3."

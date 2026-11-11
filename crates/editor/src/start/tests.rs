@@ -512,3 +512,27 @@ fn recent_project_cards_stay_inside_the_page_at_every_window_width() {
         }
     }
 }
+
+#[test]
+fn the_version_label_names_the_channel() {
+    let label = version_label();
+    let version = axcenity_release::Version::current();
+    assert_eq!(label, format!("{version} · {}", version.channel()));
+}
+
+#[test]
+fn the_about_box_build_line_names_the_commit_and_toolchain() {
+    let mut build = axcenity_release::BuildInfo::current();
+    build.commit = "0123456789abcdef0123456789abcdef01234567".to_owned();
+    build.rustc = "rustc 1.97.0 (2d8144b78 2026-07-07)".to_owned();
+    build.target = "x86_64-pc-windows-msvc".to_owned();
+    build.profile = "dist".to_owned();
+    build.kind = axcenity_release::BuildKind::Local;
+    assert_eq!(
+        build_line(&build),
+        "Local build · commit 012345678 · rustc 1.97.0 · x86_64-pc-windows-msvc (dist)"
+    );
+    build.kind = axcenity_release::BuildKind::Official;
+    build.tag = Some("v0.2.0-alpha.1".to_owned());
+    assert!(build_line(&build).starts_with("Official build v0.2.0-alpha.1 · commit"));
+}

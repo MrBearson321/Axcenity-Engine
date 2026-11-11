@@ -4,55 +4,107 @@ How a tagged build becomes the installers on [GitHub Releases](https://github.co
 
 ## Version numbers
 
-Public releases use **SemVer** with a channel suffix while the engine is in alpha:
+**The one version is `[workspace.package] version` in the root `Cargo.toml`**, including its pre-release suffix (`0.2.0-alpha.1`). Every crate inherits it, so the editor's About box, the start page, `--version` on the editor, player and server, and the release tag all show the same number. The tag must be `v` plus that version; `axcenity-release check --tag v…` refuses anything else. Between releases, `main` carries the version of the next release, and a local build says so with its commit ("0.2.0-alpha.1 · Development · local build of 1a2b3c4d5").
 
-| Tag | Meaning |
-|---|---|
-| `v0.1.0-alpha.1` | First alpha. Bump the last number for each alpha (`-alpha.2`, …). |
-| `v0.1.0-beta.1` | Beta, later. |
-| `v0.1.0-rc.1` | Release candidate, later. |
-| `v0.1.0` | First stable 0.1. GitHub marks it as a full release, not a pre-release. |
+SemVer 2.0, with one of three pre-release tags. The channel follows from the version and is never written separately:
 
-The first packaged alpha is **`v0.1.0-alpha.1`**; bump the last number when a tag is retried (`-alpha.2`, `-alpha.3`, …). Anything with `-alpha`, `-beta` or `-rc` is uploaded as a GitHub pre-release.
+| Version | Channel | GitHub release |
+|---|---|---|
+| `0.2.0` | Stable | full release |
+| `0.2.0-rc.1`, `0.2.0-beta.1` | Beta | pre-release |
+| `0.2.0-alpha.1` | Development | pre-release |
 
-The crate version in `Cargo.toml` stays `0.1.0` until 0.1 is stable. The tag is the product version shown in the installer and on the release.
+While the engine is 0.x, a breaking change (an old engine can't open new projects, a script API removed) bumps the minor number, new features bump the minor number, and fixes alone bump the patch. Bump the last number of a pre-release (`-alpha.2`, …) for each new build of the same version, including a retried tag.
+
+History so far: `v0.1.0-alpha.1` and `v0.1.0-alpha.2` are tags that never became releases, and `v0.1.0-alpha.3` (2026-10-21) is the one published release. Its editor reported itself as `0.1.0` (known issue AX-0002). The next release is `0.2.0-alpha.1`.
+
+## Release notes and history
+
+Every pull request that changes something a user would notice adds one change entry to `releases/unreleased/`. How to write one, and the feature and issue files beside it: [releases/README.md](../../releases/README.md). `axcenity-release` (`crates/release`) checks them and answers questions about the history:
+
+```bash
+cargo run -p axcenity-release -- check                       # releases/ and Cargo.toml agree
+cargo run -p axcenity-release -- prepare 0.2.0-alpha.1       # start the release record from releases/unreleased/
+cargo run -p axcenity-release -- query compare 0.1.0-alpha.3 unreleased
+cargo run -p axcenity-release -- query introduced terrain.studio
+cargo run -p axcenity-release -- query search physics --json
+```
+
+The design (the manifest, the update flow, the Version Explorer) is in [research/release-system](../research/release-system/README.md).
 
 ## What a release contains
 
-| File | Platform |
+| File | What it is |
 |---|---|
 | `AxcenityEditor-<ver>-windows-x86_64.exe` | NSIS setup wizard (current-user install) |
+| `AxcenityEditor-<ver>-windows-x86_64-update.zip` | What the editor's updater installs on Windows: the setup's files, at the archive root (`packaging/update-zip.py`) |
 | `AxcenityEditor-<ver>-macos-universal.dmg` | License agreement, then drag the app onto Applications |
 | `AxcenityEditor-<ver>-linux-x86_64.deb` | Debian / Ubuntu |
 | `AxcenityEditor-<ver>-linux-x86_64.rpm` | Fedora / RHEL / openSUSE |
 | `AxcenityEditor-<ver>-linux-x86_64.pkg.tar.zst` | Arch Linux |
-| `AxcenityEditor-<ver>-linux-x86_64.tar.gz` | Portable folder |
+| `AxcenityEditor-<ver>-linux-x86_64.tar.gz` | Portable folder; also what the updater installs on Linux |
 | `AxcenityEditor-<ver>-linux-x86_64.AppImage` | Run in place |
+| `axcenity-release.json` | The manifest: version, channel, notes, known issues, formats, and every package's name, size and SHA-256 |
+| `axcenity-release.json.minisig` | Its signature. The updater trusts nothing else directly |
+| `axcenity-history.json` | The public release history, for the Version Explorer |
 | `SHA256SUMS.txt` | Checksums |
 
-Each editor payload includes `axcenity-player` for the host OS beside the editor, and `players/windows`, `players/macos`, `players/linux` for **File > Build Game**. macOS editor and player binaries are universal (Apple Silicon + Intel). Linux builds use Ubuntu 22.04 so the glibc requirement stays at 2.35. Windows and Linux packages are x86_64.
+Each editor payload includes `axcenity-player` for the host OS beside the editor, and `players/windows`, `players/macos`, `players/linux` for **File > Build Game**, and an `install.json` that says how it was installed (`windows-setup`, `linux-tarball`, `appimage`, `deb`, `rpm`, `pacman` or `macos-dmg`; `crates/release/src/install.rs`). Only the Windows setup, the tar.gz and the AppImage will update themselves. macOS editor and player binaries are universal (Apple Silicon + Intel). Linux builds use Ubuntu 22.04 so the glibc requirement stays at 2.35. Windows and Linux packages are x86_64.
 
 Installer pictures (NSIS header/sidebar, DMG background) come from `python packaging/generate-assets.py`, which reads `assets/branding` and Inter.
 
 ## Cutting a release
 
-GitHub Actions is intentionally turned off ([development policy](../development-policy.md#continuous-integration)), and that includes the Release workflow. Turn **Release** back on in the repository's Actions settings for the release, and off again after.
+GitHub Actions runs only for release tags, so each release run is deliberate ([development policy](../development-policy.md#continuous-integration)). **Tell Paul before pushing a tag**: the version, the platforms and roughly how long it takes.
 
-1. Main passes the local platform checks on Windows and Linux (`scripts/check-platform.ps1`, `scripts/check-platform.sh`; [development.md](../development.md)), and on macOS too if the release ships a macOS build that should be checked. Then the package check ([below](#checking-packages)) on each of them.
-2. Push a tag, or run **Actions > Release** and type the version without `v`:
+1. **Prepare** on a branch: `cargo run -p axcenity-release -- prepare 0.2.0-alpha.1`. It moves `releases/unreleased/` into `releases/history/0.2.0-alpha.1.toml`, sets the version in `Cargo.toml` and `Cargo.lock`, and marks the issues those entries fix as fixed. Write the record's `title` (the release's name on GitHub, after "Axcenity Engine 0.2.0-alpha.1:"), `summary` and `[formats]` (the project, world, save and network format versions it reads and writes). Read the notes it will publish: `cargo run -p axcenity-release -- notes 0.2.0-alpha.1`.
+2. **Check locally** on Windows and Linux: the platform checks (`scripts/check-platform.ps1`, `scripts/check-platform.sh`; [development.md](../development.md)), the package check ([below](#checking-packages)), and `cargo run -p axcenity-release -- check --tag v0.2.0-alpha.1`. Record what ran in the record's `[verification]`. Merge the branch.
+3. **Tag** the merge commit and push the tag:
 
    ```bash
-   git tag v0.1.0-alpha.1
-   git push origin v0.1.0-alpha.1
+   git tag v0.2.0-alpha.1
+   git push origin v0.2.0-alpha.1
    ```
 
-3. [.github/workflows/release.yml](../../.github/workflows/release.yml) builds the editor and player on Windows, macOS and Linux, packs them, and publishes the GitHub Release. Re-running the workflow on the same tag replaces the files.
+4. [.github/workflows/release.yml](../../.github/workflows/release.yml) runs:
+   - **Validate** (Linux, about two minutes): `check --tag`, the release tool's tests, the plan (channel, profile, platforms), that the tag isn't already a published release, and that the signing key's public half is committed. Nothing else starts if it fails.
+   - **Build** on Windows, macOS and Linux, from scratch, with the profile for the channel: `release` for Development, the fat-LTO `dist` for Beta and Stable. Each build is official (`AXCENITY_OFFICIAL_BUILD=1`, the tag and the commit), and `scripts/check-release-build.py` checks that every binary's `--version --json` says so. One failing build cancels the others.
+   - **Package** each OS as before, plus the Windows update zip.
+   - **Sign and draft**, in the `release` environment: writes `axcenity-history.json` and `axcenity-release.json`, signs the manifest with minisign, verifies the signature with `packaging/axcenity-release.pub`, writes `SHA256SUMS.txt`, and creates a **draft** release with the notes from `axcenity-release notes`. With a required reviewer on the environment, this job waits for that person's approval first.
+5. **Publish**: open the draft on GitHub, read it, and press **Publish release**. Nothing reaches users before this. A published release never changes; a mistake is fixed by the next release (and a `[[corrections]]` entry in its record).
 
-Unsigned: Windows SmartScreen and macOS Gatekeeper will warn. Signing and notarizing need certificates that this workflow does not have yet.
+To build an existing tag again (for example after a runner failure), run **Actions > Release > Run workflow**, pick the tag under **Use workflow from**, and turn dry run off. It replaces the files of a draft, and refuses a tag that is already published. A run always builds the ref it was started on, never another one.
+
+### Costs
+
+The repository is public, so GitHub's standard runners cost nothing. Runs are still kept rare and short: nothing runs on pushes or pull requests, the cheap Linux checks run before any other machine starts, and a failure stops the rest. Every release builds from scratch without a cache: caches are per tag, so one tag's cache wouldn't help the next, and skipping them keeps a run started by hand from writing a cache that later runs trust. A full run takes roughly an hour of runner time across the three OSes.
+
+### Signing key
+
+The manifest is signed with [minisign](https://jedisct1.github.io/minisign/) (Ed25519). The editor and the updater will check that signature with the public key built into them, and every other file by its SHA-256 in the manifest. One-time setup, by Paul:
+
+1. Make the key pair without a password (GitHub keeps the secret encrypted; a password stored beside it adds nothing): `minisign -G -W -p axcenity-release.pub -s axcenity-release.key`.
+2. Commit `axcenity-release.pub` as `packaging/axcenity-release.pub`.
+3. In the repository's **Settings > Environments**, create `release`, add yourself as a required reviewer, and add an environment secret `MINISIGN_SECRET_KEY` with the whole contents of `axcenity-release.key`. Then keep the `.key` file offline (a password manager), not in the repository.
+4. Run **Actions > Release > Run workflow** on `main` with dry run on. Its **Signing key check** signs a scratch file and verifies it with the committed public key.
+
+Rotating the key means shipping the new public key in a release signed with the old one ([research/release-system/architecture.md](../research/release-system/architecture.md#9-security-and-integrity-d7)).
+
+Windows SmartScreen and macOS Gatekeeper still warn on first install: OS code signing and notarization need paid certificates and are deferred (known issue AX-0001).
+
+### Testing the release workflow
+
+Before pushing a change to a workflow:
+
+- `python3 scripts/check-workflows.py`: no workflow runs on pushes or pull requests; every job and step output a workflow reads exists; every bash step parses; only the draft job can write, and only the `release` environment sees the secret.
+- `cargo test -p axcenity-release`: the plan, notes, history file and manifest.
+- The scripts the steps call, run locally: `packaging/stage.py`, `packaging/update-zip.py`, `packaging/linux/build-packages.sh`, `scripts/check-release-build.py` (its docstring shows how to make an official build locally).
+
+Then, once merged, one dry run (**Run workflow** on `main` with dry run on) proves the trigger, permissions and signing key in about two Linux minutes, without building anything.
 
 ## Checking packages
 
-The release workflow is off, so packages are checked on each computer with one script (Python 3, from the repository root):
+Packages are checked on each computer before a tag, with one script (Python 3, from the repository root):
 
 ```bash
 python3 scripts/check-packages.py                    # dist profile, as released (fat LTO: slow)

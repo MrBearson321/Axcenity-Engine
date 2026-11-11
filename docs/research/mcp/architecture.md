@@ -1,6 +1,6 @@
 # Axcenity MCP toolkit: architecture proposal (Phase 2)
 
-Status: **proposal, awaiting Paul's approval** (decisions in [README.md](README.md#decisions-for-paul)). Nothing here is implemented yet.
+Status: **approved** by Paul on 2026-11-11 (the defaults of [README.md](README.md#decisions-for-paul)) and being built step by step; what exists is described in [docs/editor/mcp.md](../../editor/mcp.md).
 
 Inputs: the engine audit ([engine-capability-map.md](engine-capability-map.md)), the proposed tools ([tool-inventory.md](tool-inventory.md)) and the MCP spec and client research ([client-compatibility.md](client-compatibility.md)).
 

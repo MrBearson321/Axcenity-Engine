@@ -1,0 +1,7 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "fix"
+subsystem = "scripting"
+title = "Instances work as Lua table keys"
+features = ["scripting.scripts"]
+prs = [4]
+evidence = "reconstructed"

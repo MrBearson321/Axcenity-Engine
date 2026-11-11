@@ -55,6 +55,7 @@
 //! without stepping it or writing back.
 
 pub mod assembly;
+mod blend;
 mod fracture;
 pub mod joints;
 mod mass;
@@ -68,6 +69,7 @@ mod sync;
 pub mod threads;
 mod vehicles;
 
+pub use blend::{Blend, interpolates};
 pub use mass::Mass;
 pub use query::{
     CastShape, ColliderOutline, Column, QueryParams, RayHit, Solid, cast_ray, cast_ray_excluding,
@@ -204,6 +206,8 @@ pub struct Physics {
     /// only way a MeshPart changes without its Instance doing so.
     assets_generation: u64,
     stats: SyncStats,
+    /// Where moving parts are drawn between steps (see [`blend`]).
+    blending: blend::Blending,
 }
 
 /// How much the last [`Physics::step`] read from the world to catch up, for
@@ -557,6 +561,7 @@ impl Physics {
             synced: None,
             assets_generation: 0,
             stats: SyncStats::default(),
+            blending: blend::Blending::default(),
         }
     }
 
@@ -629,6 +634,9 @@ impl Physics {
     pub fn step(&mut self, world: &mut World, seconds: f64) -> u32 {
         profiling::scope!("Physics::step");
         self.stats = SyncStats::default();
+        // Before syncing scripts' changes, which could make an unread list
+        // of blends wrong.
+        self.blending.start_frame();
         self.sync_from_world(world);
         self.sleep_far_bodies();
         let wind = global_wind(world);
@@ -640,12 +648,19 @@ impl Physics {
 
         // `max` also turns NaN into 0, so a bad time can't stop physics forever.
         self.unsimulated_seconds += seconds.max(0.0);
+        let interpolating = blend::interpolates(world);
         let mut steps = 0;
         let mut wheels = BTreeMap::new();
         while self.unsimulated_seconds + STEP_TOLERANCE >= STEP_SECONDS {
             if steps == MAX_STEPS_PER_FRAME {
                 self.unsimulated_seconds = 0.0;
                 break;
+            }
+            // The frame's last step: the loop won't come round again.
+            let last = steps + 1 == MAX_STEPS_PER_FRAME
+                || self.unsimulated_seconds - STEP_SECONDS + STEP_TOLERANCE < STEP_SECONDS;
+            if interpolating && last {
+                self.remember_before_last_step(&wheels);
             }
             self.blow(wind);
             joints::drive(&mut self.rapier, &mut self.joints);
@@ -677,7 +692,13 @@ impl Physics {
         // needn't convert and write every moving part.
         if steps > 0 {
             self.write_to_world(world);
+            if interpolating {
+                self.remember_wheels_before_writing();
+            }
             vehicles::write_wheels(world, &mut self.parts, &wheels);
+        }
+        if !interpolating {
+            self.blending.forget();
         }
         steps
     }
@@ -1222,3 +1243,6 @@ mod break_tests;
 
 #[cfg(test)]
 mod fracture_tests;
+
+#[cfg(test)]
+mod blend_tests;

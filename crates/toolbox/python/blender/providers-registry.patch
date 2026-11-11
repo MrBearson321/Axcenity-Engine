@@ -1,0 +1,17 @@
+--- a/tools/blender/providers/__init__.py
++++ b/tools/blender/providers/__init__.py
+@@ -28,10 +28,13 @@
+ from .local_files import LocalFiles
+ from .polyhaven import PolyHaven
+ from .sketchfab import Sketchfab
++from .toolbox_backed import backed
+ 
+ ENV_LIBRARY = "PIPELINE_ASSET_LIBRARY"
+ 
+-PROVIDERS = {AmbientCG.name: AmbientCG, PolyHaven.name: PolyHaven, Kenney.name: Kenney,
++# ambientCG and Poly Haven go through the Axcenity Toolbox when it's installed
++# (toolbox_backed.py); their Python code answers otherwise.
++PROVIDERS = {AmbientCG.name: backed(AmbientCG), PolyHaven.name: backed(PolyHaven), Kenney.name: Kenney,
+              Sketchfab.name: Sketchfab, LocalFiles.name: LocalFiles, Catalogue.name: Catalogue}
+ _libraries = {}
+ 

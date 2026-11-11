@@ -40,7 +40,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Lua, the sandbox, blocks, or graphs | [scripting.md](scripting.md), then one file |
 | Drawing, materials, lights, or animation playback | [rendering.md](rendering.md), then one file |
 | Project files, export, licenses, or GitHub releases | [project-and-export.md](project-and-export.md), then one file |
-| Engine versioning, release notes, the updater or the Version Explorer (proposal, not built yet) | [research/release-system/README.md](research/release-system/README.md) |
+| Engine version, `--version`, release entries in `releases/`, or `axcenity-release` | [project/releases.md](project/releases.md); the design of the updater and Version Explorer: [research/release-system/README.md](research/release-system/README.md) |
 | Data tables, the Data Table tab, or `DataService` | [project/data-tables.md](project/data-tables.md) |
 | Dialogues, quests, `DialogueService`, `QuestService`, the Dialogue tab | [scripting/api-dialogue.md](scripting/api-dialogue.md) |
 | New Project's genre templates (`templates/`) | [project/templates.md](project/templates.md) |

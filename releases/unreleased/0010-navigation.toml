@@ -1,0 +1,7 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "feature"
+subsystem = "navigation"
+title = "Navigation mesh, pathfinding agents, obstacle avoidance, perception and behavior trees"
+features = ["navigation.pathfinding", "navigation.behavior-trees"]
+commits = ["e9a15012", "71bb48b6", "8945fb63", "44d62115", "7b5b8e39"]
+evidence = "reconstructed"

@@ -498,7 +498,7 @@ fn add_instance(
 }
 
 /// Reads an attribute's value (see the module docs).
-fn json_to_attribute(json: &Json) -> Result<Value, String> {
+pub fn json_to_attribute(json: &Json) -> Result<Value, String> {
     const EXPECTED: &str = "expected true or false, a number, a string, or an object with one \
          field: Vector3, Vector2, Color3, UDim2, CFrame or EnumItem";
     match json {
@@ -599,7 +599,7 @@ fn apply_properties(
 }
 
 /// Reads `json` as a value of `kind`, or explains what was expected.
-pub(crate) fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
+pub fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
     match kind {
         ValueKind::Bool => json
             .as_bool()

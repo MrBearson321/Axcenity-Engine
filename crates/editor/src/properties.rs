@@ -140,6 +140,7 @@ const GROUPS: [(&str, &[&str]); 35] = [
             "AssemblyLinearVelocity",
             "AssemblyAngularVelocity",
             "Gravity",
+            "PhysicsInterpolation",
         ],
     ),
     ("Wind", &["GlobalWind"]),
@@ -2245,10 +2246,9 @@ fn cframe_control(ui: &mut egui::Ui, cf: CFrame) -> Option<CFrame> {
     changed
 }
 
-/// An enum item: a dropdown of the items when it's one of the enums
-/// properties use, else its name, shown.
-fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<EnumItem> {
-    let names: Vec<&'static str> = match item.enum_name.as_str() {
+/// The items of `enum_name`, when it's one of the enums properties use.
+pub(crate) fn enum_items(enum_name: &str) -> Option<Vec<&'static str>> {
+    Some(match enum_name {
         "Material" => Material::ALL.iter().map(|m| m.as_str()).collect(),
         "PartType" => PartType::ALL.iter().map(|t| t.as_str()).collect(),
         "TextureChannel" => TextureChannel::ALL.iter().map(|c| c.as_str()).collect(),
@@ -2280,10 +2280,16 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         "EffectOperation" => vec!["Add", "Multiply"],
         // A Decal's face (Phase 75).
         "NormalId" => vec!["Right", "Top", "Back", "Left", "Bottom", "Front"],
-        _ => {
-            ui.label(format!("{}.{}", item.enum_name, item.item));
-            return None;
-        }
+        _ => return None,
+    })
+}
+
+/// An enum item: a dropdown of the items when it's one of the enums
+/// properties use, else its name, shown.
+fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<EnumItem> {
+    let Some(names) = enum_items(&item.enum_name) else {
+        ui.label(format!("{}.{}", item.enum_name, item.item));
+        return None;
     };
     let current = names
         .iter()

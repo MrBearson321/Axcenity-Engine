@@ -1,0 +1,8 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "feature"
+subsystem = "scripting"
+title = "Opt-in native code for scripts (--!native or @native)"
+stability = "experimental"
+features = ["scripting.native-code"]
+prs = [58]
+evidence = "reconstructed"

@@ -109,6 +109,128 @@ pub fn needs_credit(code: &str) -> bool {
     !matches!(code, CC0 | PD)
 }
 
+/// What a licence lets a game do with an asset, in the Django Toolbox's
+/// terms. Not legal advice: it reads the licence's code, nothing else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Policy {
+    /// The author must be credited.
+    pub credit: bool,
+    /// It may be used in a game that is sold or earns money.
+    pub commercial: bool,
+    /// It may be changed (cropped, recoloured, remixed).
+    pub modify: bool,
+    /// Changed versions must be shared under the same licence.
+    pub share_alike: bool,
+    /// The code was recognised; an unknown licence allows nothing.
+    pub known: bool,
+}
+
+/// What `code` allows and asks.
+pub fn policy(code: &str) -> Policy {
+    let code = normalize(code);
+    let known = code != UNKNOWN;
+    let non_commercial = matches!(
+        code,
+        CC_BY_NC | CC_BY_NC_SA | CC_BY_NC_ND | NC_SAMPLING_PLUS
+    );
+    Policy {
+        credit: needs_credit(code),
+        commercial: known && !non_commercial,
+        modify: known && !matches!(code, CC_BY_ND | CC_BY_NC_ND),
+        share_alike: matches!(code, CC_BY_SA | CC_BY_NC_SA),
+        known,
+    }
+}
+
+/// Whether a licence is one the Toolbox shows by default: free for any
+/// game, at most asking for a credit.
+pub fn is_open(code: &str) -> bool {
+    matches!(normalize(code), CC0 | PD | CC_BY)
+}
+
+/// How a licence reads on a badge: "CC0 1.0", "CC BY-NC 4.0", "Public
+/// domain", "Unknown licence".
+pub fn display(code: &str, version: &str) -> String {
+    let name = match normalize(code) {
+        PD => return "Public domain".to_owned(),
+        UNKNOWN => return "Unknown licence".to_owned(),
+        CC0 => "CC0".to_owned(),
+        SAMPLING_PLUS => "CC Sampling+".to_owned(),
+        NC_SAMPLING_PLUS => "CC NC-Sampling+".to_owned(),
+        other => other.replacen("CC-", "CC ", 1),
+    };
+    match version.trim() {
+        "" => name,
+        version => format!("{name} {version}"),
+    }
+}
+
+/// What a licence allows and asks, in plain words, for the details drawer.
+pub fn plain_words(code: &str) -> String {
+    let policy = policy(code);
+    if !policy.known {
+        return "The licence isn't known, so don't use it in a game until you've checked \
+                its source."
+            .to_owned();
+    }
+    let mut words = vec![if policy.credit {
+        "Free to use if you credit the author."
+    } else {
+        "Free to use for anything; no credit needed."
+    }];
+    if !policy.commercial {
+        words.push("Not for a game that is sold or earns money.");
+    }
+    if !policy.modify {
+        words.push("Use it unchanged: no edits or remixes.");
+    }
+    if policy.share_alike {
+        words.push("Changed versions must be shared under the same licence.");
+    }
+    words.join(" ")
+}
+
+/// Why a licence blocks a commercial game, or `None` when it doesn't.
+pub fn commercial_block(code: &str) -> Option<&'static str> {
+    let policy = policy(code);
+    if !policy.known {
+        Some("its licence is unknown")
+    } else if !policy.commercial {
+        Some("its licence is non-commercial")
+    } else {
+        None
+    }
+}
+
+/// The credit line for one asset: the source's own text when it gives one,
+/// else "\"Name\" by Author, from Source, CC BY 4.0 (url)".
+pub fn credit_line(record: &crate::AssetRecord, source_name: &str) -> String {
+    if !record.attribution.trim().is_empty() {
+        return record.attribution.trim().to_owned();
+    }
+    let mut line = format!("\"{}\"", record.name);
+    let authors: Vec<&str> = record
+        .authors
+        .iter()
+        .map(|author| author.trim())
+        .filter(|author| !author.is_empty())
+        .collect();
+    if !authors.is_empty() {
+        line.push_str(&format!(" by {}", authors.join(", ")));
+    }
+    if !source_name.is_empty() {
+        line.push_str(&format!(", from {source_name}"));
+    }
+    line.push_str(&format!(
+        ", {}",
+        display(&record.license, &record.license_version)
+    ));
+    if !record.url.is_empty() {
+        line.push_str(&format!(" ({})", record.url));
+    }
+    line
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +273,59 @@ mod tests {
         assert!(!needs_credit(PD));
         assert!(needs_credit(CC_BY));
         assert!(needs_credit(UNKNOWN));
+    }
+
+    #[test]
+    fn policies_follow_the_licence() {
+        let by = policy(CC_BY);
+        assert!(by.credit && by.commercial && by.modify && !by.share_alike);
+        let nc = policy("CC BY-NC-SA 4.0");
+        assert!(!nc.commercial && nc.share_alike && nc.modify);
+        assert!(!policy(CC_BY_ND).modify);
+        assert!(!policy(CC0).credit);
+        let unknown = policy("All rights reserved");
+        assert!(!unknown.known && !unknown.commercial && !unknown.modify);
+        assert_eq!(
+            commercial_block(CC_BY_NC),
+            Some("its licence is non-commercial")
+        );
+        assert_eq!(commercial_block(UNKNOWN), Some("its licence is unknown"));
+        assert_eq!(commercial_block(CC_BY), None);
+        assert!(is_open(CC0) && is_open(PD) && is_open(CC_BY) && !is_open(CC_BY_SA));
+    }
+
+    #[test]
+    fn licences_read_plainly() {
+        assert_eq!(display(CC0, "1.0"), "CC0 1.0");
+        assert_eq!(display(CC_BY_NC, "4.0"), "CC BY-NC 4.0");
+        assert_eq!(display(PD, ""), "Public domain");
+        assert_eq!(display("nonsense", "2"), "Unknown licence");
+        assert!(plain_words(CC0).contains("no credit needed"));
+        assert!(plain_words(CC_BY_NC_ND).contains("Not for a game"));
+        assert!(plain_words(CC_BY_NC_ND).contains("unchanged"));
+    }
+
+    #[test]
+    fn credit_lines_name_the_work_author_source_and_licence() {
+        let mut record = crate::AssetRecord {
+            provider: "polyhaven".into(),
+            id: "red_brick_03".into(),
+            name: "Red Brick 03".into(),
+            url: "https://polyhaven.com/a/red_brick_03".into(),
+            authors: vec!["Rob Tuytel".into()],
+            license: CC0.into(),
+            license_version: "1.0".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            credit_line(&record, "Poly Haven"),
+            "\"Red Brick 03\" by Rob Tuytel, from Poly Haven, CC0 1.0 \
+             (https://polyhaven.com/a/red_brick_03)"
+        );
+        record.attribution = "\"Rain\" by Ann, CC BY 4.0".into();
+        assert_eq!(
+            credit_line(&record, "Openverse"),
+            "\"Rain\" by Ann, CC BY 4.0"
+        );
     }
 }
