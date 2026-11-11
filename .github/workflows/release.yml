@@ -72,8 +72,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Full release run: $full; tag: ${tag:-none}; ref: $GITHUB_REF"
       - uses: actions/checkout@v4
-        with:
-          - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: dtolnay/rust-toolchain@1.97.0
       - name: Check releases/, Cargo.toml and the tag
         env:
           TAG: ${{ steps.mode.outputs.tag }}
