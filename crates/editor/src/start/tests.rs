@@ -1185,3 +1185,59 @@ fn the_start_screen_look_draws_at_rest_hovered_and_sliding() {
         );
     }
 }
+
+#[test]
+fn the_join_dialog_asks_for_a_link_then_says_how_joining_goes() {
+    let mut projects = vec![link("Space Race")];
+    let mut start = StartScreen::default();
+    let ctx = theme::test_context();
+    ctx.enable_accesskit();
+    // The clock only goes forward, as it does in the editor.
+    let mut clock = 0.0;
+    let mut draw = |start: &mut StartScreen| {
+        let mut output = None;
+        for _ in 0..3 {
+            clock += 10.0;
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+                time: Some(clock),
+                ..Default::default()
+            };
+            output = Some(crate::theme::run(&ctx, input, |ui| {
+                let ctx = &ui.ctx().clone();
+                theme::apply(ctx, &theme::Appearance::default());
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let brand = Brand::load(ui.ctx());
+                    assert!(start.show(ui, &mut projects, &brand).is_none());
+                });
+            }));
+        }
+        drawn_text(&output.unwrap())
+    };
+    // The header offers Join beside New and Open.
+    let drawn = draw(&mut start);
+    find(&drawn, "Join…");
+
+    start.join_session();
+    let drawn = draw(&mut start);
+    find(&drawn, "Join a Team Create session");
+    find(&drawn, "Invite link");
+
+    start.show_joining();
+    start.set_join_progress(Some(JoinProgress::Fetching {
+        host: "192.168.1.20:47800".to_owned(),
+    }));
+    let drawn = draw(&mut start);
+    find(&drawn, "Fetching the session's files");
+    assert!(!drawn.iter().any(|(text, ..)| text == "Invite link"));
+
+    // Joining stopped (the project opened, or the session ended): the
+    // dialog closes by itself.
+    start.set_join_progress(None);
+    draw(&mut start);
+    assert!(start.join_dialog().is_none());
+
+    start.join_failed("this invite was already used".to_owned());
+    let drawn = draw(&mut start);
+    find(&drawn, "this invite was already used");
+}

@@ -43,11 +43,12 @@ impl EditorApp {
                 .map(|table| table.rows.iter().map(|row| row.key.clone()).collect())
                 .unwrap_or_default()
         };
+        let locked = self.locked_banner(ui, self.data_tables.current());
         let scene = TableScene {
             files: &files,
             project_files: &entries,
             keys_of: &keys_of,
-            editable: folder.is_some(),
+            editable: folder.is_some() && !locked,
         };
         let actions = self.data_tables.show(ui, &scene);
         self.hand_over_tables();

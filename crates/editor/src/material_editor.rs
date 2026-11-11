@@ -295,6 +295,15 @@ impl MaterialStudio {
         self.document(self.current.as_deref()?)
     }
 
+    /// The paths of the materials with changes to save.
+    pub fn unsaved_paths(&self) -> Vec<String> {
+        self.documents
+            .iter()
+            .filter(|doc| doc.unsaved())
+            .map(|doc| doc.path.clone())
+            .collect()
+    }
+
     pub fn document(&self, path: &str) -> Option<&MaterialDocument> {
         self.documents.iter().find(|doc| doc.path == path)
     }

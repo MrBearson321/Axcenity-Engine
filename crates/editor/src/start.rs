@@ -163,6 +163,37 @@ pub enum StartAction {
     OpenSample(PathBuf),
     /// The Settings window, from the sidebar.
     Settings,
+    /// Join a Team Create session with this invite (the Join dialog).
+    Join(axcenity_collab::access::Invite),
+    /// Stop joining: Cancel while the Join dialog waits.
+    CancelJoin,
+}
+
+/// How joining a Team Create session from the start screen is going, for
+/// the Join dialog. The app sets it each frame while it joins.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JoinProgress {
+    /// Signing in to `host`.
+    Connecting { host: String },
+    /// `host` can't be reached yet, because of `why`; still trying.
+    Retrying { host: String, why: String },
+    /// Let in; the session's files are arriving.
+    Fetching { host: String },
+}
+
+impl JoinProgress {
+    /// What the Join dialog says while it waits.
+    pub fn describe(&self) -> String {
+        match self {
+            JoinProgress::Connecting { host } => format!("Signing in to {host}…"),
+            JoinProgress::Retrying { host, why } => {
+                format!("Can't reach {host} yet ({why}). Still trying…")
+            }
+            JoinProgress::Fetching { host } => {
+                format!("Joined {host}. Fetching the session's files…")
+            }
+        }
+    }
 }
 /// The start screen's pages, picked in its sidebar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -221,6 +252,13 @@ enum Dialog {
         /// The version Restore was clicked on, waiting to be confirmed.
         confirm: Option<String>,
     },
+    /// Join a Team Create session: the invite link, then how joining goes.
+    Join {
+        link: String,
+        error: Option<String>,
+        /// Join was pressed: the dialog follows [`StartScreen::join`].
+        waiting: bool,
+    },
 }
 
 /// What a project card's buttons asked for.
@@ -264,6 +302,10 @@ pub struct StartScreen {
     nav: StartNav,
     /// How many projects past the first page All projects shows.
     more: usize,
+    /// How joining a Team Create session goes, while it does.
+    join: Option<JoinProgress>,
+    /// What the Join dialog asked for this frame.
+    join_asked: Option<StartAction>,
 }
 
 impl StartScreen {
@@ -285,6 +327,68 @@ impl StartScreen {
                 .and_then(|metadata| metadata.modified())
                 .ok()
         })
+    }
+
+    /// Opens the Join dialog, for an invite link.
+    pub fn join_session(&mut self) {
+        self.dialog = Some(Dialog::Join {
+            link: String::new(),
+            error: None,
+            waiting: false,
+        });
+    }
+
+    /// Shows the Join dialog following a join already asked for (from the
+    /// dialog itself, or the command line).
+    pub fn show_joining(&mut self) {
+        match &mut self.dialog {
+            Some(Dialog::Join { error, waiting, .. }) => {
+                *error = None;
+                *waiting = true;
+            }
+            _ => {
+                self.dialog = Some(Dialog::Join {
+                    link: String::new(),
+                    error: None,
+                    waiting: true,
+                });
+            }
+        }
+    }
+
+    /// The Join dialog's state: whether it waits, and its problem.
+    #[cfg(test)]
+    pub fn join_dialog(&self) -> Option<(bool, Option<&str>, Option<&JoinProgress>)> {
+        match &self.dialog {
+            Some(Dialog::Join { waiting, error, .. }) => {
+                Some((*waiting, error.as_deref(), self.join.as_ref()))
+            }
+            _ => None,
+        }
+    }
+
+    /// How joining goes, each frame while it does (`None` when it isn't).
+    pub fn set_join_progress(&mut self, progress: Option<JoinProgress>) {
+        self.join = progress;
+    }
+
+    /// Joining didn't work, because of `why`: the Join dialog says so and
+    /// asks for a link again.
+    pub fn join_failed(&mut self, why: String) {
+        self.join = None;
+        match &mut self.dialog {
+            Some(Dialog::Join { error, waiting, .. }) => {
+                *error = Some(why);
+                *waiting = false;
+            }
+            _ => {
+                self.dialog = Some(Dialog::Join {
+                    link: String::new(),
+                    error: Some(why),
+                    waiting: false,
+                });
+            }
+        }
     }
 
     /// Opens the New Project dialog, starting from `template`.
@@ -411,6 +515,9 @@ impl StartScreen {
         if let Some(opened) = self.dialogs(&ctx, projects) {
             action = Some(StartAction::Open(opened));
         }
+        if let Some(asked) = self.join_asked.take() {
+            action = Some(asked);
+        }
         action
     }
 
@@ -427,6 +534,7 @@ impl StartScreen {
         match page_header(ui, &palette, projects.is_empty()) {
             Some(HeaderAction::New) => self.new_project(Template::Baseplate),
             Some(HeaderAction::Open) => action = Some(StartAction::OpenDialog),
+            Some(HeaderAction::Join) => self.join_session(),
             None => {}
         }
         if let Some(notice) = &self.notice {

@@ -103,7 +103,6 @@ impl BehaviorTreeStudio {
     }
 
     /// The path of the tree shown.
-    #[cfg(test)]
     pub fn current(&self) -> Option<&str> {
         self.current.as_deref()
     }
@@ -123,6 +122,43 @@ impl BehaviorTreeStudio {
     #[cfg(test)]
     pub fn view_mut(&mut self, path: &str) -> Option<&mut GraphView> {
         self.views.get_mut(path)
+    }
+
+    /// The paths of the trees with changes to save.
+    pub fn unsaved_paths(&self) -> Vec<String> {
+        self.documents
+            .iter()
+            .filter(|doc| doc.unsaved())
+            .map(|doc| doc.path.clone())
+            .collect()
+    }
+
+    /// The file at `path` changed on disk (a teammate saved it, or another
+    /// program did): an open tree without unsaved changes reads it again,
+    /// and a deleted one is forgotten.
+    pub fn file_changed(&mut self, folder: &Path, path: &str) {
+        let Some(doc) = self.document(path) else {
+            return;
+        };
+        if doc.unsaved() {
+            return;
+        }
+        if !folder.join(path).exists() {
+            self.documents.retain(|doc| doc.path != path);
+            if self.current.as_deref() == Some(path) {
+                self.current = None;
+            }
+            return;
+        }
+        if let Ok(graph) = axcenity_project::read_ui_graph(folder, path)
+            && let Some(doc) = self.document_mut(path)
+            && doc.graph != graph
+        {
+            doc.saved = Some(graph.clone());
+            doc.graph = graph;
+            doc.undo.clear();
+            doc.redo.clear();
+        }
     }
 
     pub fn document(&self, path: &str) -> Option<&TreeDocument> {

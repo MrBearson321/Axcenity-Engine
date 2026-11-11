@@ -173,6 +173,15 @@ impl EditorApp {
         assets: Assets,
         level: Option<String>,
     ) {
+        // Another project ends this editor's part in a Team Create session:
+        // the session's World and files belong to the folder it shares.
+        if self
+            .team
+            .as_ref()
+            .is_some_and(|team| team.files_folder() != Some(project.folder.as_path()))
+        {
+            self.leave_team_session();
+        }
         if let Some(from) = project.migrated_from {
             self.report_upgrade(&project, from);
         }
@@ -1204,6 +1213,8 @@ impl EditorApp {
         }
         self.animation = AnimationStudio::default();
         self.asset_check.clear();
+        // The session was this project's (or ended for good with it).
+        self.leave_team_session();
         self.project = None;
         self.play = None;
         self.pending_ui_activation = None;
@@ -1342,6 +1353,7 @@ impl EditorApp {
     /// what's picked there.
     pub(super) fn start_screen(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
+        self.follow_start_join();
         let picked = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
             .show(ui, |ui| {
@@ -1361,6 +1373,8 @@ impl EditorApp {
                 self.learn_open = true;
             }
             Some(StartAction::Settings) => self.settings.open = true,
+            Some(StartAction::Join(invite)) => self.join_from_start(&invite, None),
+            Some(StartAction::CancelJoin) => self.cancel_team_join(),
             None => {}
         }
     }

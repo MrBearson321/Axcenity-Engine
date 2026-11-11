@@ -86,10 +86,11 @@ impl EditorApp {
         let folder = self.project.as_ref().map(|project| project.folder.clone());
         self.behavior.follow(folder.as_deref(), agent.as_ref());
         let files = folder.as_deref().map(tree_files).unwrap_or_default();
+        let locked = self.locked_banner(ui, self.behavior.current());
         let scene = TreeScene {
             files: &files,
             agent: agent.as_ref(),
-            editable: folder.is_some() && !self.playing(),
+            editable: folder.is_some() && !self.playing() && !locked,
         };
         let actions = self.behavior.show(ui, &scene);
         for action in actions {

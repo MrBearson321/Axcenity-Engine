@@ -36,13 +36,15 @@ impl EditorApp {
             .selection
             .iter()
             .find_map(|&id| SelectedLook::of(&self.world, id));
+        let current = self.materials.current().map(|doc| doc.path.clone());
+        let locked = self.locked_banner(ui, current.as_deref());
         let scene = MaterialScene {
             files: &files,
             images: &images,
             assets: &self.assets,
             selected,
             render_state,
-            editable: self.project.is_some(),
+            editable: self.project.is_some() && !locked,
         };
         let actions = self.materials.show(ui, &scene);
         self.hand_over_materials();
