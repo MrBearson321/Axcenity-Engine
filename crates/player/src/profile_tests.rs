@@ -57,6 +57,10 @@ pub const VARIANTS: &[(&str, &str)] = &[
         "High's shadows (three 2048 maps) instead of the preset's",
     ),
     ("shadows-half-distance", "shadows reach half as far"),
+    (
+        "single-sided-match",
+        "double-sided materials whose `file: material` name holds AXCENITY_PROFILE_MATCH drawn one-sided",
+    ),
     ("no-msaa", "anti-aliasing off"),
     ("no-ao", "ambient occlusion off"),
 ];
@@ -287,6 +291,21 @@ fn profile_project() {
             .map(|&(name, _)| {
                 let mut list = base.clone();
                 vary_list(name, &mut list);
+                if name == "single-sided-match" {
+                    let text = std::env::var("AXCENITY_PROFILE_MATCH").unwrap_or_default();
+                    let names = mesh_names(&world, &assets);
+                    each_item(&mut list, |item| {
+                        let matched = match &item.shape {
+                            Shape::Mesh(mesh) => names
+                                .get(&mesh.key())
+                                .is_some_and(|name| !text.is_empty() && name.contains(&text)),
+                            _ => false,
+                        };
+                        if matched {
+                            item.material.double_sided = false;
+                        }
+                    });
+                }
                 let mut settings = GraphicsSettings::preset(quality);
                 vary_settings(name, &mut settings);
                 (name, list, settings)
