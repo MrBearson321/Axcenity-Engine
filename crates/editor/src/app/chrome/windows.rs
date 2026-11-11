@@ -115,7 +115,11 @@ pub(in crate::app) fn paused_panel(
 }
 
 /// Names and values, one per row.
-fn variables(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, list: &[axcenity_script::Local]) {
+fn variables(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    list: &[axcenity_script::Local],
+) {
     crate::responsive::form(ui, id, |ui| {
         for local in list {
             ui.monospace(&local.name);
