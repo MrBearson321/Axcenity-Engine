@@ -1,0 +1,17 @@
+# Engine-generated folders for the XB10k projects
+logs/
+godot/.godot/
+unity/Library/
+unity/Temp/
+unity/Logs/
+unity/UserSettings/
+unity/Builds/
+unity/ProjectSettings/
+unity/*.csproj
+unity/*.sln
+unreal/Binaries/
+unreal/Intermediate/
+unreal/Saved/
+unreal/DerivedDataCache/
+unreal/Packaged/
+**/xb10k-result.json

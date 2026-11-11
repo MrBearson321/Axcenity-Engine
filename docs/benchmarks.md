@@ -482,3 +482,7 @@ The roadmap said to measure the ratio before compressing `.axgame` files. Each e
 The render benchmarks ran on the same container to relate it to the machine in [rendering/performance.md](rendering/performance.md). `bench_10000_parts` (edge view) took 8.6 ms in `build_draw_list` there, about the same as the desktop above; steps other than the draw list are about 1.5 to 2× slower on the container. Compare runs on one machine rather than scaling between them. `bench_project` on S10k: `build_draw_list` 9.4 ms and `ScenePipeline::draw` (CPU side) 3.7 ms from the spawn, 9.5 ms and 3.7 ms from the overview, 6,575 and 10,026 items drawn. GPU times on lavapipe (300–940 ms a frame) say nothing about a real GPU and are left out.
 
 Absolute numbers depend on the machine. Compare runs on one machine, and run the same commands before and after a change.
+
+## Against other engines (XB10k)
+
+`benchmarks/cross-engine/` holds XB10k: S10k's parts, physics and scripts (no sounds, characters or agents) rebuilt from the same formulas in Godot, Unity, Unreal, s&box and Roblox, with one timing rule and one result line for all of them. Its README is the spec; results go in `benchmarks/cross-engine/results.md`. For the player's part, `AXCENITY_VSYNC=off` turns vsync off (the player otherwise uses the surface's default, vsync, so `--bench` frames wait for the display) and `AXCENITY_WINDOW_SIZE=1920x1080` sets the window size in physical pixels.
