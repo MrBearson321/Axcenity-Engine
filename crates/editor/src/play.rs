@@ -835,6 +835,11 @@ impl Session {
         let mut actions = self.sim.scripts.take_sound_actions();
         actions.append(&mut self.ui_sounds);
         let listener = axcenity_audio::Listener::from_view(camera.position, camera.orientation);
+        let walls = self
+            .sim
+            .occlusion
+            .step(&self.sim.world, &self.sim.assets, camera.position);
+        self.audio.set_walls(walls);
         let update = self
             .audio
             .update(actions, &self.sim.world, &self.sim.assets, listener);

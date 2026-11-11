@@ -1137,6 +1137,18 @@ declare extern type EnumReverbTypeItems with
 	SewerPipe: EnumReverbType
 end
 
+--- One choice of `Enum.RollOffMode`.
+declare extern type EnumRollOffMode extends EnumItem with
+end
+
+--- The choices of `Enum.RollOffMode`.
+declare extern type EnumRollOffModeItems with
+	Inverse: EnumRollOffMode
+	Linear: EnumRollOffMode
+	LinearSquare: EnumRollOffMode
+	InverseTapered: EnumRollOffMode
+end
+
 --- One choice of `Enum.Precipitation`.
 declare extern type EnumPrecipitation extends EnumItem with
 end
@@ -1251,6 +1263,7 @@ declare extern type EnumLibrary with
 	ProximityPromptExclusivity: EnumProximityPromptExclusivityItems
 	HumanoidStateType: EnumHumanoidStateTypeItems
 	ReverbType: EnumReverbTypeItems
+	RollOffMode: EnumRollOffModeItems
 	Precipitation: EnumPrecipitationItems
 	SplineTangentMode: EnumSplineTangentModeItems
 	SplineFollowMode: EnumSplineFollowModeItems
@@ -3310,6 +3323,8 @@ declare extern type Sound extends Instance with
 	RollOffMinDistance: number
 	--- A spatial sound is silent from this many studs out. 150 by default. Kept at least as large as RollOffMinDistance.
 	RollOffMaxDistance: number
+	--- How a spatial sound gets quieter between RollOffMinDistance and RollOffMaxDistance (`Enum.RollOffMode`): Inverse (the default, as sound behaves in the open: half as loud at twice the min distance), Linear, LinearSquare (quieter sooner) or InverseTapered (Inverse, fading out smoothly before the max distance).
+	RollOffMode: EnumRollOffMode | "Inverse" | "Linear" | "LinearSquare" | "InverseTapered"
 	--- The SoundGroup it plays through, so that group's Volume and effects (and its parent groups') apply to it. nil plays it straight out.
 	SoundGroup: Instance?
 	--- Fires when the sound plays to its end. Looped sounds, and sounds stopped with Stop, don't fire it.
@@ -4769,6 +4784,8 @@ end
 
 --- The service that holds the SoundGroups, the game's audio buses. Its groups' volumes are saved with the world in save slots. When a group is UserAdjustable, the game has an AudioSettings ScreenGui in the Workspace (made when it starts, hidden until a script sets its Enabled) with a slider for UserGameSettings.MasterVolume and one for each of those groups.
 declare extern type SoundService extends Instance with
+	--- If true (the default), solid parts between a spatial sound and the camera muffle it: each wall, up to three, halves it and takes off more of the highs.
+	Occlusion: boolean
 	[string]: any
 end
 

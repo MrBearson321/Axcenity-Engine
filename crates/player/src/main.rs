@@ -1521,7 +1521,13 @@ impl HostIo for App {
     }
 
     fn audio(&mut self) {
-        let heard = listener_of_view(self.shown_view());
+        let view = self.shown_view();
+        let heard = listener_of_view(view);
+        let walls = self
+            .sim
+            .occlusion
+            .step(&self.sim.world, &self.sim.assets, view.position);
+        self.audio.set_walls(walls);
         apply_audio(
             &mut self.sim.scripts,
             &mut self.sim.world,
