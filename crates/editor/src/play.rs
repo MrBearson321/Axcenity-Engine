@@ -719,6 +719,52 @@ impl Session {
         })
     }
 
+    /// Runs every script in the game whose `SourceFile` is `path` (the
+    /// copies of a script inside an object, G2) again in place with
+    /// `source`, as [`Self::reload_script`] does for one, and says so once.
+    pub fn reload_copies(
+        &mut self,
+        path: &str,
+        source: &str,
+        output: &mut Output,
+    ) -> Result<(), Crash> {
+        let name = path.rsplit('/').next().unwrap_or(path).to_owned();
+        guard(|| {
+            let world = &self.sim.world;
+            let copies: Vec<InstanceId> = world
+                .descendants_iter(world.root())
+                .filter(|&id| world.get(id).and_then(|i| i.source_file()) == Some(path))
+                .collect();
+            if copies.is_empty() {
+                return;
+            }
+            let mut failed = false;
+            for &script in &copies {
+                failed |= self
+                    .sim
+                    .scripts
+                    .reload_script(&mut self.sim.world, script, path, source)
+                    .is_err();
+                self.forward_output(output);
+                // A syntax error is the same in every copy: said once.
+                if failed {
+                    break;
+                }
+            }
+            if failed {
+                output.warning(format!(
+                    "{name} still runs its last good version until the error is fixed."
+                ));
+            } else {
+                let copies = match copies.len() {
+                    1 => String::new(),
+                    n => format!(" in {n} copies"),
+                };
+                output.info(format!("Reloaded {name}{copies}"));
+            }
+        })
+    }
+
     fn forward_animator_errors(&mut self, output: &mut Output) {
         for error in self.sim.animators.take_errors() {
             output.error(error);

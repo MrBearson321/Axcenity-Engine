@@ -75,7 +75,7 @@ mod ui_links;
 mod ui_selection;
 mod version_history;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -756,6 +756,11 @@ struct OpenProject {
     /// read or written. Play reads their files again, for the newest code.
     scripts: Vec<ScriptFile>,
     block_scripts: Vec<BlockDocument>,
+    /// The code files of scripts inside objects (G2; a script's
+    /// `SourceFile`), by path, with each file's text as last read or
+    /// written. Copies share a file, so these have no Instance of their
+    /// own: the world says which scripts use each.
+    object_files: BTreeMap<String, String>,
     /// Each ScreenGui's UI Event Graph, as edited (see `app/ui_graphs.rs`).
     ui_graphs: Vec<ui_graphs::UiGraphDocument>,
     /// Blocks switched to Code, by the code file's path, with the code they
@@ -1685,6 +1690,8 @@ mod mover_tests;
 mod multi_edit_tests;
 #[cfg(test)]
 mod navigation_tests;
+#[cfg(test)]
+mod object_script_tests;
 #[cfg(test)]
 mod palette_tests;
 #[cfg(test)]

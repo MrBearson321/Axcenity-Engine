@@ -439,6 +439,7 @@ fn include_runtime_file(root: &Path, path: &Path) -> bool {
         first.to_str(),
         Some(
             "scripts"
+                | crate::OBJECTS_FOLDER
                 | "assets"
                 | crate::LEVELS_FOLDER
                 | axcenity_blocks_runtime::ui_graph::UI_GRAPHS_FOLDER

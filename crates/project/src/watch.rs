@@ -71,6 +71,13 @@ fn watched_paths(folder: &Path, watched: Watched) -> Vec<String> {
         let mut ignored = Vec::new();
         paths.push(WORLD_FILE.to_string());
         paths.extend(find_scripts(folder, &mut ignored));
+        // Scripts inside objects' files (G2).
+        crate::scripts::find_script_files(
+            &folder.join(crate::OBJECTS_FOLDER),
+            crate::OBJECTS_FOLDER,
+            &mut paths,
+            &mut ignored,
+        );
         paths.extend(find_stylesheets(folder, &mut ignored));
     }
     find_files(&folder.join(ASSETS_FOLDER), ASSETS_FOLDER, &mut paths);

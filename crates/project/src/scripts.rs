@@ -360,6 +360,38 @@ pub fn create_script(
     Ok(path)
 }
 
+/// Makes a new file for a script of `class` called `name` inside the
+/// object called `object` (G2): `objects/<object>/<name>.server.lua` and so
+/// on, holding `source`, and returns its path. An object name that can't be
+/// a folder name gives `objects/Object/`. Never replaces a file.
+pub fn create_object_script(
+    folder: &Path,
+    object: &str,
+    name: &str,
+    class: ClassName,
+    source: &str,
+) -> Result<String, SaveError> {
+    let object = if check_script_name(object).is_ok() {
+        object
+    } else {
+        "Object"
+    };
+    let path = format!("{OBJECTS_FOLDER}/{object}/{name}{}", script_suffix(class));
+    let disk_path = folder.join(&path);
+    let error = SaveError::new(&disk_path);
+    if let Some(parent) = disk_path.parent() {
+        fs::create_dir_all(parent).map_err(SaveError::new(&disk_path))?;
+    }
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&disk_path)
+        .map_err(SaveError::new(&disk_path))?;
+    file.write_all(source.as_bytes()).map_err(error)?;
+    Ok(path)
+}
+
 /// Writes `source` to the script file at `path` (a [`ScriptFile::path`]),
 /// making it if it isn't there. Like [`save_world`], a half-written file
 /// never replaces the old one.
