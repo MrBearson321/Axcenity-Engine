@@ -1,0 +1,14 @@
+﻿s&box run 1, settings for the timed run:
+{
+  "VSync": false,
+  "MaxFrameRate": 1000,
+  "Screen": "1920,1080"
+}
+perf_overview after it: 
+  "TargetFps": 1000,   "LimitedBy": "CPU",
+3 entries, oldest first (17 buffered):
+19:51:32 [Generic] Info: XB10K_SHADOW_DISTANCE 700
+19:51:32 [Generic] Info: XB10K_CHECK count=10000 sum=98894.50
+19:51:34 [Generic] Info: XB10K_RESULT {"engine":"s&box","version":"26.11.10","renderer":"Source 2","frames":600,"median_ms":1.7657,"mean_ms":2.0010,"p95_ms":3.7290,"worst_ms":6.5932,"fps_from_median":566.3,"build_ms":459.9,"first_frame_ms":525.14,"fixed_timestep":false}
+Cursor: 17
+
