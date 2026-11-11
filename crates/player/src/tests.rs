@@ -1894,6 +1894,46 @@ fn hello_physics_script_teleports_the_bouncy_ball_back_to_its_start() {
 }
 
 #[test]
+fn hello_object_scripts_runs_one_door_script_per_copy_and_clones_the_coin_template() {
+    // `start_scripts` prints and takes what the scripts print as they start.
+    let (mut world, mut scripts, _folder) = start_example_in("hello-object-scripts");
+    let mut printed = Vec::new();
+    // 3.5 seconds at 60 frames per second.
+    for _ in 0..210 {
+        scripts.step(&mut world, 1.0 / 60.0);
+        printed.extend(scripts.take_output().into_iter().map(|line| line.text));
+    }
+    // Each placed copy of the Door prefab runs the one script with its own
+    // `script.Parent`; the template Coin in ServerStorage never runs, and
+    // each Clone of it does once it's in the Workspace.
+    assert_eq!(printed, ["FrontDoor opens", "BackDoor opens"]);
+    let workspace = world.workspace();
+    let position = |name: &str| {
+        let id = world.find_first_child(workspace, name).unwrap();
+        world.get(id).unwrap().property("Position").cloned()
+    };
+    // Opened half a second ago: up by its height, 8 studs.
+    assert_eq!(
+        position("FrontDoor"),
+        Some(Value::Vector3(Vector3::new(-5.0, 12.0, 4.0)))
+    );
+    let coin = world.find_first_child(workspace, "Coin1").unwrap();
+    assert_ne!(
+        world.get(coin).unwrap().property("Orientation"),
+        Some(&Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+        "the copy spins"
+    );
+    let template = world
+        .find_first_child(world.server_storage(), "Coin")
+        .unwrap();
+    assert_eq!(
+        world.get(template).unwrap().property("Orientation"),
+        Some(&Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+        "the template doesn't"
+    );
+}
+
+#[test]
 fn hello_tasks_example_blinks_spins_and_adds_a_ball_over_time() {
     let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-tasks");
     let project = axcenity_project::load(&folder).unwrap();

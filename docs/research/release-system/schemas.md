@@ -137,7 +137,7 @@ public = true
 
 Whether version *V* has the issue, answered in this order:
 
-1. `fixed_in` is set and *V* ≥ `fixed_in`: **not affected (fixed)**.
+1. `fixed_in` is set and *V* ≥ `fixed_in`: **not affected (fixed)**. A fix that is still unreleased counts for a *V* newer than every release: that is a build of the coming release.
 2. *V* is in `confirmed_affected`: **affected (confirmed)**.
 3. `introduced` is a version and `introduced` ≤ *V* (and *V* < `fixed_in` if set): **affected (by version range, not checked on V)**.
 4. Otherwise: **not investigated**. Never "not affected".

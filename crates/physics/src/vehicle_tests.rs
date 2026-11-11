@@ -339,3 +339,36 @@ fn a_car_climbs_a_gentle_terrain_slope() {
     let pitch = vector(&world, car.chassis, "Orientation").x;
     assert!((pitch - 10.0).abs() < 3.0, "{pitch}");
 }
+
+/// Roadmap G3: a driving car's wheel parts are drawn between steps with
+/// their car, from where the step before put them.
+#[test]
+fn a_rolling_cars_wheel_parts_blend_with_it() {
+    let mut world = World::new();
+    floor(&mut world);
+    let car = car(&mut world, Vector3::new(0.0, 2.5, 0.0));
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 1.0);
+    set(&mut world, car.seat, "Throttle", Value::Number(1.0));
+    run(&mut physics, &mut world, 1.0);
+    let before = vector(&world, car.wheel_parts[0], "Position");
+    run(&mut physics, &mut world, 1.0 / 60.0);
+    let blends = physics.blends(&[]);
+    let wheel = blends
+        .iter()
+        .find(|blend| blend.part == car.wheel_parts[0])
+        .expect("the wheel part blends");
+    assert_eq!(wheel.from_position, before);
+    assert_eq!(
+        wheel.to_position,
+        vector(&world, car.wheel_parts[0], "Position")
+    );
+    assert!(blends.iter().any(|blend| blend.part == car.chassis));
+    // Following the seat keeps the car and its wheels stepped.
+    let kept = physics.blends(&[car.seat]);
+    assert!(
+        kept.iter()
+            .all(|blend| !car.wheel_parts.contains(&blend.part) && blend.part != car.chassis),
+        "{kept:?}"
+    );
+}

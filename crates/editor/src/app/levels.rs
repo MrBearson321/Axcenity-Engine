@@ -63,7 +63,7 @@ impl EditorApp {
     }
 
     /// `base`, or `base 2`, `base 3`… : the first name no level has.
-    fn free_level_name(&self, base: &str) -> String {
+    pub(in crate::app) fn free_level_name(&self, base: &str) -> String {
         let Some(project) = &self.project else {
             return base.to_owned();
         };
@@ -79,7 +79,7 @@ impl EditorApp {
 
     /// The saved text of the level `name`: the start level's Workspace from
     /// `world.json`, or a level's file.
-    fn level_text(&self, name: &str) -> Option<String> {
+    pub(in crate::app) fn level_text(&self, name: &str) -> Option<String> {
         let project = self.project.as_ref()?;
         if name == project.start_level {
             let text = std::fs::read_to_string(project.folder.join(project::WORLD_FILE)).ok()?;
@@ -105,7 +105,7 @@ impl EditorApp {
         self.levels_panel.start_renaming(&name);
     }
 
-    fn rename_level(&mut self, old: &str, new: &str) {
+    pub(in crate::app) fn rename_level(&mut self, old: &str, new: &str) {
         let Some(project) = &self.project else {
             return;
         };
@@ -158,7 +158,7 @@ impl EditorApp {
     /// Set as Start: `name`'s Workspace moves into world.json and the old
     /// start level's into `levels/`. The project is saved first, so the
     /// files hold what's open.
-    fn set_start_level(&mut self, name: &str) {
+    pub(in crate::app) fn set_start_level(&mut self, name: &str) {
         if self.unsaved() && !self.save() {
             self.output.error(format!(
                 "\"{name}\" didn't become the start level, because the project couldn't be saved first."
@@ -191,7 +191,11 @@ impl EditorApp {
 
     /// Writes `files` (each a path from the project folder and its new text,
     /// `None` to remove it) and records them as one undo step `label`.
-    fn change_level_files(&mut self, label: String, files: Vec<(String, Option<String>)>) {
+    pub(in crate::app) fn change_level_files(
+        &mut self,
+        label: String,
+        files: Vec<(String, Option<String>)>,
+    ) {
         let Some(project) = &self.project else {
             return;
         };

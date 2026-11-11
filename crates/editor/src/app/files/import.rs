@@ -7,7 +7,7 @@ use crate::history::BlobChange;
 
 /// Every file under the project's `assets` folder, where imports copy and
 /// write files, as paths in the project with `/`.
-pub(super) fn asset_files(project: &Path) -> BTreeSet<String> {
+pub(in crate::app) fn asset_files(project: &Path) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
     let mut folders = vec![project.join("assets")];
     while let Some(at) = folders.pop() {
@@ -34,7 +34,10 @@ pub(super) fn asset_files(project: &Path) -> BTreeSet<String> {
 /// (from [`asset_files`]), as made by an import, with their bytes so redo
 /// can put them back. An import only makes new files (every copy and clip
 /// gets a free name), so files that were there stay out of its step.
-pub(super) fn files_made_since(project: &Path, before: &BTreeSet<String>) -> Vec<BlobChange> {
+pub(in crate::app) fn files_made_since(
+    project: &Path,
+    before: &BTreeSet<String>,
+) -> Vec<BlobChange> {
     asset_files(project)
         .difference(before)
         .filter_map(|path| {
@@ -206,6 +209,29 @@ impl EditorApp {
         }
     }
 
+    /// Imports the model at `file` as the Import dialog would with nothing
+    /// changed (every object, its usual placement), without asking: for
+    /// callers with no one to ask, such as AI clients. A file with only
+    /// animation in it, or one that can't be read, is refused with why.
+    pub(in crate::app) fn import_model_without_asking(
+        &mut self,
+        file: &Path,
+    ) -> Result<(), String> {
+        let objects = axcenity_assets::list_model_objects(file).map_err(|err| chain(&err))?;
+        let model = axcenity_assets::load_model_file(file).map_err(|err| chain(&err))?;
+        let takes = axcenity_assets::load_takes_file(file).unwrap_or_default();
+        let model_name = file
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let materials = surface::materials_maps(model.primitives.iter().map(|p| &p.material));
+        let animation = AnimationImport::new(model.rig.as_deref(), &takes, &model_name);
+        let dialog =
+            ImportDialog::new(file.to_owned(), objects, materials).with_animation(animation);
+        self.import_chosen(&dialog);
+        Ok(())
+    }
+
     /// Shows the Import dialog while a file is waiting for it, and imports
     /// what it says, then goes on to the next model waiting. `render_state`
     /// draws its preview.
@@ -290,6 +316,8 @@ impl EditorApp {
             "Imported `{}` into the project as `{copy}`.",
             file.display()
         ));
+        let copy_path = copy.to_owned();
+        self.toolbox_imported(file, &copy_path);
         let animation = dialog
             .animation
             .as_ref()

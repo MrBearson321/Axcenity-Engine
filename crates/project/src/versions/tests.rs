@@ -334,3 +334,22 @@ fn line_diffs_keep_order_and_context() {
         .collect();
     assert_eq!(shown, ["…", " 2", "-3", "+three", " 4", "…", " 8", "+nine"]);
 }
+
+#[test]
+fn the_code_of_scripts_inside_objects_is_kept_and_restored() {
+    let folder = temp_folder("objects");
+    fs::create_dir_all(folder.join("objects/Door")).unwrap();
+    fs::write(folder.join("objects/Door/Open.server.lua"), "-- open\n").unwrap();
+    assert!(record_version(&folder, "Save").unwrap());
+    let id = list_versions(&folder)[0].id.clone();
+
+    fs::write(folder.join("objects/Door/Open.server.lua"), "-- changed\n").unwrap();
+    fs::write(folder.join("objects/Door/New.server.lua"), "-- new\n").unwrap();
+    restore_version(&folder, &id).unwrap();
+    assert_eq!(
+        fs::read_to_string(folder.join("objects/Door/Open.server.lua")).unwrap(),
+        "-- open\n"
+    );
+    assert!(!folder.join("objects/Door/New.server.lua").exists());
+    let _ = fs::remove_dir_all(&folder);
+}

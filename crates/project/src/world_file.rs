@@ -80,8 +80,14 @@ use serde::Deserialize;
 use serde_json::{Map, Value as Json};
 
 /// `world.json` and prefab files. The manifest version is separate: a project
-/// upgrade can leave these files unchanged.
-const WORLD_FORMAT_VERSION: u32 = 1;
+/// upgrade can leave these files unchanged. This is the newest version read.
+const WORLD_FORMAT_VERSION: u32 = SCRIPTS_FORMAT_VERSION;
+/// What a file without scripts says, so those files stay as they were
+/// before scripts inside objects (G2).
+const PLAIN_FORMAT_VERSION: u32 = 1;
+/// What a file holding a script node says: an older engine then asks to be
+/// updated instead of refusing the script.
+const SCRIPTS_FORMAT_VERSION: u32 = 2;
 /// Editor-only switches that are off nearly everywhere.
 const WRITTEN_ONLY_WHEN_ON: [&str; 2] = ["Locked", "BlueprintTexture"];
 
@@ -100,7 +106,7 @@ pub enum WorldError {
     #[error("{path}: {class} is a service and can't be listed as a child")]
     Service { path: String, class: ClassName },
     #[error(
-        "{path}: scripts can't be listed in the world file; save them as files in the `scripts` folder instead (`.server.lua` for a Script, `.client.lua` for a LocalScript, `.module.lua` for a ModuleScript)"
+        "{path}: a script in the world file needs a `SourceFile` naming the file its code is in (such as `objects/Door/Open.server.lua`); a script in a service is a file in the `scripts` folder instead (`.server.lua` for a Script, `.client.lua` for a LocalScript, `.module.lua` for a ModuleScript)"
     )]
     Script { path: String },
     #[error("{path}: Players are made when someone joins the game, so they can't be saved")]
@@ -364,19 +370,20 @@ pub fn parse_prefab(
 }
 
 /// The text of a prefab file holding `ids` and everything inside them
-/// (scripts are left out, as in the world file).
+/// (scripts are left out as in the world file, unless they're inside
+/// objects).
 pub fn write_prefab(world: &World, ids: &[InstanceId]) -> String {
-    let mut out =
-        format!("{{\n  \"format_version\": {WORLD_FORMAT_VERSION},\n  \"instances\": [\n");
     let ids: Vec<InstanceId> = ids
         .iter()
         .copied()
         .filter(|&id| {
             world
                 .get(id)
-                .is_some_and(|i| !i.class().is_script() && !i.class().is_service())
+                .is_some_and(|i| saved(i) && !i.class().is_service())
         })
         .collect();
+    let version = format_version(world, &ids);
+    let mut out = format!("{{\n  \"format_version\": {version},\n  \"instances\": [\n");
     for (i, &id) in ids.iter().enumerate() {
         out.push_str("    ");
         write_instance(world, id, 2, &ids, Region::Outside, false, &mut out);
@@ -406,9 +413,6 @@ fn add_instance(
         path: path.clone(),
         class: node.class.clone(),
     })?;
-    if class.is_script() {
-        return Err(WorldError::Script { path });
-    }
     if class == ClassName::Player {
         return Err(WorldError::Player { path });
     }
@@ -419,6 +423,13 @@ fn add_instance(
     world.set_parent(id, Some(parent)).expect("both exist");
 
     apply_properties(world, id, &node.properties, references)?;
+    // A script in a file is one inside an object (G2): its code is in the
+    // file it names.
+    if class.is_script() && world.get(id).and_then(|i| i.source_file()).is_none() {
+        return Err(WorldError::Script {
+            path: world.full_name(id).unwrap_or_default(),
+        });
+    }
     for (attribute, json) in &node.attributes {
         let result = json_to_attribute(json).and_then(|value| {
             world
@@ -487,7 +498,7 @@ fn add_instance(
 }
 
 /// Reads an attribute's value (see the module docs).
-fn json_to_attribute(json: &Json) -> Result<Value, String> {
+pub fn json_to_attribute(json: &Json) -> Result<Value, String> {
     const EXPECTED: &str = "expected true or false, a number, a string, or an object with one \
          field: Vector3, Vector2, Color3, UDim2, CFrame or EnumItem";
     match json {
@@ -588,7 +599,7 @@ fn apply_properties(
 }
 
 /// Reads `json` as a value of `kind`, or explains what was expected.
-pub(crate) fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
+pub fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
     match kind {
         ValueKind::Bool => json
             .as_bool()
@@ -767,8 +778,9 @@ fn four_numbers(json: &Json) -> Option<[f32; 4]> {
 /// The text of a world file for `world`, in the same layout people write by
 /// hand: two-space indents, and `[x, y, z]` values on one line.
 pub fn write_world(world: &World) -> String {
-    let mut out = format!("{{\n  \"format_version\": {WORLD_FORMAT_VERSION},\n  \"workspace\": ");
     let roots = world_roots(world);
+    let version = format_version(world, &roots);
+    let mut out = format!("{{\n  \"format_version\": {version},\n  \"workspace\": ");
     write_instance(
         world,
         world.workspace(),
@@ -818,8 +830,9 @@ pub fn write_world(world: &World) -> String {
 /// The text of a level file (`levels/<name>.world.json`): `world`'s
 /// Workspace only, written as in [`write_world`].
 pub fn write_workspace_only(world: &World) -> String {
-    let mut out = format!("{{\n  \"format_version\": {WORLD_FORMAT_VERSION},\n  \"workspace\": ");
     let roots = world_roots(world);
+    let version = format_version(world, &[world.workspace()]);
+    let mut out = format!("{{\n  \"format_version\": {version},\n  \"workspace\": ");
     write_instance(
         world,
         world.workspace(),
@@ -833,8 +846,31 @@ pub fn write_workspace_only(world: &World) -> String {
     out
 }
 
-/// The children of `id` that go in the world file. Scripts are saved as
-/// their own `.lua` files, Players only exist while the game runs, a
+/// The `format_version` a file holding `ids` (and what's inside them) says:
+/// 2 if it holds a script node, otherwise 1.
+fn format_version(world: &World, ids: &[InstanceId]) -> u32 {
+    fn holds_script(world: &World, id: InstanceId) -> bool {
+        world.get(id).is_some_and(|i| i.class().is_script())
+            || saved_children(world, id)
+                .into_iter()
+                .any(|child| holds_script(world, child))
+    }
+    if ids.iter().any(|&id| holds_script(world, id)) {
+        SCRIPTS_FORMAT_VERSION
+    } else {
+        PLAIN_FORMAT_VERSION
+    }
+}
+
+/// Whether a file holds this Instance: a script only when it's inside an
+/// object (its code is in the `SourceFile` it names); the scripts made from
+/// `scripts/` are files of their own.
+fn saved(instance: &axcenity_core::Instance) -> bool {
+    !instance.class().is_script() || instance.source_file().is_some()
+}
+
+/// The children of `id` that go in the world file. Scripts from `scripts/`
+/// are saved as their own `.lua` files, Players only exist while the game runs, a
 /// service inside another (StarterPlayerScripts) is always there, and what
 /// a SplineMesh or SplineScatter made is made again from its settings
 /// (Phase 74).
@@ -849,9 +885,7 @@ fn saved_children(world: &World, id: InstanceId) -> Vec<InstanceId> {
             .copied()
             .filter(|&child| {
                 world.get(child).is_some_and(|c| {
-                    !c.class().is_script()
-                        && !c.class().is_service()
-                        && c.class() != ClassName::Player
+                    saved(c) && !c.class().is_service() && c.class() != ClassName::Player
                 })
             })
             .collect()

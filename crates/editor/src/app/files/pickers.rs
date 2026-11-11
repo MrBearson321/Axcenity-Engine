@@ -120,6 +120,48 @@ impl EditorApp {
         relative
     }
 
+    /// Asks for the code file of the selected script inside an object (its
+    /// `SourceFile`, G2) inside the project, with the ending its class needs,
+    /// and returns its path there.
+    pub(in crate::app) fn pick_source_file(&mut self) -> Option<String> {
+        let class = self.world.get(self.selected?)?.class();
+        let project = self.project.as_ref()?;
+        let objects = project.folder.join(project::OBJECTS_FOLDER);
+        let start = if objects.is_dir() {
+            objects
+        } else {
+            project.folder.clone()
+        };
+        let file = rfd::FileDialog::new()
+            .set_title("Choose the script's file")
+            .add_filter("Script", &["lua", "json"])
+            .set_directory(&start)
+            .pick_file()?;
+        let relative = file
+            .strip_prefix(&project.folder)
+            .ok()
+            .map(|path| {
+                path.components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+            .filter(|path| project::source_file_fits(class, path));
+        if relative.is_none() {
+            self.output.error(format!(
+                "Could not use `{}`: a {} needs a file inside the project folder ending in {}.",
+                file.display(),
+                class.as_str(),
+                match class {
+                    ClassName::LocalScript => "`.client.lua` or `.client.blocks.json`",
+                    ClassName::ModuleScript => "`.module.lua`",
+                    _ => "`.server.lua` or `.server.blocks.json`",
+                }
+            ));
+        }
+        relative
+    }
+
     /// Asks for an animator controller file inside the project, and returns
     /// its path there for an Animator's `Controller`.
     pub(in crate::app) fn pick_controller(&mut self) -> Option<String> {

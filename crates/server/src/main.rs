@@ -31,7 +31,7 @@ use axcenity_net::{Client, GameInfo, Join, Network, SessionEvent};
 use axcenity_script::{OutputKind, ScriptRuntime};
 use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 
-const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--bench <frames> [--bench-clients <n>]]\n\
+const USAGE: &str = "usage: axcenity-server <project-folder | game.axgame> [--port <port>] [--password <text>] [--bench <frames> [--bench-clients <n>]]  (or --version [--json])\n\
                      example: cargo run -p axcenity-server -- examples/hello-part --port 47800";
 
 /// Each frame is this long.
@@ -117,6 +117,16 @@ impl Drop for Unpacked {
 }
 
 fn main() -> Result<()> {
+    // `--version` (and `--version --json`): this build's version, channel,
+    // commit and toolchain, then exit.
+    let all: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    if let Some(text) = axcenity_release::version_flag("axcenity-server", &all) {
+        println!("{text}");
+        return Ok(());
+    }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let arguments = Arguments::parse(std::env::args_os().skip(1))?;
     let Some(game) = arguments.game else {
@@ -156,6 +166,12 @@ fn main() -> Result<()> {
         eprintln!("warning: {err}");
     }
     scripts.set_input_map(project.input_map.clone());
+    // Scripts inside objects in levels LevelService loads later, and in
+    // the StarterCharacter each player spawns as (G2).
+    let worlds = levels.values().chain([&world]);
+    for (path, source) in axcenity_project::level_code(&project.folder, worlds) {
+        scripts.know_code(&path, &source);
+    }
     scripts.set_levels(&start_level, &start_level, levels);
     // Scripts and the ModuleScripts they require; LocalScripts run on
     // players' devices, and this server has no player.

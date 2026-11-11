@@ -12,7 +12,9 @@ fn reloads_in_play(project: &OpenProject, path: &str) -> bool {
     if project::is_asset_path(path) {
         return !project::is_stylesheet(path);
     }
-    project.scripts.iter().any(|script| script.path == path) && project.folder.join(path).exists()
+    (project.scripts.iter().any(|script| script.path == path)
+        || project.object_files.contains_key(path))
+        && project.folder.join(path).exists()
 }
 
 impl EditorApp {
@@ -52,6 +54,8 @@ impl EditorApp {
                 self.stylesheet_file_changed(path);
             } else if project::is_asset_path(path) {
                 self.asset_file_changed(path);
+            } else if self.is_object_file(path) {
+                self.object_file_changed(path);
             } else {
                 self.script_file_changed(path);
             }
@@ -210,6 +214,52 @@ impl EditorApp {
         }
     }
 
+    /// Whether `path` is a file scripts inside objects take their code from
+    /// (G2): one the editor has read, or one in `objects/`.
+    pub(in crate::app) fn is_object_file(&self, path: &str) -> bool {
+        self.project.as_ref().is_some_and(|project| {
+            project.object_files.contains_key(path)
+                || path.starts_with(&format!("{}/", project::OBJECTS_FOLDER))
+        })
+    }
+
+    /// The file of scripts inside objects at `path` was made, changed or
+    /// deleted. Its scripts' Instances are in the world, so none are added
+    /// or removed: a copy whose file is gone does nothing until it's back.
+    fn object_file_changed(&mut self, path: &str) {
+        let Some(project) = &mut self.project else {
+            return;
+        };
+        let known = project.object_files.get(path).cloned();
+        if !project.folder.join(path).exists() {
+            if known.is_some() {
+                project.object_files.remove(path);
+                self.output
+                    .info(format!("`{path}` was deleted outside the editor."));
+                self.sync_tab(path, None);
+            }
+            return;
+        }
+        let source = match project::read_object_file(&project.folder, path) {
+            Ok(source) => source,
+            Err(err) => {
+                self.output
+                    .error(format!("Skipped a damaged file: {}", chain(&err)));
+                return;
+            }
+        };
+        if known.as_ref() == Some(&source) {
+            return;
+        }
+        project.object_files.insert(path.to_owned(), source.clone());
+        if known.is_some() {
+            self.output
+                .info(format!("`{path}` was changed outside the editor."));
+            self.reload_in_play(path);
+        }
+        self.sync_tab(path, Some(&source));
+    }
+
     /// The script file at `path` was made, changed or deleted.
     pub(super) fn script_file_changed(&mut self, path: &str) {
         if project::is_block_script(path) {
@@ -268,12 +318,15 @@ impl EditorApp {
         let (Some(project), Some(session)) = (&self.project, &mut self.play) else {
             return;
         };
-        let Some(script) = project.scripts.iter().find(|script| script.path == path) else {
+        let reloaded = if let Some(script) = project.scripts.iter().find(|s| s.path == path) {
+            session.reload_script(script.instance, path, &script.source, &mut self.output)
+        } else if let Some(source) = project.object_files.get(path) {
+            // Every copy of a script inside an object uses the file.
+            session.reload_copies(path, source, &mut self.output)
+        } else {
             return;
         };
-        if let Err(crash) =
-            session.reload_script(script.instance, path, &script.source, &mut self.output)
-        {
+        if let Err(crash) = reloaded {
             self.crashed(crash);
         }
     }
@@ -393,7 +446,7 @@ impl EditorApp {
     /// Brings the tab for `path`, if open, up to date with its file, which
     /// now has `on_disk` in it (`None`: deleted). A tab with unsaved changes
     /// keeps them, and says the file changed.
-    pub(super) fn sync_tab(&mut self, path: &str, on_disk: Option<&str>) {
+    pub(in crate::app) fn sync_tab(&mut self, path: &str, on_disk: Option<&str>) {
         let Some(tab) = self.tabs.get_mut(path) else {
             return;
         };

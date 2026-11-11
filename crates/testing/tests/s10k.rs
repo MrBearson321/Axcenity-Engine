@@ -26,6 +26,12 @@ fn s10k_has_its_counts_and_runs_frames_without_errors() {
         s10k::UNANCHORED_PARTS + s10k::AGENTS
     );
     assert_eq!(s10k::script_files().len(), s10k::SCRIPTS);
+    // The Profiler's memory breakdown (roadmap G7) counts the same parts.
+    let memory = world.memory();
+    assert_eq!(memory.count_of(ClassName::Part), parts.len());
+    assert_eq!(memory.classes[0].0, ClassName::Part, "the most bytes");
+    assert!(memory.total.count >= parts.len());
+    assert!(memory.total.count <= world.len());
 
     let folder = std::env::temp_dir().join(format!("axcenity-s10k-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&folder);

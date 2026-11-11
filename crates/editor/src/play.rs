@@ -183,6 +183,14 @@ impl Session {
         // Who plays, the same each time on this install (Phase 64).
         session.sim.scripts.set_user_id(play_user_id());
         session.sim.scripts.set_input_map(input_map.clone());
+        // Scripts inside objects in levels LevelService loads later, and in
+        // the StarterCharacter each player spawns as (G2).
+        if let Some(folder) = session.sim.assets.folder() {
+            let worlds = levels.worlds.values().chain([&session.sim.world]);
+            for (path, source) in axcenity_project::level_code(&folder, worlds) {
+                session.sim.scripts.know_code(&path, &source);
+            }
+        }
         if !levels.worlds.is_empty() {
             session
                 .sim
@@ -638,9 +646,32 @@ impl Session {
         }
     }
 
+    /// The game's memory by kind, for the Profiler's Memory tab (G7).
+    pub fn memory(&self) -> axcenity_core::memory::MemoryBreakdown {
+        let mut memory = self.sim.memory();
+        memory.sounds = self.audio.memory();
+        memory
+    }
+
     /// The posed models of the animated MeshParts, for the viewport.
     pub fn poses(&self) -> &axcenity_scene::Poses {
         self.sim.animators.poses()
+    }
+
+    /// The moving parts to draw between physics steps (roadmap G3), for
+    /// the viewport.
+    pub fn blends(&self) -> axcenity_scene::Blends {
+        let moving = self.sim.blends();
+        let mut blends = axcenity_scene::Blends::new(self.sim.physics.blend_alpha());
+        blends.reserve(moving.len());
+        for blend in moving {
+            blends.add(
+                blend.part,
+                (blend.from_position, blend.from_orientation),
+                (blend.to_position, blend.to_orientation),
+            );
+        }
+        blends
     }
 
     /// The path each NavigationAgent is walking, from its feet, for the
@@ -703,6 +734,52 @@ impl Session {
         })
     }
 
+    /// Runs every script in the game whose `SourceFile` is `path` (the
+    /// copies of a script inside an object, G2) again in place with
+    /// `source`, as [`Self::reload_script`] does for one, and says so once.
+    pub fn reload_copies(
+        &mut self,
+        path: &str,
+        source: &str,
+        output: &mut Output,
+    ) -> Result<(), Crash> {
+        let name = path.rsplit('/').next().unwrap_or(path).to_owned();
+        guard(|| {
+            let world = &self.sim.world;
+            let copies: Vec<InstanceId> = world
+                .descendants_iter(world.root())
+                .filter(|&id| world.get(id).and_then(|i| i.source_file()) == Some(path))
+                .collect();
+            if copies.is_empty() {
+                return;
+            }
+            let mut failed = false;
+            for &script in &copies {
+                failed |= self
+                    .sim
+                    .scripts
+                    .reload_script(&mut self.sim.world, script, path, source)
+                    .is_err();
+                self.forward_output(output);
+                // A syntax error is the same in every copy: said once.
+                if failed {
+                    break;
+                }
+            }
+            if failed {
+                output.warning(format!(
+                    "{name} still runs its last good version until the error is fixed."
+                ));
+            } else {
+                let copies = match copies.len() {
+                    1 => String::new(),
+                    n => format!(" in {n} copies"),
+                };
+                output.info(format!("Reloaded {name}{copies}"));
+            }
+        })
+    }
+
     fn forward_animator_errors(&mut self, output: &mut Output) {
         for error in self.sim.animators.take_errors() {
             output.error(error);
@@ -758,6 +835,11 @@ impl Session {
         let mut actions = self.sim.scripts.take_sound_actions();
         actions.append(&mut self.ui_sounds);
         let listener = axcenity_audio::Listener::from_view(camera.position, camera.orientation);
+        let walls = self
+            .sim
+            .occlusion
+            .step(&self.sim.world, &self.sim.assets, camera.position);
+        self.audio.set_walls(walls);
         let update = self
             .audio
             .update(actions, &self.sim.world, &self.sim.assets, listener);

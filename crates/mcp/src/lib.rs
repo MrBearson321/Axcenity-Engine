@@ -5,17 +5,22 @@
 //! This crate knows nothing about the engine. It defines what a tool is
 //! ([`ToolSpec`], with its safety [`Class`] and [`Profile`]), how a call's
 //! arguments are checked ([`Args`]) and how errors read ([`ToolError`]), and
-//! serves the tools with `rmcp` ([`serve_stdio`]). The editor implements the
-//! tools (`editor/src/mcp/`) and runs each [`Job`] on its own thread.
+//! serves the tools with `rmcp` ([`serve_stdio`]), with prompts
+//! ([`PromptSpec`]) and resources that mirror read tools ([`ResourceSpec`]). The editor implements the
+//! tools (`editor/src/app/mcp/`) and runs each [`Job`] on its own thread.
 //! Design: `docs/research/mcp/architecture.md`; behavior: `docs/editor/mcp.md`.
 
 mod args;
 mod error;
+mod extras;
+mod safety;
 mod server;
 mod spec;
 pub mod text;
 
 pub use args::{Args, Detail};
 pub use error::{Code, ToolError, closest};
+pub use extras::{PromptArg, PromptSpec, ResourceSpec};
+pub use safety::{Allowed, Confirms, Mode, call_key};
 pub use server::{Call, Job, Outcome, Setup, rmcp_tool, serve, serve_stdio, tools_list_json};
 pub use spec::{Class, Kind, Param, Profile, ToolSpec};

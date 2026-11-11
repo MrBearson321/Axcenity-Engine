@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "product": "axcenity-engine",
+  "version": "0.2.0-alpha.2",
+  "channel": "development",
+  "tag": "v0.2.0-alpha.2",
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "published": "2026-12-01T12:00:00Z",
+  "title": "Faster startup",
+  "summary": "Projects open twice as fast.",
+  "notes": {
+    "performance": [
+      {
+        "subsystem": "editor",
+        "title": "Projects open twice as fast"
+      }
+    ]
+  },
+  "known_issues": [
+    "AX-0001"
+  ],
+  "formats": {
+    "project": 5
+  },
+  "compatibility": {
+    "min_update_protocol": 1
+  },
+  "artifacts": {
+    "windows-x86_64": {
+      "update": {
+        "file": "AxcenityEditor-0.2.0-alpha.2-windows-x86_64-update.zip",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 100
+      }
+    }
+  },
+  "history": {
+    "file": "axcenity-history.json",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size": 10
+  },
+  "provenance": {
+    "reproducible": "not verified"
+  },
+  "added_by_a_later_schema": true
+}

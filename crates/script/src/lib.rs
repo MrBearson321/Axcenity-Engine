@@ -114,7 +114,9 @@ use std::time::Duration;
 use axcenity_assets::Assets;
 use axcenity_core::input::{InputEvent, InputMap};
 use axcenity_core::sound::SoundAction;
-use axcenity_core::{ClassName, InstanceId, KeyCode, MouseBehavior, Value, Vector3, World};
+use axcenity_core::{
+    Change, ClassName, InstanceId, KeyCode, MouseBehavior, RecordedChange, Value, Vector3, World,
+};
 use axcenity_physics::RayHit;
 use axcenity_render_types::{Capabilities, GraphicsSettings};
 use axcenity_save::Saves;
@@ -293,12 +295,20 @@ pub struct ScriptRuntime {
     /// Every script and ModuleScript started, in the order they first
     /// started, with the code they run now, so they can run again.
     started: Vec<Started>,
-    /// Scripts copied by `Clone`, with their original's code, waiting to
-    /// be somewhere scripts run (see [`Self::start_clones`]).
+    /// Scripts waiting to be somewhere scripts run, with their code (see
+    /// [`Self::start_clones`]): copies made by `Clone`, with their
+    /// original's, and scripts inside objects started somewhere else, such
+    /// as a template in ServerStorage, so its clones have code too (G2).
     clones: Vec<Started>,
     /// True while [`Self::start_clones`] runs, so starting a clone doesn't
     /// start more inside it.
     starting_clones: bool,
+    /// The code of each file scripts inside objects take theirs from, by
+    /// `SourceFile` (G2): from every start, and the hosts'
+    /// [`Self::know_code`]. A script inside an object that arrives with no
+    /// code of its own (replicated to this device, streamed in, or in a
+    /// level LevelService loads) starts with it.
+    known_code: BTreeMap<String, String>,
 }
 
 /// A script as [`ScriptRuntime::start_script`] was last given it.
@@ -428,6 +438,7 @@ impl ScriptRuntime {
             started: Vec::new(),
             clones: Vec::new(),
             starting_clones: false,
+            known_code: BTreeMap::new(),
         }
     }
 
@@ -601,6 +612,11 @@ impl ScriptRuntime {
     /// A ModuleScript doesn't run here: its code is kept for `require`, on
     /// both sides. So pass the ModuleScripts first, before any script that
     /// might require them.
+    ///
+    /// A script inside an object (one with a `SourceFile`, G2) only runs
+    /// where a clone would ([`Self::start_clones`]): elsewhere, such as a
+    /// template in ServerStorage, its code is kept, and it starts once it's
+    /// moved there, as does a `Clone` of it.
     pub fn start_script(
         &mut self,
         world: &mut World,
@@ -608,13 +624,31 @@ impl ScriptRuntime {
         path: &str,
         source: &str,
     ) {
-        self.remember(script, path, source);
         let class = world.get(script).map(|instance| instance.class());
+        if world.get(script).and_then(|i| i.source_file()) == Some(path) {
+            self.known_code.insert(path.to_owned(), source.to_owned());
+        }
         if class == Some(ClassName::ModuleScript) {
+            self.remember(script, path, source);
             self.server.add_module(script, path, source);
             self.client.add_module(script, path, source);
             return;
         }
+        let waits = world.get(script).is_some_and(|instance| {
+            instance.source_file().is_some() && !world.runs_scripts_at(script)
+        });
+        if waits {
+            // New code (a reload) replaces what it waited with.
+            self.started.retain(|started| started.script != script);
+            self.clones.retain(|clone| clone.script != script);
+            self.clones.push(Started {
+                script,
+                path: path.to_owned(),
+                source: source.to_owned(),
+            });
+            return;
+        }
+        self.remember(script, path, source);
         let side = class.and_then(Side::of_class).unwrap_or(Side::Server);
         if side == Side::Server && self.client_only {
             // The server runs it.
@@ -627,6 +661,71 @@ impl ScriptRuntime {
         self.context(side).start_script(world, script, path, source);
         self.collect(side);
         self.fire_changes(world);
+    }
+
+    /// The code in the file at `path`, for scripts inside objects whose
+    /// `SourceFile` names it and that arrive later with no code: a level's
+    /// (hosts pass every level's before LevelService loads one), or a
+    /// LocalScript the server places on a device following it (G2).
+    pub fn know_code(&mut self, path: &str, source: &str) {
+        self.known_code.insert(path.to_owned(), source.to_owned());
+    }
+
+    /// Each script inside an object in what `changes` put in the tree that
+    /// has no code here yet: see [`Self::note_arrived`].
+    fn note_arrived_scripts(&mut self, world: &World, changes: &[RecordedChange]) {
+        if self.known_code.is_empty() {
+            return;
+        }
+        let added: Vec<InstanceId> = changes
+            .iter()
+            .filter_map(|change| match change.change {
+                Change::ChildAdded { child, .. } => Some(child),
+                _ => None,
+            })
+            .collect();
+        self.note_arrived(world, &added);
+    }
+
+    /// Starts each script inside an object in `roots` (or inside one of
+    /// them) that has no code here yet, with the code its `SourceFile`
+    /// names, once it's where scripts of its kind run: for a device that
+    /// joins, what the server placed before it did (G2).
+    pub fn start_arrived(&mut self, world: &mut World, roots: &[InstanceId]) {
+        self.note_arrived(world, roots);
+        self.fire_changes(world);
+    }
+
+    /// Each script inside an object in `arrived` (or inside one of them)
+    /// that has no code here yet (not started, not waiting) waits with the
+    /// code its `SourceFile` names, if known, and starts once it's where
+    /// scripts of its kind run ([`Self::start_clones`]).
+    fn note_arrived(&mut self, world: &World, arrived: &[InstanceId]) {
+        if self.known_code.is_empty() {
+            return;
+        }
+        for &root in arrived {
+            for id in std::iter::once(root).chain(world.descendants_iter(root)) {
+                let Some(path) = world.get(id).and_then(|i| i.source_file()) else {
+                    continue;
+                };
+                let has_code = self
+                    .started
+                    .iter()
+                    .chain(&self.clones)
+                    .any(|started| started.script == id);
+                if has_code {
+                    continue;
+                }
+                if let Some(source) = self.known_code.get(path) {
+                    self.clones.push(Started {
+                        script: id,
+                        path: path.to_owned(),
+                        source: source.clone(),
+                    });
+                }
+            }
+        }
     }
 
     /// Keeps `script`'s code for running it again, in the place it first
@@ -1753,6 +1852,7 @@ impl ScriptRuntime {
             if changes.is_empty() {
                 return;
             }
+            self.note_arrived_scripts(world, &changes);
             for side in [Side::Server, Side::Client] {
                 self.context(side).fire_changes(world, &changes);
                 self.collect(side);
@@ -1789,33 +1889,20 @@ impl ScriptRuntime {
         });
     }
 
-    /// Starts each cloned script that's now where scripts of its kind run:
-    /// a Script in the Workspace or ServerScriptService, a LocalScript in
-    /// the Workspace, StarterPlayerScripts or Players. A cloned ModuleScript
-    /// can be required wherever it is. The rest wait for the next call;
-    /// clones destroyed before they ran are forgotten.
+    /// Starts each waiting script (a clone, or a template inside an object)
+    /// that's now where scripts of its kind run (`World::runs_scripts_at`). The
+    /// rest wait for the next call; those destroyed before they ran are
+    /// forgotten.
     fn start_clones(&mut self, world: &mut World) {
         if self.starting_clones || self.clones.is_empty() {
             return;
         }
         self.starting_clones = true;
         for clone in std::mem::take(&mut self.clones) {
-            let Some(class) = world.get(clone.script).map(|instance| instance.class()) else {
+            if !world.contains(clone.script) {
                 continue;
-            };
-            let under = |place| world.is_descendant_of(clone.script, place);
-            let runs = match class {
-                ClassName::Script => {
-                    under(world.workspace()) || under(world.server_script_service())
-                }
-                ClassName::LocalScript => {
-                    under(world.workspace())
-                        || under(world.starter_player_scripts())
-                        || under(world.players())
-                }
-                _ => true,
-            };
-            if runs {
+            }
+            if world.runs_scripts_at(clone.script) {
                 self.start_script(world, clone.script, &clone.path, &clone.source);
             } else {
                 self.clones.push(clone);
@@ -1852,6 +1939,13 @@ impl ScriptRuntime {
     /// `take_camera_move` applied) into the one to draw and listen from.
     pub fn step_camera(&mut self, world: &World, seconds: f64) -> GameCamera {
         self.client.step_camera(world, seconds)
+    }
+
+    /// What a Follow or Track camera follows (`CameraSubject`), if it's one
+    /// of those: physics keeps it drawn where it's stepped, with
+    /// everything welded to it (roadmap G3).
+    pub fn camera_followed(&self) -> Option<InstanceId> {
+        self.client.camera_followed()
     }
 
     /// Whether scripts hold the camera (`CameraType` isn't Custom): the
@@ -2052,6 +2146,20 @@ pub fn run_edit_command(world: &mut World, source: &str) -> Result<EditCommand, 
         output: context.take_output(),
         changed,
     })
+}
+
+/// The first syntax error in `source`, the code of the script at `path`,
+/// as Luau reports it (`path:line: message`), or `None` when it compiles.
+/// Compiles only, with the scripts' own compiler: nothing runs.
+pub fn syntax_error(path: &str, source: &str) -> Option<String> {
+    let lua = Lua::new();
+    lua.set_compiler(sandbox::compiler());
+    lua.load(source)
+        .set_name(format!("@{path}"))
+        .set_mode(mlua::chunk::ChunkMode::Text)
+        .into_function()
+        .err()
+        .map(|error| errors::error_message(&error))
 }
 
 /// Every global name a script has, for the Console's autocomplete.

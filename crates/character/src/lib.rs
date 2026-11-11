@@ -685,6 +685,14 @@ impl Controllers {
         pose_camera(world, id, eye, orbit, standing)
     }
 
+    /// The character (Model or part) whose controller the last
+    /// [`step`](Self::step) moved with the player's input, without
+    /// searching the world: `None` before the first step or when no
+    /// controller has a body.
+    pub fn stepped_character(&self, world: &World) -> Option<InstanceId> {
+        world.get(self.active?)?.parent()
+    }
+
     /// Anchors every part a character controller moves, so the physics
     /// step does not treat the character as a dynamic body. Parts that are
     /// already anchored are left alone. Other parts, gravity, and friction

@@ -329,7 +329,7 @@ pub(super) fn command_category(command: &Command) -> Category {
 
 /// The panels that are tools of their own (editors, studios, monitors),
 /// rather than the Explorer, Properties, Console and Assets.
-const TOOL_PANES: [Pane; 15] = [
+const TOOL_PANES: [Pane; 17] = [
     Pane::Animation,
     Pane::UiDesigner,
     Pane::Terrain,
@@ -345,6 +345,8 @@ const TOOL_PANES: [Pane; 15] = [
     Pane::Sequencer,
     Pane::Tests,
     Pane::ModelStudio,
+    Pane::Toolbox,
+    Pane::VersionExplorer,
 ];
 
 /// Other words people search for a command by, matched like its name.
@@ -470,7 +472,8 @@ fn command_description(command: &Command) -> String {
         Command::NewRibbonTab => "Make your own ribbon tab from any of the ribbon's groups.",
         Command::RibbonTab(tab) => return format!("Show the ribbon's {} tab.", tab_label(*tab)),
         Command::Learn => "Tutorials and notes on each part of the editor.",
-        Command::About => "The editor's version and licences.",
+        Command::About => "The editor's version and licences, and Copy diagnostics.",
+        Command::CheckForUpdates => "Look for a newer Axcenity on your update channel.",
         Command::PanicDuringPlay => "Debug builds only: make Play fail, to test error handling.",
         Command::Play => {
             "Run the game in the editor. Changes made while playing are undone by Stop."
@@ -567,8 +570,13 @@ impl SearchProvider for Scripts {
         let paths: Vec<&str> = app
             .project
             .iter()
-            .flat_map(|project| &project.scripts)
-            .map(|script| script.path.as_str())
+            .flat_map(|project| {
+                project
+                    .scripts
+                    .iter()
+                    .map(|script| script.path.as_str())
+                    .chain(project.object_files.keys().map(String::as_str))
+            })
             .collect();
         Some(stamp_of((&app.project.as_ref().map(|p| &p.folder), paths)))
     }
@@ -591,6 +599,19 @@ impl SearchProvider for Scripts {
                 entry,
                 SearchTarget::Open(OpenTarget::Script(script.path.clone())),
             );
+        }
+        // The code of scripts inside objects (G2), once per file.
+        for path in project.object_files.keys() {
+            if project::is_block_script(path) {
+                continue;
+            }
+            let class = project::script_class(path);
+            let mut entry = Entry::new(format!("script {path}"), project::script_name(path), path)
+                .in_category(Category::Script);
+            entry.icon = theme::class_icon(class);
+            entry.description =
+                format!("The code of a {class} inside an object. Opens in its own tab.");
+            out.push(entry, SearchTarget::Open(OpenTarget::Script(path.clone())));
         }
     }
 }

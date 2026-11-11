@@ -1,0 +1,7 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "feature"
+subsystem = "ui"
+title = "Localization, TweenService and rich text for game UI"
+features = ["ui.localization", "ui.tweens"]
+commits = ["61ed52a3", "4e924204", "3ae8c8f1"]
+evidence = "reconstructed"

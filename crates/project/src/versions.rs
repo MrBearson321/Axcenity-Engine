@@ -195,7 +195,8 @@ pub fn version_changes(folder: &Path, id: &str) -> io::Result<Changes> {
 }
 
 /// `world.json`, `strings.json`, `collision-groups.json`, every level in
-/// `levels/`, every script and every stylesheet, in path order.
+/// `levels/`, every script (`objects/`' too) and every stylesheet, in path
+/// order.
 fn tracked_files(folder: &Path) -> Vec<String> {
     let mut problems = Vec::new();
     let mut files = Vec::new();
@@ -210,6 +211,12 @@ fn tracked_files(folder: &Path) -> Vec<String> {
             .map(|name| crate::level_path(name)),
     );
     files.extend(find_scripts(folder, &mut problems));
+    // The code of scripts inside objects (G2), which the world names.
+    files.extend(
+        crate::validate::files_under(folder, crate::OBJECTS_FOLDER)
+            .into_iter()
+            .filter(|file| file.ends_with(".lua") || crate::is_block_script(file)),
+    );
     files.extend(find_stylesheets(folder, &mut problems));
     files.sort();
     files.dedup();

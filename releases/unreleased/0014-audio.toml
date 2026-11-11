@@ -1,0 +1,7 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "feature"
+subsystem = "audio"
+title = "Audio buses and effects"
+features = ["audio.buses"]
+commits = ["89a2c8e4"]
+evidence = "reconstructed"

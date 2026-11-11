@@ -37,6 +37,7 @@ mod levels;
 mod migrate;
 mod migrate_animation;
 mod migrate_physics;
+mod object_scripts;
 mod package;
 mod packed;
 mod prefabs;
@@ -90,10 +91,13 @@ pub use levels::{
     set_start_level, set_start_level_name, write_files, write_level,
 };
 pub use migrate::PREVIOUS_FORMAT_DIR;
+pub use object_scripts::{
+    in_start_order, level_code, numbered_path, object_scripts, read_object_file, source_file_fits,
+};
 pub use package::{
     Clashes, Contents, ImportPlan, PACKAGE_EXTENSION, Package, PackageError, PackageManifest,
-    package_contents, package_contents_with_scripts, plan_import, read_package, script_tables,
-    write_package,
+    package_contents, package_contents_with_scripts, package_scripts, plan_import, read_package,
+    script_tables, without_scripts, write_package,
 };
 pub use packed::{PackError, pack_game, unpack_game};
 pub use prefabs::{PrefabError, Prefabs, applied_text, prefab_references, variant_text};
@@ -111,7 +115,10 @@ pub use versions::{
     version_changes,
 };
 pub use watch::{Watched, Watcher, is_asset_path};
-pub use world_file::{WorldError, parse_prefab, parse_world, write_prefab, write_world};
+pub use world_file::{
+    WorldError, json_to_attribute, json_to_value, parse_prefab, parse_world, write_prefab,
+    write_world,
+};
 
 pub const MANIFEST_FILE: &str = "axcenity.json";
 pub const WORLD_FILE: &str = "world.json";
@@ -121,6 +128,9 @@ pub const WORLD_FILE: &str = "world.json";
 /// this name is taken too.
 pub const KEPT_WORLD_FILE: &str = "world.backup.json";
 pub const SCRIPTS_FOLDER: &str = "scripts";
+/// Where new files of scripts inside objects go (G2); the `scripts` scan
+/// never reads it.
+pub const OBJECTS_FOLDER: &str = "objects";
 /// The editor's Lua plugins for this project (Phase 54; the `plugins`
 /// crate). Editor-only: built games never have it, and its stylesheets
 /// don't style the game.
@@ -231,7 +241,10 @@ pub struct Project {
     pub world: World,
     /// Every script that could be read, in the order they start: modules
     /// first (so they can be required), then server scripts, then client
-    /// scripts, each sorted by path (see [`script_order`]).
+    /// scripts, each sorted by path (see [`script_order`]) and followed by
+    /// the scripts inside objects of its kind, in tree order (G2,
+    /// [`in_start_order`]). Copies of an object share their file, so its
+    /// path can be here more than once.
     pub scripts: Vec<ScriptFile>,
     /// Parsed block documents corresponding to generated entries in `scripts`.
     pub block_scripts: Vec<BlockScriptFile>,
@@ -311,12 +324,14 @@ pub(crate) fn update_manifest(
     Ok(())
 }
 
-/// A script file from the project's `scripts` folder.
+/// A script file from the project's `scripts` folder, or a script inside an
+/// object and the file its `SourceFile` names (G2).
 #[derive(Clone)]
 pub struct ScriptFile {
     /// The Script made for this file, in `ServerScriptService`, the
     /// LocalScript, in `StarterPlayer.StarterPlayerScripts`, or the
-    /// ModuleScript, in `ReplicatedStorage`.
+    /// ModuleScript, in `ReplicatedStorage`; or the script inside an
+    /// object.
     pub instance: InstanceId,
     /// Where the file is, relative to the project folder and with `/` between
     /// folders on every OS, for example `scripts/doors/open.server.lua`.
@@ -386,6 +401,12 @@ pub enum LoadError {
     InputMap { path: PathBuf, message: String },
     #[error("the terrain in `{}` couldn't be loaded, so it's flat: {message}", path.display())]
     Terrain { path: PathBuf, message: String },
+    /// A script inside an object (G2) that can't run; the Instance stays.
+    #[error("`{script}` does nothing: {message}")]
+    ObjectScript { script: String, message: String },
+    /// A `SourceFile` no script can take its code from.
+    #[error("the scripts using `{path}` do nothing: {message}")]
+    SourceFile { path: String, message: String },
     #[error("{source}, so its copies are as they were last saved")]
     Prefab {
         #[source]
@@ -548,7 +569,11 @@ pub(crate) fn load_project(
     collision_groups::load_collision_groups(folder, &mut world, &mut problems);
     let damaged_terrains =
         terrain_files::load_terrains_reporting(folder, &mut world, &mut problems, progress);
-    let (mut scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems, progress);
+    let (scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems, progress);
+    // Scripts inside objects (G2), from the tree as the world, level and
+    // prefabs made it.
+    let objects = object_scripts(folder, &world, &mut problems);
+    let mut scripts = in_start_order(&world, scripts, objects);
     let ui_graphs = load_ui_graphs(folder, &mut world, &mut scripts, &mut problems);
     if level.is_some() {
         // A level without a graph's ScreenGui just doesn't use that graph.

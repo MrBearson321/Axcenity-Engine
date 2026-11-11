@@ -45,6 +45,7 @@ mod watch;
 
 pub(super) use export::ExportTarget;
 pub(super) use import::is_package;
+pub(in crate::app) use import::{asset_files, files_made_since};
 
 /// An error and its causes on one line, the way `{:#}` shows an `anyhow::Error`.
 pub(super) fn chain(err: &dyn std::error::Error) -> String {
@@ -467,6 +468,12 @@ impl EditorApp {
         }
         tab.mark_saved();
         let source = tab.text.clone();
+        // A script inside an object's file: its copies come from the world.
+        if let Some(known) = project.object_files.get_mut(path) {
+            *known = source;
+            self.reload_in_play(path);
+            return true;
+        }
         match project
             .scripts
             .iter_mut()

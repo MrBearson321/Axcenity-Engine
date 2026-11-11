@@ -1,0 +1,7 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "performance"
+subsystem = "assets"
+title = "Cooked BC7/BC5 textures, cached LODs and whole cooked models: projects open and built games start faster"
+features = ["assets.cooked-assets"]
+prs = [45, 47, 49, 51, 53, 55, 57, 65, 67, 69]
+evidence = "reconstructed"

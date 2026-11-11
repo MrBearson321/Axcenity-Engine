@@ -452,6 +452,7 @@ pub fn build_draw_list_posed(
         assets,
         poses,
         glow,
+        blends: &terrain.blends,
     };
     let mut items = Vec::new();
     let mut other = OtherDrawn::default();
@@ -477,6 +478,7 @@ pub fn build_draw_list_posed(
             .filter(|&id| !axcenity_core::csg::out_of_world(world, id))
             .filter_map(|id| Some((id, world.get(id)?)))
         {
+            let first = items.len();
             add_instance(
                 &frame,
                 id,
@@ -486,6 +488,9 @@ pub fn build_draw_list_posed(
                 &mut items,
                 &mut other,
             );
+            frame
+                .blends
+                .shift_items(world, id, instance, &mut items[first..]);
         }
         terrain.meshes.end_frame();
     }
@@ -542,6 +547,10 @@ pub(crate) struct InstanceFrame<'a> {
     pub(crate) poses: &'a Poses,
     /// How much brighter than its color a glowing part is drawn.
     pub(crate) glow: f32,
+    /// Moving parts drawn between physics steps. [`add_instance`] moves
+    /// only lights by them: callers move the draw items they hand on, so
+    /// kept items stay where the world has their parts.
+    pub(crate) blends: &'a crate::blend::Blends,
 }
 
 /// What a frame's Instances add to the draw list besides draw items.
@@ -571,6 +580,7 @@ pub(crate) fn add_instance(
         assets,
         poses,
         glow,
+        blends,
     } = *frame;
     let first_item = items.len();
     match instance.class() {
@@ -589,7 +599,11 @@ pub(crate) fn add_instance(
             let posed = poses.get(&id);
             mesh_part_draw_items(world, id, instance, assets, posed, meshes, items)
         }
-        class if class.is_light() => other.lights.extend(light_of(world, instance)),
+        class if class.is_light() => {
+            let first = other.lights.len();
+            other.lights.extend(light_of(world, instance));
+            blends.shift_lights(world, id, instance, &mut other.lights[first..]);
+        }
         ClassName::ReflectionProbe => other
             .reflection_probes
             .extend(reflection_probe_of(world, instance, assets)),

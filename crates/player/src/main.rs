@@ -90,7 +90,7 @@ const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
 const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | --join address:port] \
                      [--password text] [--bench frames] [--size WxH] [--quality preset] \
-                     [project-folder | game.axgame]\n\
+                     [project-folder | game.axgame]  (or --version [--json])\n\
                      example: cargo run -p axcenity-player -- examples/hello-part\n\
                      --watch reloads a project folder's changed assets while it plays\n\
                      --dev turns on the F9 Developer Console in a built game\n\
@@ -100,6 +100,16 @@ const USAGE: &str = "usage: axcenity-player [--watch] [--dev] [--host [port] | -
                      --quality draws with that preset (Low, Medium, High, Ultra) for this run only";
 
 fn main() -> Result<()> {
+    // `--version` (and `--version --json`): this build's version, channel,
+    // commit and toolchain, then exit.
+    let all: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    if let Some(text) = axcenity_release::version_flag("axcenity-player", &all) {
+        println!("{text}");
+        return Ok(());
+    }
     // `--bench` reports its launch times (first frame, assets loaded) from here.
     let launched = Instant::now();
     // Show warnings and errors by default. `wgpu_hal` relays harmless graphics
@@ -265,6 +275,12 @@ fn main() -> Result<()> {
     }
     // The project's actions, before any LocalScript asks about them.
     scripts.set_input_map(project.input_map.clone());
+    // Scripts inside objects in levels LevelService loads later, and in
+    // the StarterCharacter each player spawns as (G2).
+    let worlds = levels.values().chain([&world]);
+    for (path, source) in axcenity_project::level_code(&project.folder, worlds) {
+        scripts.know_code(&path, &source);
+    }
     scripts.set_levels(&start_level, &start_level, levels);
     start_scripts(&mut scripts, &mut world, &project.scripts);
     // Hosting or joining from the command line, once the scripts listen
@@ -469,6 +485,21 @@ fn print_output(runtime: &mut ScriptRuntime) {
             }
         }
     }
+}
+
+/// The moving parts to draw between physics steps this frame (roadmap G3).
+fn blends_to_draw(sim: &axcenity_sim::Sim) -> axcenity_scene::Blends {
+    let moving = sim.blends();
+    let mut blends = axcenity_scene::Blends::new(sim.physics.blend_alpha());
+    blends.reserve(moving.len());
+    for blend in moving {
+        blends.add(
+            blend.part,
+            (blend.from_position, blend.from_orientation),
+            (blend.to_position, blend.to_orientation),
+        );
+    }
+    blends
 }
 
 fn listener_of(camera: &FlyCamera) -> axcenity_audio::Listener {
@@ -1382,6 +1413,7 @@ impl App {
                 stats.shadow_casters_drawn
             );
         }
+        self.note_memory();
         self.frame_stats
             .finish(real_seconds, &watch, render_stats.as_ref());
         profiling::finish_frame!();
@@ -1489,7 +1521,13 @@ impl HostIo for App {
     }
 
     fn audio(&mut self) {
-        let heard = listener_of_view(self.shown_view());
+        let view = self.shown_view();
+        let heard = listener_of_view(view);
+        let walls = self
+            .sim
+            .occlusion
+            .step(&self.sim.world, &self.sim.assets, view.position);
+        self.audio.set_walls(walls);
         apply_audio(
             &mut self.sim.scripts,
             &mut self.sim.world,
@@ -1575,6 +1613,7 @@ impl HostIo for App {
         let size = self.frame_size;
         let on_top = self.loading_gui.as_ref().and_then(LoadingGui::on_top);
         let camera = self.shown_camera();
+        self.terrain.set_blends(blends_to_draw(&self.sim));
         let (draw_list, ui_layout) = axcenity_scene::build_draw_list_with_ui_interaction(
             &self.sim.world,
             &self.sim.assets,

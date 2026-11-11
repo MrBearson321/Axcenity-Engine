@@ -21,6 +21,18 @@ pub enum Class {
     Destructive,
 }
 
+impl Class {
+    /// Its name in logs: `read`, `add`, `modify` or `destructive`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Class::Read => "read",
+            Class::Add => "add",
+            Class::Modify => "modify",
+            Class::Destructive => "destructive",
+        }
+    }
+}
+
 /// Which tool lists a server shows. A profile only hides tools: every tool
 /// behaves the same in every profile that has it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -76,6 +88,11 @@ pub enum Kind {
     Vector3,
     /// A flat object, such as `props`.
     Object,
+    /// A list of objects with these two string fields, such as
+    /// `[{"find":…,"replace":…}]`.
+    Pairs(&'static str, &'static str),
+    /// A list of objects, such as `batch`'s steps.
+    Objects,
 }
 
 /// One parameter. Tools share the common ones as constants (`ID`, `DETAIL`,
@@ -123,6 +140,15 @@ impl Param {
                 "maxItems": 3
             }),
             Kind::Object => json!({ "type": "object" }),
+            Kind::Pairs(first, second) => json!({
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": { first: { "type": "string" }, second: { "type": "string" } },
+                    "required": [first, second]
+                }
+            }),
+            Kind::Objects => json!({ "type": "array", "items": { "type": "object" } }),
         };
         if !self.about.is_empty() {
             schema["description"] = Value::String(self.about.to_owned());

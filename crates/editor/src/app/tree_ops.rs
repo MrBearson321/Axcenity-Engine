@@ -24,11 +24,9 @@ impl EditorApp {
         if self.viewport.is_dragging() || self.playing() {
             return;
         }
-        let is_script = |id| {
-            self.world
-                .get(id)
-                .is_some_and(|instance| instance.class().is_script())
-        };
+        // A script from the `scripts` folder is its file; one inside an
+        // object (G2) is an ordinary Instance whose file its copies share.
+        let is_script = |id| self.world.get(id).is_some_and(tree::is_file_script);
         // A graph's LocalScript changes only with its graph.
         if let Action::Rename(id, _) | Action::Delete(id) | Action::Duplicate(id) = &action
             && let Some(gui) = self.graph_script_gui(*id)
@@ -65,6 +63,7 @@ impl EditorApp {
             Action::Animate(id) => self.animate(id),
             Action::ExportPackage(id) => self.export_object_package_with_dialog(id),
             Action::SaveMaterial(id) => self.save_material(id),
+            Action::MakeUnique(id) => self.make_unique(id),
             Action::Prefab(action) => self.prefab_action(action),
             Action::KeepPlayChanges(_) => {}
             Action::SetLocked(id, on) => self.set_locked(id, on),
@@ -782,22 +781,13 @@ impl EditorApp {
     /// scripts are left, and a note says to delete those one at a time.
     pub(super) fn delete_selected(&mut self) {
         let ids = self.selection_roots();
-        if ids.len() == 1
-            && self
-                .world
-                .get(ids[0])
-                .is_some_and(|instance| instance.class().is_script())
-        {
+        if ids.len() == 1 && self.world.get(ids[0]).is_some_and(tree::is_file_script) {
             self.confirm_delete = Some(ids[0]);
             return;
         }
         let mut skipped_script = false;
         for id in ids {
-            if self
-                .world
-                .get(id)
-                .is_some_and(|instance| instance.class().is_script())
-            {
+            if self.world.get(id).is_some_and(tree::is_file_script) {
                 skipped_script = true;
                 continue;
             }

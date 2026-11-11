@@ -581,6 +581,15 @@ impl AnimationStudio {
             .collect()
     }
 
+    /// Whether the clip at `path` is open with changes not yet written.
+    pub fn unwritten(&self, path: &str) -> bool {
+        match &self.clip.doc {
+            Some(Clip::Property(doc)) => doc.path == path && doc.unwritten(),
+            Some(Clip::Take(doc)) => doc.path == path && doc.unwritten(),
+            None => false,
+        }
+    }
+
     /// Forgets the file scan so the next time a tab is shown it lists
     /// files undo or redo just put back.
     pub fn refresh(&mut self) {

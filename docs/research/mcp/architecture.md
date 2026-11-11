@@ -1,6 +1,6 @@
 # Axcenity MCP toolkit: architecture proposal (Phase 2)
 
-Status: **proposal, awaiting Paul's approval** (decisions in [README.md](README.md#decisions-for-paul)). Nothing here is implemented yet.
+Status: **approved** by Paul on 2026-11-11 (the defaults of [README.md](README.md#decisions-for-paul)) and being built step by step; what exists is described in [docs/editor/mcp.md](../../editor/mcp.md).
 
 Inputs: the engine audit ([engine-capability-map.md](engine-capability-map.md)), the proposed tools ([tool-inventory.md](tool-inventory.md)) and the MCP spec and client research ([client-compatibility.md](client-compatibility.md)).
 
@@ -150,6 +150,8 @@ fix: did you mean "Workspace/House"? Use scene_inspect to list objects.
 ### 6.3 Changes instead of re-reads
 
 The host keeps the edit world's change log on (`World::record_changes`) and drains it every frame into a bounded ring (like `WORKSPACE_MOVES_KEPT`), numbering changes. Every result carries `cursor`. Reads accept `since: cursor` and return only what changed; `history {action:"changes"}` summarises creates, removals and changed property names, including the **user's** edits in live mode ("the user moved 41 and deleted 44"). If a cursor fell out of the ring the answer says so and the agent re-reads.
+
+As built (step 5): only `history changes` carries the number, called a **mark** because `cursor` already means the paging token of cut results, and its default `since` is the last answer's mark, so a small model just asks again. Other results don't carry it (it would cost tokens on every call for a feature only the live editor really needs), and reads don't take `since`. A world swapped in whole (a level opened, a whole-world undo) makes older marks answer "read again".
 
 A separate snapshot system was considered and dropped: cursors plus `Instance::revision` cover "what changed", and version checkpoints (`project::versions`) cover "go back to before the AI started". No new storage.
 

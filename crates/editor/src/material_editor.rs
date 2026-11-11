@@ -81,7 +81,7 @@ pub struct MaterialDocument {
 }
 
 impl MaterialDocument {
-    fn unsaved(&self) -> bool {
+    pub fn unsaved(&self) -> bool {
         self.saved.as_ref() != Some(&self.file)
     }
 }

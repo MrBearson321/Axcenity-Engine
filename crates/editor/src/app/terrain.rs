@@ -176,7 +176,7 @@ impl EditorApp {
     }
 
     /// Carries out one of the panel's actions.
-    fn terrain_action(&mut self, action: TerrainAction) {
+    pub(super) fn terrain_action(&mut self, action: TerrainAction) {
         if self.playing() {
             return;
         }
@@ -229,6 +229,9 @@ impl EditorApp {
             }
             TerrainAction::PickLayerTexture(layer, name) => {
                 self.apply(layer, Edit::PickTexture(name));
+            }
+            TerrainAction::FromToolbox(layer) => {
+                self.open_toolbox(Some(crate::toolbox_panel::Target::TerrainLayer(layer)));
             }
             TerrainAction::UseTextureSet(layer, entry) => {
                 if !self.use_global_asset(&entry.path) {
@@ -286,9 +289,6 @@ impl EditorApp {
     /// A new flat terrain in the Workspace, with grass, dirt and rock
     /// layers, as one undo step. It's selected and ready to sculpt.
     fn create_terrain(&mut self, width: f32, length: f32, height: f32, samples: usize) {
-        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
-            return;
-        };
         let samples_z = samples_along(samples, width, length);
         let data =
             match TerrainData::flat(samples, samples_z, axcenity_core::DEFAULT_TERRAIN_HEIGHT) {
@@ -299,19 +299,37 @@ impl EditorApp {
                     return;
                 }
             };
-        let Ok(id) = self.world.create(ClassName::Terrain) else {
-            return;
-        };
+        let size = Vector3::new(width, height, length);
+        if let Some(id) = self.insert_terrain(size, data, Preset::RollingHills, None) {
+            self.select_from_viewport(Some(id));
+            self.terrain.target = Some(id);
+            self.terrain.tool.get_or_insert(TerrainTool::Raise);
+            self.layout.open(Pane::Terrain);
+        }
+    }
+
+    /// Puts a new Terrain of `size` studs with landscape `data` at the end
+    /// of the Workspace, with `preset`'s layers inside, as one undo step
+    /// (`label`, or `Insert <name>`). Its flat ground (a quarter of the way
+    /// up) sits at Y = 0.
+    pub(in crate::app) fn insert_terrain(
+        &mut self,
+        size: Vector3,
+        data: TerrainData,
+        preset: Preset,
+        label: Option<String>,
+    ) -> Option<InstanceId> {
+        let folder = self.project.as_ref()?.folder.clone();
+        let id = self.world.create(ClassName::Terrain).ok()?;
         let workspace = self.world.workspace();
         let name = tree::unique_name(&self.world, workspace, "Terrain");
         let taken = terrain_folders(&self.world);
         let data_folder = axcenity_project::new_terrain_folder(&folder, &name, &taken);
-        // The flat ground (a quarter of the way up) sits at Y = 0.
         let properties = [
-            ("Size", Value::Vector3(Vector3::new(width, height, length))),
+            ("Size", Value::Vector3(size)),
             (
                 "Position",
-                Value::Vector3(Vector3::new(0.0, -0.25 * height, 0.0)),
+                Value::Vector3(Vector3::new(0.0, -0.25 * size.y, 0.0)),
             ),
             ("DataFolder", Value::String(data_folder)),
         ];
@@ -323,8 +341,8 @@ impl EditorApp {
         self.world.set_name(id, &name).expect("just made");
         self.world.set_terrain(id, Arc::new(data));
         // Its layers go inside it before it's placed, so one step adds all.
-        for preset in layers_for(Preset::RollingHills) {
-            if let Some(layer) = new_layer(&mut self.world, id, &preset, height) {
+        for preset in layers_for(preset) {
+            if let Some(layer) = new_layer(&mut self.world, id, &preset, size.y) {
                 let _ = self.world.set_parent(layer, Some(id));
             }
         }
@@ -333,12 +351,8 @@ impl EditorApp {
             parent: workspace,
             index: end,
         };
-        if self.place(id, Some(place), format!("Insert {name}")) {
-            self.select_from_viewport(Some(id));
-            self.terrain.target = Some(id);
-            self.terrain.tool.get_or_insert(TerrainTool::Raise);
-            self.layout.open(Pane::Terrain);
-        }
+        let label = label.unwrap_or_else(|| format!("Insert {name}"));
+        self.place(id, Some(place), label).then_some(id)
     }
 
     /// Play starts: strokes, previews and jobs belong to editing.

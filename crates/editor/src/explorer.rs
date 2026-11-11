@@ -209,6 +209,9 @@ pub enum Action {
     ExportPackage(InstanceId),
     /// Save the Part `id`'s look as a material file.
     SaveMaterial(InstanceId),
+    /// Give the script inside an object `id` a copy of its file of its own
+    /// (G2), so changing it leaves the other copies alone.
+    MakeUnique(InstanceId),
     /// During Play, keep every change to `id` after Stop (see `play::kept`).
     KeepPlayChanges(InstanceId),
     /// Apply, revert or unpack a placed prefab copy (Phase 49).
@@ -1086,6 +1089,8 @@ enum RowCommand {
     InsertScript(ClassName),
     /// Open a script in a tab.
     Open,
+    /// Give a script inside an object a file of its own.
+    MakeUnique,
     /// Animate a Part, Model or UI element (see [`Action::Animate`]).
     Animate,
     /// Export it as a prefab in an asset package.
@@ -1116,6 +1121,7 @@ impl RowCommand {
             RowCommand::Animate => Some(Action::Animate(id)),
             RowCommand::ExportPackage => Some(Action::ExportPackage(id)),
             RowCommand::SaveMaterial => Some(Action::SaveMaterial(id)),
+            RowCommand::MakeUnique => Some(Action::MakeUnique(id)),
             RowCommand::Prefab(action) => Some(Action::Prefab(action)),
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
             RowCommand::Delete => Some(Action::Delete(id)),
@@ -1138,6 +1144,20 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             .clicked()
     {
         chosen = Some(RowCommand::Open);
+    }
+    let in_object = world
+        .get(id)
+        .is_some_and(|instance| instance.source_file().is_some());
+    if in_object
+        && ui
+            .button(theme::with_icon(icons::COPY, "Make Unique"))
+            .on_hover_text(
+                "Copy its file next to the one its copies share, and use the copy, so changing \
+                 it leaves the others alone",
+            )
+            .clicked()
+    {
+        chosen = Some(RowCommand::MakeUnique);
     }
     let can_animate = world
         .get(id)
@@ -1283,7 +1303,9 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             "Save it as a prefab, with every model, texture, sound and clip it uses, in one \
              .axpkg file to import into another project.",
         )
-        .on_disabled_hover_text("Only parts, Models and Folders in the Workspace can be exported.")
+        .on_disabled_hover_text(
+            "Only parts, Models, Folders and UI in the Workspace can be exported.",
+        )
         .clicked()
     {
         chosen = Some(RowCommand::ExportPackage);

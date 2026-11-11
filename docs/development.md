@@ -2,7 +2,7 @@
 
 How to keep builds and test runs short, down to a laptop (the numbers below are from a 6-core Ryzen 5 5500U with 14 GB of RAM).
 
-**Testing is local.** GitHub Actions is intentionally turned off while the architecture changes ([development policy](development-policy.md#continuous-integration)), so the checks on this page, run on your own machine, are the only verification. Significant engine changes need local tests, and a pull request says what ran and on which OS.
+**Testing is local.** GitHub Actions runs only for releases, and CI only by hand, while the architecture changes ([development policy](development-policy.md#continuous-integration)), so the checks on this page, run on your own machine, are the only verification. Significant engine changes need local tests, and a pull request says what ran and on which OS.
 
 ## Tools
 
@@ -38,7 +38,7 @@ Keep single tests short. `axcenity-player`'s `every_example_renders` draws every
 
 ## Checking another platform
 
-GitHub Actions is **intentionally disabled**. The CI workflow (`.github/workflows/ci.yml`: format, the workspace-hack check, and build, the player having no editor code, clippy and every test on Windows, macOS and Linux) and the Release workflow are both turned off in the repository's Actions settings. The engine is going through large architectural changes, and the priority is stability and development speed over keeping CI infrastructure running. The workflow files stay so CI can be turned back on once the architecture and core systems are stable ([development policy](development-policy.md#continuous-integration)); until then, don't add jobs to them.
+GitHub Actions runs only for releases. The CI workflow (`.github/workflows/ci.yml`: format, the workspace-hack check, and build, the player having no editor code, clippy and every test on Windows, macOS and Linux) runs only when started by hand (**Actions > CI > Run workflow**), never on pushes or pull requests. The Release workflow runs for release tags ([releases.md](project/releases.md#cutting-a-release)). The priority is stability and development speed over keeping CI infrastructure running, and minutes are spent only on purpose ([development policy](development-policy.md#continuous-integration)). Don't add jobs to `ci.yml`; check any workflow change locally with `python3 scripts/check-workflows.py` first.
 
 Check on the computers themselves instead. Windows and Linux are the primary platforms; macOS is secondary. The scripts also cover what CI never could (the game on a real GPU). From the repository root:
 
@@ -69,6 +69,10 @@ Each copy was also kept, so the target folder grew to 23 GB instead of 9 GB.
 - **After adding, removing or changing a dependency**, run `cargo hakari generate`. For a new crate, also run `cargo hakari manage-deps`. To check, run `cargo hakari generate --diff` and `cargo hakari manage-deps --dry-run` (what CI's "Workspace hack" job ran); both print nothing when it's up to date.
 - Settings are in `.config/hakari.toml`. `http` and `httparse` are left out (`final-excludes`) so the player doesn't depend on the editor's HTTP crates, and `winit` so the dedicated server builds no window crates (roadmap M8; check with `cargo tree -p axcenity-server -e normal -i winit`).
 - The player still gets the union of features (for example `winit`'s default features, which the editor alone wouldn't turn on). Release builds already did this, since they build the editor and player in one command.
+
+## Patched dependencies
+
+`vendor/` holds copies of crates.io releases with small fixes of ours, used through `[patch.crates-io]` in the workspace `Cargo.toml` and left out of the workspace. `vendor/README.md` lists each change and how to carry it over when upgrading. Today that's rapier3d.
 
 ## Build settings
 

@@ -1000,6 +1000,19 @@ impl Network {
                 replica.set_terrain(id, data.clone());
             }
         }
+        // Scripts inside objects (G2) that aren't in the server's world
+        // yet: templates the server will clone, and those in models not
+        // streamed in. They start with their file's code when they arrive.
+        let objects: BTreeSet<InstanceId> = self
+            .client_scripts
+            .iter()
+            .filter(|code| {
+                world
+                    .get(code.instance)
+                    .is_some_and(|i| i.source_file().is_some())
+            })
+            .map(|code| code.instance)
+            .collect();
         scripts.become_client(world, replica, you);
         scripts.note_streaming(world, &applied.streamed_out, &[]);
         let mut modules_first = Vec::new();
@@ -1010,11 +1023,21 @@ impl Network {
                 }
             }
         }
-        let started = modules_first.len();
         for code in modules_first {
             scripts.start_script(world, code.instance, &code.path, &code.source);
         }
-        let missing = self.client_scripts.len() - started;
+        let mut missing = 0;
+        for code in &self.client_scripts {
+            if objects.contains(&code.instance) {
+                scripts.know_code(&code.path, &code.source);
+            } else if !world.contains(code.instance) {
+                missing += 1;
+            }
+        }
+        // What the server placed before this device joined, such as a
+        // clone of a template, starts with its file's code.
+        let root = world.root();
+        scripts.start_arrived(world, &[root]);
         if missing > 0 {
             self.log.push(format!(
                 "warning: {missing} of this game's scripts aren't in the server's world"

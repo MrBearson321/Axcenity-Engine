@@ -267,6 +267,7 @@ impl EditorApp {
             }
             stats.lua_bytes = session.load().lua_bytes;
             stats.instances = session.world().len();
+            stats.breakdown = self.profiler.breakdown().cloned();
         }
         if let Some(readout) = self.profiler.readout() {
             stats.low_fps = readout.low_fps;

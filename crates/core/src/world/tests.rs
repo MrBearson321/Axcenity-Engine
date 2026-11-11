@@ -721,6 +721,38 @@ fn copy_from_brings_a_tree_over_from_another_world_without_its_scripts() {
 }
 
 #[test]
+fn a_copy_from_another_world_keeps_scripts_inside_objects() {
+    let mut level = World::new();
+    let workspace = level.workspace();
+    let model = level.create(ClassName::Model).unwrap();
+    level.set_parent(model, Some(workspace)).unwrap();
+    let open = level.create(ClassName::Script).unwrap();
+    level.set_name(open, "Open").unwrap();
+    level
+        .set_property(
+            open,
+            "SourceFile",
+            Value::String("objects/Door/Open.server.lua".into()),
+        )
+        .unwrap();
+    level.set_parent(open, Some(model)).unwrap();
+    let inside = part_in(&mut level, open, "Inside");
+    let service_script = level.create(ClassName::Script).unwrap();
+    level.set_parent(service_script, Some(model)).unwrap();
+
+    let mut world = World::new();
+    let copy = world.copy_from(&level, model).unwrap();
+    let children = world.get(copy).unwrap().children().to_vec();
+    assert_eq!(children.len(), 1, "a script with no SourceFile is left out");
+    let script = world.get(children[0]).unwrap();
+    assert_eq!(script.name(), "Open");
+    assert_eq!(script.source_file(), Some("objects/Door/Open.server.lua"));
+    assert_eq!(script.children().len(), 1, "with what's inside it");
+    assert!(level.get(inside).is_some());
+    assert_eq!(level.get(service_script).unwrap().source_file(), None);
+}
+
+#[test]
 fn a_replica_holds_the_servers_instances_at_their_ids_and_its_own_apart() {
     let mut server = World::new();
     let workspace = server.workspace();

@@ -1,0 +1,7 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "improvement"
+subsystem = "assets"
+title = "Assets keep stable IDs in sidecar files, so references survive renames and moves"
+features = ["assets.asset-ids"]
+prs = [50, 78]
+evidence = "reconstructed"

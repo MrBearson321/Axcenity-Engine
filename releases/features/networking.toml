@@ -1,0 +1,25 @@
+# The networking subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "networking.multiplayer"
+name = "Multiplayer"
+subsystem = "networking"
+description = "Host and join games over UDP, with replication, network ownership and chat."
+status = "active"
+docs = "docs/architecture/networking.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 0e529208 (Transport, Hosting and Joining), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "networking.dedicated-server"
+name = "Dedicated server"
+subsystem = "networking"
+description = "Run a game without a window as axcenity-server."
+status = "active"
+docs = "docs/architecture/networking.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 0e529208 (Transport, Hosting and Joining), after v0.1.0-alpha.3"

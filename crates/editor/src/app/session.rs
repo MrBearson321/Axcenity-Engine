@@ -273,6 +273,20 @@ impl EditorApp {
             })
             .collect();
         let ui_graphs = ui_graphs::documents(&project.world, project.ui_graphs);
+        // Scripts inside objects (G2) are found again in the world each
+        // Play, as copies come and go while editing; their files are kept
+        // by path.
+        let world = &project.world;
+        let (objects, scripts): (Vec<_>, Vec<_>) =
+            project.scripts.into_iter().partition(|script| {
+                world
+                    .get(script.instance)
+                    .is_some_and(|instance| instance.source_file().is_some())
+            });
+        let object_files = objects
+            .into_iter()
+            .map(|script| (script.path, script.source))
+            .collect();
         // A level that's the start level by name is opened as it.
         let start_level = project.manifest.start_level;
         let level = level.filter(|name| *name != start_level);
@@ -295,8 +309,9 @@ impl EditorApp {
             folder: project.folder,
             stylesheets,
             stylesheet_texts,
-            scripts: project.scripts,
+            scripts,
             block_scripts,
+            object_files,
             ui_graphs,
             remembered_blocks: HashMap::new(),
             world_text,
@@ -460,6 +475,14 @@ impl EditorApp {
             &self.world,
             &mut self.output,
         );
+        // With the scripts inside objects in the world being played (G2).
+        let mut problems = Vec::new();
+        let objects = axcenity_project::object_scripts(&project.folder, game, &mut problems);
+        for problem in &problems {
+            self.output
+                .error(format!("A script won't run: {}", files::chain(problem)));
+        }
+        let scripts = axcenity_project::in_start_order(game, scripts, objects);
         let (position, orientation) = self.viewport.camera_view();
         match Play::start(
             game,
@@ -855,6 +878,9 @@ impl EditorApp {
             session.frame(seconds, input, motion, camera, &mut self.output)
         });
         if let Some(cost) = session.cost() {
+            if self.profiler.memory_due() {
+                self.profiler.record_memory(session.memory());
+            }
             self.profiler.record_game(cost, session.load());
         }
         let network = session
@@ -1034,7 +1060,8 @@ impl EditorApp {
             | Discard::OpenSample(_)
             | Discard::CloseProject
             | Discard::NewProject
-            | Discard::OpenLevel(_) => self.unsaved(),
+            | Discard::OpenLevel(_)
+            | Discard::Update(_) => self.unsaved(),
         };
         if unsaved {
             self.asking = Some(discard);
@@ -1056,7 +1083,8 @@ impl EditorApp {
                 | Discard::OpenSample(_)
                 | Discard::CloseProject
                 | Discard::NewProject
-                | Discard::OpenLevel(_) => self.save().then_some(discard),
+                | Discard::OpenLevel(_)
+                | Discard::Update(_) => self.save().then_some(discard),
             },
             Answer::DontSave => {
                 if let Discard::CloseTab(path) = &discard {
@@ -1103,6 +1131,7 @@ impl EditorApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Discard::OpenAnother => self.open_with_dialog(ctx),
+            Discard::Update(action) => self.hand_over_update(ctx, action),
             Discard::OpenSample(folder) => self.begin_open(ctx, &folder),
             Discard::CloseProject => self.close_project(),
             // The start screen's New Project dialog, once this one closes.
@@ -1208,6 +1237,7 @@ impl EditorApp {
             }
             Discard::CloseProject => (project, "closing it"),
             Discard::OpenLevel(_) => (project, "opening another level"),
+            Discard::Update(_) => (project, "restarting to update"),
             Discard::CloseTab(path) => (axcenity_project::script_name(path), "closing it"),
         };
         // What isn't saved: only the tab, when closing a tab.

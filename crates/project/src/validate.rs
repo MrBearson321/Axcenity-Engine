@@ -4,7 +4,7 @@
 //! says where its reference is written ([`Site`]), so `asset_fix.rs` can
 //! work out a fix.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -57,6 +57,9 @@ pub enum FindingKind {
     ImportFailure,
     /// An asset file that names another asset that isn't there.
     BrokenDependency,
+    /// A file in `objects/` no script inside an object takes its code from
+    /// (G2): left behind when its last script was deleted.
+    UnusedFile,
 }
 
 impl FindingKind {
@@ -67,6 +70,7 @@ impl FindingKind {
             Self::InvalidReference => "invalid-reference",
             Self::ImportFailure => "import-failure",
             Self::BrokenDependency => "broken-dependency",
+            Self::UnusedFile => "unused-file",
         }
     }
 
@@ -76,6 +80,7 @@ impl FindingKind {
             Self::InvalidReference => "Invalid reference",
             Self::ImportFailure => "Import failure",
             Self::BrokenDependency => "Broken dependency",
+            Self::UnusedFile => "Unused file",
         }
     }
 }
@@ -170,6 +175,12 @@ pub enum AssetKind {
     Material,
     Prefab,
     Folder,
+    /// A Script's code: `.server.lua` or `.server.blocks.json` (G2).
+    ServerScript,
+    /// A LocalScript's code: `.client.lua` or `.client.blocks.json`.
+    ClientScript,
+    /// A ModuleScript's code: `.module.lua`.
+    ModuleScript,
 }
 
 impl AssetKind {
@@ -183,6 +194,9 @@ impl AssetKind {
             Self::Material => "a .material.json file",
             Self::Prefab => "a .prefab.json file",
             Self::Folder => "a folder inside the project",
+            Self::ServerScript => "a .server.lua or .server.blocks.json file",
+            Self::ClientScript => "a .client.lua or .client.blocks.json file",
+            Self::ModuleScript => "a .module.lua file",
         }
     }
 
@@ -208,7 +222,18 @@ impl AssetKind {
             Self::Material => is_material_file(path),
             Self::Prefab => path.to_ascii_lowercase().ends_with(PREFAB_SUFFIX),
             Self::Folder => true,
+            Self::ServerScript => crate::source_file_fits(ClassName::Script, path),
+            Self::ClientScript => crate::source_file_fits(ClassName::LocalScript, path),
+            Self::ModuleScript => crate::source_file_fits(ClassName::ModuleScript, path),
         }
+    }
+
+    /// Whether it's the code of a script inside an object.
+    pub fn is_script(self) -> bool {
+        matches!(
+            self,
+            Self::ServerScript | Self::ClientScript | Self::ModuleScript
+        )
     }
 }
 
@@ -227,6 +252,7 @@ pub fn check_assets_in_level(folder: &Path, world: &World, open: Option<&str>) -
         loader: Assets::new(folder),
         findings: Vec::new(),
         models: HashMap::new(),
+        sourced: HashSet::new(),
     };
     scan.world(world, None);
     scan.levels(open);
@@ -235,6 +261,7 @@ pub fn check_assets_in_level(folder: &Path, world: &World, open: Option<&str>) -
     scan.state_machines();
     scan.data_tables();
     scan.unreferenced_models();
+    scan.unused_object_files();
     scan.findings.sort();
     scan.findings.dedup();
     Report {
@@ -248,6 +275,8 @@ struct Scan {
     findings: Vec<Finding>,
     /// Whole-file model loads, keyed by the file path (no `#` pick).
     models: HashMap<String, Result<Vec<String>, String>>,
+    /// Every file a script inside an object names in its `SourceFile`.
+    sourced: HashSet<String>,
 }
 
 impl Scan {
@@ -639,6 +668,9 @@ impl Scan {
         } else {
             path
         };
+        if kind.is_script() {
+            self.sourced.insert(path.to_owned());
+        }
         let from_asset = !matches!(site, Site::Instance { .. });
         let (file, pick) = match kind {
             AssetKind::Model => Pick::of_mesh_id(path),
@@ -726,7 +758,8 @@ impl Scan {
                     );
                 }
             }
-            AssetKind::Audio | AssetKind::Material | AssetKind::Prefab | AssetKind::Folder => {}
+            kind if kind.is_script() => self.script_ref(owner, property, path, site, kind),
+            _ => {}
         }
     }
 
@@ -873,6 +906,59 @@ impl Scan {
         result
     }
 
+    /// A script inside an object takes its code from the file at `path`,
+    /// which is there: it mustn't be in `scripts/`, where it would also run
+    /// once as a service script, and a block script must translate.
+    fn script_ref(&mut self, owner: &str, property: &str, path: &str, site: Site, kind: AssetKind) {
+        if path.starts_with(&format!("{}/", crate::SCRIPTS_FOLDER)) {
+            self.push(
+                FindingKind::InvalidReference,
+                owner.to_owned(),
+                path.to_owned(),
+                format!(
+                    "`{property}` names `{path}`, in the scripts folder, so it also runs once on its own as a service script; move it to {}/",
+                    crate::OBJECTS_FOLDER
+                ),
+                site,
+                Some(kind),
+            );
+            return;
+        }
+        if crate::is_block_script(path)
+            && let Err(err) = crate::read_object_file(&self.folder, path)
+        {
+            self.push(
+                FindingKind::ImportFailure,
+                owner.to_owned(),
+                path.to_owned(),
+                format!("`{property}` names `{path}`, which could not be loaded: {err}"),
+                site,
+                Some(kind),
+            );
+        }
+    }
+
+    /// The script files in `objects/` that no script inside an object names.
+    fn unused_object_files(&mut self) {
+        for path in files_under(&self.folder, crate::OBJECTS_FOLDER) {
+            let script = [
+                AssetKind::ServerScript,
+                AssetKind::ClientScript,
+                AssetKind::ModuleScript,
+            ]
+            .into_iter()
+            .any(|kind| kind.matches(&path));
+            if script && !self.sourced.contains(&path) {
+                self.push_file(
+                    FindingKind::UnusedFile,
+                    path,
+                    "no script inside an object runs it any more; delete it if you don't need it"
+                        .to_owned(),
+                );
+            }
+        }
+    }
+
     fn push(
         &mut self,
         kind: FindingKind,
@@ -908,6 +994,9 @@ pub(crate) fn refs(class: ClassName) -> Vec<(&'static str, AssetKind)> {
         ClassName::Animator => vec![("StateMachine", AssetKind::StateMachine)],
         ClassName::Animation => vec![("Clip", AssetKind::Clip)],
         ClassName::Terrain => vec![("DataFolder", AssetKind::Folder)],
+        ClassName::Script => vec![("SourceFile", AssetKind::ServerScript)],
+        ClassName::LocalScript => vec![("SourceFile", AssetKind::ClientScript)],
+        ClassName::ModuleScript => vec![("SourceFile", AssetKind::ModuleScript)],
         ClassName::SurfaceAppearance => SURFACE_MAPS
             .into_iter()
             .map(|name| (name, AssetKind::Texture))

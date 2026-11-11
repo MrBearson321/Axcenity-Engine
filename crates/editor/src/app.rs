@@ -68,13 +68,16 @@ mod tags;
 mod terrain;
 mod texture_set;
 mod to_terrain;
+mod toolbox;
 mod tree_ops;
 mod ui_graphs;
 mod ui_links;
 mod ui_selection;
+mod update_install;
+mod updates;
 mod version_history;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -123,6 +126,7 @@ use crate::terrain_studio::TerrainStudio;
 use crate::theme::{self, Appearance, filled_icons, icons};
 use crate::thumbnail;
 use crate::toast::{self, Toasts};
+use crate::toolbox_panel::ToolboxPanel;
 use crate::tree::{self, Insertable};
 use crate::ui_designer::{DesignerAction, DesignerScene, GraphPane, UiDesigner};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
@@ -346,6 +350,15 @@ pub struct EditorApp {
     sound_preview: Option<axcenity_audio::AudioEngine>,
     /// The Assets panel, which shares the bottom of the window with Output.
     asset_browser: AssetBrowser,
+    /// The Toolbox tab (`toolbox_panel.rs`, its actions `app/toolbox.rs`).
+    toolbox: ToolboxPanel,
+    /// Update checks and their settings (`app/updates.rs`).
+    updates: updates::Updates,
+    /// The Version Explorer tab (`version_explorer.rs`).
+    version_explorer: crate::version_explorer::VersionExplorer,
+    /// Models the Toolbox got, waiting for the Import dialog: each file in
+    /// the asset directory and the asset key and package it came from.
+    toolbox_imports: HashMap<PathBuf, (String, String)>,
     /// The Animation panel's clips, open clip and preview.
     animation: AnimationStudio,
     /// The Behavior Tree tab and the trees open in it.
@@ -406,6 +419,8 @@ pub struct EditorApp {
     graphics: axcenity_render::GraphicsSettings,
     /// What the GPU can do, read on the first frame that has one.
     capabilities: Option<axcenity_render::Capabilities>,
+    /// The graphics adapter, for the About box's diagnostics.
+    adapter: Option<String>,
     /// Settings > Engine: rebuilding the editor when engine code changes
     /// (a debug editor run from the source tree only; see `engine.rs`).
     rebuilds: Rebuilds,
@@ -477,6 +492,11 @@ impl DockViewer<'_> {
             Pane::Tests => self.app.tests_pane(ui),
             Pane::Plugins => self.app.plugins_pane(ui),
             Pane::ModelStudio => self.app.model_studio_pane(ui, self.render_state),
+            Pane::Toolbox => self.app.toolbox_pane(ui),
+            Pane::VersionExplorer => self
+                .app
+                .version_explorer
+                .show(ui, &axcenity_release::BuildInfo::current()),
             Pane::Script(id) => self.app.script_pane(ui, id),
             Pane::Plugin(id) => self.app.plugin_pane(ui, id, self.render_state),
         }
@@ -685,6 +705,9 @@ enum Discard {
     NewProject,
     /// Opening a level from the Levels panel (`None`: the start level).
     OpenLevel(Option<String>),
+    /// Closing for the updater to install an update or roll back
+    /// (`app/update_install.rs`).
+    Update(axcenity_updater::apply::Action),
 }
 
 /// A screenshot asked for, to make the open project's thumbnail from.
@@ -742,6 +765,11 @@ struct OpenProject {
     /// read or written. Play reads their files again, for the newest code.
     scripts: Vec<ScriptFile>,
     block_scripts: Vec<BlockDocument>,
+    /// The code files of scripts inside objects (G2; a script's
+    /// `SourceFile`), by path, with each file's text as last read or
+    /// written. Copies share a file, so these have no Instance of their
+    /// own: the world says which scripts use each.
+    object_files: BTreeMap<String, String>,
     /// Each ScreenGui's UI Event Graph, as edited (see `app/ui_graphs.rs`).
     ui_graphs: Vec<ui_graphs::UiGraphDocument>,
     /// Blocks switched to Code, by the code file's path, with the code they
@@ -861,6 +889,10 @@ impl EditorApp {
             learn_open: false,
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
+            toolbox: ToolboxPanel::default(),
+            version_explorer: Default::default(),
+            updates: Default::default(),
+            toolbox_imports: HashMap::new(),
             animation: AnimationStudio::default(),
             behavior: BehaviorTreeStudio::default(),
             dialogues: DialogueStudio::default(),
@@ -888,6 +920,7 @@ impl EditorApp {
             nav_mesh: None,
             graphics: axcenity_render::GraphicsSettings::default(),
             capabilities: None,
+            adapter: None,
             rebuilds: Rebuilds {
                 source: EngineSource::find(),
                 ..Rebuilds::default()
@@ -904,6 +937,10 @@ impl EditorApp {
     /// Restores the settings saved by [`eframe::App::save`] (none in tests, or
     /// on the first run) and applies the look.
     pub fn load_settings(&mut self, ctx: &egui::Context, storage: Option<&dyn eframe::Storage>) {
+        // Tests never look at, or tidy, the real app data.
+        if !cfg!(test) {
+            self.update_results_on_start();
+        }
         if let Some(storage) = storage {
             self.appearance = match storage.get_string(APPEARANCE_KEY) {
                 Some(text) => Appearance::from_text(&text),
@@ -964,6 +1001,9 @@ impl EditorApp {
             }
             if let Some(text) = storage.get_string(command_palette::RECENT_COMMANDS_KEY) {
                 self.palette.load_recent(&text);
+            }
+            if let Some(text) = storage.get_string(updates::UPDATES_KEY) {
+                self.updates.prefs = updates::Updates::load(&text);
             }
             if let Some(settings) = storage
                 .get_string(GRAPHICS_KEY)
@@ -1031,6 +1071,7 @@ impl eframe::App for EditorApp {
     /// this now and then, and when the window closes.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(APPEARANCE_KEY, self.appearance.to_text());
+        storage.set_string(updates::UPDATES_KEY, self.updates.to_text());
         let recent: Vec<String> = self
             .recent
             .iter()
@@ -1204,9 +1245,14 @@ impl EditorApp {
         if self.capabilities.is_none()
             && let Some(render_state) = render_state
         {
+            let info = render_state.adapter.get_info();
             self.capabilities = Some(axcenity_render::read_capabilities(
                 &render_state.device,
-                Some(&render_state.adapter.get_info()),
+                Some(&info),
+            ));
+            self.adapter = Some(format!(
+                "{} ({:?}, {:?}, driver {} {})",
+                info.name, info.backend, info.device_type, info.driver, info.driver_info
             ));
         }
         // Engine code changed: rebuild in the background (debug editors only).
@@ -1596,9 +1642,11 @@ impl EditorApp {
         if self.about_open
             && let Some(brand) = &self.brand
         {
-            self.about_open = start::about(ctx, brand);
+            self.about_open = start::about(ctx, brand, self.adapter.as_deref());
         }
         self.follow_sound_preview();
+        self.updates_frame();
+        self.update_install_frame();
         self.settings_window(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();
@@ -1675,6 +1723,8 @@ mod mover_tests;
 mod multi_edit_tests;
 #[cfg(test)]
 mod navigation_tests;
+#[cfg(test)]
+mod object_script_tests;
 #[cfg(test)]
 mod palette_tests;
 #[cfg(test)]

@@ -1,0 +1,61 @@
+# The physics subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "physics.rigid-bodies"
+name = "Rigid-body physics"
+subsystem = "physics"
+description = "Parts collide and fall under gravity (rapier)."
+status = "active"
+docs = "docs/architecture/physics.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/physics in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "physics.constraints"
+name = "Joints, motors and springs"
+subsystem = "physics"
+description = "Constraints between parts, and movers."
+status = "active"
+docs = "docs/architecture/physics.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 8ae590c8 (Joints, Motors and Springs), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "physics.ragdolls"
+name = "Ragdolls"
+subsystem = "physics"
+description = "Characters go limp as ragdolls."
+status = "active"
+docs = "docs/architecture/physics.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 97e1af22 (Ragdolls), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "physics.destruction"
+name = "Destruction"
+subsystem = "physics"
+description = "Parts that fracture and break."
+status = "active"
+docs = "docs/architecture/fracture.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 03468e53 (Destruction), after v0.1.0-alpha.3"
+
+[[feature]]
+id = "physics.vehicles"
+name = "Vehicles and seats"
+subsystem = "physics"
+description = "Seats and driveable vehicles."
+status = "active"
+docs = "docs/architecture/physics.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 2e7fb31b (Vehicles), after v0.1.0-alpha.3"

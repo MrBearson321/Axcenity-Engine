@@ -795,6 +795,17 @@ impl Context {
             .unwrap_or_default()
     }
 
+    /// What a Follow or Track camera follows (`CameraSubject`), if it's one
+    /// of those.
+    pub fn camera_followed(&self) -> Option<InstanceId> {
+        let camera = self.lua.app_data_ref::<Camera>()?;
+        let following = matches!(
+            camera.camera_type,
+            crate::camera::CameraType::Follow | crate::camera::CameraType::Track
+        );
+        camera.subject.filter(|_| following)
+    }
+
     /// Whether scripts hold the camera (any `CameraType` but Custom), so
     /// the host shouldn't fly or orbit it.
     pub fn camera_scripted(&self) -> bool {

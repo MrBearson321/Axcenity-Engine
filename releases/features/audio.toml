@@ -1,0 +1,25 @@
+# The audio subsystem's features. Format: releases/README.md.
+
+[[feature]]
+id = "audio.sound"
+name = "Sound"
+subsystem = "audio"
+description = "Play sounds from scripts and the editor."
+status = "active"
+docs = "docs/scripting/api-sound.md"
+[feature.introduced]
+version = "0.1.0-alpha.3"
+evidence = "verified"
+source = "crates/audio in the tree at tag v0.1.0-alpha.3"
+
+[[feature]]
+id = "audio.buses"
+name = "Audio buses and effects"
+subsystem = "audio"
+description = "Mix sounds through buses with effects."
+status = "active"
+docs = "docs/scripting/api-sound.md"
+[feature.introduced]
+version = "unreleased"
+evidence = "reconstructed"
+source = "commit 89a2c8e4 (Audio Buses and Effects), after v0.1.0-alpha.3"

@@ -1,0 +1,7 @@
+# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
+category = "feature"
+subsystem = "gameplay"
+title = "Humanoids, tools and inventories, health and damage, abilities and effects, dialogue and quests"
+features = ["gameplay.humanoid", "gameplay.tools", "gameplay.abilities", "gameplay.dialogue"]
+commits = ["91f825d5", "9aa0c1d8", "104c7a9a", "8a1bebec", "fcd181d7"]
+evidence = "reconstructed"

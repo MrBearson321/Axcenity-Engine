@@ -31,12 +31,27 @@ else
   NFPM_PRERELEASE_LINE=""
 fi
 
-mkdir -p "$OUT" "$ROOT/packaging/linux/.generated"
+GENERATED="$ROOT/packaging/linux/.generated"
+mkdir -p "$OUT" "$GENERATED"
 export NFPM_VERSION NFPM_PRERELEASE_LINE STAGE ROOT
+
+# install.json for one kind of package (see packaging/stage.py).
+install_marker() {
+  printf '{"schema": 1, "kind": "%s"}\n' "$1"
+}
+
+# The nfpm config for one package format, with its own install.json.
 # envsubst replaces ${VAR}; the template has no other dollars.
-envsubst '${NFPM_VERSION} ${NFPM_PRERELEASE_LINE} ${STAGE} ${ROOT}' \
-  < "$ROOT/packaging/linux/nfpm.yaml.tpl" \
-  > "$ROOT/packaging/linux/.generated/nfpm.yaml"
+nfpm_config() {
+  local kind="$1"
+  INSTALL_JSON="$GENERATED/install-$kind.json"
+  install_marker "$kind" > "$INSTALL_JSON"
+  export INSTALL_JSON
+  envsubst '${NFPM_VERSION} ${NFPM_PRERELEASE_LINE} ${STAGE} ${ROOT} ${INSTALL_JSON}' \
+    < "$ROOT/packaging/linux/nfpm.yaml.tpl" \
+    > "$GENERATED/nfpm-$kind.yaml"
+  echo "$GENERATED/nfpm-$kind.yaml"
+}
 
 python3 - <<'PY'
 from pathlib import Path
@@ -52,19 +67,24 @@ PY
 
 FILE_STEM="AxcenityEditor-${VERSION}-linux-x86_64"
 
-wants deb && nfpm package --config "$ROOT/packaging/linux/.generated/nfpm.yaml" \
-  --packager deb --target "$OUT/${FILE_STEM}.deb"
-wants rpm && nfpm package --config "$ROOT/packaging/linux/.generated/nfpm.yaml" \
-  --packager rpm --target "$OUT/${FILE_STEM}.rpm"
-wants archlinux && nfpm package --config "$ROOT/packaging/linux/.generated/nfpm.yaml" \
-  --packager archlinux --target "$OUT/${FILE_STEM}.pkg.tar.zst"
+if wants deb; then
+  nfpm package --config "$(nfpm_config deb)" --packager deb --target "$OUT/${FILE_STEM}.deb"
+fi
+if wants rpm; then
+  nfpm package --config "$(nfpm_config rpm)" --packager rpm --target "$OUT/${FILE_STEM}.rpm"
+fi
+if wants archlinux; then
+  nfpm package --config "$(nfpm_config pacman)" --packager archlinux --target "$OUT/${FILE_STEM}.pkg.tar.zst"
+fi
 
-# Portable tree: extract and run ./axcenity-editor.
+# Portable tree: extract and run ./axcenity-editor. It is also the update
+# payload the editor installs, so it keeps the stage's install.json.
 if wants tar; then
   TAR_DIR="$OUT/${FILE_STEM}"
   rm -rf "$TAR_DIR"
   mkdir -p "$TAR_DIR"
   cp -a "$STAGE/." "$TAR_DIR/"
+  install_marker linux-tarball > "$TAR_DIR/install.json"
   mark_executables "$TAR_DIR"
   tar -C "$OUT" -czf "$OUT/${FILE_STEM}.tar.gz" "$(basename "$TAR_DIR")"
   rm -rf "$TAR_DIR"
@@ -81,6 +101,7 @@ rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" \
   "$APPDIR/usr/share/icons/hicolor/256x256/apps" "$APPDIR/usr/share/doc/axcenity-editor"
 cp -a "$STAGE/." "$APPDIR/usr/bin/"
+install_marker appimage > "$APPDIR/usr/bin/install.json"
 mark_executables "$APPDIR/usr/bin"
 cp "$ROOT/packaging/linux/AppRun" "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"

@@ -940,6 +940,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Sound,
+        "RollOffMode",
+        "How a spatial sound gets quieter between RollOffMinDistance and RollOffMaxDistance (`Enum.RollOffMode`): Inverse (the default, as sound behaves in the open: half as loud at twice the min distance), Linear, LinearSquare (quieter sooner) or InverseTapered (Inverse, fading out smoothly before the max distance).",
+    ),
+    (
+        ClassName::SoundService,
+        "Occlusion",
+        "If true (the default), solid parts between a spatial sound and the camera muffle it: each wall, up to three, halves it and takes off more of the highs.",
+    ),
+    (
+        ClassName::Sound,
         "SoundGroup",
         "The SoundGroup it plays through, so that group's Volume and effects (and its parent groups') apply to it. nil plays it straight out.",
     ),
@@ -1227,6 +1237,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Workspace,
         "MaxSpawnedDecals",
         "The most decals `workspace:SpawnDecal` keeps at once on each side: 200 by default. Past it, the oldest goes first.",
+    ),
+    (
+        ClassName::Workspace,
+        "PhysicsInterpolation",
+        "On (the default), moving parts are drawn smoothly between physics steps, which run 60 times a second, so they don't move in steps on faster screens. What's drawn trails the simulation by under a step; scripts, touches and the network still see the stepped values. Off, parts are drawn where the last step left them.",
     ),
     (
         ClassName::Workspace,
@@ -3066,6 +3081,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Players,
         "LeaderboardEnabled",
         "If false, the default leaderboard isn't drawn, for a game that makes its own. It shows each Player's `leaderstats` Folder of Value objects, top right, and Tab shows and hides it.",
+    ),
+    (
+        ClassName::Script,
+        "SourceFile",
+        "For a script inside an object: the project file its code is in, such as `objects/Door/Open.server.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.",
+    ),
+    (
+        ClassName::LocalScript,
+        "SourceFile",
+        "For a script inside an object: the project file its code is in, such as `objects/Door/Open.client.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.",
+    ),
+    (
+        ClassName::ModuleScript,
+        "SourceFile",
+        "For a script inside an object: the project file its code is in, such as `objects/Door/Open.module.lua`, which every copy shares. Empty for a script in the `scripts` folder. Changing it while the game runs doesn't change the code that runs.",
     ),
     (
         ClassName::TextChatService,

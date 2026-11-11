@@ -11,14 +11,14 @@ use axcenity_mcp::{
     Args, Class, Code, Kind, Outcome, Param, Profile, ToolError, ToolSpec, closest,
 };
 
-use super::super::EditorApp;
+use super::Host;
 use super::refs::{label, path, quoted, resolve};
 use super::{CURSOR, LIMIT};
 
 pub const SPEC: ToolSpec = ToolSpec {
     name: "scene_inspect",
     title: "Inspect scene",
-    summary: "Browse the object tree under root, or search it by class, name, tag or distance; one line per object.",
+    summary: "Browse the object tree, or search it by class, name, tag or distance.",
     profile: Profile::Lite,
     class: Class::Read,
     idempotent: true,
@@ -26,22 +26,14 @@ pub const SPEC: ToolSpec = ToolSpec {
         Param::optional(
             "root",
             Kind::String,
-            "where to look: ID or path; default Workspace, \"game\" for everything",
+            "ID or path; default Workspace; game for all",
         ),
-        Param::optional("depth", Kind::Integer, "tree levels to show, default 2"),
-        Param::optional(
-            "class",
-            Kind::String,
-            "only this class or its subclasses (BasePart, Light, Script...)",
-        ),
-        Param::optional("name", Kind::String, "only names containing this"),
-        Param::optional("tag", Kind::String, "only objects with this tag"),
-        Param::optional(
-            "near",
-            Kind::Vector3,
-            "only objects within radius of this point",
-        ),
-        Param::optional("radius", Kind::Number, "studs from near, default 50"),
+        Param::optional("depth", Kind::Integer, "tree levels, default 2"),
+        Param::optional("class", Kind::String, "class or base (BasePart...)"),
+        Param::optional("name", Kind::String, "name contains"),
+        Param::optional("tag", Kind::String, "has tag"),
+        Param::optional("near", Kind::Vector3, "within radius of [x,y,z]"),
+        Param::optional("radius", Kind::Number, "default 50"),
         LIMIT,
         CURSOR,
     ],
@@ -52,8 +44,8 @@ const MAX_DEPTH: u64 = 12;
 const DEFAULT_LIMIT: usize = 60;
 const MAX_LIMIT: usize = 500;
 
-pub fn call(app: &mut EditorApp, args: &Args) -> Outcome {
-    let world = &app.world;
+pub fn call(host: &mut Host, args: &Args) -> Outcome {
+    let world = &host.app.world;
     let root = match args.str("root") {
         Some(text) => resolve(world, text)?,
         None => world.workspace(),

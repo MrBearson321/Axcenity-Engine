@@ -6,7 +6,10 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use axcenity_mcp::{Class, Job, Kind, Param, Profile, Setup, ToolError, ToolSpec, serve};
+use axcenity_mcp::{
+    Args, Class, Job, Kind, Param, Profile, PromptArg, PromptSpec, ResourceSpec, Setup, ToolError,
+    ToolSpec, serve,
+};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream, Lines};
 
@@ -28,6 +31,51 @@ static BREAK: ToolSpec = ToolSpec {
     class: Class::Destructive,
     idempotent: false,
     params: &[Param::required("ids", Kind::Strings, "objects")],
+};
+
+static BUILD: PromptSpec = PromptSpec {
+    name: "build",
+    title: "Build something",
+    description: "Steps for building what you describe.",
+    args: &[PromptArg {
+        name: "goal",
+        about: "what to build",
+        required: true,
+    }],
+    render: build_text,
+};
+
+fn build_text(args: &Args, tools: &[&'static ToolSpec]) -> String {
+    format!(
+        "Build {} with {} tools.",
+        args.str("goal").unwrap_or_default(),
+        tools.len()
+    )
+}
+
+static SCENE: ResourceSpec = ResourceSpec {
+    uri: "test://scene",
+    name: "scene",
+    title: "Scene",
+    description: "The scene tree.",
+    tool: "scene_inspect",
+};
+
+static UNDER: ResourceSpec = ResourceSpec {
+    uri: "test://under/{root}",
+    name: "under",
+    title: "Under an object",
+    description: "The tree under one object.",
+    tool: "scene_inspect",
+};
+
+/// Mirrors a tool this server doesn't list, so it isn't listed either.
+static HIDDEN: ResourceSpec = ResourceSpec {
+    uri: "test://hidden",
+    name: "hidden",
+    title: "Hidden",
+    description: "Not listed.",
+    tool: "docs",
 };
 
 struct Client {
@@ -91,6 +139,8 @@ fn start_pair() -> Client {
         version: "1.0.0".into(),
         instructions: "Use scene_inspect first.".into(),
         tools: vec![&LOOK, &BREAK],
+        prompts: vec![&BUILD],
+        resources: vec![&SCENE, &UNDER, &HIDDEN],
     };
     tokio::spawn(async move { serve(setup, jobs, (server_reads, server_writes)).await });
     Client {
@@ -116,6 +166,8 @@ async fn legacy_client() -> Client {
     assert_eq!(init["result"]["serverInfo"]["name"], "axcenity");
     assert_eq!(init["result"]["instructions"], "Use scene_inspect first.");
     assert!(init["result"]["capabilities"]["tools"].is_object());
+    assert!(init["result"]["capabilities"]["prompts"].is_object());
+    assert!(init["result"]["capabilities"]["resources"].is_object());
     client
         .send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
         .await;
@@ -136,9 +188,11 @@ async fn a_2025_client_lists_tools_with_their_annotations_and_flat_schemas() {
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["scene_inspect", "object_delete"]);
     assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
-    assert_eq!(tools[0]["annotations"]["destructiveHint"], false);
+    // Defaults aren't repeated: a read-only tool's other hints mean nothing.
+    assert!(tools[0]["annotations"]["destructiveHint"].is_null());
     assert_eq!(tools[0]["annotations"]["openWorldHint"], false);
     assert_eq!(tools[1]["annotations"]["destructiveHint"], true);
+    assert!(tools[1]["annotations"]["readOnlyHint"].is_null());
     assert_eq!(
         tools[1]["inputSchema"],
         json!({
@@ -240,4 +294,69 @@ async fn a_2026_client_discovers_the_server_and_calls_without_a_handshake() {
         .await;
     assert_eq!(call["result"]["resultType"], "complete", "{call}");
     assert_eq!(text_of(&call), "scene_inspect for Modern Client with {}");
+}
+
+#[tokio::test]
+async fn prompts_are_listed_and_filled_in_with_their_arguments() {
+    let mut client = legacy_client().await;
+    let list = client.request("prompts/list", json!({})).await;
+    let prompt = &list["result"]["prompts"][0];
+    assert_eq!(prompt["name"], "build", "{list}");
+    assert_eq!(prompt["arguments"][0]["name"], "goal");
+    assert_eq!(prompt["arguments"][0]["required"], true);
+    let got = client
+        .request(
+            "prompts/get",
+            json!({"name": "build", "arguments": {"goal": "a hut"}}),
+        )
+        .await;
+    let message = &got["result"]["messages"][0];
+    assert_eq!(message["role"], "user", "{got}");
+    assert_eq!(message["content"]["text"], "Build a hut with 2 tools.");
+    let missing = client
+        .request("prompts/get", json!({"name": "build", "arguments": {}}))
+        .await;
+    assert_eq!(missing["error"]["code"], -32602, "{missing}");
+    assert!(
+        missing["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("needs goal"),
+        "{missing}"
+    );
+}
+
+#[tokio::test]
+async fn resources_mirror_read_tools_and_reading_one_runs_its_tool() {
+    let mut client = legacy_client().await;
+    let list = client.request("resources/list", json!({})).await;
+    let uris: Vec<&str> = list["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["uri"].as_str().unwrap())
+        .collect();
+    assert_eq!(uris, ["test://scene"], "{list}");
+    let templates = client.request("resources/templates/list", json!({})).await;
+    assert_eq!(
+        templates["result"]["resourceTemplates"][0]["uriTemplate"], "test://under/{root}",
+        "{templates}"
+    );
+    let read = client
+        .request(
+            "resources/read",
+            json!({"uri": "test://under/Workspace%2FHouse"}),
+        )
+        .await;
+    let contents = &read["result"]["contents"][0];
+    assert_eq!(contents["uri"], "test://under/Workspace%2FHouse", "{read}");
+    assert_eq!(
+        contents["text"],
+        r#"scene_inspect for Test Client with {"root":"Workspace/House"}"#
+    );
+    // The engine's error, and URIs that aren't resources here.
+    for uri in ["test://under/nowhere", "test://hidden", "test://other"] {
+        let read = client.request("resources/read", json!({"uri": uri})).await;
+        assert!(read["error"]["message"].is_string(), "{uri}: {read}");
+    }
 }

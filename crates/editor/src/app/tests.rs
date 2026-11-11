@@ -608,6 +608,10 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::Sequencer => app.sequencer_pane(ui),
                         Pane::Plugins => app.plugins_pane(ui),
                         Pane::ModelStudio => app.model_studio_pane(ui, None),
+                        Pane::Toolbox => app.toolbox_pane(ui),
+                        Pane::VersionExplorer => app
+                            .version_explorer
+                            .show(ui, &axcenity_release::BuildInfo::current()),
                         Pane::Scene | Pane::Script(_) | Pane::Plugin(_) => {}
                     }
                     fit = Some((ui.min_rect(), room));

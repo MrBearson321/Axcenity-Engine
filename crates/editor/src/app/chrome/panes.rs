@@ -120,6 +120,7 @@ impl EditorApp {
                 }
             }
             Some(BrowserAction::Import { image_folder }) => self.import_with_dialog(image_folder),
+            Some(BrowserAction::OpenToolbox) => self.open_toolbox(None),
             Some(BrowserAction::SavePrefab) => self.save_prefab(),
             Some(BrowserAction::RenamePrefab { path, name }) => self.rename_prefab(&path, &name),
             Some(BrowserAction::DuplicatePrefab { path }) => self.duplicate_prefab(&path),
@@ -998,6 +999,13 @@ impl EditorApp {
                             poses: sequence
                                 .map(crate::sequencer::Preview::poses)
                                 .or(self.play.as_ref().map(|play| play.poses())),
+                            // A Sequencer preview draws its own poses, not
+                            // the game's.
+                            blends: self
+                                .play
+                                .as_ref()
+                                .filter(|_| sequence.is_none())
+                                .map(|play| play.blends()),
                             terrain_brush,
                             constraint_pick: self
                                 .constraint_tool

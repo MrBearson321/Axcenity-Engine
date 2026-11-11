@@ -1,0 +1,13 @@
+# Reconstructed 2026-11-11 from the tag and GitHub's API.
+version = "0.1.0-alpha.1"
+date = "2026-10-20"
+title = "First alpha tag (never released)"
+summary = "The tag exists, but no GitHub release was made from it: the release workflow didn't exist yet."
+published = false
+note = "Date is the tagged commit's (UTC); the tag is a lightweight tag with no date of its own."
+commit = "2e80234c916fecf9ad7bdaecf96387aa0258c32c"
+
+[formats]
+project = 2
+world = 1
+axgame = 1

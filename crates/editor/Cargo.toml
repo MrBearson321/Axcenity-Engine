@@ -22,6 +22,7 @@ axcenity-physics.workspace = true
 axcenity-plugins.workspace = true
 axcenity-procedural.workspace = true
 axcenity-project.workspace = true
+axcenity-release.workspace = true
 # Its debug views (View > View Mode) are the editor's only; the player leaves them out.
 axcenity-render = { workspace = true, features = ["debug-views"] }
 axcenity-save.workspace = true
@@ -32,6 +33,8 @@ axcenity-sim.workspace = true
 axcenity-terrain.workspace = true
 axcenity-testing.workspace = true
 axcenity-toolbox.workspace = true
+# Downloading, staging and handing over updates (Settings > Updates).
+axcenity-updater = { workspace = true, features = ["http"] }
 axcenity-ui.workspace = true
 anyhow.workspace = true
 eframe.workspace = true
@@ -65,6 +68,9 @@ hot-patch = ["dep:dioxus-cli-config", "dep:dioxus-devtools", "dep:subsecond"]
 [dev-dependencies]
 # Draws editor UI offscreen in tests (see `snapshot.rs`).
 pollster.workspace = true
+# Builds update archives for the install tests (`app/update_install.rs`).
+flate2.workspace = true
+tar.workspace = true
 
 [lints]
 workspace = true

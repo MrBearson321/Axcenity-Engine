@@ -1,21 +1,32 @@
 name: Release
 
+# Runs only for a release tag, or by hand: never on pushes or pull requests.
+# A tag run checks everything cheap on Linux first, then builds, packages,
+# signs and ends in a DRAFT release that a person publishes. Nothing here
+# publishes on its own. How to cut a release: docs/project/releases.md.
+#
+# No build cache, on purpose: a cache saved by one tag can't be restored by
+# the next (caches are per ref), so it would only cost storage. Releases are
+# rare and the runners are free, so every release builds from scratch.
 on:
   push:
     tags:
       - "v*"
+  # Run workflow from a branch: a dry run. From a tag (pick it under "Use
+  # workflow from"): that tag's release, built again, unless dry run is on.
+  # Every job checks out the ref the run was started on, never another.
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version without the v prefix (for example 0.1.0-alpha.1)"
-        required: true
-        type: string
+      dry_run:
+        description: "Dry run: only check the release files and the signing key (about two Linux minutes)"
+        type: boolean
+        default: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.workflow }}-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -24,41 +35,147 @@ env:
   NFPM_VERSION: "2.48.0"
 
 jobs:
-  version:
-    name: Version
+  validate:
+    name: Validate
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.set.outputs.version }}
-      tag: ${{ steps.set.outputs.tag }}
-      prerelease: ${{ steps.set.outputs.prerelease }}
+      full: ${{ steps.mode.outputs.full }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      channel: ${{ steps.plan.outputs.channel }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      profile: ${{ steps.plan.outputs.profile }}
+      commit: ${{ steps.plan.outputs.commit }}
+      source_date_epoch: ${{ steps.plan.outputs.source_date_epoch }}
     steps:
-      - id: set
+      - name: Decide what this run does
+        id: mode
         env:
-          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="$DISPATCH_VERSION"
+          tag=""
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then tag="$GITHUB_REF_NAME"; fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            full=true
+          elif [ "$DRY_RUN" = "true" ]; then
+            full=false
+          elif [ -n "$tag" ]; then
+            full=true
           else
-            VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+|-beta\.[0-9]+|-rc\.[0-9]+)?$'; then
-            echo "Version '$VERSION' must look like 0.1.0 or 0.1.0-alpha.1"
+            echo "::error::A full run needs a release tag: pick it under \"Use workflow from\", or turn dry run on"
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          if echo "$VERSION" | grep -Eq -- '-(alpha|beta|rc)\.'; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$tag"
+            echo "full=$full"
+          } >> "$GITHUB_OUTPUT"
+          echo "Full release run: $full; tag: ${tag:-none}; ref: $GITHUB_REF"
+      - uses: actions/checkout@v4
+        with:
+          - uses: dtolnay/rust-toolchain@1.97.0
+      - name: Check releases/, Cargo.toml and the tag
+        env:
+          TAG: ${{ steps.mode.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TAG" ]; then
+            cargo run -q --locked -p axcenity-release -- check --tag "$TAG"
           else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            cargo run -q --locked -p axcenity-release -- check
           fi
+      - name: Release tool tests
+        run: cargo test -q --locked -p axcenity-release
+      - name: Plan
+        id: plan
+        env:
+          TAG: ${{ steps.mode.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAG" ]; then
+            TAG="v$(cargo run -q --locked -p axcenity-release -- --version --json | jq -r .version)"
+          fi
+          plan="$(cargo run -q --locked -p axcenity-release -- plan --tag "$TAG")"
+          echo "$plan" | jq .
+          {
+            echo "tag=$(echo "$plan" | jq -r .tag)"
+            echo "version=$(echo "$plan" | jq -r .version)"
+            echo "channel=$(echo "$plan" | jq -r .channel)"
+            echo "prerelease=$(echo "$plan" | jq -r .prerelease)"
+            echo "profile=$(echo "$plan" | jq -r .profile)"
+            echo "commit=$(git rev-parse HEAD)"
+            echo "source_date_epoch=$(git log -1 --format=%ct)"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release plan"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Tag | \`$(echo "$plan" | jq -r .tag)\` |"
+            echo "| Channel | $(echo "$plan" | jq -r .channel) |"
+            echo "| Profile | \`$(echo "$plan" | jq -r .profile)\` |"
+            echo "| Platforms | $(echo "$plan" | jq -r '.platforms | join(", ")') |"
+            echo "| Full run | ${{ steps.mode.outputs.full }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: The tag isn't already a published release
+        if: steps.mode.outputs.full == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [ "$draft" != "true" ]; then
+              echo "::error::$TAG is already a published release; published releases never change. Release a new version instead."
+              exit 1
+            fi
+            echo "$TAG has a draft release; this run replaces its files."
+          fi
+      - name: The release signing key's public half is committed
+        if: steps.mode.outputs.full == 'true'
+        run: |
+          if [ ! -f packaging/axcenity-release.pub ]; then
+            echo "::error::packaging/axcenity-release.pub is missing: create the signing key first (docs/project/releases.md, \"Signing key\")"
+            exit 1
+          fi
+
+  # A dry run's check that the signing key works: signs a scratch file with
+  # the secret key and verifies it with the committed public key. Uses the
+  # `release` environment, like the real signing step.
+  signing-check:
+    name: Signing key check
+    needs: validate
+    if: needs.validate.outputs.full != 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install minisign
+        run: sudo apt-get update -q && sudo apt-get install -y -q minisign
+      - name: Sign and verify a scratch file
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$MINISIGN_SECRET_KEY" ] || [ ! -f packaging/axcenity-release.pub ]; then
+            echo "::warning::The signing key isn't set up yet (the MINISIGN_SECRET_KEY secret and packaging/axcenity-release.pub). A tag run would stop before building."
+            exit 0
+          fi
+          umask 077
+          key="$RUNNER_TEMP/release.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          echo "signing check $(date -u +%FT%TZ)" > "$RUNNER_TEMP/check.txt"
+          minisign -S -s "$key" -m "$RUNNER_TEMP/check.txt" -t "axcenity-engine signing check"
+          rm -f "$key"
+          minisign -V -m "$RUNNER_TEMP/check.txt" -p packaging/axcenity-release.pub
+          echo "The signing key matches packaging/axcenity-release.pub."
 
   build:
     name: Build (${{ matrix.host }})
-    needs: version
+    needs: validate
+    if: needs.validate.outputs.full == 'true'
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - os: windows-latest
@@ -71,6 +188,15 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      PROFILE: ${{ needs.validate.outputs.profile }}
+      VERSION: ${{ needs.validate.outputs.version }}
+      COMMIT: ${{ needs.validate.outputs.commit }}
+      # Official build provenance (crates/release/build.rs).
+      AXCENITY_OFFICIAL_BUILD: "1"
+      AXCENITY_BUILD_TAG: ${{ needs.validate.outputs.tag }}
+      AXCENITY_BUILD_COMMIT: ${{ needs.validate.outputs.commit }}
+      SOURCE_DATE_EPOCH: ${{ needs.validate.outputs.source_date_epoch }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.97.0
@@ -79,60 +205,61 @@ jobs:
         if: matrix.host == 'macos'
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: release-${{ matrix.host }}
       - name: Install Linux audio libraries
         if: matrix.host == 'linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libdbus-1-dev libudev-dev pkg-config
-      - name: Build Windows
-        if: matrix.host == 'windows'
-        run: cargo build --profile dist --locked -p axcenity-editor -p axcenity-player
-      - name: Build Linux
-        if: matrix.host == 'linux'
-        run: cargo build --profile dist --locked -p axcenity-editor -p axcenity-player
+      - name: Build
+        if: matrix.host != 'macos'
+        run: |
+          set -euo pipefail
+          # Windows and Linux installs update in-app, with axcenity-updater.
+          cargo build --profile "$PROFILE" --locked -p axcenity-editor -p axcenity-player -p axcenity-updater
+          mkdir -p dist-bin
+          ext=""; if [ "${{ matrix.host }}" = "windows" ]; then ext=".exe"; fi
+          for bin in axcenity-editor axcenity-player axcenity-updater; do
+            cp "target/$PROFILE/$bin$ext" "dist-bin/$bin$ext"
+          done
       - name: Build macOS universal binaries
         if: matrix.host == 'macos'
         run: |
           set -euo pipefail
-          cargo build --profile dist --locked -p axcenity-editor -p axcenity-player --target aarch64-apple-darwin
-          cargo build --profile dist --locked -p axcenity-editor -p axcenity-player --target x86_64-apple-darwin
-          mkdir -p dist-macos
+          cargo build --profile "$PROFILE" --locked -p axcenity-editor -p axcenity-player --target aarch64-apple-darwin
+          cargo build --profile "$PROFILE" --locked -p axcenity-editor -p axcenity-player --target x86_64-apple-darwin
+          mkdir -p dist-bin
           for bin in axcenity-editor axcenity-player; do
-            lipo -create -output "dist-macos/$bin" \
-              "target/aarch64-apple-darwin/dist/$bin" \
-              "target/x86_64-apple-darwin/dist/$bin"
+            lipo -create -output "dist-bin/$bin" \
+              "target/aarch64-apple-darwin/$PROFILE/$bin" \
+              "target/x86_64-apple-darwin/$PROFILE/$bin"
           done
-      - name: Upload Windows binaries
-        if: matrix.host == 'windows'
-        uses: actions/upload-artifact@v4
+      - name: Smoke test, the binaries say what they are
+        run: |
+          set -euo pipefail
+          py="$(command -v python3 || command -v python)"
+          "$py" scripts/check-release-build.py --profile="$PROFILE" "$VERSION" "$COMMIT" dist-bin/*
+          mkdir -p runner
+          echo "$ImageOS $ImageVersion" > runner/image.txt
+      - uses: actions/upload-artifact@v4
         with:
-          name: bin-windows
-          path: |
-            target/dist/axcenity-editor.exe
-            target/dist/axcenity-player.exe
-      - name: Upload Linux binaries
-        if: matrix.host == 'linux'
-        uses: actions/upload-artifact@v4
+          name: bin-${{ matrix.host }}
+          path: dist-bin/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
         with:
-          name: bin-linux
-          path: |
-            target/dist/axcenity-editor
-            target/dist/axcenity-player
-      - name: Upload macOS binaries
-        if: matrix.host == 'macos'
-        uses: actions/upload-artifact@v4
-        with:
-          name: bin-macos
-          path: dist-macos/
+          name: runner-${{ matrix.host }}
+          path: runner/image.txt
+          retention-days: 7
 
   package-windows:
     name: Package Windows
-    needs: [version, build]
+    needs: [validate, build]
     runs-on: windows-latest
     defaults:
       run:
         shell: bash
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      SOURCE_DATE_EPOCH: ${{ needs.validate.outputs.source_date_epoch }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -147,7 +274,7 @@ jobs:
         run: |
           choco install nsis -y
           python -m pip install --upgrade pillow
-      - name: Stage payload
+      - name: Stage payload and update archive
         run: |
           set -euo pipefail
           python packaging/generate-assets.py
@@ -155,14 +282,14 @@ jobs:
             --os windows \
             --editor ci-bins/bin-windows/axcenity-editor.exe \
             --player-native ci-bins/bin-windows/axcenity-player.exe \
+            --updater ci-bins/bin-windows/axcenity-updater.exe \
             --player-windows ci-bins/bin-windows/axcenity-player.exe \
             --player-macos ci-bins/bin-macos/axcenity-player \
             --player-linux ci-bins/bin-linux/axcenity-player \
             --out dist/stage
+          python packaging/update-zip.py dist/stage "dist/out/AxcenityEditor-${VERSION}-windows-x86_64-update.zip"
       - name: Build NSIS installer
         shell: powershell
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
         run: |
           $ErrorActionPreference = "Stop"
           $root = (Get-Location).Path
@@ -185,13 +312,16 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: package-windows
-          path: dist/out/*.exe
+          path: dist/out/AxcenityEditor-*
           if-no-files-found: error
+          retention-days: 7
 
   package-macos:
     name: Package macOS
-    needs: [version, build]
+    needs: [validate, build]
     runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -202,10 +332,9 @@ jobs:
           pattern: bin-*
           path: ci-bins
       - name: Stage and build disk image
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
+          chmod +x ci-bins/bin-*/axcenity-* || true
           python3 -m pip install --upgrade pillow
           python3 packaging/generate-assets.py
           python3 packaging/stage.py \
@@ -227,11 +356,14 @@ jobs:
           name: package-macos
           path: dist/out/*.dmg
           if-no-files-found: error
+          retention-days: 7
 
   package-linux:
     name: Package Linux
-    needs: [version, build]
+    needs: [validate, build]
     runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -254,7 +386,6 @@ jobs:
           sudo chmod +x /usr/local/bin/appimagetool /usr/local/bin/nfpm
       - name: Stage and build packages
         env:
-          VERSION: ${{ needs.version.outputs.version }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           set -euo pipefail
@@ -262,6 +393,7 @@ jobs:
             --os linux \
             --editor ci-bins/bin-linux/axcenity-editor \
             --player-native ci-bins/bin-linux/axcenity-player \
+            --updater ci-bins/bin-linux/axcenity-updater \
             --player-windows ci-bins/bin-windows/axcenity-player.exe \
             --player-macos ci-bins/bin-macos/axcenity-player \
             --player-linux ci-bins/bin-linux/axcenity-player \
@@ -281,52 +413,104 @@ jobs:
             dist/out/*.tar.gz
             dist/out/*.AppImage
           if-no-files-found: error
+          retention-days: 7
 
-  publish:
-    name: Publish GitHub Release
-    needs: [version, package-windows, package-macos, package-linux]
+  # Signs the manifest and creates the DRAFT release. The `release`
+  # environment holds the signing key; give it a required reviewer so this
+  # job waits for a person's approval before it runs.
+  draft:
+    name: Sign and draft the release
+    needs: [validate, package-windows, package-macos, package-linux]
     runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.validate.outputs.tag }}
+      VERSION: ${{ needs.validate.outputs.version }}
+      PRERELEASE: ${{ needs.validate.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - name: Install minisign
+        run: sudo apt-get update -q && sudo apt-get install -y -q minisign
       - uses: actions/download-artifact@v4
         with:
           pattern: package-*
           merge-multiple: true
           path: dist
-      - name: Checksums and notes
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: runner-*
+          path: runners
+      - name: History, manifest and notes
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          PROFILE: ${{ needs.validate.outputs.profile }}
+          SOURCE_DATE_EPOCH: ${{ needs.validate.outputs.source_date_epoch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          release() { cargo run -q --locked -p axcenity-release -- "$@"; }
+          release history --out dist/axcenity-history.json
+          release manifest "$VERSION" --dist dist --out dist/axcenity-release.json \
+            --commit "$COMMIT" \
+            --published "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --workflow-run "$RUN_URL" \
+            --rustc "$(rustc --version | cut -d' ' -f2)" \
+            --profile "$PROFILE" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH" \
+            --runner-image "windows-x86_64=$(cat runners/runner-windows/image.txt)" \
+            --runner-image "linux-x86_64=$(cat runners/runner-linux/image.txt)" \
+            --runner-image "macos-universal=$(cat runners/runner-macos/image.txt)"
+          mkdir -p meta
+          release notes "$VERSION" --install packaging/release-notes.md.tpl --out meta/notes.md
+          jq -r .title dist/axcenity-release.json > meta/title.txt
+      - name: Sign the manifest
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            echo "::error::The MINISIGN_SECRET_KEY secret isn't set in the release environment"
+            exit 1
+          fi
+          umask 077
+          key="$RUNNER_TEMP/release.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          minisign -S -s "$key" -m dist/axcenity-release.json -t "axcenity-engine $TAG"
+          rm -f "$key"
+          minisign -V -m dist/axcenity-release.json -p packaging/axcenity-release.pub
+      - name: Checksums
         run: |
           set -euo pipefail
           cd dist
-          sha256sum * > SHA256SUMS.txt
-          ls -la
-          cd ..
-          sed "s/__VERSION__/${VERSION}/g" packaging/release-notes.md.tpl > dist/RELEASE_NOTES.md
-      - name: Create or update release
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Create or update the draft
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.version.outputs.tag }}
-          VERSION: ${{ needs.version.outputs.version }}
-          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          files=(dist/AxcenityEditor-* dist/SHA256SUMS.txt)
+          title="Axcenity Engine $VERSION: $(cat meta/title.txt)"
           extra=()
-          if [ "$PRERELEASE" = "true" ]; then
-            extra+=(--prerelease)
-          fi
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${files[@]}" --clobber
-            gh release edit "$TAG" \
-              --title "Axcenity Engine ${VERSION}" \
-              --notes-file dist/RELEASE_NOTES.md \
-              "${extra[@]}"
+          if [ "$PRERELEASE" = "true" ]; then extra+=(--prerelease); fi
+          if draft="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [ "$draft" != "true" ]; then
+              echo "::error::$TAG was published while this run was building; nothing changed"
+              exit 1
+            fi
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --title "$title" --notes-file meta/notes.md "${extra[@]}"
           else
-            gh release create "$TAG" "${files[@]}" \
-              --title "Axcenity Engine ${VERSION}" \
-              --notes-file dist/RELEASE_NOTES.md \
-              --target "$GITHUB_SHA" \
-              "${extra[@]}"
+            gh release create "$TAG" dist/* --draft --verify-tag \
+              --title "$title" --notes-file meta/notes.md "${extra[@]}"
           fi
+          url="$(gh release view "$TAG" --json url --jq .url)"
+          {
+            echo "### Draft release ready"
+            echo
+            echo "$url"
+            echo
+            echo "Nobody sees it until a person publishes it on GitHub."
+          } >> "$GITHUB_STEP_SUMMARY"

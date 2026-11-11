@@ -82,6 +82,7 @@ impl EditorApp {
             | Edit::PickAudio
             | Edit::PickController
             | Edit::PickBehaviorTree
+            | Edit::PickSourceFile
             | Edit::PickClip => {
                 if let Some(Some((name, value))) = self.pick_file_for(&edit) {
                     self.apply(id, Edit::Property(name, value));
@@ -114,6 +115,18 @@ impl EditorApp {
             Edit::AskSkyImage(path) => {
                 let path = path.clone();
                 self.ask_sky(path);
+                return;
+            }
+            Edit::OpenSourceFile => {
+                self.open_script_instance(id);
+                return;
+            }
+            Edit::MoveSourceFile => {
+                if let Some(path) = self.world.get(id).and_then(|i| i.source_file()) {
+                    let path = path.to_owned();
+                    self.layout.open(Pane::Assets);
+                    self.asset_browser.start_move(path);
+                }
                 return;
             }
             Edit::OpenBehaviorTree => {
@@ -246,6 +259,7 @@ impl EditorApp {
                 .map(|path| ("SoundId", self.reference_to(path))),
             Edit::PickController => self.pick_controller().map(|path| ("StateMachine", path)),
             Edit::PickBehaviorTree => self.pick_behavior_tree().map(|path| ("BehaviorTree", path)),
+            Edit::PickSourceFile => self.pick_source_file().map(|path| ("SourceFile", path)),
             Edit::PickClip => self.pick_property_clip().map(|path| ("Clip", path)),
             _ => return None,
         };
@@ -1265,6 +1279,22 @@ impl EditorApp {
             self.output
                 .error(format!("Could not restore a project file: {err}"));
         }
+        // Scripts inside objects' files (G2): their code as the file now is.
+        for file in &files {
+            if self.is_object_file(&file.path) {
+                if let Some(project) = &mut self.project {
+                    match &file.after {
+                        Some(text) => {
+                            project.object_files.insert(file.path.clone(), text.clone());
+                        }
+                        None => {
+                            project.object_files.remove(&file.path);
+                        }
+                    }
+                }
+                self.sync_tab(&file.path, file.after.as_deref());
+            }
+        }
         // The Input and Collision Groups windows' files, read again.
         self.reload_project_settings(&files);
         // A level's start or name changed back or again (Phase 48).
@@ -1422,6 +1452,9 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::PickController
         | Edit::OpenController
         | Edit::PickBehaviorTree
+        | Edit::PickSourceFile
+        | Edit::OpenSourceFile
+        | Edit::MoveSourceFile
         | Edit::OpenBehaviorTree
         | Edit::PickSkyImage
         | Edit::AskSkyImage(_)

@@ -17,6 +17,7 @@ axcenity-nav.workspace = true
 axcenity-net.workspace = true
 axcenity-physics.workspace = true
 axcenity-project.workspace = true
+axcenity-release.workspace = true
 # `debug-views` for the Developer Console's `wireframe` (Phase 71).
 axcenity-render = { workspace = true, features = ["debug-views"] }
 axcenity-save.workspace = true

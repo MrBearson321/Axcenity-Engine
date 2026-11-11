@@ -45,6 +45,14 @@ pub enum Edit {
     PickBehaviorTree,
     /// Opens the agent's behavior tree in the Behavior Tree tab.
     OpenBehaviorTree,
+    /// Asks for the code file of a script inside an object (its
+    /// `SourceFile`, G2), with the ending its class needs.
+    PickSourceFile,
+    /// Opens the script's `SourceFile` in a tab.
+    OpenSourceFile,
+    /// Rename or move the file a script inside an object takes its code
+    /// from, pointing every script that uses it at the new path.
+    MoveSourceFile,
     /// Asks for a sky image file for Lighting's `SkyImage` with the file
     /// picker, then asks whether to use it.
     PickSkyImage,
@@ -132,6 +140,7 @@ const GROUPS: [(&str, &[&str]); 35] = [
             "AssemblyLinearVelocity",
             "AssemblyAngularVelocity",
             "Gravity",
+            "PhysicsInterpolation",
         ],
     ),
     ("Wind", &["GlobalWind"]),
@@ -611,7 +620,7 @@ pub fn can_rename(instance: &Instance) -> bool {
 /// script renames its file, which shouldn't happen at every key typed, so
 /// Scripts are renamed in the Explorer instead, all at once.
 pub fn can_rename_here(instance: &Instance) -> bool {
-    can_rename(instance) && !instance.class().is_script()
+    can_rename(instance) && !crate::tree::is_file_script(instance)
 }
 
 /// Draws the panel for `selected` and returns the edit made this frame, if any.
@@ -1436,6 +1445,7 @@ fn value_control(
         Value::String(path) if name == "StateMachine" => controller_control(ui, &path, assets),
         Value::String(path) if name == "Clip" => clip_control(ui, &path, assets),
         Value::String(path) if name == "BehaviorTree" => behavior_tree_control(ui, &path),
+        Value::String(path) if name == "SourceFile" => source_file_control(ui, &path),
         Value::String(path) if name == "SkyImage" => sky_control(ui, &path, assets),
         Value::String(path) if matches!(name, "LookupTable" | "Palette") => {
             grading_control(ui, name, &path, assets)
@@ -1748,6 +1758,46 @@ fn behavior_tree_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         }
         let name = axcenity_blocks::behavior_tree::behavior_tree_name(path);
         ui.add(egui::Label::new(name).truncate())
+            .on_hover_text(path);
+    });
+    edit
+}
+
+/// A script's `SourceFile` (G2), with buttons to pick another and to open
+/// it. Empty for a script from the `scripts` folder, which is its file.
+fn source_file_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+    if path.is_empty() {
+        ui.weak("Its own file in scripts/");
+        return None;
+    }
+    let mut edit = None;
+    ui.horizontal(|ui| {
+        if ui
+            .small_button(icons::FOLDER_OPEN)
+            .on_hover_text(
+                "Choose the file this script runs. Copies of its object keep using theirs.",
+            )
+            .clicked()
+        {
+            edit = Some(Edit::PickSourceFile);
+        }
+        if ui
+            .small_button(icons::ARROW_SQUARE_OUT)
+            .on_hover_text("Open it in a tab")
+            .clicked()
+        {
+            edit = Some(Edit::OpenSourceFile);
+        }
+        if ui
+            .small_button(icons::PENCIL_SIMPLE)
+            .on_hover_text(
+                "Rename or move the file. Every script that uses it is changed to match.",
+            )
+            .clicked()
+        {
+            edit = Some(Edit::MoveSourceFile);
+        }
+        ui.add(egui::Label::new(path).truncate())
             .on_hover_text(path);
     });
     edit
@@ -2196,10 +2246,9 @@ fn cframe_control(ui: &mut egui::Ui, cf: CFrame) -> Option<CFrame> {
     changed
 }
 
-/// An enum item: a dropdown of the items when it's one of the enums
-/// properties use, else its name, shown.
-fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<EnumItem> {
-    let names: Vec<&'static str> = match item.enum_name.as_str() {
+/// The items of `enum_name`, when it's one of the enums properties use.
+pub(crate) fn enum_items(enum_name: &str) -> Option<Vec<&'static str>> {
+    Some(match enum_name {
         "Material" => Material::ALL.iter().map(|m| m.as_str()).collect(),
         "PartType" => PartType::ALL.iter().map(|t| t.as_str()).collect(),
         "TextureChannel" => TextureChannel::ALL.iter().map(|c| c.as_str()).collect(),
@@ -2222,6 +2271,8 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         "ProximityPromptExclusivity" => vec!["OnePerButton", "OneGlobally", "AlwaysShow"],
         // The room a ReverbZone sounds like (Phase 52).
         "ReverbType" => axcenity_audio::REVERB_TYPES.to_vec(),
+        // How a spatial Sound gets quieter with distance (G8).
+        "RollOffMode" => axcenity_audio::mix::ROLL_OFF_MODES.to_vec(),
         // What a Weather lets fall (graphics Phase 27).
         "Precipitation" => vec!["None", "Rain", "Snow"],
         // A SplinePoint's handles and a SplineFollower's ends (Phase 73).
@@ -2231,10 +2282,16 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         "EffectOperation" => vec!["Add", "Multiply"],
         // A Decal's face (Phase 75).
         "NormalId" => vec!["Right", "Top", "Back", "Left", "Bottom", "Front"],
-        _ => {
-            ui.label(format!("{}.{}", item.enum_name, item.item));
-            return None;
-        }
+        _ => return None,
+    })
+}
+
+/// An enum item: a dropdown of the items when it's one of the enums
+/// properties use, else its name, shown.
+fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<EnumItem> {
+    let Some(names) = enum_items(&item.enum_name) else {
+        ui.label(format!("{}.{}", item.enum_name, item.item));
+        return None;
     };
     let current = names
         .iter()

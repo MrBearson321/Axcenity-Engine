@@ -234,8 +234,34 @@ impl EditorApp {
         for &id in &ids {
             let _ = self.world.set_parent(id, None);
         }
+        let label = format!("Place {}", entry.name);
+        // Screen elements only show inside a ScreenGui (G5): they go where
+        // an inserted one would, in the UI under the pointer or the
+        // selection, or a new ScreenGui made in the same undo step.
+        let screen = ids.iter().all(|&id| {
+            self.world
+                .get(id)
+                .is_some_and(|instance| instance.class().is_screen_element())
+        });
+        if screen {
+            let near = spot.ui.or(self.selected);
+            if tree::needs_screen_gui(&self.world, near, Insertable::Frame) {
+                let gui = tree::create(&mut self.world, Insertable::ScreenGui, Vector3::default());
+                let _ = self.world.set_name(gui, "ScreenGui");
+                for &id in &ids {
+                    let _ = self.world.set_parent(id, Some(gui));
+                }
+                self.place_new(workspace, vec![gui], label);
+                // What was dropped is selected, not the ScreenGui around it.
+                self.select_from_viewport(ids.last().copied());
+            } else {
+                let parent = tree::insert_parent(&self.world, near, Insertable::Frame);
+                self.place_new(parent, ids, label);
+            }
+            return;
+        }
         self.rest_on(&ids, spot);
-        self.place_new(workspace, ids, format!("Place {}", entry.name));
+        self.place_new(workspace, ids, label);
     }
 
     fn drop_model(&mut self, entry: &AssetEntry, spot: Spot) {
@@ -426,7 +452,7 @@ impl EditorApp {
             .collect();
         if roots.is_empty() {
             self.output
-                .error("Select parts, Models or Folders in the Workspace to save as a prefab.");
+                .error("Select parts, Models, Folders or UI in the Workspace to save as a prefab.");
             return;
         }
         let wanted = match roots.as_slice() {
@@ -671,7 +697,7 @@ impl EditorApp {
 
 /// Copies a prefab file into the project's prefabs folder (checking it
 /// first), under a name not yet taken there.
-fn copy_prefab(folder: &Path, file: &Path) -> Result<String, String> {
+pub(in crate::app) fn copy_prefab(folder: &Path, file: &Path) -> Result<String, String> {
     let text = std::fs::read_to_string(file).map_err(|err| err.to_string())?;
     let mut check = World::new();
     let workspace = check.workspace();
