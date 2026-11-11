@@ -162,7 +162,17 @@ jobs:
           fi
           umask 077
           key="$RUNNER_TEMP/release.key"
-          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          # The .key file is two lines: a comment, then the key. Accept a
+          # secret pasted with Windows line endings, blank lines or without
+          # the comment line; say what's wrong (never the key) otherwise.
+          printf '%s\n' "$MINISIGN_SECRET_KEY" | tr -d '\r' | sed '/^[[:space:]]*$/d' > "$key"
+          if ! head -n 1 "$key" | grep -q '^untrusted comment:'; then
+            sed -i '1i untrusted comment: minisign secret key' "$key"
+          fi
+          if [ "$(wc -l < "$key")" -ne 2 ]; then
+            echo "::error::MINISIGN_SECRET_KEY should be the .key file's comment line and key line; after cleaning it has $(wc -l < "$key") lines"
+            exit 1
+          fi
           echo "signing check $(date -u +%FT%TZ)" > "$RUNNER_TEMP/check.txt"
           minisign -S -s "$key" -m "$RUNNER_TEMP/check.txt" -t "axcenity-engine signing check"
           rm -f "$key"
@@ -476,7 +486,17 @@ jobs:
           fi
           umask 077
           key="$RUNNER_TEMP/release.key"
-          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          # The .key file is two lines: a comment, then the key. Accept a
+          # secret pasted with Windows line endings, blank lines or without
+          # the comment line; say what's wrong (never the key) otherwise.
+          printf '%s\n' "$MINISIGN_SECRET_KEY" | tr -d '\r' | sed '/^[[:space:]]*$/d' > "$key"
+          if ! head -n 1 "$key" | grep -q '^untrusted comment:'; then
+            sed -i '1i untrusted comment: minisign secret key' "$key"
+          fi
+          if [ "$(wc -l < "$key")" -ne 2 ]; then
+            echo "::error::MINISIGN_SECRET_KEY should be the .key file's comment line and key line; after cleaning it has $(wc -l < "$key") lines"
+            exit 1
+          fi
           minisign -S -s "$key" -m dist/axcenity-release.json -t "axcenity-engine $TAG"
           rm -f "$key"
           minisign -V -m dist/axcenity-release.json -p packaging/axcenity-release.pub
