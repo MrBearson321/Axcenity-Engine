@@ -20,7 +20,7 @@ Map only. `render` draws a draw list. It does not know about Instances. Open the
 - Sprites and particles: [rendering/particles.md](rendering/particles.md)
 - Decals (a Part's `Decal` on a face, `ProjectedDecal` boxes, `workspace:SpawnDecal`, decal quality): [rendering/decals.md](rendering/decals.md)
 - The machine's graphics settings (presets, overrides, capabilities, `UserGameSettings`, `graphics.json`, the per-preset references): [rendering/settings.md](rendering/settings.md)
-- Measuring drawing (`RenderStats`, per-pass GPU time, the benchmarks and their baseline) and the editor's debug views (View > View Mode: wireframe, normals, overdraw and the rest): [rendering/performance.md](rendering/performance.md)
+- Measuring drawing (`RenderStats`, per-pass GPU time, the benchmarks and their baseline) and the editor's debug views (Viewport > View Mode: wireframe, normals, overdraw and the rest): [rendering/performance.md](rendering/performance.md)
 - Sun shadows, and how shadow quality, render scale, anti-aliasing and ambient occlusion draw: [rendering/shadows.md](rendering/shadows.md)
 
 The Animation panel in the editor is [editor/import.md](editor/import.md). The Lua API is [scripting/api-animation.md](scripting/api-animation.md). Clip and state machine files are [project/animation-files.md](project/animation-files.md). Cutscene sequences and the Sequencer tab are [project/sequences.md](project/sequences.md).

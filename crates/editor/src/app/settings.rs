@@ -22,6 +22,8 @@ pub(super) enum SettingsPage {
     Appearance,
     Typography,
     Layout,
+    /// What the Scene view draws while editing (the menu bar's Viewport).
+    Viewport,
     Graphics,
     Shortcuts,
     Accessibility,
@@ -31,19 +33,24 @@ pub(super) enum SettingsPage {
     Ai,
     /// Only in a debug editor run from the source tree (`engine.rs`).
     Engine,
+    /// The open project's own settings, which live in its folder. Listed
+    /// apart from the rest, which are the user's.
+    Project,
 }
 
 impl SettingsPage {
-    const ALL: [SettingsPage; 9] = [
+    const ALL: [SettingsPage; 11] = [
         SettingsPage::Appearance,
         SettingsPage::Typography,
         SettingsPage::Layout,
+        SettingsPage::Viewport,
         SettingsPage::Graphics,
         SettingsPage::Shortcuts,
         SettingsPage::Accessibility,
         SettingsPage::Updates,
         SettingsPage::Ai,
         SettingsPage::Engine,
+        SettingsPage::Project,
     ];
 
     pub(super) fn label(self) -> &'static str {
@@ -51,12 +58,14 @@ impl SettingsPage {
             SettingsPage::Appearance => "Appearance",
             SettingsPage::Typography => "Text & density",
             SettingsPage::Layout => "Editor layout",
+            SettingsPage::Viewport => "Viewport",
             SettingsPage::Graphics => "Graphics",
             SettingsPage::Shortcuts => "Shortcuts",
             SettingsPage::Accessibility => "Accessibility",
             SettingsPage::Updates => "Updates",
             SettingsPage::Ai => "AI connections",
             SettingsPage::Engine => "Engine",
+            SettingsPage::Project => "This project",
         }
     }
 
@@ -65,12 +74,14 @@ impl SettingsPage {
             SettingsPage::Appearance => icons::PALETTE,
             SettingsPage::Typography => icons::TEXT_AA,
             SettingsPage::Layout => icons::LAYOUT,
+            SettingsPage::Viewport => icons::CUBE_FOCUS,
             SettingsPage::Graphics => icons::MONITOR,
             SettingsPage::Shortcuts => icons::KEYBOARD,
             SettingsPage::Accessibility => icons::EYE,
             SettingsPage::Updates => icons::ARROW_CIRCLE_UP,
             SettingsPage::Ai => icons::ROBOT,
             SettingsPage::Engine => icons::HAMMER,
+            SettingsPage::Project => icons::FOLDER_SIMPLE,
         }
     }
 }
@@ -116,9 +127,19 @@ impl EditorApp {
                     ui.vertical(|ui| {
                         ui.set_width(NAV_WIDTH);
                         ui.spacing_mut().item_spacing.y = 2.0;
+                        let palette = theme::palette(ui.ctx());
+                        ui.label(widgets::micro("Editor", palette.text_weak))
+                            .on_hover_text("Yours: saved on this computer, for every project.");
                         for page in SettingsPage::ALL {
                             if page == SettingsPage::Engine && self.rebuilds.source.is_none() {
                                 continue;
+                            }
+                            if page == SettingsPage::Project {
+                                ui.add_space(space::M);
+                                ui.label(widgets::micro("Project", palette.text_weak))
+                                    .on_hover_text(
+                                        "Saved in the project's folder, for everyone who opens it.",
+                                    );
                             }
                             let selected = self.settings.page == page;
                             if widgets::nav_item(ui, page.icon(), page.label(), None, selected)
@@ -141,6 +162,7 @@ impl EditorApp {
                                 SettingsPage::Appearance => appearance_page(ui, &mut appearance),
                                 SettingsPage::Typography => typography_page(ui, &mut appearance),
                                 SettingsPage::Layout => self.layout_page(ui),
+                                SettingsPage::Viewport => self.viewport_page(ui),
                                 SettingsPage::Graphics => {
                                     let capabilities = self.capabilities.unwrap_or_default();
                                     graphics_page(ui, &mut self.graphics, &capabilities);
@@ -152,6 +174,7 @@ impl EditorApp {
                                 SettingsPage::Updates => self.updates_page(ui),
                                 SettingsPage::Ai => self.ai_page(ui),
                                 SettingsPage::Engine => self.engine_page(ui),
+                                SettingsPage::Project => self.project_page(ui),
                             });
                         });
                 });
@@ -275,7 +298,36 @@ impl EditorApp {
             self.start.set_nav(nav);
         }
         ui.add_space(space::L);
-        section(ui, "Viewport");
+        section(ui, "Ribbon");
+        ui.label(
+            egui::RichText::new(
+                "Make your own ribbon tab from any of the ribbon's groups. Right-click a tab \
+                 you made to change or delete it.",
+            )
+            .color(palette.text_secondary),
+        );
+        if ui
+            .add(widgets::button(
+                widgets::Role::Secondary,
+                Some(icons::PLUS),
+                "New Ribbon Tab…",
+                &palette,
+            ))
+            .clicked()
+        {
+            self.ribbon_tabs.edit(None);
+        }
+    }
+
+    /// What the Scene view draws over the world: the same toggles as the
+    /// menu bar's Viewport menu, and the grid's strength.
+    fn viewport_page(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            "Viewport",
+            "What the Scene view draws while you edit. Yours, for every project.",
+        );
+        section(ui, "Guides");
         let row = ui
             .checkbox(
                 &mut self.light_cones,
@@ -312,6 +364,15 @@ impl EditorApp {
             "The cube in the viewport's corner that turns the camera to a face, edge or corner.",
         );
         found(ui, &row, "Show the view cube");
+        let row = ui
+            .checkbox(
+                &mut self.move_guide,
+                theme::with_icon(icons::ARROWS_OUT_CARDINAL, "Show the movement guide"),
+            )
+            .on_hover_text(MOVE_GUIDE_HINT);
+        found(ui, &row, "Show the movement guide");
+        ui.add_space(space::L);
+        section(ui, "Overlays");
         let row = ui
             .checkbox(
                 &mut self.overlays.colliders,
@@ -371,26 +432,97 @@ impl EditorApp {
              Not saved between runs.",
             );
         found(ui, &row, "Show culling");
+    }
+
+    /// The open project's settings: what they are and where each is
+    /// changed. They're saved in the project, so they aren't kept with the
+    /// user's own on the other pages.
+    fn project_page(&mut self, ui: &mut egui::Ui) {
+        page_title(
+            ui,
+            "This project",
+            "Saved in the project's folder and shared with everyone who opens it. Everything \
+             on the other pages is yours, saved on this computer for every project.",
+        );
+        let Some(project) = &self.project else {
+            ui.weak("Open a project to change its settings.");
+            return;
+        };
+        let palette = theme::palette(ui.ctx());
+        ui.label(
+            egui::RichText::new(&project.name)
+                .size(type_scale::HEADING)
+                .color(palette.text_strong),
+        );
+        ui.label(
+            egui::RichText::new(project.folder.display().to_string())
+                .size(type_scale::SMALL)
+                .color(palette.text_weak),
+        );
         ui.add_space(space::L);
-        section(ui, "Ribbon");
+        section(ui, "Project settings");
+        let editing = !self.playing();
+        let row = |ui: &mut egui::Ui, icon: &str, name: &'static str, about: &str| {
+            // The button, then what it's for under it, so a narrow window
+            // wraps the words instead of cutting them off.
+            let button = ui
+                .add_enabled(
+                    editing,
+                    widgets::button(widgets::Role::Secondary, Some(icon), name, &palette),
+                )
+                .on_disabled_hover_text("Press Stop to change it.");
+            found(ui, &button, name);
+            ui.label(
+                egui::RichText::new(about)
+                    .size(type_scale::SMALL)
+                    .color(palette.text_secondary),
+            );
+            ui.add_space(space::S);
+            button.clicked()
+        };
+        if row(
+            ui,
+            icons::GAME_CONTROLLER,
+            "Input…",
+            "The game's actions and the keys and buttons bound to them.",
+        ) {
+            self.input_settings.open = true;
+        }
+        if row(
+            ui,
+            icons::INTERSECT,
+            "Collision Groups…",
+            "Which groups of parts pass through each other.",
+        ) {
+            self.collision_groups.open = true;
+        }
+        if row(
+            ui,
+            icons::GLOBE_HEMISPHERE_WEST,
+            "Workspace",
+            "Gravity, physics and streaming: select it to see them in Properties.",
+        ) {
+            let workspace = self.world.workspace();
+            self.select_from_viewport(Some(workspace));
+        }
+        if row(
+            ui,
+            icons::SUN,
+            "Lighting",
+            "The game's sky, time of day, fog and post effects, in Properties.",
+        ) {
+            let lighting = self.world.lighting();
+            self.select_from_viewport(Some(lighting));
+        }
+        ui.add_space(space::S);
         ui.label(
             egui::RichText::new(
-                "Make your own ribbon tab from any of the ribbon's groups. Right-click a tab \
-                 you made to change or delete it.",
+                "The name, description and splash are on the start screen: open the project's \
+                 menu there and pick Settings. Build options are in File > Build Game.",
             )
-            .color(palette.text_secondary),
+            .size(type_scale::SMALL)
+            .color(palette.text_weak),
         );
-        if ui
-            .add(widgets::button(
-                widgets::Role::Secondary,
-                Some(icons::PLUS),
-                "New Ribbon Tab…",
-                &palette,
-            ))
-            .clicked()
-        {
-            self.ribbon_tabs.edit(None);
-        }
     }
 }
 
@@ -519,73 +651,85 @@ pub(super) const SEARCHABLE: &[SearchableSetting] = {
             "The start screen's sidebar shows only its icons, each with a tooltip.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Show every light's cone",
             &["Light cones", "Spotlight"],
             "Off, only the selected light shows where it shines.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Show the measuring grid",
             &["Grid", "Ruler", "Studs"],
             "Lines and distances in studs on the baseplate, while editing.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Grid strength",
             &["Grid opacity", "Grid lines"],
             "How solid the grid's lines are.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Show the view cube",
             &["View cube", "Navigation cube", "Gizmo"],
             "The cube in the viewport's corner that turns the camera to a face.",
         ),
         setting(
-            Layout,
+            Viewport,
+            "Show the movement guide",
+            &[
+                "Movement guide",
+                "Move guide",
+                "Snap points",
+                "Distance",
+                "Drag guide",
+            ],
+            "The line, snap points and distance drawn while moving parts.",
+        ),
+        setting(
+            Viewport,
             "Show colliders",
             &["Collision shapes", "Physics", "Hitboxes"],
             "The shape each part collides with.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Show raycasts",
             &["Rays", "Physics debug"],
             "Recent workspace:Raycast calls during Play.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Show bounds",
             &["Bounding boxes", "Size box"],
             "Each part's Size box.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Show audio emitters",
             &["Sound", "Audio debug"],
             "Where each spatial Sound is heard from.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Show navigation mesh",
             &["Nav mesh", "Pathfinding", "Walkable"],
             "Where characters can walk.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Show agent paths",
             &["Pathfinding", "AI paths"],
             "The path each NavigationAgent is walking, during Play.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Show constraints",
             &["Welds", "Attachments", "Joints"],
             "Welds as lines between their parts, and every Attachment.",
         ),
         setting(
-            Layout,
+            Viewport,
             "Show culling",
             &["Frustum", "Occlusion", "Culled objects"],
             "What's drawn and what's culled for the current view.",
@@ -595,6 +739,18 @@ pub(super) const SEARCHABLE: &[SearchableSetting] = {
             "Ribbon",
             &["Custom ribbon tab", "Toolbar"],
             "Make your own ribbon tab from any of the ribbon's groups.",
+        ),
+        setting(
+            Project,
+            "Input…",
+            &["Key bindings", "Controls", "Actions", "Project settings"],
+            "The game's actions and the keys bound to them, saved in the project.",
+        ),
+        setting(
+            Project,
+            "Collision Groups…",
+            &["Collision", "Physics groups", "Project settings"],
+            "Which groups of parts pass through each other, saved in the project.",
         ),
         setting(
             Graphics,
@@ -1817,6 +1973,29 @@ mod tests {
         assert_eq!(restarted.saved_layouts, app.saved_layouts);
         restarted.use_saved_layout("Props");
         assert!(restarted.layout.is_open(Pane::ModelStudio));
+    }
+
+    /// The movement guide is on until it's turned off, and stays off after
+    /// a restart; the other viewport guides keep their own choices.
+    #[test]
+    fn the_movement_guide_choice_survives_a_restart() {
+        let ctx = theme::test_context();
+        let mut app = EditorApp::new(None);
+        assert!(app.move_guide, "on by default");
+        app.move_guide = false;
+        let mut storage = MemoryStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+
+        let mut restarted = EditorApp::new(None);
+        restarted.load_settings(&ctx, Some(&storage));
+        assert!(!restarted.move_guide);
+        assert!(restarted.grid && restarted.view_cube);
+
+        restarted.move_guide = true;
+        eframe::App::save(&mut restarted, &mut storage);
+        let mut again = EditorApp::new(None);
+        again.load_settings(&ctx, Some(&storage));
+        assert!(again.move_guide);
     }
 
     #[test]

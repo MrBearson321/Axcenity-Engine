@@ -294,7 +294,8 @@ fn synonyms_and_descriptions_find_commands_and_tools() {
 #[test]
 fn every_searchable_setting_is_found_on_its_page() {
     let ctx = theme::test_context();
-    let mut app = EditorApp::new(None);
+    // With a project open, so the Project page has its rows.
+    let mut app = EditorApp::new(Some(&example("hello-touched")));
     let mut clock = 0.0;
     for row in settings::SEARCHABLE {
         if row.page == SettingsPage::Engine {
@@ -316,12 +317,18 @@ fn every_searchable_setting_is_found_on_its_page() {
                 app.settings_window(ctx);
             });
         }
-        if row.name == "Steady frame rate"
+        let picture = match row.name {
+            "Steady frame rate" => Some("settings-found.png"),
+            "Show the movement guide" => Some("settings-viewport.png"),
+            "Input…" => Some("settings-project.png"),
+            _ => None,
+        };
+        if let Some(picture) = picture
             && let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS")
         {
             let mut asked = false;
             crate::snapshot::snapshot(
-                &std::path::PathBuf::from(folder).join("settings-found.png"),
+                &std::path::PathBuf::from(folder).join(picture),
                 egui::vec2(900.0, 640.0),
                 vec![Vec::new(); 3],
                 |ui| {
