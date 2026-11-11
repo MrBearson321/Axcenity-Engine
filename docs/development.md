@@ -13,6 +13,8 @@ cargo install cargo-nextest --locked
 cargo install cargo-hakari --locked
 ```
 
+On Windows, Visual Studio 2022 (17.11 or later) or its Build Tools needs the **Desktop development with C++** workload and the individual component **C++ ATL for latest v143 build tools (x86 & x64)**. wgpu's `static-dxc` feature links Microsoft's DXC shader compiler into the build, and its link needs ATL's `atls.lib` (without it: `LNK1104: cannot open file 'atls.lib'`). Its build script also downloads the compiler with `curl` and `tar`, which Windows 10 and 11 include. GitHub's Windows runners have all of this.
+
 ## Run the tests with nextest
 
 | Task | Command |

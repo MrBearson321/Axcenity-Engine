@@ -231,7 +231,8 @@ taffy = { version = "0.7", features = ["taffy_tree"] }
 # downloads at build time; DXC itself is NCSA and Apache-2.0 with LLVM
 # exception). Without it DirectX 12 compiles shaders with the old FXC, which
 # took about 8.5 s more to load each of the owner's projects. Needs Visual
-# Studio 17.11 or later, and curl and tar on the build machine.
+# Studio 17.11 or later with the C++ ATL component (atls.lib), and curl and
+# tar on the build machine. MinGW builds skip it and fall back to FXC.
 wgpu = { version = "30", features = ["static-dxc"] }
 winit = "0.30"
 
