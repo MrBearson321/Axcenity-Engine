@@ -8,6 +8,8 @@ GitHub (docs/project/releases.md, "Testing the release workflow").
   job, step and output that exist, and every `needs.<job>` is in the job's
   `needs`.
 - Every bash `run:` block parses (`bash -n`), with `${{ … }}` replaced.
+- Every step has `uses` or `run` (not both), and its `with:`/`env:` are
+  mappings, as GitHub requires (a stray `with:` once broke release.yml).
 - Jobs that can write to the repository or read the signing key are only the
   ones meant to.
 - No job checks out a ref other than the one the run started on, so code from
@@ -112,7 +114,13 @@ def check_file(path: Path) -> list[str]:
         if "secrets." in text and job.get("environment") != "release":
             problems.append(f"{name}: reads a secret outside the `release` environment")
 
-        for step in job.get("steps", []):
+        for index, step in enumerate(job.get("steps", [])):
+            label = step.get("name") or step.get("uses") or f"step {index + 1}"
+            if ("uses" in step) == ("run" in step):
+                problems.append(f"{name}: `{label}` needs exactly one of `uses` and `run`")
+            for key in ("with", "env"):
+                if key in step and not isinstance(step[key], dict):
+                    problems.append(f"{name}: `{label}` has a `{key}:` that isn't a mapping")
             if str(step.get("uses", "")).startswith("actions/checkout") and "ref" in (step.get("with") or {}):
                 problems.append(f"{name}: checks out another ref ({step['with']['ref']})")
 
