@@ -73,6 +73,7 @@ mod tree_ops;
 mod ui_graphs;
 mod ui_links;
 mod ui_selection;
+mod updates;
 mod version_history;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -350,6 +351,10 @@ pub struct EditorApp {
     asset_browser: AssetBrowser,
     /// The Toolbox tab (`toolbox_panel.rs`, its actions `app/toolbox.rs`).
     toolbox: ToolboxPanel,
+    /// Update checks and their settings (`app/updates.rs`).
+    updates: updates::Updates,
+    /// The Version Explorer tab (`version_explorer.rs`).
+    version_explorer: crate::version_explorer::VersionExplorer,
     /// Models the Toolbox got, waiting for the Import dialog: each file in
     /// the asset directory and the asset key and package it came from.
     toolbox_imports: HashMap<PathBuf, (String, String)>,
@@ -413,6 +418,8 @@ pub struct EditorApp {
     graphics: axcenity_render::GraphicsSettings,
     /// What the GPU can do, read on the first frame that has one.
     capabilities: Option<axcenity_render::Capabilities>,
+    /// The graphics adapter, for the About box's diagnostics.
+    adapter: Option<String>,
     /// Settings > Engine: rebuilding the editor when engine code changes
     /// (a debug editor run from the source tree only; see `engine.rs`).
     rebuilds: Rebuilds,
@@ -485,6 +492,10 @@ impl DockViewer<'_> {
             Pane::Plugins => self.app.plugins_pane(ui),
             Pane::ModelStudio => self.app.model_studio_pane(ui, self.render_state),
             Pane::Toolbox => self.app.toolbox_pane(ui),
+            Pane::VersionExplorer => self
+                .app
+                .version_explorer
+                .show(ui, &axcenity_release::BuildInfo::current()),
             Pane::Script(id) => self.app.script_pane(ui, id),
             Pane::Plugin(id) => self.app.plugin_pane(ui, id, self.render_state),
         }
@@ -881,6 +892,8 @@ impl EditorApp {
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
             toolbox: ToolboxPanel::default(),
+            version_explorer: Default::default(),
+            updates: Default::default(),
             toolbox_imports: HashMap::new(),
             animation: AnimationStudio::default(),
             behavior: BehaviorTreeStudio::default(),
@@ -909,6 +922,7 @@ impl EditorApp {
             nav_mesh: None,
             graphics: axcenity_render::GraphicsSettings::default(),
             capabilities: None,
+            adapter: None,
             rebuilds: Rebuilds {
                 source: EngineSource::find(),
                 ..Rebuilds::default()
@@ -986,6 +1000,9 @@ impl EditorApp {
             if let Some(text) = storage.get_string(command_palette::RECENT_COMMANDS_KEY) {
                 self.palette.load_recent(&text);
             }
+            if let Some(text) = storage.get_string(updates::UPDATES_KEY) {
+                self.updates.prefs = updates::Updates::load(&text);
+            }
             if let Some(settings) = storage
                 .get_string(GRAPHICS_KEY)
                 .and_then(|text| serde_json::from_str(&text).ok())
@@ -1050,6 +1067,7 @@ impl eframe::App for EditorApp {
     /// this now and then, and when the window closes.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(APPEARANCE_KEY, self.appearance.to_text());
+        storage.set_string(updates::UPDATES_KEY, self.updates.to_text());
         let recent: Vec<String> = self
             .recent
             .iter()
@@ -1219,9 +1237,14 @@ impl EditorApp {
         if self.capabilities.is_none()
             && let Some(render_state) = render_state
         {
+            let info = render_state.adapter.get_info();
             self.capabilities = Some(axcenity_render::read_capabilities(
                 &render_state.device,
-                Some(&render_state.adapter.get_info()),
+                Some(&info),
+            ));
+            self.adapter = Some(format!(
+                "{} ({:?}, {:?}, driver {} {})",
+                info.name, info.backend, info.device_type, info.driver, info.driver_info
             ));
         }
         // Engine code changed: rebuild in the background (debug editors only).
@@ -1611,9 +1634,10 @@ impl EditorApp {
         if self.about_open
             && let Some(brand) = &self.brand
         {
-            self.about_open = start::about(ctx, brand);
+            self.about_open = start::about(ctx, brand, self.adapter.as_deref());
         }
         self.follow_sound_preview();
+        self.updates_frame();
         self.settings_window(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();

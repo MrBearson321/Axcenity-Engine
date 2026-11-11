@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Patched copies of dependencies (vendor/README.md), not ours to lint.
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.2.0-alpha.1"
@@ -159,6 +161,9 @@ semver = "1"
 # later the updater's download checks. MIT OR Apache-2.0; already in the tree
 # through rmcp.
 sha2 = "0.11"
+# Checks the minisign signature on a release manifest before the editor
+# trusts it (`crates/release`). Pure Rust, no dependencies; MIT.
+minisign-verify = "0.2"
 # Reads the hand-written release records in `releases/` (`crates/release`).
 # MIT OR Apache-2.0; the same toml_parser family is already in the tree.
 # `display` writes the record `axcenity-release prepare` starts.
@@ -261,3 +266,8 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = "debuginfo"
+
+# rapier with one Axcenity fix: pairs whose contact hook only sets friction
+# and restitution keep their contacts between steps (vendor/README.md).
+[patch.crates-io]
+rapier3d = { path = "vendor/rapier3d" }

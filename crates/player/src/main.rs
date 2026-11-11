@@ -275,6 +275,12 @@ fn main() -> Result<()> {
     }
     // The project's actions, before any LocalScript asks about them.
     scripts.set_input_map(project.input_map.clone());
+    // Scripts inside objects in levels LevelService loads later, and in
+    // the StarterCharacter each player spawns as (G2).
+    let worlds = levels.values().chain([&world]);
+    for (path, source) in axcenity_project::level_code(&project.folder, worlds) {
+        scripts.know_code(&path, &source);
+    }
     scripts.set_levels(&start_level, &start_level, levels);
     start_scripts(&mut scripts, &mut world, &project.scripts);
     // Hosting or joining from the command line, once the scripts listen

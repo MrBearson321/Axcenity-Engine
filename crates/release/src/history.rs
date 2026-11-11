@@ -232,36 +232,67 @@ impl History {
 
     /// Reads a `releases/` folder. Missing parts are empty.
     pub fn load(dir: &Path) -> Result<History, LoadError> {
-        let mut releases = Vec::new();
-        let mut problems = Vec::new();
-        for path in toml_files(&dir.join(HISTORY_DIR))? {
-            let record: ReleaseRecord = parse(&path)?;
-            let stem = file_stem(&path);
-            if stem != record.version.to_string() {
-                problems.push(Problem {
-                    file: display(dir, &path),
-                    message: format!(
-                        "the file is named `{stem}` but records version {}",
-                        record.version
-                    ),
-                });
+        let mut sources = Vec::new();
+        for sub in [HISTORY_DIR, UNRELEASED_DIR, FEATURES_DIR] {
+            for path in toml_files(&dir.join(sub))? {
+                sources.push((display(dir, &path), read(&path)?));
             }
-            releases.push(record);
-        }
-        let mut unreleased = Vec::new();
-        for path in toml_files(&dir.join(UNRELEASED_DIR))? {
-            unreleased.push((file_stem(&path), parse::<Change>(&path)?));
-        }
-        let mut features = Vec::new();
-        for path in toml_files(&dir.join(FEATURES_DIR))? {
-            features.extend(parse::<FeatureFile>(&path)?.feature);
         }
         let issues_path = dir.join(ISSUES_FILE);
-        let issues = if issues_path.exists() {
-            parse::<IssueFile>(&issues_path)?.issue
-        } else {
-            Vec::new()
-        };
+        if issues_path.exists() {
+            sources.push((ISSUES_FILE.to_owned(), read(&issues_path)?));
+        }
+        History::from_sources(sources)
+    }
+
+    /// The history from the release files' texts, each with its path
+    /// relative to `releases/` (`history/0.2.0-alpha.1.toml`, `issues.toml`,
+    /// …), as [`History::load`] reads them from disk. The editor builds the
+    /// repository's files in this way, so the Version Explorer works offline.
+    pub fn from_sources<P, T>(
+        sources: impl IntoIterator<Item = (P, T)>,
+    ) -> Result<History, LoadError>
+    where
+        P: AsRef<str>,
+        T: AsRef<str>,
+    {
+        let mut sources: Vec<(String, String)> = sources
+            .into_iter()
+            .map(|(p, t)| (p.as_ref().replace('\\', "/"), t.as_ref().to_owned()))
+            .collect();
+        sources.sort();
+        let mut releases = Vec::new();
+        let mut problems = Vec::new();
+        let mut unreleased = Vec::new();
+        let mut features = Vec::new();
+        let mut issues = Vec::new();
+        for (path, text) in &sources {
+            let (folder, name) = path.rsplit_once('/').unwrap_or(("", path.as_str()));
+            let Some(stem) = name.strip_suffix(".toml") else {
+                continue;
+            };
+            match folder {
+                HISTORY_DIR => {
+                    let record: ReleaseRecord = parse_text(path, text)?;
+                    if stem != record.version.to_string() {
+                        problems.push(Problem {
+                            file: path.clone(),
+                            message: format!(
+                                "the file is named `{stem}` but records version {}",
+                                record.version
+                            ),
+                        });
+                    }
+                    releases.push(record);
+                }
+                UNRELEASED_DIR => {
+                    unreleased.push((stem.to_owned(), parse_text::<Change>(path, text)?))
+                }
+                FEATURES_DIR => features.extend(parse_text::<FeatureFile>(path, text)?.feature),
+                "" if name == ISSUES_FILE => issues = parse_text::<IssueFile>(path, text)?.issue,
+                _ => {}
+            }
+        }
         let mut history = History::new(releases, unreleased, features, issues);
         history.load_problems = problems;
         Ok(history)
@@ -678,9 +709,14 @@ impl History {
 
     fn state_of(&self, issue: &KnownIssue, version: &Version) -> IssueState {
         let fixed = self.fixed_in(issue);
-        if let Some(VersionRef::Release(fixed_version)) = &fixed
-            && version >= fixed_version
-        {
+        let fixed_by = match &fixed {
+            Some(VersionRef::Release(fixed_version)) => version >= fixed_version,
+            // A version newer than every release is a build of the coming
+            // one, which carries the unreleased changes.
+            Some(VersionRef::Unreleased) => self.latest().is_none_or(|r| *version > r.version),
+            _ => false,
+        };
+        if fixed_by {
             return IssueState::Fixed {
                 fixed_in: fixed.unwrap(),
             };
@@ -1190,21 +1226,18 @@ fn toml_files(dir: &Path) -> Result<Vec<PathBuf>, LoadError> {
     Ok(files)
 }
 
-fn parse<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, LoadError> {
-    let text = fs::read_to_string(path).map_err(|source| LoadError::Read {
+fn read(path: &Path) -> Result<String, LoadError> {
+    fs::read_to_string(path).map_err(|source| LoadError::Read {
         path: path.to_owned(),
         source,
-    })?;
-    toml::from_str(&text).map_err(|err| LoadError::Parse {
-        path: path.to_owned(),
-        message: err.to_string(),
     })
 }
 
-fn file_stem(path: &Path) -> String {
-    path.file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default()
+fn parse_text<T: serde::de::DeserializeOwned>(path: &str, text: &str) -> Result<T, LoadError> {
+    toml::from_str(text).map_err(|err| LoadError::Parse {
+        path: PathBuf::from(path),
+        message: err.to_string(),
+    })
 }
 
 fn display(root: &Path, path: &Path) -> String {

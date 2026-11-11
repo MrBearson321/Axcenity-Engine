@@ -93,8 +93,8 @@ A model from the Toolbox that carries scripts runs code from the internet. On in
 1. **Format and runtime**: `SourceFile`; script nodes in world, level and prefab files with the version rule; the loader's tree walk and order; keeping uncloned templates' code. No editor UI yet, and an example project with a prefab door.
 2. **Editor**: Explorer, Insert Script, tabs, Make Unique, `SourceFile` picker, live reload.
 3. **References**: asset refs, Rename or Move, Find in Scripts, Asset Check, packages, Build Game.
-4. **Multiplayer and streaming**: replicas start replicated LocalScripts by `SourceFile`; streamed models start theirs on arrival.
-5. **Toolbox insert confirmation**, with G1's model step.
+4. **Multiplayer and streaming**: replicas start replicated LocalScripts by `SourceFile`; LevelService loads and StarterCharacter copies start theirs. (Streaming turned out to need nothing: a model holding a LocalScript never streams out.)
+5. **Insert confirmation**: done for asset packages, the only way scripts come in from elsewhere today (the Import dialog leaves them out unless kept). Toolbox models are plain model files, so they carry no scripts; a Toolbox source that does would reuse `project::without_scripts`.
 
 Effort is M–L in total (2–4 weeks), as estimated in the gap analysis.
 

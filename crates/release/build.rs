@@ -81,6 +81,15 @@ fn main() {
     set("AXCENITY_BUILD_RUSTC", &rustc_version);
     set("AXCENITY_BUILD_TARGET", &env::var("TARGET").unwrap());
     set("AXCENITY_BUILD_PROFILE", &profile);
+
+    // The release signing key's public half, built in for update checks
+    // (`src/updates.rs`); empty until the key exists. The folder is watched,
+    // not the file: Cargo reruns a script on every build while a watched
+    // file is missing.
+    let packaging = manifest_dir.join("../../packaging");
+    println!("cargo:rerun-if-changed={}", packaging.display());
+    let key = std::fs::read_to_string(packaging.join("axcenity-release.pub")).unwrap_or_default();
+    std::fs::write(out_dir.join("release-key.pub"), key).expect("OUT_DIR is writable");
 }
 
 /// Runs git in `dir` and returns its trimmed output, or `None` if git isn't

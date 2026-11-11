@@ -863,6 +863,7 @@ name = "axcenity-release"
 version = "0.2.0-alpha.1"
 dependencies = [
  "axcenity-workspace-hack",
+ "minisign-verify",
  "semver",
  "serde",
  "serde_json",
@@ -3704,6 +3705,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "minisign-verify"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22f9645cb765ea72b8111f36c522475d2daa0d22c957a9826437e97534bc4e9e"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4847,8 +4854,6 @@ checksum = "a611d15b50743feb4c76b7d03edcb0e64f399c26961e4efe6975bc398be6aa3d"
 [[package]]
 name = "rapier3d"
 version = "0.36.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "033e2edc815d61ab97bd74ed5d1cbea5ebe575218774a7cfedbd3551f0033317"
 dependencies = [
  "approx",
  "arrayvec",

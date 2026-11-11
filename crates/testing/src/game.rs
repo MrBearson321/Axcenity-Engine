@@ -81,6 +81,12 @@ impl TestGame {
         game.sim.scripts.set_save_folder(Some(setup.save_folder));
         game.sim.scripts.set_input_map(setup.input_map.clone());
         let (start, current, worlds) = setup.levels;
+        // Scripts inside objects in levels LevelService loads later, and in
+        // the StarterCharacter each player spawns as (G2).
+        let all = worlds.values().chain([&game.sim.world]);
+        for (path, source) in axcenity_project::level_code(setup.folder, all) {
+            game.sim.scripts.know_code(&path, &source);
+        }
         game.sim.scripts.set_levels(start, current, worlds);
         if setup.start_scripts {
             game.sim

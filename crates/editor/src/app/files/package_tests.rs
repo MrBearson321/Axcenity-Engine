@@ -219,3 +219,37 @@ fn an_object_in_the_explorer_exports_as_a_prefab_with_every_asset_it_uses() {
     let _ = fs::remove_dir_all(&source);
     let _ = fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_packages_scripts_inside_objects_come_in_only_when_kept() {
+    // hello-object-scripts' door prefab, exported with its script.
+    let file = package_file("door-scripts");
+    let source = copy_of_example("hello-object-scripts", "package-door-source");
+    let mut exporter = EditorApp::new(Some(&source));
+    let door = "assets/prefabs/Door.prefab.json".to_owned();
+    assert!(exporter.export_package(&file, "Door", vec![door.clone()], Vec::new()));
+    let _ = fs::remove_dir_all(&source);
+
+    let folder = copy_of_example("hello-part", "package-door-import");
+    let mut app = EditorApp::new(Some(&folder));
+    let mut dialog = import(&mut app, &file);
+    let package = dialog.package.as_mut().unwrap();
+    let script = "objects/Door/Open.server.lua";
+    assert_eq!(package.scripts, [script]);
+    assert!(!package.keep_scripts, "left out unless ticked");
+    assert_eq!(package.sentence(), "Adds 1 file: 1 prefab.");
+    app.import_package_chosen(&dialog);
+    assert!(!folder.join(script).exists());
+    let prefab = fs::read_to_string(folder.join(&door)).unwrap();
+    assert!(!prefab.contains("SourceFile"), "{prefab}");
+    app.undo();
+
+    let mut dialog = import(&mut app, &file);
+    dialog.package.as_mut().unwrap().set_keep_scripts(true);
+    app.import_package_chosen(&dialog);
+    assert!(folder.join(script).is_file());
+    let prefab = fs::read_to_string(folder.join(&door)).unwrap();
+    assert!(prefab.contains(script), "{prefab}");
+    let _ = fs::remove_dir_all(&folder);
+    let _ = fs::remove_file(&file);
+}

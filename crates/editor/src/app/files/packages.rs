@@ -65,7 +65,7 @@ impl EditorApp {
     ) -> Option<(String, (String, Vec<u8>))> {
         if !tree::can_be_prefab(&self.world, id) {
             self.output.error(
-                "Only parts, Models and Folders in the Workspace can be exported as a package.",
+                "Only parts, Models, Folders and UI in the Workspace can be exported as a package.",
             );
             return None;
         }

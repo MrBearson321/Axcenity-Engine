@@ -82,6 +82,7 @@ mod tree;
 mod ui_cost_tests;
 mod ui_designer;
 mod ui_handles;
+mod version_explorer;
 mod viewport;
 mod watcher;
 mod widgets;

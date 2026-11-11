@@ -1140,9 +1140,10 @@ impl AssetBrowser {
                 .min_size(egui::vec2(0.0, 24.0)),
             )
             .on_hover_text(
-                "Save the selected parts and Models as a prefab in assets/prefabs, to                  place copies of from here.",
+                "Save the selected parts, Models or UI as a prefab in assets/prefabs, to place \
+                 copies of from here.",
             )
-            .on_disabled_hover_text("Select parts or Models to save as a prefab.")
+            .on_disabled_hover_text("Select parts, Models or UI to save as a prefab.")
             .clicked()
         };
         let saved = if right_to_left {
