@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axcenity_assets::{
+    AUDIO_EXTENSIONS, PROJECT_AUDIO_FOLDER, PROJECT_SKY_FOLDER, PROJECT_TEXTURES_FOLDER,
     TEXTURE_EXTENSIONS, TEXTURE_SET_SUFFIX, texture_set_from_files, write_texture_set,
 };
 use axcenity_toolbox::ambientcg::AMBIENTCG;
@@ -31,10 +32,9 @@ use axcenity_toolbox::db::{self, Database, Install};
 use axcenity_toolbox::directory::{self, AssetDirectory};
 use axcenity_toolbox::download::Fetcher;
 use axcenity_toolbox::http::{self, Http};
-use axcenity_toolbox::polyhaven::POLYHAVEN;
 use axcenity_toolbox::variants::{self, Choice};
 use axcenity_toolbox::{
-    AssetRecord, AssetSource, Kind, Package, Query, SourceError, Variant, files,
+    AssetRecord, AssetSource, Kind, Licenses, Package, Query, SourceError, Variant, files, license,
 };
 use eframe::egui;
 
@@ -80,7 +80,9 @@ impl Listing {
     /// A search result from one of the Toolbox's texture sources.
     fn from_record(record: AssetRecord) -> Self {
         let kept = record.clone();
-        let lookup = record.variants.is_empty() && record.provider == POLYHAVEN.info().key;
+        // Poly Haven and Openverse list files only in the full record.
+        let lookup = record.variants.is_empty() && record.provider != AMBIENTCG.info().key;
+        let kind = record.kind;
         Self {
             record: kept,
             lookup,
@@ -91,25 +93,87 @@ impl Listing {
                 .map(|map| map_label(map).to_owned())
                 .collect(),
             preview: Some(record.thumbnail_url).filter(|url| url.starts_with("https://")),
-            packages: record.variants.into_iter().filter(usable).collect(),
+            packages: record
+                .variants
+                .into_iter()
+                .filter(|variant| usable(kind, variant))
+                .collect(),
             id: record.id,
             name: record.name,
         }
     }
 }
 
-/// Whether Get can make a texture set from a package: one zip, or loose
-/// maps, of JPG or PNG images (the formats the engine reads).
-fn usable(variant: &Variant) -> bool {
-    let images = FORMATS
+/// What the dialog offers for one kind of asset.
+struct KindRules {
+    /// The tab's label and the plural in messages.
+    label: &'static str,
+    noun: &'static str,
+    /// The format menu, in order of preference when one is missing.
+    formats: &'static [&'static str],
+    /// Whether the resolution menu applies.
+    resolution: bool,
+    /// Files taken out of a zip package.
+    extract: &'static [&'static str],
+    /// Licences searched for (empty: any). Sounds have their own licences;
+    /// the default keeps the ones a game can use with at most a credit.
+    licenses: &'static [&'static str],
+}
+
+const SKY_EXTENSIONS: [&str; 2] = ["hdr", "exr"];
+
+fn rules(kind: Kind) -> KindRules {
+    match kind {
+        Kind::Hdri => KindRules {
+            label: "Skies",
+            noun: "skies",
+            formats: &["HDR", "EXR"],
+            resolution: true,
+            extract: &SKY_EXTENSIONS,
+            licenses: &[],
+        },
+        Kind::Sound => KindRules {
+            label: "Sounds",
+            noun: "sounds",
+            formats: &["MP3", "OGG", "WAV", "FLAC"],
+            resolution: false,
+            extract: &AUDIO_EXTENSIONS,
+            licenses: &[license::CC0, license::PD, license::CC_BY],
+        },
+        Kind::Texture | Kind::Model => KindRules {
+            label: "Textures",
+            noun: "materials",
+            formats: &FORMATS,
+            resolution: true,
+            extract: &TEXTURE_EXTENSIONS,
+            licenses: &[],
+        },
+    }
+}
+
+/// The kinds the dialog has tabs for, in order.
+const KINDS: [Kind; 3] = [Kind::Texture, Kind::Hdri, Kind::Sound];
+
+/// Whether Get can install a package of a `kind` asset: for textures one
+/// zip or loose maps of JPG or PNG images (the formats the engine reads);
+/// for skies one HDR or EXR file, or a zip of them; for sounds one file the
+/// engine plays.
+fn usable(kind: Kind, variant: &Variant) -> bool {
+    let format_known = rules(kind)
+        .formats
         .iter()
         .any(|format| variant.format.eq_ignore_ascii_case(format));
     let shape = match variant.package {
-        Package::Archive => variant.files.len() == 1,
-        Package::Maps => !variant.files.is_empty(),
-        Package::Bundle | Package::Single => false,
+        Package::Archive => variant.files.len() == 1 && kind != Kind::Sound,
+        Package::Maps => !variant.files.is_empty() && kind == Kind::Texture,
+        Package::Single => variant.files.len() == 1 && kind != Kind::Texture,
+        Package::Bundle => false,
     };
-    images && shape
+    // ambientCG labels its HDRI zips by resolution only ("4K"), so their
+    // format is unknown until they're unpacked.
+    let unlabelled_sky_zip =
+        kind == Kind::Hdri && variant.package == Package::Archive && variant.format.is_empty();
+    shape && (format_known || unlabelled_sky_zip)
 }
 
 /// Leaves out loose maps the texture set doesn't need: a DirectX normal
@@ -167,6 +231,7 @@ struct SearchResult {
     listings: Vec<Listing>,
 }
 
+#[derive(Debug)]
 enum DownloadResult {
     Saved(String),
     Cancelled,
@@ -190,7 +255,9 @@ struct Card {
 
 /// The Get texture dialog.
 pub struct GetTexture {
-    /// Where materials come from: ambientCG or Poly Haven.
+    /// The tab: textures, skies or sounds.
+    kind: Kind,
+    /// Where they come from: ambientCG, Poly Haven or Openverse.
     source: &'static dyn AssetSource,
     query: String,
     resolution: String,
@@ -222,6 +289,7 @@ impl GetTexture {
     fn idle() -> Self {
         let (preview_tx, preview_rx) = mpsc::channel();
         Self {
+            kind: Kind::Texture,
             source: &AMBIENTCG,
             query: String::new(),
             resolution: "2K".to_owned(),
@@ -254,23 +322,28 @@ impl GetTexture {
         let height = (screen.y - 260.0).clamp(200.0, 600.0);
         let mut close = false;
         let source = self.source.info();
-        let subtitle = format!(
-            "Materials from {}. Saved files are CC0 and work offline.",
-            source.name
-        );
+        let kind = rules(self.kind);
+        let licence = match source.licenses {
+            Licenses::All(code) => format!("Saved files are {code} and work offline."),
+            Licenses::PerAsset => {
+                "Each has its own licence, shown on its card; saved files work offline.".to_owned()
+            }
+        };
+        let subtitle = format!("{} from {}. {licence}", capitalize(kind.noun), source.name);
         let ((), dismissed) = dialog::modal(ctx, "get texture", width, |ui| {
             dialog::header(
                 ui,
                 icons::DOWNLOAD_SIMPLE,
                 dialog::Tone::Question,
-                "Get texture",
+                "Toolbox",
                 Some(&subtitle),
             );
+            self.kind_tabs(ui);
             ui.horizontal_wrapped(|ui| {
                 self.source_choice(ui);
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
-                        .hint_text("Search materials")
+                        .hint_text(format!("Search {}", kind.noun))
                         .desired_width(180.0),
                 );
                 let enter =
@@ -283,8 +356,10 @@ impl GetTexture {
                 {
                     self.start_search(ui.ctx(), 0);
                 }
-                self.choice(ui, "resolution", &RESOLUTIONS, true);
-                self.choice(ui, "format", &FORMATS, false);
+                if kind.resolution {
+                    self.choice(ui, "resolution", &RESOLUTIONS, true);
+                }
+                self.choice(ui, "format", kind.formats, false);
             });
             if let Some(error) = &self.error {
                 ui.colored_label(ui.visuals().error_fg_color, error);
@@ -310,13 +385,39 @@ impl GetTexture {
         (close || notice.is_some()).then_some(TextureEvent { close, notice })
     }
 
+    /// Textures, Skies and Sounds. Picking another kind takes its first
+    /// source and format, and searches.
+    fn kind_tabs(&mut self, ui: &mut egui::Ui) {
+        let mut picked = None;
+        ui.horizontal(|ui| {
+            for kind in KINDS {
+                if ui
+                    .selectable_label(self.kind == kind, rules(kind).label)
+                    .clicked()
+                    && self.kind != kind
+                {
+                    picked = Some(kind);
+                }
+            }
+        });
+        if let Some(kind) = picked
+            && self.search.is_none()
+            && let Some(source) = axcenity_toolbox::sources_for(kind).into_iter().next()
+        {
+            self.kind = kind;
+            self.source = source;
+            self.format = rules(kind).formats[0].to_owned();
+            self.start_search(ui.ctx(), 0);
+        }
+    }
+
     /// The source menu. Picking another source searches it.
     fn source_choice(&mut self, ui: &mut egui::Ui) {
         let mut picked = None;
         egui::ComboBox::from_id_salt("texture source")
             .selected_text(self.source.info().name)
             .show_ui(ui, |ui| {
-                for source in axcenity_toolbox::sources_for(Kind::Texture) {
+                for source in axcenity_toolbox::sources_for(self.kind) {
                     let current = source.info().key == self.source.info().key;
                     if ui.selectable_label(current, source.info().name).clicked() && !current {
                         picked = Some(source);
@@ -359,7 +460,7 @@ impl GetTexture {
             return;
         };
         if page.listings.is_empty() {
-            ui.label("No materials match that.");
+            ui.label(format!("No {} match that.", rules(self.kind).noun));
             return;
         }
         let total = page.total;
@@ -369,7 +470,15 @@ impl GetTexture {
             .iter()
             .map(|listing| {
                 let maps = listing.maps.join(", ");
-                let detail = if maps.is_empty() {
+                let record = &listing.record;
+                let detail = if record.kind == Kind::Sound {
+                    // Each sound has its own licence and author: show both.
+                    let author = record
+                        .authors
+                        .first()
+                        .map_or("unknown author", String::as_str);
+                    format!("{} · {author}", record.license)
+                } else if maps.is_empty() {
                     listing.category.clone()
                 } else if listing.category.is_empty() {
                     maps
@@ -482,15 +591,17 @@ impl GetTexture {
         let generation = self.generation;
         let query = self.query.trim().to_owned();
         let source = self.source;
+        let kind = self.kind;
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = search(source, &query, offset).map(|(total, listings)| SearchResult {
-                generation,
-                offset,
-                total,
-                listings,
-            });
+            let result =
+                search(source, kind, &query, offset).map(|(total, listings)| SearchResult {
+                    generation,
+                    offset,
+                    total,
+                    listings,
+                });
             let _ = tx.send(result);
             ctx.request_repaint();
         });
@@ -674,18 +785,39 @@ impl GetTexture {
 fn pick<'a>(listing: &'a Listing, resolution: &str, format: &str) -> Option<Choice<'a>> {
     let resolution = resolution.to_ascii_lowercase();
     let format = format.to_ascii_lowercase();
-    variants::choose(&listing.packages, &resolution, &format, &["jpg", "png"])
+    let fallbacks: Vec<String> = rules(listing.record.kind)
+        .formats
+        .iter()
+        .map(|format| format.to_ascii_lowercase())
+        .collect();
+    let fallbacks: Vec<&str> = fallbacks.iter().map(String::as_str).collect();
+    variants::choose(&listing.packages, &resolution, &format, &fallbacks)
 }
 
-/// One page of materials matching `query` from one of the Toolbox's
-/// texture sources (most popular first).
+/// `text` with its first letter upper-case.
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// One page of `kind` assets matching `query` from one of the Toolbox's
+/// sources (most popular first; sounds only with the licences `rules` keeps).
 fn search(
     source: &dyn AssetSource,
+    kind: Kind,
     query: &str,
     offset: usize,
 ) -> Result<(usize, Vec<Listing>), String> {
     let client = http::Client::new(Duration::from_secs(30));
-    let mut wanted = Query::new(query, Kind::Texture);
+    let mut wanted = Query::new(query, kind);
+    wanted.licenses = rules(kind)
+        .licenses
+        .iter()
+        .map(|code| (*code).to_owned())
+        .collect();
     wanted.per_page = PAGE as u32;
     wanted.page = (offset / PAGE) as u32 + 1;
     let page = source
@@ -739,8 +871,9 @@ fn preview_image(client: &http::Client, url: &str) -> Option<egui::ColorImage> {
     ))
 }
 
-/// Gets one package of `record` into `project/assets/textures/<id>/` with
-/// its texture set file.
+/// Gets one package of `record` into the project: a texture into
+/// `assets/textures/<id>/` with its texture set file, a sky into
+/// `assets/sky/`, a sound into `assets/audio/`.
 ///
 /// The package goes into the central asset directory at `assets` first
 /// (verified, unpacked, recorded in its metadata database with the asset's
@@ -768,26 +901,30 @@ fn download(
         dir: &dir,
         db: &db,
     };
-    let fetched =
-        match fetcher.fetch_variant(source.info(), record, variant, &TEXTURE_EXTENSIONS, cancel) {
-            Ok(fetched) => fetched,
-            Err(SourceError::Cancelled) => return Ok(DownloadResult::Cancelled),
-            Err(err) => return Err(err.to_string()),
-        };
+    let extract = rules(record.kind).extract;
+    let fetched = match fetcher.fetch_variant(source.info(), record, variant, extract, cancel) {
+        Ok(fetched) => fetched,
+        Err(SourceError::Cancelled) => return Ok(DownloadResult::Cancelled),
+        Err(err) => return Err(err.to_string()),
+    };
     if cancel.load(Ordering::Relaxed) {
         return Ok(DownloadResult::Cancelled);
     }
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |time| time.as_millis());
-    let root = std::env::temp_dir().join(format!("axcenity-texture-{id}-{stamp}"));
-    let outcome = install(&root, &dir, &fetched, project, record, cancel);
-    let _ = fs::remove_dir_all(&root);
-    let outcome = outcome?;
+    let (outcome, installed) = if matches!(record.kind, Kind::Hdri | Kind::Sound) {
+        install_file(&dir, &fetched, project, record, variant)?
+    } else {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |time| time.as_millis());
+        let root = std::env::temp_dir().join(format!("axcenity-texture-{id}-{stamp}"));
+        let outcome = install(&root, &dir, &fetched, project, record, cancel);
+        let _ = fs::remove_dir_all(&root);
+        (outcome?, format!("{PROJECT_TEXTURES_FOLDER}/{id}"))
+    };
     if let DownloadResult::Saved(_) = &outcome {
         let install = Install {
             project: project.display().to_string(),
-            path: format!("assets/textures/{id}"),
+            path: installed,
             key: record.key(),
             variant: variant.label.clone(),
             uid: None,
@@ -798,6 +935,78 @@ fn download(
         }
     }
     Ok(outcome)
+}
+
+/// Copies a downloaded sky into `assets/sky/<id>_<resolution>.<hdr|exr>`
+/// or a sound into `assets/audio/<name>-<id start>.<ext>`, and returns what
+/// to say and the file's path in the project.
+fn install_file(
+    dir: &AssetDirectory,
+    fetched: &db::Download,
+    project: &Path,
+    record: &AssetRecord,
+    variant: &Variant,
+) -> Result<(DownloadResult, String), String> {
+    let wanted = rules(record.kind).extract;
+    let file = fetched
+        .files
+        .iter()
+        .find(|file| wanted.contains(&extension(&file.path).as_str()))
+        .ok_or_else(|| "the download has no file the engine reads".to_owned())?;
+    let ext = extension(&file.path);
+    let relative = if record.kind == Kind::Hdri {
+        let resolution = variant.resolution.as_deref().unwrap_or("sky");
+        format!("{PROJECT_SKY_FOLDER}/{}_{resolution}.{ext}", record.id)
+    } else {
+        format!("{PROJECT_AUDIO_FOLDER}/{}.{ext}", sound_name(record))
+    };
+    let dest = relative
+        .split('/')
+        .fold(project.to_owned(), |path, part| path.join(part));
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    let replaced = dest.exists();
+    let source = file
+        .path
+        .split('/')
+        .fold(dir.path(&fetched.folder), |path, part| path.join(part));
+    fs::copy(&source, &dest).map_err(|err| err.to_string())?;
+    let verb = if replaced { "Replaced" } else { "Saved" };
+    let message = format!("{verb} {} ({}) in {relative}.", record.name, record.license);
+    Ok((DownloadResult::Saved(message), relative))
+}
+
+/// A file name's extension, lower case.
+fn extension(name: &str) -> String {
+    name.rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// A sound's file name: its title as lower-case words joined by `-`, then
+/// the start of its id so two sounds with one title don't collide.
+fn sound_name(record: &AssetRecord) -> String {
+    let words: Vec<String> = record
+        .name
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let mut title = words.join("-");
+    title.truncate(40);
+    let title = title.trim_end_matches('-');
+    let id: String = record
+        .id
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(8)
+        .collect();
+    match (title.is_empty(), id.is_empty()) {
+        (true, _) => format!("sound-{id}"),
+        (false, true) => title.to_owned(),
+        (false, false) => format!("{title}-{id}"),
+    }
 }
 
 /// Copies a downloaded package's images into a staging folder, writes the
@@ -846,8 +1055,8 @@ fn install(
         .map_err(|err| err.to_string())?;
     let verb = if replaced { "Replaced" } else { "Saved" };
     Ok(DownloadResult::Saved(format!(
-        "{verb} {} (CC0) in assets/textures/{id}.",
-        record.name
+        "{verb} {} ({}) in assets/textures/{id}.",
+        record.name, record.license
     )))
 }
 
@@ -858,6 +1067,8 @@ mod tests {
 
     use axcenity_toolbox::RemoteFile;
     use axcenity_toolbox::http::Fixture;
+    use axcenity_toolbox::openverse::OPENVERSE;
+    use axcenity_toolbox::polyhaven::POLYHAVEN;
 
     use super::*;
 
@@ -1011,7 +1222,7 @@ mod tests {
     #[ignore = "reaches ambientCG"]
     fn get_downloads_a_real_material_into_a_project() {
         let temp = Temp::new("live");
-        let (_, listings) = search(&AMBIENTCG, "ground", 0).unwrap();
+        let (_, listings) = search(&AMBIENTCG, Kind::Texture, "ground", 0).unwrap();
         let listing = listings
             .into_iter()
             .find(|l| !l.packages.is_empty())
@@ -1173,7 +1384,7 @@ mod tests {
     #[ignore = "reaches Poly Haven"]
     fn get_downloads_a_real_poly_haven_texture_into_a_project() {
         let temp = Temp::new("polyhaven-live");
-        let (_, listings) = search(&POLYHAVEN, "brick", 0).unwrap();
+        let (_, listings) = search(&POLYHAVEN, Kind::Texture, "brick", 0).unwrap();
         let listing = &listings[0];
         assert!(listing.lookup);
         let client = http::Client::new(Duration::from_secs(600));
@@ -1203,5 +1414,207 @@ mod tests {
             .join(&full.id)
             .join(format!("{}{TEXTURE_SET_SUFFIX}", full.id));
         assert!(set_file.is_file());
+    }
+
+    fn single(
+        kind: Kind,
+        provider: &str,
+        id: &str,
+        name: &str,
+        url: &str,
+        format: &str,
+    ) -> (AssetRecord, Variant) {
+        let variant = Variant {
+            label: format!("4K {}", format.to_uppercase()),
+            resolution: (kind == Kind::Hdri).then(|| "4k".to_owned()),
+            format: format.to_owned(),
+            package: Package::Single,
+            files: vec![RemoteFile {
+                url: url.to_owned(),
+                path: url.rsplit('/').next().unwrap().to_owned(),
+                ..RemoteFile::default()
+            }],
+        };
+        let record = AssetRecord {
+            provider: provider.into(),
+            id: id.into(),
+            kind,
+            name: name.into(),
+            license: if kind == Kind::Sound {
+                "CC-BY".into()
+            } else {
+                "CC0".into()
+            },
+            authors: vec!["Jane Doe".into()],
+            ..AssetRecord::default()
+        };
+        (record, variant)
+    }
+
+    #[test]
+    fn a_sky_lands_in_assets_sky_named_by_its_resolution() {
+        let temp = Temp::new("sky");
+        let url = "https://dl.polyhaven.org/fish_eagle_hill_4k.hdr";
+        let (record, variant) = single(
+            Kind::Hdri,
+            "polyhaven",
+            "fish_eagle_hill",
+            "Fish Eagle Hill",
+            url,
+            "hdr",
+        );
+        let http = Fixture::default().with(url, "radiance");
+        let project = temp.0.join("Project");
+        let cancel = AtomicBool::new(false);
+        let saved = download(
+            &http,
+            &POLYHAVEN,
+            &temp.0.join("Assets"),
+            &project,
+            &record,
+            &variant,
+            &cancel,
+        );
+        assert!(
+            matches!(&saved, Ok(DownloadResult::Saved(text)) if text.ends_with("in assets/sky/fish_eagle_hill_4k.hdr.")),
+            "{saved:?}"
+        );
+        assert_eq!(
+            fs::read(project.join("assets/sky/fish_eagle_hill_4k.hdr")).unwrap(),
+            b"radiance"
+        );
+    }
+
+    #[test]
+    fn a_sound_lands_in_assets_audio_with_its_licence_named() {
+        let temp = Temp::new("sound");
+        let url = "https://cdn.freesound.org/previews/1/door.mp3";
+        let id = "4bd0a3e8-1111-2222-3333-444455556666";
+        let (record, variant) = single(Kind::Sound, "openverse", id, "Creaking Door!", url, "mp3");
+        let http = Fixture::default().with(url, "mp3 bytes");
+        let project = temp.0.join("Project");
+        let cancel = AtomicBool::new(false);
+        let saved = download(
+            &http,
+            &OPENVERSE,
+            &temp.0.join("Assets"),
+            &project,
+            &record,
+            &variant,
+            &cancel,
+        );
+        assert!(
+            matches!(&saved, Ok(DownloadResult::Saved(text))
+                if text == "Saved Creaking Door! (CC-BY) in assets/audio/creaking-door-4bd0a3e8.mp3."),
+            "{saved:?}"
+        );
+        assert!(
+            project
+                .join("assets/audio/creaking-door-4bd0a3e8.mp3")
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn each_tab_offers_only_packages_it_can_install() {
+        let (_, sky) = single(
+            Kind::Hdri,
+            "polyhaven",
+            "a",
+            "A",
+            "https://dl.polyhaven.org/a.exr",
+            "exr",
+        );
+        assert!(usable(Kind::Hdri, &sky));
+        assert!(!usable(Kind::Texture, &sky));
+        let mut zip_sky = zip("4K", "4k", "");
+        zip_sky.format = String::new();
+        assert!(usable(Kind::Hdri, &zip_sky));
+        let (_, sound) = single(
+            Kind::Sound,
+            "openverse",
+            "a",
+            "A",
+            "https://x.org/a.mp3",
+            "mp3",
+        );
+        assert!(usable(Kind::Sound, &sound));
+        let (_, odd) = single(
+            Kind::Sound,
+            "openverse",
+            "a",
+            "A",
+            "https://x.org/a.aiff",
+            "aiff",
+        );
+        assert!(!usable(Kind::Sound, &odd));
+        assert!(!usable(Kind::Sound, &zip("2K JPG", "2k", "jpg")));
+    }
+
+    #[test]
+    fn sound_names_are_plain_and_unique() {
+        let record = |name: &str, id: &str| AssetRecord {
+            name: name.into(),
+            id: id.into(),
+            ..AssetRecord::default()
+        };
+        assert_eq!(
+            sound_name(&record("Rain on a Tin Roof", "ab-cd-ef")),
+            "rain-on-a-tin-roof-abcdef"
+        );
+        assert_eq!(sound_name(&record("???", "1234567890")), "sound-12345678");
+    }
+
+    /// Gets the first result of a real search on `source` into a project at
+    /// the smallest package, looking the record up first when it needs it.
+    fn get_first(
+        source: &dyn AssetSource,
+        kind: Kind,
+        words: &str,
+        resolution: &str,
+        format: &str,
+    ) -> String {
+        let temp = Temp::new(&format!("live-{}", source.info().key));
+        let (_, listings) = search(source, kind, words, 0).unwrap();
+        let client = http::Client::new(Duration::from_secs(600));
+        let listing = listings.into_iter().next().expect("a result");
+        let listing = if listing.lookup {
+            Listing::from_record(source.record(&client, &listing.id).unwrap())
+        } else {
+            listing
+        };
+        let choice = pick(&listing, resolution, format).expect("a usable package");
+        let variant = needed_maps(choice.variant);
+        let cancel = AtomicBool::new(false);
+        let project = temp.0.join("Project");
+        let saved = download(
+            &client,
+            source,
+            &temp.0.join("Assets"),
+            &project,
+            &listing.record,
+            &variant,
+            &cancel,
+        );
+        match saved {
+            Ok(DownloadResult::Saved(text)) => text,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Skies and sounds from the real sources. Reaches the network, so run
+    /// it by hand (see the ambientCG texture one above).
+    #[test]
+    #[ignore = "reaches ambientCG, Poly Haven and Openverse"]
+    fn get_downloads_real_skies_and_sounds() {
+        for (source, words, format) in [
+            (&AMBIENTCG as &dyn AssetSource, "sky", "EXR"),
+            (&POLYHAVEN, "sunset", "HDR"),
+        ] {
+            let text = get_first(source, Kind::Hdri, words, "1K", format);
+            assert!(text.contains("in assets/sky/"), "{text}");
+        }
+        let text = get_first(&OPENVERSE, Kind::Sound, "door", "", "MP3");
+        assert!(text.contains("in assets/audio/"), "{text}");
     }
 }

@@ -220,7 +220,9 @@ fn variants(asset: &Value, id: &str) -> Vec<Variant> {
                     .filter(|label| !label.is_empty())
                     .unwrap_or_else(|| "Download".to_owned()),
                 resolution,
-                format: if format.is_empty() {
+                // A zip labelled by resolution only ("4K", HDRIs) has an
+                // unknown format until it's unpacked: left empty.
+                format: if format.is_empty() && extension != "zip" {
                     extension.clone()
                 } else {
                     format

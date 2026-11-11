@@ -54,7 +54,8 @@ pub fn choose<'a>(
     };
     let variant = variants.iter().min_by_key(|variant| score(variant))?;
     let mut notes = Vec::new();
-    if !variant.format.eq_ignore_ascii_case(format) {
+    // An unknown format (empty) gets no note: there's nothing to say it is.
+    if !variant.format.is_empty() && !variant.format.eq_ignore_ascii_case(format) {
         notes.push(format!(
             "No {} here, so {}.",
             format.to_ascii_uppercase(),
