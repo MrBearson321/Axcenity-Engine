@@ -2423,3 +2423,38 @@ fn the_ai_connections_setting_starts_and_stops_listening_for_the_open_project() 
     assert!(!folder.join(ENDPOINT_FILE).exists());
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn render_stats_reads_the_viewports_last_frame_and_says_why_without_a_window() {
+    let mut opened = open("hello-part", "mcp-render-stats");
+    let host = &mut opened.app;
+    let error = call(host, "render_stats", json!({})).unwrap_err();
+    assert_eq!(error.code, Code::Unsupported);
+    assert!(error.to_string().contains("AI connections"), "{error}");
+    // The open editor keeps its viewport's last frame.
+    let mut cost = crate::profiler::RenderCost {
+        cpu: std::time::Duration::from_micros(2_500),
+        lights: 3,
+        ..Default::default()
+    };
+    cost.stats.draw_calls = 42;
+    cost.stats.gpu_time = Some(std::time::Duration::from_micros(4_000));
+    host.app.last_drawn = Some(super::LastDrawn {
+        cost,
+        at: std::time::Instant::now(),
+        size: (1280, 720),
+        playing: false,
+    });
+    let text = ok(host, "render_stats", json!({}));
+    assert!(
+        text.starts_with("viewport 1280×720 · editing · last frame "),
+        "{text}"
+    );
+    assert!(
+        text.contains("CPU 2.50 ms · GPU 4.00 ms · 3 lights"),
+        "{text}"
+    );
+    assert!(text.contains("Draws 42 calls"), "{text}");
+    assert!(text.contains("GPU memory"), "{text}");
+    assert!(!text.contains("Play"), "nothing played: {text}");
+}
