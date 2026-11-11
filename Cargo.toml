@@ -169,6 +169,10 @@ sha2 = "0.11"
 # Checks the minisign signature on a release manifest before the editor
 # trusts it (`crates/release`). Pure Rust, no dependencies; MIT.
 minisign-verify = "0.2"
+# Signs a throwaway release manifest in the updater's end-to-end test
+# (dev-dependency only; the real key signs in CI with the minisign CLI).
+# MIT.
+minisign = { version = "0.10", default-features = false }
 # Reads the hand-written release records in `releases/` (`crates/release`).
 # MIT OR Apache-2.0; the same toml_parser family is already in the tree.
 # `display` writes the record `axcenity-release prepare` starts.

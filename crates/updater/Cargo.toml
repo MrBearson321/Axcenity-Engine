@@ -27,5 +27,8 @@ ureq = { workspace = true, optional = true }
 zip.workspace = true
 axcenity-workspace-hack.workspace = true
 
+[dev-dependencies]
+minisign.workspace = true
+
 [lints]
 workspace = true

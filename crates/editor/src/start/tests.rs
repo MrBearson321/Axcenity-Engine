@@ -53,31 +53,49 @@ fn the_start_screen_draws_each_page_and_the_new_project_dialog() {
     std::fs::write(pictured.join(axcenity_project::THUMBNAIL_FILE), png_bytes).unwrap();
     projects[0].folder = pictured.clone();
     let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
-    for (name, page, dialog, theme) in [
+    let folded = StartNav {
+        folded: true,
+        ..Default::default()
+    };
+    let top_bar = StartNav {
+        layout: NavLayout::TopBar,
+        folded: false,
+    };
+    for (name, page, dialog, theme, nav) in [
         (
             "start-projects",
             Page::Projects,
             None,
             theme::ThemeChoice::Dark,
+            StartNav::default(),
         ),
         (
             "start-projects-light",
             Page::Projects,
             None,
             theme::ThemeChoice::Light,
+            StartNav::default(),
         ),
-        ("start-learn", Page::Learn, None, theme::ThemeChoice::Dark),
+        (
+            "start-learn",
+            Page::Learn,
+            None,
+            theme::ThemeChoice::Dark,
+            StartNav::default(),
+        ),
         (
             "start-reference",
             Page::Reference,
             None,
             theme::ThemeChoice::Dark,
+            StartNav::default(),
         ),
         (
             "start-new-project",
             Page::Projects,
             Some(Template::Starter),
             theme::ThemeChoice::Dark,
+            StartNav::default(),
         ),
         // A genre template picked: its picture, and the rest beside it.
         (
@@ -85,10 +103,33 @@ fn the_start_screen_draws_each_page_and_the_new_project_dialog() {
             Page::Projects,
             Some(Template::Arena),
             theme::ThemeChoice::Light,
+            StartNav::default(),
+        ),
+        (
+            "start-projects-folded",
+            Page::Projects,
+            None,
+            theme::ThemeChoice::Dark,
+            folded,
+        ),
+        (
+            "start-projects-top-bar",
+            Page::Projects,
+            None,
+            theme::ThemeChoice::Dark,
+            top_bar,
+        ),
+        (
+            "start-learn-top-bar-light",
+            Page::Learn,
+            None,
+            theme::ThemeChoice::Light,
+            top_bar,
         ),
     ] {
         let mut start = StartScreen {
             page,
+            nav,
             ..Default::default()
         };
         if let Some(template) = dialog {
@@ -562,4 +603,229 @@ fn copy_diagnostics_names_the_build_system_gpu_and_known_issues() {
     // 0.1.0-alpha.3 was checked and found affected by AX-0001.
     assert!(text.contains("known issues: AX-0001"), "{text}");
     assert!(diagnostics(&build, None).contains("gpu: not started yet"));
+}
+
+/// Every label and button drawn, with AccessKit on: its text (without icon
+/// characters; a label's starts "label: ") and its bounds as left, right,
+/// top and bottom.
+fn drawn_text(output: &egui::FullOutput) -> Vec<(String, f32, f32, f32, f32)> {
+    let update = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("AccessKit is on");
+    update
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| {
+            let (kind, text) = match node.role() {
+                egui::accesskit::Role::Label => ("label: ", node.value()?),
+                egui::accesskit::Role::Button => ("", node.label()?),
+                _ => return None,
+            };
+            let text: String = text
+                .chars()
+                .filter(|c| !('\u{e000}'..='\u{f8ff}').contains(c))
+                .collect();
+            let text = format!("{kind}{}", text.trim());
+            let bounds = node.bounds()?;
+            Some((
+                text.trim().to_owned(),
+                bounds.x0 as f32,
+                bounds.x1 as f32,
+                bounds.y0 as f32,
+                bounds.y1 as f32,
+            ))
+        })
+        .collect()
+}
+
+/// The start screen drawn `width` wide with `nav`, after it settles.
+fn draw_with_nav(nav: StartNav, width: f32) -> Vec<(String, f32, f32, f32, f32)> {
+    let mut projects = vec![link("Space Race")];
+    let mut start = StartScreen::default();
+    start.set_nav(nav);
+    let ctx = theme::test_context();
+    ctx.enable_accesskit();
+    let mut output = None;
+    for frame in 0..4 {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 800.0))),
+            time: Some(frame as f64 * 10.0),
+            ..Default::default()
+        };
+        output = Some(crate::theme::run(&ctx, input, |ui| {
+            let ctx = &ui.ctx().clone();
+            theme::apply(ctx, &theme::Appearance::default());
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
+                .show(ui, |ui| {
+                    let brand = Brand::load(ui.ctx());
+                    assert!(start.show(ui, &mut projects, &brand).is_none());
+                });
+        }));
+    }
+    drawn_text(&output.unwrap())
+}
+
+fn find<'a>(
+    drawn: &'a [(String, f32, f32, f32, f32)],
+    text: &str,
+) -> &'a (String, f32, f32, f32, f32) {
+    drawn
+        .iter()
+        .find(|(found, ..)| found.contains(text))
+        .unwrap_or_else(|| panic!("`{text}` is drawn: {drawn:?}"))
+}
+
+/// The navigation's button for `page` (not a heading of the same name),
+/// the one nearest the top left.
+fn nav_button<'a>(
+    drawn: &'a [(String, f32, f32, f32, f32)],
+    page: &str,
+) -> &'a (String, f32, f32, f32, f32) {
+    drawn
+        .iter()
+        .filter(|(text, ..)| text == page)
+        .min_by(|a, b| (a.1 + a.3).total_cmp(&(b.1 + b.3)))
+        .unwrap_or_else(|| panic!("`{page}` is drawn"))
+}
+
+#[test]
+fn the_sidebar_version_stays_inside_the_sidebar() {
+    for width in [900.0, 1400.0] {
+        let drawn = draw_with_nav(StartNav::default(), width);
+        for text in ["Axcenity Engine", "Development", "Apache-2.0"] {
+            let (_, left, right, top, bottom) = find(&drawn, text);
+            assert!(
+                *left >= 0.0 && *right <= nav::SIDEBAR_WIDTH,
+                "`{text}` spans {left}..{right}, past the sidebar's {} edge",
+                nav::SIDEBAR_WIDTH
+            );
+            // Below Settings, so the two never overlap.
+            let (_, _, _, _, settings_bottom) = find(&drawn, "Settings");
+            assert!(top >= settings_bottom, "`{text}` overlaps Settings");
+            assert!(*bottom <= 800.0, "`{text}` is cut off at the bottom");
+        }
+        // The page starts after the sidebar.
+        let (_, new_left, ..) = find(&drawn, "New Project");
+        assert!(*new_left > nav::SIDEBAR_WIDTH);
+    }
+}
+
+#[test]
+fn a_folded_sidebar_keeps_every_page_as_an_icon_and_gives_the_page_its_room() {
+    let folded = StartNav {
+        folded: true,
+        ..Default::default()
+    };
+    let drawn = draw_with_nav(folded, 1280.0);
+    for page in [
+        "Projects",
+        "Global Assets",
+        "Learn",
+        "API Reference",
+        "Settings",
+    ] {
+        let (_, left, right, ..) = nav_button(&drawn, page);
+        assert!(
+            *left >= 0.0 && *right <= nav::FOLDED_WIDTH,
+            "`{page}` spans {left}..{right} in a folded sidebar"
+        );
+    }
+    // The version shows in the logo's tooltip, not as text that won't fit.
+    assert!(drawn.iter().all(|(text, ..)| !text.contains("Apache")));
+    find(&drawn, "Open the sidebar");
+    // The page moves left to fill the room: wider than beside an open sidebar.
+    let (_, folded_left, ..) = find(&drawn, "Space Race");
+    let open = draw_with_nav(StartNav::default(), 1280.0);
+    let (_, open_left, ..) = find(&open, "Space Race");
+    assert!(folded_left < open_left, "{folded_left} vs {open_left}");
+}
+
+#[test]
+fn the_top_bar_lists_the_same_pages_across_the_top() {
+    let top = StartNav {
+        layout: NavLayout::TopBar,
+        folded: false,
+    };
+    for width in [800.0, 1400.0] {
+        let drawn = draw_with_nav(top, width);
+        let mut lefts = Vec::new();
+        for page in [
+            "Projects",
+            "Global Assets",
+            "Learn",
+            "API Reference",
+            "Settings",
+        ] {
+            let (_, left, right, _, bottom) = nav_button(&drawn, page);
+            assert!(*bottom <= nav::TOP_BAR_HEIGHT, "`{page}` is in the top bar");
+            assert!(*right <= width, "`{page}` fits the window at {width}");
+            lefts.push(*left);
+        }
+        assert!(lefts.is_sorted(), "left to right, then Settings: {lefts:?}");
+        find(&drawn, "Show the pages in a sidebar");
+        // The page uses the whole width, below the bar.
+        let (_, card_left, _, card_top, _) = find(&drawn, "Space Race");
+        assert!(*card_left < nav::SIDEBAR_WIDTH && *card_top > nav::TOP_BAR_HEIGHT);
+    }
+}
+
+#[test]
+fn the_layout_buttons_switch_between_sidebar_and_top_bar() {
+    let mut projects = Vec::new();
+    let mut start = StartScreen::default();
+    let ctx = theme::test_context();
+    ctx.enable_accesskit();
+    // Each frame a while after the last, so folding has finished sliding.
+    let mut clock = 0.0;
+    let mut frame = |start: &mut StartScreen, events: Vec<egui::Event>| {
+        clock += 10.0;
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+            time: Some(clock),
+            events,
+            ..Default::default()
+        };
+        crate::theme::run(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let brand = Brand::load(ui.ctx());
+                let _ = start.show(ui, &mut projects, &brand);
+            });
+        })
+    };
+    let click = |at: egui::Pos2| {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        vec![egui::Event::PointerMoved(at), button(true), button(false)]
+    };
+    let center = |drawn: &[(String, f32, f32, f32, f32)], text: &str| {
+        let (_, left, right, top, bottom) = find(drawn, text);
+        pos2((left + right) / 2.0, (top + bottom) / 2.0)
+    };
+    frame(&mut start, Vec::new());
+    let drawn = drawn_text(&frame(&mut start, Vec::new()));
+    let fold = center(&drawn, "Fold the sidebar to its icons");
+    frame(&mut start, click(fold));
+    assert!(start.nav().folded);
+    frame(&mut start, Vec::new());
+    let drawn = drawn_text(&frame(&mut start, Vec::new()));
+    let unfold = center(&drawn, "Open the sidebar");
+    frame(&mut start, click(unfold));
+    assert!(!start.nav().folded);
+    frame(&mut start, Vec::new());
+    let drawn = drawn_text(&frame(&mut start, Vec::new()));
+    let top_bar = center(&drawn, "Show the pages in a top bar");
+    frame(&mut start, click(top_bar));
+    assert_eq!(start.nav().layout, NavLayout::TopBar);
+    frame(&mut start, Vec::new());
+    let drawn = drawn_text(&frame(&mut start, Vec::new()));
+    let sidebar = center(&drawn, "Show the pages in a sidebar");
+    frame(&mut start, click(sidebar));
+    assert_eq!(start.nav().layout, NavLayout::Sidebar);
 }

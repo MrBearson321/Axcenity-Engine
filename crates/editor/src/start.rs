@@ -1,5 +1,5 @@
-//! The start screen shown while no project is open: a sidebar with the
-//! wordmark, the Projects, Global Assets, Learn and API Reference pages and
+//! The start screen shown while no project is open: a sidebar (or top bar,
+//! `nav`) with the wordmark, the Projects, Global Assets, Learn and API Reference pages and
 //! Settings (global assets are in `global`, the tutorials in `learn`, the
 //! reference in `reference`; the last two also
 //! show over an open project in Help > Learn); on Projects, a
@@ -19,6 +19,7 @@ mod cards;
 mod dialogs;
 mod global;
 mod learn;
+mod nav;
 mod pages;
 mod reference;
 
@@ -26,6 +27,7 @@ use cards::*;
 use dialogs::*;
 use global::GlobalPage;
 use learn::{Learn, LearnAction, SampleState};
+pub use nav::{NavLayout, StartNav};
 pub(crate) use pages::ago;
 use pages::*;
 use reference::Reference;
@@ -41,7 +43,6 @@ const ABOUT_WIDTH: f32 = 360.0;
 /// How wide the wordmark is drawn in the About box, in points. The image is
 /// over twice this, so it stays sharp on high-DPI screens.
 const WORDMARK_WIDTH: f32 = 280.0;
-const SIDEBAR_WIDTH: f32 = 220.0;
 /// Project cards are at least this wide; a row fills the page with as many
 /// as fit, all the same width.
 const MIN_CARD_WIDTH: f32 = 230.0;
@@ -246,6 +247,8 @@ pub struct StartScreen {
     arrived: Option<(Page, f64)>,
     /// When the start screen was first drawn, for the logo's entrance.
     intro: Option<f64>,
+    /// Sidebar or top bar, and whether the sidebar is folded. Saved.
+    nav: StartNav,
 }
 
 impl StartScreen {
@@ -324,10 +327,8 @@ impl StartScreen {
         let mut action = None;
         let ctx = ui.ctx().clone();
         let full = ui.available_rect_before_wrap();
-        let sidebar = Rect::from_min_size(full.min, vec2(SIDEBAR_WIDTH, full.height()));
-        let page = Rect::from_min_max(pos2(sidebar.right(), full.top()), full.max);
-
-        if self.sidebar(ui, sidebar, projects.len(), brand) {
+        let (page, settings) = self.navigation(ui, full, projects.len(), brand);
+        if settings {
             action = Some(StartAction::Settings);
         }
         let palette = theme::palette(&ctx);
@@ -381,71 +382,6 @@ impl StartScreen {
             action = Some(StartAction::Open(opened));
         }
         action
-    }
-
-    /// The wordmark, the pages, Settings and the version. Returns true when
-    /// Settings was clicked.
-    fn sidebar(&mut self, ui: &mut egui::Ui, rect: Rect, tracked: usize, brand: &Brand) -> bool {
-        let palette = theme::palette(ui.ctx());
-        ui.painter().rect_filled(rect, 0, palette.app_bg);
-        ui.painter().vline(
-            rect.right() - 0.5,
-            rect.y_range(),
-            Stroke::new(1.0_f32, palette.border),
-        );
-        let inner = rect.shrink2(vec2(12.0, 18.0));
-        let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-        let ctx = ui.ctx().clone();
-        let intro = *self.intro.get_or_insert(ctx.input(|input| input.time));
-        let cut = theme::arrival(&ctx, intro, 0.1, 1.0, theme::curve::CUT);
-        let wipe = theme::arrival(&ctx, intro, 0.3, 0.7, theme::curve::CUT);
-        bar.horizontal(|ui| {
-            ui.add_space(6.0);
-            widgets::wordmark(ui, brand.mark(), 15.0, cut, wipe);
-        });
-        bar.add_space(22.0);
-        bar.spacing_mut().item_spacing.y = 2.0;
-        for (page, icon, title, count) in [
-            (
-                Page::Projects,
-                icons::SQUARES_FOUR,
-                "Projects",
-                Some(tracked),
-            ),
-            (Page::Global, icons::GLOBE, "Global Assets", None),
-            (Page::Learn, icons::BOOK_OPEN, "Learn", None),
-            (Page::Reference, icons::BOOKS, "API Reference", None),
-        ] {
-            if widgets::nav_item(&mut bar, icon, title, count, self.page == page).clicked() {
-                self.page = page;
-            }
-        }
-
-        let bottom = Rect::from_min_max(pos2(inner.left(), inner.bottom() - 72.0), inner.max);
-        let mut foot = ui.new_child(egui::UiBuilder::new().max_rect(bottom));
-        let settings = widgets::nav_item(&mut foot, icons::GEAR_SIX, "Settings", None, false)
-            .on_hover_text(format!(
-                "Theme, accent, density and motion ({})",
-                ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::Comma
-                ))
-            ));
-        foot.add_space(8.0);
-        foot.horizontal(|ui| {
-            ui.add_space(10.0);
-            ui.label(
-                RichText::new(format!("Axcenity Engine {}", version_label()))
-                    .size(type_scale::CAPTION)
-                    .color(palette.text_weak),
-            );
-            ui.label(
-                RichText::new("Apache-2.0")
-                    .size(type_scale::CAPTION)
-                    .color(palette.text_weak),
-            );
-        });
-        settings.clicked()
     }
 
     /// The header, the templates and the tracked projects. Returns a

@@ -61,7 +61,7 @@ Installer pictures (NSIS header/sidebar, DMG background) come from `python packa
 
 GitHub Actions runs only for release tags, so each release run is deliberate ([development policy](../development-policy.md#continuous-integration)). **Tell Paul before pushing a tag**: the version, the platforms and roughly how long it takes.
 
-1. **Prepare** on a branch: `cargo run -p axcenity-release -- prepare 0.2.0-alpha.1`. It moves `releases/unreleased/` into `releases/history/0.2.0-alpha.1.toml`, sets the version in `Cargo.toml` and `Cargo.lock`, and marks the issues those entries fix as fixed. Write the record's `title` (the release's name on GitHub, after "Axcenity Engine 0.2.0-alpha.1:"), `summary` and `[formats]` (the project, world, save and network format versions it reads and writes). Read the notes it will publish: `cargo run -p axcenity-release -- notes 0.2.0-alpha.1`.
+1. **Prepare** on a branch: `cargo run -p axcenity-release -- prepare 0.2.0-alpha.1`. It moves `releases/unreleased/` into `releases/history/0.2.0-alpha.1.toml`, sets the version in `Cargo.toml` and `Cargo.lock`, and marks the issues those entries fix as fixed. It also copies `releases/formats.toml` (the project, world, built-game, save and network formats the code writes; each crate's tests check its number) into the record's `[formats]`, and refuses when one changed since the last release without a `breaking` change entry. Write the record's `title` (the release's name on GitHub, after "Axcenity Engine 0.2.0-alpha.1:") and `summary`. Read the notes it will publish: `cargo run -p axcenity-release -- notes 0.2.0-alpha.1`.
 2. **Check locally** on Windows and Linux: the platform checks (`scripts/check-platform.ps1`, `scripts/check-platform.sh`; [development.md](../development.md)), the package check ([below](#checking-packages)), and `cargo run -p axcenity-release -- check --tag v0.2.0-alpha.1`. Record what ran in the record's `[verification]`. Merge the branch.
 3. **Tag** the merge commit and push the tag:
 
@@ -78,6 +78,16 @@ GitHub Actions runs only for release tags, so each release run is deliberate ([d
 5. **Publish**: open the draft on GitHub, read it, and press **Publish release**. Nothing reaches users before this. A published release never changes; a mistake is fixed by the next release (and a `[[corrections]]` entry in its record).
 
 To build an existing tag again (for example after a runner failure), run **Actions > Release > Run workflow**, pick the tag under **Use workflow from**, and turn dry run off. It replaces the files of a draft, and refuses a tag that is already published. A run always builds the ref it was started on, never another one.
+
+### The first release
+
+Once, before the first tag (release system Phase 8):
+
+1. The signing key: [Signing key](#signing-key), steps 1–3. Until `packaging/axcenity-release.pub` is committed, official builds don't check for updates and the workflow's Validate job fails.
+2. One dry run (step 4 there).
+3. Then the steps above with a Development version (`0.2.0-alpha.N`), so only people following Development are offered it. After publishing, check by hand on Windows and Linux: an installed older build finds the release in Settings > Updates, installs it, and rolls back.
+
+`cargo test -p axcenity-updater --test end_to_end` already runs that whole path offline: it makes a release with `prepare` and `Manifest::build` from the repository's own files, signs it with a key made for the test, and has the update check, the download, staging and the real `axcenity-updater` install it.
 
 ### Costs
 

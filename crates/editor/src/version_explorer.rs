@@ -605,6 +605,10 @@ mod tests {
         assert!(history.release(&alpha3).is_some_and(|r| r.published));
         assert!(!history.features().is_empty());
         assert!(history.changes().all(|(_, c)| c.is_public()));
+        assert_eq!(
+            history.formats().get("project"),
+            Some(&axcenity_project::FORMAT_VERSION)
+        );
     }
 
     #[test]
