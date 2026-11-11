@@ -154,6 +154,14 @@ zstd = { version = "0.13", default-features = false }
 # HTTPS for the Toolbox (`crates/toolbox`, editor only). rustls so no system TLS library
 # is required. MIT OR Apache-2.0.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# The Toolbox's metadata database (`metadata.db` in the central asset
+# directory, `crates/toolbox`, editor only). `bundled` builds SQLite with `cc`
+# on every desktop OS, so no system library is needed. MIT; SQLite itself is
+# public domain.
+rusqlite = { version = "0.41", features = ["bundled"] }
+# Checks downloads against the MD5s Poly Haven publishes (`crates/toolbox`, an
+# integrity check, not security). MIT OR Apache-2.0.
+md-5 = "0.11"
 # Hot-patching the running editor's code (unified Phase 26), only behind the
 # editor's dev `hot-patch` feature; the player never has them. `subsecond`
 # swaps in changed functions, `dioxus-devtools` connects to the `dx` CLI that

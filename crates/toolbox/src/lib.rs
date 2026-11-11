@@ -14,6 +14,9 @@
 //! Editor only: the player, server and test runner must never depend on it.
 
 pub mod ambientcg;
+pub mod db;
+pub mod directory;
+pub mod download;
 mod error;
 pub mod files;
 pub mod guard;

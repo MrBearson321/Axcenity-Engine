@@ -35,6 +35,12 @@ pub enum SourceError {
     /// Reading or writing files on this computer failed.
     #[error("{0}")]
     Io(#[from] io::Error),
+    /// The metadata database couldn't be opened, read or written.
+    #[error("the asset database couldn't be read or written")]
+    Database(#[from] rusqlite::Error),
+    /// Someone cancelled the download.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 impl From<ureq::Error> for SourceError {

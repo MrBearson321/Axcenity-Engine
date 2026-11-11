@@ -93,7 +93,8 @@ impl Http for Fixture {
         if !url.starts_with("https://") {
             return Err(SourceError::NotHttps);
         }
-        let body = self.bodies.get(url).ok_or(SourceError::Status(404))?;
+        // The same error `Client` gives for a 404.
+        let body = self.bodies.get(url).ok_or(SourceError::NotFound)?;
         copy_limited(&mut body.as_slice(), out, limit)
     }
 }
@@ -139,7 +140,7 @@ mod tests {
         );
         assert!(matches!(
             get_bytes(&http, "https://example.com/b", 100),
-            Err(SourceError::Status(404))
+            Err(SourceError::NotFound)
         ));
     }
 

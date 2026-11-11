@@ -10,9 +10,10 @@
 //!
 //! Searching and the packages on offer come from the Toolbox's ambientCG
 //! source (its v3 API); when the chosen resolution and format aren't
-//! there, Get takes the nearest package and says so. Requests, the
-//! download's size limit, unpacking and swapping the folder into the
-//! project go through the Toolbox crate (`axcenity_toolbox`) too.
+//! there, Get takes the nearest package and says so. A package is fetched
+//! once into the central asset directory (verified, and recorded with its
+//! source and licence in the metadata database) and copied into each
+//! project from there, so a second project gets it without downloading.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -26,9 +27,14 @@ use axcenity_assets::{
     TEXTURE_EXTENSIONS, TEXTURE_SET_SUFFIX, texture_set_from_files, write_texture_set,
 };
 use axcenity_toolbox::ambientcg::AMBIENTCG;
+use axcenity_toolbox::db::{self, Database, Install};
+use axcenity_toolbox::directory::{self, AssetDirectory};
+use axcenity_toolbox::download::Fetcher;
 use axcenity_toolbox::http::{self, Http};
 use axcenity_toolbox::variants::{self, Choice};
-use axcenity_toolbox::{AssetRecord, AssetSource, Kind, Package, Query, Variant, files, guard};
+use axcenity_toolbox::{
+    AssetRecord, AssetSource, Kind, Package, Query, SourceError, Variant, files, guard,
+};
 use eframe::egui;
 
 use crate::dialog;
@@ -37,8 +43,6 @@ use crate::theme::icons;
 const PAGE: usize = 24;
 const RESOLUTIONS: [&str; 4] = ["1K", "2K", "4K", "8K"];
 const FORMATS: [&str; 2] = ["JPG", "PNG"];
-/// A zip larger than this is refused, so a bad response can't fill the disk.
-const ZIP_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 const PREVIEW_LIMIT: u64 = 2 * 1024 * 1024;
 /// How many previews are fetched at once.
 const PREVIEW_FETCHERS: usize = 6;
@@ -59,17 +63,20 @@ struct Listing {
     id: String,
     name: String,
     category: String,
-    link: String,
     maps: Vec<String>,
     preview: Option<String>,
     /// Its zip downloads, such as "2K JPG", each one file from ambientCG.
     packages: Vec<Variant>,
+    /// The source's record, kept in the metadata database on download.
+    record: AssetRecord,
 }
 
 impl Listing {
     /// A search result from the Toolbox's ambientCG source.
     fn from_record(record: AssetRecord) -> Self {
+        let kept = record.clone();
         Self {
+            record: kept,
             category: record.categories.first().cloned().unwrap_or_default(),
             maps: record
                 .maps
@@ -84,7 +91,6 @@ impl Listing {
                 .collect(),
             id: record.id,
             name: record.name,
-            link: record.url,
         }
     }
 }
@@ -157,8 +163,15 @@ pub struct GetTexture {
 impl GetTexture {
     /// Opens the dialog and searches the popular materials.
     pub fn open(ctx: &egui::Context) -> Self {
+        let mut dialog = Self::idle();
+        dialog.start_search(ctx, 0);
+        dialog
+    }
+
+    /// The dialog before its first search.
+    fn idle() -> Self {
         let (preview_tx, preview_rx) = mpsc::channel();
-        let mut dialog = Self {
+        Self {
             query: String::new(),
             resolution: "2K".to_owned(),
             format: "JPG".to_owned(),
@@ -173,9 +186,7 @@ impl GetTexture {
             no_preview: HashSet::new(),
             preview_tx,
             preview_rx,
-        };
-        dialog.start_search(ctx, 0);
-        dialog
+        }
     }
 
     /// Draws the dialog. `Some` when it should close or Output should hear
@@ -412,12 +423,11 @@ impl GetTexture {
             self.error = Some(format!("{} has no download.", listing.name));
             return;
         };
-        let url = choice.variant.files[0].url.clone();
-        let label = choice.variant.label.clone();
+        let variant = choice.variant.clone();
+        let label = variant.label.clone();
         let notes = choice.notes.join(" ");
         let name = listing.name.clone();
-        let asset_id = listing.id.clone();
-        let link = listing.link.clone();
+        let record = listing.record.clone();
         let project = project.to_owned();
         self.error = None;
         self.status = Some(
@@ -430,7 +440,15 @@ impl GetTexture {
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = match download(&project, &asset_id, &name, &link, &url, &cancel) {
+            let client = http::Client::new(Duration::from_secs(15 * 60));
+            let outcome = match directory::locate() {
+                Some(assets) => download(&client, &assets, &project, &record, &variant, &cancel),
+                None => Err(format!(
+                    "there is no asset directory; set {} to a folder",
+                    directory::ENV
+                )),
+            };
+            let result = match outcome {
                 Ok(DownloadResult::Cancelled) => Ok(DownloadResult::Cancelled),
                 Ok(DownloadResult::Saved(text)) if !notes.is_empty() => {
                     Ok(DownloadResult::Saved(format!("{text} {notes}")))
@@ -596,55 +614,95 @@ fn preview_image(client: &http::Client, url: &str) -> Option<egui::ColorImage> {
     ))
 }
 
-/// Downloads `url` into `project/assets/textures/<id>/` and writes the set
-/// file. Does nothing to the project when `cancel` is set before the files
-/// are moved into place.
+/// Gets one package of `record` into `project/assets/textures/<id>/` with
+/// its texture set file.
+///
+/// The package goes into the central asset directory at `assets` first
+/// (verified, unpacked, recorded in its metadata database with the asset's
+/// source and licence), unless it's already there, in which case nothing
+/// is downloaded. Then its images are copied into the project, and the
+/// database records the install. Does nothing to the project when `cancel`
+/// is set before the files are moved into place.
 fn download(
+    http: &dyn Http,
+    assets: &Path,
     project: &Path,
-    id: &str,
-    name: &str,
-    link: &str,
-    url: &str,
+    record: &AssetRecord,
+    variant: &Variant,
     cancel: &AtomicBool,
 ) -> Result<DownloadResult, String> {
+    let id = record.id.as_str();
     if !guard::safe_asset_id(id) {
         return Err("the asset id is not a file name".to_owned());
     }
-    if !AMBIENTCG.info().allows_download_from(url) {
-        return Err("the download is not from ambientCG".to_owned());
+    let dir = AssetDirectory::open(assets).map_err(|err| err.to_string())?;
+    let db = Database::open(&dir.database_path()).map_err(|err| err.to_string())?;
+    let fetcher = Fetcher {
+        http,
+        dir: &dir,
+        db: &db,
+    };
+    let fetched = match fetcher.fetch_variant(
+        AMBIENTCG.info(),
+        record,
+        variant,
+        &TEXTURE_EXTENSIONS,
+        cancel,
+    ) {
+        Ok(fetched) => fetched,
+        Err(SourceError::Cancelled) => return Ok(DownloadResult::Cancelled),
+        Err(err) => return Err(err.to_string()),
+    };
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(DownloadResult::Cancelled);
     }
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |time| time.as_millis());
     let root = std::env::temp_dir().join(format!("axcenity-texture-{id}-{stamp}"));
-    let outcome = download_into(&root, project, id, name, link, url, cancel);
+    let outcome = install(&root, &dir, &fetched, project, record, cancel);
     let _ = fs::remove_dir_all(&root);
-    outcome
+    let outcome = outcome?;
+    if let DownloadResult::Saved(_) = &outcome {
+        let install = Install {
+            project: project.display().to_string(),
+            path: format!("assets/textures/{id}"),
+            key: record.key(),
+            variant: variant.label.clone(),
+            uid: None,
+            installed_at: db::now(),
+        };
+        if let Err(err) = db.record_install(&install) {
+            log::warn!("Could not record installing {}: {err}", record.key());
+        }
+    }
+    Ok(outcome)
 }
 
-fn download_into(
+/// Copies a downloaded package's images into a staging folder, writes the
+/// texture set beside them, and swaps the folder into the project.
+fn install(
     root: &Path,
+    dir: &AssetDirectory,
+    fetched: &db::Download,
     project: &Path,
-    id: &str,
-    name: &str,
-    link: &str,
-    url: &str,
+    record: &AssetRecord,
     cancel: &AtomicBool,
 ) -> Result<DownloadResult, String> {
+    let id = record.id.as_str();
     let staging = root.join("files");
     fs::create_dir_all(&staging).map_err(|err| err.to_string())?;
-    let zip_path = root.join("package.zip");
-    let mut zip = fs::File::create(&zip_path).map_err(|err| err.to_string())?;
-    let client = http::Client::new(Duration::from_secs(15 * 60));
-    client
-        .fetch(url, ZIP_LIMIT, &mut zip)
-        .map_err(|err| err.to_string())?;
-    drop(zip);
-    if cancel.load(Ordering::Relaxed) {
-        return Ok(DownloadResult::Cancelled);
+    let source = dir.path(&fetched.folder);
+    let mut names = Vec::new();
+    for file in &fetched.files {
+        // Unpacked archives are flat, so each path is a plain file name.
+        if file.path.contains('/') {
+            continue;
+        }
+        fs::copy(source.join(&file.path), staging.join(&file.path))
+            .map_err(|err| err.to_string())?;
+        names.push(file.path.clone());
     }
-    let names = guard::extract_files(&zip_path, &staging, &TEXTURE_EXTENSIONS)
-        .map_err(|err| err.to_string())?;
     let pairs: Vec<(String, String)> = names
         .iter()
         .map(|file| (file.clone(), format!("assets/textures/{id}/{file}")))
@@ -653,7 +711,7 @@ fn download_into(
         .iter()
         .map(|(file, path)| (file.as_str(), path.as_str()))
         .collect();
-    let set = texture_set_from_files("ambientcg", id, link, &borrowed);
+    let set = texture_set_from_files(&record.provider, id, &record.url, &borrowed);
     if set.maps.is_empty() {
         return Err("none of the images were recognized as maps".to_owned());
     }
@@ -667,13 +725,18 @@ fn download_into(
         .map_err(|err| err.to_string())?;
     let verb = if replaced { "Replaced" } else { "Saved" };
     Ok(DownloadResult::Saved(format!(
-        "{verb} {name} (CC0) in assets/textures/{id}."
+        "{verb} {} (CC0) in assets/textures/{id}.",
+        record.name
     )))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+    use std::path::PathBuf;
+
     use axcenity_toolbox::RemoteFile;
+    use axcenity_toolbox::http::Fixture;
 
     use super::*;
 
@@ -691,30 +754,152 @@ mod tests {
         }
     }
 
+    fn record(variants: Vec<Variant>) -> AssetRecord {
+        AssetRecord {
+            provider: "ambientcg".into(),
+            id: "Fabric086".into(),
+            name: "Fabric 086".into(),
+            url: "https://ambientcg.com/a/Fabric086".into(),
+            license: "CC0".into(),
+            thumbnail_url: "https://example.com/Fabric086.png".into(),
+            maps: vec!["base_color".into(), "normal".into(), "ao".into()],
+            variants,
+            ..AssetRecord::default()
+        }
+    }
+
+    /// A folder under the temp directory, removed when dropped.
+    struct Temp(PathBuf);
+
+    impl Temp {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "axcenity-get-texture-{name}-{}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            Self(path)
+        }
+    }
+
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn package_zip() -> Vec<u8> {
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut cursor);
+            let options = zip::write::SimpleFileOptions::default();
+            for name in [
+                "Fabric086_2K-JPG_Color.jpg",
+                "Fabric086_2K-JPG_NormalGL.jpg",
+                "Fabric086.usdc",
+            ] {
+                writer.start_file(name, options).unwrap();
+                writer.write_all(name.as_bytes()).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        cursor.into_inner()
+    }
+
+    #[test]
+    fn a_package_is_downloaded_once_and_installed_into_each_project() {
+        let temp = Temp::new("twice");
+        let assets = temp.0.join("Assets");
+        let variant = zip("2K JPG", "2k", "jpg");
+        let record = record(vec![variant.clone()]);
+        let http = Fixture::default().with(&variant.files[0].url, package_zip());
+        let cancel = AtomicBool::new(false);
+
+        let first = temp.0.join("First");
+        let saved = download(&http, &assets, &first, &record, &variant, &cancel).unwrap();
+        assert!(
+            matches!(&saved, DownloadResult::Saved(text) if text.starts_with("Saved Fabric 086"))
+        );
+        let folder = first.join("assets").join("textures").join("Fabric086");
+        assert!(folder.join("Fabric086.texture.json").is_file());
+        assert!(folder.join("Fabric086_2K-JPG_Color.jpg").is_file());
+        assert!(!folder.join("Fabric086.usdc").exists());
+
+        // The second project is filled from the asset directory: nothing is fetched.
+        let second = temp.0.join("Second");
+        download(
+            &Fixture::default(),
+            &assets,
+            &second,
+            &record,
+            &variant,
+            &cancel,
+        )
+        .unwrap();
+        assert!(
+            second
+                .join("assets/textures/Fabric086/Fabric086.texture.json")
+                .is_file()
+        );
+
+        let dir = AssetDirectory::open(&assets).unwrap();
+        let db = Database::open(&dir.database_path()).unwrap();
+        let stored = db.asset("ambientcg:Fabric086").unwrap().unwrap();
+        assert_eq!(stored.license, "CC0");
+        assert!(
+            db.download("ambientcg:Fabric086", "2K JPG")
+                .unwrap()
+                .is_some()
+        );
+        let installs = db.installs(&second.display().to_string()).unwrap();
+        assert_eq!(installs.len(), 1);
+        assert_eq!(installs[0].path, "assets/textures/Fabric086");
+    }
+
+    #[test]
+    fn a_failed_download_leaves_the_project_alone() {
+        let temp = Temp::new("failed");
+        let variant = zip("2K JPG", "2k", "jpg");
+        let record = record(vec![variant.clone()]);
+        let project = temp.0.join("Project");
+        let cancel = AtomicBool::new(false);
+        let err = download(
+            &Fixture::default(),
+            &temp.0.join("Assets"),
+            &project,
+            &record,
+            &variant,
+            &cancel,
+        )
+        .err()
+        .unwrap();
+        assert!(err.contains("no asset with that id"), "{err}");
+        assert!(!project.exists());
+    }
+
     /// The whole Get path against the real ambientCG: search, choose the
-    /// nearest to 1K JPG, download, unpack and save the texture set.
-    /// Reaches the network, so run it by hand:
+    /// nearest to 1K JPG, download into a temporary asset directory, unpack
+    /// and save the texture set. Reaches the network, so run it by hand:
     /// `cargo nextest run -p axcenity-editor --run-ignored only -E 'test(ambient_cg)'`
     #[test]
     #[ignore = "reaches ambientCG"]
     fn get_downloads_a_real_material_into_a_project() {
+        let temp = Temp::new("live");
         let (_, listings) = search("ground", 0).unwrap();
         let listing = listings
             .into_iter()
             .find(|l| !l.packages.is_empty())
             .unwrap();
         let choice = variants::choose(&listing.packages, "1k", "jpg", &["png"]).unwrap();
-        let project =
-            std::env::temp_dir().join(format!("axcenity-get-texture-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&project);
+        let project = temp.0.join("Project");
         let cancel = AtomicBool::new(false);
-        let url = &choice.variant.files[0].url;
+        let client = http::Client::new(Duration::from_secs(600));
         let saved = download(
+            &client,
+            &temp.0.join("Assets"),
             &project,
-            &listing.id,
-            &listing.name,
-            &listing.link,
-            url,
+            &listing.record,
+            choice.variant,
             &cancel,
         );
         assert!(
@@ -728,26 +913,15 @@ mod tests {
                 .join(format!("{}{TEXTURE_SET_SUFFIX}", listing.id))
                 .is_file()
         );
-        let _ = fs::remove_dir_all(&project);
     }
 
     #[test]
     fn a_listing_keeps_only_single_zip_downloads_and_names_its_maps() {
         let mut single = zip("8K EXR", "8k", "exr");
         single.package = Package::Single;
-        let record = AssetRecord {
-            provider: "ambientcg".into(),
-            id: "Fabric086".into(),
-            name: "Fabric 086".into(),
-            url: "https://ambientcg.com/a/Fabric086".into(),
-            thumbnail_url: "https://example.com/Fabric086.png".into(),
-            maps: vec!["base_color".into(), "normal".into(), "ao".into()],
-            variants: vec![zip("2K JPG", "2k", "jpg"), single],
-            ..AssetRecord::default()
-        };
-        let listing = Listing::from_record(record);
+        let listing = Listing::from_record(record(vec![zip("2K JPG", "2k", "jpg"), single]));
         assert_eq!(listing.id, "Fabric086");
-        assert_eq!(listing.link, "https://ambientcg.com/a/Fabric086");
+        assert_eq!(listing.record.url, "https://ambientcg.com/a/Fabric086");
         assert_eq!(listing.maps, ["color", "normal", "occlusion"]);
         assert_eq!(listing.packages.len(), 1);
         assert!(listing.preview.is_some());
@@ -755,29 +929,23 @@ mod tests {
 
     #[test]
     fn get_offers_the_nearest_package_when_the_chosen_one_is_missing() {
-        let ctx = egui::Context::default();
-        let mut dialog = GetTexture::open(&ctx);
-        dialog.search = None;
-        let listing = Listing {
-            id: "Fabric086".into(),
-            name: "Fabric 086".into(),
-            category: String::new(),
-            link: String::new(),
-            maps: Vec::new(),
-            preview: None,
-            packages: vec![zip("1K JPG", "1k", "jpg"), zip("4K PNG", "4k", "png")],
-        };
+        let mut dialog = GetTexture::idle();
+        let listing = Listing::from_record(record(vec![
+            zip("1K JPG", "1k", "jpg"),
+            zip("4K PNG", "4k", "png"),
+        ]));
         dialog.resolution = "2K".into();
         dialog.format = "JPG".into();
         let choice = dialog.package(&listing).unwrap();
         assert_eq!(choice.variant.label, "1K JPG");
         assert_eq!(choice.notes, ["No 2K here, so 1K, the nearest."]);
+        assert_eq!(
+            choice.describe(),
+            "Gets 1K JPG. No 2K here, so 1K, the nearest."
+        );
         dialog.format = "PNG".into();
         assert_eq!(dialog.package(&listing).unwrap().variant.label, "4K PNG");
-        let empty = Listing {
-            packages: Vec::new(),
-            ..listing
-        };
+        let empty = Listing::from_record(record(Vec::new()));
         assert!(dialog.package(&empty).is_none());
     }
 }
