@@ -13,6 +13,7 @@
 use axcenity_editor_kit::snapshot;
 use axcenity_editor_kit::{color_palette, lua_syntax, responsive, screen, wheel, widgets};
 // Panel families in crates of their own, under their old module names.
+use axcenity_editor_benchmark as graphics_benchmark;
 use axcenity_editor_toolbox as toolbox_panel;
 
 mod angular;
@@ -40,7 +41,6 @@ mod find_in_scripts;
 mod game_tests;
 mod gizmo;
 mod global_assets;
-mod graphics_benchmark;
 mod history;
 mod hot_patch;
 mod import_dialog;

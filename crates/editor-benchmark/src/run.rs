@@ -47,7 +47,7 @@ impl Plan {
     };
 
     /// A handful of frames each: for tests on a software adapter.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const QUICK: Plan = Plan {
         warmup: 1,
         preset_frames: 4,

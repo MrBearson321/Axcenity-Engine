@@ -60,7 +60,7 @@ fn a_run_leaves_the_project_and_settings_alone_until_apply() {
 
 #[test]
 fn the_report_survives_a_restart() {
-    let Some(report) = crate::graphics_benchmark::tests::quick_report() else {
+    let Some(report) = crate::graphics_benchmark::testing::quick_report() else {
         return;
     };
     let mut app = EditorApp::new(None);
