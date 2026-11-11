@@ -62,6 +62,7 @@ mod ribbon_tabs;
 mod screen;
 mod scripts;
 mod sequencer;
+mod shortcuts;
 mod side_warnings;
 mod snapping;
 #[cfg(test)]
@@ -76,6 +77,8 @@ mod theme;
 mod thumbnail;
 mod toast;
 mod tree;
+#[cfg(test)]
+mod ui_cost_tests;
 mod ui_designer;
 mod ui_handles;
 mod viewport;

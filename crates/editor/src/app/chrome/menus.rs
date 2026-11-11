@@ -92,7 +92,7 @@ impl EditorApp {
                     self.request_and_go_ahead(ui.ctx(), Discard::OpenAnother);
                 }
                 let save = egui::Button::new(theme::with_icon(icons::FLOPPY_DISK, "Save"))
-                    .shortcut_text(ui.ctx().format_shortcut(&SAVE_SHORTCUT));
+                    .shortcut_text(crate::shortcuts::Action::Save.menu_text(ui.ctx()));
                 if ui.add_enabled(self.project.is_some(), save).clicked() {
                     self.save();
                 }
@@ -221,7 +221,7 @@ impl EditorApp {
                 }
                 ui.separator();
                 let settings = egui::Button::new(theme::with_icon(icons::GEAR_SIX, "Settings…"))
-                    .shortcut_text(ui.ctx().format_shortcut(&settings::SETTINGS_SHORTCUT));
+                    .shortcut_text(crate::shortcuts::Action::Settings.menu_text(ui.ctx()));
                 if ui.add(settings).clicked() {
                     self.settings.open = true;
                 }
@@ -245,7 +245,7 @@ impl EditorApp {
                         None => "Undo".to_string(),
                     },
                 ))
-                .shortcut_text(ui.ctx().format_shortcut(&UNDO_SHORTCUT));
+                .shortcut_text(crate::shortcuts::Action::Undo.menu_text(ui.ctx()));
                 if ui
                     .add_enabled(undo_label.is_some() && !busy, undo)
                     .clicked()
@@ -260,7 +260,7 @@ impl EditorApp {
                         None => "Redo".to_string(),
                     },
                 ))
-                .shortcut_text(ui.ctx().format_shortcut(&REDO_SHORTCUT));
+                .shortcut_text(crate::shortcuts::Action::Redo.menu_text(ui.ctx()));
                 if ui
                     .add_enabled(redo_label.is_some() && !busy, redo)
                     .clicked()
@@ -290,37 +290,42 @@ impl EditorApp {
                     .is_some_and(|id| tree::check_editable(&self.world, id).is_ok())
                     && !busy;
                 let rename = egui::Button::new(theme::with_icon(icons::PENCIL_SIMPLE, "Rename"))
-                    .shortcut_text(RENAME_KEY.name());
+                    .shortcut_text(crate::shortcuts::Action::Rename.menu_text(ui.ctx()));
                 if ui.add_enabled(renamable, rename).clicked()
                     && let Some(id) = selected
                 {
                     self.explorer.start_rename(&self.world, id);
                 }
                 let duplicate = egui::Button::new(theme::with_icon(icons::COPY, "Duplicate"))
-                    .shortcut_text(ui.ctx().format_shortcut(&DUPLICATE_SHORTCUT));
+                    .shortcut_text(crate::shortcuts::Action::Duplicate.menu_text(ui.ctx()));
                 if ui.add_enabled(editable, duplicate).clicked() && selected.is_some() {
                     self.duplicate_selected();
                 }
                 let deletable =
                     selected.is_some_and(|id| tree::check_delete(&self.world, id).is_ok()) && !busy;
                 let delete = egui::Button::new(theme::with_icon(icons::TRASH, "Delete"))
-                    .shortcut_text(DELETE_KEY_TEXT);
+                    .shortcut_text(crate::shortcuts::Action::Delete.menu_text(ui.ctx()));
                 if ui.add_enabled(deletable, delete).clicked() && selected.is_some() {
                     self.delete_selected();
                 }
                 ui.separator();
+                let search = egui::Button::new(theme::with_icon(icons::MAGNIFYING_GLASS, "Search Everything…"))
+                    .shortcut_text(crate::shortcuts::Action::Search.menu_text(ui.ctx()));
+                if ui.add(search).clicked() {
+                    self.palette.toggle();
+                }
                 let palette = egui::Button::new(theme::with_icon(icons::COMMAND, "Command Palette"))
-                    .shortcut_text(ui.ctx().format_shortcut(&command_palette::PALETTE_SHORTCUT));
+                    .shortcut_text(crate::shortcuts::Action::Palette.menu_text(ui.ctx()));
                 if ui.add(palette).clicked() {
-                    self.palette.toggle(crate::command_palette::Mode::Commands);
+                    self.palette.toggle_commands();
                 }
                 let quick = egui::Button::new(theme::with_icon(icons::FILE_MAGNIFYING_GLASS, "Quick Open…"))
-                    .shortcut_text(ui.ctx().format_shortcut(&command_palette::QUICK_OPEN_SHORTCUT));
+                    .shortcut_text(crate::shortcuts::Action::QuickOpen.menu_text(ui.ctx()));
                 if ui.add_enabled(self.project.is_some(), quick).clicked() {
-                    self.open_quick_open();
+                    self.palette.toggle();
                 }
                 let find = egui::Button::new(theme::with_icon(icons::MAGNIFYING_GLASS, "Find in Scripts…"))
-                    .shortcut_text(ui.ctx().format_shortcut(&command_palette::FIND_SHORTCUT));
+                    .shortcut_text(crate::shortcuts::Action::FindInScripts.menu_text(ui.ctx()));
                 if ui.add_enabled(self.project.is_some(), find).clicked() {
                     self.find.show_and_focus();
                     self.search_scripts();
@@ -375,6 +380,9 @@ impl EditorApp {
                 {
                     self.layout.reset();
                 }
+                ui.menu_button(theme::with_icon(icons::LAYOUT, "Layout"), |ui| {
+                    self.layout_menu(ui);
+                });
                 ui.separator();
                 let cones = egui::Button::selectable(
                     self.light_cones,

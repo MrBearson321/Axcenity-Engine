@@ -192,3 +192,64 @@ fn a_rename_refuses_a_taken_name_another_ending_and_leaving_assets() {
     assert!(plan("assets/textures/wood.jpg").contains(".png"));
     assert!(plan("scripts/wood.png").contains("assets folder"));
 }
+
+#[test]
+fn a_reference_by_asset_id_names_its_file_and_a_rename_leaves_it_alone() {
+    let (folder, mut world, look) = project("by-id");
+    axcenity_assets::give_asset_ids(&folder).unwrap();
+    let id = axcenity_assets::read_asset_id(&folder, WOOD).unwrap();
+    world
+        .set_property(look, "ColorMap", Value::String(id.to_string()))
+        .unwrap();
+    // Found as a reference to the file, and so not unused.
+    let found = find_references(&folder, &world, None, WOOD);
+    assert!(
+        found.iter().any(|r| r.instance() == Some(look)),
+        "{found:?}"
+    );
+    let assets = vec![WOOD.to_owned()];
+    assert!(unused_assets(&folder, &world, None, &assets).is_empty());
+    // A rename doesn't touch it: the ID goes with the file's sidecar.
+    let plan = plan_rename(&folder, &world, None, WOOD, "assets/textures/oak.png").unwrap();
+    assert!(
+        plan.properties.iter().all(|change| change.id != look),
+        "{:?}",
+        plan.properties
+    );
+}
+
+#[test]
+fn asset_check_follows_an_id_and_reports_one_no_file_has() {
+    let (folder, mut world, look) = project("check-id");
+    axcenity_assets::give_asset_ids(&folder).unwrap();
+    let id = axcenity_assets::read_asset_id(&folder, WOOD).unwrap();
+    world
+        .set_property(look, "ColorMap", Value::String(id.to_string()))
+        .unwrap();
+    let report = crate::check_assets(&folder, &world);
+    // The test texture isn't a real PNG, so it may fail to decode, but the
+    // ID must name the file: nothing reports it missing.
+    let look_findings: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| f.owner == "Workspace.Crate.Look")
+        .collect();
+    assert!(
+        look_findings
+            .iter()
+            .all(|f| f.kind != crate::FindingKind::MissingFile && f.message.contains(WOOD)),
+        "{look_findings:?}"
+    );
+    let unknown = axcenity_assets::AssetId::new().to_string();
+    world
+        .set_property(look, "ColorMap", Value::String(unknown.clone()))
+        .unwrap();
+    let report = crate::check_assets(&folder, &world);
+    let finding = report
+        .findings
+        .iter()
+        .find(|f| f.owner == "Workspace.Crate.Look")
+        .expect("reported");
+    assert_eq!(finding.kind, crate::FindingKind::MissingFile);
+    assert!(finding.message.contains(&unknown), "{}", finding.message);
+}

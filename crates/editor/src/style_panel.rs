@@ -611,9 +611,17 @@ mod tests {
             egui::SidePanel::right("properties")
                 .default_width(320.0)
                 .show(ctx, |ui| {
-                    crate::properties::show(ui, &world, Some(frame), false, &[], 1, |ui| {
-                        edits.extend(show(ui, &world, Some(frame), &stylesheets));
-                    });
+                    crate::properties::show(
+                        ui,
+                        &world,
+                        &Default::default(),
+                        Some(frame),
+                        false,
+                        &[],
+                        |ui| {
+                            edits.extend(show(ui, &world, Some(frame), &stylesheets));
+                        },
+                    );
                 });
         };
         match std::env::var_os("AXCENITY_SNAPSHOTS") {

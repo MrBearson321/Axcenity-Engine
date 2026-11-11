@@ -63,7 +63,7 @@ impl EditorApp {
     /// an editor control has the keyboard. Outside Play it starts over.
     pub(super) fn type_dev_console(&mut self, events: &[egui::Event], editing: bool) -> bool {
         if self.play.is_none() {
-            let seen = self.output.lines().len();
+            let seen = self.output.total();
             self.dev = DevPlay {
                 seen,
                 ..DevPlay::default()
@@ -73,11 +73,22 @@ impl EditorApp {
         for event in events {
             match event {
                 egui::Event::Key {
-                    key: egui::Key::F9,
+                    key,
                     pressed: true,
                     repeat: false,
+                    modifiers,
                     ..
-                } if !editing || self.dev.console.open => self.dev.console.toggle(),
+                } if (!editing || self.dev.console.open)
+                    && crate::shortcuts::Action::DevConsole
+                        .keys()
+                        .iter()
+                        .any(|chord| {
+                            chord.logical_key == *key
+                                && modifiers.matches_logically(chord.modifiers)
+                        }) =>
+                {
+                    self.dev.console.toggle()
+                }
                 _ if !self.dev.console.open => {}
                 egui::Event::Text(text) => self.dev.console.type_text(text),
                 egui::Event::Key {
@@ -108,9 +119,7 @@ impl EditorApp {
 
     /// Moves the Output's new lines into the console's Log.
     fn feed_dev_console(&mut self) {
-        let lines = self.output.lines();
-        let start = self.dev.seen.min(lines.len());
-        for line in &lines[start..] {
+        for line in self.output.since(self.dev.seen) {
             let level = match line.kind {
                 OutputKind::Info => LogLevel::Info,
                 OutputKind::Warning => LogLevel::Warning,
@@ -120,7 +129,7 @@ impl EditorApp {
             };
             self.dev.console.log(level, None, line.text.clone());
         }
-        self.dev.seen = lines.len();
+        self.dev.seen = self.output.total();
     }
 
     /// Runs a line typed in the console's Commands tab.

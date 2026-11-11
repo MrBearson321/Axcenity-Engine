@@ -172,7 +172,7 @@ def build_game(editor: Path, os_name: str, work: Path) -> Path:
         contents = out / "AxcenityPlayer.app" / "Contents"
         check_binary(contents / "MacOS" / "AxcenityPlayer", "macos")
         files = [
-            "AxcenityPlayer.app/Contents/MacOS/game.axgame",
+            "AxcenityPlayer.app/Contents/Resources/game.axgame",
             "AxcenityPlayer.app/Contents/Resources/LICENSES.txt",
         ]
         with open(contents / "Info.plist", "rb") as file:
@@ -181,6 +181,7 @@ def build_game(editor: Path, os_name: str, work: Path) -> Path:
         need(info.get("CFBundlePackageType") == "APPL", "Info.plist isn't an application's")
         if HOST == "macos":
             run(["plutil", "-lint", contents / "Info.plist"])
+            run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", out / "AxcenityPlayer.app"])
     for name in files:
         need((out / name).is_file(), f"the build has no `{name}`")
     if HOST == "windows" and os_name != "windows":
@@ -219,7 +220,8 @@ def run_game(out: Path, host: str) -> None:
         if not shutil.which("xvfb-run"):
             raise Skip("no display, and xvfb-run isn't installed")
         command = ["xvfb-run", "-a"] + command
-    # From another folder: a built game finds its game.axgame beside itself.
+    # From another folder: a built game finds its game.axgame beside itself
+    # (in Contents/Resources on macOS).
     done = run(command, cwd=tempfile.gettempdir(), capture_output=True, text=True, timeout=900)
     print(done.stdout[-2000:])
     need("first frame" in done.stdout, "the game didn't report its first frame")
@@ -327,7 +329,11 @@ def make_macos_dmg(stage: Path, out: Path, work: Path) -> tuple[Path, Path]:
     run(["bash", ROOT / "packaging/macos/build-dmg.sh", VERSION, ROOT, stage, dmg])
     mount = work / "dmg"
     mount.mkdir()
-    run(["hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", mount, dmg])
+    # The image carries a license agreement (dmgbuild_settings.py), which
+    # hdiutil pages to stdout and asks to accept; with no answer it prints
+    # "attach canceled". "Y" accepts it.
+    run(["hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", mount, dmg],
+        input="Y\n", stdout=subprocess.DEVNULL, text=True, env={**os.environ, "PAGER": "cat"})
     app = mount / "Axcenity Editor.app"
     need(app.is_dir(), "the disk image has no Axcenity Editor.app")
     need((mount / "Applications").is_symlink(), "the disk image has no Applications shortcut")

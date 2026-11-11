@@ -107,10 +107,18 @@ fn main() -> Result<()> {
         Some(path) => PackedProjectFolder::from_folder(path),
         None => {
             let player = std::env::current_exe().context("could not locate the player program")?;
-            let bundled = player
+            let beside = player
                 .parent()
-                .context("the player program has no parent folder")?
-                .join(GAME_FILE);
+                .context("the player program has no parent folder")?;
+            // Beside the player (Windows, Linux), or in a macOS app's
+            // `Contents/Resources` (Build Game keeps `Contents/MacOS` for code).
+            let bundled = [
+                beside.join(GAME_FILE),
+                beside.join("../Resources").join(GAME_FILE),
+            ]
+            .into_iter()
+            .find(|path| path.is_file())
+            .unwrap_or_else(|| beside.join(GAME_FILE));
             if !bundled.is_file() {
                 bail!("no project folder or `{GAME_FILE}` found next to the player\n\n{USAGE}");
             }

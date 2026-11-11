@@ -398,3 +398,117 @@ fn the_learn_page_says_build_game() {
         assert!(!text.contains("Export Game"), "{text}");
     }
 }
+
+/// Every button drawn and its bounds, with AccessKit on: label (without
+/// icon characters), left and right edges, and top.
+fn drawn_buttons(output: &egui::FullOutput) -> Vec<(String, f32, f32, f32)> {
+    let update = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("AccessKit is on");
+    update
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.role() == egui::accesskit::Role::Button)
+        .filter_map(|(_, node)| {
+            let label: String = node
+                .label()?
+                .chars()
+                .filter(|c| !('\u{e000}'..='\u{f8ff}').contains(c))
+                .collect();
+            let bounds = node.bounds()?;
+            Some((
+                label.trim().to_owned(),
+                bounds.x0 as f32,
+                bounds.x1 as f32,
+                bounds.y0 as f32,
+            ))
+        })
+        .collect()
+}
+
+#[test]
+fn recent_project_cards_stay_inside_the_page_at_every_window_width() {
+    let names: Vec<String> = (1..=9).map(|n| format!("Project {n}")).collect();
+    for width in [900.0, 1280.0, 1785.0, 2200.0, 3000.0] {
+        let mut projects: Vec<ProjectLink> = names
+            .iter()
+            .map(|name| ProjectLink {
+                name: name.clone(),
+                description: String::new(),
+                folder: PathBuf::from(format!("not-a-folder/{name}")),
+            })
+            .collect();
+        let mut start = StartScreen::default();
+        let ctx = theme::test_context();
+        ctx.enable_accesskit();
+        let mut output = None;
+        for frame in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
+                time: Some(frame as f64 * 10.0),
+                ..Default::default()
+            };
+            output = Some(ctx.run(input, |ctx| {
+                theme::apply(ctx, &theme::Appearance::default());
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
+                    .show(ctx, |ui| {
+                        let brand = Brand::load(ui.ctx());
+                        assert!(start.show(ui, &mut projects, &brand).is_none());
+                    });
+            }));
+        }
+        let buttons = drawn_buttons(&output.unwrap());
+        let edge = |label: &str| {
+            buttons
+                .iter()
+                .find(|(found, ..)| found == label)
+                .unwrap_or_else(|| panic!("`{label}` is drawn at {width}"))
+                .clone()
+        };
+        // The header's New Project button ends where the page does.
+        let (_, _, page_right, _) = edge("New Project");
+        let cards: Vec<_> = names.iter().map(|name| edge(name)).collect();
+        let page_left = cards[0].1;
+        for (name, left, right, _) in &cards {
+            assert!(
+                *left >= page_left - 0.5 && *right <= page_right + 0.5,
+                "`{name}` spans {left}..{right}, outside the page {page_left}..{page_right} \
+                 in a window {width} wide"
+            );
+        }
+        // More cards than fit in a row wrap onto the next ones, in columns.
+        let (columns, _) = grid_columns(page_right - page_left);
+        let rows: std::collections::BTreeSet<i32> =
+            cards.iter().map(|card| card.3.round() as i32).collect();
+        assert_eq!(rows.len(), names.len().div_ceil(columns), "rows at {width}");
+        if columns < names.len() {
+            assert!(
+                (cards[columns].1 - page_left).abs() < 0.5,
+                "a new row starts at the left"
+            );
+        }
+        // The screenshot's width: look at it with AXCENITY_SNAPSHOTS.
+        if width == 1785.0
+            && let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from)
+        {
+            let mut start = StartScreen::default();
+            crate::snapshot::snapshot(
+                &folder.join("start-projects-wide.png"),
+                vec2(width, 1100.0),
+                vec![Vec::new(); 3],
+                |ctx| {
+                    theme::apply(ctx, &theme::Appearance::default());
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
+                        .show(ctx, |ui| {
+                            let brand = Brand::load(ui.ctx());
+                            assert!(start.show(ui, &mut projects, &brand).is_none());
+                        });
+                },
+            );
+        }
+    }
+}

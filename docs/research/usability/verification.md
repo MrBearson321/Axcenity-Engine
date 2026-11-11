@@ -311,3 +311,125 @@ Plan and findings: [design-system.md](design-system.md). Approved by Paul with P
 **Left.** The start screen's own cards and the Learn window still lay out their pages themselves (they're pages, not dialogs).
 
 **Next.** Phase 3: the Explorer draws only visible rows from a cached list (V7) and the Console keeps at most 10,000 lines and draws only what shows (V8).
+
+## Design system Phase 3: scale (V7, V8)
+
+Plan and findings: [design-system.md](design-system.md). Approved by Paul with Phases 1–5 on 2026-11-10. Built on Phase 2.
+
+| ID | What changed | Files |
+|---|---|---|
+| V7 (DS21) | The Explorer keeps its row list between frames and builds it again only when the world, its structure or child order (`World::identity`, `structure_version`, `child_order_version`) or the open branches change, and every frame while filtering. It draws with `ScrollArea::show_rows`, so only the rows on screen are laid out. Names are read live from the world when a row is drawn. Revealing a selection scrolls to its row from its index, so a row that was never drawn can be shown | `explorer.rs` |
+| V8 (DS22) | The Console keeps the newest 10,000 lines (`Output::MAX_LINES`), dropping the oldest 1,000 at a time, with "N older lines were dropped: the Console keeps the newest 10000." at the top. Counts per severity are kept as lines arrive. Line heights are worked out once per line (from the font, the width and the stack trace's length) and replaced by the real height once the line is drawn; all are worked out again when the width or font size changes. Only lines on screen are drawn (`show_viewport`). Seen, revealed and marked lines are numbered from the first line ever added, so they stay right as old lines drop. Revealing an error scrolls straight to it (no animation, so sticking to the bottom can't undo it) | `output.rs`, `app/dev_console.rs` |
+
+**Timings.** `ui_cost_tests.rs` (new, ignored; `cargo test -p axcenity-editor --release --bins ui_cost -- --ignored --nocapture`) draws each panel alone in its usual shape (Explorer 300×800 with a Folder of Parts open, Console 900×260), averaging 20 frames after 3 to warm up. Release build, cloud container:
+
+| Rows | Explorer before | Explorer after | Console before | Console after |
+|---:|---:|---:|---:|---:|
+| 100 | 0.82 ms | 0.17 ms | 0.35 ms | 0.05 ms |
+| 1,000 | 4.99 ms | 0.16 ms | 3.31 ms | 0.06 ms |
+| 10,000 | 75.29 ms | 0.15 ms | 40.12 ms | 0.09 ms |
+
+Both now cost the same at 10,000 rows as at 100 (the plan's target was at most twice).
+
+**Differs from the plan, on purpose.**
+- *Names (V7).* The world has no version counter for names, so instead of rebuilding the list when a name changes, each drawn row reads its name from the world. A rename shows at once, and the filter (rebuilt every frame) still matches the new name.
+- *S10k Play bench (V7).* Not run: `bench_project_play` runs the game frame without drawing any panel, so it can't show the Explorer's cost. The timing test above measures it directly.
+- *Line heights (V8)* are estimated before a line is first drawn, so the scroll bar can shift by a few points as lines come into view; a revealed line is still scrolled to exactly, because it's drawn and measured in that frame.
+
+**What's preserved.** Drag-and-drop onto rows, rename in place, right-click menus, Shift-click ranges, the filter and its dimmed branches, scroll to the selection; the Console's filters, search, script links, stack traces, sticking to the bottom, revealing an error from a toast, and the Dev Console's unread count.
+
+**Tests.** New: `only_rows_on_screen_are_drawn_and_reveal_scrolls_to_any_row` (10,000 Parts: fewer than 60 rows laid out; revealing the 6,000th scrolls it to the middle), `rows_are_kept_until_the_tree_or_the_open_branches_change`, `the_newest_10000_lines_are_kept_and_counted` (the 10,001st line drops the first; counts and the dropped note stay right), `only_the_lines_on_screen_are_drawn_newest_at_the_bottom`, `a_revealed_error_far_up_is_scrolled_to_and_marked`, and the ignored timing test. `cargo test -p axcenity-editor`: 977 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`, no audio device); clippy and fmt clean. The whole-editor snapshot shows the Explorer and Console as before. Not checked on Windows or a real GPU.
+
+**Left.** Other long lists (Assets in list view, the Tags and Levels panels, Find in Scripts results) still lay out every row; none was measured as slow.
+
+**Next.** Phase 4: Properties edits every selected Instance (V5) and the Explorer moves the selection with the arrow keys (V6), built on this phase's row list.
+
+## Design system Phase 4: edit many, move by keys (V5, V6)
+
+Plan and findings: [design-system.md](design-system.md). Approved by Paul with Phases 1–5 on 2026-11-10. Built on Phase 3 (the Explorer's kept row list).
+
+| ID | What changed | Files |
+|---|---|---|
+| V5 (DS6) | With several selected, Properties shows what they all have (the last one clicked's sections and order), headed "3 Parts" or "5 selected · 2 kinds". A value that differs shows as `—` (a half-ticked box for a checkbox); clicking `—` shows the control with the last one's value, and only an edit writes. An edit goes to each that has the property, as one undo step named like "Change Anchored of 3 Parts"; undo gives each its own value back, and dragging a number stays one step. ↺ resets each to its own class's default. Locked ones only take Locked. Name shows when all can be renamed here. File pickers set the picked file on all of them. During Play an edit changes each in the game | `properties/many.rs` (new), `properties.rs` (`Edit::Reset`), `app/edits.rs` (`apply_many`, `pick_file_for`), `app/chrome/panes.rs` |
+| V6 (DS27) | Once the Explorer is clicked, or tabbed into after its Filter, Up and Down move the selection, Shift+Up and Down extend it from where the keys started, Left closes a branch or goes to the parent, Right opens one or goes to its first child, Home and End go to the ends, and Enter (or F2, as before) renames. The selected row gets the accent focus ring, and the list scrolls only as far as it takes to show it. The keys are taken in `shortcuts` before the viewport or the UI Designer sees them, and only until something else is clicked; tool keys, Delete, Ctrl+D and undo still work, also when tabbed in. Settings › Shortcuts lists them | `explorer.rs`, `app/chrome/windows.rs`, `app/chrome/panes.rs`, `app/settings.rs` |
+
+**Timings.** `ui_cost_tests.rs` now also draws Properties with every Part of the Folder selected (release, cloud container, 320×900): 100 selected 0.07 ms, 1,000 selected 0.45 ms, 10,000 selected 5.03 ms per frame.
+
+**Differs from the plan, on purpose.**
+- *Vectors (V5)* show `—` for the whole field, not per axis: clicking it shows all three axes with the last one's values, and an edit sets the whole vector on each. Per axis would need its own control for every vector type.
+- *What shows with several (V5).* Attributes, tags, Keep pins, prefab override marks, the Style section and buttons such as Animate or Build stay single-selection, as the plan allowed for Style; a note under the header says so. References (an ObjectValue's target, a seat's Occupant) and Terrain's DataFolder are left out.
+- *Enter (V6)* renames only while the Explorer has the keys and no Anchor or Angular tool wants it; those tools keep Enter.
+- *A click (V6)* still centres the clicked row, as before; only the keys scroll the least.
+
+**What's preserved.** One selected looks and works as before (minus the old "Properties are for the last one clicked" note, which no longer applies). Clicking, Ctrl and Shift clicks, drag-and-drop, rename in place, the filter, and every shortcut work as before; arrow keys in the Filter field and the rename box still move the text cursor.
+
+**Tests.** New: `explorer/key_tests.rs` (`the_arrow_keys_move_open_and_close_once_the_explorer_is_clicked`, `shift_arrows_extend_the_selection_from_where_the_keys_started`, `tab_reaches_the_explorer_after_its_filter`, `the_keys_scroll_just_far_enough_to_show_the_row`, `arrows_in_the_filter_move_its_cursor`, a focus-ring snapshot); `app/explorer_keys_tests.rs` (`a_clicked_explorer_takes_the_arrows_and_enter_and_shortcuts_still_work`: Down, Up, Enter renames, 2 picks Move, Delete deletes); `app/multi_edit_tests.rs` (one undo step and each value back, a drag is one step, ↺ to each default, locked ones, names, different kinds share only common properties, `—` shown and looking writes nothing, editing during Play, snapshots). `showing_the_properties_of_anything_in_the_examples_changes_nothing` now also selects every class with two or more in each example, and everything in its Workspace together. `cargo test -p axcenity-editor`: 991 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`, no audio device); clippy and fmt clean. Not checked on Windows or a real GPU.
+
+**Left.** At 300 points wide a vector's third axis wraps under the first two and its first frame overlaps the next row (seen with one selected too; not new). Per-axis `—` for vectors.
+
+**Next.** Phase 5: one shortcut table (V16), layout presets (V17), Increase contrast (V18), and shared section, empty-state and chip pieces (V19).
+
+## Universal search and Recent Projects (Master Improvement Initiative §8–9)
+
+Paul's brief of 2026-11-11, section 8 (universal search and indexed discovery) and section 9 (UI stability). How it works: `docs/editor/shell.md`, Universal search.
+
+**Already there, reused.** The command palette and Quick Open (Phase 70), with every menu and ribbon command as a `Command`; the Explorer, Properties and Assets filters; the Assets panel's scan and the file watcher; stable `InstanceId`s and the world's `structure_version` and per-Instance revisions; the Settings window's pages. No second command registry and no second walk of the project's files: the search index reads these.
+
+| What | Change | Files |
+|---|---|---|
+| Recent Projects overflow (§9) | Cards ran off the start page's right edge: each card's fade-in `ui.scope` stopped egui's wrapping row from breaking. Laid out row by row (PR #75) | `start.rs`, `start/tests.rs` |
+| Ctrl+K (§8A) | One window over everything; Ctrl+P and Ctrl+Shift+P (with `>` typed) are views of it; Edit > Search Everything…; Up/Down, Enter, Escape, Tab | `command_palette.rs`, `app/search.rs`, `app/chrome/menus.rs` |
+| Categories (§8B) | Commands, Tools, Objects, Assets, Scripts, Levels, Settings, Properties, as chips with counts | `command_palette.rs`, `app/search.rs` |
+| Commands (§8C) | Descriptions for every command (the highlighted row's shows under the list), synonyms, shortcuts, why a disabled one can't run | `app/search.rs` |
+| Settings (§8B–C) | 47 rows of the Settings window searchable; picking one opens its page, scrolls to the row and outlines it | `app/settings.rs` |
+| Properties (§8C) | The selection's properties are rows; picking one opens Properties with its filter set to the name | `app/search.rs`, `properties.rs` |
+| Assets panel (§8C) | Its search matches every word against the asset's path and kind ("sound door", "texture") | `asset_browser.rs` |
+| Index (§8D–E) | Providers with stamps; listed again only when their data changes; ranking cached per query and index generation; a new system registers a `SearchProvider` | `app/search.rs`, `asset_browser.rs` (`generation`) |
+
+**Timings** (`search_cost_at_100_1000_and_10000_objects`, release, cloud container, 4 cores; a Folder of Parts named "Crate N" in hello-touched):
+
+| Objects | List everything | Check, nothing changed (each frame while open) | Rank "crate 99" (each keystroke) | Ranked again, same query |
+|---|---|---|---|---|
+| 100 | 0.60 ms | 0.001 ms | 0.28 ms | 0.0001 ms |
+| 1,000 | 1.03 ms | 0.005 ms | 0.93 ms | 0.0001 ms |
+| 10,000 | 6.07 ms | 0.110 ms | 6.13 ms | 0.0001 ms |
+
+Listing happens when the palette opens and after a change, not per keystroke; nothing is indexed while it's closed.
+
+**Differs from the brief, on purpose.**
+- *Asynchronous indexing* isn't used: listing 10,000 objects takes 6 ms once per change, and threads would need copies of the world. Revisit when a provider is slow (a docs or plugin provider reading files).
+- *Context-aware ranking* is recency (the last 20 picks lead and score more), the selection (only its properties are listed), Play (the session's world) and per-category weights, not which panel has focus: the editor doesn't track a focused pane.
+- *Asset tags and metadata*: assets have none beyond path and kind, so search matches those.
+- *Searchable documentation* and AI-assisted discovery are not built; both would be one more `SearchProvider` (the start screen's API Reference search, `reference::search_entries`, is the natural source).
+- *Explorer filter by type*: the Explorer's filter already matches the class ("PointLight") and opens the branches above matches; universal search's object rows show the class and full path. Unchanged, to stay clear of Design system Phase 4's Explorer work.
+
+**Tests.** New: `app/search_tests.rs` (Ctrl+K lists every category and Enter opens the pick; Tab narrows to one category and Shift+Tab goes back; typing ranks again but lists nothing again; creating, renaming, moving and deleting objects; Play's world and back; asset files coming and going; synonyms and a description for every command and tool; every searchable setting is found on its page; a property row selects and filters; snapshots `universal-search*.png`, `settings-found.png`), `command_palette.rs` unit tests (prefix and chips, counts, whole-name bonus, synonyms and descriptions, the ranking cache, Tab order, the ASCII fast path), `asset_browser/tests.rs` (the search's words), `start/tests.rs` (cards inside the page at 900–3,000 px). `palette_tests.rs` moved to the new API. `cargo test -p axcenity-editor`: 1,009 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`, no audio device); clippy and fmt clean. Not checked on Windows or a real GPU.
+
+**Left.** The palette reads shortcuts from `palette_commands` until Design system Phase 5's shortcut table (V16) lands; then it should read them from there. The rest of §9 (other menus and panels at narrow and wide sizes) wasn't audited beyond the start page: the design-system thread's tour shots cover the panels.
+
+## Design system Phase 5: workspaces and options (V16–V19)
+
+Plan and findings: [design-system.md](design-system.md). Approved by Paul with Phases 1–5 on 2026-11-10. Built on Phase 4 and on universal search (#76), whose Ctrl+K joined the shortcut table.
+
+| ID | What changed | Files |
+|---|---|---|
+| V16 (DS5) | Every keyboard shortcut is one row of a table: what it does, its keys, where it works (19 contexts, from Everywhere and Editing the scene to the Model Studio's modes) and its label. Every handler that named keys now asks the table: the scene's undo, tools, duplicate, rename and delete, the Explorer's arrows, the Terrain Studio and brushes, the Console's line, the Animation clip, the graphs, the UI Designer, the Model Studio (Object and Edit keys, moves, typed amounts, Poly Build, the UV editor, Armature, Pose and Paint), F9 in Play, the palette's own keys and Ctrl+K. Settings › Shortcuts lists all of it by context (it listed 24 rows); menus and the command palette show keys from it, so the tools' and terrain tools' palette rows now show their keys too | `shortcuts.rs` (new) and the handlers: `app/chrome/windows.rs`, `app.rs`, `app/search.rs`, `app/command_palette.rs`, `app/settings.rs`, `app/terrain/strokes.rs`, `app/dev_console.rs`, `explorer.rs`, `console.rs`, `animation/…`, `node_graph.rs`, `block_editor/graph.rs`, `ui_designer/…`, `model_studio/…`, `gizmo.rs`, `terrain_studio.rs` |
+| V17 (DS1) | View › Layout: Default, five presets (Scripting, Animation, UI Design, Modeling & Assets, Lighting & Environment), Save Current Layout… and the saved ones. Switching keeps open scripts (behind the preset's front tab, except in Scripting) and the selection. Also on Settings › Editor layout and in the palette and search | `layout/presets.rs` (new), `app/layouts.rs` (new), `layout.rs`, `app/chrome/menus.rs`, `app/command_palette.rs`, `app/search.rs`, `app/settings.rs` |
+| V18 (DS19, DS25) | Settings › Accessibility › Increase contrast: borders and control outlines reach 3:1 on the panels, muted text 4.5:1, focus rings are 2 points, and block colours darken until white labels reach 4.5:1. Saved with the appearance; older saves load with it off | `theme.rs`, `widgets.rs`, `explorer.rs`, `block_editor/…`, `app/settings.rs` |
+| V19 (DS8, DS9) | One folding section (`widgets::section`: icon, title, hint; forced open while filtering, or remembered across selections) used by Properties and the UI Designer's inspector; one empty state (`widgets::empty_state`: icon, title, a sentence on how to fill it, an optional button) used by Properties, Assets, Mixer, Tags and the Model Studio; the filter chip moved to `widgets::chip` (Assets and search) | `widgets.rs`, `properties.rs`, `ui_designer/fold.rs`, `asset_browser.rs`, `mixer.rs`, `tags.rs`, `model_studio.rs`, `command_palette.rs` |
+
+**Found and fixed on the way.** Over a node graph (a material, a UI Event Graph, a behavior tree, a dialogue), Delete and Ctrl+D went to the scene first: they deleted or duplicated the selected Instance and the graph never saw them. The table's clash test made it visible; the graph now gets them, as a block script's Graph view already did (test `delete_over_the_event_graph_leaves_the_selected_instance_alone`).
+
+**Differs from the plan, on purpose.**
+- *Fields, menus and dialogs (V16)* keep Enter, Escape and Tab outside the table: they are conventions that work the same everywhere, and Settings › Shortcuts says so in one line. The camera's mouse moves are listed as gestures.
+- *Overlaps (V16).* Where two contexts are live at once and share a key on purpose, the table says which wins (`Context::wins_over`: the Terrain Studio over the scene, the Anchor and Angular tools' Enter over the Explorer's rename, the Explorer's arrows over the UI Designer's, a clip's and a graph's keys over the scene's); the test fails on any other shared key.
+- *Small key changes (V16).* A handler that ignored modifiers now takes Shift and Alt as egui's own shortcuts do, but not Ctrl: Ctrl+Delete no longer deletes graph nodes, and Ctrl+F9 no longer opens the Developer Console. The state machine graph now also deletes with Backspace, like the other graphs.
+- *Badges (V19).* There was no pill badge to share, so none was added.
+
+**What's preserved.** Every key does what it did (bar the small changes above). The Explorer, Properties and UI Designer look as before; the default layout is unchanged; Increase contrast is off by default.
+
+**Tests.** New: `shortcuts.rs` (`no_two_actions_that_can_be_live_together_share_keys`, `every_action_has_keys_or_a_gesture_and_a_label`, `keys_with_more_modifiers_are_taken_first`, `pressed_leaves_the_key_and_ignores_a_held_shift`, `keys_read_as_settings_and_menus_write_them`, `the_tools_keys_come_from_the_table`); `layout/presets.rs` (every preset has the Scene and survives saving, brings its task's panels, scripts come back behind or in front, saved layouts by name but never a preset's); `saved_layouts_survive_a_restart`; contrast (`increase_contrast_reaches_3_to_1_outlines_and_aa_muted_text`, `appearance_saved_before_increase_contrast_loads_with_it_off`, `increase_contrast_darkens_block_colours_for_white_labels`); widgets (`a_remembered_section_folds_on_a_click_and_stays_folded`, `an_empty_state_says_how_to_fill_it_and_its_button_works`); the Event Graph test above. The palette test checks View has the Layout submenu. Tour states `90-layout-*` and `91-shortcuts`, and `TOUR_CONTRAST=high`; shots in project files `usability/design-system/phase5/`. `cargo test -p axcenity-editor`: 1,026 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`, no audio device); clippy and fmt clean. Not checked on Windows or a real GPU.
+
+**Left.** Rebinding (V23) only has to change `Action::keys`. Settings › Shortcuts is long; search finds the page but not single shortcuts yet.
+
+**Next.** Phase 6 (V20–V26) wasn't approved; it waits for Paul.

@@ -997,11 +997,12 @@ impl GraphView {
             return;
         }
         let (delete, duplicate, all, escape, events) = ctx.input(|i| {
+            use crate::shortcuts::{Action, pressed};
             (
-                i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),
-                i.modifiers.command && i.key_pressed(egui::Key::D),
-                i.modifiers.command && i.key_pressed(egui::Key::A),
-                i.key_pressed(egui::Key::Escape),
+                pressed(i, Action::DeleteNodes),
+                pressed(i, Action::DuplicateNodes),
+                pressed(i, Action::SelectAllNodes),
+                pressed(i, Action::ClearNodeSelection),
                 i.events.clone(),
             )
         });

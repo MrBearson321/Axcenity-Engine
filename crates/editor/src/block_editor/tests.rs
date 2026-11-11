@@ -574,3 +574,22 @@ fn luau_blocks_fold_under_their_own_heading_but_stay_in_the_graph_menu() {
         "{script:?}"
     );
 }
+
+/// With Increase contrast (design system V18) every category's fill and
+/// edge are dark enough for white labels; without it they're Scratch's.
+#[test]
+fn increase_contrast_darkens_block_colours_for_white_labels() {
+    for dark in [true, false] {
+        let quiet = theme::Palette::new(dark, theme::Accent::Blue);
+        let high = quiet.with_contrast(true);
+        for category in Category::ALL {
+            assert_eq!(category.fill(&quiet), category.scratch_fill());
+            for color in [category.fill(&high), category.edge(&high)] {
+                assert!(
+                    theme::contrast(egui::Color32::WHITE, color) >= 4.5,
+                    "{category:?}"
+                );
+            }
+        }
+    }
+}

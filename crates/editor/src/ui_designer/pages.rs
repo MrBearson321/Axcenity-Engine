@@ -433,9 +433,10 @@ impl UiDesigner {
         // The arrow keys move through the slides while nothing is typed in.
         if !ui.ctx().wants_keyboard_input() {
             let (back, on) = ui.input(|input| {
+                use crate::shortcuts::{Action, pressed};
                 (
-                    input.key_pressed(egui::Key::ArrowLeft),
-                    input.key_pressed(egui::Key::ArrowRight),
+                    pressed(input, Action::PreviousSlide),
+                    pressed(input, Action::NextSlide),
                 )
             });
             if back {

@@ -304,16 +304,13 @@ impl PropertyDoc {
             return false;
         }
         let (delete, key, copy, cut, paste) = ui.input(|input| {
-            let command = input.modifiers.command;
-            let plain = input.modifiers.is_none();
+            use crate::shortcuts::{Action, pressed};
             (
-                plain
-                    && (input.key_pressed(egui::Key::Delete)
-                        || input.key_pressed(egui::Key::Backspace)),
-                plain && input.key_pressed(egui::Key::K),
-                command && input.key_pressed(egui::Key::C),
-                command && input.key_pressed(egui::Key::X),
-                command && input.key_pressed(egui::Key::V),
+                pressed(input, Action::DeleteKeys),
+                pressed(input, Action::KeySelected),
+                pressed(input, Action::CopyKeys),
+                pressed(input, Action::CutKeys),
+                pressed(input, Action::PasteKeys),
             )
         });
         if copy || cut {

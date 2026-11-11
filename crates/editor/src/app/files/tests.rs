@@ -171,17 +171,22 @@ fn importing_a_model_copies_it_and_inserts_a_mesh_part_in_one_undo_step() {
     let mesh_part = app.world.get(id).unwrap();
     assert_eq!(mesh_part.class(), ClassName::MeshPart);
     assert_eq!(mesh_part.name(), "pyramid");
-    let mesh_id = "assets/models/pyramid/pyramid.gltf";
+    // By the file's asset ID, which its sidecar holds.
+    let file = "assets/models/pyramid/pyramid.gltf";
+    let id_text = axcenity_assets::read_asset_id(&folder, file)
+        .unwrap()
+        .to_string();
     assert_eq!(
         mesh_part.property("MeshId"),
-        Some(&Value::String(mesh_id.to_owned()))
+        Some(&Value::String(id_text.clone()))
     );
+    assert_eq!(mesh_id(&app, id), file);
     assert_eq!(
         mesh_part.property("Size"),
         Some(&Value::Vector3(Vector3::new(4.0, 3.0, 4.0)))
     );
-    assert!(folder.join(mesh_id).is_file());
-    assert!(last_line(&app).text.contains(mesh_id));
+    assert!(folder.join(file).is_file());
+    assert!(last_line(&app).text.contains(file));
 
     // It's drawn as its model, not as a stand-in box.
     let camera = axcenity_render::Camera {
@@ -202,7 +207,7 @@ fn importing_a_model_copies_it_and_inserts_a_mesh_part_in_one_undo_step() {
     let again = part(&reopened, "pyramid");
     assert_eq!(
         reopened.world.get(again).unwrap().property("MeshId"),
-        Some(&Value::String(mesh_id.to_owned()))
+        Some(&Value::String(id_text))
     );
 
     // One undo takes it out again, with the file it copied; redo puts
@@ -210,10 +215,10 @@ fn importing_a_model_copies_it_and_inserts_a_mesh_part_in_one_undo_step() {
     app.undo();
     let workspace = app.world.workspace();
     assert!(app.world.find_first_child(workspace, "pyramid").is_none());
-    assert!(!folder.join(mesh_id).exists());
+    assert!(!folder.join(file).exists());
     app.redo();
     assert!(app.world.find_first_child(workspace, "pyramid").is_some());
-    assert!(folder.join(mesh_id).is_file());
+    assert!(folder.join(file).is_file());
     let _ = fs::remove_dir_all(&folder);
 }
 
@@ -280,7 +285,10 @@ fn undoing_an_animated_fbx_import_removes_only_its_files_and_redo_brings_them_ba
     assert!(app.world.get(walker).unwrap().parent().is_some());
     let subject = crate::animation::Subject::of(&app.world, walker).unwrap();
     assert_eq!(
-        subject.mesh_id.as_deref(),
+        subject
+            .mesh_id
+            .map(|id| app.assets.asset_path(&id).unwrap())
+            .as_deref(),
         Some("assets/models/Walking2/Walking2.fbx")
     );
     assert!(folder.join(&subject.state_machine).is_file());
@@ -583,9 +591,14 @@ fn position(app: &EditorApp, id: InstanceId) -> Vector3 {
     }
 }
 
+/// The file (and `#pick`) a MeshPart's MeshId names: imports write it by
+/// the file's asset ID.
 fn mesh_id(app: &EditorApp, id: InstanceId) -> String {
     match app.world.get(id).unwrap().property("MeshId") {
-        Some(Value::String(mesh_id)) => mesh_id.clone(),
+        Some(Value::String(mesh_id)) => {
+            assert!(axcenity_assets::is_asset_reference(mesh_id), "{mesh_id}");
+            app.assets.asset_path(mesh_id).expect("the ID names a file")
+        }
         other => panic!("{other:?}"),
     }
 }

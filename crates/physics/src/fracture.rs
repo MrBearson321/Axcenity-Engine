@@ -253,6 +253,8 @@ fn load_pieces(
     assets: &Assets,
     file: &str,
 ) -> Option<Vec<(String, std::sync::Arc<axcenity_assets::Model>)>> {
+    // An asset ID says nothing of the format: its path does.
+    let file = &*assets.resolve(file);
     let format = ModelFormat::of(std::path::Path::new(file))?;
     let bytes = assets.read_file(file).ok()?;
     let objects = list_objects(&bytes, format).ok()?;

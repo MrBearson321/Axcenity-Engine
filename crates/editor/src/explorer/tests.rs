@@ -510,3 +510,99 @@ fn snapshot_of_the_filter() {
         },
     );
 }
+
+/// A Folder of `count` Parts in the Workspace, open.
+fn big_folder(count: usize) -> (World, Explorer, InstanceId, Vec<InstanceId>) {
+    let mut world = World::new();
+    let folder = world.create(ClassName::Folder).unwrap();
+    world.set_parent(folder, Some(world.workspace())).unwrap();
+    let parts = (0..count)
+        .map(|_| {
+            let part = world.create(ClassName::Part).unwrap();
+            world.set_parent(part, Some(folder)).unwrap();
+            part
+        })
+        .collect();
+    let mut explorer = Explorer::new(&world);
+    explorer.toggle(folder);
+    (world, explorer, folder, parts)
+}
+
+/// With 10,000 rows only the ones on screen are laid out, and revealing
+/// one far down scrolls it into the middle of the view.
+#[test]
+fn only_rows_on_screen_are_drawn_and_reveal_scrolls_to_any_row() {
+    let (world, mut explorer, _, parts) = big_folder(10_000);
+    let ctx = theme::test_context();
+    frame(&ctx, &mut explorer, &world, Vec::new());
+    assert!(
+        explorer.drawn.len() < 60,
+        "{} rows laid out",
+        explorer.drawn.len()
+    );
+    let far = parts[6_000];
+    explorer.reveal(&world, far);
+    for _ in 0..2 {
+        frame(&ctx, &mut explorer, &world, Vec::new());
+    }
+    let (_, rect) = explorer
+        .drawn
+        .iter()
+        .find(|(id, _)| *id == far)
+        .expect("the revealed row is drawn");
+    assert!(
+        (100.0..500.0).contains(&rect.center().y),
+        "near the middle of the 600-point window: {rect:?}"
+    );
+}
+
+/// The rows are made again only when the tree or the open branches
+/// change, and a rename shows without that.
+#[test]
+fn rows_are_kept_until_the_tree_or_the_open_branches_change() {
+    let (mut world, mut explorer, folder, parts) = big_folder(3);
+    let ctx = theme::test_context();
+    frame(&ctx, &mut explorer, &world, Vec::new());
+    let key = explorer.cache.as_ref().unwrap().key;
+    frame(&ctx, &mut explorer, &world, Vec::new());
+    assert_eq!(explorer.cache.as_ref().unwrap().key, key, "nothing changed");
+
+    world.set_name(parts[0], "Renamed").unwrap();
+    let mut drawn_names = Vec::new();
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(800.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let output = ctx.run(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            explorer.show(ui, &world, &[], true);
+        });
+    });
+    for clipped in &output.shapes {
+        if let egui::Shape::Text(text) = &clipped.shape {
+            drawn_names.push(text.galley.text().to_owned());
+        }
+    }
+    assert!(
+        drawn_names.iter().any(|text| text.contains("Renamed")),
+        "the new name is drawn: {drawn_names:?}"
+    );
+
+    // A new part, a closed branch and a reorder each make new rows.
+    let added = world.create(ClassName::Part).unwrap();
+    world.set_parent(added, Some(folder)).unwrap();
+    frame(&ctx, &mut explorer, &world, Vec::new());
+    assert!(explorer.drawn.iter().any(|(id, _)| *id == added));
+    explorer.toggle(folder);
+    frame(&ctx, &mut explorer, &world, Vec::new());
+    assert!(!explorer.drawn.iter().any(|(id, _)| *id == added));
+    explorer.toggle(folder);
+    world.set_parent_at(added, folder, 0).unwrap();
+    frame(&ctx, &mut explorer, &world, Vec::new());
+    let order: Vec<InstanceId> = explorer.drawn.iter().map(|(id, _)| *id).collect();
+    let at = order.iter().position(|id| *id == added).unwrap();
+    assert_eq!(order[at + 1], parts[0], "moved to the front of the folder");
+}

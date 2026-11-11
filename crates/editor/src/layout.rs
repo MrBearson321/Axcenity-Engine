@@ -23,6 +23,8 @@ use crate::theme::{self, icons};
 
 pub mod floating;
 use floating::{FloatingWindow, Home, SavedWindow};
+pub mod presets;
+pub use presets::{Preset, SavedLayouts};
 
 /// How tall a dock's row of tabs is, in points.
 pub const TAB_BAR_HEIGHT: f32 = 30.0;
@@ -196,6 +198,9 @@ pub struct Layout {
     last_script: Option<u64>,
     /// Where each panel was last docked in the main window.
     homes: HashMap<Pane, Home>,
+    /// True from switching layouts until the scripts come back, which then
+    /// go behind the tab the layout puts in front.
+    switched: bool,
 }
 
 impl Default for Layout {
@@ -207,6 +212,7 @@ impl Default for Layout {
             dock_generation: 0,
             last_script: None,
             homes: HashMap::new(),
+            switched: false,
         }
     }
 }
@@ -328,8 +334,15 @@ impl Layout {
                 .or_else(|| self.dock.find_tab(&Pane::Scene));
             match beside {
                 Some((surface, node, _)) => {
+                    let front = match &self.dock[surface][node] {
+                        egui_dock::Node::Leaf(leaf) if self.switched => Some(leaf.active),
+                        _ => None,
+                    };
                     self.dock.set_focused_node_and_surface((surface, node));
                     self.dock.push_to_focused_leaf(pane);
+                    if let Some(front) = front {
+                        self.dock.set_active_tab((surface, node, front));
+                    }
                 }
                 None => self.dock.push_to_first_leaf(pane),
             }
@@ -353,6 +366,7 @@ impl Layout {
         if let Some(id) = active.filter(|id| open.contains(id)) {
             self.last_script = Some(id);
         }
+        self.switched = false;
     }
 
     /// Makes the plugin dock tabs match `open`, the plugin widgets that

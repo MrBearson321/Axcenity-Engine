@@ -463,10 +463,14 @@ impl Assets {
     /// or a data table. Any other file (a sound, say) isn't kept in memory,
     /// so it only has to be there.
     pub fn request(&self, path: &str) -> LoadTicket {
-        self.request_kind(Kind::of(path), path)
+        // An ID says nothing of what the file is: its path does.
+        let resolved = self.resolve(path);
+        self.request_kind(Kind::of(&resolved), &resolved)
     }
 
     fn request_kind(&self, kind: Kind, path: &str) -> LoadTicket {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         if path.is_empty() {
             return LoadTicket::new(LoadStatus::Failed);
         }
@@ -483,6 +487,8 @@ impl Assets {
     /// The model at `mesh_id` if it's loaded, or `None` if it isn't (yet),
     /// or couldn't be. Never loads anything and never waits for a load.
     pub fn model_ready(&self, mesh_id: &str) -> Option<Arc<Model>> {
+        let resolved = self.resolve(mesh_id);
+        let mesh_id: &str = &resolved;
         self.lock().models.get(mesh_id).cloned().flatten()
     }
 
@@ -493,6 +499,8 @@ impl Assets {
     /// frame. Otherwise it's read before this returns, like
     /// [`model_blocking`](Self::model_blocking).
     pub fn model_slot(&self, mesh_id: &str) -> Slot<Model> {
+        let resolved = self.resolve(mesh_id);
+        let mesh_id: &str = &resolved;
         if mesh_id.is_empty() {
             return Slot::Failed;
         }
