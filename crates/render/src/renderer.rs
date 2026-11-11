@@ -250,7 +250,9 @@ impl Renderer {
     ) -> Result<Self> {
         // `Instance` picks a graphics API: DirectX 12 or Vulkan on Windows,
         // Metal on macOS, Vulkan on Linux.
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        // Probe: `WGPU_BACKEND=dx12|vulkan` picks the API.
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let surface = instance
             .create_surface(target)
             .context("could not create a drawing surface for the window")?;
@@ -300,6 +302,19 @@ impl Renderer {
         if vsync_off(std::env::var("AXCENITY_VSYNC").ok().as_deref()) {
             config.present_mode = wgpu::PresentMode::AutoNoVsync;
         }
+        // Probe: `AXCENITY_FRAME_LATENCY=n` sets how many frames may queue.
+        if let Some(n) = std::env::var("AXCENITY_FRAME_LATENCY")
+            .ok()
+            .and_then(|n| n.trim().parse().ok())
+        {
+            config.desired_maximum_frame_latency = n;
+        }
+        log::warn!(
+            "probe: backend {:?}, present mode {:?}, frame latency {}",
+            adapter.get_info().backend,
+            config.present_mode,
+            config.desired_maximum_frame_latency
+        );
         surface.configure(&device, &config);
         let capabilities = read_capabilities(&device, Some(&adapter.get_info()));
         let mut scene =
