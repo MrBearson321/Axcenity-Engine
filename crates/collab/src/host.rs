@@ -1,11 +1,13 @@
 //! The session host: the one place that orders, checks and applies every
 //! member's transactions.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::time::{Duration, Instant};
 
 use axcenity_core::World;
 
 use crate::apply::{self, Doc, Note, Refusal};
+use crate::files::{self, Assembly, FileHash, FileStore, Manifest, MemoryStore, Piece};
 use crate::ids::{IdAllocator, IdBlock};
 use crate::message::{MemberId, Snapshot, ToClient, ToHost};
 use crate::op::Op;
@@ -19,6 +21,18 @@ pub const LOG_KEPT: usize = 10_000;
 /// How many of a member's refusals the host remembers for when they
 /// reconnect.
 const REFUSALS_KEPT: usize = 64;
+
+/// How long a document stays locked to a member whose connection dropped,
+/// so a short drop doesn't hand their unsaved work to someone else.
+pub const LOCK_GRACE: Duration = Duration::from_secs(60);
+
+/// Who is editing a document.
+#[derive(Clone, Copy, Debug)]
+struct Lock {
+    member: MemberId,
+    /// When their connection dropped, if it has.
+    away_since: Option<Instant>,
+}
 
 /// A message for one member.
 #[derive(Clone, Debug)]
@@ -49,6 +63,8 @@ struct Member {
     profile: Profile,
     /// What they're doing, while connected.
     presence: Presence,
+    /// Files they're uploading, by hash.
+    uploads: HashMap<FileHash, Assembly>,
 }
 
 /// The authority of one Team Create session.
@@ -59,6 +75,10 @@ pub struct Host {
     log_kept: usize,
     ids: IdAllocator,
     members: BTreeMap<MemberId, Member>,
+    store: Box<dyn FileStore>,
+    locks: BTreeMap<String, Lock>,
+    /// The time as of the last [`Host::tick`].
+    clock: Instant,
 }
 
 impl Host {
@@ -73,7 +93,51 @@ impl Host {
             log_kept: LOG_KEPT,
             ids,
             members: BTreeMap::new(),
+            store: Box::new(MemoryStore::default()),
+            locks: BTreeMap::new(),
+            clock: Instant::now(),
         }
+    }
+
+    /// Hosts the project's files too: `files` names them, `store` has
+    /// their bytes.
+    pub fn with_files(mut self, files: Manifest, store: Box<dyn FileStore>) -> Host {
+        self.doc.files = files;
+        self.store = store;
+        self
+    }
+
+    /// The project's files as the session has them now.
+    pub fn files(&self) -> &Manifest {
+        &self.doc.files
+    }
+
+    /// The bytes of a file the host has.
+    pub fn read_file(&self, hash: FileHash) -> Option<files::Bytes> {
+        self.store.read(hash)
+    }
+
+    /// Who is editing which document.
+    pub fn locks(&self) -> BTreeMap<String, MemberId> {
+        self.locks
+            .iter()
+            .map(|(path, lock)| (path.clone(), lock.member))
+            .collect()
+    }
+
+    /// Lets time pass: a lock whose holder has been gone for
+    /// [`LOCK_GRACE`] ends. Call it a few times a second.
+    pub fn tick(&mut self, now: Instant) -> Vec<Outgoing> {
+        self.clock = now;
+        let before = self.locks.len();
+        self.locks.retain(|_, lock| {
+            lock.away_since
+                .is_none_or(|since| now.saturating_duration_since(since) < LOCK_GRACE)
+        });
+        if self.locks.len() == before {
+            return Vec::new();
+        }
+        self.locks_to_everyone()
     }
 
     /// Keeps only `kept` transactions for catching up (tests use a small one
@@ -114,6 +178,7 @@ impl Host {
                 connected: false,
                 profile: Profile::unnamed(member),
                 presence: Presence::default(),
+                uploads: HashMap::new(),
             },
         );
     }
@@ -136,7 +201,13 @@ impl Host {
         if self.members.remove(&member).is_none() {
             return Vec::new();
         }
-        self.roster_to_everyone()
+        let mut out = self.roster_to_everyone();
+        let before = self.locks.len();
+        self.locks.retain(|_, lock| lock.member != member);
+        if self.locks.len() != before {
+            out.extend(self.locks_to_everyone());
+        }
+        out
     }
 
     /// Everyone in the session, by member ID.
@@ -193,6 +264,13 @@ impl Host {
         }
         m.connected = false;
         m.presence = Presence::default();
+        m.uploads.clear();
+        let now = self.clock;
+        for lock in self.locks.values_mut() {
+            if lock.member == member {
+                lock.away_since = Some(now);
+            }
+        }
         self.roster_to_everyone()
     }
 
@@ -211,9 +289,11 @@ impl Host {
                     return Vec::new();
                 }
                 m.last_client_seq = transaction.client_seq;
-                if !m.role.can(Capability::EditWorld) {
-                    return self.refuse(member, transaction.client_seq, Refusal::Permission);
+                let role = m.role;
+                if let Err(reason) = self.check_files(member, role, &transaction.ops) {
+                    return self.refuse(member, transaction.client_seq, reason);
                 }
+                let m = self.members.get_mut(&member).expect("checked above");
                 let blocks = m.blocks.clone();
                 let owns = |id| blocks.iter().any(|block: &IdBlock| block.contains(id));
                 match apply::apply(&mut self.doc.view(), &transaction.ops, &owns) {
@@ -259,6 +339,91 @@ impl Host {
                     })
                     .collect()
             }
+            ToHost::Upload {
+                hash,
+                at,
+                total,
+                bytes,
+            } => {
+                let m = self.members.get_mut(&member).expect("checked above");
+                if !m.connected || !may_change_files(m.role) || self.store.has(hash) {
+                    return Vec::new();
+                }
+                match Assembly::add(&mut m.uploads, hash, at, total, &bytes.0) {
+                    Ok(Some(file)) => self.store.keep(hash, file),
+                    Ok(None) => {}
+                    Err(()) => log::warn!(
+                        "Team Create: member {} sent a file that doesn't fit together",
+                        member.0
+                    ),
+                }
+                Vec::new()
+            }
+            ToHost::Fetch(hashes) => {
+                if !self.members[&member].connected {
+                    return Vec::new();
+                }
+                let mut out = Vec::new();
+                for hash in hashes {
+                    match self.store.read(hash) {
+                        Some(bytes) => {
+                            let total = bytes.len() as u64;
+                            out.extend(files::pieces(&bytes).map(|(at, piece)| Outgoing {
+                                to: member,
+                                message: ToClient::File {
+                                    hash,
+                                    at,
+                                    total,
+                                    bytes: Piece(piece),
+                                },
+                            }));
+                        }
+                        None => out.push(Outgoing {
+                            to: member,
+                            message: ToClient::Missing(hash),
+                        }),
+                    }
+                }
+                out
+            }
+            ToHost::Lock { path } => {
+                let m = &self.members[&member];
+                if !m.connected
+                    || !may_edit_file(m.role, &path)
+                    || files::check_path(&path).is_err()
+                {
+                    return Vec::new();
+                }
+                match self.locks.get(&path) {
+                    Some(lock) if lock.member == member => Vec::new(),
+                    // Taken: tell the asker who has it.
+                    Some(_) => vec![Outgoing {
+                        to: member,
+                        message: ToClient::Locks(self.locks()),
+                    }],
+                    None => {
+                        self.locks.insert(
+                            path,
+                            Lock {
+                                member,
+                                away_since: None,
+                            },
+                        );
+                        self.locks_to_everyone()
+                    }
+                }
+            }
+            ToHost::Unlock { path } => {
+                if self
+                    .locks
+                    .get(&path)
+                    .is_some_and(|lock| lock.member == member)
+                {
+                    self.locks.remove(&path);
+                    return self.locks_to_everyone();
+                }
+                Vec::new()
+            }
             ToHost::NeedIds => {
                 let block = self.ids.block();
                 let m = self.members.get_mut(&member).expect("checked above");
@@ -271,8 +436,54 @@ impl Host {
         }
     }
 
+    /// Whether `member` (with `role`) may make the transaction `ops`:
+    /// each op needs its capability, each new file must have been uploaded,
+    /// and nobody else may be editing a file it changes.
+    fn check_files(&self, member: MemberId, role: Role, ops: &[Op]) -> Result<(), Refusal> {
+        for op in ops {
+            let Op::FileVersion { path, new, .. } = op else {
+                if !role.can(Capability::EditWorld) {
+                    return Err(Refusal::Permission);
+                }
+                continue;
+            };
+            if !may_edit_file(role, path) {
+                return Err(Refusal::Permission);
+            }
+            if let Some(lock) = self.locks.get(path)
+                && lock.member != member
+            {
+                return Err(Refusal::Locked {
+                    path: path.clone(),
+                    by: lock.member,
+                });
+            }
+            if let Some(hash) = new
+                && !self.store.has(*hash)
+            {
+                return Err(Refusal::Invalid(format!(
+                    "`{path}` wasn't uploaded before it was saved"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn locks_to_everyone(&self) -> Vec<Outgoing> {
+        self.to_everyone(ToClient::Locks(self.locks()))
+    }
+
     fn hello(&mut self, member: MemberId, have: Option<u64>) -> Vec<Outgoing> {
+        for lock in self.locks.values_mut() {
+            if lock.member == member {
+                lock.away_since = None;
+            }
+        }
         let mut out = self.catch_up(member, have);
+        out.push(Outgoing {
+            to: member,
+            message: ToClient::Locks(self.locks()),
+        });
         // Who's here, to everyone (the member is online now), and what the
         // others are doing, to the member.
         out.extend(self.roster_to_everyone());
@@ -332,6 +543,7 @@ impl Host {
                 role,
                 ids: Some(block),
                 rejected,
+                files: self.doc.files.clone(),
             },
         }]
     }
@@ -358,6 +570,20 @@ impl Host {
             })
             .collect()
     }
+}
+
+/// Whether `role` may change any file.
+fn may_change_files(role: Role) -> bool {
+    role.can(Capability::EditScripts) || role.can(Capability::EditAssets)
+}
+
+/// Whether `role` may change the file at `path`.
+fn may_edit_file(role: Role, path: &str) -> bool {
+    role.can(if files::is_script(path) {
+        Capability::EditScripts
+    } else {
+        Capability::EditAssets
+    })
 }
 
 fn accepted(logged: &Logged) -> ToClient {

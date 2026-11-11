@@ -2,6 +2,8 @@
 
 use axcenity_core::{ClassName, InstanceId, Value};
 
+use crate::files::FileHash;
+
 /// One Instance to make, as part of [`Op::CreateTree`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeSpec {
@@ -57,6 +59,23 @@ pub enum Op {
         tag: String,
         added: bool,
     },
+    /// Sets a project file to the uploaded version `new`, or deletes it
+    /// with `None` (TC5). `base` is the version its author changed (`None`
+    /// for a new file): if the file has changed since, the whole
+    /// transaction is refused, so a save never overwrites one the author
+    /// hasn't seen.
+    FileVersion {
+        path: String,
+        base: Option<FileHash>,
+        new: Option<FileHash>,
+    },
+}
+
+impl Op {
+    /// True for an op that changes the World (not a file).
+    pub fn is_world(&self) -> bool {
+        !matches!(self, Op::FileVersion { .. })
+    }
 }
 
 /// One undo step's worth of edits, as a client sends it.

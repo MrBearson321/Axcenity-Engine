@@ -182,7 +182,15 @@ impl HostSession {
         for event in events {
             self.handle(event);
         }
+        self.tick();
         count
+    }
+
+    /// Lets the host's clock move on (document locks of members who left
+    /// end after a while).
+    fn tick(&mut self) {
+        let out = self.host.tick(std::time::Instant::now());
+        self.route(out);
     }
 
     /// Runs the session on its own thread until the returned handle is
@@ -209,6 +217,7 @@ impl HostSession {
                             Err(RecvTimeoutError::Timeout) => {}
                             Err(RecvTimeoutError::Disconnected) => break,
                         }
+                        session.lock().expect("host session").tick();
                     }
                 })
                 .expect("starting the Team Create host thread")
