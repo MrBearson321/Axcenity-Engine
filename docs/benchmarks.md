@@ -533,6 +533,31 @@ Queries now keep each part's bounding ball between rays (`physics::query::Worksp
 
 Every query benefits the same way (`workspace:Raycast`, `Spherecast`, `GetPartBoundsInBox`, ...). After this, S10k has no stage left where splitting work across threads is the clear next step on a 4-core machine: Physics is rapier's own (already parallel), Heartbeat is one Luau VM, and the player's draw list became retained in M4. L4 stays open for an 8+ core measurement.
 
+### Property slots (L1): measured, not now
+
+L1 (a slot per property in each class's layout, `Prop` IDs instead of names, dirty bits) was to be built only if property access still dominated after M2 and M4. It doesn't.
+
+Callgrind over whole S10k frames (test runner, after M2 and M4, 2026-11-10), share of the frame's instructions:
+
+| | Share |
+|---|---|
+| Physics | 58% |
+| Agents' navmesh refresh | 19% |
+| `fire_changes` | 11% |
+| Name lookups (string compares under `property` and `set_property`) | about 9% |
+
+The other gains L1 promised, measured on 10,000 Parts in the Workspace (`World::new`, release, cloud container, 2026-11-11):
+
+| | Today (`BTreeMap<&'static str, Value>`) |
+|---|---|
+| Properties per Part | 26 (`Value` is 48 bytes) |
+| Heap per Part | about 3.3 KB in 8 allocations |
+| `World::clone` (undo snapshots of some edits, Play) | 11.5 ms |
+| `property(&str)`, 6 common names, all parts | 68 ns per read (mostly cache misses across 10k Instances) |
+| `set_property("Position")` | 150 ns per write, change log included |
+
+A per-class slot array would cut the heap to roughly 1.3 KB per Part and the clone to a few ms, but the frame cost is the name compares, and only `Prop` IDs at the ~500 call sites remove those. At about a tenth of the frame, and with no measured hitch from the clones (one per edit, not per frame), that isn't worth the change and its risk to the Properties panel, world files, saves and replication now. Revisit if a project shows `property`/`set_property` above about 20% of a frame, or `World::clone` becoming a visible edit hitch.
+
 ### Game files (M9)
 
 The roadmap said to measure the ratio before compressing `.axgame` files. Each example was cooked (`cook_project`, as Build Game does), packed and unpacked on the cloud container (unpacking: best of three, page cache warm). Sizes in MB, times in ms:
