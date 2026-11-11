@@ -98,9 +98,6 @@ impl EditorApp {
     /// one undo step (undo writes the file back; `apply_history_texts`
     /// reads it again).
     pub(super) fn edit_input_map(&mut self, edit: InputEdit) {
-        let Some(project) = &mut self.project else {
-            return;
-        };
         let label = match &edit {
             InputEdit::Add { action, .. } => format!("Add an input to {action}"),
             InputEdit::Remove { action, .. } => format!("Remove an input from {action}"),
@@ -108,13 +105,24 @@ impl EditorApp {
             InputEdit::RemoveAction(name) => format!("Remove input action {name}"),
             InputEdit::Reset => "Restore default input".to_owned(),
         };
-        let map = match edited(&project.input_map, edit) {
-            Ok(map) => map,
-            Err(err) => {
-                self.output.error(format!("Input: {err}."));
-                return;
-            }
+        self.edit_input_map_all(label, vec![edit]);
+    }
+
+    /// Makes `edits` in turn, as one undo step `label` (all or nothing).
+    pub(super) fn edit_input_map_all(&mut self, label: String, edits: Vec<InputEdit>) {
+        let Some(project) = &mut self.project else {
+            return;
         };
+        let mut map = project.input_map.clone();
+        for edit in edits {
+            map = match edited(&map, edit) {
+                Ok(map) => map,
+                Err(err) => {
+                    self.output.error(format!("Input: {err}."));
+                    return;
+                }
+            };
+        }
         let path = project.folder.join(axcenity_project::INPUT_FILE);
         let before = std::fs::read_to_string(&path).ok();
         match axcenity_project::save_input_map(&project.folder, &map) {

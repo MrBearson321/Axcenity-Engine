@@ -30,11 +30,13 @@ use super::EditorApp;
 mod anim_edit;
 mod asset_find;
 mod asset_import;
+mod asset_manage;
 mod batch;
 mod docs;
 mod env_set;
 mod game_run;
 mod history;
+mod level;
 mod material_edit;
 mod object_create;
 mod object_delete;
@@ -42,13 +44,17 @@ mod object_duplicate;
 mod object_get;
 mod object_set;
 mod ops;
+mod prefab;
 mod project_check;
 mod project_info;
 mod project_save;
+mod project_settings;
 mod refs;
 mod scene_inspect;
 mod script_read;
 mod script_write;
+mod solid_op;
+mod style_edit;
 mod terrain_edit;
 mod values;
 
@@ -218,6 +224,30 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &anim_edit::SPEC,
         call: anim_edit::call,
+    },
+    Tool {
+        spec: &level::SPEC,
+        call: level::call,
+    },
+    Tool {
+        spec: &prefab::SPEC,
+        call: prefab::call,
+    },
+    Tool {
+        spec: &solid_op::SPEC,
+        call: solid_op::call,
+    },
+    Tool {
+        spec: &style_edit::SPEC,
+        call: style_edit::call,
+    },
+    Tool {
+        spec: &project_settings::SPEC,
+        call: project_settings::call,
+    },
+    Tool {
+        spec: &asset_manage::SPEC,
+        call: asset_manage::call,
     },
 ];
 

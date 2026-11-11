@@ -1680,3 +1680,333 @@ fn asset_import_places_a_model_where_asked() {
     assert!(left.starts_with("0 assets"), "{left}");
     let _ = std::fs::remove_dir_all(&downloads);
 }
+
+#[test]
+fn level_lists_makes_renames_deletes_and_opens_levels() {
+    let mut opened = open("hello-levels", "mcp-levels");
+    let host = &mut opened.app;
+    let list = ok(host, "level", json!({}));
+    assert!(
+        list.contains("· start · open") && list.contains("\nCastle"),
+        "{list}"
+    );
+    let made = ok(host, "level", json!({"action": "create", "name": "Caves"}));
+    assert!(
+        made.contains("undo \"AI (test): New level Caves\""),
+        "{made}"
+    );
+    let levels = opened.folder.join("levels");
+    assert!(levels.join("Caves.world.json").is_file());
+    let taken = call(host, "level", json!({"action": "create", "name": "caves"})).unwrap_err();
+    assert_eq!(taken.code, Code::BadValue, "{taken}");
+    ok(
+        host,
+        "level",
+        json!({"action": "rename", "name": "Caves", "to": "Mines"}),
+    );
+    assert!(levels.join("Mines.world.json").is_file() && !levels.join("Caves.world.json").exists());
+    // Deleting asks first.
+    let asked = call(host, "level", json!({"action": "delete", "name": "Mines"})).unwrap_err();
+    assert_eq!(asked.code, Code::NeedsConfirm, "{asked}");
+    ok(
+        host,
+        "level",
+        json!({"action": "delete", "name": "Mines", "confirm": token(&asked)}),
+    );
+    assert!(!levels.join("Mines.world.json").exists());
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(
+        levels.join("Mines.world.json").is_file(),
+        "undo brings it back"
+    );
+    // Opening another level wants unsaved changes saved first.
+    let wrong = call(host, "level", json!({"action": "open", "name": "Atlantis"})).unwrap_err();
+    assert_eq!(wrong.code, Code::NotFound);
+    assert!(wrong.to_string().contains("Castle"), "{wrong}");
+    ok(host, "object_create", json!({"kind": "Block"}));
+    let unsaved = call(host, "level", json!({"action": "open", "name": "Castle"})).unwrap_err();
+    assert_eq!(unsaved.code, Code::Locked, "{unsaved}");
+    assert!(unsaved.to_string().contains("project_save"), "{unsaved}");
+    let asked = call(host, "project_save", json!({})).unwrap_err();
+    ok(host, "project_save", json!({"confirm": token(&asked)}));
+    let opened_text = ok(host, "level", json!({"action": "open", "name": "Castle"}));
+    assert!(opened_text.starts_with("opened Castle"), "{opened_text}");
+    let list = ok(host, "level", json!({}));
+    assert!(list.contains("Castle · open"), "{list}");
+}
+
+#[test]
+fn prefab_saves_places_and_applies_copies_as_undo_steps() {
+    let mut opened = open("hello-part", "mcp-prefab");
+    let host = &mut opened.app;
+    let made = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "name": "Crate"}),
+    );
+    let crate_id = made.split_whitespace().nth(1).unwrap().to_owned();
+    let saved = ok(host, "prefab", json!({"action": "save", "id": crate_id}));
+    assert!(
+        saved.starts_with("saved assets/prefabs/Crate.prefab.json"),
+        "{saved}"
+    );
+    let path = "assets/prefabs/Crate.prefab.json";
+    assert!(opened.folder.join(path).is_file());
+    let placed = ok(
+        host,
+        "prefab",
+        json!({"action": "place", "path": path, "position": [20, 3, 0]}),
+    );
+    assert!(
+        placed.contains("undo \"AI (test): Place Crate\""),
+        "{placed}"
+    );
+    let copy = placed
+        .trim_start_matches("placed ")
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned();
+    let position = ok(
+        host,
+        "object_get",
+        json!({"id": copy, "props": ["Position"]}),
+    );
+    assert!(position.contains("Position [20,3,0]"), "{position}");
+    // A change on the copy is an override, which apply writes back.
+    ok(
+        host,
+        "object_set",
+        json!({"id": copy, "props": {"Transparency": 0.5}}),
+    );
+    let overrides = ok(host, "prefab", json!({"action": "overrides", "id": copy}));
+    assert!(overrides.contains("Transparency"), "{overrides}");
+    let asked = call(host, "prefab", json!({"action": "apply", "id": copy})).unwrap_err();
+    assert_eq!(asked.code, Code::NeedsConfirm, "{asked}");
+    ok(
+        host,
+        "prefab",
+        json!({"action": "apply", "id": copy, "confirm": token(&asked)}),
+    );
+    let file = std::fs::read_to_string(opened.folder.join(path)).unwrap();
+    assert!(file.contains("0.5"), "{file}");
+    // The first copy follows it too.
+    let first = ok(
+        host,
+        "object_get",
+        json!({"id": crate_id, "props": ["Transparency"]}),
+    );
+    assert!(first.contains("0.5"), "{first}");
+    let unpacked = ok(host, "prefab", json!({"action": "unpack", "id": copy}));
+    assert!(unpacked.contains("no longer follows"), "{unpacked}");
+    let not_a_copy = call(host, "prefab", json!({"action": "revert", "id": copy})).unwrap_err();
+    assert_eq!(not_a_copy.code, Code::BadValue, "{not_a_copy}");
+}
+
+#[test]
+fn solid_op_unions_and_separates_parts_as_undo_steps() {
+    let mut opened = open("hello-part", "mcp-solid");
+    let host = &mut opened.app;
+    let first = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "position": [0, 5, 0], "size": [4, 4, 4]}),
+    );
+    let second = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "position": [2, 5, 0], "size": [4, 4, 4]}),
+    );
+    let ids: Vec<String> = [first, second]
+        .iter()
+        .map(|text| text.split_whitespace().nth(1).unwrap().to_owned())
+        .collect();
+    let one = call(host, "solid_op", json!({"op": "union", "id": ids[0]})).unwrap_err();
+    assert_eq!(one.code, Code::BadArgs, "{one}");
+    let union = ok(host, "solid_op", json!({"op": "union", "ids": ids}));
+    assert!(union.contains("UnionOperation"), "{union}");
+    assert!(union.contains("undo \"AI (test): "), "{union}");
+    let made = union
+        .split("→ ")
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned();
+    let separated = ok(host, "solid_op", json!({"op": "separate", "id": made}));
+    assert!(separated.starts_with("Separate"), "{separated}");
+    ok(host, "history", json!({"action": "undo", "steps": 2}));
+    let parts = ok(host, "scene_inspect", json!({"class": "UnionOperation"}));
+    assert!(!parts.contains("UnionOperation \""), "{parts}");
+}
+
+#[test]
+fn style_edit_lists_shows_and_changes_rules_by_selector() {
+    let mut opened = open("hello-css", "mcp-style");
+    let host = &mut opened.app;
+    let list = ok(host, "style_edit", json!({}));
+    assert!(
+        list.starts_with("ui.css · ") && list.contains("\n#score"),
+        "{list}"
+    );
+    let score = ok(
+        host,
+        "style_edit",
+        json!({"action": "get", "selector": "#score"}),
+    );
+    assert!(
+        score.contains("font-size: 20px;") && score.ends_with("in ui.css"),
+        "{score}"
+    );
+    // Change one in place, add one, remove one, add a :hover rule.
+    let set = ok(
+        host,
+        "style_edit",
+        json!({"action": "set", "selector": "#score", "props": {"font-size": "24px", "opacity": 0.8, "font-family": null}}),
+    );
+    assert!(set.contains("undo \"AI (test): Style #score\""), "{set}");
+    ok(
+        host,
+        "style_edit",
+        json!({"action": "set", "selector": "#score:hover", "props": {"color": "#ffffff"}}),
+    );
+    let score = ok(
+        host,
+        "style_edit",
+        json!({"action": "get", "selector": "#score"}),
+    );
+    assert!(
+        score.contains("font-size: 24px;") && score.contains("opacity: 0.8;"),
+        "{score}"
+    );
+    assert!(!score.contains("font-family"), "{score}");
+    assert!(
+        score.contains("#score:hover { color: #ffffff; }"),
+        "{score}"
+    );
+    let text = host.app.stylesheet_text("ui.css").unwrap();
+    assert_eq!(text.matches("font-size").count(), 1, "{text}");
+    // Undo puts the text back.
+    ok(host, "history", json!({"action": "undo", "steps": 2}));
+    let score = ok(
+        host,
+        "style_edit",
+        json!({"action": "get", "selector": "#score"}),
+    );
+    assert!(
+        score.contains("font-size: 20px;") && score.contains("font-family"),
+        "{score}"
+    );
+    let bad = call(
+        host,
+        "style_edit",
+        json!({"action": "set", "selector": "#score", "props": {"color": "red; } x {"}}),
+    )
+    .unwrap_err();
+    assert_eq!(bad.code, Code::BadValue, "{bad}");
+}
+
+#[test]
+fn project_settings_changes_input_collision_groups_and_strings() {
+    let mut opened = open("hello-part", "mcp-settings");
+    let host = &mut opened.app;
+    let input = ok(host, "project_settings", json!({"setting": "input"}));
+    assert!(input.contains("\nJump: Space | ButtonA"), "{input}");
+    // A new action and its key are one step.
+    let dash = ok(
+        host,
+        "project_settings",
+        json!({"setting": "input", "action": "add", "name": "Dash", "input": "Q"}),
+    );
+    assert!(
+        dash.contains("undo \"AI (test): Add input to Dash\""),
+        "{dash}"
+    );
+    let input = ok(host, "project_settings", json!({"setting": "input"}));
+    assert!(input.contains("\nDash: Q"), "{input}");
+    let file = std::fs::read_to_string(opened.folder.join("input.json")).unwrap();
+    assert!(file.contains("Dash"), "{file}");
+    ok(host, "history", json!({"action": "undo"}));
+    let input = ok(host, "project_settings", json!({"setting": "input"}));
+    assert!(!input.contains("Dash"), "{input}");
+    let wrong = call(
+        host,
+        "project_settings",
+        json!({"setting": "input", "action": "add", "name": "Jump", "input": "Spaceship"}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadValue, "{wrong}");
+    // Collision groups.
+    ok(
+        host,
+        "project_settings",
+        json!({"setting": "collision", "action": "add", "name": "Ghosts"}),
+    );
+    ok(
+        host,
+        "project_settings",
+        json!({"setting": "collision", "action": "set", "name": "Ghosts", "other": "Default", "collide": false}),
+    );
+    let groups = ok(host, "project_settings", json!({"setting": "collision"}));
+    assert!(
+        groups.contains("Ghosts") && groups.contains("don't collide: "),
+        "{groups}"
+    );
+    // Strings.
+    let set = ok(
+        host,
+        "project_settings",
+        json!({"setting": "strings", "action": "set", "name": "greeting", "value": "Hello"}),
+    );
+    assert!(set.contains("unsaved"), "{set}");
+    let strings = ok(host, "project_settings", json!({"setting": "strings"}));
+    assert!(strings.contains("\ngreeting: \"Hello\""), "{strings}");
+    ok(host, "history", json!({"action": "undo"}));
+    let strings = ok(host, "project_settings", json!({"setting": "strings"}));
+    assert!(!strings.contains("greeting"), "{strings}");
+}
+
+#[test]
+fn asset_manage_renames_with_references_and_deletes_after_asking() {
+    let mut opened = open("hello-material-graph", "mcp-asset-manage");
+    let host = &mut opened.app;
+    let renamed = ok(
+        host,
+        "asset_manage",
+        json!({"action": "rename", "path": "assets/textures/moss.png", "to": "lichen.png"}),
+    );
+    assert!(
+        renamed.starts_with("assets/textures/moss.png is now assets/textures/lichen.png"),
+        "{renamed}"
+    );
+    let folder = opened.folder.clone();
+    assert!(folder.join("assets/textures/lichen.png").is_file());
+    let users = ok(
+        host,
+        "asset_find",
+        json!({"name": "lichen", "detail": "full"}),
+    );
+    assert!(
+        users.contains("used by "),
+        "what used moss.png follows: {users}"
+    );
+    // Delete asks first, naming what still uses it.
+    let args = json!({"action": "delete", "path": "assets/textures/lichen.png"});
+    let asked = call(host, "asset_manage", args.clone()).unwrap_err();
+    assert_eq!(asked.code, Code::NeedsConfirm, "{asked}");
+    assert!(asked.to_string().contains("still use"), "{asked}");
+    let mut args = args;
+    args["confirm"] = json!(token(&asked));
+    ok(host, "asset_manage", args);
+    assert!(!folder.join("assets/textures/lichen.png").exists());
+    ok(host, "history", json!({"action": "undo", "steps": 2}));
+    assert!(folder.join("assets/textures/moss.png").is_file());
+    let missing = call(
+        host,
+        "asset_manage",
+        json!({"action": "delete", "path": "assets/nothing.png"}),
+    )
+    .unwrap_err();
+    assert_eq!(missing.code, Code::NotFound, "{missing}");
+}
