@@ -4,7 +4,7 @@
 //! prefab files hold the Instance; its code stays in that file, which every
 //! copy shares (`docs/project/world.md`).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Component;
 
 use super::*;
@@ -57,6 +57,24 @@ pub fn object_scripts(
         }
     }
     scripts
+}
+
+/// The code of every script inside an object in `worlds` (the game's
+/// levels), by `SourceFile`, for `ScriptRuntime::know_code`: a level that
+/// LevelService loads during the game brings its scripts' Instances, and
+/// they start with this. A file that can't be read is left out (Asset Check
+/// lists it).
+pub fn level_code<'a>(
+    folder: &Path,
+    worlds: impl IntoIterator<Item = &'a World>,
+) -> BTreeMap<String, String> {
+    let mut code = BTreeMap::new();
+    for world in worlds {
+        for script in object_scripts(folder, world, &mut Vec::new()) {
+            code.entry(script.path).or_insert(script.source);
+        }
+    }
+    code
 }
 
 /// `scripts` (from the `scripts` folder, in [`script_order`], with UI

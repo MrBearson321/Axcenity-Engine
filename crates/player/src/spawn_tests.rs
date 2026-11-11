@@ -366,6 +366,51 @@ fn a_starter_character_model_in_starter_player_is_what_spawns() {
 }
 
 #[test]
+fn a_script_inside_the_starter_character_runs_in_each_character_it_spawns_as() {
+    let mut world = World::new();
+    floor(&mut world);
+    spawn(&mut world, "Pad", -12.0, 4.0, None);
+    let starter = world.starter_player();
+    let model = make(
+        &mut world,
+        ClassName::Model,
+        STARTER_CHARACTER,
+        starter,
+        Vec::new(),
+    );
+    make(
+        &mut world,
+        ClassName::Part,
+        "Robot",
+        model,
+        vec![("Size", v(3.0, 6.0, 3.0))],
+    );
+    make(
+        &mut world,
+        ClassName::Script,
+        "Hello",
+        model,
+        vec![(
+            "SourceFile",
+            Value::String("objects/Robot/Hello.server.lua".to_owned()),
+        )],
+    );
+    let mut game = Game::new(world);
+    // Hosts pass the code of the StarterCharacter's scripts (G2).
+    game.scripts.know_code(
+        "objects/Robot/Hello.server.lua",
+        "print('hello from', script.Parent.Name)",
+    );
+    game.frames(2);
+    let player_name = game.world.get(game.player()).unwrap().name().to_owned();
+    assert_eq!(game.printed, [format!("hello from {player_name}")]);
+    // Not the original in StarterPlayer.
+    game.command("game.Players:GetPlayers()[1]:LoadCharacter()");
+    game.frames(2);
+    assert_eq!(game.printed.len(), 2, "{:?}", game.printed);
+}
+
+#[test]
 fn a_character_placed_in_the_workspace_becomes_the_players_and_respawns_as_it_was() {
     let mut world = World::new();
     floor(&mut world);

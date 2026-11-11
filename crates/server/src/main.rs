@@ -166,6 +166,12 @@ fn main() -> Result<()> {
         eprintln!("warning: {err}");
     }
     scripts.set_input_map(project.input_map.clone());
+    // Scripts inside objects in levels LevelService loads later, and in
+    // the StarterCharacter each player spawns as (G2).
+    let worlds = levels.values().chain([&world]);
+    for (path, source) in axcenity_project::level_code(&project.folder, worlds) {
+        scripts.know_code(&path, &source);
+    }
     scripts.set_levels(&start_level, &start_level, levels);
     // Scripts and the ModuleScripts they require; LocalScripts run on
     // players' devices, and this server has no player.
