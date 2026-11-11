@@ -88,3 +88,61 @@ pub struct Transaction {
     pub label: String,
     pub ops: Vec<Op>,
 }
+
+/// Changes every ID `ops` name that `map` has a new one for: what they
+/// make, change, move and point to. A member's edits made against IDs that
+/// are no longer theirs (a host started again, or an editor's unsent edits
+/// from before it stopped) are given IDs from their new block this way.
+pub fn remap_ids(ops: &mut [Op], map: &rustc_hash::FxHashMap<InstanceId, InstanceId>) {
+    let id = |id: &mut InstanceId| {
+        if let Some(&new) = map.get(id) {
+            *id = new;
+        }
+    };
+    let value = |value: &mut Value| {
+        if let Value::Instance(Some(target)) = value
+            && let Some(&new) = map.get(target)
+        {
+            *target = new;
+        }
+    };
+    for op in ops {
+        match op {
+            Op::CreateTree { nodes } => {
+                for node in nodes {
+                    id(&mut node.id);
+                    id(&mut node.parent);
+                    node.properties.iter_mut().for_each(|(_, v)| value(v));
+                    node.attributes.iter_mut().for_each(|(_, v)| value(v));
+                }
+            }
+            Op::Reparent {
+                id: moved, parent, ..
+            } => {
+                id(moved);
+                if let Some(parent) = parent {
+                    id(parent);
+                }
+            }
+            Op::SetProps {
+                id: target,
+                properties,
+            } => {
+                id(target);
+                properties.iter_mut().for_each(|(_, v)| value(v));
+            }
+            Op::SetAttribute {
+                id: target,
+                value: v,
+                ..
+            } => {
+                id(target);
+                if let Some(v) = v {
+                    value(v);
+                }
+            }
+            Op::Tag { id: target, .. } => id(target),
+            Op::FileVersion { .. } => {}
+        }
+    }
+}

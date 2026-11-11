@@ -33,6 +33,12 @@
 //! host's project; ending the session or quitting with them saved (or let
 //! go) removes the journal, and opening a project whose session stopped
 //! without ending brings its World back ([`EditorApp::recover_team_session`]).
+//! A joining editor keeps its edits the host hasn't confirmed in a
+//! recovery file in its folder while it's offline ([`EditorApp::keep_unsent`]),
+//! and sends them the next time it joins that session. Edits sent again
+//! after a gap that no longer apply are listed in the Recovered Changes
+//! window. When the host ends the session, the copy stays open, read-only.
+//! Following a member's camera is the panel's.
 //!
 //! What SplineMeshes and SplineScatters make isn't shared: each copy makes
 //! its own ([`World::unrecorded`] in `generate_frame`).
@@ -50,7 +56,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use axcenity_collab::access::{Access, INVITE_LIFETIME_SECONDS, Invite};
+use axcenity_collab::access::{Access, Invite};
 use axcenity_collab::identity::{Fingerprint, Identity};
 use axcenity_collab::journal;
 use axcenity_collab::mirror::{Change, Mirror};
@@ -137,6 +143,25 @@ fn load_identity(folder: &Path) -> std::io::Result<Identity> {
         }
         Err(error) => Err(error),
     }
+}
+
+/// This computer's identity, for Settings > Team Create (made on first use,
+/// as sharing or joining would).
+pub(super) fn load_own_identity() -> Result<Identity, String> {
+    if cfg!(test) {
+        return Ok(Identity::new("Tester", [90, 160, 230]));
+    }
+    let folder = data_folder().ok_or("there's no folder for Team Create's files")?;
+    load_identity(&folder).map_err(|e| format!("Couldn't read your identity: {e}"))
+}
+
+/// Saves a changed name or colour for the next session.
+pub(super) fn save_own_identity(identity: &Identity) -> std::io::Result<()> {
+    if cfg!(test) {
+        return Ok(());
+    }
+    let folder = data_folder().ok_or_else(|| std::io::Error::other("no data folder"))?;
+    identity.save(&folder.join("identity.json"))
 }
 
 /// The members file of the project in `project`, named by a hash of its
@@ -307,6 +332,11 @@ pub(crate) struct Team {
     open_mirror: bool,
     /// The newest transaction this editor's copy had last frame.
     seen_seq: Option<u64>,
+    /// What the recovery file in the mirror's folder holds (how many edits
+    /// and the newest), while there is one.
+    unsent_kept: Option<(usize, Option<u64>)>,
+    /// The recovery file found on joining was taken in.
+    unsent_loaded: bool,
 }
 
 impl Team {
@@ -324,6 +354,8 @@ impl Team {
             mirrors_home: None,
             open_mirror: false,
             seen_seq: None,
+            unsent_kept: None,
+            unsent_loaded: false,
         }
     }
 
@@ -365,12 +397,18 @@ pub(crate) enum TeamStatus {
     Reconnecting { why: String, waiting: usize },
     /// The host refused this editor: the session is over for it.
     Refused(String),
+    /// The owner ended the session: this copy is read-only, with `waiting`
+    /// edits kept in its recovery file.
+    HostLeft { waiting: usize },
 }
 
 impl Team {
     /// How the session is going.
     pub(crate) fn status(&self) -> TeamStatus {
         let waiting = self.client.as_ref().map_or(0, Client::pending);
+        if self.client.as_ref().is_some_and(Client::host_left) {
+            return TeamStatus::HostLeft { waiting };
+        }
         if self.ended {
             return TeamStatus::Refused(self.problem.clone().unwrap_or_default());
         }
@@ -541,7 +579,10 @@ impl EditorApp {
             None,
         )
         .map_err(|e| format!("couldn't listen on port {port}: {e}"))?;
-        let invite = session.invite(Role::Editor, INVITE_LIFETIME_SECONDS);
+        let invite = session.invite(
+            self.team_panel.invite_role.role(),
+            self.team_panel.invite_lifetime.seconds(),
+        );
         let loopback = session.loopback();
         let hosting = session.serve();
         let remote = Box::new(Remote::join(
@@ -625,6 +666,12 @@ impl EditorApp {
         };
         let host = team.address().to_owned();
         let progress = match team.status() {
+            TeamStatus::HostLeft { .. } => {
+                self.cancel_team_join();
+                self.start
+                    .join_failed("the host ended the session".to_owned());
+                return;
+            }
             TeamStatus::Refused(why) => {
                 self.cancel_team_join();
                 let why = if why.is_empty() {
@@ -652,7 +699,7 @@ impl EditorApp {
         let link = team
             .hosting()?
             .lock()
-            .invite(role, INVITE_LIFETIME_SECONDS)
+            .invite(role, self.team_panel.invite_lifetime.seconds())
             .link();
         team.invite = Some(link.clone());
         Some(link)
@@ -695,6 +742,14 @@ impl EditorApp {
         };
         let hosted = team.hosting().is_some();
         let unsaved = !self.history.is_saved();
+        // A member's edits the host never confirmed go with them next time.
+        if !hosted
+            && let (Some(client), Some(mirror)) = (&team.client, &team.mirror)
+            && client.pending() > 0
+            && let Err(error) = journal::save_unsent(mirror.root(), &client.unsent())
+        {
+            log::warn!("Team Create: couldn't keep the unsent edits: {error}");
+        }
         if let Some(hosting) = team.hosting()
             && !unsaved
         {
@@ -839,6 +894,10 @@ impl EditorApp {
         let Link::Net { remote, .. } = &mut team.link else {
             return Vec::new();
         };
+        // The session is over: nothing more to hear, nobody to reconnect to.
+        if team.client.as_ref().is_some_and(Client::host_left) {
+            return Vec::new();
+        }
         let mut inbox = Vec::new();
         for event in remote.poll() {
             match event {
@@ -900,6 +959,7 @@ impl EditorApp {
             if let Some(mirror) = team.mirror.as_mut()
                 && due
                 && client.is_joined()
+                && !client.host_left()
             {
                 team.mirror_synced = Some(std::time::Instant::now());
                 match mirror.sync(client, &mut self.world) {
@@ -954,6 +1014,98 @@ impl EditorApp {
         self.team_file_changes(file_changes, file_problem);
         self.open_team_mirror_when_ready();
         self.team_locks();
+        self.keep_unsent();
+        self.follow_member();
+    }
+
+    /// A joining editor's recovery file (TC6): while edits wait for the
+    /// host (offline, or the host gone), they're written to its folder, so
+    /// an editor that stops first sends them next time. Written again when
+    /// they change, removed once the host has them all.
+    pub(super) fn keep_unsent(&mut self) {
+        let Some(team) = self.team.as_mut() else {
+            return;
+        };
+        let (Some(client), Some(mirror)) = (&team.client, &team.mirror) else {
+            return;
+        };
+        if team.hosting().is_some() || !client.is_joined() {
+            return;
+        }
+        let now = (client.pending(), client.newest_unsent());
+        if team.unsent_kept == Some(now) {
+            return;
+        }
+        let root = mirror.root().to_owned();
+        if now.0 == 0 {
+            if team.unsent_kept.take().is_some()
+                && let Err(error) = journal::discard_unsent(&root)
+            {
+                log::warn!("Team Create: couldn't remove the recovery file: {error}");
+            }
+            return;
+        }
+        // While online they're confirmed in moments: written only once the
+        // connection is down, or to keep a file there already up to date.
+        if client.is_online() && team.unsent_kept.is_none() {
+            return;
+        }
+        match journal::save_unsent(&root, &client.unsent()) {
+            Ok(()) => team.unsent_kept = Some(now),
+            Err(error) => {
+                log::warn!("Team Create: couldn't write the recovery file: {error}")
+            }
+        }
+    }
+
+    /// On joining a session: edits an earlier run of this editor kept in
+    /// the session's folder and never had confirmed are sent now.
+    fn recover_unsent_edits(&mut self) {
+        let Some(team) = self.team.as_mut() else {
+            return;
+        };
+        if team.unsent_loaded || team.hosting().is_some() {
+            return;
+        }
+        let (Some(client), Some(mirror)) = (team.client.as_mut(), &team.mirror) else {
+            return;
+        };
+        team.unsent_loaded = true;
+        let unsent = match journal::load_unsent(mirror.root()) {
+            Ok(unsent) => unsent,
+            Err(error) => {
+                log::warn!("Team Create: couldn't read the recovery file: {error}");
+                return;
+            }
+        };
+        if unsent.is_empty() {
+            return;
+        }
+        let count = client.recover_unsent(&mut self.world, unsent);
+        // The file now holds edits that are pending again: it's written
+        // anew next frame, and removed once they're confirmed.
+        team.unsent_kept = Some((usize::MAX, None));
+        if count > 0 {
+            self.output.info(format!(
+                "Team Create: sent {count} change(s) this editor made in the session before it                  stopped"
+            ));
+        }
+    }
+
+    /// Drops the network connection as a cut cable would (tests): it comes
+    /// back by itself after a second or more.
+    #[cfg(test)]
+    pub(crate) fn drop_team_connection(&mut self) {
+        let Some(team) = self.team.as_mut() else {
+            return;
+        };
+        if let Link::Net { remote, .. } = &mut team.link
+            && !remote.drop_connection().is_empty()
+            && let Some(client) = &mut team.client
+        {
+            client.disconnected();
+            team.problem = Some("disconnected".to_owned());
+        }
     }
 
     /// Publishes the files an import just wrote, with the Instances it
@@ -1245,15 +1397,63 @@ impl EditorApp {
                     self.selection.clear();
                     self.selected = None;
                     self.start_team_mirror();
+                    self.recover_unsent_edits();
                 }
-                Notice::Changed { label, notes, .. } => self.output.warning(format!(
-                    "Team Create: \"{label}\" didn't apply in full: someone deleted what it \
-                     changed ({} change(s) dropped or moved)",
-                    notes.len()
-                )),
-                Notice::Refused { label, reason, .. } => self
-                    .output
-                    .warning(format!("Team Create: \"{label}\" was refused: {reason}")),
+                Notice::Changed {
+                    label,
+                    notes,
+                    recovered,
+                    ..
+                } => {
+                    let what = format!(
+                        "someone deleted what it changed ({} change(s) dropped or moved)",
+                        notes.len()
+                    );
+                    self.output.warning(format!(
+                        "Team Create: \"{label}\" didn't apply in full: {what}"
+                    ));
+                    if recovered {
+                        self.team_panel
+                            .recovered
+                            .push(super::team_panel::RecoveredChange {
+                                label,
+                                reason: format!("Didn't apply in full: {what}."),
+                            });
+                    }
+                }
+                Notice::Refused {
+                    label,
+                    reason,
+                    recovered,
+                    ..
+                } => {
+                    self.output
+                        .warning(format!("Team Create: \"{label}\" was refused: {reason}"));
+                    // From a while ago: listed where they can't be missed.
+                    if recovered {
+                        self.team_panel
+                            .recovered
+                            .push(super::team_panel::RecoveredChange {
+                                label,
+                                reason: reason.to_string(),
+                            });
+                    }
+                }
+                Notice::HostLeft => {
+                    if let Some(team) = self.team.as_mut() {
+                        team.ended = true;
+                        team.problem = Some("The host left the session".to_owned());
+                        if let Link::Net { remote, .. } = &mut team.link {
+                            remote.drop_connection();
+                        }
+                    }
+                    self.team_panel.following = None;
+                    self.output.warning(
+                        "Team Create: the host ended the session. Your copy stays open,                          read-only; changes not sent yet are kept and go to the host the next                          time you join. Leave the session to work on your copy alone.",
+                    );
+                    self.toasts
+                        .warning("The host ended the Team Create session: read-only now.");
+                }
                 Notice::Arrived { name, .. } => self
                     .output
                     .info(format!("Team Create: {name} joined the session")),

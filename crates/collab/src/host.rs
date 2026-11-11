@@ -10,7 +10,7 @@ use crate::apply::{self, Doc, Note, Refusal};
 use crate::files::{self, Assembly, FileHash, FileStore, Manifest, MemoryStore, Piece};
 use crate::ids::{IdAllocator, IdBlock};
 use crate::journal::{self, Journal};
-use crate::message::{MemberId, Snapshot, ToClient, ToHost};
+use crate::message::{Have, MemberId, Snapshot, ToClient, ToHost};
 use crate::op::Op;
 use crate::presence::{Collaborator, Presence, Profile};
 use crate::role::{Capability, Role};
@@ -87,6 +87,18 @@ pub struct Host {
     journal: Option<Journal>,
     /// When the journal's snapshot was last written.
     snapshot_at: Instant,
+    /// Names this run of the host ([`ToClient::Welcome`]).
+    epoch: u64,
+}
+
+/// A number no earlier run of a host had (as near as random gets).
+fn new_epoch() -> u64 {
+    use ring::rand::SecureRandom;
+    let mut bytes = [0; 8];
+    ring::rand::SystemRandom::new()
+        .fill(&mut bytes)
+        .expect("the system's random numbers");
+    u64::from_le_bytes(bytes)
 }
 
 impl Host {
@@ -107,6 +119,7 @@ impl Host {
             session: String::new(),
             journal: None,
             snapshot_at: Instant::now(),
+            epoch: new_epoch(),
         }
     }
 
@@ -221,6 +234,16 @@ impl Host {
     /// The number of the last applied transaction.
     pub fn seq(&self) -> u64 {
         self.seq
+    }
+
+    /// Names this run of the host: a host started again has another.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// The owner ended the session: tells everyone connected (TC6).
+    pub fn end(&mut self) -> Vec<Outgoing> {
+        self.to_everyone(ToClient::Ended)
     }
 
     /// The transactions still kept, oldest first.
@@ -542,7 +565,7 @@ impl Host {
         self.to_everyone(ToClient::Locks(self.locks()))
     }
 
-    fn hello(&mut self, member: MemberId, have: Option<u64>) -> Vec<Outgoing> {
+    fn hello(&mut self, member: MemberId, have: Option<Have>) -> Vec<Outgoing> {
         for lock in self.locks.values_mut() {
             if lock.member == member {
                 lock.away_since = None;
@@ -570,8 +593,12 @@ impl Host {
         out
     }
 
-    fn catch_up(&mut self, member: MemberId, have: Option<u64>) -> Vec<Outgoing> {
+    fn catch_up(&mut self, member: MemberId, have: Option<Have>) -> Vec<Outgoing> {
         let first_kept = self.log.front().map_or(self.seq + 1, |logged| logged.seq);
+        // A copy from another run of the host numbers another history.
+        let have = have
+            .filter(|have| have.epoch == self.epoch)
+            .map(|have| have.seq);
         let can_catch_up = have.is_some_and(|have| have <= self.seq && have + 1 >= first_kept);
         let m = self.members.get_mut(&member).expect("checked by receive");
         m.connected = true;
@@ -614,6 +641,7 @@ impl Host {
                 rejected,
                 files: self.doc.files.clone(),
                 session: self.session.clone(),
+                epoch: self.epoch,
             },
         }]
     }

@@ -176,3 +176,48 @@ fn ending_cleanly_leaves_nothing_to_recover() {
     edit(&mut net, 2);
     net.assert_converged();
 }
+
+#[test]
+fn unsent_edits_from_an_editor_that_stopped_are_sent_when_it_joins_again() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let a = world.create(ClassName::Part).unwrap();
+    world.set_name(a, "A").unwrap();
+    world.set_parent(a, Some(workspace)).unwrap();
+    let mut net = Net::new(world, &[Role::Owner, Role::Editor]);
+    let folder = Project::new();
+    net.disconnect(1);
+    let lamp = net.new_id(1);
+    net.submit(
+        1,
+        "Add Lamp",
+        vec![create(vec![part(lamp, workspace, "Lamp")])],
+    )
+    .unwrap();
+    net.submit(
+        1,
+        "Dim",
+        vec![set(lamp, "Transparency", Value::Number(0.25))],
+    )
+    .unwrap();
+    net.submit(1, "Rename A", vec![rename(a, "Door")]).unwrap();
+    journal::save_unsent(&folder.0, &net.clients[1].unsent()).unwrap();
+    // The editor stops; the next run joins and finds the file.
+    net.restart_editor(1);
+    net.connect(1);
+    net.settle();
+    let unsent = journal::load_unsent(&folder.0).unwrap();
+    assert_eq!(unsent.len(), 3);
+    let count = net.with_client(1, |client, world| client.recover_unsent(world, unsent));
+    assert_eq!(count, 3);
+    net.settle();
+    journal::discard_unsent(&folder.0).unwrap();
+    assert!(journal::load_unsent(&folder.0).unwrap().is_empty());
+    let lamp = find(&net, 0, "Lamp").expect("the Lamp reached the others");
+    assert_eq!(
+        net.host.world().get(lamp).unwrap().property("Transparency"),
+        Some(&Value::Number(0.25))
+    );
+    assert_eq!(net.host.world().get(a).unwrap().name(), "Door");
+    net.assert_converged();
+}

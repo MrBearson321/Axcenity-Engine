@@ -33,13 +33,23 @@ impl std::fmt::Debug for Snapshot {
     }
 }
 
+/// What a client's copy of the session has: the World as of transaction
+/// `seq` of the host that started as `epoch`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Have {
+    /// The host's [`ToClient::Welcome`] `epoch`: a host started again (after
+    /// a crash, say) has another, and its numbers start over.
+    pub epoch: u64,
+    pub seq: u64,
+}
+
 /// From a client to the host.
 #[derive(Clone, Debug)]
 pub enum ToHost {
-    /// The first message on a connection. `have` is the last host sequence
-    /// number the client has, if it still has the session's World; `None`
-    /// asks for a fresh snapshot.
-    Hello { have: Option<u64> },
+    /// The first message on a connection. `have` is what the client's copy
+    /// has, if it still has the session's World; `None` asks for a fresh
+    /// snapshot.
+    Hello { have: Option<Have> },
     /// One undo step.
     Submit(Transaction),
     /// The client is running low on IDs.
@@ -83,6 +93,9 @@ pub enum ToClient {
         files: Manifest,
         /// Names the session's project ([`crate::Host::with_session`]).
         session: String,
+        /// Names this run of the host: one started again has another, so a
+        /// member knows its old ID blocks and numbers are gone (TC6).
+        epoch: u64,
     },
     /// After a `Hello` whose `have` the host could catch up from: the
     /// missed transactions came just before this, and transactions the
@@ -127,4 +140,6 @@ pub enum ToClient {
     Missing(FileHash),
     /// Who is editing which document, whenever that changes.
     Locks(BTreeMap<String, MemberId>),
+    /// The owner ended the session (or quit): nothing more comes (TC6).
+    Ended,
 }

@@ -290,10 +290,12 @@ fn many_edits_from_both_editors_stay_identical() {
 /// A folder for one test's Team Create files (identity, certificate,
 /// members), so each editor is its own computer.
 fn team_folder(name: &str) -> std::path::PathBuf {
+    // A counter, not the time: names must be valid on Windows too.
+    static FOLDERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let folder = std::env::temp_dir().join(format!(
-        "axcenity-team-{name}-{}-{:?}",
+        "axcenity-team-{name}-{}-{}",
         std::process::id(),
-        std::time::Instant::now()
+        FOLDERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     let _ = std::fs::remove_dir_all(&folder);
     folder
@@ -922,4 +924,159 @@ fn end_unsaved_then_save(project: &std::path::Path) {
     assert!(axcenity_collab::journal::has_recovery(project));
     assert!(a.save());
     assert!(!axcenity_collab::journal::has_recovery(project));
+}
+
+#[test]
+fn when_the_host_ends_the_session_the_joiner_stays_open_read_only() {
+    with_big_stack(host_ends_the_session);
+}
+
+fn host_ends_the_session() {
+    let project = copy_of_example("hello-part", "team-host-leaves");
+    let (mut a, mut b) = session_with_a_crate(&project, "host-leaves");
+    a.leave_team_session();
+    let start = std::time::Instant::now();
+    while !matches!(
+        b.team().map(|t| t.status()),
+        Some(super::team::TeamStatus::HostLeft { .. })
+    ) {
+        assert!(start.elapsed().as_secs() < 20, "{:?}", warnings(&b));
+        b.team_frame();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(super::team_panel::status_text(&b.team().unwrap().status()).contains("host left"));
+    // The copy is still there, and an edit is taken back.
+    let part = b
+        .world
+        .descendants(b.world.workspace())
+        .into_iter()
+        .find(|&id| b.world.get(id).is_some_and(|i| i.name() == "Crate"))
+        .expect("the copy stays open");
+    rename(&mut b, part, "Box");
+    b.team_frame();
+    assert_eq!(b.world.get(part).unwrap().name(), "Crate");
+    assert!(
+        warnings(&b).iter().any(|w| w.contains("read-only")),
+        "{:?}",
+        warnings(&b)
+    );
+}
+
+#[test]
+fn a_joiner_that_stops_while_offline_sends_its_edits_when_it_joins_again() {
+    with_big_stack(stop_offline_then_join_again);
+}
+
+fn stop_offline_then_join_again() {
+    let project = copy_of_example("hello-part", "team-unsent");
+    let mut a = EditorApp::new(Some(&project));
+    let invite = over_loopback(
+        a.host_network_session(Some(&team_folder("unsent-host")), 0)
+            .expect("hosting"),
+    );
+    // The joiner's computer: its identity and folders, kept across runs.
+    let joiner = team_folder("unsent-joiner");
+    let mut b = EditorApp::new(None);
+    b.join_network_session(&invite, Some(&joiner))
+        .expect("joining");
+    settle_net(&mut a, &mut b, |_, b| b.project.is_some());
+    b.insert(Insertable::Part(PartType::Block), None);
+    let part = b.selected.expect("the new part is selected");
+    rename(&mut b, part, "Crate");
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq) && caught_up(b, seq) && has_named(&a.world, "Crate")
+    });
+    // The cable is cut: the joiner adds a Lamp and renames the Crate,
+    // then the editor stops before the connection is back.
+    b.drop_team_connection();
+    b.insert(Insertable::Part(PartType::Block), None);
+    let lamp = b.selected.expect("the new part is selected");
+    rename(&mut b, lamp, "Lamp");
+    b.team_frame();
+    rename(&mut b, part, "Box");
+    b.team_frame();
+    // The Lamp (inserted and named in one frame, so one step) and the rename.
+    assert_eq!(team_client(&b).unwrap().pending(), 2);
+    let kept = b.team().unwrap().files_folder().unwrap().to_owned();
+    drop(b);
+    // Meanwhile the host's editor deletes the Crate.
+    let host_crate = a
+        .world
+        .descendants(a.world.workspace())
+        .into_iter()
+        .find(|&id| a.world.get(id).is_some_and(|i| i.name() == "Crate"))
+        .unwrap();
+    a.select_from_viewport(Some(host_crate));
+    a.delete_selected();
+    // The joiner's editor starts again and joins.
+    let mut c = EditorApp::new(None);
+    c.join_network_session(&invite, Some(&joiner))
+        .expect("joining again");
+    settle_net(&mut a, &mut c, |a, c| {
+        let seq = host_seq(a);
+        caught_up(a, seq) && caught_up(c, seq) && has_named(&a.world, "Lamp")
+    });
+    // The Lamp arrived; renaming the deleted Crate couldn't apply, and the
+    // Recovered Changes window says so.
+    assert!(!has_named(&a.world, "Box") && !has_named(&a.world, "Crate"));
+    let recovered: Vec<&str> = c
+        .team_panel
+        .recovered
+        .iter()
+        .map(|r| r.label.as_str())
+        .collect();
+    assert_eq!(recovered, ["Rename to Box"], "{:?}", warnings(&c));
+    // Everything is confirmed: the recovery file is gone.
+    c.team_frame();
+    assert!(
+        axcenity_collab::journal::load_unsent(&kept)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(dump(&a.world), dump(&c.world));
+}
+
+#[test]
+fn following_a_member_moves_the_camera_with_theirs_until_you_move_it() {
+    let (mut a, mut b, _hub) = two_editors();
+    let b_member = b.team().unwrap().me().unwrap();
+    // Presence goes at most 10 times a second.
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    b.viewport.look_at(
+        axcenity_render::glam::Vec3::new(10.0, 5.0, 20.0),
+        axcenity_render::glam::Vec3::ZERO,
+    );
+    settle(&mut a, &mut b);
+    a.team_panel.following = Some(b_member);
+    a.team_frame();
+    let here = a.viewport.render_camera().position;
+    assert!(here.distance(axcenity_render::glam::Vec3::new(10.0, 5.0, 20.0)) < 1e-3);
+    // b moves on; a follows.
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    b.viewport.look_at(
+        axcenity_render::glam::Vec3::new(-4.0, 8.0, 2.0),
+        axcenity_render::glam::Vec3::ZERO,
+    );
+    settle(&mut a, &mut b);
+    let here = a.viewport.render_camera().position;
+    assert!(here.distance(axcenity_render::glam::Vec3::new(-4.0, 8.0, 2.0)) < 1e-3);
+    // a moves the camera: following stops.
+    a.viewport.look_at(
+        axcenity_render::glam::Vec3::new(0.0, 50.0, 0.0),
+        axcenity_render::glam::Vec3::ZERO,
+    );
+    a.team_frame();
+    assert_eq!(a.team_panel.following, None);
+}
+
+#[test]
+fn invite_defaults_are_kept_between_runs() {
+    let mut panel = super::team_panel::TeamPanel::default();
+    assert_eq!(panel.to_text(), "editor week");
+    panel.read_text("viewer month");
+    assert_eq!(panel.to_text(), "viewer month");
+    assert_eq!(panel.invite_lifetime.seconds(), 30 * 24 * 60 * 60);
+    panel.read_text("garbled");
+    assert_eq!(panel.to_text(), "viewer month");
 }

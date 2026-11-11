@@ -937,8 +937,8 @@ impl Viewport {
         self.camera.set_view(position, orientation);
     }
 
-    /// Points the camera at `target` from `position`.
-    #[cfg(test)]
+    /// Points the camera at `target` from `position` (following a Team
+    /// Create member's camera, and tests).
     pub fn look_at(&mut self, position: Vec3, target: Vec3) {
         self.swing = None;
         self.camera = FlyCamera::looking_at(position, target);
