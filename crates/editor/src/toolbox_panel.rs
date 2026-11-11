@@ -12,8 +12,19 @@
 //! library or the project, and Get, Favourite, Add to collection, Copy
 //! credit line and, for textures, Make material.
 //!
-//! Searches need a network connection. Results show as soon as the source
-//! answers; their previews arrive afterwards, fetched by a few threads at
+//! Textures and skies search every source that has them at once ("All
+//! sources", the default): each source is asked on its own thread, the
+//! answers are interleaved so no source buries another, a result already
+//! shown is not shown twice, and a source that fails or times out is named
+//! above the results while the others' still show. Each card says where it
+//! came from, and source chips narrow the results without searching again.
+//!
+//! The Sounds tab shows a licence notice above its results: Openverse
+//! gathers sounds from many sites under many licences, so each card keeps
+//! its own licence and the notice says to check it before use.
+//!
+//! Searches need a network connection. Results show as soon as the sources
+//! answer; their previews arrive afterwards, fetched by a few threads at
 //! once, and are kept for the panel's life. A download runs on its own
 //! thread: a package is fetched once into the central asset directory
 //! (verified, and recorded with its source and licence in the metadata
@@ -43,7 +54,8 @@ use axcenity_toolbox::download::Fetcher;
 use axcenity_toolbox::http::{self, Http};
 use axcenity_toolbox::variants::{self, Choice};
 use axcenity_toolbox::{
-    AssetRecord, AssetSource, Kind, Package, Query, SourceError, Variant, files, license,
+    AssetRecord, AssetSource, Kind, Package, Query, SearchPage, SourceError, Variant, files,
+    license, provenance,
 };
 use eframe::egui;
 
@@ -53,6 +65,8 @@ use crate::{responsive, widgets};
 mod drawer;
 pub mod install;
 mod packs;
+#[cfg(test)]
+mod search_tests;
 mod views;
 
 use install::{DownloadResult, Installed, download};
@@ -71,6 +85,45 @@ const CARD_PICTURE: f32 = 112.0;
 const HOVER_PREVIEW: f32 = 256.0;
 /// From this width the details drawer sits beside the results.
 const DRAWER_BESIDE_FROM: f32 = 620.0;
+/// The Sounds tab's licence notice (Paul's wording, 2026-11-11).
+pub const SOUND_LICENCE_NOTICE: &str = "Sound assets obtained through this provider are not \
+    licensed for commercial use unless their individual source licenses explicitly permit it. \
+    Always review the original asset license before using an asset in a project.";
+
+/// Which sources a search asks.
+#[derive(Clone, Copy)]
+enum Sources {
+    /// Every source that has the tab's kind.
+    All,
+    One(&'static dyn AssetSource),
+}
+
+impl Sources {
+    /// The sources to ask for `kind`.
+    fn list(self, kind: Kind) -> Vec<&'static dyn AssetSource> {
+        match self {
+            Sources::All => axcenity_toolbox::sources_for(kind),
+            Sources::One(source) => vec![source],
+        }
+    }
+
+    /// The menu's text: "All sources" or the source's name.
+    fn label(self) -> &'static str {
+        match self {
+            Sources::All => "All sources",
+            Sources::One(source) => source.info().name,
+        }
+    }
+
+    /// Whether this is `other` (two `All`s, or the same source).
+    fn is(self, other: Sources) -> bool {
+        match (self, other) {
+            (Sources::All, Sources::All) => true,
+            (Sources::One(a), Sources::One(b)) => a.info().key == b.info().key,
+            _ => false,
+        }
+    }
+}
 
 /// Where a texture got for a purpose goes once it's in the project.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -280,15 +333,30 @@ fn map_label(map: &str) -> &str {
 }
 
 struct Page {
-    total: usize,
     listings: Vec<Listing>,
+    /// The search page last asked of each source (from 1).
+    number: u32,
+    /// The sources that may have more after it, by key.
+    more: Vec<&'static str>,
 }
 
 struct SearchResult {
     generation: u64,
-    offset: usize,
-    total: usize,
+    /// The page asked for, from 1.
+    number: u32,
+    found: Found,
+}
+
+/// What one search of one or more sources found.
+#[derive(Default)]
+struct Found {
+    /// Interleaved, a source at a time.
     listings: Vec<Listing>,
+    /// The sources that may have another page, by key.
+    more: Vec<&'static str>,
+    /// "Poly Haven: the connection timed out", for each source that failed
+    /// while another answered.
+    failed: Vec<String>,
 }
 
 struct Job<T> {
@@ -313,8 +381,14 @@ struct Card {
 pub struct ToolboxPanel {
     /// The tab: textures, skies, models or sounds.
     kind: Kind,
-    /// Where they come from: ambientCG, Poly Haven or Openverse.
-    source: &'static dyn AssetSource,
+    /// Where they come from: every source, or ambientCG, Poly Haven or
+    /// Openverse.
+    sources: Sources,
+    /// The one source whose results are shown (the source chips), when
+    /// searching all of them.
+    only: Option<&'static str>,
+    /// The sources that failed in the last search while others answered.
+    partial: Option<String>,
     /// Search results or one of the library's lists.
     view: View,
     query: String,
@@ -364,7 +438,9 @@ impl ToolboxPanel {
         let (preview_tx, preview_rx) = mpsc::channel();
         Self {
             kind: Kind::Texture,
-            source: &AMBIENTCG,
+            sources: Sources::All,
+            only: None,
+            partial: None,
             view: View::Search,
             query: String::new(),
             resolution: "2K".to_owned(),
@@ -434,7 +510,7 @@ impl ToolboxPanel {
             && self.page.is_none()
             && self.search.is_none()
         {
-            self.start_search(&ctx, 0);
+            self.start_search(&ctx, 1);
         }
         self.search_on_show = false;
         if self.shown_for.as_deref() != project {
@@ -446,6 +522,9 @@ impl ToolboxPanel {
         }
         let palette = theme::palette(&ctx);
         self.kind_tabs(ui);
+        if self.kind == Kind::Sound {
+            sound_licence_notice(ui);
+        }
         responsive::toolbar(ui, |ui| {
             self.view_choice(ui);
             responsive::room_for(ui, 60.0);
@@ -477,7 +556,7 @@ impl ToolboxPanel {
                     || enter)
                     && self.search.is_none()
                 {
-                    self.start_search(ui.ctx(), 0);
+                    self.start_search(ui.ctx(), 1);
                 }
             }
             let kind = rules(self.kind);
@@ -497,7 +576,7 @@ impl ToolboxPanel {
                     )
                     .changed()
             {
-                self.start_search(ui.ctx(), 0);
+                self.start_search(ui.ctx(), 1);
             }
         });
         if let Some(target) = self.target {
@@ -515,6 +594,17 @@ impl ToolboxPanel {
         if let Some(error) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
+        if let Some(partial) = &self.partial
+            && self.view == View::Search
+        {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!("{} {partial}", icons::WARNING))
+                        .color(ui.visuals().warn_fg_color),
+                )
+                .wrap(),
+            );
+        }
         if let Some(status) = self.status.clone() {
             ui.horizontal_wrapped(|ui| {
                 ui.label(status);
@@ -525,7 +615,13 @@ impl ToolboxPanel {
         }
         self.pack_review(ui, project, can_edit);
         ui.add_space(4.0);
-        let credit = self.source.info().credit;
+        let credit = self
+            .sources
+            .list(self.kind)
+            .iter()
+            .map(|source| source.info().credit)
+            .collect::<Vec<_>>()
+            .join(" · ");
         let search_view = self.view == View::Search;
         let open = self.drawer.is_some();
         let width = ui.available_width();
@@ -570,45 +666,104 @@ impl ToolboxPanel {
         {
             self.set_kind(kind);
             if self.view == View::Search {
-                self.start_search(ui.ctx(), 0);
+                self.start_search(ui.ctx(), 1);
             } else {
                 self.load_view(ui.ctx());
             }
         }
     }
 
-    /// Picks another kind: its first source and format. Searches when the
-    /// panel is next drawn.
+    /// Picks another kind: all its sources (or its only one) and its first
+    /// format. Searches when the panel is next drawn.
     fn set_kind(&mut self, kind: Kind) {
-        let Some(source) = axcenity_toolbox::sources_for(kind).into_iter().next() else {
+        let sources = axcenity_toolbox::sources_for(kind);
+        let Some(first) = sources.first() else {
             return;
         };
         self.kind = kind;
-        self.source = source;
+        self.sources = if sources.len() > 1 {
+            Sources::All
+        } else {
+            Sources::One(*first)
+        };
+        self.only = None;
         self.format = rules(kind).formats[0].to_owned();
         self.page = None;
         self.drawer = None;
         self.error = None;
     }
 
-    /// The source menu. Picking another source searches it.
+    /// The source menu: All sources (when the kind has more than one), then
+    /// each source. Picking another searches it.
     fn source_choice(&mut self, ui: &mut egui::Ui) {
         let mut picked = None;
+        let sources = axcenity_toolbox::sources_for(self.kind);
+        let mut choices: Vec<Sources> = Vec::new();
+        if sources.len() > 1 {
+            choices.push(Sources::All);
+        }
+        choices.extend(sources.into_iter().map(Sources::One));
         egui::ComboBox::from_id_salt("toolbox source")
-            .selected_text(self.source.info().name)
+            .selected_text(self.sources.label())
             .show_ui(ui, |ui| {
-                for source in axcenity_toolbox::sources_for(self.kind) {
-                    let current = source.info().key == self.source.info().key;
-                    if ui.selectable_label(current, source.info().name).clicked() && !current {
-                        picked = Some(source);
+                for choice in choices {
+                    let current = choice.is(self.sources);
+                    if ui.selectable_label(current, choice.label()).clicked() && !current {
+                        picked = Some(choice);
                     }
                 }
-            });
-        if let Some(source) = picked
+            })
+            .response
+            .on_hover_text("Search every source at once, or just one.");
+        if let Some(sources) = picked
             && self.search.is_none()
         {
-            self.source = source;
-            self.start_search(ui.ctx(), 0);
+            self.sources = sources;
+            self.start_search(ui.ctx(), 1);
+        }
+    }
+
+    /// The source chips above results from every source: each source's
+    /// count, and a click shows only its results (again to show all).
+    fn source_chips(&mut self, ui: &mut egui::Ui) {
+        if !matches!(self.sources, Sources::All) || self.view != View::Search {
+            return;
+        }
+        let Some(page) = &self.page else {
+            return;
+        };
+        let counts: Vec<(&'static str, &'static str, usize)> = self
+            .sources
+            .list(self.kind)
+            .iter()
+            .map(|source| {
+                let info = source.info();
+                let count = page
+                    .listings
+                    .iter()
+                    .filter(|listing| listing.record.provider == info.key)
+                    .count();
+                (info.key, info.name, count)
+            })
+            .collect();
+        let mut picked = None;
+        responsive::toolbar(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            if widgets::chip(ui, "All", self.only.is_none()).clicked() {
+                picked = Some(None);
+            }
+            for (key, name, count) in counts {
+                let on = self.only == Some(key);
+                if widgets::chip(ui, &format!("{name} {count}"), on)
+                    .on_hover_text(format!("Show only the results from {name}."))
+                    .clicked()
+                {
+                    picked = Some(if on { None } else { Some(key) });
+                }
+            }
+        });
+        if let Some(only) = picked {
+            self.only = only;
         }
     }
 
@@ -634,13 +789,18 @@ impl ToolboxPanel {
     }
 
     fn results(&mut self, ui: &mut egui::Ui, project: Option<&Path>, can_edit: bool) {
+        self.source_chips(ui);
         let Some(page) = self.page.as_ref() else {
             if self.search.is_some() {
                 ui.label("Searching…");
             } else if self.view == View::Search && self.error.is_none() {
+                let whose = match self.sources {
+                    Sources::All => "every source".to_owned(),
+                    Sources::One(source) => source.info().name.to_owned(),
+                };
                 ui.weak(format!(
-                    "Press Search to see {}'s most popular {}, or type what you're after.",
-                    self.source.info().name,
+                    "Press Search to see the most popular {} from {whose}, or type what you're \
+                     after.",
                     rules(self.kind).noun
                 ));
             }
@@ -650,11 +810,13 @@ impl ToolboxPanel {
             ui.label(self.view.empty_text(rules(self.kind).noun));
             return;
         }
-        let total = page.total;
-        let shown = page.listings.len();
+        let more = !page.more.is_empty();
+        let all_sources = matches!(self.sources, Sources::All) && self.view == View::Search;
+        let only = self.only.filter(|_| all_sources);
         let cards: Vec<Card> = page
             .listings
             .iter()
+            .filter(|listing| only.is_none_or(|key| listing.record.provider == key))
             .map(|listing| {
                 let maps = listing.maps.join(", ");
                 let record = &listing.record;
@@ -674,6 +836,17 @@ impl ToolboxPanel {
                     maps
                 } else {
                     format!("{} · {maps}", listing.category)
+                };
+                // Results from several sources say whose each one is.
+                let detail = if all_sources {
+                    let source = provenance::source_name(&record.provider);
+                    if detail.is_empty() {
+                        source
+                    } else {
+                        format!("{source} · {detail}")
+                    }
+                } else {
+                    detail
                 };
                 Card {
                     key: listing.key(),
@@ -713,12 +886,13 @@ impl ToolboxPanel {
                 });
             });
         if self.view == View::Search
-            && shown < total
+            && more
             && ui
                 .add_enabled(self.search.is_none(), egui::Button::new("More"))
                 .clicked()
         {
-            self.start_search(ui.ctx(), shown);
+            let next = self.page.as_ref().map_or(1, |page| page.number + 1);
+            self.start_search(ui.ctx(), next);
         }
     }
 
@@ -816,31 +990,37 @@ impl ToolboxPanel {
         pick(listing, &self.resolution, &self.format)
     }
 
-    fn start_search(&mut self, ctx: &egui::Context, offset: usize) {
-        if offset == 0 {
+    /// Searches page `number` (from 1): the first page anew, a later one
+    /// (More) from the sources that said they have more.
+    fn start_search(&mut self, ctx: &egui::Context, number: u32) {
+        let mut sources = self.sources.list(self.kind);
+        if number <= 1 {
             self.generation += 1;
             self.page = None;
+            self.only = None;
+        } else if let Some(page) = &self.page {
+            sources.retain(|source| page.more.contains(&source.info().key));
         }
         self.view = View::Search;
         self.error = None;
+        self.partial = None;
         self.status = Some("Searching…".to_owned());
         let generation = self.generation;
         let query = self.query.trim().to_owned();
-        let source = self.source;
         let kind = self.kind;
         let restricted = self.restricted;
+        let number = number.max(1);
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result =
-                search(source, kind, &query, offset, restricted).map(|(total, listings)| {
-                    SearchResult {
-                        generation,
-                        offset,
-                        total,
-                        listings,
-                    }
-                });
+            let client = http::Client::new(Duration::from_secs(30));
+            let result = search(&client, &sources, kind, &query, number, restricted).map(|found| {
+                SearchResult {
+                    generation,
+                    number,
+                    found,
+                }
+            });
             let _ = tx.send(result);
             ctx.request_repaint();
         });
@@ -934,17 +1114,16 @@ impl ToolboxPanel {
     fn poll(&mut self, ctx: &egui::Context, actions: &mut Vec<ToolboxAction>) {
         let search = self.search.take();
         if let Some(job) = search {
-            let name = self.source.info().name;
             match job.rx.try_recv() {
                 Ok(Ok(result)) => self.accept_search(ctx, result),
                 Ok(Err(err)) => {
                     self.status = None;
-                    self.error = Some(format!("Could not search {name}: {err}"));
+                    self.error = Some(format!("Could not search: {err}"));
                 }
                 Err(TryRecvError::Empty) => self.search = Some(job),
                 Err(TryRecvError::Disconnected) => {
                     self.status = None;
-                    self.error = Some(format!("Could not search {name}."));
+                    self.error = Some("Could not search.".to_owned());
                 }
             }
         }
@@ -1004,16 +1183,26 @@ impl ToolboxPanel {
             return;
         }
         self.status = None;
-        self.fetch_previews_for(ctx, &result.listings);
-        if result.offset == 0 || self.page.is_none() {
-            self.page = Some(Page {
-                total: result.total,
-                listings: result.listings,
-            });
-        } else if let Some(page) = &mut self.page {
-            page.total = result.total;
-            page.listings.extend(result.listings);
+        let Found {
+            listings,
+            more,
+            failed,
+        } = result.found;
+        if !failed.is_empty() {
+            self.partial = Some(format!(
+                "Showing the other sources' results. Could not search {}.",
+                failed.join("; ")
+            ));
         }
+        let page = self.page.get_or_insert_with(|| Page {
+            listings: Vec::new(),
+            number: 0,
+            more: Vec::new(),
+        });
+        let fresh = merge(&mut page.listings, listings);
+        page.number = result.number;
+        page.more = more;
+        self.fetch_previews_for(ctx, &fresh);
     }
 
     /// Starts fetching the previews of `listings` not seen before.
@@ -1079,17 +1268,19 @@ fn pick<'a>(listing: &'a Listing, resolution: &str, format: &str) -> Option<Choi
     variants::choose(&listing.packages, &resolution, &format, &fallbacks)
 }
 
-/// One page of `kind` assets matching `query` from one of the Toolbox's
-/// sources (most popular first; sounds only with the licences `rules` keeps
-/// unless `restricted`).
+/// Page `number` of `kind` assets matching `query` from each of `sources`
+/// at once (most popular first; sounds only with the licences `rules`
+/// keeps unless `restricted`), interleaved a source at a time. A source
+/// that fails is named in [`Found::failed`] while another answered; when
+/// every one fails, the search fails with each one's reason.
 fn search(
-    source: &dyn AssetSource,
+    http: &dyn Http,
+    sources: &[&dyn AssetSource],
     kind: Kind,
     query: &str,
-    offset: usize,
+    number: u32,
     restricted: bool,
-) -> Result<(usize, Vec<Listing>), String> {
-    let client = http::Client::new(Duration::from_secs(30));
+) -> Result<Found, String> {
     let mut wanted = Query::new(query, kind);
     if !restricted {
         wanted.licenses = rules(kind)
@@ -1099,16 +1290,141 @@ fn search(
             .collect();
     }
     wanted.per_page = PAGE as u32;
-    wanted.page = (offset / PAGE) as u32 + 1;
-    let page = source
-        .search(&client, &wanted)
-        .map_err(|err| err.to_string())?;
-    let shown = offset + page.records.len();
-    let total = page
-        .total
-        .map_or(shown + usize::from(page.more), |total| total as usize);
-    let listings = page.records.into_iter().map(Listing::from_record).collect();
-    Ok((total, listings))
+    wanted.page = number.max(1);
+    // Each source on its own thread, so a slow one doesn't hold up the rest.
+    let answers: Vec<(&dyn AssetSource, Result<SearchPage, SourceError>)> =
+        std::thread::scope(|scope| {
+            let asks: Vec<_> = sources
+                .iter()
+                .map(|&source| {
+                    let wanted = &wanted;
+                    (source, scope.spawn(move || source.search(http, wanted)))
+                })
+                .collect();
+            asks.into_iter()
+                .map(|(source, ask)| {
+                    let answer = ask
+                        .join()
+                        .unwrap_or(Err(SourceError::Refused("the search stopped unexpectedly")));
+                    (source, answer)
+                })
+                .collect()
+        });
+    let mut found = Found::default();
+    let mut errors = Vec::new();
+    let mut lists = Vec::new();
+    for (source, answer) in answers {
+        let info = source.info();
+        match answer {
+            Ok(page) => {
+                let shown = u64::from(wanted.page - 1) * u64::from(wanted.per_page)
+                    + page.records.len() as u64;
+                if page.more || page.total.is_some_and(|total| total > shown) {
+                    found.more.push(info.key);
+                }
+                lists.push(page.records);
+            }
+            Err(err) => errors.push(format!("{}: {err}", info.name)),
+        }
+    }
+    if lists.is_empty() && !errors.is_empty() {
+        return Err(errors.join("; "));
+    }
+    found.failed = errors;
+    found.listings = interleave(lists)
+        .into_iter()
+        .map(Listing::from_record)
+        .collect();
+    Ok(found)
+}
+
+/// One list from several, taking the next of each in turn: the first of
+/// each, then the second of each, and so on.
+fn interleave<T>(lists: Vec<Vec<T>>) -> Vec<T> {
+    let mut iters: Vec<_> = lists.into_iter().map(Vec::into_iter).collect();
+    let mut out = Vec::new();
+    loop {
+        let before = out.len();
+        for iter in &mut iters {
+            out.extend(iter.next());
+        }
+        if out.len() == before {
+            return out;
+        }
+    }
+}
+
+/// Adds `more` to `shown`, leaving out any asset already there (or twice
+/// in `more`); returns the ones added. Assets are the same when their
+/// source and id are: two sources' assets are never merged, since their
+/// files and licences differ.
+fn merge(shown: &mut Vec<Listing>, more: Vec<Listing>) -> Vec<Listing> {
+    let mut seen: HashSet<String> = shown.iter().map(Listing::key).collect();
+    let fresh: Vec<Listing> = more
+        .into_iter()
+        .filter(|listing| seen.insert(listing.key()))
+        .collect();
+    shown.extend(fresh.iter().cloned());
+    fresh
+}
+
+/// The Sounds tab's licence notice: a warning box above the results,
+/// which every sound card's own licence badge then refines. Its caret
+/// folds it to one line (remembered across restarts) so it doesn't take
+/// a narrow column's room; folded, it still says what matters.
+fn sound_licence_notice(ui: &mut egui::Ui) {
+    let palette = theme::palette(ui.ctx());
+    let id = egui::Id::new("toolbox sound licence notice folded");
+    let folded = ui
+        .ctx()
+        .data_mut(|data| data.get_persisted::<bool>(id))
+        .unwrap_or(false);
+    let mut toggle = false;
+    egui::Frame::new()
+        .fill(palette.surface)
+        .stroke(egui::Stroke::new(1.0_f32, palette.warning))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(8, 5))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_top(|ui| {
+                ui.label(egui::RichText::new(icons::WARNING).color(palette.warning));
+                let (caret, tip) = if folded {
+                    (icons::CARET_DOWN, "Show the whole notice")
+                } else {
+                    (icons::CARET_UP, "Fold the notice to one line")
+                };
+                let text = if folded {
+                    "Not for commercial use unless a sound's own licence allows it."
+                } else {
+                    SOUND_LICENCE_NOTICE
+                };
+                let room = ui.available_width() - ui.spacing().interact_size.y - 4.0;
+                let label = egui::Label::new(
+                    egui::RichText::new(text)
+                        .size(theme::type_scale::SMALL)
+                        .color(palette.text_secondary),
+                );
+                ui.allocate_ui_with_layout(
+                    egui::vec2(room.max(0.0), 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.add(if folded {
+                            label.truncate()
+                        } else {
+                            label.wrap()
+                        });
+                    },
+                );
+                if widgets::icon_button(ui, caret, tip, false).clicked() {
+                    toggle = true;
+                }
+            });
+        });
+    if toggle {
+        ui.ctx().data_mut(|data| data.insert_persisted(id, !folded));
+    }
+    ui.add_space(2.0);
 }
 
 /// Fetches each `(id, url)` in `wanted` on a few threads that share one
@@ -1315,8 +1631,10 @@ mod tests {
     #[ignore = "reaches ambientCG"]
     fn get_downloads_a_real_material_into_a_project() {
         let temp = Temp::new("live");
-        let (_, listings) = search(&AMBIENTCG, Kind::Texture, "ground", 0, false).unwrap();
-        let listing = listings
+        let client = http::Client::new(Duration::from_secs(30));
+        let found = search(&client, &[&AMBIENTCG], Kind::Texture, "ground", 1, false).unwrap();
+        let listing = found
+            .listings
             .into_iter()
             .find(|l| !l.packages.is_empty())
             .unwrap();
@@ -1424,8 +1742,9 @@ mod tests {
         assert!(listing.packages.is_empty());
         let mut dialog = ToolboxPanel::idle();
         dialog.page = Some(Page {
-            total: 1,
             listings: vec![listing],
+            number: 1,
+            more: Vec::new(),
         });
         assert!(
             dialog
@@ -1480,10 +1799,12 @@ mod tests {
     #[ignore = "reaches Poly Haven"]
     fn get_downloads_a_real_poly_haven_texture_into_a_project() {
         let temp = Temp::new("polyhaven-live");
-        let (_, listings) = search(&POLYHAVEN, Kind::Texture, "brick", 0, false).unwrap();
+        let client = http::Client::new(Duration::from_secs(600));
+        let listings = search(&client, &[&POLYHAVEN], Kind::Texture, "brick", 1, false)
+            .unwrap()
+            .listings;
         let listing = &listings[0];
         assert!(listing.lookup);
-        let client = http::Client::new(Duration::from_secs(600));
         let full = POLYHAVEN.record(&client, &listing.record.id).unwrap();
         let listing = Listing::from_record(full.clone());
         let choice = pick(&listing, "1K", "JPG").unwrap();
@@ -1671,9 +1992,9 @@ mod tests {
         format: &str,
     ) -> String {
         let temp = Temp::new(&format!("live-{}", source.info().key));
-        let (_, listings) = search(source, kind, words, 0, false).unwrap();
         let client = http::Client::new(Duration::from_secs(600));
-        let listing = listings.into_iter().next().expect("a result");
+        let found = search(&client, &[source], kind, words, 1, false).unwrap();
+        let listing = found.listings.into_iter().next().expect("a result");
         let listing = if listing.lookup {
             Listing::from_record(source.record(&client, &listing.record.id).unwrap())
         } else {
