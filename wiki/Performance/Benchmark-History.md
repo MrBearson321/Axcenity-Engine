@@ -75,6 +75,14 @@ The pre-#65 Farmhouse row is from the PR's own run and isn't directly comparable
 | 2026-11-09 | `556b72b` | 10,000 parts | 8.0–8.8 | | |
 | 2026-11-09 | `3f2fc05` | Forest 2560×1440 Ultra | 1.2 → 1.3 | 39.6 → 9.5–10.0 | 31.0 → 13.6–13.9 |
 
+**Upscaling (G9, `bench_upscaling`, 2026-11-11, `c004365`)**: a light field of blocks, High, FXAA, median GPU frame in ms over two runs. EASU and RCAS cost the upscaled frame minus a native frame at the small size.
+
+| Output | 1.00 | 0.67 | 0.50 | Upscale cost (0.67 / 0.5) |
+|---|---|---|---|---|
+| 1920×1080 | 1.01–1.19 | 0.85 | 0.63 | 0.15 / 0.13 |
+| 2560×1440 | 1.03–1.07 | 0.99–1.12 | 0.93 | noise / 0.24 |
+| 3840×2160 | 1.90–1.92 | 1.27 | 1.01 | 0.20–0.26 / below noise |
+
 **Unexplained**: `bench_10000_parts`'s `build_draw_list` rose from 3.3 to 8–9 ms between the commit that added the render benchmarks and `556b72b`; not bisected ([Known bottlenecks](Known-Bottlenecks.md)).
 
 ## Against other engines (XB10k)

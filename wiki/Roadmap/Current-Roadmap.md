@@ -71,7 +71,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G6 | Debugger stepping and watches | Planned |
 | G7 | Memory breakdown (Profiler Memory tab and F9 Stats) | **Done** (#125, #126) |
 | G8 | `RollOffMode` curves and audio occlusion | **Done** (#128) |
-| G9 | Upscaling (FSR 1-class) | Stage 1 (spatial EASU + RCAS below 100% render scale) in review; stage 2 (upscale inside TAA) not started |
+| G9 | Upscaling (FSR 1-class) | Stage 1 done (#155; EASU + RCAS below 100% render scale, about 0.13 to 0.25 ms on an RX 9070 XT); stage 2 (upscale inside TAA) not started |
 | G10 | Plugin API additions | Planned, as needed |
 | G11 | Split the editor (L6) | In progress: `editor-kit` (#162), the Toolbox tab in `editor-toolbox` (#164), Graphics Benchmark in `editor-benchmark`; Model Studio after the animation work |
 | G12 | Cooked-only games, read the pack in place | Planned |
