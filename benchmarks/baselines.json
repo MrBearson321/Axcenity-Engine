@@ -2,9 +2,20 @@
   "about": "Performance baselines for axcenity-bench-check (docs/benchmarks.md, \"Regression check\"). Numbers are milliseconds and only compare on the machine that recorded them. A project scene is a copy of that project from the projects folder, cooked; S10k is made by axcenity-test --make-s10k.",
   "machines": {
     "desktop-9950x3d": {
-      "about": "AMD Ryzen 9 9950X3D (16 cores), 62 GB, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Pinned to CPUs 0-15 (the V-cache CCD). Recorded at main 15965da with nothing else running.",
-      "commit": "15965da",
+      "about": "AMD Ryzen 9 9950X3D (16 cores), 62 GB, AMD Radeon RX 9070 XT on Vulkan, Windows 11. Pinned to CPUs 0-15 (the V-cache CCD). Recorded at main 15965da with nothing else running; the dry-patch runs were added on the rendering-initiative branch (Phase 1), where the player benchmarks with vertical sync off. A full check on that branch matched every older baseline within 4%.",
+      "commit": "15965da (dry-patch: rendering Phase 1)",
       "results": {
+        "dry-patch-test": {
+          "frame_ms": 0.026
+        },
+        "dry-patch-ultra-1440p": {
+          "assets_ms": 1502.363,
+          "bound": "GPU-bound",
+          "first_frame_ms": 279.712,
+          "frame_ms": 11.742,
+          "gpu_ms": 11.471,
+          "low_1pct_fps": 70.3
+        },
         "farmhouse-player": {
           "assets_ms": 1579.117,
           "first_frame_ms": 211.72,
@@ -107,6 +118,25 @@
       "host": "player",
       "name": "wet-patch-player",
       "scene": "project:Temperate Wet Patch"
+    },
+    {
+      "frames": 300,
+      "host": "test",
+      "name": "dry-patch-test",
+      "scene": "project:Temperate Dry Patch"
+    },
+    {
+      "about": "The project script holds its demo camera for 8 s (480 frames at the bench step), then hands the camera to the walker: 60 warm-up + 400 measured frames stay on the demo view.",
+      "args": [
+        "--size",
+        "2560x1440",
+        "--quality",
+        "Ultra"
+      ],
+      "frames": 400,
+      "host": "player",
+      "name": "dry-patch-ultra-1440p",
+      "scene": "project:Temperate Dry Patch"
     }
   ],
   "tolerance": {

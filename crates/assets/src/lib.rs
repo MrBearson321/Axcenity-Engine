@@ -94,10 +94,11 @@ pub use material::{
 };
 pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys,
-    MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER, MapSlot, Model, ModelError, ModelFormat, ModelMaterial,
-    ModelObject, Pick, Pose, Posed, PosedPrimitive, Primitive, Rig, Take, TextureRole, Track,
-    cached_meshes, cooked_models, embedded_files, list_objects, load_model, load_models,
-    load_takes, lod_level, tangents, texture_roles,
+    LevelReport, LodReport, LodWarning, MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER, MapSlot, Model,
+    ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
+    Primitive, PrimitiveReport, Rig, Take, TextureRole, Track, cached_meshes, cooked_models,
+    embedded_files, list_objects, load_model, load_models, load_takes, lod_level, tangents,
+    texture_roles,
 };
 pub use orphaned::remove_orphaned_copies;
 pub use probe::{

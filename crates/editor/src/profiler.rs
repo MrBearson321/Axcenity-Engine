@@ -13,6 +13,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use axcenity_core::bench::{Bound, FramePacing};
 use axcenity_render::{FramePass, LOD_LEVELS, RenderStats, ShaderError};
 use eframe::egui::{self, RichText};
 
@@ -117,6 +118,15 @@ pub enum Tab {
     Graphics,
 }
 
+/// The profiler's numbers for the `fps` readout ([`Profiler::readout`]).
+pub struct Readout {
+    pub low_fps: f32,
+    pub cpu_ms: f32,
+    pub gpu_ms: Option<f32>,
+    pub bound: &'static str,
+    pub stats: RenderStats,
+}
+
 #[derive(Default)]
 pub struct Profiler {
     pub tab: Tab,
@@ -216,6 +226,20 @@ impl Profiler {
         }
     }
 
+    /// What the `fps` readout shows during Play: the 1% low, the CPU's
+    /// and GPU's times, what limits the frame and the newest drawing
+    /// numbers. `None` before the first frame.
+    pub fn readout(&self) -> Option<Readout> {
+        let summary = self.summary()?;
+        Some(Readout {
+            low_fps: summary.low_fps.unwrap_or(0.0) as f32,
+            cpu_ms: summary.cpu.as_secs_f32() * 1000.0,
+            gpu_ms: summary.gpu.map(|gpu| gpu.as_secs_f32() * 1000.0),
+            bound: summary.bound.label(),
+            stats: summary.stats,
+        })
+    }
+
     /// The viewport drew the game frame just recorded.
     pub fn record_render(&mut self, render: RenderCost) {
         if self.is_live()
@@ -241,8 +265,21 @@ impl Profiler {
             .iter()
             .filter_map(|s| s.render.stats.gpu_time)
             .collect();
+        let low_fps = FramePacing::of(&intervals).map(|pacing| pacing.low_1pct_fps);
+        let cpu = average(|s| s.game.total + s.render.cpu);
+        let bound = match (intervals.is_empty(), mean(&gpu)) {
+            (false, gpu) => Bound::of(
+                (intervals.iter().sum::<Duration>() / intervals.len() as u32).as_secs_f64()
+                    * 1000.0,
+                cpu.as_secs_f64() * 1000.0,
+                gpu.map(|gpu| gpu.as_secs_f64() * 1000.0),
+            ),
+            (true, _) => Bound::Unknown,
+        };
         Some(Summary {
             fps,
+            low_fps,
+            bound,
             cpu: average(|s| s.game.total + s.render.cpu),
             cpu_peak: self
                 .samples
@@ -340,6 +377,13 @@ impl Profiler {
             );
             row(
                 ui,
+                "1% low",
+                summary
+                    .low_fps
+                    .map_or("-".into(), |fps| format!("{fps:.0} fps")),
+            );
+            row(
+                ui,
                 "CPU time",
                 format!(
                     "{} (peak {})",
@@ -412,6 +456,7 @@ impl Profiler {
             );
             row(ui, "Rendering CPU", millis(summary.render_cpu));
             row(ui, "GPU frame", gpu_text(summary.gpu, summary.gpu_timing));
+            row(ui, "Limited by", summary.bound.label().to_owned());
         });
         section(ui, "GPU passes", |ui| {
             if summary.gpu_timing {
@@ -493,6 +538,11 @@ const LOD_NAMES: [&str; LOD_LEVELS] = ["Full detail", "Level 1", "Level 2"];
 /// The readings the panel shows.
 struct Summary {
     fps: Option<f64>,
+    /// The average frame rate of the slowest 1% of the kept frames.
+    low_fps: Option<f64>,
+    /// What limits the frame: the GPU, the CPU (game and drawing), or
+    /// neither (the editor's own UI, or the display).
+    bound: Bound,
     cpu: Duration,
     cpu_peak: Duration,
     gpu: Option<Duration>,

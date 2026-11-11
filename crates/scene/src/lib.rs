@@ -44,7 +44,7 @@ mod weather;
 pub use camera::{FlyCamera, MoveKeys};
 pub use draw_list::{
     LightMarker, MarkerKind, Mount, Poses, UiFrame, attach_ui_textures, build_draw_list,
-    build_draw_list_posed, build_draw_list_with_ui, build_draw_list_with_ui_interaction,
+    build_draw_list_posed, build_draw_list_with_ui, build_draw_list_with_ui_interaction, item_id,
     light_markers, mount_of,
 };
 pub use foliage::brush_color as foliage_brush_color;

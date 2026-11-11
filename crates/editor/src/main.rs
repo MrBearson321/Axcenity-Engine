@@ -39,6 +39,7 @@ mod import_dialog;
 mod layout;
 mod levels;
 mod loading;
+mod lod_inspector;
 mod lua_syntax;
 mod material_editor;
 mod material_graph;

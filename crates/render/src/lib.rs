@@ -12,6 +12,7 @@ mod draw_list;
 mod fonts;
 mod graphics;
 mod mesh;
+mod overdraw;
 mod renderer;
 mod tone_mapping;
 mod water;
@@ -37,11 +38,13 @@ pub use graphics::{
     PointShadowMapSize, Quality, RENDER_SCALE_RANGE, ReflectionQuality, ShadowMapSize,
     ShadowQuality, SpotShadowMapSize, TEXTURE_BUDGET_RANGE, TextureQuality, read_capabilities,
 };
+pub use overdraw::{MAX_LAYERS, OVERDRAW_BANDS, OVERDRAW_STEP, OverdrawStats, layers_of};
 #[cfg(feature = "debug-views")]
 pub use renderer::DebugView;
 pub use renderer::{
-    CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, MAX_GPU_PARTICLES,
-    PROBE_BAKE_SIZE, RenderStats, Renderer, ShaderError, SurfaceShader, TextureRenderer,
+    CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, LOD_LEVELS, LOD_SCREEN_SIZES,
+    MAX_GPU_PARTICLES, PROBE_BAKE_SIZE, RenderStats, Renderer, ShaderError, SurfaceShader,
+    TextureRenderer,
 };
 pub use tone_mapping::ToneMapping;
 pub use water::{WATER_GRID, Water, water_surface};

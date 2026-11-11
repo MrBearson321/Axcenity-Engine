@@ -1008,8 +1008,12 @@ pub(super) struct ScenePipeline {
     pub(super) terrain: terrain::TerrainPass,
     /// How many frames have been drawn, to tell what wasn't drawn lately.
     pub(super) frame: u64,
-    /// Only on devices that can take timestamps (the editor asks for them).
+    /// Only on devices that can take timestamps (the editor asks for them,
+    /// and the player where the GPU has them).
     pub(super) gpu_timer: Option<gpu_timer::GpuTimer>,
+    /// Whether frames are timed while there's a timer: on unless a host
+    /// turns it off (the player times only while someone is looking).
+    pub(super) time_gpu: bool,
     /// What the last frame drew.
     pub(super) counts: FrameCounts,
     /// While set, items are culled as if seen from this camera, not the

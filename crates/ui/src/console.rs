@@ -17,6 +17,7 @@
 //! [`DevConsole`] keeps the state between frames; [`console_items`] draws it.
 
 use std::collections::VecDeque;
+use std::fmt::Write as _;
 
 use axcenity_core::Vector3;
 use axcenity_render::{TextAlign, UiDrawItem, UiRectangle, UiText, VerticalAlign};
@@ -178,6 +179,19 @@ pub struct ConsoleStats {
     pub instances: usize,
     /// While hosting or joined.
     pub network: Option<NetworkStats>,
+    /// The average frame rate of the slowest 1% of recent frames.
+    pub low_fps: f32,
+    /// The CPU's work in a frame: the frame less the time it was blocked
+    /// on the display or the GPU, in milliseconds.
+    pub cpu_ms: f32,
+    /// The GPU's time for a frame, where it can be timed.
+    pub gpu_ms: Option<f32>,
+    /// What limits the frame (`axcenity_core::bench::Bound::label`).
+    pub bound: &'static str,
+    /// The drawing's numbers (GPU passes, draws, triangles, items, levels
+    /// of detail, GPU memory), a line each, for `fps full` and the Stats
+    /// tab.
+    pub detail: Vec<String>,
 }
 
 /// The connection's numbers: to the server when joined, the slowest
@@ -221,6 +235,11 @@ pub struct DevConsole {
 }
 
 impl DevConsole {
+    /// Whether the Stats tab is on screen, so the host knows to measure.
+    pub fn showing_stats(&self) -> bool {
+        self.open && self.tab == ConsoleTab::Stats
+    }
+
     /// Opens a closed console and closes an open one (F9).
     pub fn toggle(&mut self) {
         self.open = !self.open;
@@ -340,7 +359,10 @@ impl DevConsole {
 pub const BUILT_INS: &[(&str, &str)] = &[
     ("help", "lists the commands"),
     ("clear", "empties the log"),
-    ("fps", "shows or hides the frame rate in the corner"),
+    (
+        "fps [full]",
+        "shows or hides the frame rate, CPU and GPU times in the corner; full adds the drawing's numbers",
+    ),
     ("wireframe", "draws every triangle's edges"),
     ("collisions", "draws the colliders' outlines"),
     (
@@ -363,7 +385,10 @@ pub const BUILT_INS: &[(&str, &str)] = &[
 pub enum BuiltIn {
     Help,
     Clear,
-    Fps,
+    /// `fps`, or `fps full` for the detailed readout.
+    Fps {
+        full: bool,
+    },
     Wireframe,
     Collisions,
     Noclip,
@@ -398,7 +423,11 @@ pub fn built_in(line: &str) -> Option<Result<BuiltIn, String>> {
     Some(match name.as_str() {
         "help" => plain(BuiltIn::Help),
         "clear" => plain(BuiltIn::Clear),
-        "fps" => plain(BuiltIn::Fps),
+        "fps" => match args[..] {
+            [] => Ok(BuiltIn::Fps { full: false }),
+            [word] if word.eq_ignore_ascii_case("full") => Ok(BuiltIn::Fps { full: true }),
+            _ => Err("usage: fps, or fps full".to_owned()),
+        },
         "wireframe" => plain(BuiltIn::Wireframe),
         "collisions" => plain(BuiltIn::Collisions),
         "noclip" => plain(BuiltIn::Noclip),
@@ -489,15 +518,38 @@ fn kilobytes(bytes: f32) -> String {
     format!("{:.1} KB/s", bytes / 1024.0)
 }
 
+/// The readout's first line: frame rate, frame time, 1% low, the CPU's
+/// and GPU's times and what limits the frame.
+pub fn readout_line(stats: &ConsoleStats) -> String {
+    let mut line = format!("{:.0} FPS  {:.1} ms", stats.fps, stats.frame_ms);
+    if stats.low_fps > 0.0 {
+        let _ = write!(line, "  1% low {:.0}", stats.low_fps);
+    }
+    if stats.cpu_ms > 0.0 {
+        let _ = write!(line, "  CPU {:.1} ms", stats.cpu_ms);
+    }
+    if let Some(gpu) = stats.gpu_ms {
+        let _ = write!(line, "  GPU {gpu:.1} ms");
+    }
+    if !stats.bound.is_empty() {
+        let _ = write!(line, "  {}", stats.bound);
+    }
+    line
+}
+
 /// The Stats tab's lines.
 pub fn stats_lines(stats: &ConsoleStats) -> Vec<String> {
     let mut lines = vec![format!(
         "FPS {:.0}    frame {:.2} ms",
         stats.fps, stats.frame_ms
     )];
+    if stats.low_fps > 0.0 || stats.gpu_ms.is_some() {
+        lines.push(readout_line(stats));
+    }
     for (stage, ms) in &stats.stages {
         lines.push(format!("  {stage:<12} {ms:>7.2} ms"));
     }
+    lines.extend(stats.detail.iter().cloned());
     lines.push(match stats.memory_bytes {
         Some(bytes) => format!("Memory {}", megabytes(bytes as f64)),
         None => "Memory unknown".to_owned(),
@@ -610,26 +662,98 @@ fn panel_height(height: f32) -> f32 {
     (height * HEIGHT_SHARE).max(LINE_HEIGHT * 6.0).min(height)
 }
 
+/// Each pass the GPU timed in `stats`, by its name, for `--bench`.
+pub fn pass_times(
+    stats: &axcenity_render::RenderStats,
+) -> Vec<(&'static str, std::time::Duration)> {
+    axcenity_render::FramePass::ALL
+        .into_iter()
+        .filter_map(|pass| Some((pass.label(), stats.pass_time(pass)?)))
+        .collect()
+}
+
+/// The drawing's numbers as the readout's lines: GPU passes, draws,
+/// items and culling, levels of detail and GPU memory.
+pub fn render_lines(stats: &axcenity_render::RenderStats) -> Vec<String> {
+    let mut lines = Vec::new();
+    let passes: Vec<String> = pass_times(stats)
+        .into_iter()
+        .map(|(name, time)| format!("{name} {:.2}", time.as_secs_f64() * 1000.0))
+        .collect();
+    if !passes.is_empty() {
+        lines.push(format!("GPU ms: {}", passes.join("  ")));
+    } else if !stats.gpu_timing {
+        lines.push("GPU passes: not timed on this GPU".to_owned());
+    }
+    let millions = |count: u64| count as f64 / 1_000_000.0;
+    lines.push(format!(
+        "Draws {} calls, {} batches; {:.2} M triangles, {:.2} M vertices",
+        stats.draw_calls,
+        stats.batches,
+        millions(stats.triangles),
+        millions(stats.vertices)
+    ));
+    lines.push(format!(
+        "Items {} drawn of {} ({} culled); shadow casters {} drawn, {} culled",
+        stats.items_drawn,
+        stats.items_submitted,
+        stats.items_culled,
+        stats.shadow_casters_drawn,
+        stats.shadow_casters_culled
+    ));
+    let lods: Vec<String> = stats.lod_items.iter().map(u32::to_string).collect();
+    lines.push(format!("Levels of detail (0/1/2): {}", lods.join(" / ")));
+    let megabytes = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+    lines.push(format!(
+        "GPU memory {:.0} MB: textures {:.0}, meshes {:.0}, targets {:.0}, buffers {:.0}",
+        megabytes(stats.texture_bytes + stats.mesh_bytes + stats.target_bytes + stats.buffer_bytes),
+        megabytes(stats.texture_bytes),
+        megabytes(stats.mesh_bytes),
+        megabytes(stats.target_bytes),
+        megabytes(stats.buffer_bytes)
+    ));
+    lines
+}
+
 /// The `fps` command's readout, at the top right of a `width` × `height`
-/// view: under the console while it's open.
+/// view: under the console while it's open. `full` adds the drawing's
+/// numbers (`ConsoleStats::detail`) under the first line.
 pub fn fps_items(
     stats: &ConsoleStats,
     console: &DevConsole,
     width: u32,
     height: u32,
+    full: bool,
 ) -> Vec<UiDrawItem> {
-    let label = format!("{:.0} FPS  {:.1} ms", stats.fps, stats.frame_ms);
-    let box_width = label.len() as f32 * FONT_SIZE * 0.6 + PADDING * 2.0;
+    let mut lines = vec![readout_line(stats)];
+    if full {
+        lines.extend(
+            stats
+                .stages
+                .iter()
+                .map(|(stage, ms)| format!("{stage:<12} {ms:>7.2} ms")),
+        );
+        lines.extend(stats.detail.iter().cloned());
+    }
+    let longest = lines
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    let box_width = longest as f32 * FONT_SIZE * 0.6 + PADDING * 2.0;
     let x = (width as f32 - box_width - PADDING).max(0.0);
     let y = if console.open {
         panel_height(height as f32) + PADDING
     } else {
         PADDING
     };
-    vec![
-        rectangle(x, y, box_width, LINE_HEIGHT + 6.0, READOUT),
-        text(label, x + PADDING, y + 3.0, box_width, TEXT),
-    ]
+    let box_height = lines.len() as f32 * LINE_HEIGHT + 6.0;
+    let mut items = vec![rectangle(x, y, box_width, box_height, READOUT)];
+    for (row, line) in lines.into_iter().enumerate() {
+        let top = y + 3.0 + row as f32 * LINE_HEIGHT;
+        items.push(text(line, x + PADDING, top, box_width, TEXT));
+    }
+    items
 }
 
 /// Screen-space line segments, each `(from, to)` in pixels, drawn as thin
@@ -746,7 +870,9 @@ mod tests {
     #[test]
     fn built_in_commands_read_their_numbers_and_say_what_is_wrong() {
         assert_eq!(built_in("timescale 0.5"), Some(Ok(BuiltIn::Timescale(0.5))));
-        assert_eq!(built_in("FPS"), Some(Ok(BuiltIn::Fps)));
+        assert_eq!(built_in("FPS"), Some(Ok(BuiltIn::Fps { full: false })));
+        assert_eq!(built_in("fps Full"), Some(Ok(BuiltIn::Fps { full: true })));
+        assert!(matches!(built_in("fps lots"), Some(Err(_))));
         assert_eq!(
             built_in("teleport 1 2.5 -3"),
             Some(Ok(BuiltIn::Teleport(Vector3::new(1.0, 2.5, -3.0))))
@@ -779,6 +905,7 @@ mod tests {
                 sent_per_second: 2048.0,
                 received_per_second: 1024.0,
             }),
+            ..ConsoleStats::default()
         };
         assert!(console_items(&console, &stats, 800, 600).is_empty());
         console.toggle();
@@ -807,7 +934,7 @@ mod tests {
             "{shown:?}"
         );
         assert!(shown.contains(&"  sent 2.0 KB/s    received 1.0 KB/s".to_owned()));
-        let readout = fps_items(&stats, &console, 800, 600);
+        let readout = fps_items(&stats, &console, 800, 600, false);
         assert_eq!(texts(&readout), ["60 FPS  16.7 ms"]);
         let UiDrawItem::Rectangle(under) = &readout[0] else {
             panic!("{readout:?}");
@@ -816,6 +943,34 @@ mod tests {
             under.position[1] > 600.0 * HEIGHT_SHARE,
             "below the open console"
         );
+    }
+
+    #[test]
+    fn the_readout_shows_lows_cpu_gpu_and_the_bound_and_full_adds_the_detail() {
+        let console = DevConsole::default();
+        let stats = ConsoleStats {
+            fps: 120.0,
+            frame_ms: 8.3,
+            low_fps: 95.0,
+            cpu_ms: 3.2,
+            gpu_ms: Some(7.9),
+            bound: "GPU-bound",
+            stages: vec![("Render", 2.0)],
+            detail: vec!["Draws 10".to_owned(), "Triangles 2.0 M".to_owned()],
+            ..ConsoleStats::default()
+        };
+        let simple = texts(&fps_items(&stats, &console, 1600, 900, false));
+        assert_eq!(
+            simple,
+            ["120 FPS  8.3 ms  1% low 95  CPU 3.2 ms  GPU 7.9 ms  GPU-bound"]
+        );
+        let full = texts(&fps_items(&stats, &console, 1600, 900, true));
+        assert_eq!(full.len(), 4, "{full:?}");
+        assert!(full[1].starts_with("Render"), "{full:?}");
+        assert_eq!(full[3], "Triangles 2.0 M");
+        let tab = stats_lines(&stats);
+        assert!(tab.contains(&"Draws 10".to_owned()), "{tab:?}");
+        assert!(tab[1].contains("1% low 95"), "{tab:?}");
     }
 
     #[test]

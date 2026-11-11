@@ -25,6 +25,8 @@ pub(super) struct DevPlay {
     /// Game time per real second (`timescale`).
     pub time_scale: f64,
     pub show_fps: bool,
+    /// `fps full`: the readout with the drawing's numbers.
+    pub fps_full: bool,
     /// The Output lines already in the console's Log.
     seen: usize,
     /// The last frames' lengths, in seconds, newest last.
@@ -37,6 +39,7 @@ impl Default for DevPlay {
             console: axcenity_ui::DevConsole::default(),
             time_scale: 1.0,
             show_fps: false,
+            fps_full: false,
             seen: 0,
             frames: VecDeque::new(),
         }
@@ -173,10 +176,13 @@ impl EditorApp {
                 self.output.info("Anything else runs as Lua.");
             }
             BuiltIn::Clear => self.dev.console.clear(),
-            BuiltIn::Fps => {
-                self.dev.show_fps = !self.dev.show_fps;
+            BuiltIn::Fps { full } => {
+                // The same command again hides it; the other mode switches.
+                self.dev.show_fps = !(self.dev.show_fps && self.dev.fps_full == full);
+                self.dev.fps_full = full;
+                let mode = if full { "fps full" } else { "fps" };
                 self.output
-                    .info(format!("fps {}", on_off(self.dev.show_fps)));
+                    .info(format!("{mode} {}", on_off(self.dev.show_fps)));
             }
             BuiltIn::Wireframe => {
                 let wireframe = ViewMode::Debug(axcenity_render::DebugView::Wireframe);
@@ -251,6 +257,13 @@ impl EditorApp {
             stats.lua_bytes = session.load().lua_bytes;
             stats.instances = session.world().len();
         }
+        if let Some(readout) = self.profiler.readout() {
+            stats.low_fps = readout.low_fps;
+            stats.cpu_ms = readout.cpu_ms;
+            stats.gpu_ms = readout.gpu_ms;
+            stats.bound = readout.bound;
+            stats.detail = axcenity_ui::render_lines(&readout.stats);
+        }
         stats
     }
 
@@ -269,6 +282,7 @@ impl EditorApp {
                 &self.dev.console,
                 width,
                 height,
+                self.dev.fps_full,
             ));
         }
         items

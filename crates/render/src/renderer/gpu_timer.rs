@@ -90,6 +90,9 @@ pub(super) struct GpuTimer {
     last: Option<Duration>,
     /// Its passes, `None` for any it didn't draw.
     last_passes: [Option<Duration>; FramePass::COUNT],
+    /// How many measurements have been read, so a reader can tell a new
+    /// one from the last one again.
+    readings: u64,
 }
 
 impl GpuTimer {
@@ -126,6 +129,7 @@ impl GpuTimer {
             mapped: Arc::new(AtomicU8::new(PENDING)),
             last: None,
             last_passes: [None; FramePass::COUNT],
+            readings: 0,
         })
     }
 
@@ -138,6 +142,11 @@ impl GpuTimer {
     /// [`FramePass::ALL`]'s order: `None` for a pass it didn't draw.
     pub(super) fn last_passes(&self) -> [Option<Duration>; FramePass::COUNT] {
         self.last_passes
+    }
+
+    /// How many measurements have been read so far.
+    pub(super) fn readings(&self) -> u64 {
+        self.readings
     }
 
     /// Reads a finished measurement, if one is ready. Returns true if this
@@ -164,6 +173,7 @@ impl GpuTimer {
                 };
                 if let Some(whole) = between(stamps[0], stamps[STAMPS as usize - 1]) {
                     self.last = Some(whole);
+                    self.readings += 1;
                     for (index, time) in self.last_passes.iter_mut().enumerate() {
                         *time = drawn[index]
                             .then(|| between(stamps[index], stamps[index + 1]))

@@ -362,6 +362,7 @@ impl ScenePipeline {
             terrain,
             frame: 0,
             gpu_timer,
+            time_gpu: true,
             counts: FrameCounts::default(),
             frozen_view: None,
             culling_bounds: Vec::new(),
@@ -1066,8 +1067,8 @@ impl ScenePipeline {
             });
         // Times this frame unless the last measurement is still being read.
         let timed = match &mut self.gpu_timer {
-            Some(timer) => timer.collect(&self.device),
-            None => false,
+            Some(timer) if self.time_gpu => timer.collect(&self.device),
+            _ => false,
         };
         let timer = self.gpu_timer.as_ref().filter(|_| timed);
         let mark = |encoder: &mut wgpu::CommandEncoder, pass| {
@@ -1809,11 +1810,20 @@ impl ScenePipeline {
             draw_calls: counts.draw_calls,
             triangles: counts.triangles,
             vertices: counts.vertices,
-            gpu_time: self.gpu_timer.as_ref().and_then(gpu_timer::GpuTimer::last),
-            gpu_timing: self.gpu_timer.is_some(),
+            gpu_time: self
+                .gpu_timer
+                .as_ref()
+                .filter(|_| self.time_gpu)
+                .and_then(gpu_timer::GpuTimer::last),
+            gpu_timing: self.gpu_timer.is_some() && self.time_gpu,
+            gpu_readings: self
+                .gpu_timer
+                .as_ref()
+                .map_or(0, gpu_timer::GpuTimer::readings),
             pass_times: self
                 .gpu_timer
                 .as_ref()
+                .filter(|_| self.time_gpu)
                 .map_or([None; FramePass::COUNT], gpu_timer::GpuTimer::last_passes),
             items_submitted: counts.items_submitted,
             items_drawn: counts.items_drawn,

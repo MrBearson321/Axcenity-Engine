@@ -41,7 +41,7 @@ const DEBUG_OVERDRAW: f32 = 7.0;
 const DEBUG_LOD: f32 = 8.0;
 
 // Each layer drawn over a pixel adds this much light in the overdraw view.
-const OVERDRAW_STEP: vec3<f32> = vec3<f32>(0.12, 0.05, 0.02);
+const OVERDRAW_STEP: vec3<f32> = vec3<f32>(0.12, 0.05, 0.02); // overdraw.rs reads it back
 
 struct DebugOut {
     @builtin(position) clip_position: vec4<f32>,

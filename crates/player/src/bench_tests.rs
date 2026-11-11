@@ -40,7 +40,7 @@ const BATCH_FRAMES: usize = 60;
 /// does, so cooked textures go up as their blocks here too; without it they
 /// were decoded from their source files and the tools measured and drew
 /// the uncooked path.
-fn bench_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
+pub(crate) fn bench_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,

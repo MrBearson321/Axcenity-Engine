@@ -27,6 +27,12 @@ AXCENITY_BENCH_PROJECT=target/s10k AXCENITY_BENCH_FRAMES=600 \
 
 `--bench-clients <n>` makes the server host in memory and join `n` loopback players that read everything sent to them, as a player's device would, so the frame pays for replicating to them (roadmap M7). Measuring (and its warm-up) starts once every player has its snapshot. After the table it prints the snapshot's size, how many frames joining took, the bytes sent per frame and how long the players took to read them (not in the frame's steps).
 
+**Frame rate and what limits it.** Under the table each host prints the frames' pacing (`core::bench::FramePacing`): average FPS (frames over the time they took), the 1% and 0.1% lows (the average frame rate of the slowest 1% and 0.1% of frames, at least one frame), the frame time's standard deviation and its 99th percentile. The JSON line has them under `"pacing"`. The player then prints the GPU's time for each pass from timestamps (`"gpu"` in the JSON; a frame the GPU timer skipped while its last reading was still on its way isn't counted, so it holds about half the frames) and a verdict, `"bound"` (`core::bench::Bound`): **GPU-bound** when the GPU's median is at least 85% of the frame's, **CPU-bound** when the CPU's work (the frame less the steps that wait, here Present wait) is, and **sync-bound** when neither is, which means waiting on the display or the two taking turns. Memory-bound isn't told apart: a texture budget that's full shows as its own note in the graphics settings, not in the frame.
+
+**The player's own conditions.** `--bench` turns vertical sync off (`Renderer::set_vsync`) so frames are the engine's, not the display's, and times the GPU. `--size 2560x1440` makes the window that many physical pixels (it can be larger than the screen) and `--quality Ultra` draws with that preset alone for the run, leaving `graphics.json` as it is and ignoring a LocalScript's `UserGameSettings` changes. `Render` is the CPU's drawing work and `Present wait` the time the frame was blocked getting its picture from the window and handing it back (`Renderer::present_wait`).
+
+**Where uneven frames come from.** `AXCENITY_BENCH_TIMELINE=<file.csv>` makes the player write every measured frame's steps there, the GPU's passes to `<file>.gpu.csv`, and each frame's camera, items drawn, triangles, draw calls and shadow casters to `<file>.counts.csv`. A frame-time spread with no matching change in counts is the machine; a step in the counts is the scene (Temperate Dry Patch's script moves the camera after 8 seconds, which first read as uneven frames).
+
 `--bench` works on any project, not only S10k. After the table, each host also prints its **first frame** and its **worst warm-up frame** (where first-sight loads land), and the player adds **launch to first frame** and **launch to assets loaded** (from `main` starting to the end of the first frame drawn with the Workspace's assets in). The JSON line has these under `"startup"`. `core::bench` holds the shared pieces: `Laps` times a frame's steps one after another (the player's Developer Console Stats tab uses it too), `StageSamples` keeps every frame, and `BenchRun` adds the warm-up and the report.
 
 ### Regression check
@@ -43,7 +49,28 @@ taskset -c 0-15 target/release/axcenity-bench-check --machine <name>            
 - **What it measures.** One uncounted warm-up round, then `--rounds` (3) counted ones; the median of the runs' frame medians, and for the player also its first frame and launch to assets in. A measure slower than its baseline by more than `tolerance` (10% for frames, 30% for startup times) prints `SLOWER` and the exit code is 1. A slower result is a reason to measure properly, alternating before and after builds, not proof on its own. Rerunning the recorded build straight after recording it, every measure came back within 6% (frames within 5%).
 - **Projects.** A `project:<name>` scene is copied once from `AXCENITY_PROJECTS` (or `--projects`; default `Documents/Axcenity Projects`) into `target/bench-projects`, without its `.axcenity` folder, then cooked with `axcenity-editor --cook` before each run. The owner's project is never written. `--fresh` copies it again; a project that isn't on the machine is skipped.
 - **Recording.** `--update` writes this run's numbers for `--machine` into `benchmarks/baselines.json` with the commit. Commit that file with the change that moved them, and say why in the commit. A run's `known` note (Abandoned Farmhouse's steady frame) is kept; edit it, and the machine's `about`, by hand when they go stale.
+- **Per-run options and what else is noted.** A run's `args` are passed to the player (`dry-patch-ultra-1440p` draws Temperate Dry Patch at `--size 2560x1440 --quality Ultra`, the owner's desktop settings, for 400 frames: the project's script keeps its demo camera for 8 seconds, then hands it to the walker). A host that times the GPU also has its GPU frame median checked against `gpu_ms` with the frame's tolerance, and its 1% low frame rate and bound printed and recorded (`low_1pct_fps`, `bound`) but not judged: a 1% low is too few frames to fail a check on.
 - `--only <text>` runs the scenes whose names contain it. Raw reports of the before/after comparison below are in `benchmarks/results/2026-11-10-desktop-9950x3d.jsonl`, one JSON line per run.
+
+### Controlled scenarios
+
+Each kind of load has a scene that isolates it, measured the same way every time (fixed cameras, size, preset and frame count). Most existed before; the regression check runs the ones marked "check" on every pinned run.
+
+| Scenario | Where | How it's run |
+|---|---|---|
+| The owner's baseline: Temperate Dry Patch at Ultra 2560 × 1440 | `dry-patch-ultra-1440p` (check) | player `--bench`, demo camera |
+| Lightweight, minimal geometry | `bench_20_animated_characters` (41 small items), hello-part | render bench, player `--bench` |
+| Dense vegetation | Temperate Wet and Dry Patch (check), `bench_terrain_with_foliage` (20,000 plants) | player `--bench`, render bench |
+| Several large trees | Abandoned Farmhouse (check), the patches' two 0.7–1 M triangle oaks | player `--bench`; `profile_project`'s `no-large-meshes` isolates them |
+| High wind | any patch: `GlobalWind` is set; `profile_project`'s `no-wind` and `no-sway` measure it | `profile_project` |
+| High shadow complexity | the patches at Ultra (four 4096² cascades, 40,000–64,000 casters); `no-shadows`, `no-foliage-shadows` | `profile_project` |
+| High object count | S10k (check), `bench_10000_parts` | every host's `--bench` |
+| High-poly realistic assets | `bench_2000_mesh_parts` (2,000 × 15,500-triangle helmets), General Store Roadside (check) | render bench, player `--bench` |
+| Large terrain | General Store Roadside (960 × 1,260 studs, check), `bench_terrain_with_foliage` (2,048 studs) | player `--bench`, render bench |
+| Particle-heavy | `bench_particles` (up to 100,000 GPU particles) | render bench |
+| Animation-heavy | `bench_20_walking_characters`, S10k's 20 animated characters | render bench, `--bench` |
+
+Render benches: `cargo test -p axcenity-player --release -- --ignored bench_ --nocapture --test-threads 1` ([rendering/performance.md](rendering/performance.md)). Results over time: `benchmarks/baselines.json` (the recorded numbers and commit per machine) and `benchmarks/results/*.jsonl` (raw reports).
 
 ### Frame steps
 
@@ -63,7 +90,8 @@ Each host names its steps the same way where they do the same work. A step a hos
 | Animation | Animators, tools in hand, levels and loading screens (player: also audio and particles) | player, editor Play, test runner |
 | Draw list | `build_draw_list` with UI layout | player |
 | UI | Overlays (hotbar, chat, prompts, console) and network send | player |
-| Render | `Renderer::render`, including waiting to present | player |
+| Render | `Renderer::render`: planning, uploading and recording the frame on the CPU | player |
+| Present wait | Blocked getting the window's picture and presenting it (vertical sync, or the GPU frames behind); split off Render by `Laps::lap_with_wait` | player |
 | Network send | Replication to clients | editor Play, server |
 
 ### Profiler spans

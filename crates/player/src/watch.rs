@@ -16,6 +16,8 @@ use axcenity_assets::{Assets, Reload};
 use axcenity_audio::GameAudio;
 use axcenity_project::{Watched, Watcher};
 
+use axcenity_render::Quality;
+
 use crate::USAGE;
 
 /// The flag that turns live reload on.
@@ -41,6 +43,12 @@ pub struct Arguments {
     /// `--bench <frames>`: measure that many frames' steps after a warm-up,
     /// print them, and quit (roadmap I1, `docs/development/benchmarks.md`).
     pub bench: Option<usize>,
+    /// `--size <width>x<height>`: the window's size in physical pixels,
+    /// so benchmarks draw the same number of pixels on every monitor.
+    pub size: Option<(u32, u32)>,
+    /// `--quality <Low|Medium|High|Ultra>`: that preset with no overrides,
+    /// for this run only (`graphics.json` is left as it is).
+    pub quality: Option<Quality>,
 }
 
 /// Hosting or joining from the start.
@@ -95,6 +103,36 @@ impl Arguments {
                     bail!("--bench takes how many frames to measure, such as 600\n\n{USAGE}");
                 };
                 parsed.bench = Some(frames);
+            } else if argument == "--size" {
+                let size = arguments.next().and_then(|size| {
+                    let (width, height) = size.to_str()?.split_once(['x', 'X'])?;
+                    Some((width.parse::<u32>().ok()?, height.parse::<u32>().ok()?))
+                });
+                match size {
+                    Some((width, height)) if width > 0 && height > 0 => {
+                        parsed.size = Some((width, height));
+                    }
+                    _ => bail!(
+                        "--size takes the window's size in pixels, such as 2560x1440
+
+{USAGE}"
+                    ),
+                }
+            } else if argument == "--quality" {
+                let name = arguments
+                    .next()
+                    .map(|name| name.to_string_lossy().to_ascii_lowercase());
+                let quality = Quality::ALL
+                    .into_iter()
+                    .find(|quality| Some(quality.label().to_ascii_lowercase()) == name);
+                let Some(quality) = quality else {
+                    bail!(
+                        "--quality takes Low, Medium, High or Ultra
+
+{USAGE}"
+                    );
+                };
+                parsed.quality = Some(quality);
             } else if argument == "--password" {
                 let Some(password) = arguments.next() else {
                     bail!("--password takes the game's password\n\n{USAGE}");
@@ -221,6 +259,28 @@ mod tests {
             let err = parse(bad).unwrap_err();
             assert!(err.to_string().contains("--bench takes"), "{err}");
         }
+    }
+
+    #[test]
+    fn size_and_quality_fix_what_a_benchmark_draws() {
+        let parsed = parse(&[
+            "--bench",
+            "300",
+            "--size",
+            "2560x1440",
+            "--quality",
+            "ultra",
+            "p",
+        ])
+        .unwrap();
+        assert_eq!(parsed.size, Some((2560, 1440)));
+        assert_eq!(parsed.quality, Some(Quality::Ultra));
+        for bad in [&["--size", "2560"][..], &["--size", "0x10"], &["--size"]] {
+            let err = parse(bad).unwrap_err();
+            assert!(err.to_string().contains("--size takes"), "{err}");
+        }
+        let err = parse(&["--quality", "Epic"]).unwrap_err();
+        assert!(err.to_string().contains("--quality takes"), "{err}");
     }
 
     #[test]

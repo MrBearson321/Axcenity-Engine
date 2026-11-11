@@ -64,6 +64,7 @@ use crate::ui_handles::{self, Grip, Handles, UiDrag, UiDragEdit};
 mod game_input;
 mod grid;
 mod input;
+mod legend;
 mod move_overlay;
 mod overlays;
 mod view_cube;
@@ -664,6 +665,14 @@ pub struct Viewport {
     /// Where the camera was when the culling overlay went on: culling
     /// stays there until it goes off.
     frozen_culling: Option<axcenity_render::Camera>,
+    /// The Overdraw view's numbers, once its legend's Measure was clicked;
+    /// cleared when the view changes.
+    overdraw: Option<axcenity_render::OverdrawStats>,
+    /// Measure was clicked: the next frame drawn is read back.
+    measure_overdraw: bool,
+    /// The LOD inspector's preview: this item (`scene::item_id`) drawn at
+    /// this level whatever its size. Only what's drawn changes.
+    pub lod_preview: Option<(u64, usize)>,
     /// The camera swinging round after a click on the view cube.
     swing: Option<view_cube::Swing>,
     /// The measuring grid's printed distances.
@@ -731,6 +740,9 @@ impl Viewport {
             last_rect: egui::Rect::NOTHING,
             last_pixels: (0, 0),
             frozen_culling: None,
+            overdraw: None,
+            measure_overdraw: false,
+            lod_preview: None,
             swing: None,
             grid_labels: Default::default(),
             grid_glow: Default::default(),
@@ -844,6 +856,17 @@ impl Viewport {
     }
 
     /// The camera's focus point, where new parts are inserted.
+    /// The level of detail the item with this `scene::item_id` was last
+    /// drawn at, if its mesh has levels and it was drawn lately.
+    pub fn lod_level_of(&self, id: u64) -> Option<usize> {
+        self.target.as_ref()?.renderer.lod_level_of(id)
+    }
+
+    /// The editing camera, as the renderer takes it.
+    pub fn render_camera(&self) -> axcenity_render::Camera {
+        self.camera.to_render_camera()
+    }
+
     pub fn focus(&self) -> Vec3 {
         self.camera.focus()
     }
@@ -1237,6 +1260,7 @@ impl Viewport {
         // Does nothing unless the settings changed.
         target.renderer.set_graphics(graphics);
         target.renderer.set_debug_view(view_mode.debug_view());
+        target.renderer.preview_lod(self.lod_preview);
         self.frozen_culling = (overlays.culling || view_mode.holds_culling())
             .then(|| self.frozen_culling.unwrap_or(camera));
         target.renderer.freeze_culling(self.frozen_culling);
@@ -1326,6 +1350,17 @@ impl Viewport {
         if let Err(error) = target.renderer.render(&draw_list) {
             log::error!("could not render the viewport: {error:#}");
         }
+        if view_mode != ViewMode::Debug(axcenity_render::DebugView::Overdraw) {
+            self.overdraw = None;
+        } else if std::mem::take(&mut self.measure_overdraw) {
+            // Reading the picture back waits for the GPU: only on request.
+            let (width, height) = target.renderer.size();
+            self.overdraw = Some(axcenity_render::OverdrawStats::from_pixels(
+                &target.renderer.read_pixels(),
+                width,
+                height,
+            ));
+        }
         let shader_errors = target.renderer.take_shader_errors();
         let render = RenderCost {
             cpu: render_started.elapsed(),
@@ -1409,6 +1444,9 @@ impl Viewport {
         }
         if game_playing && let Some(settings) = self.terrain.streaming.settings() {
             paint_streaming_radius(&ui.painter_at(rect), &screen, settings, eye);
+        }
+        if legend::paint(ui, rect, view_mode, &render.stats, self.overdraw.as_ref()) {
+            self.measure_overdraw = true;
         }
         if let Some(frozen) = self.frozen_culling {
             paint_culling(
