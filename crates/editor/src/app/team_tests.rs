@@ -8,7 +8,7 @@ use axcenity_collab::Role;
 use axcenity_core::{ClassName, PartType, Value};
 
 use super::team::SharedHub;
-use super::tests::example;
+use super::tests::{copy_of_example, example};
 use super::*;
 use crate::properties::Edit;
 
@@ -336,7 +336,7 @@ fn team_client(app: &EditorApp) -> Option<&axcenity_collab::Client> {
 
 #[test]
 fn two_editors_share_a_session_over_the_network() {
-    let mut a = EditorApp::new(Some(&example("hello-part")));
+    let mut a = EditorApp::new(Some(&copy_of_example("hello-touched", "team-net-host")));
     let invite = a
         .host_network_session(Some(&team_folder("host")), 0)
         .expect("hosting");
@@ -346,7 +346,7 @@ fn two_editors_share_a_session_over_the_network() {
         host: format!("127.0.0.1:{port}"),
         ..invite
     };
-    let mut b = EditorApp::new(Some(&example("hello-part")));
+    let mut b = EditorApp::new(Some(&copy_of_example("hello-touched", "team-net-joiner")));
     b.join_network_session(&invite, Some(&team_folder("joiner")))
         .expect("joining");
     settle_net(&mut a, &mut b, |a, b| {
@@ -450,7 +450,7 @@ fn draw_panel(app: &mut EditorApp, name: &str) {
 
 #[test]
 fn the_panel_offers_share_and_join_then_shows_the_session() {
-    let mut a = EditorApp::new(Some(&example("hello-part")));
+    let mut a = EditorApp::new(Some(&copy_of_example("hello-touched", "team-panel-host")));
     draw_panel(&mut a, "team-create-start");
     assert!(!a.in_team_session());
 
@@ -468,7 +468,7 @@ fn the_panel_offers_share_and_join_then_shows_the_session() {
         host: format!("127.0.0.1:{port}"),
         ..invite
     };
-    let mut b = EditorApp::new(Some(&example("hello-part")));
+    let mut b = EditorApp::new(Some(&copy_of_example("hello-touched", "team-panel-joiner")));
     b.join_network_session(&invite, Some(&team_folder("panel-joiner")))
         .expect("joining");
     settle_net(&mut a, &mut b, |a, b| {
@@ -505,4 +505,147 @@ fn the_panel_offers_share_and_join_then_shows_the_session() {
     assert!(!b.in_team_session() && !b.world.is_recording_edits());
     a.leave_team_session();
     assert!(!a.in_team_session());
+}
+
+/// `invite`, naming the loopback address (the host names its LAN one).
+fn over_loopback(invite: axcenity_collab::access::Invite) -> axcenity_collab::access::Invite {
+    let port = invite.host.rsplit(':').next().unwrap().to_owned();
+    axcenity_collab::access::Invite {
+        host: format!("127.0.0.1:{port}"),
+        ..invite
+    }
+}
+
+/// The project's scripts: path, Instance and code.
+fn scripts(app: &EditorApp) -> Vec<(String, InstanceId, String)> {
+    let mut list: Vec<_> = app
+        .project
+        .as_ref()
+        .unwrap()
+        .scripts
+        .iter()
+        .map(|s| (s.path.clone(), s.instance, s.source.clone()))
+        .collect();
+    list.sort();
+    list
+}
+
+#[test]
+fn a_joining_editor_gets_the_files_and_its_saves_reach_the_host() {
+    let project = copy_of_example("hello-touched", "team-files-host");
+    let mut a = EditorApp::new(Some(&project));
+    let invite = a
+        .host_network_session(Some(&team_folder("files-host")), 0)
+        .expect("hosting");
+    // The joiner starts with no project: the session's opens.
+    let mut b = EditorApp::new(None);
+    let joiner = team_folder("files-joiner");
+    b.join_network_session(&over_loopback(invite), Some(&joiner))
+        .expect("joining");
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq)
+            && caught_up(b, seq)
+            && b.project
+                .as_ref()
+                .is_some_and(|p| p.folder.starts_with(&joiner))
+    });
+    let mirror = b.project.as_ref().unwrap().folder.clone();
+    assert_eq!(
+        std::fs::read_to_string(mirror.join("axcenity.json")).unwrap(),
+        std::fs::read_to_string(project.join("axcenity.json")).unwrap()
+    );
+    // The same scripts, on the same Instances, and the same World.
+    assert!(!scripts(&a).is_empty());
+    assert_eq!(scripts(&a), scripts(&b));
+    assert_eq!(dump(&a.world), dump(&b.world));
+
+    // The joiner edits a script: the host's editor shows it read-only.
+    let (path, _, source) = scripts(&b).remove(0);
+    b.tabs.open(&path, &source, None);
+    a.tabs.open(&path, &source, None);
+    b.tabs.get_mut(&path).unwrap().text = format!("{source}\n-- edited by the joiner\n");
+    settle_net(&mut a, &mut b, |a, _| {
+        a.tabs
+            .get(&path)
+            .is_some_and(|tab| tab.editing_elsewhere.is_some())
+    });
+    // Saving sends it; the host's editor reads it in and the tab frees up.
+    assert!(b.save_tab(&path));
+    settle_net(&mut a, &mut b, |a, _| {
+        std::fs::read_to_string(project.join(&path))
+            .is_ok_and(|text| text.ends_with("-- edited by the joiner\n"))
+            && a.tabs
+                .get(&path)
+                .is_some_and(|tab| tab.editing_elsewhere.is_none())
+    });
+    settle_net(&mut a, &mut b, |a, b| scripts(a) == scripts(b));
+    assert!(
+        a.tabs
+            .get(&path)
+            .unwrap()
+            .text
+            .ends_with("-- edited by the joiner\n")
+    );
+
+    // A new script from the host's editor reaches the joiner on the same
+    // Instance, without a second Script.
+    let new = "scripts/Extra.server.lua";
+    std::fs::write(project.join(new), "print('extra')\n").unwrap();
+    a.disk_changed(&[new.to_owned()]);
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq) && caught_up(b, seq) && scripts(b).iter().any(|s| s.0 == new)
+    });
+    assert_eq!(scripts(&a), scripts(&b));
+    assert_eq!(dump(&a.world), dump(&b.world));
+}
+
+#[test]
+fn an_import_reaches_everyone_as_one_step_with_its_files() {
+    let project = copy_of_example("hello-touched", "team-import-host");
+    let mut a = EditorApp::new(Some(&project));
+    let invite = a
+        .host_network_session(Some(&team_folder("import-host")), 0)
+        .expect("hosting");
+    let mut b = EditorApp::new(None);
+    let joiner = team_folder("import-joiner");
+    b.join_network_session(&over_loopback(invite), Some(&joiner))
+        .expect("joining");
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq) && caught_up(b, seq) && b.project.is_some()
+    });
+
+    a.import_model(&super::tests::example("hello-mesh").join("assets/models/pyramid.gltf"));
+    let dialog = a.importing.take().expect("the dialog is open");
+    a.import_chosen(&dialog);
+    let part = a.selected.expect("the new MeshPart is selected");
+    let file = "assets/models/pyramid/pyramid.gltf";
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq)
+            && caught_up(b, seq)
+            && b.world.get(part).is_some()
+            && b.project
+                .as_ref()
+                .is_some_and(|p| p.folder.join(file).exists())
+    });
+    // One transaction made the MeshPart and published its files.
+    let hosting = a.team().unwrap().hosting().unwrap().lock();
+    let step = hosting
+        .host()
+        .log()
+        .find(|logged| logged.label == "Import pyramid")
+        .expect("the import's step");
+    assert!(
+        step.ops
+            .iter()
+            .any(|op| matches!(op, axcenity_collab::Op::CreateTree { .. }))
+    );
+    assert!(
+        step.ops
+            .iter()
+            .any(|op| matches!(op, axcenity_collab::Op::FileVersion { path, .. } if path == file))
+    );
 }

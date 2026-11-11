@@ -81,6 +81,8 @@ pub enum ToClient {
         rejected: Vec<(u64, Refusal)>,
         /// The project's files as of `seq`.
         files: Manifest,
+        /// Names the session's project ([`crate::Host::with_session`]).
+        session: String,
     },
     /// After a `Hello` whose `have` the host could catch up from: the
     /// missed transactions came just before this, and transactions the

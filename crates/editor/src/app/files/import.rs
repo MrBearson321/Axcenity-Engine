@@ -689,7 +689,11 @@ impl EditorApp {
             .as_ref()
             .map(|project| files_made_since(&project.folder, before))
             .unwrap_or_default();
+        // In a Team Create session, the files and the placed Instances go
+        // to everyone as one step.
+        let step = label.clone();
         self.place_new_with_files(parent, ids, label, made);
+        self.team_publish_files(&step);
         self.animation.refresh();
     }
 

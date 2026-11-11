@@ -1,4 +1,4 @@
-//! Team Create in the editor (TC2 and TC3 of `docs/research/team-create.md`).
+//! Team Create in the editor (TC2 to TC5 of `docs/research/team-create.md`).
 //!
 //! While in a session, the edit World keeps an edit journal, and each frame
 //! [`EditorApp::team_frame`] sends what changed since the last frame as one
@@ -10,8 +10,19 @@
 //! Undo in a session only changes what's still as the step left it
 //! (`History::set_shared`), and its result syncs like any edit. Steps that
 //! swap the whole World (Console commands, prefab Apply) can't be undone in
-//! a session yet, and terrain, the string table and project files aren't
-//! shared yet (TC5): the Output says so.
+//! a session yet, and terrain and the string table aren't shared yet: the
+//! Output says so.
+//!
+//! Files (TC5): every editor in a session keeps a folder of the session's
+//! files in step with `collab::Mirror`, every half second and right after
+//! an import (whose files and placed Instances then go as one step). The
+//! host's folder is its project; a joining editor fetches the files into a
+//! folder of its own (under the Team Create data folder, one per session)
+//! and opens it as the project once they're in, keeping the session's
+//! World and pointing the project's scripts at the session's Instances
+//! ([`EditorApp::open_team_mirror`]). A script tab with unsaved changes
+//! asks to be the one editing that file; the others' tabs for it are
+//! read-only until it's saved or closed.
 //!
 //! What SplineMeshes and SplineScatters make isn't shared: each copy makes
 //! its own ([`World::unrecorded`] in `generate_frame`).
@@ -19,8 +30,8 @@
 //! Over the network (TC3), the hosting editor runs the session's host on
 //! its own thread and joins it over the loopback address like any member
 //! (`collab::session`); others join with an invite link. Until the Team
-//! Create menus (TC4), `--team-host` and `--team-join <link>` start one
-//! from the command line. The tests also meet in a [`Hub`] in this process.
+//! Create panel (TC4), `--team-host` and `--team-join <link>` start one
+//! from the command line too. The tests also meet in a [`Hub`] in this process.
 
 // The in-process hub is for tests; menus that end a session come in TC4.
 #![cfg_attr(not(test), allow(dead_code))]
@@ -31,10 +42,14 @@ use std::sync::{Arc, Mutex};
 
 use axcenity_collab::access::{Access, INVITE_LIFETIME_SECONDS, Invite};
 use axcenity_collab::identity::{Fingerprint, Identity};
+use axcenity_collab::mirror::{Change, Mirror};
 use axcenity_collab::session::{HostSession, Hosting, Remote, RemoteEvent};
 use axcenity_collab::socket::{DEFAULT_PORT, HostCert};
-use axcenity_collab::{Camera, Client, Host, MemberId, Notice, Presence, Role, ToClient, ToHost};
+use axcenity_collab::{
+    Camera, Client, FolderStore, Host, MemberId, Notice, Presence, Role, ToClient, ToHost,
+};
 use axcenity_core::spline::is_generator;
+use axcenity_project as project;
 
 use super::*;
 
@@ -43,6 +58,10 @@ const ROUNDS_PER_FRAME: usize = 8;
 
 /// How often the editor looks at the network while nothing else redraws.
 const NET_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// How often an editor in a session looks at its folder for files saved
+/// or arrived (TC5).
+const MIRROR_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// The least time between two presences this editor sends (design §7.9:
 /// at most 10 a second).
@@ -117,6 +136,43 @@ fn access_path(folder: &Path, project: &Path) -> PathBuf {
     folder
         .join("projects")
         .join(format!("{}.json", &hash[..16]))
+}
+
+/// True for a file the editor takes in when it changes on disk (what its
+/// watcher reports): scripts, stylesheets and assets.
+fn editor_reads(path: &str) -> bool {
+    let script = (path.starts_with("scripts/") || path.starts_with("objects/"))
+        && [
+            project::SERVER_SCRIPT_SUFFIX,
+            project::CLIENT_SCRIPT_SUFFIX,
+            project::MODULE_SCRIPT_SUFFIX,
+            project::SERVER_BLOCK_SCRIPT_SUFFIX,
+            project::CLIENT_BLOCK_SCRIPT_SUFFIX,
+        ]
+        .iter()
+        .any(|suffix| path.ends_with(suffix));
+    script || project::is_stylesheet(path) || project::is_asset_path(path)
+}
+
+/// Where `id` is in `world`: each class and name from `game` down.
+fn tree_key(world: &World, id: InstanceId) -> Vec<(ClassName, String)> {
+    let mut key = Vec::new();
+    let mut at = Some(id);
+    while let Some(here) = at.and_then(|id| world.get(id)) {
+        key.push((here.class(), here.name().to_owned()));
+        at = here.parent();
+    }
+    key.reverse();
+    key
+}
+
+/// Names a hosted project the same way every time it's hosted from this
+/// computer: its host certificate and its folder.
+fn session_id(cert: &Fingerprint, project: &Path) -> String {
+    let folder = std::path::absolute(project).unwrap_or_else(|_| project.to_owned());
+    let mut bytes = cert.0.to_vec();
+    bytes.extend(folder.to_string_lossy().as_bytes());
+    Fingerprint::of(&bytes).to_hex()[..16].to_owned()
 }
 
 /// `world` as a session starts from: without what SplineMeshes and
@@ -217,6 +273,61 @@ pub(crate) struct Team {
     address: String,
     /// The newest invite link this editor made, to copy again.
     invite: Option<String>,
+    /// This editor's folder of the session's files (TC5): the project
+    /// folder when hosting, a folder of its own when joining.
+    mirror: Option<Mirror>,
+    /// When the mirror last looked at the folder.
+    mirror_synced: Option<std::time::Instant>,
+    /// Where a joining editor keeps the folders of the sessions it joins.
+    /// `None` when hosting, and in-process sessions without files.
+    mirrors_home: Option<PathBuf>,
+    /// The mirror's folder opens as the project once the session's files
+    /// are in it (a joining editor).
+    open_mirror: bool,
+}
+
+impl Team {
+    fn new(link: Link, address: String, invite: Option<String>) -> Team {
+        Team {
+            client: None,
+            link,
+            ended: false,
+            presence_sent: None,
+            problem: None,
+            address,
+            invite,
+            mirror: None,
+            mirror_synced: None,
+            mirrors_home: None,
+            open_mirror: false,
+        }
+    }
+
+    /// The folder this editor keeps the session's files in, once it has one.
+    pub(crate) fn files_folder(&self) -> Option<&Path> {
+        self.mirror.as_ref().map(Mirror::root)
+    }
+
+    /// True while the session's files are still arriving.
+    pub(crate) fn fetching_files(&self) -> bool {
+        match (&self.mirror, &self.client) {
+            (Some(mirror), Some(client)) => mirror.is_catching_up(client),
+            _ => false,
+        }
+    }
+
+    /// Who (other than this editor) is editing the document at `path`.
+    pub(crate) fn editing_elsewhere(&self, path: &str) -> Option<String> {
+        let client = self.client.as_ref()?;
+        let holder = client.lock_holder(path).filter(|&m| m != client.member())?;
+        Some(
+            client
+                .roster()
+                .iter()
+                .find(|c| c.member == holder)
+                .map_or_else(|| "Someone".to_owned(), |c| c.profile.name.clone()),
+        )
+    }
 }
 
 /// How a session is going, for the panel and the title bar chip.
@@ -314,15 +425,9 @@ impl EditorApp {
     pub(crate) fn join_team_session(&mut self, hub: SharedHub, member: MemberId) {
         let mut client = Client::new(member);
         client.connect();
-        self.team = Some(Team {
-            client: Some(client),
-            link: Link::Hub(hub),
-            ended: false,
-            presence_sent: None,
-            problem: None,
-            address: String::new(),
-            invite: None,
-        });
+        let mut team = Team::new(Link::Hub(hub), String::new(), None);
+        team.client = Some(client);
+        self.team = Some(team);
         self.team_frame();
     }
 
@@ -383,8 +488,17 @@ impl EditorApp {
             }
             Err(error) => return Err(format!("the members list: {error}")),
         };
+        // The project's files as they are now; the host keeps what members
+        // upload beside them, in `.axcenity` (never synced).
+        let (store, files) = FolderStore::open(&project)
+            .map_err(|e| format!("couldn't read the project's files: {e}"))?;
+        let session_id = session_id(&cert.fingerprint(), &project);
+        let mirror = Mirror::open(&project, &session_id, &identity.name);
+        let host = Host::new(session_world(self.world.clone()))
+            .with_files(files, Box::new(store))
+            .with_session(session_id);
         let mut session = HostSession::start(
-            Host::new(session_world(self.world.clone())),
+            host,
             access,
             Some(access_path),
             &cert,
@@ -401,18 +515,16 @@ impl EditorApp {
             None,
             Arc::new(identity),
         ));
-        self.team = Some(Team {
-            client: None,
-            link: Link::Net {
+        let mut team = Team::new(
+            Link::Net {
                 remote,
                 hosting: Some(hosting),
             },
-            ended: false,
-            presence_sent: None,
-            problem: None,
-            address: invite.host.clone(),
-            invite: Some(invite.link()),
-        });
+            invite.host.clone(),
+            Some(invite.link()),
+        );
+        team.mirror = Some(mirror);
+        self.team = Some(team);
         Ok(invite)
     }
 
@@ -434,18 +546,16 @@ impl EditorApp {
             identity.name,
             identity.public_key().fingerprint().short()
         ));
-        self.team = Some(Team {
-            client: None,
-            link: Link::Net {
+        let mut team = Team::new(
+            Link::Net {
                 remote: Box::new(Remote::join_invite(invite, Arc::new(identity))),
                 hosting: None,
             },
-            ended: false,
-            presence_sent: None,
-            problem: None,
-            address: invite.host.clone(),
-            invite: None,
-        });
+            invite.host.clone(),
+            None,
+        );
+        team.mirrors_home = Some(folder.join("Projects"));
+        self.team = Some(team);
         Ok(())
     }
 
@@ -601,6 +711,8 @@ impl EditorApp {
         }
         self.send_presence();
         let mut changed = false;
+        let mut file_changes = Vec::new();
+        let mut file_problem = None;
         for _ in 0..ROUNDS_PER_FRAME {
             let mut inbox = self.team_network();
             let label = self.history.undo_label().unwrap_or("Edit").to_owned();
@@ -609,6 +721,21 @@ impl EditorApp {
                 break;
             };
             let sent = client.capture(&mut self.world, label);
+            // The folder: saves go up, arrived files go in (TC5).
+            let due = team
+                .mirror_synced
+                .is_none_or(|at| at.elapsed() >= MIRROR_EVERY)
+                || client.files_waiting();
+            if let Some(mirror) = team.mirror.as_mut()
+                && due
+                && client.is_joined()
+            {
+                team.mirror_synced = Some(std::time::Instant::now());
+                match mirror.sync(client, &mut self.world) {
+                    Ok(changes) => file_changes.extend(changes),
+                    Err(error) => file_problem = Some(error.to_string()),
+                }
+            }
             let outbox = client.take_outbox();
             let busy = !outbox.is_empty();
             match &mut team.link {
@@ -637,6 +764,199 @@ impl EditorApp {
         if changed {
             self.forget_selection_outside_tree();
             self.generate_frame();
+        }
+        self.team_file_changes(file_changes, file_problem);
+        self.open_team_mirror_when_ready();
+        self.team_locks();
+    }
+
+    /// Publishes the files an import just wrote, with the Instances it
+    /// placed, as one transaction named `label` (one undo step for
+    /// everyone).
+    pub(super) fn team_publish_files(&mut self, label: &str) {
+        let Some(team) = self.team.as_mut() else {
+            return;
+        };
+        let (Some(client), Some(mirror)) = (team.client.as_mut(), team.mirror.as_mut()) else {
+            return;
+        };
+        if !client.is_joined()
+            || mirror.root() != self.project.as_ref().map_or(Path::new(""), |p| &p.folder)
+        {
+            return;
+        }
+        team.mirror_synced = Some(std::time::Instant::now());
+        let result = mirror.sync_as(client, &mut self.world, Some(label));
+        let (changes, problem) = match result {
+            Ok(changes) => (changes, None),
+            Err(error) => (Vec::new(), Some(error.to_string())),
+        };
+        self.team_file_changes(changes, problem);
+    }
+
+    /// Takes in what the mirror did: files the others changed are read
+    /// again, as if another program changed them.
+    fn team_file_changes(&mut self, changes: Vec<Change>, problem: Option<String>) {
+        if let Some(problem) = problem {
+            log::warn!("Team Create: the session's files: {problem}");
+        }
+        let in_project = match (&self.team, &self.project) {
+            (Some(team), Some(project)) => team.files_folder() == Some(project.folder.as_path()),
+            _ => false,
+        };
+        let mut read_again = Vec::new();
+        for change in changes {
+            match change {
+                Change::Wrote(path) | Change::Removed(path) => {
+                    if in_project && editor_reads(&path) {
+                        read_again.push(path);
+                    }
+                }
+                Change::Conflict { path, copy } => self.output.warning(format!(
+                    "Team Create: someone else saved `{path}` first. Yours is kept as `{copy}`."
+                )),
+                Change::Failed { path, reason } => self
+                    .output
+                    .warning(format!("Team Create: `{path}` wasn't shared: {reason}")),
+                Change::Published { .. } => {}
+            }
+        }
+        if !read_again.is_empty() {
+            self.disk_changed(&read_again);
+            self.asset_browser.refresh();
+        }
+    }
+
+    /// A joining editor: once the session's files are in its folder, opens
+    /// the folder as the project, with the session's World.
+    fn open_team_mirror_when_ready(&mut self) {
+        let Some(team) = self.team.as_mut() else {
+            return;
+        };
+        let ready = team.open_mirror
+            && !team.fetching_files()
+            && team
+                .files_folder()
+                .is_some_and(|root| root.join(project::MANIFEST_FILE).exists());
+        if !ready {
+            return;
+        }
+        team.open_mirror = false;
+        let root = team.files_folder().expect("checked above").to_owned();
+        self.open_team_mirror(&root);
+    }
+
+    /// Opens `root` (this editor's folder of the session's files) as the
+    /// project, keeping the session's World in place of the one it loads.
+    pub(super) fn open_team_mirror(&mut self, root: &Path) {
+        // A world file, so the folder opens as any project does. It stays
+        // on this computer (the World itself travels as operations).
+        let world_file = root.join(project::WORLD_FILE);
+        if let Err(error) = std::fs::write(&world_file, project::write_world(&self.world)) {
+            self.output.error(format!(
+                "Team Create: couldn't write `{}`: {error}",
+                world_file.display()
+            ));
+            return;
+        }
+        let session = std::mem::replace(&mut self.world, World::new());
+        self.open(root);
+        if self.project.as_ref().is_none_or(|p| p.folder != root) {
+            self.world = session;
+            self.output
+                .error("Team Create: couldn't open the session's files as a project");
+            return;
+        }
+        let loaded = std::mem::replace(&mut self.world, World::new());
+        self.replace_world(session);
+        self.history.set_shared(true);
+        self.generators = Default::default();
+        self.relink_to_session(&loaded);
+        self.output.info(format!(
+            "Team Create: opened the session's files (kept in `{}`)",
+            root.display()
+        ));
+    }
+
+    /// After the session's World took the place of the one a project load
+    /// made, points the project's scripts and UI graphs at the session's
+    /// Instances for them (the same class and names from `game` down). A
+    /// script the session has no Instance for gets one, which syncs.
+    fn relink_to_session(&mut self, loaded: &World) {
+        let Some(project) = self.project.as_mut() else {
+            return;
+        };
+        let world = &mut self.world;
+        let mut index: HashMap<Vec<(ClassName, String)>, VecDeque<InstanceId>> = HashMap::new();
+        for id in world.descendants(world.root()) {
+            index.entry(tree_key(world, id)).or_default().push_back(id);
+        }
+        let mut find = |id: InstanceId| index.get_mut(&tree_key(loaded, id))?.pop_front();
+        for script in &mut project.scripts {
+            script.instance = match find(script.instance) {
+                Some(id) => id,
+                None => project::add_script_instance(world, &script.path),
+            };
+        }
+        for document in &mut project.block_scripts {
+            if let Some(script) = project.scripts.iter().find(|s| s.path == document.path) {
+                document.instance = script.instance;
+            }
+        }
+        for document in &mut project.ui_graphs {
+            if let Some(id) = find(document.gui) {
+                document.gui = id;
+            }
+        }
+    }
+
+    /// For a script file that just appeared in a session: the Script the
+    /// author's editor made for it (it arrives as an edit before the file
+    /// does), if no other file has it.
+    pub(super) fn team_script_instance(&self, path: &str) -> Option<InstanceId> {
+        self.team.as_ref()?;
+        let project = self.project.as_ref()?;
+        let class = project::script_class(path);
+        let service = project::script_service(&self.world, class);
+        let name = project::script_name(path);
+        self.world
+            .get(service)?
+            .children()
+            .iter()
+            .copied()
+            .find(|&id| {
+                self.world
+                    .get(id)
+                    .is_some_and(|i| i.class() == class && i.name() == name)
+                    && !project.scripts.iter().any(|s| s.instance == id)
+            })
+    }
+
+    /// Asks to be the one editing each script with unsaved changes, lets
+    /// go of the rest, and marks tabs someone else is editing read-only.
+    fn team_locks(&mut self) {
+        let Some(team) = self.team.as_mut() else {
+            return;
+        };
+        let Some(client) = team.client.as_mut().filter(|c| c.is_joined()) else {
+            return;
+        };
+        let wanted: std::collections::BTreeSet<String> = self
+            .tabs
+            .unsaved_paths()
+            .into_iter()
+            .filter(|path| axcenity_collab::files::is_synced(path))
+            .collect();
+        let held = client.my_locks().clone();
+        for path in held.difference(&wanted) {
+            client.unlock(path);
+        }
+        for path in wanted.difference(&held) {
+            client.lock(path);
+        }
+        let team = self.team.as_ref().expect("checked above");
+        for tab in self.tabs.iter_mut() {
+            tab.editing_elsewhere = team.editing_elsewhere(&tab.path);
         }
     }
 
@@ -694,6 +1014,7 @@ impl EditorApp {
                     self.generators = Default::default();
                     self.selection.clear();
                     self.selected = None;
+                    self.start_team_mirror();
                 }
                 Notice::Changed { label, notes, .. } => self.output.warning(format!(
                     "Team Create: \"{label}\" didn't apply in full: someone deleted what it \
@@ -715,6 +1036,43 @@ impl EditorApp {
                 ),
             }
         }
+    }
+
+    /// A joining editor's folder for the session's files: one per session,
+    /// under the Team Create data folder, kept for next time.
+    fn start_team_mirror(&mut self) {
+        let Some(team) = self.team.as_mut() else {
+            return;
+        };
+        let (Some(home), Some(client)) = (team.mirrors_home.clone(), team.client.as_ref()) else {
+            return;
+        };
+        if team.mirror.is_some() {
+            return;
+        }
+        let session = client.session().unwrap_or_default().to_owned();
+        if session.is_empty() || !session.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return;
+        }
+        let me = client.member();
+        let name = client
+            .roster()
+            .iter()
+            .find(|c| c.member == me)
+            .map_or_else(|| "member".to_owned(), |c| c.profile.name.clone());
+        let root = home.join(&session);
+        if let Err(error) = std::fs::create_dir_all(&root) {
+            self.output.error(format!(
+                "Team Create: couldn't make a folder for the session's files: {error}"
+            ));
+            return;
+        }
+        team.mirror = Some(Mirror::open(&root, &session, &name));
+        team.open_mirror = self.project.as_ref().is_none_or(|p| p.folder != root);
+        self.output.info(format!(
+            "Team Create: fetching the session's files into `{}`",
+            root.display()
+        ));
     }
 
     /// The newest step changed something Team Create doesn't share yet.

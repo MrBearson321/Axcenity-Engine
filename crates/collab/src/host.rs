@@ -79,6 +79,9 @@ pub struct Host {
     locks: BTreeMap<String, Lock>,
     /// The time as of the last [`Host::tick`].
     clock: Instant,
+    /// Names this session's project, so each member's folder for it is
+    /// told apart from folders of other sessions.
+    session: String,
 }
 
 impl Host {
@@ -96,7 +99,14 @@ impl Host {
             store: Box::new(MemoryStore::default()),
             locks: BTreeMap::new(),
             clock: Instant::now(),
+            session: String::new(),
         }
+    }
+
+    /// Names the session's project (the same each time it's hosted).
+    pub fn with_session(mut self, session: impl Into<String>) -> Host {
+        self.session = session.into();
+        self
     }
 
     /// Hosts the project's files too: `files` names them, `store` has
@@ -544,6 +554,7 @@ impl Host {
                 ids: Some(block),
                 rejected,
                 files: self.doc.files.clone(),
+                session: self.session.clone(),
             },
         }]
     }

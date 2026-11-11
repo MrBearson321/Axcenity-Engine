@@ -138,6 +138,18 @@ impl Mirror {
     /// editor would hand the client a message, not in the middle of a
     /// drag.
     pub fn sync(&mut self, client: &mut Client, world: &mut World) -> io::Result<Vec<Change>> {
+        self.sync_as(client, world, None)
+    }
+
+    /// [`Mirror::sync`], naming the step that publishes what changed
+    /// `label` (an import: its files and the model placed from them go as
+    /// one step).
+    pub fn sync_as(
+        &mut self,
+        client: &mut Client,
+        world: &mut World,
+        label: Option<&str>,
+    ) -> io::Result<Vec<Change>> {
         if !client.is_joined() {
             return Ok(Vec::new());
         }
@@ -241,7 +253,7 @@ impl Mirror {
         }
 
         if !publish.is_empty() {
-            changes.extend(self.publish(client, world, publish));
+            changes.extend(self.publish(client, world, publish, label));
         }
         let now = Instant::now();
         want.retain(|hash| {
@@ -311,10 +323,12 @@ impl Mirror {
         client: &mut Client,
         world: &mut World,
         publish: Vec<(String, Option<Bytes>)>,
+        label: Option<&str>,
     ) -> Vec<Change> {
-        let label = match publish.as_slice() {
-            [(path, _)] => format!("Save {path}"),
-            list => format!("Save {} files", list.len()),
+        let label = match (label, publish.as_slice()) {
+            (Some(label), _) => label.to_owned(),
+            (None, [(path, _)]) => format!("Save {path}"),
+            (None, list) => format!("Save {} files", list.len()),
         };
         let versions: Vec<(String, Option<FileHash>)> = publish
             .iter()
