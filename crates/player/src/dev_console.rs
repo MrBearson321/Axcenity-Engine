@@ -88,6 +88,9 @@ pub struct FrameStats {
     /// The newest drawing numbers, while someone is looking.
     render: Option<axcenity_render::RenderStats>,
     gpu_readings: u64,
+    /// The game's memory by kind (roadmap G7), asked every
+    /// `MEMORY_EVERY` frames while the Stats tab is showing.
+    breakdown: Option<axcenity_core::memory::MemoryBreakdown>,
 }
 
 impl FrameStats {
@@ -150,6 +153,17 @@ impl FrameStats {
 }
 
 impl App {
+    /// Asks for the game's memory breakdown on the frames the process's
+    /// memory is read, while the Stats tab is showing (it walks every
+    /// Instance and asset). Call before `FrameStats::finish`.
+    pub(crate) fn note_memory(&mut self) {
+        if self.console.showing_stats() && self.frame_stats.frame.is_multiple_of(MEMORY_EVERY) {
+            let mut memory = self.sim.memory();
+            memory.sounds = self.audio.memory();
+            self.frame_stats.breakdown = Some(memory);
+        }
+    }
+
     /// F9, and every key while the console is open. True when the console
     /// took the key, so the game doesn't see it. Opening it lets go of the
     /// game's held keys.
@@ -384,6 +398,7 @@ impl App {
             memory_bytes: stats.memory,
             lua_bytes: self.sim.scripts.used_memory(),
             instances: self.sim.world.len(),
+            breakdown: stats.breakdown.clone(),
             network,
             ..ConsoleStats::default()
         }

@@ -1413,6 +1413,7 @@ impl App {
                 stats.shadow_casters_drawn
             );
         }
+        self.note_memory();
         self.frame_stats
             .finish(real_seconds, &watch, render_stats.as_ref());
         profiling::finish_frame!();

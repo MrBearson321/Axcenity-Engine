@@ -39,6 +39,7 @@ mod import;
 mod light_probes;
 mod loading;
 mod material;
+mod memory;
 mod model;
 mod orphaned;
 mod probe;
@@ -94,6 +95,7 @@ pub use material::{
     WaterFile, is_material_file, material_json, parse_material, read_material_file,
     write_material_file,
 };
+pub use memory::{AssetMemory, CacheUse, model_bytes};
 pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys,
     LevelReport, LodReport, LodWarning, MESH_CACHE_FOLDER, MODEL_CACHE_FOLDER, MapSlot, Model,

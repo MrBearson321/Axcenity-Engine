@@ -309,3 +309,13 @@ fn adding_an_effect_rebuilds_the_bus_and_the_music_carries_on() {
     let after = rig.engine.sounds[&sound].handle.position();
     assert!(after >= before, "from where it was: {before} then {after}");
 }
+
+#[test]
+fn the_decoded_sounds_memory_is_their_samples() {
+    let rig = Rig::new();
+    let used = rig.engine.memory();
+    assert_eq!(used.count, 2);
+    // A second of noise and half a second of steps, two f32s a frame.
+    let frames = RATE as usize + STEP_PERIOD;
+    assert_eq!(used.bytes, frames * 8);
+}

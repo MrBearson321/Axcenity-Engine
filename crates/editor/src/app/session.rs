@@ -877,6 +877,9 @@ impl EditorApp {
             session.frame(seconds, input, motion, camera, &mut self.output)
         });
         if let Some(cost) = session.cost() {
+            if self.profiler.memory_due() {
+                self.profiler.record_memory(session.memory());
+            }
             self.profiler.record_game(cost, session.load());
         }
         let network = session

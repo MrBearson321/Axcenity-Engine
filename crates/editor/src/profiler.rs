@@ -3,9 +3,11 @@
 //! already take. The panel only reads them, so closing it changes nothing
 //! in the game.
 //!
-//! Two tabs: **Game** (frame rate, memory, physics, audio, scripts and
-//! the network) and **Graphics** (frame and pass times, draws, culling,
-//! levels of detail, GPU memory and shaders, all from [`RenderStats`]).
+//! Three tabs: **Game** (frame rate, memory, physics, audio, scripts and
+//! the network), **Graphics** (frame and pass times, draws, culling,
+//! levels of detail, GPU memory and shaders, all from [`RenderStats`]) and
+//! **Memory** (roadmap G7: what the game holds by kind, from
+//! `Session::memory`, the GPU's share, and the Instances by class).
 //!
 //! Readings start fresh at each Play, update every frame, and freeze at
 //! Stop. The player has no profiler.
@@ -14,6 +16,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use axcenity_core::bench::{Bound, FramePacing};
+use axcenity_core::memory::MemoryBreakdown;
 use axcenity_render::{FramePass, LOD_LEVELS, RenderStats, SHADOW_CASCADE_COUNT, ShaderError};
 use eframe::egui::{self, RichText};
 
@@ -26,6 +29,8 @@ const WINDOW: usize = 120;
 /// Asking the OS for the process's memory every frame would be wasted
 /// work; every this many frames is plenty.
 const MEMORY_EVERY: u64 = 15;
+/// How many classes the Memory tab lists, the most bytes first.
+const MEMORY_CLASSES: usize = 12;
 /// How many shader messages the Graphics tab keeps, newest last.
 const SHADER_MESSAGES: usize = 20;
 
@@ -116,6 +121,7 @@ pub enum Tab {
     #[default]
     Game,
     Graphics,
+    Memory,
 }
 
 /// The profiler's numbers for the `fps` readout ([`Profiler::readout`]).
@@ -137,6 +143,8 @@ pub struct Profiler {
     /// The process's resident memory, as last asked; `None` where the OS
     /// doesn't say.
     memory: Option<usize>,
+    /// The game's memory by kind, as last asked ([`Profiler::memory_due`]).
+    breakdown: Option<MemoryBreakdown>,
     /// Each client's connection to the server, as last measured (Play with
     /// several clients, Phase 67).
     network: Vec<NetworkRow>,
@@ -207,6 +215,25 @@ impl Profiler {
             render: render.unwrap_or_default(),
             interval,
         });
+    }
+
+    /// True on the frames the game's memory breakdown should be asked for
+    /// and handed to [`record_memory`](Self::record_memory): it walks every
+    /// Instance and asset, so every few frames while live.
+    pub fn memory_due(&self) -> bool {
+        self.is_live() && self.frames.is_multiple_of(MEMORY_EVERY)
+    }
+
+    /// The game's memory by kind, for the Memory tab.
+    pub fn record_memory(&mut self, breakdown: MemoryBreakdown) {
+        if self.is_live() {
+            self.breakdown = Some(breakdown);
+        }
+    }
+
+    /// The memory breakdown last recorded, for the Developer Console.
+    pub fn breakdown(&self) -> Option<&MemoryBreakdown> {
+        self.breakdown.as_ref()
     }
 
     /// Each client's connection this frame.
@@ -342,7 +369,11 @@ impl Profiler {
             widgets::segmented(
                 ui,
                 &mut self.tab,
-                &[(Tab::Game, None, "Game"), (Tab::Graphics, None, "Graphics")],
+                &[
+                    (Tab::Game, None, "Game"),
+                    (Tab::Graphics, None, "Graphics"),
+                    (Tab::Memory, None, "Memory"),
+                ],
             );
             ui.label(RichText::new(theme::with_icon(theme::icons::CIRCLE, status)).color(color));
         });
@@ -369,6 +400,7 @@ impl Profiler {
                 match self.tab {
                     Tab::Game => self.game(ui, summary),
                     Tab::Graphics => self.graphics(ui, summary),
+                    Tab::Memory => self.memory(ui, summary),
                 }
             });
     }
@@ -527,6 +559,63 @@ impl Profiler {
             row(ui, "Total", bytes(total as usize));
         });
         self.shaders(ui, Some(stats));
+    }
+
+    /// The Memory tab: the process, what the game holds by kind (CPU),
+    /// the GPU's share, and the classes with the most bytes.
+    fn memory(&self, ui: &mut egui::Ui, summary: &Summary) {
+        let stats = &summary.stats;
+        let gpu = stats.texture_bytes + stats.mesh_bytes + stats.target_bytes + stats.buffer_bytes;
+        section(ui, "Process", |ui| {
+            row(
+                ui,
+                "Editor process",
+                summary.memory.map_or("-".into(), bytes),
+            );
+            if let Some(breakdown) = &self.breakdown {
+                row(ui, "Game (counted)", bytes(breakdown.total()));
+            }
+            row(ui, "GPU", bytes(gpu as usize));
+        });
+        let Some(breakdown) = &self.breakdown else {
+            return;
+        };
+        section(ui, "Game, by kind", |ui| {
+            for (name, count, size) in breakdown.rows() {
+                let value = match count {
+                    Some(count) => format!("{} ({})", bytes(size), thousands(count as u64)),
+                    None => bytes(size),
+                };
+                row(ui, name, value);
+            }
+        });
+        section(ui, "Instances by class", |ui| {
+            for (class, used) in breakdown.instances.classes.iter().take(MEMORY_CLASSES) {
+                row(
+                    ui,
+                    class.as_str(),
+                    format!("{} ({})", bytes(used.bytes), thousands(used.count as u64)),
+                );
+            }
+            let more = breakdown
+                .instances
+                .classes
+                .len()
+                .saturating_sub(MEMORY_CLASSES);
+            if more > 0 {
+                row(ui, "Other classes", more.to_string());
+            }
+        });
+        let palette = theme::palette(ui.ctx());
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new(
+                "Estimates of what each part holds; the process also has the editor, \
+                 fonts and the allocator's spare room.",
+            )
+            .color(palette.text_weak)
+            .size(type_scale::CAPTION),
+        );
     }
 
     /// The surface shaders compiled, once a frame was drawn, and the
@@ -960,9 +1049,10 @@ mod tests {
     }
 
     #[test]
-    fn both_tabs_fit_a_narrow_column() {
+    fn every_tab_fits_a_narrow_column() {
         let mut profiler = Profiler::default();
         profiler.start();
+        profiler.record_memory(breakdown());
         profiler.record_game(frame(1), GameLoad::default());
         profiler.record_render(timed_render(2));
         profiler.record_shader_errors(&[ShaderError {
@@ -973,7 +1063,11 @@ mod tests {
         }]);
         let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from);
         let size = egui::vec2(260.0, 1400.0);
-        for (tab, name) in [(Tab::Game, "game"), (Tab::Graphics, "graphics")] {
+        for (tab, name) in [
+            (Tab::Game, "game"),
+            (Tab::Graphics, "graphics"),
+            (Tab::Memory, "memory"),
+        ] {
             profiler.tab = tab;
             let mut fit = None;
             let mut draw = |ctx: &egui::Context| {
@@ -1003,6 +1097,83 @@ mod tests {
                 room.width()
             );
         }
+    }
+
+    /// A breakdown with every row different, and more classes than are
+    /// listed.
+    fn breakdown() -> MemoryBreakdown {
+        use axcenity_core::ClassName;
+        use axcenity_core::memory::{InstanceMemory, MemoryUse};
+        let used = |count, megabytes: usize| MemoryUse {
+            count,
+            bytes: megabytes << 20,
+        };
+        let classes: Vec<_> = ClassName::ALL
+            .iter()
+            .filter(|class| !class.is_service())
+            .take(MEMORY_CLASSES + 3)
+            .enumerate()
+            .map(|(index, &class)| (class, used(100 - index, 40 - index)))
+            .collect();
+        MemoryBreakdown {
+            lua: 3 << 20,
+            instances: InstanceMemory {
+                total: used(10_234, 21),
+                classes,
+            },
+            models: used(4, 50),
+            textures: used(12, 300),
+            lighting: used(2, 9),
+            sounds: used(6, 17),
+            physics: used(10_001, 8),
+        }
+    }
+
+    #[test]
+    fn the_memory_tab_lists_each_kind_and_the_biggest_classes() {
+        use axcenity_core::ClassName;
+        let mut profiler = Profiler::default();
+        assert!(!profiler.memory_due(), "not playing");
+        profiler.start();
+        assert!(profiler.memory_due(), "the first frame");
+        profiler.record_memory(breakdown());
+        profiler.record_game(frame(1), GameLoad::default());
+        assert!(!profiler.memory_due(), "every few frames");
+        profiler.record_render(RenderCost {
+            stats: RenderStats {
+                texture_bytes: 64 << 20,
+                mesh_bytes: 32 << 20,
+                ..RenderStats::default()
+            },
+            ..RenderCost::default()
+        });
+        profiler.tab = Tab::Memory;
+        let text = shown_text(&mut profiler);
+        for line in [
+            "GPU\n96.0 MB",
+            "Game (counted)\n408.0 MB",
+            "Lua\n3.0 MB",
+            "Instances\n21.0 MB (10,234)",
+            "Models\n50.0 MB (4)",
+            "Textures\n300.0 MB (12)",
+            "Sky and probes\n9.0 MB (2)",
+            "Sounds\n17.0 MB (6)",
+            "Physics\n8.0 MB (10,001)",
+            "Other classes\n3",
+        ] {
+            assert!(text.contains(line), "{line:?} in {text}");
+        }
+        let first = ClassName::ALL.iter().find(|c| !c.is_service()).unwrap();
+        assert!(
+            text.contains(&format!("{}\n40.0 MB (100)", first.as_str())),
+            "{text}"
+        );
+
+        // Stopped, the last breakdown stays and no new one is taken.
+        profiler.stop();
+        assert!(!profiler.memory_due());
+        profiler.record_memory(MemoryBreakdown::default());
+        assert_eq!(profiler.breakdown(), Some(&breakdown()));
     }
 
     /// A world of `parts` parts in a row in front of the camera.
