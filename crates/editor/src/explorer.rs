@@ -1303,7 +1303,9 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             "Save it as a prefab, with every model, texture, sound and clip it uses, in one \
              .axpkg file to import into another project.",
         )
-        .on_disabled_hover_text("Only parts, Models and Folders in the Workspace can be exported.")
+        .on_disabled_hover_text(
+            "Only parts, Models, Folders and UI in the Workspace can be exported.",
+        )
         .clicked()
     {
         chosen = Some(RowCommand::ExportPackage);
