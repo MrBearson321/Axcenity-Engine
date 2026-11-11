@@ -235,10 +235,15 @@ impl EditorApp {
                     "Image" => crate::asset_browser::IMAGES_FOLDER,
                     _ => axcenity_assets::PROJECT_TEXTURES_FOLDER,
                 };
-                self.pick_texture(folder).map(|path| (name, path))
+                self.pick_texture(folder)
+                    .map(|path| (name, self.reference_to(path)))
             }
-            Edit::PickGradingFile(name) => self.pick_grading_file(name).map(|path| (name, path)),
-            Edit::PickAudio => self.pick_audio().map(|path| ("SoundId", path)),
+            Edit::PickGradingFile(name) => self
+                .pick_grading_file(name)
+                .map(|path| (name, self.reference_to(path))),
+            Edit::PickAudio => self
+                .pick_audio()
+                .map(|path| ("SoundId", self.reference_to(path))),
             Edit::PickController => self.pick_controller().map(|path| ("StateMachine", path)),
             Edit::PickBehaviorTree => self.pick_behavior_tree().map(|path| ("BehaviorTree", path)),
             Edit::PickClip => self.pick_property_clip().map(|path| ("Clip", path)),

@@ -1,6 +1,21 @@
 use super::*;
 
 impl EditorApp {
+    /// How a reference to the project file at `path` (maybe with a model's
+    /// `#pick`) is written into the world: by its asset ID, so it keeps
+    /// working when the file is renamed or moved, giving the file one first
+    /// if it takes one (a file just imported has none yet). Else the path.
+    pub(in crate::app) fn reference_to(&self, path: String) -> String {
+        let Some(folder) = self.project.as_ref().map(|project| &project.folder) else {
+            return path;
+        };
+        let file = path.split('#').next().unwrap_or(&path);
+        if let Err(err) = axcenity_assets::give_asset_id(folder, file) {
+            log::warn!("couldn't give `{file}` an asset ID: {err}");
+        }
+        self.assets.asset_reference(&path)
+    }
+
     /// Asks for a texture file with the system's file picker, for a map
     /// in Properties, and returns its path in the project: a file outside
     /// the project is copied into `assets/textures` first. `None` if

@@ -13,6 +13,7 @@ use axcenity_core::{
     is_attribute_name,
 };
 
+use axcenity_assets::{Assets, is_asset_reference};
 use eframe::egui;
 
 use crate::history::Field;
@@ -622,6 +623,7 @@ pub fn can_rename_here(instance: &Instance) -> bool {
 pub fn show(
     ui: &mut egui::Ui,
     world: &World,
+    assets: &Assets,
     selected: Option<InstanceId>,
     playing: bool,
     kept: &[(Field, bool)],
@@ -891,7 +893,7 @@ pub fn show(
                                 Edit::Property(name, Value::PhysicalProperties(custom))
                             })
                         }
-                        value => value_control(ui, name, value),
+                        value => value_control(ui, name, value, assets),
                     })
                     .inner;
                     if made.is_some() {
@@ -1432,17 +1434,33 @@ fn notice(ui: &mut egui::Ui, icon: &str, text: &str) {
 
 /// Draws the control for one property and returns the edit if the user
 /// changed it this frame.
-fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<Edit> {
+fn value_control(
+    ui: &mut egui::Ui,
+    name: &'static str,
+    value: Value,
+    assets: &Assets,
+) -> Option<Edit> {
     match value {
-        Value::String(path) if is_map(name) => map_control(ui, name, &path),
-        Value::String(path) if name == "SoundId" => sound_control(ui, &path),
+        Value::String(path) if is_map(name) => map_control(ui, name, &path, assets),
+        Value::String(path) if name == "SoundId" => sound_control(ui, &path, assets),
         Value::String(path) if name == "Image" => image_control(ui, &path),
-        Value::String(path) if name == "StateMachine" => controller_control(ui, &path),
-        Value::String(path) if name == "Clip" => clip_control(ui, &path),
+        Value::String(path) if name == "StateMachine" => controller_control(ui, &path, assets),
+        Value::String(path) if name == "Clip" => clip_control(ui, &path, assets),
         Value::String(path) if name == "BehaviorTree" => behavior_tree_control(ui, &path),
-        Value::String(path) if name == "SkyImage" => sky_control(ui, &path),
+        Value::String(path) if name == "SkyImage" => sky_control(ui, &path, assets),
         Value::String(path) if matches!(name, "LookupTable" | "Palette") => {
-            grading_control(ui, name, &path)
+            grading_control(ui, name, &path, assets)
+        }
+        // A model named by its asset ID shows the file it names.
+        Value::String(mesh_id) if name == "MeshId" && is_asset_reference(&mesh_id) => {
+            let shown = assets
+                .asset_path(&mesh_id)
+                .unwrap_or_else(|| format!("(no file has the ID {mesh_id})"));
+            let hover =
+                format!("{mesh_id}\n(the model's asset ID: it follows the file when it moves)");
+            ui.add_enabled(false, egui::TextEdit::singleline(&mut shown.as_str()))
+                .on_disabled_hover_text(hover);
+            None
         }
         // Picked by the editor; the Terrain Studio says where it is.
         Value::String(path) if name == "DataFolder" => {
@@ -1458,9 +1476,30 @@ fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<
     }
 }
 
+/// The name of the file `reference` names, with its project path on hover.
+/// A reference by asset ID shows the file with that ID, or says no file has
+/// it (its sidecar may be gone; Asset Check lists it).
+fn file_label(ui: &mut egui::Ui, assets: &Assets, reference: &str) {
+    let Some(path) = assets.asset_path(reference) else {
+        ui.weak("No file has this ID").on_hover_text(format!(
+            "No file in the project has the asset ID {reference}: its .import.json \
+             sidecar may be gone. Asset Check lists it."
+        ));
+        return;
+    };
+    let hover = if path == reference {
+        path.clone()
+    } else {
+        format!("{path}\n(by its asset ID {reference}, so it follows the file when it moves)")
+    };
+    let file = path.rsplit('/').next().unwrap_or(&path);
+    ui.add(egui::Label::new(file).truncate())
+        .on_hover_text(hover);
+}
+
 /// A texture map's file, with buttons to pick another and to clear it.
 /// Typing isn't offered: each half-typed path would be loaded, and fail.
-fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit> {
+fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str, assets: &Assets) -> Option<Edit> {
     let mut edit = None;
     ui.horizontal(|ui| {
         if ui
@@ -1481,9 +1520,7 @@ fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit
         {
             edit = Some(Edit::Property(name, Value::String(String::new())));
         }
-        let file = path.rsplit('/').next().unwrap_or(path);
-        ui.add(egui::Label::new(file).truncate())
-            .on_hover_text(path);
+        file_label(ui, assets, path);
     });
     edit
 }
@@ -1535,7 +1572,12 @@ fn image_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
 
 /// A ColorCorrectionEffect's lookup table or palette file, with buttons to
 /// pick one and to use none.
-fn grading_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit> {
+fn grading_control(
+    ui: &mut egui::Ui,
+    name: &'static str,
+    path: &str,
+    assets: &Assets,
+) -> Option<Edit> {
     let mut edit = None;
     ui.horizontal(|ui| {
         let hover = if name == "LookupTable" {
@@ -1562,9 +1604,7 @@ fn grading_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<
         {
             edit = Some(Edit::Property(name, Value::String(String::new())));
         }
-        let file = path.rsplit('/').next().unwrap_or(path);
-        ui.add(egui::Label::new(file).truncate())
-            .on_hover_text(path);
+        file_label(ui, assets, path);
     });
     edit
 }
@@ -1572,7 +1612,7 @@ fn grading_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<
 /// Lighting's sky image, with buttons to pick a file and to go back to the
 /// sky colors. A sky dragged from the Assets panel can be let go on it.
 /// Both ask before the sky changes.
-fn sky_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+fn sky_control(ui: &mut egui::Ui, path: &str, assets: &Assets) -> Option<Edit> {
     let mut edit = None;
     let row = ui.horizontal(|ui| {
         if ui
@@ -1595,9 +1635,7 @@ fn sky_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         {
             edit = Some(Edit::Property("SkyImage", Value::String(String::new())));
         }
-        let file = path.rsplit('/').next().unwrap_or(path);
-        ui.add(egui::Label::new(file).truncate())
-            .on_hover_text(path);
+        file_label(ui, assets, path);
     });
     if let Some(held) = row
         .response
@@ -1622,7 +1660,7 @@ fn sky_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
 }
 
 /// A property Animation's clip file.
-fn clip_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+fn clip_control(ui: &mut egui::Ui, path: &str, assets: &Assets) -> Option<Edit> {
     let mut edit = None;
     ui.horizontal(|ui| {
         if ui
@@ -1650,15 +1688,13 @@ fn clip_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         {
             edit = Some(Edit::Property("Clip", Value::String(String::new())));
         }
-        let file = path.rsplit('/').next().unwrap_or(path);
-        ui.add(egui::Label::new(file).truncate())
-            .on_hover_text(path);
+        file_label(ui, assets, path);
     });
     edit
 }
 
 /// An Animator's controller file, with buttons to pick another and to clear it.
-fn controller_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+fn controller_control(ui: &mut egui::Ui, path: &str, assets: &Assets) -> Option<Edit> {
     let mut edit = None;
     ui.horizontal(|ui| {
         if ui
@@ -1686,9 +1722,7 @@ fn controller_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         {
             edit = Some(Edit::Property("StateMachine", Value::String(String::new())));
         }
-        let file = path.rsplit('/').next().unwrap_or(path);
-        ui.add(egui::Label::new(file).truncate())
-            .on_hover_text(path);
+        file_label(ui, assets, path);
     });
     edit
 }
@@ -1731,7 +1765,7 @@ fn behavior_tree_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
 }
 
 /// A Sound's file, with buttons to pick another, and to hear it.
-fn sound_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+fn sound_control(ui: &mut egui::Ui, path: &str, assets: &Assets) -> Option<Edit> {
     let mut edit = None;
     ui.horizontal(|ui| {
         if ui
@@ -1759,9 +1793,7 @@ fn sound_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         {
             edit = Some(Edit::PreviewSound(false));
         }
-        let file = path.rsplit('/').next().unwrap_or(path);
-        ui.add(egui::Label::new(file).truncate())
-            .on_hover_text(path);
+        file_label(ui, assets, path);
     });
     edit
 }
@@ -2424,7 +2456,15 @@ mod attribute_section_tests {
         let mut draw = |ctx: &egui::Context| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let room = ui.max_rect();
-                edit = show(ui, &world, Some(folder), false, &[], |_| {});
+                edit = show(
+                    ui,
+                    &world,
+                    &Assets::default(),
+                    Some(folder),
+                    false,
+                    &[],
+                    |_| {},
+                );
                 fit = Some((ui.min_rect(), room));
             });
         };
@@ -2493,7 +2533,15 @@ mod physics_section_tests {
         let mut draw = |ctx: &egui::Context| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let room = ui.max_rect();
-                edit = show(ui, &world, Some(part), false, &[], |_| {});
+                edit = show(
+                    ui,
+                    &world,
+                    &Assets::default(),
+                    Some(part),
+                    false,
+                    &[],
+                    |_| {},
+                );
                 fit = Some((ui.min_rect(), room));
             });
         };
@@ -2567,7 +2615,15 @@ mod prefab_override_tests {
         let mut draw = |ctx: &egui::Context| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let room = ui.max_rect();
-                edit = show(ui, &world, Some(part), false, &[], |_| {});
+                edit = show(
+                    ui,
+                    &world,
+                    &Assets::default(),
+                    Some(part),
+                    false,
+                    &[],
+                    |_| {},
+                );
                 fit = Some((ui.min_rect(), room));
             });
         };
@@ -2686,7 +2742,7 @@ mod decal_section_tests {
             };
             let output = ctx.run(input, |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    let _ = show(ui, world, Some(id), false, &[], |_| {});
+                    let _ = show(ui, world, &Assets::default(), Some(id), false, &[], |_| {});
                 });
             });
             found.clear();
@@ -2726,7 +2782,15 @@ mod decal_section_tests {
             let mut edit = None;
             let output = ctx.run(input, |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    edit = show(ui, world, Some(id), playing, &[], |_| {});
+                    edit = show(
+                        ui,
+                        world,
+                        &Assets::default(),
+                        Some(id),
+                        playing,
+                        &[],
+                        |_| {},
+                    );
                 });
             });
             let mut at = None;
@@ -2807,7 +2871,15 @@ mod decal_section_tests {
                         d.insert_temp(egui::Id::new("properties filter"), String::new())
                     });
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        let _ = show(ui, &world, Some(part), false, &[], |_| {});
+                        let _ = show(
+                            ui,
+                            &world,
+                            &Assets::default(),
+                            Some(part),
+                            false,
+                            &[],
+                            |_| {},
+                        );
                     });
                 },
             );
@@ -2869,7 +2941,15 @@ mod decal_section_tests {
                         d.insert_temp(egui::Id::new("properties filter"), String::new())
                     });
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        let _ = show(ui, &world, Some(part), false, &[], |_| {});
+                        let _ = show(
+                            ui,
+                            &world,
+                            &Assets::default(),
+                            Some(part),
+                            false,
+                            &[],
+                            |_| {},
+                        );
                     });
                 },
             );
@@ -2948,7 +3028,15 @@ mod decal_section_tests {
                         d.insert_temp(egui::Id::new("properties filter"), filter.to_owned())
                     });
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        let _ = show(ui, &world, Some(part), false, &[], |_| {});
+                        let _ = show(
+                            ui,
+                            &world,
+                            &Assets::default(),
+                            Some(part),
+                            false,
+                            &[],
+                            |_| {},
+                        );
                     });
                 };
                 let frames = match hover {

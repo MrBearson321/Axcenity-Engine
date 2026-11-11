@@ -69,6 +69,7 @@ fn editable_together(name: &str, value: &Value) -> bool {
 pub fn show_many(
     ui: &mut egui::Ui,
     world: &World,
+    assets: &Assets,
     ids: &[InstanceId],
     playing: bool,
 ) -> Option<Edit> {
@@ -255,7 +256,7 @@ pub fn show_many(
                                         Edit::Property(name, Value::PhysicalProperties(custom))
                                     })
                                 }
-                                value => value_control(ui, name, value),
+                                value => value_control(ui, name, value, assets),
                             })
                             .inner;
                         if made.is_some() {

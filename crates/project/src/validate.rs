@@ -608,6 +608,37 @@ impl Scan {
         if path.is_empty() {
             return;
         }
+        // A reference by asset ID is checked as the path of the file with
+        // that ID.
+        let named;
+        let path = if axcenity_assets::is_asset_reference(path) {
+            match self.loader.asset_path(path) {
+                Some(found) => {
+                    named = found;
+                    named.as_str()
+                }
+                None => {
+                    let from_asset = !matches!(site, Site::Instance { .. });
+                    self.push(
+                        if from_asset {
+                            FindingKind::BrokenDependency
+                        } else {
+                            FindingKind::MissingFile
+                        },
+                        owner.to_owned(),
+                        path.to_owned(),
+                        format!(
+                            "`{property}` names the asset ID `{path}`, which no file in the project has (its sidecar may be gone)"
+                        ),
+                        site,
+                        Some(kind),
+                    );
+                    return;
+                }
+            }
+        } else {
+            path
+        };
         let from_asset = !matches!(site, Site::Instance { .. });
         let (file, pick) = match kind {
             AssetKind::Model => Pick::of_mesh_id(path),

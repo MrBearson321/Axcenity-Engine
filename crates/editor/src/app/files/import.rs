@@ -583,7 +583,8 @@ impl EditorApp {
     }
 
     /// A new MeshPart showing `model` (loaded from `mesh_id`), centered on
-    /// `position`, with no parent yet.
+    /// `position`, with no parent yet. Its MeshId names the file by its
+    /// asset ID ([`reference_to`](Self::reference_to)).
     pub(in crate::app) fn new_mesh_part(
         &mut self,
         mesh_id: String,
@@ -591,6 +592,7 @@ impl EditorApp {
         position: Vector3,
     ) -> InstanceId {
         let id = tree::create(&mut self.world, Insertable::MeshPart, position);
+        let mesh_id = self.reference_to(mesh_id);
         for (property, value) in mesh_part_properties(mesh_id, model) {
             self.world
                 .set_property(id, property, value)
