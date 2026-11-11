@@ -761,8 +761,9 @@ impl EditorApp {
 }
 
 impl EditorApp {
-    /// The overlay toggles, for the ribbon's Overlays menu.
-    fn overlay_items(&mut self, ui: &mut egui::Ui) {
+    /// The overlay toggles, for the ribbon's Overlays menu and the menu
+    /// bar's Viewport menu.
+    pub(in crate::app) fn overlay_items(&mut self, ui: &mut egui::Ui) {
         let overlays = &mut self.overlays;
         let items: [(&mut bool, &'static str, &'static str, &'static str); 8] = [
             (
