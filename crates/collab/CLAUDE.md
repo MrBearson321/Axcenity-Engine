@@ -1,6 +1,6 @@
 # `collab`
 
-- Team Create's sync core (TC1 and TC2 of `docs/research/team-create.md`; ADR-0020): operations (`op.rs`), applying them with the conflict rules and their exact inverses (`apply.rs`), turning a World's edit journal into ops (`capture.rs`), ID blocks (`ids.rs`), roles (`role.rs`), messages (`message.rs`), the host (`host.rs`) and the client (`client.rs`).
-- Depends on `core` only: no network, files, UI or scripts. The transport, identity and editor wiring come in TC2 and TC3.
-- The client works on the editor's own World (passed in to every call), which records edits (`World::record_edits`); tools edit it directly and `Client::capture` sends each undo step. Synced Instances use IDs from the writer's blocks (`World::add_id_block`); every world here is in replica mode.
-- Tests: `tests.rs` (each conflict rule), `capture_tests.rs` (edits made straight on a World) and `convergence_tests.rs` (random edits, as ops and straight on the World, over a simulated network with reconnects). Keep the conflict table in the design doc and the tests in step.
+- Team Create (TC1–TC3 of `docs/research/team-create.md`; ADR-0020). Sync core: operations (`op.rs`), applying them with the conflict rules and exact inverses (`apply.rs`), journal to ops (`capture.rs`), ID blocks, roles, messages, `host.rs`, `client.rs`. Network: `wire.rs` (bytes), `identity.rs` (device keys), `access.rs` (members, invite links), `handshake.rs`, `socket.rs` (WebSocket over TLS, pinned certificate), `session.rs` (`HostSession`, `Remote`).
+- No UI or scripts. Members, keys and certificates never go in the project folder (the repo may be public).
+- The client works on the editor's own World (passed to every call), which records edits; `Client::capture` sends each undo step. Synced Instances use IDs from the writer's blocks; every world here is in replica mode.
+- Tests: `tests.rs` (each conflict rule), `capture_tests.rs`, `convergence_tests.rs` (random edits over a simulated network whose messages go through `wire`) and `net_tests.rs` (real sockets on 127.0.0.1: handshake refusals, drops, a cut network). Keep the conflict table in the design doc and the tests in step.
