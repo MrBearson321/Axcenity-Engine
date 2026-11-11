@@ -256,6 +256,14 @@ impl EditorApp {
             }
             written += 1;
         }
+        // A sidecar moved with its file (Rename, its undo, a package): IDs
+        // name the new places.
+        if blobs[..written]
+            .iter()
+            .any(|blob| axcenity_assets::is_import_file(&blob.path))
+        {
+            self.assets.forget_asset_ids();
+        }
         self.asset_browser.refresh();
         self.animation.refresh();
         // A table a fix (or its undo) rewrote: scripts and its tab read it again.

@@ -11,7 +11,9 @@
 //! Primary, and [`place_held`] moves each Tool in hand to its character's
 //! right hand.
 
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
 
 use axcenity_anim::Poses;
 use axcenity_assets::Assets;
@@ -20,11 +22,8 @@ use axcenity_core::{ClassName, InstanceId, KeyCode, Parameter, Value, World};
 use glam::{Quat, Vec3};
 use mlua::{FromLua, Function, Lua};
 
-use crate::cframe::{LuaCFrame, to_vec3};
-use crate::input::PromptInput;
-use crate::instance::{LuaInstance, destroyed, world_mut};
-use crate::prompt::Fired;
-use crate::types::type_name;
+use axcenity_script::system::{self, LuaCFrame, destroyed, to_vec3, type_name};
+use axcenity_script::{LuaInstance, PromptInput, lent_world as world, lent_world_mut as world_mut};
 
 /// The Animator parameter a character's Tool in hand sets.
 pub const EQUIPPED_PARAMETER: &str = "Equipped";
@@ -50,8 +49,21 @@ const SLOT_KEYS: [KeyCode; 10] = [
     KeyCode::Zero,
 ];
 
-/// What one side's scripts did to Inventories, until the runtime collects
-/// it.
+/// An event with no arguments to fire on an Instance, on both sides.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fired {
+    pub instance: InstanceId,
+    pub event: &'static str,
+}
+
+impl Fired {
+    fn bare(instance: InstanceId, event: &'static str) -> Self {
+        Self { instance, event }
+    }
+}
+
+/// What scripts on either side did to Inventories, until the Tools
+/// system's next sync.
 #[derive(Default)]
 pub struct ToolChanges {
     /// Inventories whose `Equipped` may have changed.
@@ -660,13 +672,18 @@ fn in_inventory(world: &World, tool: InstanceId) -> bool {
     false
 }
 
-pub(crate) fn changes_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, ToolChanges>> {
-    lua.app_data_mut::<ToolChanges>()
+/// Both sides' handle on the [`ToolChanges`] scripts make.
+#[derive(Clone, Default)]
+pub struct SharedToolChanges(pub Rc<RefCell<ToolChanges>>);
+
+fn shared_changes(lua: &Lua) -> mlua::Result<SharedToolChanges> {
+    lua.app_data_ref::<SharedToolChanges>()
+        .map(|changes| changes.clone())
         .ok_or_else(|| mlua::Error::runtime("tools aren't set up on this side"))
 }
 
 /// The Tool argument of `call`.
-pub(crate) fn tool_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<InstanceId> {
+fn tool_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<InstanceId> {
     let not_tool = |value: &mlua::Value| {
         mlua::Error::runtime(format!(
             "{call} needs a Tool, not {}",
@@ -674,7 +691,7 @@ pub(crate) fn tool_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Resul
         ))
     };
     let tool = LuaInstance::from_lua(value.clone(), lua).map_err(|_| not_tool(&value))?;
-    let world = crate::instance::world(lua)?;
+    let world = world(lua)?;
     match world.get(tool.0) {
         Some(instance) if instance.class() == ClassName::Tool => Ok(tool.0),
         Some(_) => Err(not_tool(&value)),
@@ -688,15 +705,16 @@ fn with_changes<T>(
     this: InstanceId,
     change: impl FnOnce(&mut World, &mut ToolChanges) -> T,
 ) -> mlua::Result<T> {
+    let shared = shared_changes(lua)?;
     let mut world = world_mut(lua)?;
     world.get(this).ok_or_else(destroyed)?;
-    let mut changes = changes_mut(lua)?;
+    let mut changes = shared.0.borrow_mut();
     Ok(change(&mut world, &mut changes))
 }
 
 pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
     let get_items = lua.create_function(|lua, this: LuaInstance| {
-        let world = crate::instance::world(lua)?;
+        let world = world(lua)?;
         world.get(this.0).ok_or_else(destroyed)?;
         Ok(items(&world, this.0)
             .into_iter()
@@ -718,14 +736,36 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
     })?;
     let equip_tool = lua.create_function(|lua, (this, tool): (LuaInstance, mlua::Value)| {
         let tool = tool_arg(lua, tool, "Equip(tool)")?;
-        let assets = lua
-            .app_data_ref::<Assets>()
-            .map(|assets| assets.clone())
-            .unwrap_or_default();
+        let assets = assets_of(lua);
         with_changes(lua, this.0, |world, changes| {
             equip(world, &assets, this.0, tool, changes)
         })?
         .map_err(mlua::Error::runtime)
+    })?;
+    // A Humanoid's `EquipTool(tool)` and `UnequipTools()` act on its
+    // character's Inventory, which they make if there's none.
+    let humanoid_equip = lua.create_function(|lua, (this, tool): (LuaInstance, mlua::Value)| {
+        let call = "EquipTool(tool)";
+        let tool = tool_arg(lua, tool, call)?;
+        let Some(inventory) = system::humanoid_inventory(lua, this.0, call)? else {
+            return Ok(());
+        };
+        let assets = assets_of(lua);
+        with_changes(lua, inventory, |world, changes| {
+            if !add(world, inventory, tool, changes)? {
+                return Err("EquipTool(tool): the character's Inventory is full".to_owned());
+            }
+            equip(world, &assets, inventory, tool, changes)
+        })?
+        .map_err(mlua::Error::runtime)
+    })?;
+    let humanoid_unequip = lua.create_function(|lua, this: LuaInstance| {
+        if let Some(inventory) = system::humanoid_inventory(lua, this.0, "UnequipTools()")? {
+            with_changes(lua, inventory, |world, changes| {
+                unequip_all(world, inventory, changes)
+            })?;
+        }
+        Ok(())
     })?;
     let unequip = lua.create_function(|lua, this: LuaInstance| {
         with_changes(lua, this.0, |world, changes| {
@@ -744,7 +784,16 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
         (ClassName::Inventory, "Equip", equip_tool),
         (ClassName::Inventory, "UnequipAll", unequip),
         (ClassName::Tool, "Drop", drop),
+        (ClassName::Humanoid, "EquipTool", humanoid_equip),
+        (ClassName::Humanoid, "UnequipTools", humanoid_unequip),
     ])
+}
+
+/// The project's files, as the runtime set them.
+fn assets_of(lua: &Lua) -> Assets {
+    lua.app_data_ref::<Assets>()
+        .map(|assets| assets.clone())
+        .unwrap_or_default()
 }
 
 /// What setting `Inventory.Equipped` says.

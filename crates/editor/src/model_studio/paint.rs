@@ -848,12 +848,12 @@ impl ModelStudio {
 
     /// `[` and `]` change the brush's radius; X swaps Draw and Erase.
     pub(super) fn paint_keys(&mut self, ui: &mut egui::Ui) {
-        let none = egui::Modifiers::NONE;
         let (smaller, bigger, swap) = ui.input_mut(|input| {
+            use crate::shortcuts::{Action, consume};
             (
-                input.consume_key(none, egui::Key::OpenBracket),
-                input.consume_key(none, egui::Key::CloseBracket),
-                input.consume_key(none, egui::Key::X),
+                consume(input, Action::BrushSmaller),
+                consume(input, Action::BrushBigger),
+                consume(input, Action::SwapDrawErase),
             )
         });
         let brush = &mut self.paint.brush;

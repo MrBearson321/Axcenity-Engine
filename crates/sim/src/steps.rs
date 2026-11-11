@@ -243,14 +243,14 @@ fn tools(ctx: &mut FrameCtx) {
         return;
     }
     let sim = ctx.io.sim();
-    sim.scripts.step_tools(&mut sim.world);
+    axcenity_gameplay::step_tools(&mut sim.scripts, &mut sim.world);
 }
 
 /// Abilities' keys, on every device (Phase 76). A breakpoint hit in the
 /// input step ends the frame here.
 fn abilities(ctx: &mut FrameCtx) {
     let sim = ctx.io.sim();
-    sim.scripts.step_abilities(&mut sim.world, ctx.seconds);
+    axcenity_gameplay::step_abilities(&mut sim.scripts, &mut sim.world, ctx.seconds);
     ctx.io.flush_output();
     end_frame_if_paused(ctx);
 }
@@ -392,8 +392,7 @@ fn animators(ctx: &mut FrameCtx) {
 /// Tools in hand follow the posed hands.
 fn tools_place(ctx: &mut FrameCtx) {
     let sim = ctx.io.sim();
-    sim.scripts
-        .place_tools(&mut sim.world, sim.animators.poses());
+    axcenity_gameplay::place_tools(&mut sim.scripts, &mut sim.world, sim.animators.poses());
     ctx.io.flush_output();
 }
 

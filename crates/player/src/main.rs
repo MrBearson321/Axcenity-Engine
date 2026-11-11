@@ -57,6 +57,28 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, CursorIcon, Window, WindowId};
 
 const DEFAULT_WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
+
+/// `AXCENITY_WINDOW_SIZE`'s `<width>x<height>`, if it's two whole numbers
+/// above zero.
+fn window_size_override(value: Option<&str>) -> Option<(u32, u32)> {
+    let (width, height) = value?.trim().split_once(['x', 'X'])?;
+    let (width, height) = (width.trim().parse().ok()?, height.trim().parse().ok()?);
+    (width > 0 && height > 0).then_some((width, height))
+}
+
+#[cfg(test)]
+mod window_size_tests {
+    use super::window_size_override;
+
+    #[test]
+    fn reads_width_by_height() {
+        assert_eq!(window_size_override(Some("1920x1080")), Some((1920, 1080)));
+        assert_eq!(window_size_override(Some(" 800 X 600 ")), Some((800, 600)));
+        assert_eq!(window_size_override(Some("0x600")), None);
+        assert_eq!(window_size_override(Some("big")), None);
+        assert_eq!(window_size_override(None), None);
+    }
+}
 const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
 /// After a long pause (such as dragging the window), don't jump the camera
 /// by the whole pause; treat the frame as at most this long.
@@ -111,10 +133,18 @@ fn main() -> Result<()> {
         Some(path) => PackedProjectFolder::from_folder(path),
         None => {
             let player = std::env::current_exe().context("could not locate the player program")?;
-            let bundled = player
+            let beside = player
                 .parent()
-                .context("the player program has no parent folder")?
-                .join(GAME_FILE);
+                .context("the player program has no parent folder")?;
+            // Beside the player (Windows, Linux), or in a macOS app's
+            // `Contents/Resources` (Build Game keeps `Contents/MacOS` for code).
+            let bundled = [
+                beside.join(GAME_FILE),
+                beside.join("../Resources").join(GAME_FILE),
+            ]
+            .into_iter()
+            .find(|path| path.is_file())
+            .unwrap_or_else(|| beside.join(GAME_FILE));
             if !bundled.is_file() {
                 bail!("no project folder or `{GAME_FILE}` found next to the player\n\n{USAGE}");
             }
@@ -508,9 +538,8 @@ fn prompt_views(shown: &[axcenity_script::ShownPrompt]) -> Vec<axcenity_ui::Prom
 
 /// True while the player character has a Tool in hand, so the wheel goes
 /// through the hotbar instead of zooming (Phase 45).
-fn tool_in_hand(scripts: &ScriptRuntime, world: &World) -> bool {
-    scripts
-        .player_inventory(world)
+fn tool_in_hand(world: &World) -> bool {
+    axcenity_gameplay::player_inventory(world)
         .and_then(|inventory| axcenity_core::tool::equipped(world, inventory))
         .is_some()
 }
@@ -1594,8 +1623,8 @@ impl HostIo for App {
         }
         // The hotbar, the ability bar, the quest tracker and dialogue box,
         // the leaderboard, the chat window, then ProximityPrompts that show.
-        let inventory = self.sim.scripts.player_inventory(&self.sim.world);
-        let abilities = self.sim.scripts.ability_bar(&self.sim.world);
+        let inventory = axcenity_gameplay::player_inventory(&self.sim.world);
+        let abilities = axcenity_gameplay::ability_bar(&self.sim.scripts, &self.sim.world);
         let quests = axcenity_gameplay::quest_tracker(&self.sim.scripts, &self.sim.world);
         let dialogue = axcenity_gameplay::dialogue_view(&self.sim.scripts, &self.sim.world);
         let lines: Vec<(Option<String>, String)> = self
@@ -1760,15 +1789,18 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let attributes = Window::default_attributes()
+        let mut attributes = Window::default_attributes()
             .with_title(&self.title)
+            .with_inner_size(DEFAULT_WINDOW_SIZE)
             .with_window_icon(icon::window_icon());
-        let attributes = match self.window_size {
-            Some((width, height)) => {
-                attributes.with_inner_size(winit::dpi::PhysicalSize::new(width, height))
-            }
-            None => attributes.with_inner_size(DEFAULT_WINDOW_SIZE),
-        };
+        // `--size`, else `AXCENITY_WINDOW_SIZE=1920x1080` (physical pixels),
+        // for benchmarks that need the same window every run, in every engine.
+        let size = self.window_size.or_else(|| {
+            window_size_override(std::env::var("AXCENITY_WINDOW_SIZE").ok().as_deref())
+        });
+        if let Some((width, height)) = size {
+            attributes = attributes.with_inner_size(winit::dpi::PhysicalSize::new(width, height));
+        }
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(err) => return self.fail(event_loop, err.into()),
@@ -1925,7 +1957,7 @@ impl ApplicationHandler for App {
                         .wheel(&self.sim.world, pointer, wheel_pixels(delta))
                         .apply(&mut self.sim.world)
                 });
-                if !scrolled && !tool_in_hand(&self.sim.scripts, &self.sim.world) {
+                if !scrolled && !tool_in_hand(&self.sim.world) {
                     self.zoom += wheel_notches(delta);
                 }
                 self.input.push(InputEvent {

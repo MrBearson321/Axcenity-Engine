@@ -16,9 +16,12 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use axcenity_core::{InstanceId, World};
+use axcenity_core::{ClassName, InstanceId, World};
 use axcenity_save::Saves;
-use mlua::{AnyUserData, IntoLuaMulti, Lua, Table, Thread};
+use mlua::{AnyUserData, Function, IntoLuaMulti, Lua, Table, Thread};
+
+pub use crate::cframe::{LuaCFrame, to_vec3};
+pub use crate::health::{HealthEvent, damage, heal, set_health};
 
 use crate::input::PromptInput;
 use crate::{ScriptRuntime, Side};
@@ -50,6 +53,19 @@ pub trait GameSystem: Any {
     /// Called once for each side's interpreter when the system is added,
     /// before any script runs: set up its app data here.
     fn added(&self, _lua: &Lua) {}
+
+    /// Methods it adds to Instances of a class (`ability:Activate()`), as
+    /// `(class, name, function)`. A name the engine already has for that
+    /// class keeps the engine's.
+    fn methods(&self, _lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
+        Ok(Vec::new())
+    }
+
+    /// Why scripts can't set `class.key`, when it's a property the system
+    /// keeps (`Ability.CooldownLeft`); `None` lets the write through.
+    fn read_only(&self, _class: ClassName, _key: &str) -> Option<String> {
+        None
+    }
 
     /// Runs once per frame on each side, after scripts have resumed, with
     /// the World lent (`crate::lent_world_mut`). Systems step in the order
@@ -86,6 +102,21 @@ pub trait GameSystem: Any {
     fn fire_events(&self, _runtime: &mut ScriptRuntime, _world: &mut World) -> bool {
         false
     }
+
+    /// True to fire its events before the engine's own (Health, Tools,
+    /// Players, levels) rather than after them: Abilities do, so the
+    /// Health events their Effects cause fire in the same call.
+    fn fires_first(&self) -> bool {
+        false
+    }
+
+    /// Runs in `ScriptRuntime::step_health` (frame step 4, on the device
+    /// that runs the server) after Healths step, with the frame's length.
+    fn step_server(&self, _runtime: &mut ScriptRuntime, _world: &mut World, _seconds: f64) {}
+
+    /// A player asked to activate `target` (`MessageKind::Activate`, from
+    /// this device or another), for the server to serve.
+    fn activation_requested(&self, _target: InstanceId, _player: InstanceId) {}
 }
 
 /// Services the API definitions (`definitions/tables.rs`) describe that
@@ -94,6 +125,25 @@ pub trait GameSystem: Any {
 /// them and the `gameplay` crate's tests check them instead.
 #[doc(hidden)]
 pub const DESCRIBED_SYSTEM_SERVICES: &[&str] = &["Debris", "DialogueService", "QuestService"];
+
+/// Instance methods the API definitions describe that game systems add
+/// ([`GameSystem::methods`]), skipped and checked as
+/// [`DESCRIBED_SYSTEM_SERVICES`] are.
+#[doc(hidden)]
+pub const DESCRIBED_SYSTEM_METHODS: &[(ClassName, &str)] = &[
+    (ClassName::Ability, "CanActivate"),
+    (ClassName::Ability, "Activate"),
+    (ClassName::Ability, "Cancel"),
+    (ClassName::Model, "ApplyEffect"),
+    (ClassName::Inventory, "GetItems"),
+    (ClassName::Inventory, "Add"),
+    (ClassName::Inventory, "Remove"),
+    (ClassName::Inventory, "Equip"),
+    (ClassName::Inventory, "UnequipAll"),
+    (ClassName::Tool, "Drop"),
+    (ClassName::Humanoid, "EquipTool"),
+    (ClassName::Humanoid, "UnequipTools"),
+];
 
 /// The systems added to one interpreter, in the order they were added.
 #[derive(Default, Clone)]
@@ -131,6 +181,13 @@ pub(crate) fn service_names(lua: &Lua) -> Vec<&'static str> {
         .iter()
         .flat_map(|system| system.services().iter().copied())
         .collect()
+}
+
+/// Why `class.key` is read-only, if a system on `lua` keeps it.
+pub(crate) fn read_only(lua: &Lua, class: ClassName, key: &str) -> Option<String> {
+    all(lua)
+        .iter()
+        .find_map(|system| system.read_only(class, key))
 }
 
 /// Scripts' name for `data` if a system on `lua` made it.
@@ -244,4 +301,57 @@ pub fn saves(lua: &Lua) -> mlua::Result<Rc<RefCell<Saves>>> {
 /// Reach objectives and ProximityPrompts measure from.
 pub fn player_middle(world: &World) -> Option<glam::Vec3> {
     crate::prompt::Viewer::find(world, None).map(|viewer| viewer.position)
+}
+
+/// The error for using a destroyed Instance.
+pub fn destroyed() -> mlua::Error {
+    crate::instance::destroyed()
+}
+
+/// The local player on `lua`'s side: a LocalScript's `Players.LocalPlayer`.
+pub fn local_player(lua: &Lua) -> Option<InstanceId> {
+    lua.app_data_ref::<crate::client::LocalPlayer>()
+        .map(|player| player.0)
+}
+
+/// The Inventory of the character whose Humanoid is `humanoid`, made (with
+/// the character's other pieces) if it has none. An error names `call`
+/// when the Humanoid is destroyed or isn't in a character's Model.
+pub fn humanoid_inventory(
+    lua: &Lua,
+    humanoid: InstanceId,
+    call: &str,
+) -> mlua::Result<Option<InstanceId>> {
+    crate::humanoid::inventory(lua, humanoid, call)
+}
+
+/// The Player whose `Character` is `character`, if any.
+pub fn player_of(world: &World, character: InstanceId) -> Option<InstanceId> {
+    crate::players::player_of(world, character)
+}
+
+/// From a LocalScript: asks the server to activate `target` for
+/// `player` (`MessageKind::Activate`); the server's system gets
+/// [`GameSystem::activation_requested`].
+pub fn send_activation(lua: &Lua, target: InstanceId, player: InstanceId) {
+    if let Some(mut outbox) = lua.app_data_mut::<crate::remote::Outbox>() {
+        outbox.0.push(crate::Message {
+            to: Side::Server,
+            remote: target,
+            player,
+            kind: crate::MessageKind::Activate,
+            args: Vec::new(),
+        });
+    }
+}
+
+/// Fires the event `event` of the Instance `id` (`ability.Activated`) on
+/// `lua`'s side with `args`. The World must be lent.
+pub fn fire_instance_event(
+    lua: &Lua,
+    id: InstanceId,
+    event: &'static str,
+    args: impl IntoLuaMulti,
+) {
+    crate::events::fire(lua, crate::events::Owner::Instance(id), event, args);
 }

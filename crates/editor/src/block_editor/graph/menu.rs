@@ -159,7 +159,7 @@ pub(super) fn show_menu(
                                 shown = Some(item.category);
                                 ui.label(
                                     egui::RichText::new(item.category.name())
-                                        .color(item.category.fill())
+                                        .color(item.category.fill(&theme::palette(ui.ctx())))
                                         .strong()
                                         .size(theme::type_scale::SMALL),
                                 );

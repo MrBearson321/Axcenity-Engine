@@ -62,14 +62,14 @@ impl EditorApp {
             .filter(|id| world.get(*id).is_some())
             .collect();
         if many.len() > 1 {
-            if let Some(edit) = properties::show_many(ui, world, &many, !editing) {
+            if let Some(edit) = properties::show_many(ui, world, &self.assets, &many, !editing) {
                 self.apply_many(&many, edit);
                 ui.ctx().request_repaint();
             }
             return;
         }
         let mut style_edit = None;
-        let edit = properties::show(ui, world, selected, !editing, &kept, |ui| {
+        let edit = properties::show(ui, world, &self.assets, selected, !editing, &kept, |ui| {
             // Stylesheets are edited, not the game, so not during Play.
             if editing {
                 style_edit = style_panel::show(ui, world, selected, stylesheets);

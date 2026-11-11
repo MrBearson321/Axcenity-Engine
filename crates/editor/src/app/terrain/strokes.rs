@@ -1,4 +1,5 @@
 use super::*;
+use crate::shortcuts::{self, Action};
 
 /// The samples along a side `length` studs long that keep cells square
 /// with `samples` across `width` studs.
@@ -16,15 +17,17 @@ impl EditorApp {
         if self.terrain.tool.is_none() || ctx.wants_keyboard_input() {
             return;
         }
-        let none = egui::Modifiers::NONE;
         let (tool, smaller, bigger, escape) = ctx.input_mut(|input| {
-            let tool = TerrainTool::all()
-                .find(|tool| tool.key().is_some_and(|key| input.consume_key(none, key)));
+            let tools: Vec<Action> = TerrainTool::all().map(Action::TerrainTool).collect();
+            let tool = match shortcuts::consume_first(input, &tools) {
+                Some(Action::TerrainTool(tool)) => Some(tool),
+                _ => None,
+            };
             (
                 tool,
-                input.consume_key(none, egui::Key::OpenBracket),
-                input.consume_key(none, egui::Key::CloseBracket),
-                input.consume_key(none, egui::Key::Escape),
+                shortcuts::consume(input, Action::BrushSmaller),
+                shortcuts::consume(input, Action::BrushBigger),
+                shortcuts::consume(input, Action::PutBrushDown),
             )
         });
         if let Some(tool) = tool {

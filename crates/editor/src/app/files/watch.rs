@@ -64,6 +64,10 @@ impl EditorApp {
     /// file that can't be loaded now keeps its last good version, reported
     /// once (by `Assets` and the session's errors).
     pub(in crate::app) fn asset_file_changed(&mut self, path: &str) {
+        // A sidecar written, moved or deleted: asset IDs are read again.
+        if axcenity_assets::is_import_file(path) {
+            self.assets.forget_asset_ids();
+        }
         let mut reloaded = self.assets.reload(path) == Reload::Reloaded;
         if let Some(session) = &mut self.play {
             reloaded |= session.asset_changed(path, &mut self.output);

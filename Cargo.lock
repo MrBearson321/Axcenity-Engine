@@ -697,6 +697,7 @@ dependencies = [
 name = "axcenity-gameplay"
 version = "0.1.0"
 dependencies = [
+ "axcenity-anim",
  "axcenity-assets",
  "axcenity-character",
  "axcenity-core",
@@ -742,6 +743,7 @@ dependencies = [
  "axcenity-assets",
  "axcenity-character",
  "axcenity-core",
+ "axcenity-gameplay",
  "axcenity-physics",
  "axcenity-script",
  "axcenity-workspace-hack",

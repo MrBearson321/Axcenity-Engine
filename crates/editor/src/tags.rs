@@ -38,21 +38,13 @@ impl TagsPanel {
         let palette = theme::palette(ui.ctx());
         let mut action = TagAction::None;
         if tags.is_empty() {
-            ui.add_space(16.0);
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    RichText::new(icons::TAG)
-                        .size(22.0)
-                        .color(palette.text_muted),
-                );
-                ui.label(
-                    RichText::new(
-                        "No tags yet. Add one in Properties > Tags, or from a script with \
-                         instance:AddTag(\"Lava\").",
-                    )
-                    .color(palette.text_weak),
-                );
-            });
+            crate::widgets::empty_state(
+                ui,
+                icons::TAG,
+                "No tags",
+                "Add one in Properties › Tags, or from a script with instance:AddTag(\"Lava\").",
+                None,
+            );
             return action;
         }
         egui::ScrollArea::vertical()

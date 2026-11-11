@@ -154,7 +154,7 @@ pub fn paint_hover(
         ui.painter().rect_stroke(
             rect,
             radius,
-            Stroke::new(1.0_f32, palette.accent),
+            palette.focus_stroke(),
             egui::StrokeKind::Inside,
         );
     }
@@ -244,7 +244,7 @@ pub fn segmented_tips<T: Copy + PartialEq>(
                         ui.painter().rect_stroke(
                             rect,
                             theme::radius::CONTROL,
-                            Stroke::new(1.0_f32, palette.accent),
+                            palette.focus_stroke(),
                             egui::StrokeKind::Inside,
                         );
                     }
@@ -362,7 +362,7 @@ pub fn nav_item(
         ui.painter().rect_stroke(
             rect,
             theme::radius::CONTROL,
-            Stroke::new(1.0_f32, palette.accent),
+            palette.focus_stroke(),
             egui::StrokeKind::Inside,
         );
     }
@@ -848,6 +848,95 @@ impl ToolWindow {
 mod tests {
     use super::*;
 
+    /// Runs one frame of `draw` in a 400×600 window, with `events`.
+    fn frame(ctx: &egui::Context, events: Vec<egui::Event>, draw: impl FnMut(&mut egui::Ui)) {
+        let mut draw = draw;
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| draw(ui));
+        });
+    }
+
+    fn click(at: egui::Pos2) -> Vec<Vec<egui::Event>> {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        vec![
+            vec![egui::Event::PointerMoved(at)],
+            vec![button(true)],
+            vec![button(false)],
+        ]
+    }
+
+    /// The shared section (design system V19): a remembered one keeps its
+    /// state under its id, so the same section folded for one Instance is
+    /// folded for the next; a forced one ignores clicks.
+    #[test]
+    fn a_remembered_section_folds_on_a_click_and_stays_folded() {
+        let ctx = theme::test_context();
+        let id = egui::Id::new("test section");
+        let header = std::cell::Cell::new(Rect::NOTHING);
+        let open = std::cell::Cell::new(true);
+        let mut draw = |ui: &mut egui::Ui| {
+            let top = ui.cursor().top();
+            open.set(
+                section(icons::GEAR, "Behavior")
+                    .id(id)
+                    .remember()
+                    .show(ui, |ui| {
+                        ui.label("inside");
+                    }),
+            );
+            header.set(Rect::from_min_size(
+                egui::pos2(ui.max_rect().left(), top + 6.0),
+                vec2(200.0, 20.0),
+            ));
+        };
+        frame(&ctx, Vec::new(), &mut draw);
+        assert!(open.get(), "open at first");
+        for events in click(header.get().center()) {
+            frame(&ctx, events, &mut draw);
+        }
+        frame(&ctx, Vec::new(), &mut draw);
+        assert!(!open.get(), "folded by the click");
+        assert_eq!(ctx.data(|d| d.get_temp::<bool>(id)), Some(false));
+    }
+
+    #[test]
+    fn an_empty_state_says_how_to_fill_it_and_its_button_works() {
+        let ctx = theme::test_context();
+        let clicked = std::cell::Cell::new(false);
+        let button_at = std::cell::Cell::new(egui::Pos2::ZERO);
+        let mut draw = |ui: &mut egui::Ui| {
+            if empty_state(
+                ui,
+                icons::TAG,
+                "No tags",
+                "Add one in Properties.",
+                Some((icons::PLUS, "Add Tag")),
+            ) {
+                clicked.set(true);
+            }
+            // The button is the last thing drawn, just above the cursor.
+            button_at.set(egui::pos2(
+                ui.max_rect().center().x,
+                ui.cursor().top() - 12.0,
+            ));
+        };
+        frame(&ctx, Vec::new(), &mut draw);
+        for events in click(button_at.get()) {
+            frame(&ctx, events, &mut draw);
+        }
+        assert!(clicked.get());
+    }
+
     #[test]
     fn the_logo_entrances_the_dots_and_the_spotlight_draw() {
         let pointer = egui::pos2(340.0, 200.0);
@@ -939,4 +1028,182 @@ mod tests {
         assert!(frame(&ctx, &mut value, &options, vec![click(false)]).0);
         assert_eq!(value, 1);
     }
+}
+
+/// A section that folds (design system V19): a divider, then a header with
+/// an icon and the chevron, then its contents while open. Built with
+/// [`section`]; the open state is egui's, under the section's id, unless
+/// [`Section::remember`] keeps it across every Instance shown.
+pub struct Section<'a> {
+    icon: &'a str,
+    title: &'a str,
+    salt: Salt<'a>,
+    default_open: bool,
+    forced: Option<bool>,
+    remember: bool,
+    hint: Option<&'a str>,
+}
+
+/// What a [`Section`]'s state is kept under: kept as given, so a section
+/// moved onto it keeps the id it had.
+#[derive(Clone, Copy)]
+enum Salt<'a> {
+    Text(&'a str),
+    Id(egui::Id),
+}
+
+/// A [`Section`] headed `icon` and `title`, open at first, kept under its
+/// title (where it's drawn).
+pub fn section<'a>(icon: &'a str, title: &'a str) -> Section<'a> {
+    Section {
+        icon,
+        title,
+        salt: Salt::Text(title),
+        default_open: true,
+        forced: None,
+        remember: false,
+        hint: None,
+    }
+}
+
+impl<'a> Section<'a> {
+    /// Keeps its open state under `salt` instead of its title, so the
+    /// header can say more ("Advanced · 2 changed") without forgetting it.
+    pub fn id_salt(mut self, salt: &'a str) -> Self {
+        self.salt = Salt::Text(salt);
+        self
+    }
+
+    /// Keeps its open state under `id`, as [`id_salt`](Self::id_salt).
+    pub fn id(mut self, id: egui::Id) -> Self {
+        self.salt = Salt::Id(id);
+        self
+    }
+
+    /// Starts folded, or open, until clicked.
+    pub fn default_open(mut self, open: bool) -> Self {
+        self.default_open = open;
+        self
+    }
+
+    /// Open (or folded) whatever was clicked, such as while filtering.
+    pub fn forced(mut self, open: Option<bool>) -> Self {
+        self.forced = open;
+        self
+    }
+
+    /// Keeps the open state in egui's memory under its id alone, so it
+    /// stays as it was left from one Instance to the next.
+    pub fn remember(mut self) -> Self {
+        self.remember = true;
+        self
+    }
+
+    /// What's in it, on hover over the header.
+    pub fn hint(mut self, hint: &'a str) -> Self {
+        self.hint = Some(hint);
+        self
+    }
+
+    /// Draws it, `contents` inside while open. Returns whether it's open.
+    pub fn show(self, ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui)) -> bool {
+        let palette = theme::palette(ui.ctx());
+        ui.add_space(4.0);
+        divider(ui);
+        let header = egui::RichText::new(theme::with_icon(self.icon, self.title))
+            .family(theme::medium_family())
+            .color(palette.text_secondary);
+        let memory = match self.salt {
+            Salt::Text(text) => egui::Id::new(text),
+            Salt::Id(id) => id,
+        };
+        let remembered = self.remember.then(|| {
+            ui.data(|d| d.get_temp::<bool>(memory))
+                .unwrap_or(self.default_open)
+        });
+        let header = egui::CollapsingHeader::new(header);
+        let header = match self.salt {
+            Salt::Text(text) => header.id_salt(text),
+            Salt::Id(id) => header.id_salt(id),
+        };
+        let response = header
+            .default_open(self.default_open)
+            .open(self.forced.or(remembered))
+            .icon(chevron)
+            .show_unindented(ui, contents);
+        let mut open = response.openness > 0.0;
+        if let Some(was) = remembered {
+            open = was;
+            // Drawn as it was this frame; the click shows next frame.
+            if response.header_response.clicked() && self.forced.is_none() {
+                ui.data_mut(|d| d.insert_temp(memory, !was));
+            }
+        }
+        if let Some(hint) = self.hint {
+            response.header_response.on_hover_text(hint);
+        }
+        open
+    }
+}
+
+/// What a panel shows when there's nothing in it yet (design system V19):
+/// an icon, a short title and a sentence on how to get something there,
+/// centred, with a button when `action` names one. Returns whether the
+/// button was clicked.
+pub fn empty_state(
+    ui: &mut egui::Ui,
+    icon: &str,
+    title: &str,
+    sentence: &str,
+    action: Option<(&'static str, &str)>,
+) -> bool {
+    let palette = theme::palette(ui.ctx());
+    let mut clicked = false;
+    ui.add_space(theme::space::L);
+    ui.vertical_centered(|ui| {
+        ui.label(RichText::new(icon).size(22.0).color(palette.text_muted));
+        ui.add_space(theme::space::XXS);
+        ui.label(
+            RichText::new(title)
+                .family(theme::medium_family())
+                .color(palette.text_secondary),
+        );
+        ui.add(egui::Label::new(RichText::new(sentence).color(palette.text_weak)).wrap());
+        if let Some((icon, label)) = action {
+            ui.add_space(theme::space::S);
+            clicked = ui
+                .add(button(Role::Secondary, Some(icon), label, &palette))
+                .clicked();
+        }
+    });
+    clicked
+}
+
+/// A choice in a row of filters, such as a category in Assets (design
+/// system V19): quiet text, filled while it's picked.
+pub fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        egui::FontId::new(theme::type_scale::SMALL + 0.5, theme::medium_family()),
+        Color32::PLACEHOLDER,
+    );
+    let size = vec2(galley.size().x + 16.0, 24.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, label)
+    });
+    paint_hover(ui, rect, &response, false, theme::radius::CARD);
+    if selected {
+        ui.painter()
+            .rect_filled(rect, rect.height() / 2.0, palette.control_active);
+    }
+    let color = if selected || response.hovered() {
+        palette.text_strong
+    } else {
+        palette.text_weak
+    };
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, color);
+    response
 }

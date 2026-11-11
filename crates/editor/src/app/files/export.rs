@@ -58,6 +58,12 @@ impl EditorApp {
                 "The texture `{path}` ships as it is (it couldn't be cooked: {reason})."
             ));
         }
+        if let Some(reason) = &built.unsigned {
+            self.output.warning(format!(
+                "The game's app couldn't be signed, so macOS may refuse to open it on \
+                 another Mac (codesign: {reason})."
+            ));
+        }
         self.output.info(format!(
             "Built the game for {} to `{}` (run `{}`).",
             target.directory(),

@@ -817,8 +817,8 @@ fn bench_project() {
 /// `AXCENITY_BENCH_PROJECT` names the project, `AXCENITY_SHOT_DIR` the folder
 /// for the pictures, `AXCENITY_SHOT_VIEWS` the cameras
 /// (`name:eyeX,eyeY,eyeZ:targetX,targetY,targetZ[:fovY]`, separated by `;`),
-/// and `AXCENITY_SHOT_SIZE` (`1280x720`) and `AXCENITY_SHOT_QUALITY` (`High`)
-/// are optional.
+/// and `AXCENITY_SHOT_SIZE` (`1280x720`), `AXCENITY_SHOT_QUALITY` (`High`) and
+/// `AXCENITY_SHOT_SHADOW_DISTANCE` (the preset's) are optional.
 ///
 /// `cargo test -p axcenity-player --release -- --ignored shoot_project --nocapture --test-threads 1`
 #[test]
@@ -861,6 +861,14 @@ fn shoot_project() {
     let mut settings = GraphicsSettings::preset(quality);
     if std::env::var_os("AXCENITY_SHOT_NOAA").is_some() {
         settings.anti_aliasing = Some(axcenity_render::AntiAliasing::Off);
+    }
+    // The player's own graphics.json can reach farther than the preset (the
+    // world's Lighting.ShadowDistance is capped by it), so shots can match.
+    if let Some(distance) = std::env::var("AXCENITY_SHOT_SHADOW_DISTANCE")
+        .ok()
+        .and_then(|distance| distance.parse().ok())
+    {
+        settings.shadow_distance = Some(distance);
     }
     renderer.set_graphics(&settings);
     let mut cache = TerrainCache::new();

@@ -913,10 +913,11 @@ fn show_graph_canvas(
     let typing = canvas.ctx().memory(|memory| memory.focused().is_some());
     if hovered && !typing && state.menu.is_none() {
         let (delete, duplicate, escape) = canvas.input(|i| {
+            use crate::shortcuts::{Action, pressed};
             (
-                i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),
-                i.modifiers.command && i.key_pressed(egui::Key::D),
-                i.key_pressed(egui::Key::Escape),
+                pressed(i, Action::DeleteNodes),
+                pressed(i, Action::DuplicateNodes),
+                pressed(i, Action::ClearNodeSelection),
             )
         });
         if delete && !state.selected.is_empty() {
@@ -1187,7 +1188,7 @@ fn draw_node(
     );
     painter.rect_filled(rect, radius(corner), colors.node_body);
     let header = Rect::from_min_size(rect.min, vec2(rect.width(), drawer.s(HEADER)));
-    let mut fill = geometry.category.fill();
+    let mut fill = geometry.category.fill(&theme::palette(ui.ctx()));
     if !runs {
         fill = fill.lerp_to_gamma(Color32::from_gray(90), 0.6);
     }

@@ -26,8 +26,8 @@ use std::collections::{HashMap, HashSet};
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use eframe::egui;
 
-use crate::app::{DELETE_KEY_TEXT, DUPLICATE_SHORTCUT, RENAME_KEY};
 use crate::properties;
+use crate::shortcuts;
 use crate::theme::{self, icons};
 use crate::tree::{self, Insertable};
 
@@ -135,13 +135,12 @@ pub struct Explorer {
 }
 
 /// The keys the Explorer takes while it has them.
-const NAV_KEYS: [egui::Key; 6] = [
-    egui::Key::ArrowUp,
-    egui::Key::ArrowDown,
-    egui::Key::ArrowLeft,
-    egui::Key::ArrowRight,
-    egui::Key::Home,
-    egui::Key::End,
+const NAV_KEYS: [shortcuts::Action; 5] = [
+    shortcuts::Action::ExplorerExtend,
+    shortcuts::Action::ExplorerMove,
+    shortcuts::Action::ExplorerClose,
+    shortcuts::Action::ExplorerOpen,
+    shortcuts::Action::ExplorerEnds,
 ];
 
 /// The Explorer's place in the Tab order: a widget over its rows.
@@ -389,15 +388,10 @@ impl Explorer {
     /// Explorer to act on when it's drawn. Only call it when
     /// [`has_keys`](Self::has_keys).
     pub fn take_keys(&mut self, input: &mut egui::InputState) {
-        for key in NAV_KEYS {
-            // Shift first: a plain key's pattern matches with Shift held too.
-            for shift in [true, false] {
-                let modifiers = if shift {
-                    egui::Modifiers::SHIFT
-                } else {
-                    egui::Modifiers::NONE
-                };
-                let count = input.count_and_consume_key(modifiers, key);
+        // Shift first: a plain key's pattern matches with Shift held too.
+        for action in NAV_KEYS {
+            let shift = action == shortcuts::Action::ExplorerExtend;
+            for (key, count) in shortcuts::count(input, action) {
                 self.keys.extend(std::iter::repeat_n((key, shift), count));
             }
         }
@@ -806,7 +800,7 @@ impl Explorer {
                     ui.painter().rect_stroke(
                         row_shape,
                         4,
-                        egui::Stroke::new(1.0_f32, palette.accent),
+                        palette.focus_stroke(),
                         egui::StrokeKind::Inside,
                     );
                 }
@@ -1315,7 +1309,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
 
     let renamable = world.get(id).is_some_and(properties::can_rename);
     let rename = egui::Button::new(theme::with_icon(icons::PENCIL_SIMPLE, "Rename"))
-        .shortcut_text(RENAME_KEY.name());
+        .shortcut_text(crate::shortcuts::Action::Rename.menu_text(ui.ctx()));
     if ui
         .add_enabled(renamable, rename)
         .on_disabled_hover_text("Services keep their names.")
@@ -1349,7 +1343,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     let editable = tree::check_editable(world, id);
     let reason = editable.err().unwrap_or_default();
     let duplicate = egui::Button::new(theme::with_icon(icons::COPY, "Duplicate"))
-        .shortcut_text(ui.ctx().format_shortcut(&DUPLICATE_SHORTCUT));
+        .shortcut_text(crate::shortcuts::Action::Duplicate.menu_text(ui.ctx()));
     if ui
         .add_enabled(editable.is_ok(), duplicate)
         .on_disabled_hover_text(reason)
@@ -1358,8 +1352,8 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         chosen = Some(RowCommand::Duplicate);
     }
     let deletable = tree::check_delete(world, id);
-    let delete =
-        egui::Button::new(theme::with_icon(icons::TRASH, "Delete")).shortcut_text(DELETE_KEY_TEXT);
+    let delete = egui::Button::new(theme::with_icon(icons::TRASH, "Delete"))
+        .shortcut_text(crate::shortcuts::Action::Delete.menu_text(ui.ctx()));
     if ui
         .add_enabled(deletable.is_ok(), delete)
         .on_disabled_hover_text(deletable.err().unwrap_or_default())

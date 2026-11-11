@@ -1,0 +1,25 @@
+; XB10k for Godot 4.7. See ../README.md.
+config_version=5
+
+[application]
+
+config/name="XB10k"
+run/main_scene="res://main.tscn"
+run/max_fps=0
+config/features=PackedStringArray("4.7", "Forward Plus")
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/vsync/vsync_mode=0
+
+[physics]
+
+3d/default_gravity=196.2
+common/physics_ticks_per_second=60
+common/max_physics_steps_per_frame=10
+
+[rendering]
+
+renderer/rendering_method="forward_plus"

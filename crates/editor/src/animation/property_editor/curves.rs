@@ -358,7 +358,7 @@ impl PropertyDoc {
                 (
                     i.smooth_scroll_delta.x + i.smooth_scroll_delta.y,
                     i.zoom_delta(),
-                    i.key_pressed(egui::Key::F) && i.modifiers.is_none(),
+                    crate::shortcuts::pressed(i, crate::shortcuts::Action::FrameCurves),
                 )
             });
             if scroll != 0.0 {

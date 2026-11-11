@@ -371,6 +371,10 @@ fn described_fields_and_methods_exist() {
             .expect("add a sample Instance for the new class")
     };
     for (class, method) in CLASS_METHODS {
+        // Game systems' methods: the `gameplay` crate's tests check them.
+        if crate::system::DESCRIBED_SYSTEM_METHODS.contains(&(*class, method.name)) {
+            continue;
+        }
         // Scripts have no LocalPlayer: they reach a Player once it joins.
         if *class == ClassName::Player && matches!(method.name, "LoadCharacter" | "Kick") {
             check(

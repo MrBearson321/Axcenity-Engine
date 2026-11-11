@@ -42,6 +42,7 @@ mod material;
 mod model;
 mod orphaned;
 mod probe;
+mod references;
 mod reload;
 mod sky_image;
 mod texture_set;
@@ -53,8 +54,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use loading::{Kind, LoadKey};
 
 pub use asset_id::{
-    AssetId, IMPORT_SUFFIX, KNOWN_IDS_FILE, asset_ids, encode_import_file, give_asset_ids,
-    id_files, import_path, is_import_file, moved_assets, read_asset_id, takes_asset_id,
+    AssetId, IMPORT_SUFFIX, KNOWN_IDS_FILE, asset_ids, encode_import_file, give_asset_id,
+    give_asset_ids, id_files, import_path, is_import_file, moved_assets, read_asset_id,
+    takes_asset_id,
 };
 pub use color_grading::{
     ColorLookup, LOOKUP_EXTENSIONS, MAX_LOOKUP_SIZE, MAX_PALETTE_COLORS, PROJECT_GRADING_FOLDER,
@@ -104,6 +106,10 @@ pub use orphaned::remove_orphaned_copies;
 pub use probe::{
     PROBE_SUFFIX, PROBES_FOLDER, ProbeImage, decode_probe, encode_probe, is_probe_file, probe_path,
     read_probe, write_probe,
+};
+pub use references::{
+    ASSET_INDEX_FILE, AssetPath, encode_asset_index, is_asset_reference, read_asset_index,
+    split_reference,
 };
 pub use reload::Reload;
 pub use sky_image::{
@@ -202,6 +208,8 @@ struct Shared {
     /// Files whose last reload failed, so the next failure isn't reported
     /// again until one succeeds.
     reload_failed: HashSet<String>,
+    /// Which file each asset ID names (see [`Assets::resolve`]).
+    ids: references::IdCache,
 }
 
 /// Forgets every material made from the material file `file`, so each is
@@ -264,6 +272,8 @@ impl Assets {
     /// the model's [warnings](Model::warnings). To load without waiting,
     /// see [`request_model`](Self::request_model).
     pub fn model_blocking(&self, mesh_id: &str) -> Option<Arc<Model>> {
+        let resolved = self.resolve(mesh_id);
+        let mesh_id: &str = &resolved;
         if mesh_id.is_empty() {
             return None;
         }
@@ -286,6 +296,8 @@ impl Assets {
     /// a texture not read yet is `None` until a worker thread has read it,
     /// instead of being read before this returns.
     pub fn texture(&self, path: &str) -> Option<Arc<Image>> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         if path.is_empty() {
             return None;
         }
@@ -306,6 +318,8 @@ impl Assets {
     /// The texture file at `path`, as [`texture`](Self::texture) gives it,
     /// but waiting for it even when textures load in the background.
     pub fn texture_blocking(&self, path: &str) -> Option<Arc<Image>> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         if path.is_empty() {
             return None;
         }
@@ -329,6 +343,8 @@ impl Assets {
     /// it's `None` until a worker thread has read it, like a texture, and
     /// [`texture_progress`](Self::texture_progress) counts it.
     pub fn sky_image(&self, path: &str) -> Option<Arc<SkyImage>> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         if path.is_empty() {
             return None;
         }
@@ -349,6 +365,8 @@ impl Assets {
     /// The sky image at `path`, as [`sky_image`](Self::sky_image) gives it,
     /// but waiting for it even when textures load in the background.
     pub fn sky_image_blocking(&self, path: &str) -> Option<Arc<SkyImage>> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         if path.is_empty() {
             return None;
         }
@@ -368,6 +386,8 @@ impl Assets {
     /// [`take_errors`](Self::take_errors), once. Bakes are small, so they're
     /// read at once even while textures load in the background.
     pub fn reflection_probe(&self, path: &str) -> Option<Arc<ProbeImage>> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         if path.is_empty() {
             return None;
         }
@@ -410,6 +430,8 @@ impl Assets {
     /// if `path` is empty or it can't be read; the reason goes to
     /// [`take_errors`](Self::take_errors), once.
     pub fn light_probes(&self, path: &str) -> Option<Arc<LightProbes>> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         if path.is_empty() {
             return None;
         }
@@ -456,6 +478,8 @@ impl Assets {
     /// [`take_errors`](Self::take_errors), once. Tables are small, so
     /// they're read at once even while textures load in the background.
     pub fn color_lookup(&self, path: &str) -> Option<Arc<ColorLookup>> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         if path.is_empty() {
             return None;
         }
@@ -487,6 +511,8 @@ impl Assets {
     /// [`color_lookup`](Self::color_lookup) reads a table. A palette with
     /// too many colors is reported once too.
     pub fn palette(&self, path: &str) -> Option<Arc<Palette>> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         if path.is_empty() {
             return None;
         }
@@ -527,6 +553,8 @@ impl Assets {
     /// base that can't be read, or that leads around in a cycle, is
     /// reported once too, and the default material stands in for it.
     pub fn material(&self, path: &str) -> Option<Arc<StandardMaterial>> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         if path.is_empty() {
             return None;
         }
@@ -569,6 +597,8 @@ impl Assets {
     /// The material file at `path` with its chain of bases, put together
     /// as [`material`](Self::material) does, or `None` if it can't be read.
     pub fn material_chain(&self, path: &str) -> Option<MaterialChain> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         self.material(path)?;
         let shared = self.lock();
         let resolved = shared.materials.get(path)?.as_ref()?;
@@ -664,6 +694,8 @@ impl Assets {
     /// [`take_errors`](Self::take_errors), once. A file with no animation
     /// has no takes.
     pub fn takes(&self, path: &str) -> Option<Arc<Vec<Take>>> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         let path = path.split('#').next().unwrap_or(path);
         if path.is_empty() {
             return None;
@@ -693,6 +725,8 @@ impl Assets {
     /// Reads a project asset by a relative path such as
     /// `assets/audio/chime.wav`. Paths that leave the project are refused.
     pub fn read_file(&self, path: &str) -> Result<Vec<u8>, String> {
+        let resolved = self.resolve(path);
+        let path: &str = &resolved;
         let relative = safe_path(path)
             .ok_or_else(|| "asset paths must name a file inside the project folder".to_owned())?;
         let folder = self

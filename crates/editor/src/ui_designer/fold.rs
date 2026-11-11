@@ -11,7 +11,7 @@ use axcenity_ui::UiState;
 use eframe::egui;
 
 use super::DesignerScene;
-use crate::theme::{self, icons};
+use crate::theme::icons;
 
 /// One section of the inspector.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +103,8 @@ impl Section {
             .unwrap_or(self.starts_open())
     }
 
-    /// Opens or folds it, as clicking its header does.
+    /// Opens or folds it, as a click on its header would.
+    #[cfg(test)]
     pub fn set_open(self, ctx: &egui::Context, open: bool) {
         ctx.data_mut(|data| data.insert_temp(self.id(), open));
     }
@@ -118,23 +119,12 @@ pub fn fold(
     title: &str,
     contents: impl FnOnce(&mut egui::Ui),
 ) -> bool {
-    let palette = theme::palette(ui.ctx());
-    ui.add_space(4.0);
-    crate::widgets::divider(ui);
-    let header = egui::RichText::new(theme::with_icon(section.icon(), title))
-        .family(theme::medium_family())
-        .color(palette.text_secondary);
-    let open = section.is_open(ui.ctx());
-    let response = egui::CollapsingHeader::new(header)
-        .id_salt(section.id())
-        .open(Some(open))
-        .icon(crate::widgets::chevron)
-        .show_unindented(ui, contents);
-    if response.header_response.clicked() {
-        section.set_open(ui.ctx(), !open);
-    }
-    response.header_response.on_hover_text(section.hint());
-    open
+    crate::widgets::section(section.icon(), title)
+        .id(section.id())
+        .default_open(section.starts_open())
+        .remember()
+        .hint(section.hint())
+        .show(ui, contents)
 }
 
 /// `section`'s header: its name, then what the element has there when it

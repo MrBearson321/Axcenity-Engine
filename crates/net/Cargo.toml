@@ -21,6 +21,7 @@ axcenity-workspace-hack.workspace = true
 [dev-dependencies]
 axcenity-assets.workspace = true
 axcenity-character.workspace = true
+axcenity-gameplay.workspace = true
 axcenity-physics.workspace = true
 
 [lints]

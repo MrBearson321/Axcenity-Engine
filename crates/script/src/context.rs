@@ -11,7 +11,6 @@ use axcenity_render_types::{Capabilities, GraphicsSettings};
 use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Thread};
 
-use crate::ability::AbilityEvent;
 use crate::camera::{Camera, CameraState, GameCamera};
 use crate::client::{LoadingScreenRemoved, LocalPlayer};
 use crate::errors::error_message;
@@ -62,7 +61,6 @@ impl Context {
         lua.set_app_data(crate::ParticleEmits::default());
         lua.set_app_data(crate::Shatters::default());
         lua.set_app_data(crate::health::HealthEvents::default());
-        lua.set_app_data(crate::tool::ToolChanges::default());
         lua.set_app_data(crate::humanoid::Requests::default());
         lua.set_app_data(crate::humanoid::States::default());
         lua.set_app_data(crate::players::Spawned::default());
@@ -156,16 +154,8 @@ impl Context {
                 .expect("creating the network ownership methods only fails when out of memory"),
         );
         methods.extend(
-            crate::ability::methods(&lua)
-                .expect("creating Ability methods only fails when out of memory"),
-        );
-        methods.extend(
             crate::health::methods(&lua)
                 .expect("creating Health methods only fails when out of memory"),
-        );
-        methods.extend(
-            crate::tool::methods(&lua)
-                .expect("creating Tool methods only fails when out of memory"),
         );
         methods.extend(
             crate::humanoid::methods(&lua)
@@ -630,33 +620,6 @@ impl Context {
         });
     }
 
-    /// Fires Abilities' `Activated`, `Ended` and `CooldownChanged`
-    /// (Phase 76), for those still there.
-    pub fn fire_ability_events(&self, world: &mut World, ability_events: &[AbilityEvent]) {
-        with_world(&self.lua, world, || {
-            let exists =
-                |id: InstanceId| instance::world(&self.lua).is_ok_and(|world| world.contains(id));
-            for event in ability_events {
-                match *event {
-                    AbilityEvent::Activated { ability, player } if exists(ability) => {
-                        let player = player.filter(|&id| exists(id)).map(instance::LuaInstance);
-                        let owner = events::Owner::Instance(ability);
-                        events::fire(&self.lua, owner, "Activated", player);
-                    }
-                    AbilityEvent::Ended { ability, cancelled } if exists(ability) => {
-                        let owner = events::Owner::Instance(ability);
-                        events::fire(&self.lua, owner, "Ended", cancelled);
-                    }
-                    AbilityEvent::CooldownChanged { ability, left } if exists(ability) => {
-                        let owner = events::Owner::Instance(ability);
-                        events::fire(&self.lua, owner, "CooldownChanged", left);
-                    }
-                    _ => {}
-                }
-            }
-        });
-    }
-
     /// Fires `Changed`, property signals, `ChildAdded` and `ChildRemoved`
     /// for `changes`.
     pub fn fire_changes(&self, world: &mut World, changes: &[RecordedChange]) {
@@ -988,14 +951,6 @@ impl Context {
                 }
             }
         });
-    }
-
-    /// What this side's scripts did to Inventories since the last call.
-    pub fn take_tool_changes(&self) -> crate::tool::ToolChanges {
-        match self.lua.app_data_mut::<crate::tool::ToolChanges>() {
-            Some(mut changes) => std::mem::take(&mut *changes),
-            None => crate::tool::ToolChanges::default(),
-        }
     }
 
     /// The models and tables this side's queries use.

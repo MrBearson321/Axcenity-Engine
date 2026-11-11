@@ -292,6 +292,11 @@ impl Renderer {
                 "no sRGB surface format available ({formats:?}); colors will look too dark"
             ),
         }
+        // `AXCENITY_VSYNC=off` draws as fast as the GPU can (no wait for the
+        // display), for benchmarks such as the cross-engine XB10k scene.
+        if vsync_off(std::env::var("AXCENITY_VSYNC").ok().as_deref()) {
+            config.present_mode = wgpu::PresentMode::AutoNoVsync;
+        }
         surface.configure(&device, &config);
         let capabilities = read_capabilities(&device, Some(&adapter.get_info()));
         let mut scene =
@@ -639,3 +644,22 @@ impl TextureRenderer {
 
 #[cfg(test)]
 mod tests;
+
+/// Whether `AXCENITY_VSYNC`'s value asks for no vsync.
+fn vsync_off(value: Option<&str>) -> bool {
+    value.is_some_and(|v| v.eq_ignore_ascii_case("off") || v == "0")
+}
+
+#[cfg(test)]
+mod vsync_tests {
+    use super::vsync_off;
+
+    #[test]
+    fn only_off_or_zero_turns_vsync_off() {
+        assert!(vsync_off(Some("off")));
+        assert!(vsync_off(Some("OFF")));
+        assert!(vsync_off(Some("0")));
+        assert!(!vsync_off(Some("on")));
+        assert!(!vsync_off(None));
+    }
+}

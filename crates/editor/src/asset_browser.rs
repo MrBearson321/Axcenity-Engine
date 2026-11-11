@@ -455,6 +455,10 @@ pub struct AssetBrowser {
     /// The project files nothing uses, as the app last worked out; `None`
     /// until it has (or after a change).
     unused: Option<HashSet<String>>,
+    /// Goes up each time the listed files change (a scan that found
+    /// something new, renamed or gone, or another project), so universal
+    /// search lists them again only then (`app/search.rs`).
+    generation: u64,
 }
 
 impl AssetBrowser {
@@ -463,6 +467,7 @@ impl AssetBrowser {
         self.folder = folder.map(Path::to_owned);
         self.files.clear();
         self.shared.clear();
+        self.generation += 1;
         self.thumbnails.open(folder);
         self.scanned_at = None;
         self.dialog = None;
@@ -530,13 +535,30 @@ impl AssetBrowser {
         self.files.iter().chain(&self.shared).cloned().collect()
     }
 
+    /// Scans the folders again if it's time (every couple of seconds, or
+    /// after [`refresh`](Self::refresh)), whether or not the panel shows.
+    pub fn poll(&mut self) {
+        self.rescan_if_due();
+    }
+
+    /// The project's files, then the global assets it hasn't got, as last
+    /// scanned (no built-in props).
+    pub fn listed(&self) -> impl Iterator<Item = &AssetEntry> {
+        self.files.iter().chain(&self.shared)
+    }
+
+    /// Changes whenever [`listed`](Self::listed) does.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// True if the library has the asset at `path`.
     pub fn is_global(&self, path: &str) -> bool {
         self.global_paths.contains(&path.to_lowercase())
     }
 
     /// True if the project has the asset at `path`.
-    fn is_local(&self, path: &str) -> bool {
+    pub fn is_local(&self, path: &str) -> bool {
         self.local_paths.contains(&path.to_lowercase())
     }
 
@@ -648,10 +670,13 @@ impl AssetBrowser {
             return;
         }
         self.scanned_at = Some(Instant::now());
-        self.files = match &self.folder {
+        let files = match &self.folder {
             Some(folder) => scan(folder),
             None => Vec::new(),
         };
+        let old_shared = std::mem::take(&mut self.shared);
+        let files_changed = files != self.files;
+        self.files = files;
         // Global assets show only with a project open, to use in it.
         let global = match (&self.folder, &self.library) {
             (Some(_), Some(library)) => scan(library),
@@ -669,6 +694,9 @@ impl AssetBrowser {
             .into_iter()
             .filter(|entry| !self.local_paths.contains(&entry.path.to_lowercase()))
             .collect();
+        if files_changed || old_shared != self.shared {
+            self.generation += 1;
+        }
         self.thumbnails.forget_missing();
         self.global_thumbnails.forget_missing();
     }
@@ -686,7 +714,6 @@ impl AssetBrowser {
         let mut action = None;
         self.thumbnails.poll(ui.ctx());
         self.global_thumbnails.poll(ui.ctx());
-        let palette = theme::palette(ui.ctx());
         let width = ui.available_width();
         if width >= ONE_ROW_FROM {
             // Everything on one row: the chips, then the rest at the right.
@@ -752,7 +779,7 @@ impl AssetBrowser {
             .into_iter()
             .filter(|entry| self.category.holds(entry.kind))
             .filter(|entry| self.category != Category::Global || self.is_global(&entry.path))
-            .filter(|entry| search.is_empty() || entry.path.to_lowercase().contains(&search))
+            .filter(|entry| search.is_empty() || search_matches(entry, &search))
             .filter(|entry| {
                 !self.unused_only
                     || self
@@ -800,32 +827,28 @@ impl AssetBrowser {
             .auto_shrink(false)
             .show(ui, |ui| {
                 if shown.is_empty() {
-                    ui.add_space(16.0);
-                    ui.vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new(if search.is_empty() {
-                                icons::FOLDER_DASHED
-                            } else {
-                                icons::MAGNIFYING_GLASS
-                            })
-                            .size(20.0)
-                            .color(palette.text_muted),
-                        );
-                        ui.label(
-                            egui::RichText::new(if in_folder {
-                                "Nothing of this kind in this folder."
-                            } else if search.is_empty() && self.category == Category::Global {
-                                "No global assets yet. Right-click an asset and tick Global \
-                                 asset to use it in every project."
-                            } else if search.is_empty() {
-                                "Nothing here yet. Import files, or copy them into the project's \
-                                 assets folder."
-                            } else {
-                                "No asset's path has that in it."
-                            })
-                            .color(palette.text_weak),
-                        );
-                    });
+                    let (title, sentence) = if in_folder {
+                        ("Empty folder", "Nothing of this kind in this folder.")
+                    } else if search.is_empty() && self.category == Category::Global {
+                        (
+                            "No global assets",
+                            "Right-click an asset and tick Global asset to use it in every \
+                             project.",
+                        )
+                    } else if search.is_empty() {
+                        (
+                            "No assets yet",
+                            "Import files, or copy them into the project's assets folder.",
+                        )
+                    } else {
+                        ("No matches", "No asset's path has that in it.")
+                    };
+                    let icon = if search.is_empty() {
+                        icons::FOLDER_DASHED
+                    } else {
+                        icons::MAGNIFYING_GLASS
+                    };
+                    widgets::empty_state(ui, icon, title, sentence, None);
                     return;
                 }
                 // A readable list in a narrow column, tiles where there's room.
@@ -994,11 +1017,11 @@ impl AssetBrowser {
     /// The category chips, which pick what's shown.
     fn chips(&mut self, ui: &mut egui::Ui) {
         for category in Category::ALL {
-            if chip(ui, category.label(), self.category == category).clicked() {
+            if widgets::chip(ui, category.label(), self.category == category).clicked() {
                 self.category = category;
             }
         }
-        if chip(ui, "Unused", self.unused_only)
+        if widgets::chip(ui, "Unused", self.unused_only)
             .on_hover_text(
                 "Only the assets nothing uses: no Instance, script (by its path), material, \
                  prefab, level or data table names them.",
@@ -1777,31 +1800,12 @@ pub fn prefab_file_stem(name: &str) -> String {
     }
 }
 
-/// A category to filter by: quiet text, filled while it's picked.
-fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
-    let palette = theme::palette(ui.ctx());
-    let galley = ui.painter().layout_no_wrap(
-        label.to_owned(),
-        egui::FontId::new(theme::type_scale::SMALL + 0.5, theme::medium_family()),
-        egui::Color32::PLACEHOLDER,
-    );
-    let size = egui::vec2(galley.size().x + 16.0, 24.0);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, label)
-    });
-    widgets::paint_hover(ui, rect, &response, false, theme::radius::CARD);
-    if selected {
-        ui.painter().rect_filled(rect, 12.0, palette.control_active);
-    }
-    let color = if selected || response.hovered() {
-        palette.text_strong
-    } else {
-        palette.text_weak
-    };
-    ui.painter()
-        .galley(rect.center() - galley.size() / 2.0, galley, color);
-    response
+/// Whether an asset matches the panel's search (already lower case): every
+/// word of it is in the asset's path or kind, so "sound door" finds
+/// `assets/sounds/door.ogg` and "texture" every texture.
+fn search_matches(entry: &AssetEntry, search: &str) -> bool {
+    let text = format!("{} {}", entry.kind.label(), entry.path).to_lowercase();
+    search.split_whitespace().all(|word| text.contains(word))
 }
 
 #[cfg(test)]

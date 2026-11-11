@@ -44,7 +44,6 @@
 //! - [`ScriptRuntime::start_spec`] runs a game test's spec file for the
 //!   `testing` crate's runner (see `spec`).
 
-mod ability;
 mod api;
 mod attachment;
 pub mod audio_settings;
@@ -103,7 +102,6 @@ mod spec;
 mod spline;
 pub mod system;
 mod task;
-mod tool;
 mod tree;
 mod tween;
 mod types;
@@ -127,7 +125,6 @@ use mlua::Lua;
 use crate::context::Context;
 use crate::lent::with_world;
 
-pub use ability::{AbilityEvent, Blocked, tag_list};
 pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, GameCamera};
 pub use chat::ChatLine;
 pub use console_service::{ConsoleCommandInfo, ConsoleRun, split_command};
@@ -177,8 +174,9 @@ pub struct OutputLine {
 /// How many rounds of change events [`ScriptRuntime::fire_changes`] runs in
 /// one call. Handlers that change things fire more change events (the next
 /// round); a handler that keeps changing what it listens to would never
-/// stop, so after this many rounds the rest wait for the next call.
-const MAX_CHANGE_ROUNDS: usize = 10;
+/// stop, so after this many rounds the rest wait for the next call. Game
+/// systems that fire their own rounds keep to it too.
+pub const MAX_CHANGE_ROUNDS: usize = 10;
 
 /// The output lines waiting for the host. A named type, so that this is the
 /// only `Vec<OutputLine>` stored in Lua's app data.
@@ -247,17 +245,12 @@ pub struct ScriptRuntime {
     shatters: Vec<Shatter>,
     /// Every Health's regeneration wait, and their events waiting to fire.
     health: health::Healths,
-    /// Abilities' and Effects' state (Phase 76), which both sides share.
-    abilities: ability::SharedAbilities,
     /// Game systems from other crates (roadmap L7), in the order added.
     systems: Vec<std::rc::Rc<dyn GameSystem>>,
     /// The ProximityPrompts showing and their holds (Phase 44).
     prompts: prompt::Prompts,
     /// What the mouse points at and presses, for ClickDetectors.
     clicks: click::Clicks,
-    /// The Tools in hand last fired, dropped Tools, and the hotbar's keys
-    /// (Phase 45).
-    tools: tool::Tools,
     /// Humanoids' walks and states (Phase 46).
     humanoids: humanoid::Humanoids,
     /// Respawns, spawn ForceFields and the leaderboard's Tab (Phase 47).
@@ -335,6 +328,12 @@ impl ScriptRuntime {
         for lua in [&self.server.lua, &self.client.lua] {
             system.added(lua);
             system::add(lua, std::rc::Rc::clone(&system));
+            let methods = system
+                .methods(lua)
+                .expect("creating a game system's methods only fails when out of memory");
+            if let Some(mut class_methods) = lua.app_data_mut::<instance::ClassMethods>() {
+                class_methods.extend(methods);
+            }
         }
         self.systems.push(system);
     }
@@ -403,9 +402,6 @@ impl ScriptRuntime {
         let chat = chat::SharedChat::default();
         server.lua.set_app_data(chat.clone());
         client.lua.set_app_data(chat.clone());
-        let abilities = ability::SharedAbilities::default();
-        server.lua.set_app_data(abilities.clone());
-        client.lua.set_app_data(abilities.clone());
         Self {
             server,
             client,
@@ -415,11 +411,9 @@ impl ScriptRuntime {
             particle_emits: Vec::new(),
             shatters: Vec::new(),
             health: health::Healths::default(),
-            abilities,
             systems: Vec::new(),
             prompts: prompt::Prompts::default(),
             clicks: click::Clicks::default(),
-            tools: tool::Tools::default(),
             humanoids: humanoid::Humanoids::default(),
             players: players::Players::default(),
             player_events: Vec::new(),
@@ -890,14 +884,7 @@ impl ScriptRuntime {
         for message in messages {
             if message.kind == MessageKind::Activate {
                 if message.to == Side::Server && !self.client_only {
-                    self.abilities
-                        .0
-                        .borrow_mut()
-                        .requests
-                        .push(ability::Request {
-                            ability: message.remote,
-                            player: message.player,
-                        });
+                    self.activation_requested(&message);
                 }
                 continue;
             }
@@ -1536,6 +1523,28 @@ impl ScriptRuntime {
         }
     }
 
+    /// A player's request to activate `message.remote`, for this device's
+    /// server: each game system's [`GameSystem::activation_requested`].
+    fn activation_requested(&self, message: &Message) {
+        for system in &self.systems {
+            system.activation_requested(message.remote, message.player);
+        }
+    }
+
+    /// For game systems: the player's keys, mouse and controller this
+    /// frame, as ProximityPrompts and Tools read them.
+    pub fn prompt_input(&self) -> PromptInput {
+        self.client.prompt_input()
+    }
+
+    /// For game systems: queues Health events (from
+    /// [`system::damage`], [`system::heal`] or [`system::set_health`]) to
+    /// fire on both sides with the engine's own, in
+    /// [`fire_changes`](Self::fire_changes).
+    pub fn queue_health_events(&mut self, events: Vec<system::HealthEvent>) {
+        self.health.pending.extend(events);
+    }
+
     /// For game systems: the side that runs what the player starts without
     /// a script, such as a prompt's dialogue: the server's, unless this
     /// device only follows one.
@@ -1560,77 +1569,27 @@ impl ScriptRuntime {
         self.input_locked(world) || self.input_held()
     }
 
-    /// Fires each game system's waiting events ([`GameSystem::fire_events`])
-    /// until none fire, up to the change-round limit.
-    fn fire_system_events(&mut self, world: &mut World) {
-        if self.systems.is_empty() {
+    /// Fires the waiting events ([`GameSystem::fire_events`]) of each game
+    /// system that [fires first](GameSystem::fires_first) or, with `first`
+    /// false, of the others, until none fire, up to the change-round limit.
+    fn fire_system_events(&mut self, world: &mut World, first: bool) {
+        let systems: Vec<_> = self
+            .systems
+            .iter()
+            .filter(|system| system.fires_first() == first)
+            .cloned()
+            .collect();
+        if systems.is_empty() {
             return;
         }
         for _ in 0..MAX_CHANGE_ROUNDS {
             let mut fired = false;
-            for system in self.systems.clone() {
+            for system in &systems {
                 fired |= system.fire_events(self, world);
             }
             if !fired {
                 return;
             }
-        }
-    }
-
-    /// Frame step 1, after [`step_prompts`](Self::step_prompts) (Phase 45):
-    /// characters with an Inventory pick up the dropped Tools they touch,
-    /// while there's room; the player's number keys, mouse wheel and
-    /// controller bumpers pick a hotbar slot, Drop drops the Tool in hand,
-    /// and Primary fires its `Activated` and `Deactivated`, in Scripts and
-    /// then in LocalScripts, after `Equipped` and `Unequipped`.
-    pub fn step_tools(&mut self, world: &mut World) {
-        self.fire_changes(world);
-        let input = self.client.prompt_input();
-        let assets = self.server.assets();
-        let fired = self.tools.step(world, &assets, &input);
-        // Equipped and Unequipped first, then Activated.
-        self.fire_tool_events(world);
-        self.fire_fired(world, &fired);
-    }
-
-    /// Frame step 4, after the Animators pose the characters: each Tool in
-    /// hand moves to its character's right hand (Phase 45), the bone posed
-    /// as `poses` has it.
-    pub fn place_tools(&mut self, world: &mut World, poses: &axcenity_anim::Poses) {
-        self.fire_changes(world);
-        let assets = self.server.assets();
-        tool::place_held(world, &assets, poses);
-        self.fire_changes(world);
-    }
-
-    /// The player character's Inventory, which the default hotbar shows
-    /// unless its `HotbarEnabled` is off.
-    pub fn player_inventory(&self, world: &World) -> Option<InstanceId> {
-        tool::player_inventory(world)
-    }
-
-    /// Fires `Unequipped` and `Equipped` for the Inventories scripts and
-    /// the tools step changed, on both sides, for up to
-    /// [`MAX_CHANGE_ROUNDS`] rounds of handlers that change more.
-    fn fire_tool_events(&mut self, world: &mut World) {
-        for _ in 0..MAX_CHANGE_ROUNDS {
-            if self.tools.dirty.is_empty() {
-                return;
-            }
-            let fired = self.tools.sync(world);
-            self.fire_fired(world, &fired);
-        }
-    }
-
-    /// Fires events with no arguments on their Instances, on both sides.
-    fn fire_fired(&mut self, world: &mut World, fired: &[prompt::Fired]) {
-        if fired.is_empty() {
-            return;
-        }
-        for side in [Side::Server, Side::Client] {
-            self.context(side).fire_prompt_events(world, fired, None);
-            self.collect(side);
-            self.fire_change_rounds(world);
         }
     }
 
@@ -1659,128 +1618,13 @@ impl ScriptRuntime {
         let events = self.health.step(world, &assets, seconds);
         self.health.pending.extend(events);
         self.fire_changes(world);
-        // Then Abilities' cooldowns and Effects (Phase 76).
-        self.abilities.0.borrow_mut().step(world, seconds);
-        self.fire_changes(world);
+        // Then the game systems' (Abilities' cooldowns and Effects).
+        for system in self.systems.clone() {
+            system.step_server(self, world, seconds);
+            self.fire_changes(world);
+        }
         health::bind_bars(world);
         self.fire_changes(world);
-    }
-
-    /// Frame step 1, after [`step_tools`](Self::step_tools) (Phase 76),
-    /// on every device: the player's Abilities whose `ActivationKey` was
-    /// just pressed ask to activate. The server (this device's, or the one
-    /// it follows) checks again; a following device starts the cooldown
-    /// sweep at once. This device's server then serves the requests that
-    /// came in.
-    pub fn step_abilities(&mut self, world: &mut World, seconds: f64) {
-        self.fire_changes(world);
-        let input = self.client.prompt_input();
-        let player = self.client.local_player();
-        let locked = self.input_locked(world);
-        {
-            let mut abilities = self.abilities.0.borrow_mut();
-            abilities.step_predicted(seconds);
-            let mine =
-                player.map_or_else(Vec::new, |player| ability::player_abilities(world, player));
-            let pressed = if locked {
-                Vec::new()
-            } else {
-                abilities.pressed(world, &mine, &input.map, &input.game)
-            };
-            for ability in pressed {
-                let Some(player) = player else { break };
-                if self.client_only {
-                    if ability::can_activate(world, ability).is_ok() {
-                        abilities.predict(world, ability);
-                        self.outgoing.push(Message {
-                            to: Side::Server,
-                            remote: ability,
-                            player,
-                            kind: MessageKind::Activate,
-                            args: Vec::new(),
-                        });
-                    }
-                } else {
-                    abilities
-                        .requests
-                        .push(ability::Request { ability, player });
-                }
-            }
-            if !self.client_only {
-                abilities.serve_requests(world);
-            }
-        }
-        self.fire_changes(world);
-    }
-
-    /// The local player's Abilities with an `ActivationKey`, for the
-    /// ability bar: each with the cooldown it shows (the server's, or the
-    /// one this device started at once).
-    pub fn ability_bar(&self, world: &World) -> Vec<axcenity_core::ability::AbilitySlot> {
-        let Some(player) = self.client.local_player() else {
-            return Vec::new();
-        };
-        let input = self.client.prompt_input();
-        let abilities = self.abilities.0.borrow();
-        ability::player_abilities(world, player)
-            .into_iter()
-            .filter_map(|id| {
-                let instance = world.get(id)?;
-                let action = instance.property("ActivationKey")?.as_str()?.trim();
-                if action.is_empty() {
-                    return None;
-                }
-                Some(axcenity_core::ability::AbilitySlot {
-                    ability: id,
-                    key: input
-                        .map
-                        .action(action)
-                        .map(|action| action.label(input.gamepad))
-                        .unwrap_or_default(),
-                    cooldown_left: abilities.shown_cooldown(world, id) as f32,
-                    cooldown: instance
-                        .property("Cooldown")
-                        .and_then(Value::as_number)
-                        .unwrap_or(0.0) as f32,
-                })
-            })
-            .collect()
-    }
-
-    /// Players' requests to activate Abilities that this server hasn't
-    /// served yet (Phase 76), for tests.
-    pub fn ability_requests(&self) -> Vec<(InstanceId, InstanceId)> {
-        self.abilities
-            .0
-            .borrow()
-            .requests
-            .iter()
-            .map(|request| (request.ability, request.player))
-            .collect()
-    }
-
-    /// Fires the Abilities' events, and Health's from Effects, on both
-    /// sides, for up to [`MAX_CHANGE_ROUNDS`] rounds of handlers that
-    /// cause more.
-    fn fire_ability_events(&mut self, world: &mut World) {
-        for _ in 0..MAX_CHANGE_ROUNDS {
-            let (events, health) = {
-                let mut abilities = self.abilities.0.borrow_mut();
-                (
-                    std::mem::take(&mut abilities.pending),
-                    std::mem::take(&mut abilities.health),
-                )
-            };
-            self.health.pending.extend(health);
-            if events.is_empty() {
-                return;
-            }
-            for side in [Side::Server, Side::Client] {
-                self.context(side).fire_ability_events(world, &events);
-                self.collect(side);
-                self.fire_change_rounds(world);
-            }
-        }
     }
 
     /// Fires the Health events scripts and the health step queued, on both
@@ -2010,12 +1854,12 @@ impl ScriptRuntime {
     /// that are now where scripts run start.
     pub fn fire_changes(&mut self, world: &mut World) {
         self.fire_change_rounds(world);
-        self.fire_ability_events(world);
+        // Abilities' first, so Health events their Effects cause fire here.
+        self.fire_system_events(world, true);
         self.fire_health_events(world);
-        self.fire_tool_events(world);
         self.fire_player_events(world);
         self.fire_level_events(world);
-        self.fire_system_events(world);
+        self.fire_system_events(world, false);
         self.stop_destroyed_scripts(world);
         self.start_clones(world);
     }
@@ -2250,7 +2094,6 @@ impl ScriptRuntime {
         self.particle_emits.extend(context.take_particle_emits());
         self.shatters.extend(context.take_shatters());
         self.health.pending.extend(context.take_health_events());
-        self.tools.note(context.take_tool_changes());
         self.humanoids.note(context.take_humanoid_requests());
         self.player_events
             .extend(self.players.note(context.take_spawned()));
@@ -2281,15 +2124,8 @@ impl ScriptRuntime {
             if elsewhere {
                 self.outgoing.push(message);
             } else if message.kind == MessageKind::Activate {
-                // For this device's server: the abilities step serves it.
-                self.abilities
-                    .0
-                    .borrow_mut()
-                    .requests
-                    .push(ability::Request {
-                        ability: message.remote,
-                        player: message.player,
-                    });
+                // For this device's server: a game system serves it.
+                self.activation_requested(&message);
             } else {
                 self.transport.send(message);
             }
@@ -2448,8 +2284,6 @@ mod user_settings_tests;
 mod cframe_tests;
 
 #[cfg(test)]
-mod ability_tests;
-#[cfg(test)]
 mod assembly_tests;
 #[cfg(test)]
 mod collection_tests;
@@ -2483,8 +2317,6 @@ mod query_tests;
 mod seat_tests;
 #[cfg(test)]
 mod spline_tests;
-#[cfg(test)]
-mod tool_tests;
 #[cfg(test)]
 mod utilities_tests;
 

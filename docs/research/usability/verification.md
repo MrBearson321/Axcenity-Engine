@@ -368,3 +368,68 @@ Plan and findings: [design-system.md](design-system.md). Approved by Paul with P
 **Left.** At 300 points wide a vector's third axis wraps under the first two and its first frame overlaps the next row (seen with one selected too; not new). Per-axis `—` for vectors.
 
 **Next.** Phase 5: one shortcut table (V16), layout presets (V17), Increase contrast (V18), and shared section, empty-state and chip pieces (V19).
+
+## Universal search and Recent Projects (Master Improvement Initiative §8–9)
+
+Paul's brief of 2026-11-11, section 8 (universal search and indexed discovery) and section 9 (UI stability). How it works: `docs/editor/shell.md`, Universal search.
+
+**Already there, reused.** The command palette and Quick Open (Phase 70), with every menu and ribbon command as a `Command`; the Explorer, Properties and Assets filters; the Assets panel's scan and the file watcher; stable `InstanceId`s and the world's `structure_version` and per-Instance revisions; the Settings window's pages. No second command registry and no second walk of the project's files: the search index reads these.
+
+| What | Change | Files |
+|---|---|---|
+| Recent Projects overflow (§9) | Cards ran off the start page's right edge: each card's fade-in `ui.scope` stopped egui's wrapping row from breaking. Laid out row by row (PR #75) | `start.rs`, `start/tests.rs` |
+| Ctrl+K (§8A) | One window over everything; Ctrl+P and Ctrl+Shift+P (with `>` typed) are views of it; Edit > Search Everything…; Up/Down, Enter, Escape, Tab | `command_palette.rs`, `app/search.rs`, `app/chrome/menus.rs` |
+| Categories (§8B) | Commands, Tools, Objects, Assets, Scripts, Levels, Settings, Properties, as chips with counts | `command_palette.rs`, `app/search.rs` |
+| Commands (§8C) | Descriptions for every command (the highlighted row's shows under the list), synonyms, shortcuts, why a disabled one can't run | `app/search.rs` |
+| Settings (§8B–C) | 47 rows of the Settings window searchable; picking one opens its page, scrolls to the row and outlines it | `app/settings.rs` |
+| Properties (§8C) | The selection's properties are rows; picking one opens Properties with its filter set to the name | `app/search.rs`, `properties.rs` |
+| Assets panel (§8C) | Its search matches every word against the asset's path and kind ("sound door", "texture") | `asset_browser.rs` |
+| Index (§8D–E) | Providers with stamps; listed again only when their data changes; ranking cached per query and index generation; a new system registers a `SearchProvider` | `app/search.rs`, `asset_browser.rs` (`generation`) |
+
+**Timings** (`search_cost_at_100_1000_and_10000_objects`, release, cloud container, 4 cores; a Folder of Parts named "Crate N" in hello-touched):
+
+| Objects | List everything | Check, nothing changed (each frame while open) | Rank "crate 99" (each keystroke) | Ranked again, same query |
+|---|---|---|---|---|
+| 100 | 0.60 ms | 0.001 ms | 0.28 ms | 0.0001 ms |
+| 1,000 | 1.03 ms | 0.005 ms | 0.93 ms | 0.0001 ms |
+| 10,000 | 6.07 ms | 0.110 ms | 6.13 ms | 0.0001 ms |
+
+Listing happens when the palette opens and after a change, not per keystroke; nothing is indexed while it's closed.
+
+**Differs from the brief, on purpose.**
+- *Asynchronous indexing* isn't used: listing 10,000 objects takes 6 ms once per change, and threads would need copies of the world. Revisit when a provider is slow (a docs or plugin provider reading files).
+- *Context-aware ranking* is recency (the last 20 picks lead and score more), the selection (only its properties are listed), Play (the session's world) and per-category weights, not which panel has focus: the editor doesn't track a focused pane.
+- *Asset tags and metadata*: assets have none beyond path and kind, so search matches those.
+- *Searchable documentation* and AI-assisted discovery are not built; both would be one more `SearchProvider` (the start screen's API Reference search, `reference::search_entries`, is the natural source).
+- *Explorer filter by type*: the Explorer's filter already matches the class ("PointLight") and opens the branches above matches; universal search's object rows show the class and full path. Unchanged, to stay clear of Design system Phase 4's Explorer work.
+
+**Tests.** New: `app/search_tests.rs` (Ctrl+K lists every category and Enter opens the pick; Tab narrows to one category and Shift+Tab goes back; typing ranks again but lists nothing again; creating, renaming, moving and deleting objects; Play's world and back; asset files coming and going; synonyms and a description for every command and tool; every searchable setting is found on its page; a property row selects and filters; snapshots `universal-search*.png`, `settings-found.png`), `command_palette.rs` unit tests (prefix and chips, counts, whole-name bonus, synonyms and descriptions, the ranking cache, Tab order, the ASCII fast path), `asset_browser/tests.rs` (the search's words), `start/tests.rs` (cards inside the page at 900–3,000 px). `palette_tests.rs` moved to the new API. `cargo test -p axcenity-editor`: 1,009 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`, no audio device); clippy and fmt clean. Not checked on Windows or a real GPU.
+
+**Left.** The palette reads shortcuts from `palette_commands` until Design system Phase 5's shortcut table (V16) lands; then it should read them from there. The rest of §9 (other menus and panels at narrow and wide sizes) wasn't audited beyond the start page: the design-system thread's tour shots cover the panels.
+
+## Design system Phase 5: workspaces and options (V16–V19)
+
+Plan and findings: [design-system.md](design-system.md). Approved by Paul with Phases 1–5 on 2026-11-10. Built on Phase 4 and on universal search (#76), whose Ctrl+K joined the shortcut table.
+
+| ID | What changed | Files |
+|---|---|---|
+| V16 (DS5) | Every keyboard shortcut is one row of a table: what it does, its keys, where it works (19 contexts, from Everywhere and Editing the scene to the Model Studio's modes) and its label. Every handler that named keys now asks the table: the scene's undo, tools, duplicate, rename and delete, the Explorer's arrows, the Terrain Studio and brushes, the Console's line, the Animation clip, the graphs, the UI Designer, the Model Studio (Object and Edit keys, moves, typed amounts, Poly Build, the UV editor, Armature, Pose and Paint), F9 in Play, the palette's own keys and Ctrl+K. Settings › Shortcuts lists all of it by context (it listed 24 rows); menus and the command palette show keys from it, so the tools' and terrain tools' palette rows now show their keys too | `shortcuts.rs` (new) and the handlers: `app/chrome/windows.rs`, `app.rs`, `app/search.rs`, `app/command_palette.rs`, `app/settings.rs`, `app/terrain/strokes.rs`, `app/dev_console.rs`, `explorer.rs`, `console.rs`, `animation/…`, `node_graph.rs`, `block_editor/graph.rs`, `ui_designer/…`, `model_studio/…`, `gizmo.rs`, `terrain_studio.rs` |
+| V17 (DS1) | View › Layout: Default, five presets (Scripting, Animation, UI Design, Modeling & Assets, Lighting & Environment), Save Current Layout… and the saved ones. Switching keeps open scripts (behind the preset's front tab, except in Scripting) and the selection. Also on Settings › Editor layout and in the palette and search | `layout/presets.rs` (new), `app/layouts.rs` (new), `layout.rs`, `app/chrome/menus.rs`, `app/command_palette.rs`, `app/search.rs`, `app/settings.rs` |
+| V18 (DS19, DS25) | Settings › Accessibility › Increase contrast: borders and control outlines reach 3:1 on the panels, muted text 4.5:1, focus rings are 2 points, and block colours darken until white labels reach 4.5:1. Saved with the appearance; older saves load with it off | `theme.rs`, `widgets.rs`, `explorer.rs`, `block_editor/…`, `app/settings.rs` |
+| V19 (DS8, DS9) | One folding section (`widgets::section`: icon, title, hint; forced open while filtering, or remembered across selections) used by Properties and the UI Designer's inspector; one empty state (`widgets::empty_state`: icon, title, a sentence on how to fill it, an optional button) used by Properties, Assets, Mixer, Tags and the Model Studio; the filter chip moved to `widgets::chip` (Assets and search) | `widgets.rs`, `properties.rs`, `ui_designer/fold.rs`, `asset_browser.rs`, `mixer.rs`, `tags.rs`, `model_studio.rs`, `command_palette.rs` |
+
+**Found and fixed on the way.** Over a node graph (a material, a UI Event Graph, a behavior tree, a dialogue), Delete and Ctrl+D went to the scene first: they deleted or duplicated the selected Instance and the graph never saw them. The table's clash test made it visible; the graph now gets them, as a block script's Graph view already did (test `delete_over_the_event_graph_leaves_the_selected_instance_alone`).
+
+**Differs from the plan, on purpose.**
+- *Fields, menus and dialogs (V16)* keep Enter, Escape and Tab outside the table: they are conventions that work the same everywhere, and Settings › Shortcuts says so in one line. The camera's mouse moves are listed as gestures.
+- *Overlaps (V16).* Where two contexts are live at once and share a key on purpose, the table says which wins (`Context::wins_over`: the Terrain Studio over the scene, the Anchor and Angular tools' Enter over the Explorer's rename, the Explorer's arrows over the UI Designer's, a clip's and a graph's keys over the scene's); the test fails on any other shared key.
+- *Small key changes (V16).* A handler that ignored modifiers now takes Shift and Alt as egui's own shortcuts do, but not Ctrl: Ctrl+Delete no longer deletes graph nodes, and Ctrl+F9 no longer opens the Developer Console. The state machine graph now also deletes with Backspace, like the other graphs.
+- *Badges (V19).* There was no pill badge to share, so none was added.
+
+**What's preserved.** Every key does what it did (bar the small changes above). The Explorer, Properties and UI Designer look as before; the default layout is unchanged; Increase contrast is off by default.
+
+**Tests.** New: `shortcuts.rs` (`no_two_actions_that_can_be_live_together_share_keys`, `every_action_has_keys_or_a_gesture_and_a_label`, `keys_with_more_modifiers_are_taken_first`, `pressed_leaves_the_key_and_ignores_a_held_shift`, `keys_read_as_settings_and_menus_write_them`, `the_tools_keys_come_from_the_table`); `layout/presets.rs` (every preset has the Scene and survives saving, brings its task's panels, scripts come back behind or in front, saved layouts by name but never a preset's); `saved_layouts_survive_a_restart`; contrast (`increase_contrast_reaches_3_to_1_outlines_and_aa_muted_text`, `appearance_saved_before_increase_contrast_loads_with_it_off`, `increase_contrast_darkens_block_colours_for_white_labels`); widgets (`a_remembered_section_folds_on_a_click_and_stays_folded`, `an_empty_state_says_how_to_fill_it_and_its_button_works`); the Event Graph test above. The palette test checks View has the Layout submenu. Tour states `90-layout-*` and `91-shortcuts`, and `TOUR_CONTRAST=high`; shots in project files `usability/design-system/phase5/`. `cargo test -p axcenity-editor`: 1,026 passed, only the known cloud failure (`every_tutorial_sample_opens_and_plays_in_the_editor`, no audio device); clippy and fmt clean. Not checked on Windows or a real GPU.
+
+**Left.** Rebinding (V23) only has to change `Action::keys`. Settings › Shortcuts is long; search finds the page but not single shortcuts yet.
+
+**Next.** Phase 6 (V20–V26) wasn't approved; it waits for Paul.

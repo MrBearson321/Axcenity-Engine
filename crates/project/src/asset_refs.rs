@@ -100,6 +100,9 @@ impl Reference {
 /// `world` (the open level, `open`; `None` for the start level) and in the
 /// other levels, prefabs, clips, state machines, data tables, materials,
 /// texture sets and scripts that name it by its literal path.
+///
+/// A reference by asset ID counts as naming its file, and is given with
+/// the file's path (see [`walk`]).
 pub fn find_references(
     folder: &Path,
     world: &World,
@@ -108,6 +111,23 @@ pub fn find_references(
 ) -> Vec<Reference> {
     let mut found = Vec::new();
     walk(folder, world, open, &mut |reference| {
+        if reference.names(asset) {
+            found.push(reference);
+        }
+    });
+    found
+}
+
+/// [`find_references`] as written: a reference by asset ID is left out,
+/// since it keeps naming the file wherever it goes.
+fn path_references(
+    folder: &Path,
+    world: &World,
+    open: Option<&str>,
+    asset: &str,
+) -> Vec<Reference> {
+    let mut found = Vec::new();
+    walk_written(folder, world, open, &mut |reference| {
         if reference.names(asset) {
             found.push(reference);
         }
@@ -144,10 +164,16 @@ pub fn unused_assets(
             texts.push(text);
         }
     }
+    // A script may name a file by its ID too.
+    let ids = axcenity_assets::asset_ids(folder);
     assets
         .iter()
         .filter(|asset| {
-            !named.contains(asset.as_str()) && !texts.iter().any(|text| contains_path(text, asset))
+            let id = ids.get(asset.as_str()).map(ToString::to_string);
+            !named.contains(asset.as_str())
+                && !texts.iter().any(|text| {
+                    contains_path(text, asset) || id.as_ref().is_some_and(|id| text.contains(id))
+                })
         })
         .cloned()
         .collect()
@@ -188,7 +214,8 @@ pub fn plan_rename(
         return Err("a .gltf names the files beside it: rename it in its folder".to_owned());
     }
 
-    let references = find_references(folder, world, open, from);
+    // References by ID need no change: the sidecar moves with the file.
+    let references = path_references(folder, world, open, from);
     let mut findings = Vec::new();
     let mut files: Vec<FileWrite> = Vec::new();
     for reference in &references {
@@ -272,8 +299,30 @@ pub fn plan_rename(
     Ok(plan)
 }
 
-/// Calls `found` with every reference to any file in the project.
+/// Calls `found` with every reference to any file in the project, one by
+/// asset ID (`ax://…`) given with its file's path in its place (a model's
+/// `#pick` kept), so it counts as naming that file. An ID no file has is
+/// given as it is.
 fn walk(folder: &Path, world: &World, open: Option<&str>, found: &mut dyn FnMut(Reference)) {
+    let mut ids = None;
+    walk_written(folder, world, open, &mut |mut reference| {
+        if let Some((id, pick)) = axcenity_assets::split_reference(&reference.path) {
+            let ids = ids.get_or_insert_with(|| axcenity_assets::read_asset_index(folder));
+            if let Some(path) = ids.get(&id) {
+                reference.path = format!("{path}{pick}");
+            }
+        }
+        found(reference);
+    });
+}
+
+/// [`walk`], with each reference as written.
+fn walk_written(
+    folder: &Path,
+    world: &World,
+    open: Option<&str>,
+    found: &mut dyn FnMut(Reference),
+) {
     world_refs(world, world.root(), None, found);
     for (file, other) in other_levels(folder, open) {
         let roots = other

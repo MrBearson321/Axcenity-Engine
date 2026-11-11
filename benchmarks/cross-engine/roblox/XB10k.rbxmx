@@ -1,0 +1,198 @@
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" version="4"><Item class="Folder" referent="RBX0"><Properties><string name="Name">XB10k</string></Properties><Item class="Script" referent="RBX1"><Properties><string name="Name">XB10kBuild</string><bool name="Disabled">false</bool><ProtectedString name="Source"><![CDATA[-- XB10k for Roblox: builds the scene from ../README.md's formulas when the
+-- server starts, then clones one script per spinner and blinker, as a
+-- Roblox developer would place them. The timing is XB10kTimer (a
+-- LocalScript in StarterPlayerScripts).
+local Players = game:GetService("Players")
+Players.CharacterAutoLoads = false -- no character: the other engines have none
+workspace.Gravity = 196.2
+
+local folder = script.Parent
+local SIDE, SPACING, GRID, SPINNERS, DROPS, BLINKERS = 95, 4, 8899, 100, 1000, 97
+
+local count, total = 0, 0
+local function part(parent, name, shape, pos, size, color, anchored)
+    local p = Instance.new("Part")
+    p.Name = name
+    p.Shape = Enum.PartType[shape]
+    p.Size = size
+    p.Position = pos
+    p.Color = color
+    p.Anchored = anchored
+    p.Material = Enum.Material.SmoothPlastic
+    p.TopSurface = Enum.SurfaceType.Smooth
+    p.BottomSurface = Enum.SurfaceType.Smooth
+    p.Parent = parent
+    count += 1
+    total += pos.X + pos.Y + pos.Z + size.X + size.Y + size.Z
+    return p
+end
+
+local function makeFolder(name)
+    local f = Instance.new("Folder")
+    f.Name = name
+    f.Parent = workspace
+    return f
+end
+
+local start = os.clock()
+local floor = part(workspace, "Floor", "Block", Vector3.new(0, -0.5, 0), Vector3.new(440, 1, 440),
+    Color3.new(0.35, 0.37, 0.40), true)
+
+local grid, spinners = makeFolder("Grid"), makeFolder("Spinners")
+local shapes = { "Block", "Cylinder", "Wedge" }
+for i = 0, GRID + SPINNERS - 1 do
+    local c, r = i % SIDE, i // SIDE
+    local x = c * SPACING - (SIDE - 1) * SPACING / 2
+    local z = r * SPACING - (SIDE - 1) * SPACING / 2
+    local h = 1 + (i * 7 % 5)
+    local hue = (i % 8) / 8
+    local color = Color3.new(hue, 1 - hue, 0.5 + hue / 2)
+    local pos, size = Vector3.new(x, h / 2, z), Vector3.new(2, h, 2)
+    if i >= GRID then
+        local k = i - GRID
+        part(spinners, "S" .. k, "Block", pos, size, color, true)
+    else
+        part(grid, "G" .. i, shapes[i % 3 + 1], pos, size, color, true)
+    end
+end
+
+local drops = makeFolder("Drops")
+for j = 0, DROPS - 1 do
+    local x, y, z = j % 10, j // 100, (j // 10) % 10
+    part(drops, "D" .. j, if j % 2 == 0 then "Ball" else "Block",
+        Vector3.new(x * 3 - 13.5, 12 + y * 3, z * 3 - 13.5), Vector3.new(1.5, 1.5, 1.5),
+        Color3.new(0.95, 0.6, 0.2), false)
+end
+
+-- Sun shining from (0.5, 1, 0.25): Roblox's sun follows ClockTime and
+-- GeographicLatitude, which Axcenity copies; its defaults point the sun there.
+local Lighting = game:GetService("Lighting")
+Lighting.GlobalShadows = true
+
+-- One script per spinner and blinker, plus the lifter.
+for k = 0, SPINNERS - 1 do
+    local s = folder.XB10kSpin:Clone()
+    s.Name = "Spin" .. k
+    s:SetAttribute("Index", k)
+    s.Disabled = false
+    s.Parent = game:GetService("ServerScriptService")
+end
+for k = 0, BLINKERS - 1 do
+    local s = folder.XB10kBlink:Clone()
+    s.Name = "Blink" .. k
+    s:SetAttribute("Index", k)
+    s.Disabled = false
+    s.Parent = game:GetService("ServerScriptService")
+end
+local lifter = folder.XB10kDrops:Clone()
+lifter.Disabled = false
+lifter.Parent = game:GetService("ServerScriptService")
+
+local buildMs = (os.clock() - start) * 1000
+print(string.format("XB10K_CHECK count=%d sum=%.2f", count, total))
+workspace:SetAttribute("XB10kBuildMs", buildMs)
+workspace:SetAttribute("XB10kReady", true)
+]]></ProtectedString></Properties></Item><Item class="Script" referent="RBX2"><Properties><string name="Name">XB10kSpin</string><bool name="Disabled">true</bool><ProtectedString name="Source"><![CDATA[-- XB10k: turns one spinner every Heartbeat.
+local RunService = game:GetService("RunService")
+local k = script:GetAttribute("Index")
+local part = workspace.Spinners:WaitForChild("S" .. k)
+local speed = 30 + k % 7 * 20
+local angle = 0
+RunService.Heartbeat:Connect(function(deltaTime)
+    angle = (angle + speed * deltaTime) % 360
+    part.Orientation = Vector3.new(0, angle, 0)
+end)
+]]></ProtectedString></Properties></Item><Item class="Script" referent="RBX3"><Properties><string name="Name">XB10kBlink</string><bool name="Disabled">true</bool><ProtectedString name="Source"><![CDATA[-- XB10k: wakes every 0.1 to 0.5 s, reads a grid block and recolors it.
+local k = script:GetAttribute("Index")
+local part = workspace.Grid:WaitForChild("G" .. (k * 91))
+local wait = 0.1 + (k % 5) * 0.1
+local base = part.Color
+local count = 0
+while true do
+    task.wait(wait)
+    count += 1
+    local height = part.Position.Y
+    if count % 2 == 0 and height > 0 then
+        part.Color = base
+    else
+        part.Color = Color3.new(1, 0.5, 0)
+    end
+end
+]]></ProtectedString></Properties></Item><Item class="Script" referent="RBX4"><Properties><string name="Name">XB10kDrops</string><bool name="Disabled">true</bool><ProtectedString name="Source"><![CDATA[-- XB10k: lifts 100 drops back up every second, so some always fall.
+local drops = {}
+for j = 0, 999 do
+    drops[j + 1] = workspace.Drops:FindFirstChild("D" .. j)
+end
+local n = 1
+while true do
+    task.wait(1)
+    for _ = 1, 100 do
+        local drop = drops[n]
+        local x = (n % 10) * 3 - 13.5
+        local z = (math.floor(n / 10) % 10) * 3 - 13.5
+        drop.Position = Vector3.new(x, 40, z)
+        drop.AssemblyLinearVelocity = Vector3.zero
+        drop.AssemblyAngularVelocity = Vector3.zero
+        n = n % #drops + 1
+    end
+end
+]]></ProtectedString></Properties></Item><Item class="LocalScript" referent="RBX5"><Properties><string name="Name">XB10kTimer</string><bool name="Disabled">false</bool><ProtectedString name="Source"><![CDATA[-- XB10k: the fixed camera, and the timing. Waits for the server's build and
+-- for every part to arrive, then 60 warm-up frames, then times 600 frames
+-- between RenderStepped calls (the start of each rendered frame).
+local RunService = game:GetService("RunService")
+local camera = workspace.CurrentCamera
+camera.CameraType = Enum.CameraType.Scriptable
+camera.FieldOfView = 70
+camera.CFrame = CFrame.lookAt(Vector3.new(-260, 180, -260), Vector3.new(0, 0, 0))
+
+while not workspace:GetAttribute("XB10kReady") do
+    task.wait()
+end
+local function arrived()
+    local grid, spinners, drops = workspace:FindFirstChild("Grid"), workspace:FindFirstChild("Spinners"), workspace:FindFirstChild("Drops")
+    return grid and spinners and drops
+        and #grid:GetChildren() == 8899 and #spinners:GetChildren() == 100 and #drops:GetChildren() == 1000
+end
+while not arrived() do
+    task.wait()
+end
+
+local WARMUP, MEASURED = 60, 600
+local samples = table.create(MEASURED)
+local frame, last, firstFrameMs = 0, os.clock(), 0
+local connection
+connection = RunService.RenderStepped:Connect(function()
+    local now = os.clock()
+    local ms = (now - last) * 1000
+    last = now
+    frame += 1
+    if frame == 1 then
+        firstFrameMs = ms
+    elseif frame > WARMUP + 1 then
+        table.insert(samples, ms)
+        if #samples == MEASURED then
+            connection:Disconnect()
+            table.sort(samples)
+            local sum = 0
+            for _, s in samples do
+                sum += s
+            end
+            local median = (samples[MEASURED / 2] + samples[MEASURED / 2 + 1]) / 2
+            print("XB10K_RESULT " .. game:GetService("HttpService"):JSONEncode({
+                engine = "Roblox",
+                version = version(),
+                renderer = "Studio Play",
+                frames = MEASURED,
+                median_ms = median,
+                mean_ms = sum / MEASURED,
+                p95_ms = samples[math.ceil(MEASURED * 0.95)],
+                worst_ms = samples[MEASURED],
+                fps_from_median = 1000 / median,
+                build_ms = workspace:GetAttribute("XB10kBuildMs"),
+                first_frame_ms = firstFrameMs,
+                fixed_timestep = false,
+            }))
+        end
+    end
+end)
+]]></ProtectedString></Properties></Item></Item></roblox>
