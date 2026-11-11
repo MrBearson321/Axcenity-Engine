@@ -96,7 +96,7 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
             if let Some(input) = &input {
                 edits.push(InputEdit::Add {
                     action: name.clone(),
-                    input: input.clone(),
+                    input: *input,
                 });
             }
             if edits.is_empty() {
@@ -225,7 +225,7 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
 /// One binding: a key, a button, or four keys as an axis.
 fn one_input(text: &str) -> Result<Input, ToolError> {
     match parse_binding(text).as_deref() {
-        Some([one]) => Ok(one.clone()),
+        Some([one]) => Ok(*one),
         _ => Err(ToolError::new(Code::BadValue, format!("{} isn't one input", quoted(text)))
             .with_fix("a key (Space, E, LeftShift), a button (ButtonA, MouseButton1), W,A,S,D, Thumbstick1 or MouseMovement")),
     }

@@ -1724,3 +1724,47 @@ fn project_settings_changes_input_collision_groups_and_strings() {
     let strings = ok(host, "project_settings", json!({"setting": "strings"}));
     assert!(!strings.contains("greeting"), "{strings}");
 }
+
+#[test]
+fn asset_manage_renames_with_references_and_deletes_after_asking() {
+    let mut opened = open("hello-material-graph", "mcp-asset-manage");
+    let host = &mut opened.app;
+    let renamed = ok(
+        host,
+        "asset_manage",
+        json!({"action": "rename", "path": "assets/textures/moss.png", "to": "lichen.png"}),
+    );
+    assert!(
+        renamed.starts_with("assets/textures/moss.png is now assets/textures/lichen.png"),
+        "{renamed}"
+    );
+    let folder = opened.folder.clone();
+    assert!(folder.join("assets/textures/lichen.png").is_file());
+    let users = ok(
+        host,
+        "asset_find",
+        json!({"name": "lichen", "detail": "full"}),
+    );
+    assert!(
+        users.contains("used by "),
+        "what used moss.png follows: {users}"
+    );
+    // Delete asks first, naming what still uses it.
+    let args = json!({"action": "delete", "path": "assets/textures/lichen.png"});
+    let asked = call(host, "asset_manage", args.clone()).unwrap_err();
+    assert_eq!(asked.code, Code::NeedsConfirm, "{asked}");
+    assert!(asked.to_string().contains("still use"), "{asked}");
+    let mut args = args;
+    args["confirm"] = json!(token(&asked));
+    ok(host, "asset_manage", args);
+    assert!(!folder.join("assets/textures/lichen.png").exists());
+    ok(host, "history", json!({"action": "undo", "steps": 2}));
+    assert!(folder.join("assets/textures/moss.png").is_file());
+    let missing = call(
+        host,
+        "asset_manage",
+        json!({"action": "delete", "path": "assets/nothing.png"}),
+    )
+    .unwrap_err();
+    assert_eq!(missing.code, Code::NotFound, "{missing}");
+}

@@ -29,6 +29,7 @@ use super::EditorApp;
 
 mod asset_find;
 mod asset_import;
+mod asset_manage;
 mod batch;
 mod docs;
 mod env_set;
@@ -233,6 +234,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &project_settings::SPEC,
         call: project_settings::call,
+    },
+    Tool {
+        spec: &asset_manage::SPEC,
+        call: asset_manage::call,
     },
 ];
 
