@@ -50,6 +50,7 @@ mod refs;
 mod scene_inspect;
 mod script_read;
 mod script_write;
+mod solid_op;
 mod values;
 
 #[cfg(test)]
@@ -218,6 +219,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &prefab::SPEC,
         call: prefab::call,
+    },
+    Tool {
+        spec: &solid_op::SPEC,
+        call: solid_op::call,
     },
 ];
 

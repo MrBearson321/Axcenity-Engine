@@ -1560,3 +1560,41 @@ fn prefab_saves_places_and_applies_copies_as_undo_steps() {
     let not_a_copy = call(host, "prefab", json!({"action": "revert", "id": copy})).unwrap_err();
     assert_eq!(not_a_copy.code, Code::BadValue, "{not_a_copy}");
 }
+
+#[test]
+fn solid_op_unions_and_separates_parts_as_undo_steps() {
+    let mut opened = open("hello-part", "mcp-solid");
+    let host = &mut opened.app;
+    let first = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "position": [0, 5, 0], "size": [4, 4, 4]}),
+    );
+    let second = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "position": [2, 5, 0], "size": [4, 4, 4]}),
+    );
+    let ids: Vec<String> = [first, second]
+        .iter()
+        .map(|text| text.split_whitespace().nth(1).unwrap().to_owned())
+        .collect();
+    let one = call(host, "solid_op", json!({"op": "union", "id": ids[0]})).unwrap_err();
+    assert_eq!(one.code, Code::BadArgs, "{one}");
+    let union = ok(host, "solid_op", json!({"op": "union", "ids": ids}));
+    assert!(union.contains("UnionOperation"), "{union}");
+    assert!(union.contains("undo \"AI (test): "), "{union}");
+    let made = union
+        .split("→ ")
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned();
+    let separated = ok(host, "solid_op", json!({"op": "separate", "id": made}));
+    assert!(separated.starts_with("Separate"), "{separated}");
+    ok(host, "history", json!({"action": "undo", "steps": 2}));
+    let parts = ok(host, "scene_inspect", json!({"class": "UnionOperation"}));
+    assert!(!parts.contains("UnionOperation \""), "{parts}");
+}
