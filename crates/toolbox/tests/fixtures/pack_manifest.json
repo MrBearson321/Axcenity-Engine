@@ -1,0 +1,123 @@
+{
+  "format": "axcenity-pack",
+  "version": 1,
+  "exported_at": "2026-11-05T12:00:00+00:00",
+  "pack": {
+    "title": "Medieval Village",
+    "slug": "medieval-village",
+    "author": "demo_member",
+    "description": "A market square at dusk.",
+    "tags": ["medieval", "stone", "wood"],
+    "source_url": "http://testserver/packs/medieval-village/"
+  },
+  "items": [
+    {
+      "name": "Red Brick 03",
+      "kind": "texture",
+      "provider": "polyhaven",
+      "external_id": "red_brick_03",
+      "variant": "2K JPG",
+      "files": [
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/red_brick_03/red_brick_03_diff_2k.jpg",
+          "filename": "red_brick_03_diff_2k.jpg",
+          "size": 1500000
+        },
+        {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/red_brick_03/red_brick_03_nor_gl_2k.jpg",
+          "filename": "red_brick_03_nor_gl_2k.jpg",
+          "size": 2500000
+        }
+      ],
+      "total_size": 4000000,
+      "license": "CC0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "author": "Rob Tuytel",
+      "attribution": "\"Red Brick 03\" by Rob Tuytel, from Poly Haven, CC0 1.0",
+      "source_url": "https://polyhaven.com/a/red_brick_03",
+      "import_path": "textures/red_brick_03/"
+    },
+    {
+      "name": "Forest Birds",
+      "kind": "sound",
+      "provider": "openverse",
+      "external_id": "birds-001",
+      "variant": "MP3",
+      "files": [
+        {
+          "url": "https://cdn.freesound.org/previews/1/birds-001.mp3",
+          "filename": "birds-001.mp3",
+          "size": null
+        }
+      ],
+      "total_size": null,
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "author": "Jane Doe",
+      "attribution": "\"Forest Birds\" by Jane Doe is licensed under CC BY 4.0.",
+      "source_url": "https://freesound.org/s/birds-001/",
+      "import_path": "audio/ambience/"
+    },
+    {
+      "name": "Forest Birds (loop)",
+      "kind": "sound",
+      "provider": "openverse",
+      "external_id": "birds-002",
+      "variant": "MP3",
+      "files": [
+        {
+          "url": "https://cdn.freesound.org/previews/1/birds-002.mp3",
+          "filename": "birds-002.mp3",
+          "size": 81920
+        }
+      ],
+      "total_size": 81920,
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "author": "Jane Doe",
+      "attribution": "\"Forest Birds\" by Jane Doe is licensed under CC BY 4.0.",
+      "source_url": "https://freesound.org/s/birds-002/",
+      "import_path": "sounds/birds-002/"
+    },
+    {
+      "name": "Creaking Door",
+      "kind": "sound",
+      "provider": "openverse",
+      "external_id": "door-003",
+      "variant": "WAV",
+      "files": [
+        {
+          "url": "https://cdn.freesound.org/sounds/3/door-003.wav",
+          "filename": "door-003.wav",
+          "size": 512000
+        }
+      ],
+      "total_size": 512000,
+      "license": "CC BY-SA 3.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+      "author": "Sam Roe",
+      "attribution": "",
+      "source_url": "https://freesound.org/s/door-003/",
+      "import_path": "sounds/door-003/"
+    },
+    {
+      "name": "Market Crate",
+      "kind": "model",
+      "provider": "ambientcg",
+      "external_id": "Crate001",
+      "variant": null,
+      "files": [],
+      "total_size": null,
+      "license": "CC0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "author": "ambientCG",
+      "attribution": "Crate001 by ambientCG, CC0",
+      "source_url": "https://ambientcg.com/view?id=Crate001",
+      "import_path": "models/Crate001/"
+    }
+  ],
+  "credits": [
+    "\"Forest Birds\" by Jane Doe is licensed under CC BY 4.0.",
+    "\"Creaking Door\" by Sam Roe, CC BY-SA 3.0"
+  ]
+}

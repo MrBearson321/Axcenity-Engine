@@ -14,6 +14,7 @@
 //! Editor only: the player, server and test runner must never depend on it.
 
 pub mod ambientcg;
+pub mod cli;
 pub mod db;
 pub mod directory;
 pub mod download;
@@ -22,9 +23,13 @@ pub mod files;
 pub mod guard;
 pub mod http;
 mod json;
+pub mod library;
 pub mod license;
+pub mod migrate;
 pub mod openverse;
+pub mod pack;
 pub mod polyhaven;
+pub mod provenance;
 pub mod record;
 mod source;
 pub mod variants;

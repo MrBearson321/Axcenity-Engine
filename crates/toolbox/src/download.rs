@@ -19,7 +19,7 @@ use md5::{Digest, Md5};
 use crate::db::{Database, Download, StoredFile, now};
 use crate::directory::{AssetDirectory, folder_name};
 use crate::http::Http;
-use crate::record::{AssetRecord, Package, Variant};
+use crate::record::{AssetRecord, Kind, Package, Variant};
 use crate::source::SourceInfo;
 use crate::{SourceError, guard};
 
@@ -94,6 +94,22 @@ pub fn fetch_file(
         let _ = fs::remove_file(&part);
     }
     fetched
+}
+
+/// The files kept from a zip of a `kind` asset: the images, skies, models
+/// and sounds the engine and Blender read. The editor narrows these to what
+/// it installs.
+pub fn extract_for(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::Texture | Kind::Sprites => {
+            &["png", "jpg", "jpeg", "tga", "bmp", "tif", "tiff", "exr"]
+        }
+        Kind::Hdri => &["hdr", "exr"],
+        Kind::Model => &[
+            "gltf", "glb", "bin", "fbx", "obj", "mtl", "png", "jpg", "jpeg",
+        ],
+        Kind::Sound => &["mp3", "ogg", "wav", "flac"],
+    }
 }
 
 /// Whether every file of a recorded download is still in the directory at

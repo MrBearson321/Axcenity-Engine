@@ -90,6 +90,10 @@ pub enum Pane {
     /// Editing a model's meshes (`model_studio.rs`, Phase 55). Starts
     /// closed; opening a model in it opens it.
     ModelStudio,
+    /// The Toolbox: assets from ambientCG, Poly Haven and Openverse, and
+    /// the asset library (`toolbox_panel.rs`). Starts closed; the Assets
+    /// panel's Toolbox button opens it beside Assets.
+    Toolbox,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -100,7 +104,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 21] = [
+    pub const CLOSABLE: [Pane; 22] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -122,6 +126,7 @@ impl Pane {
         Pane::Tests,
         Pane::Plugins,
         Pane::ModelStudio,
+        Pane::Toolbox,
     ];
 
     pub fn label(self) -> &'static str {
@@ -148,6 +153,7 @@ impl Pane {
             Pane::Tests => "Tests",
             Pane::Plugins => "Plugins",
             Pane::ModelStudio => "Model Studio",
+            Pane::Toolbox => "Toolbox",
             Pane::Script(_) => "Script",
             Pane::Plugin(_) => "Plugin",
         }
@@ -177,6 +183,7 @@ impl Pane {
             Pane::Tests => icons::FLASK,
             Pane::Plugins => icons::PUZZLE_PIECE,
             Pane::ModelStudio => icons::POLYGON,
+            Pane::Toolbox => icons::TOOLBOX,
             Pane::Script(_) => icons::CODE,
             Pane::Plugin(_) => icons::PUZZLE_PIECE,
         }
@@ -265,7 +272,7 @@ impl Layout {
             Pane::Scene => None,
             Pane::Explorer => Some(Pane::Properties),
             Pane::Properties => Some(Pane::Explorer),
-            Pane::Console => Some(Pane::Assets),
+            Pane::Console | Pane::Toolbox => Some(Pane::Assets),
             Pane::Assets | Pane::Profiler | Pane::Mixer | Pane::AssetCheck | Pane::Tests => {
                 Some(Pane::Console)
             }
@@ -615,6 +622,7 @@ mod tests {
                     | Pane::Tests
                     | Pane::Plugins
                     | Pane::ModelStudio
+                    | Pane::Toolbox
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;
