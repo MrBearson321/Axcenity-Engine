@@ -69,6 +69,8 @@ These can't be made identical and are reported next to the numbers:
 - Roblox Studio's Play runs a server and a client in one process, and Roblox caps frame rate (set the cap to its highest, 240, in Studio settings); its numbers are an upper bound on cost.
 - s&box and Roblox can't fix game time per frame.
 - Renderers do different amounts of work by default (see Unreal above).
+- Unity is left-handed and the others right-handed, so with the same coordinates Unity's scene is a mirror image (shadows fall on the other side). The work is the same.
+- The sun is high (about 61°) and slightly behind the camera's view, so shadows are short and faint from the benchmark camera. Check that an engine draws them with its own stats (shadow casters, shadow pass time) rather than by eye.
 
 ## Layout of this folder
 
