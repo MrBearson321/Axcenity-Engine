@@ -670,6 +670,7 @@ dependencies = [
  "axcenity-audio",
  "axcenity-blocks",
  "axcenity-character",
+ "axcenity-collab",
  "axcenity-cook",
  "axcenity-core",
  "axcenity-gameplay",
