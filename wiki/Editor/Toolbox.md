@@ -24,6 +24,8 @@ Textures and skies search **All sources** by default: `search` in `toolbox_panel
 
 The Assets panel groups a project's assets by where they came from (`asset_browser/origin.rs`): each Toolbox source gets a section, read from the project's `.axcenity/asset-sources.json` (`Snapshot::source_of`), beside Built-in, Made in Axcenity, Imported and Global assets. A model's folder takes its model's origin, and a material made from a texture set is listed under that set.
 
+The **Downloaded / Imported Assets** tab (`asset_inventory.rs`) lists the library's downloads (`Database::downloads_of`), this project's installs and the snapshot together with the project's imported files, one row per asset (`provider:id`, or the path for an imported file), grouped by type. **Remove download** deletes a variant's folder and `forget_download`s it; the `assets` row stays, per the crate's rule.
+
 ## Flow
 
 ```mermaid

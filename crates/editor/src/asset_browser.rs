@@ -573,6 +573,26 @@ impl AssetBrowser {
         props.chain(self.files_and_shared()).collect()
     }
 
+    /// The project's own files (not the global assets it hasn't got), its
+    /// model folders, every asset's origin and its Toolbox sources, scanned
+    /// again if it's time: what the Downloaded / Imported Assets tab lists.
+    pub fn project_assets(
+        &mut self,
+    ) -> (
+        Vec<AssetEntry>,
+        Vec<packages::Package>,
+        Origins,
+        axcenity_toolbox::provenance::Snapshot,
+    ) {
+        self.rescan_if_due();
+        (
+            self.files.clone(),
+            packages::packages(&self.files),
+            self.origins.clone(),
+            self.sources.clone(),
+        )
+    }
+
     fn files_and_shared(&self) -> Vec<AssetEntry> {
         self.files.iter().chain(&self.shared).cloned().collect()
     }

@@ -30,6 +30,8 @@ impl EditorApp {
     }
 
     pub(in crate::app) fn toolbox_action(&mut self, action: ToolboxAction) {
+        // Whatever the Toolbox did may have downloaded or installed something.
+        self.inventory.refresh();
         match action {
             ToolboxAction::Notice { error: true, text } => self.output.error(text),
             ToolboxAction::Notice { error: false, text } => self.output.info(text),
@@ -54,6 +56,7 @@ impl EditorApp {
                 self.import_model(&file);
             }
             ToolboxAction::MakeMaterial { set, name } => self.make_material(&set, &name),
+            ToolboxAction::OpenInventory => self.open_inventory(),
         }
     }
 
