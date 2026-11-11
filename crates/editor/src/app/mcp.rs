@@ -34,6 +34,7 @@ mod docs;
 mod env_set;
 mod game_run;
 mod history;
+mod level;
 mod material_edit;
 mod object_create;
 mod object_delete;
@@ -208,6 +209,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &project_save::SPEC,
         call: project_save::call,
+    },
+    Tool {
+        spec: &level::SPEC,
+        call: level::call,
     },
 ];
 

@@ -1438,3 +1438,57 @@ fn asset_import_places_a_model_where_asked() {
     assert!(left.starts_with("0 assets"), "{left}");
     let _ = std::fs::remove_dir_all(&downloads);
 }
+
+#[test]
+fn level_lists_makes_renames_deletes_and_opens_levels() {
+    let mut opened = open("hello-levels", "mcp-levels");
+    let host = &mut opened.app;
+    let list = ok(host, "level", json!({}));
+    assert!(
+        list.contains("· start · open") && list.contains("\nCastle"),
+        "{list}"
+    );
+    let made = ok(host, "level", json!({"action": "create", "name": "Caves"}));
+    assert!(
+        made.contains("undo \"AI (test): New level Caves\""),
+        "{made}"
+    );
+    let levels = opened.folder.join("levels");
+    assert!(levels.join("Caves.world.json").is_file());
+    let taken = call(host, "level", json!({"action": "create", "name": "caves"})).unwrap_err();
+    assert_eq!(taken.code, Code::BadValue, "{taken}");
+    ok(
+        host,
+        "level",
+        json!({"action": "rename", "name": "Caves", "to": "Mines"}),
+    );
+    assert!(levels.join("Mines.world.json").is_file() && !levels.join("Caves.world.json").exists());
+    // Deleting asks first.
+    let asked = call(host, "level", json!({"action": "delete", "name": "Mines"})).unwrap_err();
+    assert_eq!(asked.code, Code::NeedsConfirm, "{asked}");
+    ok(
+        host,
+        "level",
+        json!({"action": "delete", "name": "Mines", "confirm": token(&asked)}),
+    );
+    assert!(!levels.join("Mines.world.json").exists());
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(
+        levels.join("Mines.world.json").is_file(),
+        "undo brings it back"
+    );
+    // Opening another level wants unsaved changes saved first.
+    let wrong = call(host, "level", json!({"action": "open", "name": "Atlantis"})).unwrap_err();
+    assert_eq!(wrong.code, Code::NotFound);
+    assert!(wrong.to_string().contains("Castle"), "{wrong}");
+    ok(host, "object_create", json!({"kind": "Block"}));
+    let unsaved = call(host, "level", json!({"action": "open", "name": "Castle"})).unwrap_err();
+    assert_eq!(unsaved.code, Code::Locked, "{unsaved}");
+    assert!(unsaved.to_string().contains("project_save"), "{unsaved}");
+    let asked = call(host, "project_save", json!({})).unwrap_err();
+    ok(host, "project_save", json!({"confirm": token(&asked)}));
+    let opened_text = ok(host, "level", json!({"action": "open", "name": "Castle"}));
+    assert!(opened_text.starts_with("opened Castle"), "{opened_text}");
+    let list = ok(host, "level", json!({}));
+    assert!(list.contains("Castle · open"), "{list}");
+}
