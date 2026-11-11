@@ -195,6 +195,8 @@ impl EditorApp {
             AssetKind::Clip | AssetKind::StateMachine | AssetKind::Material | AssetKind::Prefab => {
                 &["json"]
             }
+            AssetKind::ServerScript | AssetKind::ClientScript => &["lua", "json"],
+            AssetKind::ModuleScript => &["lua"],
         };
         dialog.add_filter(kind.expected(), extensions).pick_file()
     }

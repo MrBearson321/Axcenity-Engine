@@ -50,6 +50,9 @@ pub enum Edit {
     PickSourceFile,
     /// Opens the script's `SourceFile` in a tab.
     OpenSourceFile,
+    /// Rename or move the file a script inside an object takes its code
+    /// from, pointing every script that uses it at the new path.
+    MoveSourceFile,
     /// Asks for a sky image file for Lighting's `SkyImage` with the file
     /// picker, then asks whether to use it.
     PickSkyImage,
@@ -1783,6 +1786,15 @@ fn source_file_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
             .clicked()
         {
             edit = Some(Edit::OpenSourceFile);
+        }
+        if ui
+            .small_button(icons::PENCIL_SIMPLE)
+            .on_hover_text(
+                "Rename or move the file. Every script that uses it is changed to match.",
+            )
+            .clicked()
+        {
+            edit = Some(Edit::MoveSourceFile);
         }
         ui.add(egui::Label::new(path).truncate())
             .on_hover_text(path);

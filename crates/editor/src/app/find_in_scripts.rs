@@ -48,6 +48,18 @@ impl EditorApp {
             };
             sources.push((script.path.clone(), Source::Code(text)));
         }
+        // The code of scripts inside objects (G2), once each however many
+        // copies use it. Their block scripts don't open in the editor.
+        for (path, source) in &project.object_files {
+            if project::is_block_script(path) {
+                continue;
+            }
+            let text = match self.tabs.get(path) {
+                Some(tab) => tab.text.clone(),
+                None => source.clone(),
+            };
+            sources.push((path.clone(), Source::Code(text)));
+        }
         sources
     }
 
@@ -202,6 +214,13 @@ impl EditorApp {
         }) {
             script.source = source.clone();
         }
+        if let Some(code) = self
+            .project
+            .as_mut()
+            .and_then(|project| project.object_files.get_mut(path))
+        {
+            *code = source.clone();
+        }
         if let Some(tab) = self.tabs.get_mut(path) {
             tab.text = source;
             tab.mark_saved();
@@ -210,8 +229,10 @@ impl EditorApp {
     }
 }
 
-/// Whether `path` is a script file (Lua or blocks) under `scripts/`.
+/// Whether `path` is a script file (Lua or blocks) under `scripts/`, or
+/// the code of scripts inside objects under `objects/`.
 pub(super) fn is_script_file(path: &str) -> bool {
-    path.starts_with(&format!("{}/", project::SCRIPTS_FOLDER))
+    let under = |folder: &str| path.starts_with(&format!("{folder}/"));
+    (under(project::SCRIPTS_FOLDER) || under(project::OBJECTS_FOLDER))
         && (path.ends_with(".lua") || project::is_block_script(path))
 }

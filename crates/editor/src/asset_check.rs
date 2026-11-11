@@ -91,6 +91,9 @@ impl AssetCheck {
             AssetKind::StateMachine,
             AssetKind::Material,
             AssetKind::Prefab,
+            AssetKind::ServerScript,
+            AssetKind::ClientScript,
+            AssetKind::ModuleScript,
         ]
         .into_iter()
         .map(|kind| (kind, axcenity_project::files_of_kind(files, kind)))
@@ -275,6 +278,7 @@ impl Row<'_> {
             FindingKind::InvalidReference => (icons::WARNING, palette.warning),
             FindingKind::ImportFailure => (icons::WARNING_CIRCLE, palette.error),
             FindingKind::BrokenDependency => (icons::LINK, palette.warning),
+            FindingKind::UnusedFile => (icons::FILE_CODE, palette.text_weak),
         };
         let mut action = CheckAction::None;
         let mut tick = None;
