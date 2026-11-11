@@ -12,6 +12,10 @@ project format 5 after asking, and older engines can't open them again.
 evidence = "verified"
 published = true
 
+[verification]
+linux = "scripts/check-platform.sh on 9a8a0f2d (cloud, no GPU or sound): build, clippy, doc tests, server headless pass; all tests pass except the audio tutorial sample (no sound device) and a release test fixed in this PR; game test fixed in this PR and passes."
+windows = "scripts/check-platform.ps1 and check-packages.py --profile release on 9a8a0f2d (a Windows 11 desktop): build, clippy, doc tests, server, installer, Build Game and the built game pass. Fixed before the tag: the --mcp stack overflow (#178), the release test and the game test command. Test-only: Team Create temp folder names (#180); luau-lsp 1.70 wording."
+
 [formats]
 axgame = 2
 network_protocol = 11

@@ -915,10 +915,10 @@ fn the_repositorys_own_release_files_are_consistent() {
     let problems = prepare::check(&repo, None).unwrap();
     assert!(problems.is_empty(), "{problems:#?}");
     let history = History::load(&repo.join(prepare::RELEASES_DIR)).unwrap();
-    // The one published release so far.
+    // The latest release: update this with each `prepare`.
     assert_eq!(
         history.latest_published().map(|r| r.version.to_string()),
-        Some("0.1.0-alpha.3".into())
+        Some("0.2.0-alpha.1".into())
     );
     // Nothing internal survives into what would be published.
     for (_, change) in history.public().changes() {

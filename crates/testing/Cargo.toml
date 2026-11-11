@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+# `cargo run -p axcenity-testing` runs the game test runner, not bench-check.
+default-run = "axcenity-test"
 
 [[bin]]
 name = "axcenity-test"
