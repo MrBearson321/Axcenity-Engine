@@ -33,6 +33,7 @@ mod asset_import;
 mod asset_manage;
 mod batch;
 mod changes;
+mod check;
 mod docs;
 mod env_set;
 mod game_run;
@@ -378,15 +379,19 @@ struct Options {
     mode: Mode,
     /// Folders `asset_import` may read from (`--allow-import`).
     import_folders: Vec<PathBuf>,
+    /// `--check`: report whether serving would work, and how to add it to
+    /// clients, instead of serving.
+    check: bool,
 }
 
-const USAGE: &str = "usage: axcenity-editor --mcp <project folder> [--profile lite|standard|full] [--mode read|edit|full] [--allow-import <folder>]...";
+const USAGE: &str = "usage: axcenity-editor --mcp [--check] <project folder> [--profile lite|standard|full] [--mode read|edit|full] [--allow-import <folder>]...";
 
 fn parse_options(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Options, String> {
     let mut folder = None;
     let mut profile = Profile::Standard;
     let mut mode = Mode::Edit;
     let mut import_folders = Vec::new();
+    let mut check = false;
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
         if arg == "--profile" {
@@ -407,6 +412,8 @@ fn parse_options(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Optio
             import_folders.push(PathBuf::from(
                 args.next().ok_or("--allow-import needs a folder")?,
             ));
+        } else if arg == "--check" {
+            check = true;
         } else if arg == "--project" {
             folder = Some(PathBuf::from(
                 args.next().ok_or("--project needs a folder")?,
@@ -423,6 +430,7 @@ fn parse_options(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Optio
         profile,
         mode,
         import_folders,
+        check,
     })
 }
 
@@ -438,6 +446,11 @@ pub(crate) fn run_from_command_line(args: impl Iterator<Item = std::ffi::OsStrin
             return false;
         }
     };
+    if options.check {
+        let (report, ok) = check::report(&options, &check::this_binary());
+        println!("{report}");
+        return ok;
+    }
     let app = EditorApp::new(Some(&options.folder));
     if app.project.is_none() {
         eprintln!(

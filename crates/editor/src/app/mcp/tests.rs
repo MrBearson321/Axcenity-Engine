@@ -2176,3 +2176,65 @@ fn a_resource_reads_the_same_as_its_tool() {
     );
     assert!(read.contains("\"Block\""), "{read}");
 }
+
+#[test]
+fn check_reports_the_project_and_prints_client_configs_with_full_paths() {
+    let opened = open("hello-part", "mcp-check");
+    let folder = opened.folder.clone();
+    let options = super::parse_options(
+        ["--check", folder.to_str().unwrap(), "--profile", "lite"]
+            .into_iter()
+            .map(std::ffi::OsString::from),
+    )
+    .unwrap();
+    assert!(options.check);
+    let exe = std::path::Path::new("/opt/axcenity/axcenity-editor");
+    let (report, ok) = super::check::report(&options, exe);
+    assert!(ok, "{report}");
+    assert!(report.contains("\nok   project \""), "{report}");
+    assert!(report.contains("\nok   mode edit"), "{report}");
+    assert!(report.contains("\nok   calls are logged to "), "{report}");
+    assert!(report.contains("\nok   profile lite: 12 tools"), "{report}");
+    assert!(
+        report.contains("\nwarn lite has no project_save"),
+        "{report}"
+    );
+    let full = std::fs::canonicalize(&folder).unwrap();
+    let json_folder = serde_json::to_string(&full.display().to_string()).unwrap();
+    assert!(
+        report.contains(&format!(
+            "\"command\": \"/opt/axcenity/axcenity-editor\", \"args\": [\"--mcp\", {json_folder}, \"--profile\", \"lite\"]"
+        )),
+        "{report}"
+    );
+    assert!(
+        report.contains("claude mcp add axcenity -- /opt/axcenity/axcenity-editor --mcp "),
+        "{report}"
+    );
+    assert!(report.contains("[mcp_servers.axcenity]"), "{report}");
+    // The probe file is gone again.
+    assert!(!full.join(".axcenity/.mcp-check").exists());
+
+    // No project, or an import folder that isn't there: FAIL, exit 1.
+    let options = super::parse_options(
+        [
+            "--check",
+            "/no/such/project",
+            "--allow-import",
+            "/no/such/folder",
+        ]
+        .into_iter()
+        .map(std::ffi::OsString::from),
+    )
+    .unwrap();
+    let (report, ok) = super::check::report(&options, exe);
+    assert!(!ok, "{report}");
+    assert!(
+        report.contains("\nFAIL could not open a project in /no/such/project"),
+        "{report}"
+    );
+    assert!(
+        report.contains("\nFAIL --allow-import /no/such/folder: not a folder"),
+        "{report}"
+    );
+}
