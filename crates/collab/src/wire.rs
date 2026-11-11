@@ -17,6 +17,7 @@ use crate::apply::{DropReason, Graveyard, Note, Place, Refusal};
 use crate::ids::IdBlock;
 use crate::message::{MemberId, Snapshot, ToClient, ToHost};
 use crate::op::{NodeSpec, Op, Transaction};
+use crate::presence::{Camera, Collaborator, Presence};
 use crate::role::Role;
 
 /// The first byte of every message. Raise it when a message changes.
@@ -468,6 +469,34 @@ enum WireToHost {
     Hello { have: Option<u64> },
     Submit(WireTransaction),
     NeedIds,
+    Presence(WirePresence),
+}
+
+#[derive(Serialize, Deserialize)]
+struct WirePresence {
+    selection: Vec<u64>,
+    camera: Option<([f32; 3], [f32; 3])>,
+    editing: Option<String>,
+}
+
+impl From<&Presence> for WirePresence {
+    fn from(p: &Presence) -> WirePresence {
+        WirePresence {
+            selection: p.selection.iter().map(|i| i.to_bits()).collect(),
+            camera: p.camera.map(|c| (c.position, c.look)),
+            editing: p.editing.clone(),
+        }
+    }
+}
+
+impl From<WirePresence> for Presence {
+    fn from(p: WirePresence) -> Presence {
+        Presence {
+            selection: p.selection.into_iter().map(id).collect(),
+            camera: p.camera.map(|(position, look)| Camera { position, look }),
+            editing: p.editing,
+        }
+    }
 }
 
 impl From<&ToHost> for WireToHost {
@@ -480,6 +509,7 @@ impl From<&ToHost> for WireToHost {
                 ops: ops(&transaction.ops),
             }),
             ToHost::NeedIds => WireToHost::NeedIds,
+            ToHost::Presence(p) => WireToHost::Presence(p.into()),
         }
     }
 }
@@ -494,6 +524,7 @@ impl WireToHost {
                 ops: unwire_ops(t.ops)?,
             }),
             WireToHost::NeedIds => ToHost::NeedIds,
+            WireToHost::Presence(p) => ToHost::Presence(p.into()),
         })
     }
 }
@@ -527,6 +558,11 @@ enum WireToClient {
     },
     Ids(IdBlock),
     RoleChanged(Role),
+    Roster(Vec<Collaborator>),
+    Presence {
+        member: u32,
+        presence: WirePresence,
+    },
 }
 
 impl From<&ToClient> for WireToClient {
@@ -590,6 +626,11 @@ impl From<&ToClient> for WireToClient {
             },
             ToClient::Ids(block) => WireToClient::Ids(*block),
             ToClient::RoleChanged(role) => WireToClient::RoleChanged(*role),
+            ToClient::Roster(roster) => WireToClient::Roster(roster.clone()),
+            ToClient::Presence { member, presence } => WireToClient::Presence {
+                member: member.0,
+                presence: presence.into(),
+            },
         }
     }
 }
@@ -662,6 +703,11 @@ impl WireToClient {
             },
             WireToClient::Ids(block) => ToClient::Ids(block),
             WireToClient::RoleChanged(role) => ToClient::RoleChanged(role),
+            WireToClient::Roster(roster) => ToClient::Roster(roster),
+            WireToClient::Presence { member, presence } => ToClient::Presence {
+                member: MemberId(member),
+                presence: presence.into(),
+            },
         })
     }
 }

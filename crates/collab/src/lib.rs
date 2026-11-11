@@ -41,6 +41,7 @@ pub mod identity;
 pub mod ids;
 pub mod message;
 pub mod op;
+pub mod presence;
 pub mod role;
 pub mod session;
 pub mod socket;
@@ -53,6 +54,8 @@ mod convergence_tests;
 #[cfg(test)]
 mod net_tests;
 #[cfg(test)]
+mod presence_tests;
+#[cfg(test)]
 mod testing;
 #[cfg(test)]
 mod tests;
@@ -63,6 +66,7 @@ pub use host::Host;
 pub use ids::IdBlock;
 pub use message::{MemberId, ToClient, ToHost};
 pub use op::{NodeSpec, Op, Transaction};
+pub use presence::{Camera, Collaborator, Presence, Profile};
 pub use role::{Capability, Role};
 
 pub use axcenity_core::World;

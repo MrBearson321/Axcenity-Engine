@@ -394,3 +394,20 @@ fn the_command_line_asks_for_a_session() {
     assert!(TeamStart::from_args(&args(&["--team-join"])).is_err());
     assert!(TeamStart::from_args(&args(&["--team-join", "https://example.com"])).is_err());
 }
+
+#[test]
+fn what_one_editor_selects_shows_in_the_others_session() {
+    let (mut a, mut b, _hub) = two_editors();
+    let part = a.world.descendants(a.world.workspace())[0];
+    a.selection = vec![part];
+    a.selected = Some(part);
+    // Presence goes out at most 10 times a second.
+    std::thread::sleep(std::time::Duration::from_millis(110));
+    settle(&mut a, &mut b);
+    let me = a.team.as_ref().unwrap().client().member();
+    let client = b.team.as_ref().unwrap().client();
+    let seen = client.presences().get(&me).expect("a's presence");
+    assert_eq!(seen.selection, [part]);
+    assert!(seen.camera.is_some(), "and where a's camera is");
+    assert_eq!(client.roster().len(), 2);
+}

@@ -590,3 +590,41 @@ fn edits_on_both_sides_of_a_network_cut_end_the_same_everywhere() {
     }
     assert!(part_named(&sam.world, "Owner 1"));
 }
+
+#[test]
+fn names_colours_and_selections_travel_between_computers() {
+    let owner_id = Arc::new(Identity::new("Paul", [200, 80, 40]));
+    let (hosting, cert) = host(&owner_id, None);
+    let mut owner = Member::owner(&hosting, &cert, owner_id);
+    let invite = hosting.lock().invite(Role::Editor, INVITE_LIFETIME_SECONDS);
+    let mut sam = Member::invited(&invite, "Sam");
+    converge(&hosting, &mut [&mut owner, &mut sam]);
+    until(&mut [&mut owner, &mut sam], "both on the roster", |m| {
+        m.iter()
+            .all(|m| m.client().roster().iter().filter(|c| c.online).count() == 2)
+    });
+    let roster = sam.client().roster().to_vec();
+    let paul = roster.iter().find(|c| c.role == Role::Owner).unwrap();
+    assert_eq!(paul.profile.name, "Paul");
+    assert_eq!(paul.profile.color, [200, 80, 40]);
+    assert!(
+        roster
+            .iter()
+            .any(|c| c.profile.name == "Sam" && c.profile.color == [1, 2, 3])
+    );
+
+    let part = owner.world.get(owner.world.workspace()).unwrap().children()[0];
+    let presence = crate::Presence {
+        selection: vec![part],
+        ..Default::default()
+    };
+    owner
+        .client
+        .as_mut()
+        .unwrap()
+        .set_presence(presence.clone());
+    let paul = paul.member;
+    until(&mut [&mut owner, &mut sam], "the selection", |m| {
+        m[1].client().presences().get(&paul) == Some(&presence)
+    });
+}
