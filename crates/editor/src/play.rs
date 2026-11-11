@@ -183,6 +183,14 @@ impl Session {
         // Who plays, the same each time on this install (Phase 64).
         session.sim.scripts.set_user_id(play_user_id());
         session.sim.scripts.set_input_map(input_map.clone());
+        // Scripts inside objects in levels LevelService loads later, and in
+        // the StarterCharacter each player spawns as (G2).
+        if let Some(folder) = session.sim.assets.folder() {
+            let worlds = levels.worlds.values().chain([&session.sim.world]);
+            for (path, source) in axcenity_project::level_code(&folder, worlds) {
+                session.sim.scripts.know_code(&path, &source);
+            }
+        }
         if !levels.worlds.is_empty() {
             session
                 .sim

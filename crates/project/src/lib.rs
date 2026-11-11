@@ -92,7 +92,7 @@ pub use levels::{
 };
 pub use migrate::PREVIOUS_FORMAT_DIR;
 pub use object_scripts::{
-    in_start_order, numbered_path, object_scripts, read_object_file, source_file_fits,
+    in_start_order, level_code, numbered_path, object_scripts, read_object_file, source_file_fits,
 };
 pub use package::{
     Clashes, Contents, ImportPlan, PACKAGE_EXTENSION, Package, PackageError, PackageManifest,

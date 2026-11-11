@@ -391,3 +391,22 @@ fn a_built_game_runs_block_scripts_inside_objects_as_their_lua() {
     let _ = fs::remove_dir_all(&folder);
     let _ = fs::remove_dir_all(&output);
 }
+
+#[test]
+fn level_code_has_each_file_once_and_leaves_out_what_cant_be_read() {
+    let folder = door_project("object-scripts-level-code");
+    let project = load(&folder).unwrap();
+    fs::remove_file(folder.join("objects/Lamp/Glow.client.lua")).unwrap();
+    let code = level_code(&folder, [&project.world, &project.world]);
+    let paths: Vec<&str> = code.keys().map(String::as_str).collect();
+    assert_eq!(
+        paths,
+        [
+            "objects/Coin/Spin.server.lua",
+            "objects/Door/Open.server.lua",
+            "objects/Lamp/Colors.module.lua",
+        ]
+    );
+    assert_eq!(code[OPEN], "-- open");
+    let _ = fs::remove_dir_all(&folder);
+}

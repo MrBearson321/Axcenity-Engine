@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use axcenity_core::{ClassName, InstanceId, World};
+use axcenity_core::{ClassName, InstanceId, Value, World};
 
 use super::*;
 
@@ -217,4 +217,46 @@ fn a_slot_saved_in_another_level_with_one_added_goes_back_to_them() {
         ["Castle\t0.5\tPart", "nil", "loaded\tCastle"]
     );
     assert_eq!(runtime.levels().added().collect::<Vec<_>>(), ["Dungeon"]);
+}
+
+#[test]
+fn a_loaded_levels_scripts_inside_objects_start_with_their_files_code() {
+    let (mut world, mut runtime) = game();
+    let mut cave = level(&[]);
+    let cave_workspace = cave.workspace();
+    let torch = add(&mut cave, ClassName::Part, cave_workspace, "Torch");
+    let flicker = add(&mut cave, ClassName::Script, torch, "Flicker");
+    cave.set_property(
+        flicker,
+        "SourceFile",
+        Value::String("objects/Torch/Flicker.server.lua".to_owned()),
+    )
+    .unwrap();
+    // Hosts pass every level's code before the game starts (G2).
+    runtime.know_code(
+        "objects/Torch/Flicker.server.lua",
+        "print('flicker', script.Parent:GetFullName())",
+    );
+    let mut levels = BTreeMap::from([("Meadow".to_owned(), world.clone())]);
+    levels.insert("Cave".to_owned(), cave);
+    runtime.set_levels("Meadow", "Meadow", levels);
+    runtime.fire_changes(&mut world);
+    runtime
+        .run_command(
+            &mut world,
+            "game:GetService('LevelService'):LoadLevel('Cave')",
+        )
+        .unwrap();
+    runtime.fire_changes(&mut world);
+    assert_eq!(printed(&mut runtime), ["flicker\tWorkspace.Torch"]);
+    // Loading it again makes new Instances, which start again; the old
+    // ones are gone with their level.
+    runtime
+        .run_command(
+            &mut world,
+            "game:GetService('LevelService'):LoadLevel('Cave')",
+        )
+        .unwrap();
+    runtime.fire_changes(&mut world);
+    assert_eq!(printed(&mut runtime), ["flicker\tWorkspace.Torch"]);
 }

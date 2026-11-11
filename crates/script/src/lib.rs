@@ -114,7 +114,9 @@ use std::time::Duration;
 use axcenity_assets::Assets;
 use axcenity_core::input::{InputEvent, InputMap};
 use axcenity_core::sound::SoundAction;
-use axcenity_core::{ClassName, InstanceId, KeyCode, MouseBehavior, Value, Vector3, World};
+use axcenity_core::{
+    Change, ClassName, InstanceId, KeyCode, MouseBehavior, RecordedChange, Value, Vector3, World,
+};
 use axcenity_physics::RayHit;
 use axcenity_render_types::{Capabilities, GraphicsSettings};
 use axcenity_save::Saves;
@@ -301,6 +303,12 @@ pub struct ScriptRuntime {
     /// True while [`Self::start_clones`] runs, so starting a clone doesn't
     /// start more inside it.
     starting_clones: bool,
+    /// The code of each file scripts inside objects take theirs from, by
+    /// `SourceFile` (G2): from every start, and the hosts'
+    /// [`Self::know_code`]. A script inside an object that arrives with no
+    /// code of its own (replicated to this device, streamed in, or in a
+    /// level LevelService loads) starts with it.
+    known_code: BTreeMap<String, String>,
 }
 
 /// A script as [`ScriptRuntime::start_script`] was last given it.
@@ -430,6 +438,7 @@ impl ScriptRuntime {
             started: Vec::new(),
             clones: Vec::new(),
             starting_clones: false,
+            known_code: BTreeMap::new(),
         }
     }
 
@@ -616,6 +625,9 @@ impl ScriptRuntime {
         source: &str,
     ) {
         let class = world.get(script).map(|instance| instance.class());
+        if world.get(script).and_then(|i| i.source_file()) == Some(path) {
+            self.known_code.insert(path.to_owned(), source.to_owned());
+        }
         if class == Some(ClassName::ModuleScript) {
             self.remember(script, path, source);
             self.server.add_module(script, path, source);
@@ -649,6 +661,71 @@ impl ScriptRuntime {
         self.context(side).start_script(world, script, path, source);
         self.collect(side);
         self.fire_changes(world);
+    }
+
+    /// The code in the file at `path`, for scripts inside objects whose
+    /// `SourceFile` names it and that arrive later with no code: a level's
+    /// (hosts pass every level's before LevelService loads one), or a
+    /// LocalScript the server places on a device following it (G2).
+    pub fn know_code(&mut self, path: &str, source: &str) {
+        self.known_code.insert(path.to_owned(), source.to_owned());
+    }
+
+    /// Each script inside an object in what `changes` put in the tree that
+    /// has no code here yet: see [`Self::note_arrived`].
+    fn note_arrived_scripts(&mut self, world: &World, changes: &[RecordedChange]) {
+        if self.known_code.is_empty() {
+            return;
+        }
+        let added: Vec<InstanceId> = changes
+            .iter()
+            .filter_map(|change| match change.change {
+                Change::ChildAdded { child, .. } => Some(child),
+                _ => None,
+            })
+            .collect();
+        self.note_arrived(world, &added);
+    }
+
+    /// Starts each script inside an object in `roots` (or inside one of
+    /// them) that has no code here yet, with the code its `SourceFile`
+    /// names, once it's where scripts of its kind run: for a device that
+    /// joins, what the server placed before it did (G2).
+    pub fn start_arrived(&mut self, world: &mut World, roots: &[InstanceId]) {
+        self.note_arrived(world, roots);
+        self.fire_changes(world);
+    }
+
+    /// Each script inside an object in `arrived` (or inside one of them)
+    /// that has no code here yet (not started, not waiting) waits with the
+    /// code its `SourceFile` names, if known, and starts once it's where
+    /// scripts of its kind run ([`Self::start_clones`]).
+    fn note_arrived(&mut self, world: &World, arrived: &[InstanceId]) {
+        if self.known_code.is_empty() {
+            return;
+        }
+        for &root in arrived {
+            for id in std::iter::once(root).chain(world.descendants_iter(root)) {
+                let Some(path) = world.get(id).and_then(|i| i.source_file()) else {
+                    continue;
+                };
+                let has_code = self
+                    .started
+                    .iter()
+                    .chain(&self.clones)
+                    .any(|started| started.script == id);
+                if has_code {
+                    continue;
+                }
+                if let Some(source) = self.known_code.get(path) {
+                    self.clones.push(Started {
+                        script: id,
+                        path: path.to_owned(),
+                        source: source.clone(),
+                    });
+                }
+            }
+        }
     }
 
     /// Keeps `script`'s code for running it again, in the place it first
@@ -1775,6 +1852,7 @@ impl ScriptRuntime {
             if changes.is_empty() {
                 return;
             }
+            self.note_arrived_scripts(world, &changes);
             for side in [Side::Server, Side::Client] {
                 self.context(side).fire_changes(world, &changes);
                 self.collect(side);
