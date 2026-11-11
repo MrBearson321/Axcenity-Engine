@@ -22,13 +22,13 @@ The rule throughout: **the Toolbox finds and fetches; the editor's existing path
 | Licence filter | Default: CC0, public domain and CC BY. **Show restricted** reveals NC, ND, SA and unknown licences, marked as blocked for a commercial game and why |
 | In library | Only assets already downloaded on this machine; this is also what the panel shows offline |
 
-Each result is a card like Get texture's (preview, name, source, licence badge), and the preview shows larger on hover. Sounds have a play button that streams the provider's preview through the editor's audio, stopping when another plays or the panel closes. Previews are fetched a few at a time, as today, and kept in the library's `previews/` folder, so a second search or a second project shows them at once.
+Each result is a card like Get texture's (preview, name, source, licence badge), and the preview shows larger on hover. Sounds have a play button that streams the provider's preview through the editor's audio, stopping when another plays or the panel closes. Previews are fetched a few at a time, as today, and kept in the asset directory's `previews/` folder, so a second search or a second project shows them at once.
 
 **Attribution.** Every card names its source; Poly Haven results carry "Powered by Poly Haven" (its API terms, 2.5); a card whose licence needs credit says so on its badge.
 
 ## 3. The details drawer
 
-Clicking a card opens a drawer (the Toolbox's own library drawer is the model): name, author, source page link, licence in plain words with what it allows and asks (`license.rs`, ported from the Django Toolbox), physical size, resolutions, maps, and each variant with its download size. It also shows whether the asset is **in the library** (which resolutions) and **in this project** (from the project's sidecar `source` blocks), plus **Get**, **Favourite**, **Add to collection** and **Copy credit line**.
+Clicking a card opens a drawer (the Toolbox's own library drawer is the model): name, author, source page link, licence in plain words with what it allows and asks (`license.rs`, ported from the Django Toolbox), physical size, resolutions, maps, and each variant with its download size. It also shows whether the asset is **in the library** (which resolutions) and **in this project** (from the project's records), plus **Get**, **Favourite**, **Add to collection** and **Copy credit line**.
 
 **Get** uses the member's defaults (resolution, format, maps; set in the panel's settings, like the Django Toolbox's download defaults) and `variants::choose`, and says where it had to differ ("No 8K here, so 4K, the nearest.").
 
@@ -41,7 +41,7 @@ Clicking a card opens a drawer (the Toolbox's own library drawer is the model): 
 | Model | `assets/models/<id>/` with its glTF's files | Opens the Import dialog on the downloaded file (scale, collision and the other options it has now), then places the MeshPart where the drop marker is | Explorer gets the MeshPart as any import does; the Model Studio can open it |
 | Sound | `assets/audio/<id>.<ext>` | A Sound in the part under the mouse, else the Workspace, as dropping a sound file does now | The Sequencer and scripts use it by path or ID as any sound |
 
-Dragging a card works before it is downloaded: the drop downloads (progress in the bottom-right `toast::Busy`, cancellable), installs, then applies. Installing is not an undo step, as downloading isn't today; applying it is one undo step. Every installed file gets an `ax://` ID and a sidecar `source` block, so Asset Check, Find References, Rename or Move…, Export Package and Global assets treat it like any other file, and the Assets panel tooltip shows its source and licence.
+Dragging a card works before it is downloaded: the drop downloads (progress in the bottom-right `toast::Busy`, cancellable), installs, then applies. Installing is not an undo step, as downloading isn't today; applying it is one undo step. Every installed file gets an `ax://` ID and is recorded in the metadata database and the project's snapshot, so Asset Check, Find References, Rename or Move…, Export Package and Global assets treat it like any other file, and the Assets panel tooltip shows its source and licence.
 
 **Originals and conversion.** The library keeps the provider's files untouched. The project gets a copy, which the existing cooking (`cook`, BC7 textures) and level-of-detail steps process as they do any project file, so no Toolbox-specific conversion is needed. A future **Optimise** option (smaller resolution on install, ORM packing) would sit in the install step, not in the providers.
 
@@ -49,12 +49,12 @@ Dragging a card works before it is downloaded: the drop downloads (progress in t
 
 | Feature | Where it's kept | Notes |
 |---|---|---|
-| Favourites | The library, `metadata/toolbox.json` (per machine, under the library lock) | A star on cards and in the drawer; a **Favourites** view |
-| Collections | Same file | Named lists of `provider:id` with an optional chosen variant and folder; **Export collection** writes an `axcenity-pack` manifest and **Import Toolbox pack…** reads one, so collections and the Django site's packs are the same thing |
-| Recent | Same file | The last 100 assets viewed or used |
-| Download history | The library registry's `downloads` (each resolution, its files, size and time) | A **History** view, with **Remove from library** to reclaim disk space (projects keep their copies) |
-| In this project | The project's sidecar `source` blocks | A **This project** view, and the project's credits |
-| Licences and credits | `license.rs`, the sidecars | A **Credits** view for the project; Build Game writes `CREDITS.txt` |
+| Favourites | `metadata.db` in the asset directory (per user) | A star on cards and in the drawer; a **Favourites** view |
+| Collections | `metadata.db` | Named lists of `provider:id` with an optional chosen variant and folder; **Export collection** writes an `axcenity-pack` manifest and **Import Toolbox pack…** reads one, so collections and the Django site's packs are the same thing |
+| Recent | `metadata.db` | The last 100 assets viewed or used |
+| Download history | The database's `downloads` table (each resolution, its files, size and time) | A **History** view, with **Remove from library** to reclaim disk space (projects keep their copies) |
+| In this project | The project's `.axcenity/asset-sources.json` snapshot and the database's `installs` | A **This project** view, and the project's credits |
+| Licences and credits | `license.rs`, the database | A **Credits** view for the project; Build Game writes `CREDITS.txt` |
 
 ## 6. Not in scope now
 
