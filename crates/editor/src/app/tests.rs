@@ -2182,6 +2182,46 @@ fn holding_the_refresh_rate_draws_only_while_the_window_has_focus() {
 }
 
 #[test]
+fn the_start_screen_keeps_drawing_while_focused_unless_motion_is_reduced() {
+    for reduce_motion in [false, true] {
+        let mut app = EditorApp::new(None);
+        app.appearance.reduce_motion = reduce_motion;
+        let ctx = egui::Context::default();
+        let mut frame = |time: f64, focused: bool| {
+            let mut input = egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            };
+            input
+                .viewports
+                .entry(egui::ViewportId::ROOT)
+                .or_default()
+                .focused = Some(focused);
+            let _ = crate::theme::run(&ctx, input, |ui| {
+                let ctx = &ui.ctx().clone();
+                app.keep_frames_steady(ctx)
+            });
+            ctx.has_requested_repaint()
+        };
+        frame(0.0, true);
+        frame(0.1, true);
+        // A long gap counts as a wake-up, which draws steadily for a second.
+        frame(100.0, true);
+        frame(101.5, true);
+        assert_eq!(
+            frame(101.6, true),
+            !reduce_motion,
+            "the backdrop moves unless motion is reduced"
+        );
+        // In the background it rests once the wake-up's second is over.
+        for tenth in 0..12 {
+            frame(200.0 + f64::from(tenth) * 0.1, false);
+        }
+        assert!(!frame(201.25, false), "in the background it rests");
+    }
+}
+
+#[test]
 fn steady_frames_are_presented_on_a_fixed_grid() {
     use std::time::{Duration, Instant};
     let interval = Duration::from_millis(10);

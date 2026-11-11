@@ -7,7 +7,7 @@
 //! to hold them, so nothing is clipped mid-slide; the open and folded
 //! headers never draw on top of each other.
 
-use eframe::egui::{self, Rect, RichText, Stroke, pos2, vec2};
+use eframe::egui::{self, Color32, Rect, RichText, Stroke, pos2, vec2};
 
 use super::{Brand, MAX_PAGE_WIDTH, PAGE_MARGIN, Page, StartScreen, version_label};
 use crate::theme::{self, icons, type_scale};
@@ -202,6 +202,33 @@ impl Slide {
     }
 }
 
+/// The navigation's surface: hazy glass over the backdrop, as see-through
+/// as its text's contrast allows (`backdrop::GLASS`), with the border and a
+/// bright hairline inside it where the glass meets the page: its right
+/// edge for the sidebar (`side`), its bottom for the top bar.
+fn hazy_glass(ui: &egui::Ui, rect: Rect, palette: &theme::Palette, side: bool) {
+    let painter = ui.painter_at(rect);
+    super::backdrop::glass(&painter, rect, theme::radius::NONE, palette);
+    let (edge, inward) = if side {
+        ([rect.right_top(), rect.right_bottom()], vec2(-1.0, 0.0))
+    } else {
+        ([rect.left_bottom(), rect.right_bottom()], vec2(0.0, -1.0))
+    };
+    painter.line_segment(
+        edge.map(|point| point + inward * 0.5),
+        Stroke::new(1.0_f32, palette.border),
+    );
+    let shine = if palette.dark {
+        palette.text_strong.gamma_multiply(0.06)
+    } else {
+        Color32::WHITE.gamma_multiply(0.8)
+    };
+    painter.line_segment(
+        edge.map(|point| point + inward * 1.5),
+        Stroke::new(1.0_f32, shine),
+    );
+}
+
 /// How strongly labels read. They stay off until the rail is wide enough
 /// that titles aren't clipped against the page edge.
 fn label_amount(open: f32) -> f32 {
@@ -311,17 +338,7 @@ impl StartScreen {
         open: f32,
     ) -> bool {
         let palette = theme::palette(ui.ctx());
-        // Frosted: the background shows through a little.
-        ui.painter().rect_filled(
-            rect,
-            theme::radius::NONE,
-            palette.app_bg.gamma_multiply(0.82),
-        );
-        ui.painter().vline(
-            rect.right() - 0.5,
-            rect.y_range(),
-            Stroke::new(1.0_f32, palette.border),
-        );
+        hazy_glass(ui, rect, &palette, true);
         let labels = label_amount(open);
         let pad_x = 8.0 + 4.0 * open;
         let inner = rect.shrink2(vec2(pad_x, 18.0));
@@ -476,17 +493,7 @@ impl StartScreen {
     /// their icons. Returns true when Settings was clicked.
     fn top_bar(&mut self, ui: &mut egui::Ui, rect: Rect, tracked: usize, brand: &Brand) -> bool {
         let palette = theme::palette(ui.ctx());
-        // Frosted: the background shows through a little.
-        ui.painter().rect_filled(
-            rect,
-            theme::radius::NONE,
-            palette.app_bg.gamma_multiply(0.82),
-        );
-        ui.painter().hline(
-            rect.x_range(),
-            rect.bottom() - 0.5,
-            Stroke::new(1.0_f32, palette.border),
-        );
+        hazy_glass(ui, rect, &palette, false);
         let names = rect.width() >= TOP_BAR_ROOM_FOR_NAMES;
         let inner = rect.shrink2(vec2(16.0, 0.0));
         let mut bar = ui.new_child(

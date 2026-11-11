@@ -281,6 +281,7 @@ pub(super) fn project_card(
     thumbnail: Option<&egui::TextureHandle>,
     edited: Option<String>,
     width: f32,
+    section: &str,
 ) -> Option<CardAction> {
     let picture_height = (width * 9.0 / 16.0).round();
     let size = vec2(width, picture_height + 54.0);
@@ -328,7 +329,7 @@ pub(super) fn project_card(
         card_menu(
             ui,
             menu,
-            egui::Id::new(("card menu", &link.folder)),
+            egui::Id::new(("card menu", section, &link.folder)),
             hovered,
         )
     });

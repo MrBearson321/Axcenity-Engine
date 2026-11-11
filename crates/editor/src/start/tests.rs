@@ -542,8 +542,21 @@ fn recent_project_cards_stay_inside_the_page_at_every_window_width() {
         };
         // The header's New Project button ends where the page does.
         let (_, _, page_right, _) = edge("New Project");
-        let cards: Vec<_> = names.iter().map(|name| edge(name)).collect();
-        let page_left = cards[0].1;
+        let cards: Vec<_> = buttons
+            .iter()
+            .filter(|(label, ..)| label.starts_with("Project "))
+            .cloned()
+            .collect();
+        // Recent has the four last opened, All projects the first eight; the
+        // ninth waits behind Show 1 more.
+        assert_eq!(
+            cards.len(),
+            RECENT_PROJECTS + ALL_PROJECTS_SHOWN,
+            "at {width}"
+        );
+        assert!(cards.iter().all(|(name, ..)| name != "Project 9"));
+        edge("Show 1 more");
+        let page_left = cards.iter().map(|card| card.1).fold(f32::MAX, f32::min);
         for (name, left, right, _) in &cards {
             assert!(
                 *left >= page_left - 0.5 && *right <= page_right + 0.5,
@@ -551,14 +564,22 @@ fn recent_project_cards_stay_inside_the_page_at_every_window_width() {
                  in a window {width} wide"
             );
         }
-        // More cards than fit in a row wrap onto the next ones, in columns.
+        // More cards than fit in a row wrap onto the next ones, in columns,
+        // each row starting at the left.
         let (columns, _) = grid_columns(page_right - page_left);
-        let rows: std::collections::BTreeSet<i32> =
-            cards.iter().map(|card| card.3.round() as i32).collect();
-        assert_eq!(rows.len(), names.len().div_ceil(columns), "rows at {width}");
-        if columns < names.len() {
+        let mut rows = std::collections::BTreeMap::<i32, f32>::new();
+        for (_, left, _, top) in &cards {
+            let row = rows.entry(top.round() as i32).or_insert(f32::MAX);
+            *row = row.min(*left);
+        }
+        assert_eq!(
+            rows.len(),
+            RECENT_PROJECTS.div_ceil(columns) + ALL_PROJECTS_SHOWN.div_ceil(columns),
+            "rows at {width}"
+        );
+        for left in rows.values() {
             assert!(
-                (cards[columns].1 - page_left).abs() < 0.5,
+                (left - page_left).abs() < 0.5,
                 "a new row starts at the left"
             );
         }
@@ -906,7 +927,8 @@ fn the_page_slides_with_the_sidebar_instead_of_reflowing() {
         for fold in [true, false] {
             let frames = slide_frames(width, fold);
             let cards = |frame: &[(String, f32, f32, f32)]| -> Vec<(f32, f32, f32)> {
-                (1..=9)
+                // Only in All projects, past the four in Recent.
+                (5..=8)
                     .map(|n| {
                         let name = format!("Project {n}");
                         let (_, left, right, top) = frame
