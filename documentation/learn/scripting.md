@@ -18,7 +18,15 @@ Games are scripted in **Luau**, a fast, typed dialect of Lua. The API will feel 
 
 Make one with the **Script**, **LocalScript** or **ModuleScript** button on the ribbon, or **Insert ▸ Script** on an Explorer row. A Script starts in **ServerScriptService**, a LocalScript in **StarterPlayerScripts** and a ModuleScript in **ReplicatedStorage**. With a part or model selected, a script can also live *inside* that object and travel with its copies. Double-click a script to open it in a tab.
 
-The script tab highlights Lua, numbers its lines and stays editable during Play: saving a script while the game runs runs it again in place. A ⚠ in the Explorer marks a script that uses something from the wrong side (a LocalScript changing scores, say). For autocomplete and type checking, **File > Set Up VS Code Autocomplete** sets the project up for VS Code (or any editor that runs luau-lsp) with the engine's API definitions; the editor picks up changes saved there.
+The script tab highlights Lua, numbers its lines and stays editable during Play: saving a script while the game runs runs it again in place. A ⚠ in the Explorer marks a script that uses something from the wrong side (a LocalScript changing scores, say).
+
+While you type, the tab helps:
+
+- **Completion**: typing `.` or `:` lists what can follow, and **Ctrl+Space** lists what fits the word you're typing (keywords, your locals, globals). Up and Down pick, **Enter** or **Tab** puts it in, **Escape** closes the list. It follows types through chains such as `game:GetService("Players").LocalPlayer` and a part found by name in the Workspace, and through your own locals.
+- **Signature hints**: typing `(` or `,` in an engine call shows its parameters, with the current one highlighted.
+- **Errors and warnings**: if **luau-lsp** is installed (on the PATH, or inside VS Code's Luau extension), each script is checked a moment after you stop typing. Errors get a red underline and warnings, such as an unused local, an amber one; hover for the message. A line above the code counts them, and a saved script's errors also show in Output. Without luau-lsp there are no underlines.
+
+To work in VS Code instead, **File > Set Up VS Code Autocomplete** sets the project up for VS Code (or any editor that runs luau-lsp) with the engine's API definitions; the editor picks up changes saved there.
 
 ## Instances, properties and events
 
@@ -72,7 +80,7 @@ In a multiplayer game the server owns the world, and each player's LocalScripts 
 ## Finding your way in the API
 
 - The **API Reference** (start screen, or **Help > Learn > API**) lists every class, property, method, event, data type and enum, with its description.
-- In VS Code, after **File > Set Up VS Code Autocomplete**, completions and hovers come from the same definitions.
+- The script tab's completion and signature hints, and VS Code after **File > Set Up VS Code Autocomplete**, come from the same definitions.
 - **Ctrl+Shift+F** finds text in every script and block script.
 - Names in `code` on these pages link to their API entry: click `Instance:FindFirstChild()` or `task.wait()` to look them up.
 
