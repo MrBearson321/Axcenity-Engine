@@ -1,0 +1,33 @@
+[package]
+name = "axcenity-editor-benchmark"
+description = "The Axcenity editor's Graphics Benchmark: measure this computer and recommend editor graphics settings."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axcenity-assets.workspace = true
+axcenity-core.workspace = true
+axcenity-editor-kit.workspace = true
+axcenity-render.workspace = true
+axcenity-scene.workspace = true
+eframe.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Test runs on a GPU (`testing.rs`), for the editor's tests.
+pollster = { workspace = true, optional = true }
+axcenity-workspace-hack.workspace = true
+
+[features]
+# `testing::device` and `testing::quick_report`, for the editor's tests.
+# Turn it on from `[dev-dependencies]` only.
+test-support = ["dep:pollster"]
+
+[dev-dependencies]
+axcenity-editor-kit = { workspace = true, features = ["test-support"] }
+pollster.workspace = true
+
+[lints]
+workspace = true
