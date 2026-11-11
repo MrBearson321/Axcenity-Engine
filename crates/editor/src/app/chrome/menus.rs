@@ -494,9 +494,20 @@ impl EditorApp {
                     self.ribbon_tabs.edit(None);
                 }
             });
-            // Only in debug builds (`cargo run`), never in a release.
-            if cfg!(debug_assertions) {
-                ui.menu_button("Debug", |ui| {
+            ui.menu_button("Debug", |ui| {
+                if ui
+                    .button(theme::with_icon(icons::GAUGE, "Graphics Benchmark…"))
+                    .on_hover_text(
+                        "Measure how this computer draws the viewport and get recommended \
+                         editor graphics settings. Changes nothing until you apply them.",
+                    )
+                    .clicked()
+                {
+                    self.open_graphics_benchmark();
+                }
+                // Only in debug builds (`cargo run`), never in a release.
+                if cfg!(debug_assertions) {
+                    ui.separator();
                     let panic =
                         egui::Button::new(theme::with_icon(icons::WARNING, "Panic during Play"));
                     if ui
@@ -511,8 +522,8 @@ impl EditorApp {
                     {
                         session.panic_next_frame();
                     }
-                });
-            }
+                }
+            });
             ui.menu_button("Help", |ui| {
                 if ui
                     .add_enabled(

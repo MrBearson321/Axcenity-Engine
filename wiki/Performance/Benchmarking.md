@@ -23,6 +23,7 @@ How Axcenity is measured, and the rules that make a number trustworthy. Commands
 | Render benchmarks | CPU and GPU per pass for built-in scenes (10k parts, 2,000 MeshParts, terrain + foliage, characters, decals) | `cargo test -p axcenity-player --release -- --ignored bench_ --nocapture --test-threads 1` |
 | `bench_project`, `shoot_project`, `bake_project_probes` | Your own project from its spawn and an overview; screenshots from named views | `AXCENITY_BENCH_PROJECT=<folder>` (+ `AXCENITY_SHOT_*`) |
 | Micro-benchmarks | Scheduler, connections, member access, script start, handler fire, native code, UI inventory, mesh builds | `cargo test -p <crate> --release -- --ignored bench_… --nocapture` |
+| **Graphics Benchmark** (editor, Debug menu) | The viewport on this machine: a test town at each preset plus geometry, material and light stress worlds, CPU and GPU per frame and per pass; recommends the editor's graphics settings, applied only on confirmation | Debug > Graphics Benchmark… (`docs/rendering/settings.md`) |
 | Callgrind | Instruction counts that don't vary run to run (container) | `BENCH_ONCE=1 BENCH_ONLY=<case>` with valgrind |
 
 ## Rules
