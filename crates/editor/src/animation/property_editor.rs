@@ -486,5 +486,26 @@ mod editing;
 pub use curves::CurveView;
 pub(super) use editing::{rest_numbers, set_key};
 
+impl super::transport::Playback for PropertyDoc {
+    fn playing(&self) -> bool {
+        self.playing
+    }
+    fn set_playing(&mut self, playing: bool) {
+        self.playing = playing;
+    }
+    fn playhead(&self) -> f64 {
+        self.playhead
+    }
+    fn set_playhead(&mut self, seconds: f64) {
+        self.playhead = seconds.clamp(0.0, self.file.duration.max(0.0));
+    }
+    fn length(&self) -> f64 {
+        self.file.duration
+    }
+    fn frame_rate(&self) -> f64 {
+        self.fps
+    }
+}
+
 #[cfg(test)]
 mod tests;

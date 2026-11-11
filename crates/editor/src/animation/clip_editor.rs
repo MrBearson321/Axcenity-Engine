@@ -263,9 +263,14 @@ impl ClipDoc {
         f64::from(frames) / f64::from(self.frame_rate())
     }
 
+    /// How long one pass takes as it plays, at its Speed.
+    fn play_length(&self) -> f64 {
+        self.file.length() / self.file.speed.abs().max(1e-3)
+    }
+
     /// Moves the playhead on by `dt` seconds while playing.
     pub fn tick(&mut self, dt: f64) {
-        let length = self.file.length() / self.file.speed.abs().max(1e-3);
+        let length = self.play_length();
         if !self.playing || length <= 0.0 {
             return;
         }
@@ -612,28 +617,9 @@ impl ClipDoc {
         bound.as_ref().ok().map(Clip::has_root_motion)
     }
 
-    /// The toolbar's part: play/pause, back to the start, Loop, Speed and
-    /// the model the preview shows it on (from `models`).
+    /// The toolbar's part: Loop, Speed and the model the preview shows it
+    /// on (from `models`). Playing is the transport's, over the timeline.
     pub fn controls(&mut self, ui: &mut egui::Ui, models: &[String]) {
-        let speed = self.file.speed.abs().max(1e-3);
-        let (icon, hover) = if self.playing {
-            (icons::PAUSE, "Pause")
-        } else {
-            (icons::PLAY, "Play")
-        };
-        if ui.button(icon).on_hover_text(hover).clicked() {
-            if !self.playing && self.playhead * speed >= self.file.length() {
-                self.playhead = 0.0;
-            }
-            self.playing = !self.playing;
-        }
-        if ui
-            .button(icons::SKIP_BACK)
-            .on_hover_text("Back to the start")
-            .clicked()
-        {
-            self.playhead = 0.0;
-        }
         ui.checkbox(&mut self.file.looping, "Loop")
             .on_hover_text("On, it plays again from the start; off, it holds its last frame");
         ui.add(
@@ -738,22 +724,12 @@ impl ClipDoc {
         }
     }
 
-    /// The frame counter and the timeline.
+    /// The timeline (the frame counter is the transport's).
     pub fn timeline(&mut self, ui: &mut egui::Ui) {
         let take_seconds = self
             .take()
             .map_or(self.file.end, |take| f64::from(take.duration));
         let speed = self.file.speed.abs().max(1e-3);
-        ui.horizontal_wrapped(|ui| {
-            let frame = self.frames(self.playhead * speed);
-            let frames = self.frames(self.file.length());
-            ui.monospace(format!("Frame {frame} / {frames}"));
-            ui.weak(format!(
-                "{:.2} s of {:.2} s",
-                self.playhead,
-                self.file.length() / speed
-            ));
-        });
         let events: Vec<(f64, &str)> = self
             .file
             .events
@@ -949,5 +925,27 @@ impl ClipDoc {
             }
         });
         rename
+    }
+}
+
+impl super::transport::Playback for ClipDoc {
+    fn playing(&self) -> bool {
+        self.playing
+    }
+    fn set_playing(&mut self, playing: bool) {
+        self.playing = playing;
+    }
+    fn playhead(&self) -> f64 {
+        self.playhead
+    }
+    fn set_playhead(&mut self, seconds: f64) {
+        self.playhead = seconds.clamp(0.0, self.play_length().max(0.0));
+    }
+    fn length(&self) -> f64 {
+        self.play_length()
+    }
+    /// The take's frames, as fast as they go by at the clip's Speed.
+    fn frame_rate(&self) -> f64 {
+        f64::from(self.frame_rate()) * self.file.speed.abs().max(1e-3)
     }
 }

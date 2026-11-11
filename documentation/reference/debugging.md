@@ -17,8 +17,8 @@ A walkthrough is in [Debugging and performance](../learn/debugging-and-performan
 | Breakpoints | Click a line number in a script tab | Pauses Play at that line with the call stack and locals; **F5** continues. Editor Play only. |
 | Developer Console | **F9** in Play and development runs of the player | Log, frame Stats and Commands (`help`, `clear`, `fps`, and games' own via `ConsoleService`). |
 | Profiler | View > Panels > Profiler | **Game** (frame, CPU, GPU, memory, physics, audio, scripts, network), **Graphics** (draw calls, triangles, passes), **Memory** (by kind and class). |
-| Overlays | View > Overlays | Colliders, constraints, raycasts, sound emitters, navigation mesh, agent paths, culling. |
-| View modes | View > View Mode | Unlit, base colour, wireframe, normals, metalness, roughness, ambient occlusion, levels of detail, overdraw, culling bounds. |
+| Overlays | Viewport > Overlays | Colliders, constraints, raycasts, sound emitters, navigation mesh, agent paths, culling. |
+| View modes | Viewport > View Mode | Unlit, base colour, wireframe, normals, metalness, roughness, ambient occlusion, levels of detail, overdraw, culling bounds. |
 | Asset Check | File > Check Assets | Missing files, broken references and import failures, with fixes. |
 | Tests panel | View > Panels > Tests | Runs game tests and shows each result. |
 | Several clients | Home tab, Game group | Play as 1 to 8 players with simulated latency and loss. |

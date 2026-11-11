@@ -48,7 +48,7 @@ pub enum Context {
     Brushes,
     /// Typing in the Console's command line.
     Console,
-    /// Over the Animation tab's clip.
+    /// Over the Animation tab's clip or the Sequencer's sequence.
     Animation,
     /// Over a graph: a block script's Graph view, a material graph, a UI
     /// Event Graph, the Animation tab's state machine.
@@ -104,7 +104,7 @@ impl Context {
             Context::Terrain => "Terrain Studio",
             Context::Brushes => "Brushes",
             Context::Console => "Console command line",
-            Context::Animation => "Animation clip",
+            Context::Animation => "Animation and Sequencer",
             Context::Graphs => "Graphs",
             Context::UiDesigner => "UI Designer",
             Context::UiPages => "UI Designer's Pages",
@@ -129,7 +129,7 @@ impl Context {
             Context::Terrain => "While a terrain tool is picked.",
             Context::Brushes => "The terrain brush, and Sculpt, Paint and Weights.",
             Context::Console => "While its command line has the cursor.",
-            Context::Animation => "With the mouse over a clip.",
+            Context::Animation => "With the mouse over a clip or a sequence.",
             Context::Graphs => {
                 "Over a block script's Graph view, a material, a UI Event Graph or a state \
                  machine."
@@ -244,6 +244,15 @@ pub enum Action {
     ConsoleHistory,
 
     // Animation clip.
+    /// Play, pause or resume the open clip.
+    PlayPause,
+    PreviousFrame,
+    NextFrame,
+    /// Ten frames back.
+    PreviousFrames,
+    NextFrames,
+    ClipStart,
+    ClipEnd,
     KeySelected,
     DeleteKeys,
     CopyKeys,
@@ -394,6 +403,13 @@ impl Action {
             ConsoleRun,
             ConsoleComplete,
             ConsoleHistory,
+            PlayPause,
+            PreviousFrame,
+            NextFrame,
+            PreviousFrames,
+            NextFrames,
+            ClipStart,
+            ClipEnd,
             KeySelected,
             DeleteKeys,
             CopyKeys,
@@ -530,6 +546,13 @@ impl Action {
             ConsoleComplete => keys![NONE Tab],
             ConsoleHistory => keys![NONE ArrowUp, NONE ArrowDown],
 
+            PlayPause => keys![NONE Space],
+            PreviousFrame => keys![NONE ArrowLeft],
+            NextFrame => keys![NONE ArrowRight],
+            PreviousFrames => keys![SHIFT ArrowLeft],
+            NextFrames => keys![SHIFT ArrowRight],
+            ClipStart => keys![NONE Home],
+            ClipEnd => keys![NONE End],
             KeySelected => keys![NONE K],
             DeleteKeys => keys![NONE Delete, NONE Backspace],
             CopyKeys => keys![CMD C],
@@ -642,7 +665,8 @@ impl Action {
             TerrainTool(_) | PutBrushDown => Context::Terrain,
             BrushSmaller | BrushBigger => Context::Brushes,
             ConsoleRun | ConsoleComplete | ConsoleHistory => Context::Console,
-            KeySelected | DeleteKeys | CopyKeys | CutKeys | PasteKeys | FrameCurves => {
+            PlayPause | PreviousFrame | NextFrame | PreviousFrames | NextFrames | ClipStart
+            | ClipEnd | KeySelected | DeleteKeys | CopyKeys | CutKeys | PasteKeys | FrameCurves => {
                 Context::Animation
             }
             DeleteNodes | DuplicateNodes | SelectAllNodes | ClearNodeSelection => Context::Graphs,
@@ -712,6 +736,13 @@ impl Action {
             ConsoleRun => "Run the command (Shift+Enter: new line)",
             ConsoleComplete => "Complete the name",
             ConsoleHistory => "Earlier and later commands",
+            PlayPause => "Play, pause or resume the clip",
+            PreviousFrame => "Back one frame",
+            NextFrame => "On one frame",
+            PreviousFrames => "Back ten frames",
+            NextFrames => "On ten frames",
+            ClipStart => "Go to the clip's start",
+            ClipEnd => "Go to the clip's end",
             KeySelected => "Key the selected",
             DeleteKeys => "Delete the selected keys",
             CopyKeys => "Copy keys",

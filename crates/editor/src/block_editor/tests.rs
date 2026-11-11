@@ -577,14 +577,19 @@ fn luau_blocks_fold_under_their_own_heading_but_stay_in_the_graph_menu() {
 }
 
 /// With Increase contrast (design system V18) every category's fill and
-/// edge are dark enough for white labels; without it they're Scratch's.
+/// edge are dark enough for white labels; without it they're Axcenity's
+/// own colours, which already give white labels 3:1 (usability brief §5).
 #[test]
 fn increase_contrast_darkens_block_colours_for_white_labels() {
     for dark in [true, false] {
         let quiet = theme::Palette::new(dark, theme::Accent::Blue);
         let high = quiet.with_contrast(true);
-        for category in Category::ALL {
-            assert_eq!(category.fill(&quiet), category.scratch_fill());
+        for category in Category::ALL.into_iter().chain([Category::Lua]) {
+            assert_eq!(category.fill(&quiet), category.base_fill());
+            assert!(
+                theme::contrast(egui::Color32::WHITE, category.fill(&quiet)) >= 3.0,
+                "{category:?}"
+            );
             for color in [category.fill(&high), category.edge(&high)] {
                 assert!(
                     theme::contrast(egui::Color32::WHITE, color) >= 4.5,
@@ -593,4 +598,55 @@ fn increase_contrast_darkens_block_colours_for_white_labels() {
             }
         }
     }
+}
+
+/// Each category has its own colour, far enough from every other's to tell
+/// apart, and its own icon (usability brief §5).
+#[test]
+fn every_category_has_a_colour_and_icon_of_its_own() {
+    let all: Vec<Category> = Category::ALL.into_iter().chain([Category::Lua]).collect();
+    for (index, a) in all.iter().enumerate() {
+        for b in &all[index + 1..] {
+            let (x, y) = (a.base_fill(), b.base_fill());
+            let distance = [
+                f32::from(x.r()) - f32::from(y.r()),
+                f32::from(x.g()) - f32::from(y.g()),
+                f32::from(x.b()) - f32::from(y.b()),
+            ]
+            .iter()
+            .map(|d| d * d)
+            .sum::<f32>()
+            .sqrt();
+            assert!(distance > 40.0, "{a:?} and {b:?} look alike: {distance}");
+            assert_ne!(a.icon(), b.icon(), "{a:?} and {b:?}");
+        }
+    }
+}
+
+/// The tab under a block is one convex piece (egui fills only convex
+/// shapes) that hangs `TAB_DEPTH` below the block, and its ends meet the
+/// block's bottom edge.
+#[test]
+fn the_tab_is_a_convex_rounded_bump() {
+    let at = pos2(100.0, 50.0);
+    let points = painter::tab_points(at, 1.0);
+    let (first, last) = (points[0], points[points.len() - 1]);
+    assert_eq!(first, pos2(at.x + TAB_LEFT, at.y));
+    assert!((last.x - (at.x + TAB_LEFT + TAB_WIDTH)).abs() < 1e-3 && (last.y - at.y).abs() < 1e-3);
+    let deepest = points.iter().map(|p| p.y).fold(f32::MIN, f32::max);
+    assert!((deepest - (at.y + TAB_DEPTH)).abs() < 1e-3);
+    // Convex: every turn along the outline (closed by the top edge) is the same way.
+    let closed: Vec<Pos2> = points.clone();
+    let count = closed.len();
+    let turns: Vec<f32> = (0..count)
+        .map(|i| {
+            let (a, b, c) = (closed[i], closed[(i + 1) % count], closed[(i + 2) % count]);
+            (b - a).x * (c - b).y - (b - a).y * (c - b).x
+        })
+        .filter(|turn| turn.abs() > 1e-4)
+        .collect();
+    assert!(
+        turns.iter().all(|t| *t > 0.0) || turns.iter().all(|t| *t < 0.0),
+        "{turns:?}"
+    );
 }

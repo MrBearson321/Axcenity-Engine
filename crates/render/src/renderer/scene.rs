@@ -237,6 +237,7 @@ impl ScenePipeline {
             sphere: upload_mesh(&device, &mesh_bytes, "sphere", &mesh::sphere()),
             cylinder: upload_mesh(&device, &mesh_bytes, "cylinder", &mesh::cylinder()),
             wedge: upload_mesh(&device, &mesh_bytes, "wedge", &mesh::wedge()),
+            corner_wedge: upload_mesh(&device, &mesh_bytes, "corner wedge", &mesh::corner_wedge()),
         };
         let instance_capacity = 64;
         let instance_buffer = create_instance_buffer(&device, instance_capacity);

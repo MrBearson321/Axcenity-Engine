@@ -817,6 +817,7 @@ fn built_in_shape(shape: PartType) -> Shape {
         PartType::Ball => Shape::Sphere,
         PartType::Cylinder | PartType::Capsule => Shape::Cylinder,
         PartType::Wedge => Shape::Wedge,
+        PartType::CornerWedge => Shape::CornerWedge,
     }
 }
 
@@ -1594,7 +1595,7 @@ impl TextureSource for NormalTexture {
 /// circular, whatever their `Size`: they use the smallest size that fits.
 fn mesh_scale(shape: PartType, size: Vec3) -> Vec3 {
     match shape {
-        PartType::Block | PartType::Wedge => size,
+        PartType::Block | PartType::Wedge | PartType::CornerWedge => size,
         PartType::Ball => Vec3::splat(size.min_element()),
         PartType::Cylinder | PartType::Capsule => {
             let diameter = size.y.min(size.z);
@@ -1845,7 +1846,8 @@ mod tests {
                 Shape::Wedge,
                 Shape::Cylinder,
                 Shape::Sphere,
-                Shape::Sphere
+                Shape::Sphere,
+                Shape::CornerWedge
             ]
         );
     }

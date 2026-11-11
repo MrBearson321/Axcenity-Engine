@@ -22,6 +22,23 @@ impl AnimationStudio {
             && !ctx.egui_wants_keyboard_input()
     }
 
+    /// Whether the transport's keys (Space, the arrows, Home and End) are
+    /// the clip's this frame: a clip is open and the mouse is over it, as
+    /// drawn last pass, nothing is being typed, no menu is open, and no
+    /// widget has the keyboard (one tabbed to keeps Space and the arrows).
+    pub fn wants_transport_keys(&self, ctx: &egui::Context) -> bool {
+        let Some((rect, pass)) = self.clip.drawn else {
+            return false;
+        };
+        self.view == View::Clip
+            && self.clip.doc.is_some()
+            && ctx.cumulative_pass_nr() <= pass + 1
+            && ctx
+                .input(|input| input.pointer.latest_pos())
+                .is_some_and(|pointer| rect.contains(pointer))
+            && super::transport::keys_free(ctx)
+    }
+
     /// Draws the Animation tab. `selected` is the Explorer's primary
     /// selection, which the tab follows (see [`AnimationStudio::follow`]).
     #[allow(clippy::too_many_arguments)] // Each is a different input to the tab.

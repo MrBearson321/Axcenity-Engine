@@ -30,7 +30,7 @@ Physics uses **rapier**, a Rust physics engine, on its own pool of threads. Lear
 | UnionOperation | Set by `UnionOperation.CollisionFidelity`: a box, a hull, or `PreciseConvexDecomposition` (several hulls, keeps hollows). |
 | Terrain | A heightfield. |
 
-**View > Overlays > Colliders** draws the shapes.
+**Viewport > Overlays > Colliders** draws the shapes.
 
 ## Materials and physical properties
 

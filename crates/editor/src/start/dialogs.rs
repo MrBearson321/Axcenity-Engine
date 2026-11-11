@@ -96,6 +96,7 @@ pub(super) fn template_choice(
         picture,
         CornerRadius::same(5),
         hover,
+        egui::Vec2::ZERO,
     );
     let color = if picked {
         palette.accent_text
@@ -129,6 +130,10 @@ pub(super) fn template_choice(
 
 /// A template's picture in `rect`: the built-in screenshot of a genre
 /// template, or a tile with the template's icon.
+/// A template's picture, or its icon on a tile when it has none. `float`
+/// is the hover's parallax: the picture pans inside its frame (zoomed in a
+/// little so no edge shows) and the icon drifts, both toward the pointer.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn template_picture(
     ui: &egui::Ui,
     palette: &Palette,
@@ -137,11 +142,23 @@ pub(super) fn template_picture(
     picture: Option<&egui::TextureHandle>,
     radius: CornerRadius,
     hover: f32,
+    float: egui::Vec2,
 ) {
     match picture {
-        Some(texture) => egui::Image::new(texture)
-            .corner_radius(radius)
-            .paint_at(ui, rect),
+        Some(texture) => {
+            let zoom = 1.0 + 0.06 * hover;
+            let half = 0.5 / zoom;
+            let room = 0.5 - half;
+            let pan = -float / rect.size() / zoom;
+            let center = egui::pos2(
+                0.5 + pan.x.clamp(-room, room),
+                0.5 + pan.y.clamp(-room, room),
+            );
+            egui::Image::new(texture)
+                .corner_radius(radius)
+                .uv(Rect::from_center_size(center, vec2(2.0 * half, 2.0 * half)))
+                .paint_at(ui, rect);
+        }
         None => {
             ui.painter().rect(
                 rect,
@@ -150,11 +167,18 @@ pub(super) fn template_picture(
                 Stroke::new(1.0_f32, palette.border),
                 egui::StrokeKind::Inside,
             );
+            icon_glow(
+                ui,
+                rect.center() + float * 2.0,
+                rect.height() * 0.45,
+                hover,
+                palette,
+            );
             ui.painter().text(
-                rect.center(),
+                rect.center() + float * 2.0,
                 egui::Align2::CENTER_CENTER,
                 template_icon(template),
-                FontId::proportional(rect.height() * 0.36),
+                FontId::proportional(rect.height() * (0.36 + 0.03 * hover)),
                 theme::mix(palette.text_secondary, palette.text_strong, hover),
             );
         }
@@ -181,44 +205,54 @@ pub(super) fn template_card(ui: &mut egui::Ui, template: Template, width: f32) -
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, template.name()));
     let palette = theme::palette(ui.ctx());
-    let hover = theme::ease(ui.ctx(), response.id.with("hover"), response.hovered());
-    card_frame(ui, rect, &response, hover, &palette);
-    let tile = Rect::from_min_size(rect.min + vec2(14.0, 14.0), vec2(40.0, 40.0));
-    ui.painter().rect(
-        tile,
-        8,
-        theme::mix(palette.surface, palette.control_hover, hover),
-        Stroke::new(1.0_f32, palette.border),
-        egui::StrokeKind::Inside,
-    );
-    ui.painter().text(
-        tile.center(),
-        egui::Align2::CENTER_CENTER,
-        template_icon(template),
-        FontId::proportional(theme::size::ICON_LARGE),
-        theme::mix(palette.text_secondary, palette.text_strong, hover),
-    );
-    let left = tile.right() + 12.0;
-    ui.painter().text(
-        pos2(left, rect.top() + 23.0),
-        egui::Align2::LEFT_CENTER,
-        template.name(),
-        FontId::new(type_scale::BODY, theme::medium_family()),
-        palette.text_strong,
-    );
-    let description = widgets::elided(
-        ui,
-        template.description(),
-        FontId::proportional(type_scale::SMALL),
-        palette.text_weak,
-        rect.right() - left - 12.0,
-        2,
-    );
-    ui.painter().galley(
-        pos2(left, rect.top() + 33.0),
-        description,
-        palette.text_weak,
-    );
+    let lean = tilt::lean(ui, rect, response.id, response.hovered());
+    let hover = lean.hover;
+    tilt::leaning(ui, rect, CARD_RADIUS, lean, |ui| {
+        card_surface(ui, rect, &response, hover, &palette);
+        // The icon floats above the card: it drifts further than the card
+        // leans, and glows in the accent while hovered.
+        let tile = Rect::from_min_size(rect.min + vec2(14.0, 14.0), vec2(40.0, 40.0));
+        let float = lean.drift(3.0);
+        icon_glow(ui, tile.center() + float * 1.5, 30.0, hover, &palette);
+        ui.painter().rect(
+            tile.translate(float),
+            8,
+            theme::mix(palette.surface, palette.control_hover, hover),
+            Stroke::new(
+                1.0_f32,
+                theme::mix(palette.border, palette.accent.gamma_multiply(0.6), hover),
+            ),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            tile.center() + float * 1.6,
+            egui::Align2::CENTER_CENTER,
+            template_icon(template),
+            FontId::proportional(theme::size::ICON_LARGE + 2.0 * hover),
+            theme::mix(palette.text_secondary, palette.accent, hover),
+        );
+        let left = tile.right() + 12.0;
+        ui.painter().text(
+            pos2(left, rect.top() + 23.0),
+            egui::Align2::LEFT_CENTER,
+            template.name(),
+            FontId::new(type_scale::BODY, theme::medium_family()),
+            palette.text_strong,
+        );
+        let description = widgets::elided(
+            ui,
+            template.description(),
+            FontId::proportional(type_scale::SMALL),
+            palette.text_weak,
+            rect.right() - left - 12.0,
+            2,
+        );
+        ui.painter().galley(
+            pos2(left, rect.top() + 33.0),
+            description,
+            palette.text_weak,
+        );
+    });
     response
         .on_hover_text(format!("New project: {}", template.description()))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -237,39 +271,44 @@ pub(super) fn game_template_card(
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, template.name()));
     let palette = theme::palette(ui.ctx());
-    let hover = theme::ease(ui.ctx(), response.id.with("hover"), response.hovered());
-    card_frame(ui, rect, &response, hover, &palette);
-    let image = Rect::from_min_size(rect.min + vec2(8.0, 8.0), vec2(width - 16.0, image_height));
-    template_picture(
-        ui,
-        &palette,
-        template,
-        image,
-        picture,
-        CornerRadius::same(6),
-        hover,
-    );
-    let left = rect.left() + 12.0;
-    ui.painter().text(
-        pos2(left, image.bottom() + 18.0),
-        egui::Align2::LEFT_CENTER,
-        template.name(),
-        FontId::new(type_scale::BODY, theme::medium_family()),
-        palette.text_strong,
-    );
-    let description = widgets::elided(
-        ui,
-        template.description(),
-        FontId::proportional(type_scale::SMALL),
-        palette.text_weak,
-        rect.right() - left - 12.0,
-        2,
-    );
-    ui.painter().galley(
-        pos2(left, image.bottom() + 30.0),
-        description,
-        palette.text_weak,
-    );
+    let lean = tilt::lean(ui, rect, response.id, response.hovered());
+    let hover = lean.hover;
+    tilt::leaning(ui, rect, CARD_RADIUS, lean, |ui| {
+        card_surface(ui, rect, &response, hover, &palette);
+        let image =
+            Rect::from_min_size(rect.min + vec2(8.0, 8.0), vec2(width - 16.0, image_height));
+        template_picture(
+            ui,
+            &palette,
+            template,
+            image,
+            picture,
+            CornerRadius::same(6),
+            hover,
+            lean.drift(4.0),
+        );
+        let left = rect.left() + 12.0;
+        ui.painter().text(
+            pos2(left, image.bottom() + 18.0),
+            egui::Align2::LEFT_CENTER,
+            template.name(),
+            FontId::new(type_scale::BODY, theme::medium_family()),
+            palette.text_strong,
+        );
+        let description = widgets::elided(
+            ui,
+            template.description(),
+            FontId::proportional(type_scale::SMALL),
+            palette.text_weak,
+            rect.right() - left - 12.0,
+            2,
+        );
+        ui.painter().galley(
+            pos2(left, image.bottom() + 30.0),
+            description,
+            palette.text_weak,
+        );
+    });
     response
         .on_hover_text(format!("New project: {}", template.description()))
         .on_hover_cursor(egui::CursorIcon::PointingHand)

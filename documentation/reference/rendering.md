@@ -39,6 +39,8 @@ What it **costs** belongs to each computer: the **graphics quality** preset (Low
 | Ambient occlusion | off | low | high | high |
 | Volumetric fog | off | off | off | on |
 
+Below 100% render scale the finished picture is upscaled to the window with an edge-adaptive filter and a contrast-adaptive sharpen, after AMD's FSR 1.0 (EASU and RCAS). It's automatic, the UI is still drawn at full size, and grain and vignette are applied before the upscale. A **SharpenEffect** adds to that sharpening.
+
 TAA (temporal anti-aliasing) and **real-time global illumination** are overrides only: they're off in every preset. Games can change these settings from a LocalScript through **UserGameSettings**, such as `UserGameSettings.GraphicsQuality`.
 
 ## Materials and shaders
@@ -51,7 +53,7 @@ TAA (temporal anti-aliasing) and **real-time global illumination** are overrides
 ## Measuring
 
 - **View > Panels > Profiler**, **Graphics** tab: draw calls, triangles, shadow views, lights and GPU time.
-- **View > View Mode** shows the scene unlit, as wireframe, normals, metalness, roughness, ambient occlusion, levels of detail or overdraw.
+- **Viewport > View Mode** shows the scene unlit, as wireframe, normals, metalness, roughness, ambient occlusion, levels of detail or overdraw.
 - The `fps` command in the Developer Console (F9) says whether a frame waits on the CPU or the GPU.
 
 > **Known limits.** Overlapping see-through objects can blend in the wrong order (they're sorted by their centres). Rect lights are lit from a representative point. glTF vertex colours and emissive strength aren't read.
