@@ -18,8 +18,8 @@ use crate::apply::{self, DocMut, Graveyard, Note, Refusal, Undo};
 use crate::capture;
 use crate::files::{self, Assembly, Bytes, FileHash, Manifest, Piece};
 use crate::ids::BLOCK_SIZE;
-use crate::message::{MemberId, ToClient, ToHost};
-use crate::op::{Op, Transaction};
+use crate::message::{Have, MemberId, ToClient, ToHost};
+use crate::op::{self, Op, Transaction};
 use crate::presence::{Collaborator, Presence};
 use crate::role::{Capability, Role};
 
@@ -30,18 +30,24 @@ pub enum Notice {
     /// resync): selections and the editor's own undo steps are stale.
     Joined,
     /// Their transaction applied, but not entirely as made (someone deleted
-    /// what it edited, or the parent it used).
+    /// what it edited, or the parent it used). `recovered` as for
+    /// [`Notice::Refused`].
     Changed {
         client_seq: u64,
         label: String,
         notes: Vec<Note>,
+        recovered: bool,
     },
     /// The host refused their transaction (or their role doesn't allow
-    /// edits); it was taken off.
+    /// edits); it was taken off. `recovered` says it was sent again after
+    /// the connection or the host came back, or from an editor's unsent
+    /// edits ([`Client::recover_unsent`]): the editor lists those in its
+    /// Recovered Changes window, as they're from a while ago.
     Refused {
         client_seq: u64,
         label: String,
         reason: Refusal,
+        recovered: bool,
     },
     /// The copy disagreed with the host's, so it was replaced by a fresh
     /// snapshot (a bug if it ever happens; edits not yet confirmed are kept
@@ -51,6 +57,9 @@ pub enum Notice {
     Arrived { member: MemberId, name: String },
     /// Another member's connection closed, or they were removed.
     Left { member: MemberId, name: String },
+    /// The owner ended the session or quit: this copy stays as it is, read
+    /// only, and edits not confirmed yet are in [`Client::unsent`] (TC6).
+    HostLeft,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +76,8 @@ struct Pending {
     /// How to take it off the copy; `None` while it isn't on (it didn't
     /// apply locally, or it has just been taken off).
     undo: Option<Undo>,
+    /// Sent again after a gap ([`Notice::Refused`]'s `recovered`).
+    recovered: bool,
 }
 
 /// One member's side of the session.
@@ -116,6 +127,10 @@ pub struct Client {
     refused: VecDeque<u64>,
     /// Names the session's project, once joined.
     session: Option<String>,
+    /// The run of the host this copy's World and numbers are from.
+    epoch: Option<u64>,
+    /// The host said the session is over.
+    host_left: bool,
 }
 
 impl Client {
@@ -146,6 +161,8 @@ impl Client {
             my_locks: BTreeSet::new(),
             refused: VecDeque::new(),
             session: None,
+            epoch: None,
+            host_left: false,
         }
     }
 
@@ -270,6 +287,9 @@ impl Client {
         if !self.joined {
             return Err(Refusal::Invalid("not in a session yet".to_owned()));
         }
+        if self.host_left {
+            return Err(self.edit_refusal());
+        }
         let mut ops = Vec::new();
         let mut uploads = Vec::new();
         for (path, bytes) in changes {
@@ -309,6 +329,7 @@ impl Client {
                         client_seq: 0,
                         label: label.clone(),
                         reason: Refusal::Permission,
+                        recovered: false,
                     });
                 }
             }
@@ -404,6 +425,89 @@ impl Client {
         self.connection == Connection::Online
     }
 
+    /// True once the host said the session is over: edits are taken back.
+    pub fn host_left(&self) -> bool {
+        self.host_left
+    }
+
+    /// The edits the host hasn't confirmed, oldest first: what an editor
+    /// keeps in its recovery file while offline (TC6).
+    pub fn unsent(&self) -> Vec<Transaction> {
+        self.pending.iter().map(|p| p.transaction.clone()).collect()
+    }
+
+    /// The newest edit not confirmed yet, if any: changes whenever
+    /// [`Client::unsent`] does.
+    pub fn newest_unsent(&self) -> Option<u64> {
+        self.pending.back().map(|p| p.transaction.client_seq)
+    }
+
+    /// Takes in edits an earlier run of the editor made and never had
+    /// confirmed (its recovery file): they apply here and go to the host
+    /// like new ones, what they make with IDs from this member's blocks.
+    /// One that no longer applies is reported as a recovered refusal.
+    /// Files are left out: the member's folder still has what they saved,
+    /// and their [`Mirror`](crate::Mirror) sends it. Returns how many
+    /// there were. Only once joined.
+    pub fn recover_unsent(
+        &mut self,
+        world: &mut World,
+        mut transactions: Vec<Transaction>,
+    ) -> usize {
+        for transaction in &mut transactions {
+            transaction.ops.retain(Op::is_world);
+        }
+        transactions.retain(|t| !t.ops.is_empty());
+        if !self.joined || self.host_left || transactions.is_empty() {
+            return 0;
+        }
+        self.capture(world, "Edit");
+        let count = transactions.len();
+        self.take_pending_off(world);
+        self.adopt(world, transactions);
+        self.put_pending_on(world);
+        if self.is_online() {
+            let start = self.pending.len() - count;
+            for pending in self.pending.iter().skip(start) {
+                self.outbox
+                    .push(ToHost::Submit(pending.transaction.clone()));
+            }
+        }
+        self.ask_for_ids_if_low(world);
+        world.take_edits();
+        count
+    }
+
+    /// Adds `transactions` as pending (off the copy), numbered after this
+    /// client's own, with what they make moved to IDs from this member's
+    /// blocks. They were made against IDs that aren't this member's now.
+    fn adopt(&mut self, world: &mut World, transactions: Vec<Transaction>) {
+        let mut map = FxHashMap::default();
+        for transaction in &transactions {
+            for op in &transaction.ops {
+                if let Op::CreateTree { nodes } = op {
+                    for node in nodes {
+                        if !map.contains_key(&node.id)
+                            && let Some(new) = world.take_id()
+                        {
+                            map.insert(node.id, new);
+                        }
+                    }
+                }
+            }
+        }
+        for mut transaction in transactions {
+            op::remap_ids(&mut transaction.ops, &map);
+            transaction.client_seq = self.next_client_seq;
+            self.next_client_seq += 1;
+            self.pending.push_back(Pending {
+                transaction,
+                undo: None,
+                recovered: true,
+            });
+        }
+    }
+
     /// Edits not yet confirmed by the host.
     pub fn pending(&self) -> usize {
         self.pending.len()
@@ -426,10 +530,16 @@ impl Client {
     /// A new connection is open: says hello, asking to catch up if this
     /// copy has the session already.
     pub fn connect(&mut self) {
+        if self.host_left {
+            return;
+        }
         self.connection = Connection::Joining;
         self.asked_for_ids = false;
         self.awaiting_snapshot = false;
-        let have = self.joined.then_some(self.seq);
+        let have = self.epoch.filter(|_| self.joined).map(|epoch| Have {
+            epoch,
+            seq: self.seq,
+        });
         self.outbox.push(ToHost::Hello { have });
         if self.presence != Presence::default() {
             self.outbox.push(ToHost::Presence(self.presence.clone()));
@@ -479,12 +589,13 @@ impl Client {
             return None;
         }
         let label = label.into();
-        if !self.role.can(Capability::EditWorld) {
+        if self.host_left || !self.role.can(Capability::EditWorld) {
             // `capture` already put the World back as it was.
             self.notices.push(Notice::Refused {
                 client_seq: 0,
                 label,
-                reason: Refusal::Permission,
+                reason: self.edit_refusal(),
+                recovered: false,
             });
             return None;
         }
@@ -497,6 +608,7 @@ impl Client {
                     client_seq: 0,
                     label,
                     reason,
+                    recovered: false,
                 });
                 None
             }
@@ -513,14 +625,23 @@ impl Client {
         label: impl Into<String>,
         ops: Vec<Op>,
     ) -> Result<u64, Refusal> {
-        if !self.role.can(Capability::EditWorld) {
-            return Err(Refusal::Permission);
+        if self.host_left || !self.role.can(Capability::EditWorld) {
+            return Err(self.edit_refusal());
         }
         if !self.joined {
             return Err(Refusal::Invalid("not in a session yet".to_owned()));
         }
         self.capture(world, "Edit");
         self.submit_ops(world, label.into(), ops)
+    }
+
+    /// Why this member's edits don't go anywhere.
+    fn edit_refusal(&self) -> Refusal {
+        if self.host_left {
+            Refusal::Invalid("the host left the session: this copy is read-only".to_owned())
+        } else {
+            Refusal::Permission
+        }
     }
 
     fn submit_ops(
@@ -545,6 +666,7 @@ impl Client {
         self.pending.push_back(Pending {
             transaction,
             undo: Some(applied.undo),
+            recovered: false,
         });
         Ok(client_seq)
     }
@@ -567,15 +689,23 @@ impl Client {
                 rejected,
                 files,
                 session,
+                epoch,
             } => {
                 self.files = files;
                 self.session = Some(session);
                 // The old copy is gone, and with it what undoes the pending
-                // edits on it. Blocks of IDs not used yet stay this member's.
+                // edits on it. Blocks of IDs not used yet stay this member's,
+                // unless the host started again: its blocks start over.
                 for pending in &mut self.pending {
                     pending.undo = None;
                 }
-                let blocks = world.id_blocks_left();
+                let restarted = self.epoch.is_some_and(|old| old != epoch);
+                self.epoch = Some(epoch);
+                let blocks = if restarted {
+                    Vec::new()
+                } else {
+                    world.id_blocks_left()
+                };
                 *world = *snapshot.0;
                 world.make_replica();
                 for (start, len) in blocks {
@@ -591,6 +721,15 @@ impl Client {
                 self.awaiting_snapshot = false;
                 self.seq = seq;
                 self.role = role;
+                if restarted {
+                    // What this member made used IDs from blocks the new
+                    // run of the host doesn't know: they get new ones, and
+                    // every edit not confirmed is sent again, renumbered.
+                    let unsent: Vec<Transaction> =
+                        self.pending.drain(..).map(|p| p.transaction).collect();
+                    self.next_client_seq = self.next_client_seq.max(last_client_seq + 1);
+                    self.adopt(world, unsent);
+                }
                 self.notices.push(Notice::Joined);
                 self.finish_joining(world, last_client_seq, &rejected);
             }
@@ -624,6 +763,7 @@ impl Client {
                         client_seq,
                         label: pending.transaction.label,
                         reason,
+                        recovered: pending.recovered,
                     });
                 }
                 self.put_pending_on(world);
@@ -652,6 +792,15 @@ impl Client {
             },
             ToClient::Missing(hash) => self.missing.push(hash),
             ToClient::Locks(locks) => self.locks = locks,
+            ToClient::Ended => {
+                self.host_left = true;
+                self.connection = Connection::Offline;
+                self.outbox.clear();
+                self.presences.clear();
+                self.downloads.clear();
+                self.locks.clear();
+                self.notices.push(Notice::HostLeft);
+            }
         }
         // What applying and undoing did isn't the user's edit.
         world.take_edits();
@@ -720,10 +869,12 @@ impl Client {
         if author == self.member {
             // The host handles one member's transactions in order and
             // refuses before accepting later ones, so this is the oldest.
+            let mut recovered = false;
             while let Some(front) = self.pending.front() {
                 if front.transaction.client_seq > client_seq {
                     break;
                 }
+                recovered = front.recovered;
                 self.pending.pop_front();
             }
             self.forget_uploads();
@@ -732,6 +883,7 @@ impl Client {
                     client_seq,
                     label,
                     notes,
+                    recovered,
                 });
             }
         }
@@ -759,8 +911,16 @@ impl Client {
                     client_seq,
                     label: pending.transaction.label,
                     reason: reason.clone(),
+                    recovered: true,
                 });
             }
+        }
+        // A new run of this editor starts counting at 1, but the host
+        // drops numbers it has handled: carry on after them.
+        self.next_client_seq = self.next_client_seq.max(last_client_seq + 1);
+        // What's still pending was made before the gap and goes again.
+        for pending in &mut self.pending {
+            pending.recovered = true;
         }
         self.put_pending_on(world);
         self.connection = Connection::Online;

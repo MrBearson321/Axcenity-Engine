@@ -1030,6 +1030,9 @@ impl EditorApp {
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
             self.ai.allowed = storage.get_string(AI_CONNECTIONS_KEY).as_deref() == Some("on");
+            if let Some(text) = storage.get_string(team_panel::TEAM_CREATE_KEY) {
+                self.team_panel.read_text(&text);
+            }
             self.grid = storage.get_string(GRID_KEY).as_deref() != Some("off");
             self.move_guide = storage.get_string(MOVE_GUIDE_KEY).as_deref() != Some("off");
             self.grid_strength = storage
@@ -1148,6 +1151,7 @@ impl eframe::App for EditorApp {
         storage.set_string(VIEW_CUBE_KEY, cube.to_owned());
         let ai = if self.ai.allowed { "on" } else { "off" };
         storage.set_string(AI_CONNECTIONS_KEY, ai.to_owned());
+        storage.set_string(team_panel::TEAM_CREATE_KEY, self.team_panel.to_text());
         let grid = if self.grid { "on" } else { "off" };
         storage.set_string(GRID_KEY, grid.to_owned());
         let guide = if self.move_guide { "on" } else { "off" };
@@ -1740,6 +1744,7 @@ impl EditorApp {
         self.updates_frame();
         self.update_install_frame();
         self.settings_window(ctx);
+        self.recovered_changes_window(ctx);
         let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();
             toast::Busy {

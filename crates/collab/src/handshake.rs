@@ -17,7 +17,7 @@ use crate::message::MemberId;
 use crate::role::Role;
 
 /// Raise it when a handshake or session message changes.
-pub const PROTOCOL: u32 = 4;
+pub const PROTOCOL: u32 = 5;
 
 /// This engine's version, as the handshake compares it.
 pub const ENGINE: &str = env!("CARGO_PKG_VERSION");

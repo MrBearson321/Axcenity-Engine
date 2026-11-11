@@ -86,6 +86,33 @@ impl Net {
         self.clients[i].disconnected();
     }
 
+    /// Member `i`'s editor stops and starts again: a new client and an
+    /// empty World, not connected yet.
+    pub fn restart_editor(&mut self, i: usize) {
+        self.disconnect(i);
+        self.clients[i] = Client::new(member(i));
+        self.worlds[i] = World::new();
+    }
+
+    /// The host stops and starts again with the World it had (as the
+    /// owner's editor brings it back from the journal): every connection
+    /// drops, and the new run knows nothing of the old one's numbers.
+    pub fn restart_host(&mut self) {
+        let roles: Vec<Role> = (0..self.clients.len())
+            .map(|i| self.host.role(member(i)).expect("a member"))
+            .collect();
+        for i in 0..self.clients.len() {
+            self.connected[i] = false;
+            self.up[i].clear();
+            self.down[i].clear();
+            self.clients[i].disconnected();
+        }
+        self.host = Host::new(self.host.world().clone());
+        for (i, role) in roles.into_iter().enumerate() {
+            self.host.add_member(member(i), role);
+        }
+    }
+
     /// Client `i` makes an edit.
     pub fn submit(&mut self, i: usize, label: &str, ops: Vec<Op>) -> Result<u64, Refusal> {
         let result = self.clients[i].submit(&mut self.worlds[i], label, ops);

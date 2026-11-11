@@ -19,13 +19,13 @@ use std::sync::Arc;
 use crate::apply::{DropReason, Graveyard, Note, Place, Refusal};
 use crate::files::{FileHash, Manifest, Piece};
 use crate::ids::IdBlock;
-use crate::message::{MemberId, Snapshot, ToClient, ToHost};
+use crate::message::{Have, MemberId, Snapshot, ToClient, ToHost};
 use crate::op::{NodeSpec, Op, Transaction};
 use crate::presence::{Camera, Collaborator, Presence};
 use crate::role::Role;
 
 /// The first byte of every message. Raise it when a message changes.
-pub const FORMAT: u8 = 2;
+pub const FORMAT: u8 = 3;
 
 /// Why bytes aren't a message.
 #[derive(Debug, thiserror::Error)]
@@ -520,7 +520,8 @@ impl WireWorld {
 #[derive(Serialize, Deserialize)]
 enum WireToHost {
     Hello {
-        have: Option<u64>,
+        /// Epoch and sequence number.
+        have: Option<(u64, u64)>,
     },
     Submit(WireTransaction),
     NeedIds,
@@ -566,7 +567,9 @@ impl From<WirePresence> for Presence {
 impl From<&ToHost> for WireToHost {
     fn from(message: &ToHost) -> WireToHost {
         match message {
-            ToHost::Hello { have } => WireToHost::Hello { have: *have },
+            ToHost::Hello { have } => WireToHost::Hello {
+                have: have.map(|have| (have.epoch, have.seq)),
+            },
             ToHost::Submit(transaction) => WireToHost::Submit(WireTransaction {
                 client_seq: transaction.client_seq,
                 label: transaction.label.clone(),
@@ -595,7 +598,9 @@ impl From<&ToHost> for WireToHost {
 impl WireToHost {
     fn into_message(self) -> Result<ToHost, WireError> {
         Ok(match self {
-            WireToHost::Hello { have } => ToHost::Hello { have },
+            WireToHost::Hello { have } => ToHost::Hello {
+                have: have.map(|(epoch, seq)| Have { epoch, seq }),
+            },
             WireToHost::Submit(t) => ToHost::Submit(Transaction {
                 client_seq: t.client_seq,
                 label: t.label,
@@ -632,6 +637,7 @@ enum WireToClient {
         rejected: Vec<(u64, WireRefusal)>,
         files: Manifest,
         session: String,
+        epoch: u64,
     },
     Resumed {
         last_client_seq: u64,
@@ -665,6 +671,7 @@ enum WireToClient {
     },
     Missing(FileHash),
     Locks(BTreeMap<String, u32>),
+    Ended,
 }
 
 impl From<&ToClient> for WireToClient {
@@ -680,6 +687,7 @@ impl From<&ToClient> for WireToClient {
                 rejected,
                 files,
                 session,
+                epoch,
             } => WireToClient::Welcome {
                 world: WireWorld::of(&world.0, graveyard),
                 seq: *seq,
@@ -689,6 +697,7 @@ impl From<&ToClient> for WireToClient {
                 rejected: refusals(rejected),
                 files: files.clone(),
                 session: session.clone(),
+                epoch: *epoch,
             },
             ToClient::Resumed {
                 last_client_seq,
@@ -755,6 +764,7 @@ impl From<&ToClient> for WireToClient {
                     .map(|(path, member)| (path.clone(), member.0))
                     .collect(),
             ),
+            ToClient::Ended => WireToClient::Ended,
         }
     }
 }
@@ -771,6 +781,7 @@ impl WireToClient {
                 rejected,
                 files,
                 session,
+                epoch,
             } => {
                 let (world, graveyard) = world.into_world()?;
                 ToClient::Welcome {
@@ -783,6 +794,7 @@ impl WireToClient {
                     rejected: unwire_refusals(rejected),
                     files,
                     session,
+                    epoch,
                 }
             }
             WireToClient::Resumed {
@@ -854,6 +866,7 @@ impl WireToClient {
                     .map(|(path, member)| (path, MemberId(member)))
                     .collect(),
             ),
+            WireToClient::Ended => ToClient::Ended,
         })
     }
 }

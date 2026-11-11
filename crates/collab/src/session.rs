@@ -309,6 +309,13 @@ impl HostSession {
         self.host.end_journal();
     }
 
+    /// Tells everyone connected the session is over ([`ToClient::Ended`]).
+    /// Dropping [`Hosting`] does this.
+    pub fn say_ended(&mut self) {
+        let out = self.host.end();
+        self.route(out);
+    }
+
     /// The host, to change (tests, and the hosting editor's journal).
     pub fn host_mut(&mut self) -> &mut Host {
         &mut self.host
@@ -365,7 +372,7 @@ impl HostSession {
 }
 
 /// A [`HostSession`] running on its own thread. Dropping it ends the
-/// session and closes every connection.
+/// session: everyone connected hears so, then every connection closes.
 pub struct Hosting {
     session: Arc<Mutex<HostSession>>,
     stop: Arc<AtomicBool>,
@@ -380,6 +387,10 @@ impl Hosting {
 
 impl Drop for Hosting {
     fn drop(&mut self) {
+        // Each connection sends what's queued before it closes.
+        if let Ok(mut session) = self.session.lock() {
+            session.say_ended();
+        }
         self.stop.store(true, Ordering::Relaxed);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();

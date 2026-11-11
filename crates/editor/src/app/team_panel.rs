@@ -1,10 +1,13 @@
 //! The Team Create panel and the title bar chip (TC4; design §11): share
 //! the open project or join a session, see who's in it and how the
-//! connection is, invite people and set their roles, and leave.
+//! connection is, follow someone's camera, invite people and set their
+//! roles, and leave. Also the Recovered Changes window and Settings > Team
+//! Create (TC6).
 
 use axcenity_collab::MemberId;
 use axcenity_collab::Role as MemberRole;
 use axcenity_collab::access::Invite;
+use axcenity_collab::identity::Identity;
 
 use super::team::TeamStatus;
 use super::*;
@@ -18,6 +21,90 @@ pub(crate) struct TeamPanel {
     pub(crate) invite_role: InviteRole,
     /// Why the last Share or Join didn't start.
     pub(crate) problem: Option<String>,
+    /// How long new invites work.
+    pub(crate) invite_lifetime: InviteLifetime,
+    /// Edits sent again after a gap that the host refused, for the
+    /// Recovered Changes window (TC6). It shows while there are any.
+    pub(crate) recovered: Vec<RecoveredChange>,
+    /// The member whose camera the viewport follows.
+    pub(crate) following: Option<MemberId>,
+    /// Where following last put the camera: if it's elsewhere now, the
+    /// user moved it, and following stops.
+    pub(crate) followed_to: Option<[f32; 3]>,
+    /// This computer's identity, for Settings > Team Create (read when the
+    /// page first shows).
+    identity: Option<Result<Identity, String>>,
+}
+
+/// One edit in the Recovered Changes window.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RecoveredChange {
+    /// Its undo step's name.
+    pub(crate) label: String,
+    /// Why the host refused it.
+    pub(crate) reason: String,
+}
+
+/// How long a new invite link works (Settings > Team Create).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum InviteLifetime {
+    Day,
+    #[default]
+    Week,
+    Month,
+}
+
+impl InviteLifetime {
+    pub(crate) fn seconds(self) -> u64 {
+        const DAY: u64 = 24 * 60 * 60;
+        match self {
+            InviteLifetime::Day => DAY,
+            InviteLifetime::Week => 7 * DAY,
+            InviteLifetime::Month => 30 * DAY,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            InviteLifetime::Day => "1 day",
+            InviteLifetime::Week => "7 days",
+            InviteLifetime::Month => "30 days",
+        }
+    }
+}
+
+/// Where the invite defaults are kept between runs.
+pub(crate) const TEAM_CREATE_KEY: &str = "team_create";
+
+impl TeamPanel {
+    /// The invite defaults as saved ("editor week").
+    pub(crate) fn to_text(&self) -> String {
+        let role = match self.invite_role {
+            InviteRole::Editor => "editor",
+            InviteRole::Viewer => "viewer",
+        };
+        let lifetime = match self.invite_lifetime {
+            InviteLifetime::Day => "day",
+            InviteLifetime::Week => "week",
+            InviteLifetime::Month => "month",
+        };
+        format!("{role} {lifetime}")
+    }
+
+    /// Reads what [`TeamPanel::to_text`] wrote; unknown words keep the
+    /// defaults.
+    pub(crate) fn read_text(&mut self, text: &str) {
+        for word in text.split_whitespace() {
+            match word {
+                "editor" => self.invite_role = InviteRole::Editor,
+                "viewer" => self.invite_role = InviteRole::Viewer,
+                "day" => self.invite_lifetime = InviteLifetime::Day,
+                "week" => self.invite_lifetime = InviteLifetime::Week,
+                "month" => self.invite_lifetime = InviteLifetime::Month,
+                _ => {}
+            }
+        }
+    }
 }
 
 /// The roles an invite can give.
@@ -29,7 +116,7 @@ pub(crate) enum InviteRole {
 }
 
 impl InviteRole {
-    fn role(self) -> MemberRole {
+    pub(crate) fn role(self) -> MemberRole {
         match self {
             InviteRole::Editor => MemberRole::Editor,
             InviteRole::Viewer => MemberRole::Viewer,
@@ -46,6 +133,8 @@ enum Action {
     SetRole(MemberId, MemberRole),
     Remove(MemberId),
     Leave,
+    /// Follows a member's camera, or stops with `None`.
+    Follow(Option<MemberId>),
 }
 
 /// The panel buttons tests press.
@@ -88,7 +177,9 @@ fn status_color(status: &TeamStatus, palette: &theme::Palette) -> egui::Color32 
     match status {
         TeamStatus::Connected { waiting: 0 } => palette.success,
         TeamStatus::Connected { .. } | TeamStatus::Joining => palette.warning,
-        TeamStatus::Reconnecting { .. } | TeamStatus::Refused(_) => palette.error,
+        TeamStatus::Reconnecting { .. } | TeamStatus::Refused(_) | TeamStatus::HostLeft { .. } => {
+            palette.error
+        }
     }
 }
 
@@ -103,6 +194,10 @@ pub(crate) fn status_text(status: &TeamStatus) -> String {
             format!("Offline, {waiting} change(s) waiting")
         }
         TeamStatus::Refused(_) => "Not in the session".to_owned(),
+        TeamStatus::HostLeft { waiting: 0 } => "The host left (read-only)".to_owned(),
+        TeamStatus::HostLeft { waiting } => {
+            format!("The host left (read-only), {waiting} change(s) kept")
+        }
     }
 }
 
@@ -284,12 +379,57 @@ impl EditorApp {
             TeamStatus::Refused(why) => {
                 ui.add(egui::Label::new(egui::RichText::new(why).color(palette.error)).wrap());
             }
+            TeamStatus::HostLeft { waiting } => {
+                let kept = if *waiting > 0 {
+                    " Changes the host didn't get are kept and sent the next time you join."
+                } else {
+                    ""
+                };
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(format!(
+                            "The host ended the session. This copy stays open, read-only.{kept}                              Leave the session to work on it alone."
+                        ))
+                        .color(palette.text_weak),
+                    )
+                    .wrap(),
+                );
+            }
             _ => {}
         }
         ui.add_space(theme::space::S);
 
         // Collaborators.
         let roster = team.roster().to_vec();
+        let with_camera: Vec<MemberId> = team
+            .presences()
+            .filter(|(_, presence)| presence.camera.is_some())
+            .map(|(member, _)| member)
+            .collect();
+        let following = self.team_panel.following;
+        if let Some(name) = following
+            .and_then(|member| roster.iter().find(|c| c.member == member))
+            .map(|c| c.profile.name.clone())
+        {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{} Following {name}", icons::EYE))
+                        .color(palette.accent),
+                );
+                if ui
+                    .add(widgets::button(
+                        widgets::Role::Ghost,
+                        None,
+                        "Stop",
+                        &palette,
+                    ))
+                    .on_hover_text("Or move the camera yourself.")
+                    .clicked()
+                {
+                    action = Some(Action::Follow(None));
+                }
+            });
+        }
         widgets::section(icons::USERS_THREE, "Collaborators").show(ui, |ui| {
             if roster.is_empty() {
                 ui.label(egui::RichText::new("Waiting for the host…").color(palette.text_weak));
@@ -342,6 +482,17 @@ impl EditorApp {
                         if !c.online {
                             ui.label(widgets::micro("offline", palette.text_weak));
                         }
+                        if Some(c.member) != me && with_camera.contains(&c.member) {
+                            let on = following == Some(c.member);
+                            let hover = if on {
+                                "Stop following"
+                            } else {
+                                "Follow their camera"
+                            };
+                            if widgets::icon_button(ui, icons::EYE, hover, on).clicked() {
+                                action = Some(Action::Follow((!on).then_some(c.member)));
+                            }
+                        }
                     });
                 });
             }
@@ -379,11 +530,13 @@ impl EditorApp {
                     action = Some(Action::Invite);
                 }
                 if let Some(link) = invite {
+                    let works = format!(
+                        "Works once, for {}:",
+                        self.team_panel.invite_lifetime.label()
+                    );
                     ui.add(
-                        egui::Label::new(
-                            egui::RichText::new("Works once, for 7 days:").color(palette.text_weak),
-                        )
-                        .wrap(),
+                        egui::Label::new(egui::RichText::new(works).color(palette.text_weak))
+                            .wrap(),
                     );
                     let mut shown = link.clone();
                     ui.add(
@@ -477,7 +630,199 @@ impl EditorApp {
             Action::SetRole(member, role) => self.set_team_role(member, role),
             Action::Remove(member) => self.remove_team_member(member),
             Action::Leave => self.leave_team_session(),
+            Action::Follow(member) => {
+                self.team_panel.following = member;
+                self.team_panel.followed_to = None;
+            }
         }
+    }
+
+    /// Keeps the viewport's camera on the followed member's, until they
+    /// leave or the user moves the camera. Runs each frame in a session.
+    pub(super) fn follow_member(&mut self) {
+        let Some(member) = self.team_panel.following else {
+            return;
+        };
+        let camera = self.team.as_ref().and_then(|team| {
+            team.presences()
+                .find(|(m, _)| *m == member)
+                .and_then(|(_, presence)| presence.camera)
+        });
+        let here = self.viewport.render_camera().position.to_array();
+        let moved_by_user = self.team_panel.followed_to.is_some_and(|to| {
+            axcenity_render::glam::Vec3::from(to).distance(axcenity_render::glam::Vec3::from(here))
+                > 1e-3
+        });
+        let Some(camera) = camera.filter(|_| !moved_by_user) else {
+            self.team_panel.following = None;
+            self.team_panel.followed_to = None;
+            return;
+        };
+        let position = axcenity_render::glam::Vec3::from(camera.position);
+        let look = axcenity_render::glam::Vec3::from(camera.look)
+            .normalize_or(axcenity_render::glam::Vec3::NEG_Z);
+        self.viewport.look_at(position, position + look);
+        self.team_panel.followed_to = Some(self.viewport.render_camera().position.to_array());
+    }
+
+    /// The Recovered Changes window (design §9): edits made while offline,
+    /// or before the editor or the host stopped, that the host refused when
+    /// they were sent again. Nothing is dropped without saying so.
+    pub(super) fn recovered_changes_window(&mut self, ctx: &egui::Context) {
+        if self.team_panel.recovered.is_empty() {
+            return;
+        }
+        let mut open = true;
+        let mut close = false;
+        widgets::tool_window(icons::CLOCK_COUNTER_CLOCKWISE, "Recovered Changes")
+            .id("recovered changes")
+            .show(ctx, &mut open, |ui| {
+                let palette = theme::palette(ui.ctx());
+                ui.set_max_width(360.0);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            "These changes were made while you were offline (or before the                              editor or the host stopped) and couldn't be applied when they were                              sent again: someone changed or deleted what they edited. Make them                              again if you still want them.",
+                        )
+                        .color(palette.text_weak),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(theme::space::S);
+                egui::ScrollArea::vertical()
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        for change in &self.team_panel.recovered {
+                            ui.label(
+                                egui::RichText::new(&change.label).family(theme::medium_family()),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&change.reason).color(palette.text_weak),
+                                )
+                                .wrap(),
+                            );
+                            ui.add_space(theme::space::XS);
+                        }
+                    });
+                ui.add_space(theme::space::S);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(widgets::button(
+                            widgets::Role::Secondary,
+                            Some(icons::COPY),
+                            "Copy list",
+                            &palette,
+                        ))
+                        .clicked()
+                    {
+                        let text: Vec<String> = self
+                            .team_panel
+                            .recovered
+                            .iter()
+                            .map(|c| format!("{}: {}", c.label, c.reason))
+                            .collect();
+                        ui.ctx().copy_text(text.join("\n"));
+                    }
+                    if ui
+                        .add(widgets::button(widgets::Role::Primary, None, "Done", &palette))
+                        .clicked()
+                    {
+                        close = true;
+                    }
+                });
+            });
+        if !open || close {
+            self.team_panel.recovered.clear();
+        }
+    }
+
+    /// Settings > Team Create: who this computer is to others, and what
+    /// new invites give.
+    pub(super) fn team_settings_page(&mut self, ui: &mut egui::Ui) {
+        use super::settings;
+        settings::page_title(
+            ui,
+            "Team Create",
+            "How others see you in a session, and the invites you make.",
+        );
+        let palette = theme::palette(ui.ctx());
+        let weak = |ui: &mut egui::Ui, text: &str| {
+            ui.add(egui::Label::new(egui::RichText::new(text).color(palette.text_weak)).wrap());
+        };
+        settings::section(ui, "Your name and colour");
+        let identity = self
+            .team_panel
+            .identity
+            .get_or_insert_with(super::team::load_own_identity);
+        match identity {
+            Err(error) => weak(ui, error),
+            Ok(identity) => {
+                let mut name = identity.name.clone();
+                let mut color = identity.color;
+                ui.horizontal(|ui| {
+                    super::color_palette::edit_srgb(ui, &mut color)
+                        .on_hover_text("Your colour: your selections and avatar show in it.");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut name)
+                            .hint_text("Your name")
+                            .char_limit(axcenity_collab::presence::TEXT_MOST)
+                            .desired_width(220.0),
+                    );
+                });
+                let name = name.trim();
+                if (name != identity.name && !name.is_empty()) || color != identity.color {
+                    if !name.is_empty() {
+                        identity.name = name.to_owned();
+                    }
+                    identity.color = color;
+                    if let Err(error) = super::team::save_own_identity(identity) {
+                        self.toasts
+                            .warning(format!("Couldn't save your Team Create name: {error}"));
+                    }
+                }
+                weak(
+                    ui,
+                    "Others see this from the next time you join or share a session.",
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Device key {}",
+                        identity.public_key().fingerprint().short()
+                    ))
+                    .monospace()
+                    .color(palette.text_weak),
+                )
+                .on_hover_text(
+                    "This computer's key: the host knows you by it. It's kept in the editor's \
+                     data folder, never in a project.",
+                );
+            }
+        }
+        ui.add_space(theme::space::M);
+        settings::section(ui, "New invites");
+        ui.horizontal(|ui| {
+            ui.label("Role");
+            let role = &mut self.team_panel.invite_role;
+            ui.selectable_value(role, InviteRole::Editor, "Editor");
+            ui.selectable_value(role, InviteRole::Viewer, "Viewer");
+        });
+        ui.horizontal(|ui| {
+            ui.label("Works for");
+            let lifetime = &mut self.team_panel.invite_lifetime;
+            for choice in [
+                InviteLifetime::Day,
+                InviteLifetime::Week,
+                InviteLifetime::Month,
+            ] {
+                ui.selectable_value(lifetime, choice, choice.label());
+            }
+        });
+        weak(
+            ui,
+            "Each link works once. Revoke unused ones from the Team Create panel.",
+        );
     }
 
     /// File > Share with Team Create…: opens the panel and hosts.

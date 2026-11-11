@@ -14,6 +14,11 @@
 //! Instances keep their IDs. A file from another wire format isn't read
 //! (recovery says so); a half-written last entry (the host stopped while
 //! writing it) is left out.
+//!
+//! A member keeps a recovery file the same way: their edits the host
+//! hasn't confirmed ([`save_unsent`]), written while they're offline, so
+//! an editor that stops before the connection comes back sends them the
+//! next time it joins ([`Client::recover_unsent`](crate::Client::recover_unsent)).
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -24,7 +29,8 @@ use axcenity_core::World;
 
 use crate::apply::{self, Doc, Graveyard};
 use crate::host::Logged;
-use crate::message::{Snapshot, ToClient};
+use crate::message::{Snapshot, ToClient, ToHost};
+use crate::op::Transaction;
 use crate::role::Role;
 use crate::wire;
 
@@ -32,6 +38,7 @@ use crate::wire;
 pub const FOLDER: &str = ".axcenity/teamcreate";
 const SNAPSHOT_FILE: &str = "snapshot";
 const JOURNAL_FILE: &str = "journal";
+const UNSENT_FILE: &str = "unsent";
 
 /// How often the host writes a fresh snapshot while things change.
 pub const SNAPSHOT_EVERY: Duration = Duration::from_secs(30);
@@ -184,6 +191,62 @@ pub fn discard(project: &Path) -> io::Result<()> {
     remove(&folder.join(SNAPSHOT_FILE))
 }
 
+/// Keeps a member's unconfirmed edits in the folder `root` (their copy of
+/// the session's files), replacing what was kept.
+pub fn save_unsent(root: &Path, transactions: &[Transaction]) -> io::Result<()> {
+    let folder = root.join(FOLDER);
+    fs::create_dir_all(&folder)?;
+    let mut bytes = Vec::new();
+    for transaction in transactions {
+        let entry = wire::encode_to_host(&ToHost::Submit(transaction.clone()));
+        bytes.extend_from_slice(&(entry.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&entry);
+    }
+    write_whole(&folder, UNSENT_FILE, &bytes)
+}
+
+/// What [`save_unsent`] kept in `root`, oldest first (none if nothing was).
+/// An entry that can't be read ends the list.
+pub fn load_unsent(root: &Path) -> io::Result<Vec<Transaction>> {
+    let bytes = match fs::read(root.join(FOLDER).join(UNSENT_FILE)) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut out = Vec::new();
+    for entry in entries(&bytes) {
+        match wire::decode_to_host(entry) {
+            Ok(ToHost::Submit(transaction)) => out.push(transaction),
+            _ => {
+                log::warn!("Team Create: an unsent edit couldn't be read; the rest are left out");
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Removes what [`save_unsent`] kept in `root`.
+pub fn discard_unsent(root: &Path) -> io::Result<()> {
+    remove(&root.join(FOLDER).join(UNSENT_FILE))
+}
+
+/// Writes `bytes` as `folder/name` whole: a stop partway leaves the old
+/// file.
+fn write_whole(folder: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
+    let temporary = folder.join(format!("{name}.tmp"));
+    {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    fs::rename(&temporary, folder.join(name))
+}
+
 fn write_snapshot(folder: &Path, world: &World, graveyard: &Graveyard, seq: u64) -> io::Result<()> {
     let message = ToClient::Welcome {
         world: Snapshot(Box::new(world.clone())),
@@ -195,18 +258,9 @@ fn write_snapshot(folder: &Path, world: &World, graveyard: &Graveyard, seq: u64)
         rejected: Vec::new(),
         files: Default::default(),
         session: String::new(),
+        epoch: 0,
     };
-    let temporary = folder.join(format!("{SNAPSHOT_FILE}.tmp"));
-    {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&temporary)?;
-        file.write_all(&wire::encode_to_client(&message))?;
-        file.sync_all()?;
-    }
-    fs::rename(&temporary, folder.join(SNAPSHOT_FILE))
+    write_whole(folder, SNAPSHOT_FILE, &wire::encode_to_client(&message))
 }
 
 /// The journal's whole entries, in order; a cut-off last one is left out.

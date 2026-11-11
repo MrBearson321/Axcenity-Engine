@@ -63,6 +63,8 @@ mod net_tests;
 #[cfg(test)]
 mod presence_tests;
 #[cfg(test)]
+mod rejoin_tests;
+#[cfg(test)]
 mod testing;
 #[cfg(test)]
 mod tests;
@@ -72,7 +74,7 @@ pub use client::{Client, Notice};
 pub use files::{FileHash, FileStore, FolderStore, Manifest, MemoryStore};
 pub use host::Host;
 pub use ids::IdBlock;
-pub use message::{MemberId, ToClient, ToHost};
+pub use message::{Have, MemberId, ToClient, ToHost};
 pub use mirror::Mirror;
 pub use op::{NodeSpec, Op, Transaction};
 pub use presence::{Camera, Collaborator, Presence, Profile};
