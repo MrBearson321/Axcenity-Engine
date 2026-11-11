@@ -453,3 +453,52 @@ fn script_tables_reads_written_out_names_only() {
     assert_eq!(names, ["enemies/bosses", "weapons"]);
     assert_eq!(lines, [3, 4]);
 }
+
+/// A package of a door prefab whose Script runs `objects/Door/Open.server.lua`.
+fn door_package() -> Package {
+    let prefab = r#"{ "format_version": 2, "instances": [
+        { "class": "Model", "name": "Door", "children": [
+            { "class": "Part", "name": "Panel" },
+            { "class": "Script", "name": "Open",
+              "properties": { "SourceFile": "objects/Door/Open.server.lua" } } ] } ] }"#;
+    let files = BTreeMap::from([
+        (
+            "assets/prefabs/Door.prefab.json".to_owned(),
+            prefab.as_bytes().to_vec(),
+        ),
+        (
+            "objects/Door/Open.server.lua".to_owned(),
+            b"print('open')".to_vec(),
+        ),
+    ]);
+    Package {
+        manifest: PackageManifest {
+            format: 1,
+            name: "Door".to_owned(),
+            roots: vec!["assets/prefabs/Door.prefab.json".to_owned()],
+            files: files.keys().cloned().collect(),
+        },
+        files,
+    }
+}
+
+#[test]
+fn a_package_without_its_scripts_leaves_out_their_files_and_their_script_nodes() {
+    let package = door_package();
+    assert_eq!(package_scripts(&package), ["objects/Door/Open.server.lua"]);
+
+    let plain = without_scripts(&package);
+    assert!(package_scripts(&plain).is_empty());
+    assert_eq!(
+        plain.manifest.files,
+        ["assets/prefabs/Door.prefab.json".to_owned()]
+    );
+    let prefab = String::from_utf8(plain.files["assets/prefabs/Door.prefab.json"].clone()).unwrap();
+    assert!(!prefab.contains("Open"), "{prefab}");
+    assert!(prefab.contains("Panel"), "{prefab}");
+    // Without a script node it's an ordinary version 1 prefab again.
+    assert!(prefab.contains("\"format_version\": 1"), "{prefab}");
+
+    // A package with no scripts is the same without them.
+    assert_eq!(without_scripts(&plain), plain);
+}

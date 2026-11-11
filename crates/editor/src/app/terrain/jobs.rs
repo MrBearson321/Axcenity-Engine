@@ -214,7 +214,7 @@ impl EditorApp {
 
     /// Replaces `terrain`'s whole landscape (and its Size, if given) with
     /// `data`, as one undo step named `label`.
-    pub(super) fn replace_terrain(
+    pub(in crate::app) fn replace_terrain(
         &mut self,
         terrain: InstanceId,
         label: String,
@@ -280,5 +280,106 @@ impl EditorApp {
                 .output
                 .error(format!("Could not resample the terrain: {err}")),
         }
+    }
+
+    /// Makes `settings`' landscape now, on this thread, `size` studs
+    /// across: on `terrain` (keeping its samples across, its layers and
+    /// where it is) or, with none, on a new Terrain with the preset's
+    /// layers. One undo step, `label`. For callers that wait (MCP).
+    pub(in crate::app) fn generate_now(
+        &mut self,
+        terrain: Option<InstanceId>,
+        mut settings: GeneratorSettings,
+        size: Vector3,
+        label: String,
+    ) -> Result<InstanceId, String> {
+        let samples_x = terrain
+            .and_then(|id| self.world.terrain(id))
+            .map_or(self.terrain.new_terrain.samples, |data| data.size().0);
+        let samples_z = samples_along(samples_x, size.x, size.z);
+        let target = Target {
+            size_x: samples_x,
+            size_z: samples_z,
+            world_size: Vec2::new(size.x, size.z),
+        };
+        let generator = generate::check(&settings, target).map_err(|err| err.to_string())?;
+        settings.algorithm = generator.name().to_owned();
+        settings.version = generator.version();
+        let heights = generator
+            .generate(&settings, target, &axcenity_terrain::job::JobControl::new())
+            .ok_or("it was cancelled")?;
+        let mut data =
+            TerrainData::flat(samples_x, samples_z, 0.0).map_err(|err| err.to_string())?;
+        let all = data.bounds();
+        data.heights_mut_in(all).copy_from_slice(&heights);
+        data.clamp_heights_in(all);
+        data.generation = Some(settings.to_json());
+        match terrain {
+            Some(id) => {
+                let revision = self.history.revision();
+                self.replace_terrain(id, label, &data, Some(size));
+                if self.history.revision() == revision {
+                    return Err("the terrain didn't change".to_owned());
+                }
+                Ok(id)
+            }
+            None => self
+                .insert_terrain(size, data, settings.preset, Some(label))
+                .ok_or_else(|| "no terrain could be made".to_owned()),
+        }
+    }
+
+    /// Wears `terrain` down with rain or scree now, on this thread, at the
+    /// Terrain Studio's settings, as one undo step `label`.
+    pub(in crate::app) fn erode_now(
+        &mut self,
+        terrain: InstanceId,
+        kind: ErosionKind,
+        label: String,
+    ) -> Result<(), String> {
+        let placement = self
+            .world
+            .get(terrain)
+            .and_then(Placement::of)
+            .ok_or("it isn't a Terrain")?;
+        let source = self
+            .world
+            .terrain(terrain)
+            .cloned()
+            .ok_or("it has no landscape")?;
+        let samples = source.size();
+        let studs = placement.size;
+        let scale = Scale {
+            cell: Vec2::new(
+                studs.x / (samples.0 - 1) as f32,
+                studs.z / (samples.1 - 1) as f32,
+            ),
+            height: studs.y,
+        };
+        let control = axcenity_terrain::job::JobControl::new();
+        let heights = match kind {
+            ErosionKind::Hydraulic => {
+                let mut hydraulic = self.terrain.hydraulic.clone();
+                hydraulic.droplets = HydraulicSettings::droplets_for(
+                    samples.0 * samples.1,
+                    self.terrain.quality.droplets_per_sample(),
+                );
+                erosion::hydraulic(source.heights(), samples, scale, &hydraulic, &control)
+            }
+            ErosionKind::Thermal => erosion::thermal(
+                source.heights(),
+                samples,
+                scale,
+                &self.terrain.thermal,
+                &control,
+            ),
+        }
+        .ok_or("it was cancelled")?;
+        let mut data = (*source).clone();
+        let all = data.bounds();
+        data.heights_mut_in(all).copy_from_slice(&heights);
+        data.clamp_heights_in(all);
+        self.replace_terrain(terrain, label, &data, None);
+        Ok(())
     }
 }

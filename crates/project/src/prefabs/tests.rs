@@ -359,3 +359,100 @@ fn a_missing_or_self_containing_prefab_is_reported_and_its_copies_kept() {
     assert_eq!(prefab::overrides(&world, wheel), expected);
     assert_eq!(prefab_references(text), ["assets/prefabs/Gone.prefab.json"]);
 }
+
+const HUD: &str = "assets/prefabs/Hud.prefab.json";
+const MENU_SCRIPT: &str = "objects/Hud/Menu.client.lua";
+
+/// A Hud prefab (G5): a ScreenGui holding a Frame with a TextLabel, and a
+/// LocalScript inside an object.
+fn hud_prefab(background: Value) -> String {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let make = |world: &mut World, class, name: &str, parent| {
+        let id = world.create(class).unwrap();
+        world.set_name(id, name).unwrap();
+        world.set_parent(id, Some(parent)).unwrap();
+        id
+    };
+    let gui = make(&mut world, ClassName::ScreenGui, "Hud", workspace);
+    let panel = make(&mut world, ClassName::Frame, "Panel", gui);
+    let size = Value::UDim2(axcenity_core::UDim2::new(0.0, 300.0, 0.0, 80.0));
+    world.set_property(panel, "Size", size).unwrap();
+    world
+        .set_property(panel, "BackgroundColor3", background)
+        .unwrap();
+    let label = make(&mut world, ClassName::TextLabel, "Score", panel);
+    world
+        .set_property(label, "Text", Value::String("Score: 0".to_owned()))
+        .unwrap();
+    let script = make(&mut world, ClassName::LocalScript, "Menu", gui);
+    world
+        .set_property(script, "SourceFile", Value::String(MENU_SCRIPT.to_owned()))
+        .unwrap();
+    write_prefab(&world, &[gui])
+}
+
+#[test]
+fn a_ui_prefab_keeps_its_elements_script_and_each_copys_own_layout() {
+    let dark = color(0.1, 0.1, 0.1);
+    let mut files = Files::from([(HUD.to_owned(), hud_prefab(dark.clone()))]);
+    let text = &files[HUD];
+    assert!(text.contains("\"LocalScript\"") && text.contains(MENU_SCRIPT));
+
+    // Two copies; the second's panel moved and its label's text changed.
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let huds: Vec<InstanceId> = (0..2)
+        .map(|_| {
+            prefabs(&files)
+                .instantiate(HUD, &mut world, workspace)
+                .unwrap()[0]
+        })
+        .collect();
+    for &hud in &huds {
+        assert_eq!(world.get(hud).unwrap().class(), ClassName::ScreenGui);
+        let script = world.find_first_child(hud, "Menu").unwrap();
+        assert_eq!(world.get(script).unwrap().source_file(), Some(MENU_SCRIPT));
+    }
+    let panel = world.find_first_child(huds[1], "Panel").unwrap();
+    let corner = Value::UDim2(axcenity_core::UDim2::new(1.0, -300.0, 0.0, 0.0));
+    world
+        .set_property(panel, "Position", corner.clone())
+        .unwrap();
+    let label = world.find_first_child(panel, "Score").unwrap();
+    let mine = Value::String("Points: 0".to_owned());
+    world.set_property(label, "Text", mine.clone()).unwrap();
+    let overrides = prefab::overrides(&world, huds[1]);
+    assert!(prefab::overrides(&world, huds[0]).is_empty());
+    assert_ne!(overrides, Overrides::default());
+    let saved = write_world(&world);
+    assert!(saved.contains("\"overrides\": [\"Position\"]"), "{saved}");
+
+    // The prefab's panel colour changes; both copies follow and the
+    // second keeps its own place and text, here and when opened again.
+    let blue = color(0.1, 0.2, 0.8);
+    files.insert(HUD.to_owned(), hud_prefab(blue.clone()));
+    refresh(&files, &mut world);
+    let mut opened = parse_world(&saved).unwrap();
+    refresh(&files, &mut opened);
+    for world in [&world, &opened] {
+        let huds = world.get(world.workspace()).unwrap().children().to_vec();
+        let panels: Vec<InstanceId> = huds
+            .iter()
+            .map(|&hud| world.find_first_child(hud, "Panel").unwrap())
+            .collect();
+        for &panel in &panels {
+            assert_eq!(property(world, panel, "BackgroundColor3"), blue);
+        }
+        assert_eq!(property(world, panels[1], "Position"), corner);
+        let label = world.find_first_child(panels[1], "Score").unwrap();
+        assert_eq!(property(world, label, "Text"), mine);
+        let first = world.find_first_child(panels[0], "Score").unwrap();
+        assert_eq!(
+            property(world, first, "Text"),
+            Value::String("Score: 0".to_owned())
+        );
+        let script = world.find_first_child(huds[1], "Menu").unwrap();
+        assert_eq!(world.get(script).unwrap().source_file(), Some(MENU_SCRIPT));
+    }
+}

@@ -70,6 +70,10 @@ Each copy was also kept, so the target folder grew to 23 GB instead of 9 GB.
 - Settings are in `.config/hakari.toml`. `http` and `httparse` are left out (`final-excludes`) so the player doesn't depend on the editor's HTTP crates, and `winit` so the dedicated server builds no window crates (roadmap M8; check with `cargo tree -p axcenity-server -e normal -i winit`).
 - The player still gets the union of features (for example `winit`'s default features, which the editor alone wouldn't turn on). Release builds already did this, since they build the editor and player in one command.
 
+## Patched dependencies
+
+`vendor/` holds copies of crates.io releases with small fixes of ours, used through `[patch.crates-io]` in the workspace `Cargo.toml` and left out of the workspace. `vendor/README.md` lists each change and how to carry it over when upgrading. Today that's rapier3d.
+
 ## Build settings
 
 - **Optimized libraries, line tables only.** `[profile.dev.package."*"]` in the workspace `Cargo.toml` optimizes third-party crates (and `render` and `nav`) in debug builds. It keeps only file-and-line debug info for third-party crates, so panics and backtraces still name the line. The engine's own crates keep full debug info for a debugger. With full debug info everywhere, the editor binary was 1 GB instead of 550 MB, a cold build peaked at 3.9 GB of RAM instead of 2.4 GB, and edits rebuilt 15–30% slower.

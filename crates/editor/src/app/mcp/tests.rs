@@ -1289,3 +1289,394 @@ fn game_run_runs_the_game_tests() {
         "lists the spec files"
     );
 }
+
+/// The ground's height at `x`, `z` on the only terrain.
+fn ground(host: &Host, x: f32, z: f32) -> f32 {
+    let world = &host.app.world;
+    let id = world
+        .descendants_iter(world.workspace())
+        .find(|&id| world.terrain(id).is_some())
+        .expect("a terrain");
+    let placement = axcenity_terrain::Placement::of(world.get(id).unwrap()).unwrap();
+    placement
+        .ground_y(world.terrain(id).unwrap(), x, z)
+        .unwrap()
+}
+
+#[test]
+fn terrain_edit_sculpts_paints_and_scatters_as_undo_steps() {
+    let mut opened = open("hello-part", "mcp-terrain");
+    let host = &mut opened.app;
+    assert!(ground(host, 0.0, 0.0).abs() < 0.01);
+    // Raise lifts the middle by about `amount`, as one undo step.
+    let raised = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "tool": "raise", "at": [0, 0, 0], "amount": 10}),
+    );
+    assert!(
+        raised.contains("undo \"AI (test): Raise Terrain\""),
+        "{raised}"
+    );
+    let height = ground(host, 0.0, 0.0);
+    assert!((height - 10.0).abs() < 0.5, "{height}: {raised}");
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(ground(host, 0.0, 0.0).abs() < 0.01);
+    // A line of stamps makes a ridge about as high.
+    ok(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "at": [-60, 0, 40], "to": [60, 0, 40], "amount": 6}),
+    );
+    let middle = ground(host, 0.0, 40.0);
+    assert!((middle - 6.0).abs() < 1.5, "{middle}");
+    // Flatten goes to `at`'s y.
+    ok(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "tool": "flatten", "at": [0, 3, 40], "radius": 20, "strength": 1}),
+    );
+    let flat = ground(host, 0.0, 40.0);
+    assert!(flat < middle && flat > 2.0, "{flat}");
+    // Paint by layer name; a wrong one lists them.
+    let painted = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "paint", "layer": "rock", "at": [10, 0, 10]}),
+    );
+    assert!(painted.contains("Paint Rock"), "{painted}");
+    let wrong = call(
+        host,
+        "terrain_edit",
+        json!({"action": "paint", "layer": "Lava", "at": [10, 0, 10]}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::NotFound);
+    assert!(wrong.to_string().contains("Grass, Dirt, Rock"), "{wrong}");
+    // Foliage: a built-in prop scattered, then taken away.
+    let trees = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "foliage", "item": "tree", "at": [0, 0, -50], "radius": 30, "density": 0.05}),
+    );
+    assert!(trees.contains("Paint Tree Foliage"), "{trees}");
+    assert!(!trees.contains(" 0 foliage in all"), "{trees}");
+    let gone = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "foliage", "item": "Tree", "at": [0, 0, -50], "radius": 40, "erase": true}),
+    );
+    assert!(gone.contains(" 0 foliage in all"), "{gone}");
+    let unknown = call(
+        host,
+        "terrain_edit",
+        json!({"action": "foliage", "item": "Unicorn", "at": [0, 0, 0]}),
+    )
+    .unwrap_err();
+    assert_eq!(unknown.code, Code::NotFound);
+    // Another action's parameter is a mistake.
+    let mixed = call(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "at": [0, 0, 0], "preset": "island"}),
+    )
+    .unwrap_err();
+    assert_eq!(mixed.code, Code::BadArgs, "{mixed}");
+    // Off the terrain nothing changes and no step is made.
+    let steps = ok(host, "history", json!({}));
+    let off = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "at": [5000, 0, 5000]}),
+    );
+    assert!(off.contains("nothing changed"), "{off}");
+    assert_eq!(ok(host, "history", json!({})), steps);
+}
+
+#[test]
+fn terrain_edit_generates_asking_before_it_replaces_a_landscape() {
+    let mut opened = open("hello-part", "mcp-terrain-generate");
+    let host = &mut opened.app;
+    let args = json!({"action": "generate", "preset": "mountain_range", "seed": 7});
+    let asked = call(host, "terrain_edit", args.clone()).unwrap_err();
+    assert_eq!(asked.code, Code::NeedsConfirm, "{asked}");
+    assert!(
+        asked.to_string().contains("Mountain Range (seed 7)"),
+        "{asked}"
+    );
+    let mut args = args;
+    args["confirm"] = json!(token(&asked));
+    let text = ok(host, "terrain_edit", args);
+    assert!(
+        text.starts_with("regenerated ") && text.contains(" as Mountain Range "),
+        "{text}"
+    );
+    assert!(text.contains("3 layers"), "{text}");
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(
+        ground(host, 0.0, 0.0).abs() < 0.01,
+        "undo brings the flat ground back"
+    );
+    // Erosion on a landscape, one step.
+    ok(host, "history", json!({"action": "redo"}));
+    let eroded = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "erode", "kind": "scree"}),
+    );
+    assert!(
+        eroded.contains("undo \"AI (test): Apply Scree Erosion\""),
+        "{eroded}"
+    );
+}
+
+#[test]
+fn terrain_edit_generate_makes_a_terrain_when_there_is_none() {
+    let mut opened = open("hello-material-graph", "mcp-terrain-new");
+    let host = &mut opened.app;
+    let sculpt = call(
+        host,
+        "terrain_edit",
+        json!({"action": "sculpt", "at": [0, 0, 0]}),
+    )
+    .unwrap_err();
+    assert_eq!(sculpt.code, Code::NotFound, "{sculpt}");
+    assert!(sculpt.to_string().contains("generate"), "{sculpt}");
+    let before = objects(host);
+    let text = ok(
+        host,
+        "terrain_edit",
+        json!({"action": "generate", "preset": "island", "size": [256, 64, 256]}),
+    );
+    assert!(
+        text.starts_with("made ") && text.contains("Terrain"),
+        "{text}"
+    );
+    assert!(objects(host) > before);
+    ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(objects(host), before, "one step takes it all away");
+}
+
+#[test]
+fn anim_edit_animates_keys_and_lists_a_clip_as_file_undo_steps() {
+    let mut opened = open("hello-part", "mcp-anim");
+    let host = &mut opened.app;
+    let made = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "name": "Lift", "position": [0, 2, 0]}),
+    );
+    let lift = made.split_whitespace().nth(1).unwrap().to_owned();
+    let animated = ok(host, "anim_edit", json!({"action": "animate", "id": lift}));
+    assert!(
+        animated.contains("undo \"AI (test): Animate Lift\""),
+        "{animated}"
+    );
+    let clip = "assets/animations/Lift/Lift.anim.json";
+    assert!(animated.contains(clip), "{animated}");
+    assert!(opened.folder.join(clip).is_file());
+    // With no value, a key holds what the target is now.
+    let first = ok(
+        host,
+        "anim_edit",
+        json!({"action": "key", "id": lift, "property": "Position", "time": 0}),
+    );
+    assert!(
+        first.starts_with("Key . Position at 0 s = [0, 2, 0]"),
+        "{first}"
+    );
+    let second = ok(
+        host,
+        "anim_edit",
+        json!({"action": "key", "id": lift, "property": "Position", "time": 3, "value": [0, 12, 0], "interp": "ease", "loop": true}),
+    );
+    assert!(second.contains("clip now 3 s long"), "{second}");
+    let info = ok(host, "anim_edit", json!({"action": "info", "clip": clip}));
+    assert!(
+        info.starts_with(&format!("{clip} · 3 s · loops · 1 track")),
+        "{info}"
+    );
+    assert!(
+        info.contains("\n. Position: 0 [0, 2, 0]; 3 [0, 12, 0] ease;"),
+        "{info}"
+    );
+    // Wrong widths, targets and properties say so.
+    let wide = call(
+        host,
+        "anim_edit",
+        json!({"action": "key", "id": lift, "property": "Transparency", "time": 1, "value": [1, 2, 3]}),
+    )
+    .unwrap_err();
+    assert_eq!(wide.code, Code::BadValue, "{wide}");
+    let nobody = call(
+        host,
+        "anim_edit",
+        json!({"action": "key", "id": lift, "target": "Ghost", "property": "Position", "time": 1}),
+    )
+    .unwrap_err();
+    assert_eq!(nobody.code, Code::NotFound, "{nobody}");
+    // Unkey, then undo puts the key back in the file.
+    ok(
+        host,
+        "anim_edit",
+        json!({"action": "unkey", "id": lift, "property": "Position", "time": 3}),
+    );
+    let read = || std::fs::read_to_string(opened.folder.join(clip)).unwrap();
+    assert!(!read().contains("12"), "{}", read());
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(read().contains("12"), "{}", read());
+    // Undoing everything takes the clip file and the Animator away.
+    ok(host, "history", json!({"action": "undo", "steps": 3}));
+    assert!(!opened.folder.join(clip).exists());
+    let gone = call(host, "anim_edit", json!({"action": "info", "id": lift})).unwrap_err();
+    assert_eq!(gone.code, Code::NotFound, "{gone}");
+}
+
+#[test]
+fn asset_find_lists_assets_by_kind_name_and_use() {
+    let mut opened = open("hello-material-graph", "mcp-assets");
+    let host = &mut opened.app;
+    let text = ok(host, "asset_find", json!({}));
+    assert!(text.starts_with("4 assets\n"), "{text}");
+    assert!(
+        text.contains("\nassets/materials/MossyStone.material.json · material · ")
+            && text.contains("\nassets/textures/moss.png · texture · "),
+        "{text}"
+    );
+    let materials = ok(
+        host,
+        "asset_find",
+        json!({"kind": "material", "name": "moss"}),
+    );
+    assert!(materials.starts_with("1 asset\n"), "{materials}");
+    // Full detail says what uses each one.
+    let full = ok(
+        host,
+        "asset_find",
+        json!({"name": "moss.png", "detail": "full"}),
+    );
+    assert!(full.contains("\n  used by "), "{full}");
+    // A new material nothing uses shows as unused.
+    ok(
+        host,
+        "material_edit",
+        json!({"action": "create", "name": "Spare", "values": {"roughness": 0.5}}),
+    );
+    let unused = ok(host, "asset_find", json!({"unused": true}));
+    assert!(unused.contains("Spare.material.json"), "{unused}");
+    assert!(!unused.contains("moss.png"), "{unused}");
+}
+
+/// A folder outside the project with `files` copied from the examples, as
+/// a user's downloads would be.
+fn import_folder(test: &str, files: &[&str]) -> std::path::PathBuf {
+    let folder = std::env::temp_dir().join(format!("axcenity-mcp-import-{test}"));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    for file in files {
+        let from = examples.join(file);
+        std::fs::copy(&from, folder.join(from.file_name().unwrap())).unwrap();
+    }
+    folder
+}
+
+#[test]
+fn asset_import_copies_files_only_from_allowed_folders_as_an_undo_step() {
+    let mut opened = open("hello-part", "mcp-import");
+    let downloads = import_folder(
+        "texture",
+        &["hello-material-graph/assets/textures/moss.png"],
+    );
+    let host = &mut opened.app;
+    let png = downloads.join("moss.png");
+    let png_text = png.to_string_lossy().into_owned();
+    // No allowed folder: nothing is read.
+    let refused = call(host, "asset_import", json!({"file": png_text})).unwrap_err();
+    assert_eq!(refused.code, Code::NotAllowed, "{refused}");
+    assert!(refused.to_string().contains("--allow-import"), "{refused}");
+    // A file outside the allowed folders, even through `..`, is refused.
+    host.session.import_folders = vec![downloads.clone()];
+    let outside = downloads.join("..").join("elsewhere.png");
+    std::fs::write(&outside, b"not really").unwrap();
+    let refused = call(
+        host,
+        "asset_import",
+        json!({"file": outside.to_string_lossy()}),
+    )
+    .unwrap_err();
+    let _ = std::fs::remove_file(&outside);
+    assert_eq!(refused.code, Code::NotAllowed, "{refused}");
+    // Only a model is placed.
+    let wrong = call(
+        host,
+        "asset_import",
+        json!({"file": png_text, "position": [0, 5, 0]}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::BadArgs, "{wrong}");
+    // A file that isn't an asset is refused before anything happens.
+    let notes = downloads.join("notes.txt");
+    std::fs::write(&notes, "hello").unwrap();
+    let wrong = call(
+        host,
+        "asset_import",
+        json!({"file": notes.to_string_lossy()}),
+    )
+    .unwrap_err();
+    assert_eq!(wrong.code, Code::Unsupported, "{wrong}");
+    // A texture is copied into the project, as one undo step.
+    let text = ok(host, "asset_import", json!({"file": png_text}));
+    assert!(text.starts_with("imported assets/textures/moss"), "{text}");
+    assert!(text.contains("undo \"AI (test): Import moss\""), "{text}");
+    let project = opened.folder.clone();
+    let copied = text
+        .trim_start_matches("imported ")
+        .split(" · ")
+        .next()
+        .unwrap()
+        .to_owned();
+    assert!(project.join(&copied).is_file(), "{copied}");
+    assert!(ok(host, "asset_find", json!({"kind": "texture"})).contains(&copied));
+    ok(host, "history", json!({"action": "undo"}));
+    assert!(!project.join(&copied).exists(), "undo takes the copy away");
+    ok(host, "history", json!({"action": "redo"}));
+    assert!(project.join(&copied).is_file(), "redo puts it back");
+    let _ = std::fs::remove_dir_all(&downloads);
+}
+
+#[test]
+fn asset_import_places_a_model_where_asked() {
+    let mut opened = open("hello-part", "mcp-import-model");
+    let downloads = import_folder("model", &["hello-roads/assets/models/rock.glb"]);
+    let host = &mut opened.app;
+    host.session.import_folders = vec![downloads.clone()];
+    let before = objects(host);
+    let text = ok(
+        host,
+        "asset_import",
+        json!({"file": downloads.join("rock.glb").to_string_lossy(), "position": [10, 4, -6]}),
+    );
+    assert!(text.starts_with("imported "), "{text}");
+    assert!(text.contains(" · placed "), "{text}");
+    assert!(objects(host) > before, "{text}");
+    // Somewhere under the placed model, a part sits where it was asked.
+    let world = &host.app.world;
+    let at = world.descendants_iter(world.workspace()).find_map(|id| {
+        match world.get(id)?.property("Position") {
+            Some(axcenity_core::Value::Vector3(at))
+                if (at.x - 10.0).abs() < 1e-3 && (at.z + 6.0).abs() < 1e-3 =>
+            {
+                Some(*at)
+            }
+            _ => None,
+        }
+    });
+    assert!(at.is_some(), "{text}");
+    // One undo step takes the objects and the copied files away.
+    ok(host, "history", json!({"action": "undo"}));
+    assert_eq!(objects(host), before);
+    let left = ok(host, "asset_find", json!({"name": "rock"}));
+    assert!(left.starts_with("0 assets"), "{left}");
+    let _ = std::fs::remove_dir_all(&downloads);
+}
