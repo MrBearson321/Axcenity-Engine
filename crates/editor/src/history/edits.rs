@@ -25,29 +25,44 @@ impl Edits {
         self.moves.is_empty() && self.fields.is_empty() && self.annotations.is_empty()
     }
 
-    pub(super) fn undo(&self, world: &mut World) {
+    /// Returns how many changes were left alone (see `History::set_shared`).
+    pub(super) fn undo(&self, world: &mut World, shared: bool) -> usize {
+        let mut skipped = 0;
         for (id, changes) in &self.fields {
-            restore(world, *id, changes.iter().map(|c| (c.field, &c.before)));
+            skipped += restore(
+                world,
+                shared,
+                *id,
+                changes.iter().map(|c| (c.field, &c.before, &c.after)),
+            );
         }
         for (id, before, _) in &self.annotations {
             put_annotations(world, *id, before);
         }
         // Backwards, so each Instance goes back to where it was at the time.
         for step in self.moves.iter().rev() {
-            put_back(world, step.id, step.before);
+            skipped += put_back(world, shared, step.id, step.before, step.after);
         }
+        skipped
     }
 
-    pub(super) fn redo(&self, world: &mut World) {
+    pub(super) fn redo(&self, world: &mut World, shared: bool) -> usize {
+        let mut skipped = 0;
         for step in &self.moves {
-            put_back(world, step.id, step.after);
+            skipped += put_back(world, shared, step.id, step.after, step.before);
         }
         for (id, changes) in &self.fields {
-            restore(world, *id, changes.iter().map(|c| (c.field, &c.after)));
+            skipped += restore(
+                world,
+                shared,
+                *id,
+                changes.iter().map(|c| (c.field, &c.after, &c.before)),
+            );
         }
         for (id, _, after) in &self.annotations {
             put_annotations(world, *id, after);
         }
+        skipped
     }
 
     /// Adds `later` on top: the oldest "before" and the newest "after" of

@@ -4,8 +4,10 @@
 //!
 //! The host keeps the edit world's change log on and moves what it
 //! records into a bounded [`ChangeLog`] around every call: changes from
-//! before a call are someone else's (the user's in the live editor, or
-//! another client's), changes during it are this client's. Each change
+//! before a call are the user's (or, with no window, nobody's in
+//! particular), changes during it are the calling session's. The open
+//! editor shares one log among all its clients, so each change says which
+//! session made it, and each client hears its own as "by you". Each change
 //! gets a number; a mark is the number the next change will get, so
 //! `since: mark` asks for everything after it. (Not "cursor": that's the
 //! paging token of cut results.)
@@ -31,7 +33,11 @@ const REPLACED: &str =
 /// The most objects a folded line names before `…`.
 const NAMED: usize = 8;
 
-/// Who made a change, as far as this session can tell.
+/// Which session made a change (`Session::me`); `None` for the user, or
+/// anything else between calls.
+pub type Who = Option<u32>;
+
+/// Who made a change, as the asking session sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum By {
     /// This client, during one of its calls.
@@ -44,11 +50,11 @@ pub enum By {
 #[derive(Debug)]
 struct Noted {
     number: u64,
-    by: By,
+    who: Who,
     change: Change,
 }
 
-/// The changes this session has seen, numbered.
+/// The changes seen since the first client came, numbered.
 #[derive(Debug, Default)]
 pub struct ChangeLog {
     kept: VecDeque<Noted>,
@@ -61,14 +67,12 @@ pub struct ChangeLog {
     /// The world's number for its next change, as far as the log knows,
     /// to notice a world that was swapped in.
     world_next: Option<u64>,
-    /// The mark the last answer gave: the default `since`.
-    pub asked: u64,
 }
 
 impl ChangeLog {
-    /// Moves what `world` recorded into the log as `by`'s, turning the
+    /// Moves what `world` recorded into the log as `who`'s, turning the
     /// world's recording on if it's off (a new world).
-    pub fn take(&mut self, world: &mut World, by: By) {
+    pub fn take(&mut self, world: &mut World, who: Who) {
         if !world.is_recording_changes() {
             world.record_changes();
             if self.world_next.take().is_some() {
@@ -76,7 +80,7 @@ impl ChangeLog {
             }
         }
         let changes = world.take_changes();
-        self.add(by, changes);
+        self.add(who, changes);
         let now = world.next_change_number();
         if self.world_next.is_some_and(|known| known != now) {
             self.restart(REPLACED);
@@ -84,9 +88,9 @@ impl ChangeLog {
         self.world_next = Some(now);
     }
 
-    /// Notes changes taken from the world, as `by`'s. A gap in the
+    /// Notes changes taken from the world, as `who`'s. A gap in the
     /// world's numbers means a world was swapped in between.
-    pub fn add(&mut self, by: By, changes: Vec<RecordedChange>) {
+    pub fn add(&mut self, who: Who, changes: Vec<RecordedChange>) {
         for recorded in changes {
             if self
                 .world_next
@@ -97,7 +101,7 @@ impl ChangeLog {
             self.world_next = Some(recorded.number + 1);
             self.kept.push_back(Noted {
                 number: self.next,
-                by,
+                who,
                 change: recorded.change,
             });
             self.next += 1;
@@ -116,13 +120,21 @@ impl ChangeLog {
         self.lost = why;
     }
 
-    /// What changed since the mark `since` (default: the last answer's),
-    /// one line per object or per fold of alike objects, at most `limit`
-    /// lines. The answer's mark becomes the next default.
-    pub fn summary(&mut self, world: &World, since: Option<u64>, limit: usize) -> String {
-        let since = since.unwrap_or(self.asked);
+    /// What changed since the mark `since` (default: `asked`, the last
+    /// answer's), one line per object or per fold of alike objects, at
+    /// most `limit` lines, as session `me` sees it. The answer's mark
+    /// becomes the next default.
+    pub fn summary(
+        &self,
+        world: &World,
+        me: u32,
+        asked: &mut u64,
+        since: Option<u64>,
+        limit: usize,
+    ) -> String {
+        let since = since.unwrap_or(*asked);
         let cursor = self.next;
-        self.asked = cursor;
+        *asked = cursor;
         if since > cursor {
             return format!("mark {cursor} · {since} is ahead of it; use {cursor}");
         }
@@ -132,7 +144,7 @@ impl ChangeLog {
                 self.lost
             );
         }
-        let objects = Objects::gather(self.kept.iter().filter(|noted| noted.number >= since));
+        let objects = Objects::gather(self.kept.iter().filter(|noted| noted.number >= since), me);
         let lines = objects.lines(world);
         if lines.is_empty() {
             return format!("mark {cursor} · nothing changed since {since}");
@@ -182,7 +194,7 @@ struct Objects {
 }
 
 impl Objects {
-    fn gather<'a>(changes: impl Iterator<Item = &'a Noted>) -> Self {
+    fn gather<'a>(changes: impl Iterator<Item = &'a Noted>, me: u32) -> Self {
         let mut objects = Objects::default();
         for noted in changes {
             let id = match &noted.change {
@@ -197,7 +209,11 @@ impl Objects {
                 objects.order.push(id);
                 Seen::default()
             });
-            seen.by.insert(noted.by);
+            seen.by.insert(if noted.who == Some(me) {
+                By::Client
+            } else {
+                By::Others
+            });
             match &noted.change {
                 Change::Property { name, .. } => {
                     seen.props.insert(name);

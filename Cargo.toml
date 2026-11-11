@@ -20,6 +20,7 @@ axcenity-audio = { path = "crates/audio" }
 axcenity-blocks = { path = "crates/blocks" }
 axcenity-blocks-runtime = { path = "crates/blocks-runtime" }
 axcenity-character = { path = "crates/character" }
+axcenity-collab = { path = "crates/collab" }
 axcenity-cook = { path = "crates/cook" }
 axcenity-core = { path = "crates/core" }
 axcenity-gameplay = { path = "crates/gameplay" }
@@ -152,7 +153,7 @@ rustc-hash = "2"
 # `initialize` handshake of 2025-11-25 and before). It needs `tokio`, which
 # runs on the MCP thread only; the player and server never link either.
 rmcp = { version = "3.9", default-features = false, features = ["server", "transport-io"] }
-tokio = { version = "1.53", default-features = false, features = ["rt", "sync", "io-util", "io-std", "macros"] }
+tokio = { version = "1.53", default-features = false, features = ["rt", "sync", "io-util", "io-std", "macros", "net"] }
 # Physics. Its math types come from `glamx` (glam-based), re-exported as `rapier3d::math`.
 rapier3d = "0.36"
 serde = { version = "1", features = ["derive"] }

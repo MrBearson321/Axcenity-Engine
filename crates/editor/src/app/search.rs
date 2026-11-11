@@ -329,7 +329,7 @@ pub(super) fn command_category(command: &Command) -> Category {
 
 /// The panels that are tools of their own (editors, studios, monitors),
 /// rather than the Explorer, Properties, Console and Assets.
-const TOOL_PANES: [Pane; 17] = [
+const TOOL_PANES: [Pane; 18] = [
     Pane::Animation,
     Pane::UiDesigner,
     Pane::Terrain,
@@ -346,6 +346,7 @@ const TOOL_PANES: [Pane; 17] = [
     Pane::Tests,
     Pane::ModelStudio,
     Pane::Toolbox,
+    Pane::Inventory,
     Pane::VersionExplorer,
 ];
 
@@ -478,6 +479,9 @@ fn command_description(command: &Command) -> String {
             "Measure how this computer draws the viewport and get recommended editor graphics settings."
         }
         Command::PanicDuringPlay => "Debug builds only: make Play fail, to test error handling.",
+        Command::PauseOnErrors => {
+            "Turn on or off: a script error pauses Play where it happened, with its variables."
+        }
         Command::Play => {
             "Run the game in the editor. Changes made while playing are undone by Stop."
         }

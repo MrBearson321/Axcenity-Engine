@@ -2,8 +2,10 @@
 //! Claude Code, Cursor or Codex can do in a project, through the same
 //! editor code the panels use.
 //!
-//! `axcenity-editor --mcp <project>` opens the project without a window and
-//! serves the tools on stdin and stdout ([`run_from_command_line`]). The
+//! `axcenity-editor --mcp <project>` relays to the open editor when it
+//! takes AI connections for that project ([`live`]); otherwise it opens the
+//! project without a window and serves the tools on stdin and stdout
+//! ([`run_from_command_line`]). The
 //! `axcenity_mcp` crate speaks the protocol on a thread of its own and hands
 //! each call over as a [`Job`]; this thread owns the [`EditorApp`] and runs
 //! them one at a time, so tools change the world exactly as the editor does.
@@ -21,8 +23,8 @@ use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axcenity_mcp::{
-    Allowed, Args, Confirms, Detail, Job, Kind, Mode, Outcome, Param, Profile, Setup, ToolError,
-    ToolSpec,
+    Allowed, Args, Class, Code, Confirms, Detail, Job, Kind, Mode, Outcome, Param, Profile, Setup,
+    ToolError, ToolSpec, Waker,
 };
 
 use super::EditorApp;
@@ -39,6 +41,7 @@ mod env_set;
 mod game_run;
 mod history;
 mod level;
+mod live;
 mod material_edit;
 mod object_create;
 mod object_delete;
@@ -53,6 +56,7 @@ mod project_save;
 mod project_settings;
 mod prompts;
 mod refs;
+mod render_stats;
 mod scene_inspect;
 mod script_read;
 mod script_write;
@@ -63,6 +67,9 @@ mod values;
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) use live::AiConnections;
+pub(crate) use render_stats::LastDrawn;
 
 /// The command-line flag that starts the server.
 pub(crate) const FLAG: &str = "--mcp";
@@ -80,10 +87,23 @@ Each edit is one undo step (see history). Deletes and saves preview first; \
 call again with the confirm token. Object edits stay in memory until \
 project_save; script_write saves its file at once.";
 
-/// The editor and this session: what every tool gets.
-pub(super) struct Host {
+/// The editor and the calling session: what every tool gets. Borrowed,
+/// so the open editor can lend itself for one call ([`live`]); a server
+/// without a window owns them in a [`Headless`].
+pub(super) struct Host<'a> {
+    pub app: &'a mut EditorApp,
+    pub session: &'a mut Session,
+    /// What changed in the world, shared by every session of this editor
+    /// (`history changes`).
+    pub changes: &'a mut changes::ChangeLog,
+}
+
+/// A server without a window: the editor it opened, its one session and
+/// its change log.
+pub(super) struct Headless {
     pub app: EditorApp,
     pub session: Session,
+    pub changes: changes::ChangeLog,
 }
 
 /// What lasts between calls of one server run.
@@ -104,12 +124,15 @@ pub(super) struct Session {
     /// The folders `asset_import` may copy from: only what the user named
     /// with `--allow-import`.
     pub import_folders: Vec<PathBuf>,
-    /// What changed in the world, for `history changes`.
-    pub changes: changes::ChangeLog,
+    /// This session's number in the change log, to tell its changes from
+    /// other sessions'.
+    pub me: u32,
+    /// The mark `history changes` last answered: its default `since`.
+    pub asked: u64,
 }
 
 impl Session {
-    pub fn new(mode: Mode) -> Self {
+    pub fn new(mode: Mode, me: u32) -> Self {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |time| time.subsec_nanos());
@@ -121,7 +144,8 @@ impl Session {
             last_undo: None,
             files: Vec::new(),
             import_folders: Vec::new(),
-            changes: changes::ChangeLog::default(),
+            me,
+            asked: 0,
             id: format!(
                 "{:x}",
                 u64::from(std::process::id()) << 32 | u64::from(nanos)
@@ -130,12 +154,24 @@ impl Session {
     }
 }
 
-impl Host {
+impl Headless {
     pub fn new(mut app: EditorApp, mode: Mode) -> Self {
-        let mut session = Session::new(mode);
+        let mut changes = changes::ChangeLog::default();
         // From here on the world's changes are noted, for `history changes`.
-        session.changes.take(&mut app.world, changes::By::Others);
-        Host { app, session }
+        changes.take(&mut app.world, None);
+        Headless {
+            app,
+            session: Session::new(mode, 1),
+            changes,
+        }
+    }
+
+    pub fn host(&mut self) -> Host<'_> {
+        Host {
+            app: &mut self.app,
+            session: &mut self.session,
+            changes: &mut self.changes,
+        }
     }
 }
 
@@ -255,6 +291,10 @@ pub(super) const TOOLS: &[Tool] = &[
         spec: &asset_manage::SPEC,
         call: asset_manage::call,
     },
+    Tool {
+        spec: &render_stats::SPEC,
+        call: render_stats::call,
+    },
 ];
 
 // Parameters shared by several tools.
@@ -275,6 +315,18 @@ pub(super) fn tools_for(profile: Profile) -> Vec<&'static ToolSpec> {
         .collect()
 }
 
+/// What a server with `profile` says about itself and lists.
+pub(super) fn setup(profile: Profile, waker: Option<Waker>) -> Setup {
+    Setup {
+        version: TOOLKIT_VERSION.to_owned(),
+        instructions: INSTRUCTIONS.to_owned(),
+        tools: tools_for(profile),
+        prompts: prompts::PROMPTS.to_vec(),
+        resources: prompts::RESOURCES.to_vec(),
+        waker,
+    }
+}
+
 /// Runs one call on the editor, as `client`: refused if the session's mode
 /// doesn't allow its tool, logged either way. An engine panic becomes an
 /// `internal` error rather than taking the server down.
@@ -284,13 +336,10 @@ pub(super) fn run(host: &mut Host, tool: &ToolSpec, args: &Args, client: Option<
     }
     host.session.last_undo = None;
     // Whatever changed between calls wasn't this client.
-    host.session
-        .changes
-        .take(&mut host.app.world, changes::By::Others);
+    host.changes.take(&mut host.app.world, None);
     let outcome = call(host, tool, args);
-    host.session
-        .changes
-        .take(&mut host.app.world, changes::By::Client);
+    host.changes
+        .take(&mut host.app.world, Some(host.session.me));
     log(host, tool, args, &outcome);
     outcome
 }
@@ -301,6 +350,13 @@ fn call(host: &mut Host, tool: &ToolSpec, args: &Args) -> Outcome {
     };
     if host.session.mode.allows(tool.class) == Allowed::No {
         return Err(host.session.mode.refusal(tool.name));
+    }
+    // The open editor's Play shows another world; edits wait for Stop.
+    if tool.class != Class::Read && host.app.playing() {
+        return Err(
+            ToolError::new(Code::Busy, "the game is playing in the editor")
+                .with_fix("stop Play in the editor, then try again"),
+        );
     }
     let call = entry.call;
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(host, args))).unwrap_or_else(
@@ -451,6 +507,24 @@ pub(crate) fn run_from_command_line(args: impl Iterator<Item = std::ffi::OsStrin
         println!("{report}");
         return ok;
     }
+    let hello = live::Hello {
+        profile: options.profile,
+        mode: options.mode,
+        import_folders: options
+            .import_folders
+            .iter()
+            .map(|folder| std::fs::canonicalize(folder).unwrap_or_else(|_| folder.clone()))
+            .collect(),
+        probe: false,
+    };
+    match live::relay(&options.folder, &hello) {
+        live::Relayed::Done(ok) => return ok,
+        live::Relayed::NoEditor => {}
+        live::Relayed::Refused(why) => eprintln!(
+            "axcenity-editor --mcp: the open editor refused the connection ({why}); \
+             serving the project without it"
+        ),
+    }
     let app = EditorApp::new(Some(&options.folder));
     if app.project.is_none() {
         eprintln!(
@@ -462,24 +536,29 @@ pub(crate) fn run_from_command_line(args: impl Iterator<Item = std::ffi::OsStrin
         }
         return false;
     }
-    let setup = Setup {
-        version: TOOLKIT_VERSION.to_owned(),
-        instructions: INSTRUCTIONS.to_owned(),
-        tools: tools_for(options.profile),
-        prompts: prompts::PROMPTS.to_vec(),
-        resources: prompts::RESOURCES.to_vec(),
-    };
-    let mut host = Host::new(app, options.mode);
-    host.session.import_folders = options.import_folders;
+    let folder = options.folder.clone();
+    let _mark = live::HeadlessMark::new(&folder);
+    let mut headless = Headless::new(app, options.mode);
+    headless.session.import_folders = options.import_folders;
     let (jobs, calls) = mpsc::channel::<Job>();
-    let server = axcenity_mcp::serve_stdio(setup, jobs);
+    let server = axcenity_mcp::serve_stdio(setup(options.profile, None), jobs);
     for job in calls {
-        let outcome = run(
-            &mut host,
-            job.call.tool,
-            &job.call.args,
-            job.call.client.as_deref(),
-        );
+        // An editor that opened the project since takes AI connections:
+        // two copies writing would overwrite each other.
+        let outcome = if job.call.tool.class != Class::Read && live::editor_listening(&folder) {
+            Err(ToolError::new(
+                Code::Busy,
+                "the editor has this project open and takes AI connections",
+            )
+            .with_fix("restart this MCP server so it works in the editor window"))
+        } else {
+            run(
+                &mut headless.host(),
+                job.call.tool,
+                &job.call.args,
+                job.call.client.as_deref(),
+            )
+        };
         job.answer(outcome);
     }
     match server.join() {

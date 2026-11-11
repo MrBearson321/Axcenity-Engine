@@ -23,11 +23,16 @@ fn copy_folder(from: &Path, to: &Path) {
 
 /// A copy of `examples/<name>`, so the server can't change the original.
 fn copy_of_example(name: &str) -> PathBuf {
+    copy_of_example_for(name, "stdio")
+}
+
+/// A copy of `examples/<name>` of this test's own.
+fn copy_of_example_for(name: &str, test: &str) -> PathBuf {
     let example = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples")
         .join(name);
     let folder =
-        std::env::temp_dir().join(format!("axcenity-mcp-stdio-{name}-{}", std::process::id()));
+        std::env::temp_dir().join(format!("axcenity-mcp-{test}-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&folder);
     copy_folder(&example, &folder);
     folder
@@ -179,4 +184,156 @@ fn check_prints_a_report_and_client_lines_for_this_binary() {
         .output()
         .unwrap();
     assert_eq!(missing.status.code(), Some(1));
+}
+
+/// Stands in for an open editor that takes AI connections for `folder`:
+/// writes its endpoint file and answers each hello with `answer(hello)`.
+/// After an `ok` to a client (not a probe), echoes the client's first
+/// message's id back with `{"relayed": true}`. Each hello it heard is sent
+/// to the returned channel.
+fn fake_editor(
+    folder: &Path,
+    answer: fn(&Value) -> &'static str,
+) -> std::sync::mpsc::Receiver<Value> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::fs::create_dir_all(folder.join(".axcenity")).unwrap();
+    std::fs::write(
+        folder.join(".axcenity/mcp-endpoint.json"),
+        json!({"port": port, "token": "secret", "pid": 1}).to_string(),
+    )
+    .unwrap();
+    let (heard, hellos) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut lines = BufReader::new(stream.try_clone().unwrap()).lines();
+            let Some(Ok(line)) = lines.next() else {
+                continue;
+            };
+            let hello: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(hello["token"], "secret");
+            let reply = answer(&hello);
+            writeln!(stream, "{reply}").unwrap();
+            let probe = hello["probe"] == true;
+            let _ = heard.send(hello);
+            if reply == "ok" && !probe {
+                let Some(Ok(line)) = lines.next() else {
+                    continue;
+                };
+                let message: Value = serde_json::from_str(&line).unwrap();
+                let echo =
+                    json!({"jsonrpc": "2.0", "id": message["id"], "result": {"relayed": true}});
+                writeln!(stream, "{echo}").unwrap();
+            }
+        }
+    });
+    hellos
+}
+
+#[test]
+fn the_server_relays_to_an_open_editor_with_its_options() {
+    let folder = copy_of_example_for("hello-part", "relay");
+    let hellos = fake_editor(&folder, |_| "ok");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_axcenity-editor"))
+        .args([
+            "--mcp".as_ref(),
+            folder.as_os_str(),
+            "--mode".as_ref(),
+            "read".as_ref(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc": "2.0", "id": 7, "method": "initialize", "params": {}})
+    )
+    .unwrap();
+    stdin.flush().unwrap();
+    let mut line = String::new();
+    stdout.read_line(&mut line).unwrap();
+    let answer: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(
+        answer,
+        json!({"jsonrpc": "2.0", "id": 7, "result": {"relayed": true}})
+    );
+    let hello = hellos.recv().unwrap();
+    assert_eq!(hello["mode"], "read");
+    assert_eq!(hello["profile"], "standard");
+    assert_eq!(hello["probe"], false);
+    // The editor hung up: the relay ends.
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    // Relaying, it never opened the project itself.
+    assert!(!folder.join(".axcenity/mcp-log.jsonl").exists());
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn without_the_editor_the_server_refuses_writes_while_an_editor_listens() {
+    let folder = copy_of_example_for("hello-part", "guard");
+    // The editor refuses this client but says it's there to a probe.
+    let hellos = fake_editor(&folder, |hello| {
+        if hello["probe"] == true {
+            "ok"
+        } else {
+            "no busy"
+        }
+    });
+    let mut child = Command::new(env!("CARGO_BIN_EXE_axcenity-editor"))
+        .arg("--mcp")
+        .arg(&folder)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut ask = |stdin: &mut std::process::ChildStdin, message: Value| -> Value {
+        writeln!(stdin, "{message}").unwrap();
+        stdin.flush().unwrap();
+        loop {
+            let mut line = String::new();
+            assert!(stdout.read_line(&mut line).unwrap() > 0);
+            let answer: Value = serde_json::from_str(&line).unwrap();
+            if answer["id"] == message["id"] {
+                return answer;
+            }
+        }
+    };
+    let init = ask(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-11-25", "capabilities": {},
+        "clientInfo": {"name": "guard-test", "version": "1"}}}),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "axcenity", "{init}");
+    assert_eq!(hellos.recv().unwrap()["probe"], false);
+    // Served without the window: it marks the project as such.
+    assert!(folder.join(".axcenity/mcp-headless.lock").exists());
+    let call = |id: u64, tool: &str, args: Value| {
+        json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": tool, "arguments": args}})
+    };
+    let read = ask(&mut stdin, call(2, "project_info", json!({})));
+    assert_ne!(read["result"]["isError"], true, "{read}");
+    let write = ask(
+        &mut stdin,
+        call(3, "object_create", json!({"kind": "Block"})),
+    );
+    assert_eq!(write["result"]["isError"], true, "{write}");
+    let text = write["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("the editor has this project open"), "{text}");
+    // Closing stdin ends it, and the mark goes with it.
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    assert!(!folder.join(".axcenity/mcp-headless.lock").exists());
+    let _ = std::fs::remove_dir_all(&folder);
 }

@@ -13,7 +13,6 @@ use axcenity_core::World;
 use axcenity_mcp::{Allowed, Args, Class, Code, ToolError, ToolSpec, call_key};
 
 use super::Host;
-use super::changes::By;
 use crate::history::changed_ids;
 
 /// What a write did: its result line, and the undo step's label (`None`
@@ -53,10 +52,11 @@ pub(super) fn write<T>(
             .with_fix("stop Play in the editor, then try again"));
     }
     checkpoint(host, &folder);
-    let app = &mut host.app;
-    let log = &mut host.session.changes;
+    let app = &mut *host.app;
+    let log = &mut *host.changes;
+    let me = Some(host.session.me);
     // Changes from before this write go to the log, not into its step.
-    log.take(&mut app.world, By::Client);
+    log.take(&mut app.world, me);
     let before = app.world.clone();
     let result = change(&mut app.world);
     let changes = app.world.take_changes();
@@ -70,7 +70,7 @@ pub(super) fn write<T>(
     };
     let label = format!("AI ({}): {label}", host.session.client);
     let ids = changed_ids(&changes);
-    log.add(By::Client, changes);
+    log.add(me, changes);
     let recorded =
         app.history
             .record_edits(&mut app.world, label.clone(), (&before, None), &ids, None);

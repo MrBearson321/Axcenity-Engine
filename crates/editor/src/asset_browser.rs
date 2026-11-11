@@ -14,6 +14,12 @@
 //!   anywhere else. A `*.texture.json` file is one texture set; the images
 //!   in its folder are not listed on their own.
 //!
+//! By default the grid is in a section for each source the assets came
+//! from (built-in, made in Axcenity, imported, each Toolbox source, global
+//! assets; `origin.rs`), each holding its model folders and files, and a
+//! material made from a texture set right after the set. The Source menu
+//! shows one source, or turns the sections off. Sections fold.
+//!
 //! Dragging a tile sets an egui drag-and-drop payload ([`AssetPayload`]);
 //! the app places it where it's let go over the viewport. Double-clicking a
 //! tile places it at the camera's focus point.
@@ -32,11 +38,13 @@ use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets;
 
+pub mod origin;
 pub mod packages;
 mod scan;
 pub mod thumbnails;
 
-use packages::{Shown, shown};
+use origin::{Origin, Origins};
+use packages::{Shown, grouped, shown};
 pub use scan::{display_name, kind_of, scan};
 use thumbnails::Thumbnails;
 
@@ -56,8 +64,8 @@ const HOVER_PICTURE: f32 = 192.0;
 const LIST_BELOW: f32 = 360.0;
 const LIST_ROW: f32 = 30.0;
 const LIST_PICTURE: f32 = 24.0;
-/// From this width the chips, search and buttons share one row.
-const ONE_ROW_FROM: f32 = 980.0;
+/// From this width the chips, Source menu, search and buttons share one row.
+const ONE_ROW_FROM: f32 = 1300.0;
 /// From this width the buttons sit beside the search.
 const BUTTONS_BESIDE_FROM: f32 = 520.0;
 
@@ -462,6 +470,18 @@ pub struct AssetBrowser {
     /// Where the project's Toolbox assets came from
     /// (`.axcenity/asset-sources.json`), read with each scan.
     sources: axcenity_toolbox::provenance::Snapshot,
+    /// Where every listed asset came from, worked out again when the files
+    /// or `sources` change.
+    origins: Origins,
+    /// The Source menu: only the assets from here.
+    source_filter: Option<Origin>,
+    /// Work out `origins` on the next scan even if no file changed (a
+    /// material file was edited).
+    origins_stale: bool,
+    /// The Source menu's "Group by source" is off: one grid, as before.
+    flat: bool,
+    /// The sections folded shut.
+    folded: HashSet<Origin>,
 }
 
 impl AssetBrowser {
@@ -537,6 +557,7 @@ impl AssetBrowser {
     /// thumbnail.
     pub fn file_changed(&mut self, path: &str) {
         self.thumbnails.forget(path);
+        self.origins_stale = true;
         self.refresh();
     }
 
@@ -550,6 +571,26 @@ impl AssetBrowser {
             name: prop.name.to_owned(),
         });
         props.chain(self.files_and_shared()).collect()
+    }
+
+    /// The project's own files (not the global assets it hasn't got), its
+    /// model folders, every asset's origin and its Toolbox sources, scanned
+    /// again if it's time: what the Downloaded / Imported Assets tab lists.
+    pub fn project_assets(
+        &mut self,
+    ) -> (
+        Vec<AssetEntry>,
+        Vec<packages::Package>,
+        Origins,
+        axcenity_toolbox::provenance::Snapshot,
+    ) {
+        self.rescan_if_due();
+        (
+            self.files.clone(),
+            packages::packages(&self.files),
+            self.origins.clone(),
+            self.sources.clone(),
+        )
     }
 
     fn files_and_shared(&self) -> Vec<AssetEntry> {
@@ -698,11 +739,13 @@ impl AssetBrowser {
         let old_shared = std::mem::take(&mut self.shared);
         let files_changed = files != self.files;
         self.files = files;
-        self.sources = self
+        let sources = self
             .folder
             .as_deref()
             .and_then(|folder| axcenity_toolbox::provenance::Snapshot::read(folder).ok())
             .unwrap_or_default();
+        let sources_changed = sources != self.sources;
+        self.sources = sources;
         // Global assets show only with a project open, to use in it.
         let global = match (&self.folder, &self.library) {
             (Some(_), Some(library)) => scan(library),
@@ -722,6 +765,17 @@ impl AssetBrowser {
             .collect();
         if files_changed || old_shared != self.shared {
             self.generation += 1;
+        }
+        if files_changed || sources_changed || old_shared != self.shared || self.origins_stale {
+            self.origins_stale = false;
+            let packages = packages::packages(&self.files_and_shared());
+            self.origins = Origins::work_out(
+                self.folder.as_deref(),
+                &self.files,
+                &self.shared,
+                &packages,
+                &self.sources,
+            );
         }
         self.thumbnails.forget_missing();
         self.global_thumbnails.forget_missing();
@@ -805,7 +859,22 @@ impl AssetBrowser {
             .into_iter()
             .filter(|entry| self.category.holds(entry.kind))
             .filter(|entry| self.category != Category::Global || self.is_global(&entry.path))
-            .filter(|entry| search.is_empty() || search_matches(entry, &search))
+            .filter(|entry| {
+                self.source_filter
+                    .as_ref()
+                    .is_none_or(|origin| self.origins.of(entry) == *origin)
+            })
+            .filter(|entry| {
+                // A source's name finds its assets too ("poly haven").
+                search.is_empty()
+                    || search_matches(entry, &search)
+                    || self
+                        .origins
+                        .of(entry)
+                        .label()
+                        .to_lowercase()
+                        .contains(&search)
+            })
             .filter(|entry| {
                 !self.unused_only
                     || self
@@ -837,12 +906,12 @@ impl AssetBrowser {
             self.open_package = None;
         }
         let in_folder = open.is_some() && search.is_empty();
-        let shown = shown(
-            entries,
-            &packages,
-            open,
-            !search.is_empty() || self.unused_only,
-        );
+        let searching = !search.is_empty() || self.unused_only;
+        let shown = if self.flat {
+            shown(entries, &packages, open, searching)
+        } else {
+            grouped(entries, &packages, open, searching, &self.origins)
+        };
         if let Some(package) = open
             && search.is_empty()
             && self.folder_header(ui, package)
@@ -855,6 +924,12 @@ impl AssetBrowser {
                 if shown.is_empty() {
                     let (title, sentence) = if in_folder {
                         ("Empty folder", "Nothing of this kind in this folder.")
+                    } else if search.is_empty() && self.source_filter.is_some() {
+                        (
+                            "Nothing from here",
+                            "No asset of this kind came from this source. Pick All sources \
+                             in the Source menu to see the rest.",
+                        )
                     } else if search.is_empty() && self.category == Category::Global {
                         (
                             "No global assets",
@@ -880,7 +955,19 @@ impl AssetBrowser {
                 // A readable list in a narrow column, tiles where there's room.
                 let list = ui.available_width() < LIST_BELOW;
                 for block in shown {
-                    if let Some(heading) = block.heading {
+                    if let Some(origin) = &block.origin {
+                        let open = !self.folded.contains(origin);
+                        if self.source_heading(ui, origin, block.items.len(), open) {
+                            if open {
+                                self.folded.insert(origin.clone());
+                            } else {
+                                self.folded.remove(origin);
+                            }
+                        }
+                        if !open {
+                            continue;
+                        }
+                    } else if let Some(heading) = &block.heading {
                         ui.add_space(4.0);
                         widgets::section_label(ui, heading);
                         ui.add_space(2.0);
@@ -1046,6 +1133,73 @@ impl AssetBrowser {
         None
     }
 
+    /// A source's section heading: its fold caret, icon, name and how many
+    /// things it holds. True when clicked (to fold or unfold it).
+    fn source_heading(&self, ui: &mut egui::Ui, origin: &Origin, count: usize, open: bool) -> bool {
+        let palette = theme::palette(ui.ctx());
+        ui.add_space(4.0);
+        let caret = if open {
+            icons::CARET_DOWN
+        } else {
+            icons::CARET_RIGHT
+        };
+        let text = egui::RichText::new(format!(
+            "{caret} {} {}  {count}",
+            origin.icon(),
+            origin.label()
+        ))
+        .size(theme::type_scale::SMALL)
+        .color(palette.text_secondary);
+        let clicked = ui
+            .add(egui::Label::new(text).sense(egui::Sense::click()))
+            .on_hover_text(format!(
+                "{}\nClick to {} this section.",
+                origin.hover(),
+                if open { "fold" } else { "unfold" }
+            ))
+            .clicked();
+        ui.add_space(2.0);
+        clicked
+    }
+
+    /// The Source menu: every source, or one; and whether the grid is in a
+    /// section per source.
+    fn source_menu(&mut self, ui: &mut egui::Ui) {
+        let all = self.entries();
+        let present = self.origins.present(&all);
+        let selected = self
+            .source_filter
+            .as_ref()
+            .map_or("All sources".to_owned(), Origin::label);
+        let mut grouped = !self.flat;
+        egui::ComboBox::from_id_salt("assets source")
+            .selected_text(theme::with_icon(icons::FUNNEL, &selected))
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(self.source_filter.is_none(), "All sources")
+                    .clicked()
+                {
+                    self.source_filter = None;
+                }
+                for origin in present {
+                    let on = self.source_filter.as_ref() == Some(&origin);
+                    if ui
+                        .selectable_label(on, theme::with_icon(origin.icon(), &origin.label()))
+                        .on_hover_text(origin.hover())
+                        .clicked()
+                    {
+                        self.source_filter = Some(origin);
+                    }
+                }
+                ui.separator();
+                ui.checkbox(&mut grouped, "Group by source")
+                    .on_hover_text("Show the assets in a section for each place they came from.");
+            })
+            .response
+            .on_hover_text("Show the assets from one place: built-in, made here, imported, a Toolbox source or global.");
+        self.flat = !grouped;
+    }
+
     /// The category chips, which pick what's shown.
     fn chips(&mut self, ui: &mut egui::Ui) {
         for category in Category::ALL {
@@ -1063,6 +1217,8 @@ impl AssetBrowser {
             self.unused_only = !self.unused_only;
             self.unused = None;
         }
+        responsive::room_for(ui, 140.0);
+        self.source_menu(ui);
     }
 
     fn refresh_button(&mut self, ui: &mut egui::Ui) {
@@ -1366,6 +1522,12 @@ impl AssetBrowser {
         if let Some(line) = self.source_line(&entry.path) {
             hover.push('\n');
             hover.push_str(&line);
+        }
+        if let Some(parent) = self.origins.parent(&entry.path) {
+            hover.push_str(&format!(
+                "\nMade from the texture set {}.",
+                display_name(parent)
+            ));
         }
         if global && !self.is_local(&entry.path) {
             hover.push_str("\nGlobal asset: copied into this project the first time it's used.");

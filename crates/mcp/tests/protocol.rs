@@ -141,6 +141,7 @@ fn start_pair() -> Client {
         tools: vec![&LOOK, &BREAK],
         prompts: vec![&BUILD],
         resources: vec![&SCENE, &UNDER, &HIDDEN],
+        waker: None,
     };
     tokio::spawn(async move { serve(setup, jobs, (server_reads, server_writes)).await });
     Client {
@@ -359,4 +360,65 @@ async fn resources_mirror_read_tools_and_reading_one_runs_its_tool() {
         let read = client.request("resources/read", json!({"uri": uri})).await;
         assert!(read["error"]["message"].is_string(), "{uri}: {read}");
     }
+}
+
+/// The open editor serves each relayed client on a TCP connection, and
+/// the waker is called for each job so it looks between frames.
+#[test]
+fn a_tcp_connection_is_served_and_each_call_wakes_the_engine() {
+    use std::io::{BufRead, Write};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let woken = Arc::new(AtomicUsize::new(0));
+    let (jobs, engine) = mpsc::channel::<Job>();
+    let setup = Setup {
+        version: "1.0.0".into(),
+        instructions: String::new(),
+        tools: vec![&LOOK],
+        prompts: Vec::new(),
+        resources: Vec::new(),
+        waker: Some(axcenity_mcp::Waker(Arc::new({
+            let woken = woken.clone();
+            move || {
+                woken.fetch_add(1, Ordering::SeqCst);
+            }
+        }))),
+    };
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        axcenity_mcp::serve_tcp(setup, jobs, stream)
+    });
+    std::thread::spawn(move || {
+        for job in engine {
+            let name = job.call.tool.name;
+            job.answer(Ok(format!("ran {name}")));
+        }
+    });
+    let stream = std::net::TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let writer = stream.try_clone().unwrap();
+    let mut lines = std::io::BufReader::new(stream).lines();
+    let send = |message: Value| writeln!(&writer, "{message}").unwrap();
+    send(
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-11-25", "capabilities": {},
+        "clientInfo": {"name": "Relay", "version": "1"}}}),
+    );
+    let init: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+    assert_eq!(init["result"]["serverInfo"]["name"], "axcenity", "{init}");
+    send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+    send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "scene_inspect", "arguments": {}}}));
+    let answer: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+    assert_eq!(answer["result"]["content"][0]["text"], "ran scene_inspect");
+    assert_eq!(woken.load(Ordering::SeqCst), 1);
+    // The client hangs up: the server ends.
+    drop(lines);
+    writer.shutdown(std::net::Shutdown::Both).unwrap();
+    server.join().unwrap().unwrap();
 }
