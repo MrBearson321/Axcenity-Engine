@@ -28,6 +28,8 @@ use axcenity_mcp::{
 use super::EditorApp;
 
 mod anim_edit;
+mod asset_find;
+mod asset_import;
 mod batch;
 mod docs;
 mod env_set;
@@ -90,6 +92,9 @@ pub(super) struct Session {
     pub id: String,
     /// Asset files this session wrote, read again after an undo or redo.
     pub files: Vec<String>,
+    /// The folders `asset_import` may copy from: only what the user named
+    /// with `--allow-import`.
+    pub import_folders: Vec<PathBuf>,
 }
 
 impl Session {
@@ -104,6 +109,7 @@ impl Session {
             checkpointed: false,
             last_undo: None,
             files: Vec::new(),
+            import_folders: Vec::new(),
             id: format!(
                 "{:x}",
                 u64::from(std::process::id()) << 32 | u64::from(nanos)
@@ -144,6 +150,14 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &docs::SPEC,
         call: docs::call,
+    },
+    Tool {
+        spec: &asset_find::SPEC,
+        call: asset_find::call,
+    },
+    Tool {
+        spec: &asset_import::SPEC,
+        call: asset_import::call,
     },
     Tool {
         spec: &object_create::SPEC,
@@ -320,14 +334,17 @@ struct Options {
     folder: PathBuf,
     profile: Profile,
     mode: Mode,
+    /// Folders `asset_import` may read from (`--allow-import`).
+    import_folders: Vec<PathBuf>,
 }
 
-const USAGE: &str = "usage: axcenity-editor --mcp <project folder> [--profile lite|standard|full] [--mode read|edit|full]";
+const USAGE: &str = "usage: axcenity-editor --mcp <project folder> [--profile lite|standard|full] [--mode read|edit|full] [--allow-import <folder>]...";
 
 fn parse_options(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Options, String> {
     let mut folder = None;
     let mut profile = Profile::Standard;
     let mut mode = Mode::Edit;
+    let mut import_folders = Vec::new();
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
         if arg == "--profile" {
@@ -344,6 +361,10 @@ fn parse_options(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Optio
                 .to_str()
                 .and_then(Mode::from_name)
                 .ok_or_else(|| format!("unknown mode {}", name.to_string_lossy()))?;
+        } else if arg == "--allow-import" {
+            import_folders.push(PathBuf::from(
+                args.next().ok_or("--allow-import needs a folder")?,
+            ));
         } else if arg == "--project" {
             folder = Some(PathBuf::from(
                 args.next().ok_or("--project needs a folder")?,
@@ -359,6 +380,7 @@ fn parse_options(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Optio
         folder,
         profile,
         mode,
+        import_folders,
     })
 }
 
@@ -391,6 +413,7 @@ pub(crate) fn run_from_command_line(args: impl Iterator<Item = std::ffi::OsStrin
         tools: tools_for(options.profile),
     };
     let mut host = Host::new(app, options.mode);
+    host.session.import_folders = options.import_folders;
     let (jobs, calls) = mpsc::channel::<Job>();
     let server = axcenity_mcp::serve_stdio(setup, jobs);
     for job in calls {

@@ -671,7 +671,7 @@ impl EditorApp {
 
 /// Copies a prefab file into the project's prefabs folder (checking it
 /// first), under a name not yet taken there.
-fn copy_prefab(folder: &Path, file: &Path) -> Result<String, String> {
+pub(in crate::app) fn copy_prefab(folder: &Path, file: &Path) -> Result<String, String> {
     let text = std::fs::read_to_string(file).map_err(|err| err.to_string())?;
     let mut check = World::new();
     let workspace = check.workspace();
