@@ -252,7 +252,7 @@ Each phase is one or more PRs against `main`, tested locally as the policy asks.
 | Phase | Builds | Done when |
 |---|---|---|
 | **TC0** | This proposal and ADR-0020 | Done: approved 2026-11-11 |
-| **TC1** Core | `collab` crate: operations, transactions, host and client state machines, ID blocks (`Arena` range allocation), in-memory transport | Conflict and convergence tests pass (no UI, no network) |
+| **TC1** Core | `collab` crate: operations, transactions, host and client state machines, ID blocks (`Arena` range allocation), in-memory transport | Done: `crates/collab`; a test per conflict rule and a convergence test (150 seeds by default, 3,000 checked) pass. Terrain chunks, string cells and file versions are left for TC2 and TC5 |
 | **TC2** Editor over loopback | `History` step to transaction, remote transactions into the edit World, own-step undo, unsynced-edit check, in-editor host | Two headless editors stay identical through the editor tests |
 | **TC3** Network and identity | WebSocket over TLS, device keys, sign in and out, invites, roles enforced, handshake refusals | LAN test on Paul's PC and laptop |
 | **TC4** Interface | Team Create panel, title bar chip, presence in viewport, Explorer and Properties, Share and Join flows | UI snapshots; Paul tries it |
