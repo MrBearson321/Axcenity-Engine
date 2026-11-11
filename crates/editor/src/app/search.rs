@@ -429,6 +429,10 @@ fn command_description(command: &Command) -> String {
         Command::VersionHistory => {
             "See the project's saved checkpoints and restore one, or compare it with now."
         }
+        Command::ShareTeamCreate => {
+            "Host a Team Create session for this project and make an invite link."
+        }
+        Command::JoinTeamCreate => "Join someone's Team Create session with their invite link.",
         Command::SaveCheckpoint => "Keep a named copy of the project as it is now.",
         Command::BackUpProject => "Write a zip of the whole project.",
         Command::Input => {

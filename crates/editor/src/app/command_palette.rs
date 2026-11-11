@@ -366,7 +366,10 @@ impl EditorApp {
             "File",
             &["collaborate", "multiplayer editing", "invite", "host"],
             None,
-            when(editing && solo, "Open a project, stop Play, and leave any session first."),
+            when(
+                editing && solo,
+                "Open a project, stop Play, and leave any session first.",
+            ),
         );
         add(
             Command::JoinTeamCreate,
@@ -374,7 +377,10 @@ impl EditorApp {
             "File",
             &["collaborate", "invite link", "join session"],
             None,
-            when(editing && solo, "Open a project, stop Play, and leave any session first."),
+            when(
+                editing && solo,
+                "Open a project, stop Play, and leave any session first.",
+            ),
         );
         add(
             Command::SaveCheckpoint,

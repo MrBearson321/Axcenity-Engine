@@ -266,11 +266,6 @@ impl Team {
         self.client.as_ref().map_or(&[], Client::roster)
     }
 
-    /// What another connected member is doing.
-    pub(crate) fn presence(&self, member: MemberId) -> Option<&Presence> {
-        self.client.as_ref()?.presences().get(&member)
-    }
-
     /// Every other connected member's presence.
     pub(crate) fn presences(&self) -> impl Iterator<Item = (MemberId, &Presence)> {
         self.client
@@ -457,7 +452,11 @@ impl EditorApp {
     /// A new invite for `role`, when this editor hosts; its link.
     pub(crate) fn make_team_invite(&mut self, role: Role) -> Option<String> {
         let team = self.team.as_mut()?;
-        let link = team.hosting()?.lock().invite(role, INVITE_LIFETIME_SECONDS).link();
+        let link = team
+            .hosting()?
+            .lock()
+            .invite(role, INVITE_LIFETIME_SECONDS)
+            .link();
         team.invite = Some(link.clone());
         Some(link)
     }
@@ -505,6 +504,33 @@ impl EditorApp {
         } else {
             "Team Create: you left the session; your copy stays open here"
         });
+    }
+
+    /// What the other members have selected, with their names and
+    /// colours, for the viewport and Explorer. Only what this copy has.
+    pub(crate) fn team_selections(&self) -> Vec<crate::viewport::MemberSelection> {
+        let Some(team) = &self.team else {
+            return Vec::new();
+        };
+        let mut out: Vec<_> = team
+            .presences()
+            .filter(|(_, presence)| !presence.selection.is_empty())
+            .filter_map(|(member, presence)| {
+                let who = team.roster().iter().find(|c| c.member == member)?;
+                Some(crate::viewport::MemberSelection {
+                    name: who.profile.name.clone(),
+                    color: super::team_panel::member_color(who.profile.color),
+                    selection: presence
+                        .selection
+                        .iter()
+                        .copied()
+                        .filter(|&id| self.world.get(id).is_some())
+                        .collect(),
+                })
+            })
+            .collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
     }
 
     pub(crate) fn team(&self) -> Option<&Team> {

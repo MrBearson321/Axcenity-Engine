@@ -4,6 +4,16 @@ impl EditorApp {
     /// The Explorer panel, then whatever was clicked or done in it.
     pub(in crate::app) fn explorer_pane(&mut self, ui: &mut egui::Ui) {
         let editing = !self.playing();
+        self.explorer.others.clear();
+        for member in self.team_selections() {
+            for id in member.selection {
+                self.explorer
+                    .others
+                    .entry(id)
+                    .or_default()
+                    .push(member.color);
+            }
+        }
         // The game's world during Play, otherwise the one being edited.
         let world = shown(&self.world, &self.play);
         let explorer = self.explorer.show(ui, world, &self.selection, editing);
@@ -44,6 +54,32 @@ impl EditorApp {
     /// the edit made in it.
     pub(in crate::app) fn properties_pane(&mut self, ui: &mut egui::Ui) {
         let editing = !self.playing();
+        // In Team Create, who else has this selected: their changes may
+        // land while you edit (the later one wins).
+        if editing && let Some(selected) = self.selected {
+            let others: Vec<_> = self
+                .team_selections()
+                .into_iter()
+                .filter(|member| member.selection.contains(&selected))
+                .collect();
+            if !others.is_empty() {
+                let palette = theme::palette(ui.ctx());
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for member in &others {
+                        let (dot, _) =
+                            ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                        ui.painter().circle_filled(dot.center(), 4.0, member.color);
+                    }
+                    let names: Vec<&str> = others.iter().map(|m| m.name.as_str()).collect();
+                    ui.label(
+                        egui::RichText::new(format!("Also selected by {}", names.join(", ")))
+                            .color(palette.text_weak),
+                    );
+                });
+                ui.add_space(theme::space::XS);
+            }
+        }
         let world = shown(&self.world, &self.play);
         let stylesheets = self
             .project
@@ -938,6 +974,7 @@ impl EditorApp {
             _ => Vec::new(),
         };
         let spline_editing = self.spline_editing();
+        let others = self.team_selections();
         let mut output = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ui, |ui| match render_state {
@@ -1040,6 +1077,7 @@ impl EditorApp {
                                 .as_ref()
                                 .and_then(|play| play.graphics())
                                 .unwrap_or(&self.graphics),
+                            others: &others,
                         },
                     )
                 }

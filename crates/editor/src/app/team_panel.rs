@@ -2,6 +2,7 @@
 //! the open project or join a session, see who's in it and how the
 //! connection is, invite people and set their roles, and leave.
 
+use axcenity_collab::MemberId;
 use axcenity_collab::Role as MemberRole;
 use axcenity_collab::access::Invite;
 
@@ -47,6 +48,12 @@ enum Action {
     Leave,
 }
 
+/// The panel buttons tests press.
+#[cfg(test)]
+pub(crate) enum TestAction {
+    Join,
+}
+
 /// The colour a member's profile names.
 pub(crate) fn member_color(color: [u8; 3]) -> egui::Color32 {
     egui::Color32::from_rgb(color[0], color[1], color[2])
@@ -59,8 +66,9 @@ fn avatar(ui: &mut egui::Ui, name: &str, color: [u8; 3], size: f32) -> egui::Res
     ui.painter().circle_filled(rect.center(), size * 0.5, fill);
     let initial: String = name.chars().next().unwrap_or('?').to_uppercase().collect();
     // Dark text on light colours, white on dark ones.
-    let light = 0.299 * f32::from(color[0]) + 0.587 * f32::from(color[1]) + 0.114 * f32::from(color[2])
-        > 150.0;
+    let light =
+        0.299 * f32::from(color[0]) + 0.587 * f32::from(color[1]) + 0.114 * f32::from(color[2])
+            > 150.0;
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -217,7 +225,12 @@ impl EditorApp {
                     .hint_text("axcenity://teamcreate/join?…")
                     .desired_width(f32::INFINITY),
             );
-            let join = widgets::button(widgets::Role::Secondary, Some(icons::SIGN_IN), "Join", &palette);
+            let join = widgets::button(
+                widgets::Role::Secondary,
+                Some(icons::SIGN_IN),
+                "Join",
+                &palette,
+            );
             let ready = open && !self.playing() && !self.team_panel.link.trim().is_empty();
             if ui
                 .add_enabled(ready, join)
@@ -299,8 +312,13 @@ impl EditorApp {
                             && my_role == Some(MemberRole::Owner)
                             && c.role != MemberRole::Owner;
                         if can_manage {
-                            if widgets::icon_button(ui, icons::USER_MINUS, "Remove from the project", false)
-                                .clicked()
+                            if widgets::icon_button(
+                                ui,
+                                icons::USER_MINUS,
+                                "Remove from the project",
+                                false,
+                            )
+                            .clicked()
                             {
                                 action = Some(Action::Remove(c.member));
                             }
@@ -403,9 +421,19 @@ impl EditorApp {
 
         ui.add_space(theme::space::M);
         let leave = if hosting {
-            widgets::button(widgets::Role::Danger, Some(icons::SIGN_OUT), "End session", &palette)
+            widgets::button(
+                widgets::Role::Danger,
+                Some(icons::SIGN_OUT),
+                "End session",
+                &palette,
+            )
         } else {
-            widgets::button(widgets::Role::Secondary, Some(icons::SIGN_OUT), "Leave session", &palette)
+            widgets::button(
+                widgets::Role::Secondary,
+                Some(icons::SIGN_OUT),
+                "Leave session",
+                &palette,
+            )
         };
         let hover = if hosting {
             "Disconnects everyone. Your World stays as it is."
@@ -458,6 +486,14 @@ impl EditorApp {
         if self.team.is_none() {
             self.team_action(Action::Share);
         }
+    }
+
+    /// Runs a panel button's action, for tests.
+    #[cfg(test)]
+    pub(crate) fn team_action_for_test(&mut self, action: TestAction) {
+        self.team_action(match action {
+            TestAction::Join => Action::Join,
+        });
     }
 
     /// File > Join Team Create…: opens the panel, where the link goes.
