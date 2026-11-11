@@ -1,7 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "feature"
-subsystem = "editor"
-title = "Model Studio: model, UV unwrap, paint, sculpt, retopologize, bake and rig meshes in the editor"
-features = ["editor.model-studio"]
-commits = ["82489c5c", "1ff57d41", "d92fb39b", "28d88d0d", "995f0dae", "dc70fd78", "86c86bed", "ce5ee172"]
-evidence = "reconstructed"

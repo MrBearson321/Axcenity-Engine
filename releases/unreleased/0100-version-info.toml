@@ -1,6 +1,0 @@
-category = "feature"
-subsystem = "release"
-title = "Every program has --version, and the About box shows the version, channel and commit"
-details = "The version in Cargo.toml is now the product version, including its -alpha.N suffix, so the editor no longer calls an alpha build 0.1.0."
-features = ["release.version-info"]
-fixes = ["AX-0002"]

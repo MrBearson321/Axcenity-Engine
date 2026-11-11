@@ -1,8 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "feature"
-subsystem = "ui"
-title = "UI Designer: an artboard with anchors, rulers, ready-made widgets and an event graph"
-features = ["editor.ui-designer"]
-prs = [44, 48, 52]
-commits = ["71ca326e", "9cd63e6e", "18bbcc0e", "e394bbeb"]
-evidence = "reconstructed"

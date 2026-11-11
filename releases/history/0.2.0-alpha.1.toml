@@ -1,0 +1,373 @@
+version = "0.2.0-alpha.1"
+date = "2026-11-11"
+title = "Multiplayer, Luau scripting and an editor that updates itself"
+summary = """
+The first Development build since 0.1.0-alpha.3: multiplayer with a
+dedicated server, Luau scripting, Model Studio, the UI Designer, a large
+rendering, physics and gameplay update, faster editing and loading, and an
+editor that checks for, installs and rolls back its own updates. An alpha
+for people following Development: projects open in it are upgraded to
+project format 5 after asking, and older engines can't open them again.
+"""
+evidence = "verified"
+published = true
+
+[verification]
+linux = "scripts/check-platform.sh on 9a8a0f2d (cloud, no GPU or sound): build, clippy, doc tests, server headless pass; all tests pass except the audio tutorial sample (no sound device) and a release test fixed in this PR; game test fixed in this PR and passes."
+windows = "scripts/check-platform.ps1 and check-packages.py --profile release on 9a8a0f2d (a Windows 11 desktop): build, clippy, doc tests, server, installer, Build Game and the built game pass. Fixed before the tag: the --mcp stack overflow (#178), the release test and the game test command. Test-only: Team Create temp folder names (#180); luau-lsp 1.70 wording."
+
+[formats]
+axgame = 2
+network_protocol = 11
+project = 5
+save = 2
+world = 2
+
+[[changes]]
+category = "improvement"
+subsystem = "scripting"
+title = "Scripts run on Luau instead of Lua 5.4, with luau-lsp tooling"
+features = ["scripting.scripts"]
+commits = ["be34c7b8"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "networking"
+title = "Multiplayer: host and join games, replication, network ownership, chat, multiplayer saves and a dedicated server"
+features = ["networking.multiplayer", "networking.dedicated-server"]
+commits = ["0e529208", "4bd9c050", "30672d74", "b0eb7b22", "8ebdb5c7"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "performance"
+subsystem = "networking"
+title = "Replication sends only what moved, in a compact binary wire format (network protocol 10)"
+details = "Players and servers must run the same build: an older one is refused with both protocol numbers named."
+features = ["networking.multiplayer"]
+prs = [34]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "editor"
+title = "Model Studio: model, UV unwrap, paint, sculpt, retopologize, bake and rig meshes in the editor"
+features = ["editor.model-studio"]
+commits = ["82489c5c", "1ff57d41", "d92fb39b", "28d88d0d", "995f0dae", "dc70fd78", "86c86bed", "ce5ee172"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "ui"
+title = "UI Designer: an artboard with anchors, rulers, ready-made widgets and an event graph"
+features = ["editor.ui-designer"]
+prs = [44, 48, 52]
+commits = ["71ca326e", "9cd63e6e", "18bbcc0e", "e394bbeb"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "renderer"
+title = "Rendering: real-time GI with probes, water, weather, clouds and fog, TAA and motion blur, decals, GPU particles and painted forests"
+features = ["renderer.global-illumination", "renderer.water", "renderer.weather", "renderer.temporal", "renderer.decals", "renderer.foliage"]
+commits = ["e32375f9", "4f44c25b", "32f0f2d5", "74b65e7f", "4e4e111b", "fc6a12be", "29f7ec7a", "a5ab4034", "24cd566e", "4093f81e", "3382eb96"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "materials"
+title = "Material editor, material graphs and custom shader code"
+features = ["materials.material-editor", "materials.material-graph"]
+commits = ["7048b335", "46cf196c", "36e3b25d"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "physics"
+title = "Joints, motors, springs, movers, ragdolls, destruction, vehicles and seats"
+features = ["physics.constraints", "physics.ragdolls", "physics.destruction", "physics.vehicles"]
+commits = ["8ae590c8", "e9a3ceea", "97e1af22", "03468e53", "2e7fb31b", "96e4b31a"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "gameplay"
+title = "Humanoids, tools and inventories, health and damage, abilities and effects, dialogue and quests"
+features = ["gameplay.humanoid", "gameplay.tools", "gameplay.abilities", "gameplay.dialogue"]
+commits = ["91f825d5", "9aa0c1d8", "104c7a9a", "8a1bebec", "fcd181d7"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "navigation"
+title = "Navigation mesh, pathfinding agents, obstacle avoidance, perception and behavior trees"
+features = ["navigation.pathfinding", "navigation.behavior-trees"]
+commits = ["e9a15012", "71bb48b6", "8945fb63", "44d62115", "7b5b8e39"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "editor"
+title = "Levels, nested prefabs and variants, the Sequencer, game tests, Lua editor plugins, the Developer Console and genre templates"
+features = ["project.levels", "project.prefab-variants", "editor.sequencer", "editor.game-tests", "editor.plugins", "editor.developer-console", "project.templates"]
+commits = ["4d4ed53f", "6a7e542f", "37c51365", "28f49eb3", "38e87310", "e2d34488", "66f4e073"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "editor"
+title = "Universal search (Ctrl+K) for commands, files, Instances and settings"
+features = ["editor.universal-search"]
+prs = [76]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "animation"
+title = "Animation layers, blend spaces and runtime IK"
+features = ["animation.layers", "animation.ik"]
+commits = ["5a030375", "19f73042"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "audio"
+title = "Audio buses and effects"
+features = ["audio.buses"]
+commits = ["89a2c8e4"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "ui"
+title = "Localization, TweenService and rich text for game UI"
+features = ["ui.localization", "ui.tweens"]
+commits = ["61ed52a3", "4e924204", "3ae8c8f1"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "project"
+title = "Save slots and checkpoints for games, with save migration"
+features = ["project.save-games"]
+commits = ["ceda19b2", "0ddbb1b4"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "project"
+title = "Asset packages (.axpkg) to share assets between projects"
+features = ["project.asset-packages"]
+commits = ["5fdbdb4a"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "editor"
+title = "A source-built editor rebuilds and relaunches itself when engine code changes, keeping the session"
+features = ["editor.engine-rebuild"]
+commits = ["07fbbd96", "c10b02ff"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "performance"
+subsystem = "assets"
+title = "Cooked BC7/BC5 textures, cached LODs and whole cooked models: projects open and built games start faster"
+features = ["assets.cooked-assets"]
+prs = [45, 47, 49, 51, 53, 55, 57, 65, 67, 69]
+evidence = "reconstructed"
+
+[[changes]]
+category = "improvement"
+subsystem = "assets"
+title = "Assets keep stable IDs in sidecar files, so references survive renames and moves"
+features = ["assets.asset-ids"]
+prs = [50, 78]
+evidence = "reconstructed"
+
+[[changes]]
+category = "performance"
+subsystem = "assets"
+title = "Assets load in the background, with a loading screen that waits for them and ContentProvider:PreloadAsync"
+prs = [8, 18, 19]
+evidence = "reconstructed"
+
+[[changes]]
+category = "performance"
+subsystem = "scripting"
+title = "Faster scripts: cheaper world access, a binary-heap scheduler, cached bytecode and fast builtins"
+prs = [7, 22, 29, 58]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "scripting"
+title = "Opt-in native code for scripts (--!native or @native)"
+stability = "experimental"
+features = ["scripting.native-code"]
+prs = [58]
+evidence = "reconstructed"
+
+[[changes]]
+category = "performance"
+subsystem = "renderer"
+title = "Faster large scenes: shared meshes, a retained draw list, cached UI layout and draw planning on its own thread pool"
+prs = [10, 11, 23, 37, 59, 88]
+evidence = "reconstructed"
+
+[[changes]]
+category = "performance"
+subsystem = "physics"
+title = "Faster physics: a sync overhaul, a parallel step on its own thread pool, and contact points kept between steps"
+features = ["physics.rigid-bodies"]
+prs = [25, 84, 86, 93, 99]
+evidence = "reconstructed"
+
+[[changes]]
+category = "performance"
+subsystem = "navigation"
+title = "The navigation mesh rebuilds only what changed, assembled on a worker"
+features = ["navigation.pathfinding"]
+prs = [12, 32]
+evidence = "reconstructed"
+
+[[changes]]
+category = "fix"
+subsystem = "scripting"
+title = "Instances work as Lua table keys"
+features = ["scripting.scripts"]
+prs = [4]
+evidence = "reconstructed"
+
+[[changes]]
+category = "fix"
+subsystem = "player"
+title = "Clicking no longer casts a ray when nothing has a ClickDetector, and MeshPart hulls are cached"
+prs = [21]
+evidence = "reconstructed"
+
+[[changes]]
+category = "improvement"
+subsystem = "project"
+title = "Built games are compressed (.axgame version 2) and unpack on several threads"
+features = ["project.build-game"]
+prs = [61]
+evidence = "reconstructed"
+
+[[changes]]
+category = "breaking"
+subsystem = "project"
+title = "Project format 2 → 4: one animation clip format with state machines, and physical properties"
+details = "Opening an older project upgrades it to format 4 and keeps a copy of its previous files in .axcenity/previous/<format>/. 0.1.0-alpha.3 can't open a project saved in format 4."
+features = ["project.format-migration", "animation.clips"]
+commits = ["dfecc01d", "03bb9f9c"]
+evidence = "reconstructed"
+
+[[changes]]
+category = "improvement"
+subsystem = "editor"
+title = "The editor's design system: tokens, one way to open windows and dialogs, a shortcut table, layout presets and Increase contrast"
+prs = [63, 66, 71, 73, 74, 79]
+evidence = "reconstructed"
+
+[[changes]]
+category = "improvement"
+subsystem = "editor"
+title = "A usability pass over the editor: filters, reset to default, folding Advanced properties, clearer Model Studio, block editor and Animation tab"
+prs = [31, 33, 35, 36, 38, 39, 40, 42, 43, 46, 54, 56]
+evidence = "reconstructed"
+
+[[changes]]
+category = "improvement"
+subsystem = "build"
+title = "check-packages.py builds, packages and runs Build Game on each OS without CI; macOS Build Game apps are signed ad hoc"
+features = ["build.package-checks"]
+prs = [62, 81]
+evidence = "reconstructed"
+
+[[changes]]
+category = "improvement"
+subsystem = "project"
+title = "Event-based file watching with a polling fallback"
+prs = [9]
+evidence = "reconstructed"
+
+[[changes]]
+category = "improvement"
+subsystem = "networking"
+title = "The dedicated server no longer links GPU and audio libraries"
+features = ["networking.dedicated-server"]
+prs = [13]
+evidence = "reconstructed"
+
+[[changes]]
+category = "internal"
+subsystem = "build"
+title = "Player, server and editor Play share one frame Schedule (sim crate)"
+prs = [15, 16, 20, 24]
+evidence = "reconstructed"
+
+[[changes]]
+category = "internal"
+subsystem = "gameplay"
+title = "Game systems moved from the script crate to the gameplay crate"
+prs = [68, 72, 77, 82, 85]
+evidence = "reconstructed"
+
+[[changes]]
+category = "internal"
+subsystem = "toolbox"
+title = "Toolbox crate with ambientCG, Poly Haven and Openverse providers; Get texture uses it. Not yet a panel in the editor"
+prs = [90, 96]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "editor"
+title = "AI tools can read a project through `axcenity-editor --mcp`: its scene, objects and API docs"
+stability = "experimental"
+features = ["editor.mcp"]
+prs = [102]
+evidence = "reconstructed"
+
+[[changes]]
+category = "feature"
+subsystem = "release"
+title = "Every program has --version, and the About box shows the version, channel and commit"
+details = "The version in Cargo.toml is now the product version, including its -alpha.N suffix, so the editor no longer calls an alpha build 0.1.0."
+features = ["release.version-info"]
+fixes = ["AX-0002"]
+
+[[changes]]
+category = "security"
+subsystem = "release"
+title = "Each release comes with a signed manifest listing every download's SHA-256, and its full release history"
+details = "axcenity-release.json is signed with minisign; check it with the public key in packaging/axcenity-release.pub. The editor's updater will trust only this file."
+
+[[changes]]
+category = "feature"
+subsystem = "release"
+title = "Help > Version Explorer shows every release, feature and known issue, and compares two versions"
+details = "It works offline from the release history built into the editor. Help > About's Copy diagnostics copies the build, system, GPU and the known issues of your version for a bug report."
+features = ["release.version-explorer"]
+
+[[changes]]
+category = "feature"
+subsystem = "release"
+title = "The editor tells you when a new version is out on your update channel"
+details = "Settings > Updates: follow Stable, Beta or Development, check every day, every week or only by hand. Official builds only; a check asks GitHub for its release list and verifies the release's signed manifest before saying anything."
+features = ["release.update-checks"]
+
+[[changes]]
+category = "feature"
+subsystem = "release"
+title = "The editor downloads and installs updates itself, and can roll back"
+details = "Settings > Updates on the Windows setup and the Linux tar.gz: Download and install (resumable, checked against the signed manifest's size and SHA-256), then Restart and install. A small axcenity-updater swaps the install folder after the editor closes, checks the new version runs and puts the old one back if it doesn't; Roll back returns to the version it replaced. Projects, settings and other user files are never touched. Other installs are told how to update."
+features = ["release.updater"]
+
+[[changes]]
+category = "breaking"
+subsystem = "project"
+title = "The editor asks before upgrading an older project, and projects record which Axcenity saved them"
+details = "Projects are now format 5: the manifest records the Axcenity version that made and last saved the project. Opening an older project shows what the upgrade changes and where the files from before are kept, and nothing is written until you choose Upgrade; if the upgraded world won't load, the old files are put back. A project from a newer Axcenity is refused with the version to update to. What breaks: an older Axcenity can't open a project once this version has upgraded or saved it. To go back, open the copy kept in .axcenity/previous/4 with the older version."
+features = ["project.format-migration"]

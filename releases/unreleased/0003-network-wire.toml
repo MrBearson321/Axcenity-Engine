@@ -1,8 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "performance"
-subsystem = "networking"
-title = "Replication sends only what moved, in a compact binary wire format (network protocol 10)"
-details = "Players and servers must run the same build: an older one is refused with both protocol numbers named."
-features = ["networking.multiplayer"]
-prs = [34]
-evidence = "reconstructed"

@@ -1,8 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "feature"
-subsystem = "editor"
-title = "AI tools can read a project through `axcenity-editor --mcp`: its scene, objects and API docs"
-features = ["editor.mcp"]
-prs = [102]
-stability = "experimental"
-evidence = "reconstructed"

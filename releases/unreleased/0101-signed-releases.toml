@@ -1,4 +1,0 @@
-category = "security"
-subsystem = "release"
-title = "Each release comes with a signed manifest listing every download's SHA-256, and its full release history"
-details = "axcenity-release.json is signed with minisign; check it with the public key in packaging/axcenity-release.pub. The editor's updater will trust only this file."

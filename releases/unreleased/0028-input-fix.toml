@@ -1,6 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "fix"
-subsystem = "player"
-title = "Clicking no longer casts a ray when nothing has a ClickDetector, and MeshPart hulls are cached"
-prs = [21]
-evidence = "reconstructed"
