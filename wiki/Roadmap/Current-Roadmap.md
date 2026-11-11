@@ -73,7 +73,7 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G8 | `RollOffMode` curves and audio occlusion | **Done** (#128) |
 | G9 | Upscaling (FSR 1-class) | Stage 1 (spatial EASU + RCAS below 100% render scale) in review; stage 2 (upscale inside TAA) not started |
 | G10 | Plugin API additions | Planned, as needed |
-| G11 | Split the editor (L6) | In progress: PR 1 moves the shared UI base into `editor-kit`; Model Studio next |
+| G11 | Split the editor (L6) | In progress: `editor-kit` (#162), the Toolbox tab in `editor-toolbox`; Graphics Benchmark next, Model Studio after the animation work |
 | G12 | Cooked-only games, read the pack in place | Planned |
 | G13 | 16–32 client LAN test | Planned, when the PC is free |
 | G14–G16 | Run without a player; physics debug views; humanoid retargeting | Planned |

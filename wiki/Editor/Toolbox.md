@@ -3,8 +3,8 @@ title: Toolbox (online asset sources)
 type: system
 status: current
 implementation: implemented
-crates: [toolbox, editor]
-source: [crates/toolbox/src/lib.rs, crates/toolbox/src/source.rs, crates/toolbox/src/record.rs, crates/toolbox/src/download.rs, crates/toolbox/src/db.rs, crates/toolbox/src/provenance.rs, crates/editor/src/toolbox_panel.rs, crates/editor/src/toolbox_panel/packs.rs]
+crates: [toolbox, editor-toolbox, editor]
+source: [crates/toolbox/src/lib.rs, crates/toolbox/src/source.rs, crates/toolbox/src/record.rs, crates/toolbox/src/download.rs, crates/toolbox/src/db.rs, crates/toolbox/src/provenance.rs, crates/editor-toolbox/src/lib.rs, crates/editor-toolbox/src/packs.rs]
 docs: [docs/research/asset-sources/README.md, docs/research/asset-sources/provider-interface.md, docs/editor/assets.md, docs/editor/plugins.md, crates/toolbox/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -14,11 +14,11 @@ tags: [system/editor, assets, toolbox]
 # Toolbox (online asset sources)
 
 > [!summary]
-> Roadmap **G1** (PRs #90, #92, #96, #107): the editor's one way to find and fetch assets online. The **`toolbox`** crate defines `AssetSource` and the shared `AssetRecord`, with **ambientCG** (v3 API), **Poly Haven** and **Openverse** sources; verified downloads (size, MD5, `.part` files, unpacking) into a **central asset directory** recorded in a SQLite `metadata.db` (`rusqlite`, versioned schema, also read from Python); a library (favourites, collections, recents); provenance (`.axcenity/asset-sources.json`, `CREDITS.txt`); Toolbox packs; the Blender library migration; the `axcenity-toolbox` CLI and a Python package with Blender providers. The editor's **Toolbox tab** (`toolbox_panel.rs`) replaced the Assets panel's old ambientCG "Get texture". **Editor only.** **Implemented.**
+> Roadmap **G1** (PRs #90, #92, #96, #107): the editor's one way to find and fetch assets online. The **`toolbox`** crate defines `AssetSource` and the shared `AssetRecord`, with **ambientCG** (v3 API), **Poly Haven** and **Openverse** sources; verified downloads (size, MD5, `.part` files, unpacking) into a **central asset directory** recorded in a SQLite `metadata.db` (`rusqlite`, versioned schema, also read from Python); a library (favourites, collections, recents); provenance (`.axcenity/asset-sources.json`, `CREDITS.txt`); Toolbox packs; the Blender library migration; the `axcenity-toolbox` CLI and a Python package with Blender providers. The editor's **Toolbox tab** (`editor-toolbox`'s `lib.rs`) replaced the Assets panel's old ambientCG "Get texture". **Editor only.** **Implemented.**
 
 ## Searching
 
-Textures and skies search **All sources** by default: `search` in `toolbox_panel.rs` asks each source on its own thread (`std::thread::scope`), interleaves their pages, and reports a source that fails while others answered (`Found::failed`) instead of failing the search. Results are deduplicated by `provider:id` only; assets from two sources are never merged. The Sounds tab carries a licence notice (`SOUND_LICENCE_NOTICE`) above Openverse's results; each card keeps its own licence.
+Textures and skies search **All sources** by default: `search` in `editor-toolbox`'s `lib.rs` asks each source on its own thread (`std::thread::scope`), interleaves their pages, and reports a source that fails while others answered (`Found::failed`) instead of failing the search. Results are deduplicated by `provider:id` only; assets from two sources are never merged. The Sounds tab carries a licence notice (`SOUND_LICENCE_NOTICE`) above Openverse's results; each card keeps its own licence.
 
 ## Where its assets show
 

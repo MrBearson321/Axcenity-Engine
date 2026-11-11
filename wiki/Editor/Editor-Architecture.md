@@ -79,7 +79,7 @@ Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin
 
 ## Limitations
 
-- One giant crate (~177k lines, 4.4k of them now in `editor-kit`); `EditorApp` has ~118 fields. G11 (L6) splits it one step at a time: first the shared UI base into `editor-kit`, then one panel family per crate (Model Studio next; Blocks and Animation wait while their redesign is in progress).
+- One giant crate (~177k lines, 4.4k of them now in `editor-kit`); `EditorApp` has ~118 fields. G11 (L6) splits it one step at a time: first the shared UI base into `editor-kit`, then one panel family per crate: the Toolbox tab (`editor-toolbox`), then Graphics Benchmark. Model Studio needs Animation's preview, so it waits with Blocks and Animation while their redesign is in progress.
 - egui repaints the whole editor every Play frame; panics while *drawing* the Play world aren't caught yet.
 - Editor Play can't host or join a real network game (loopback only).
 
