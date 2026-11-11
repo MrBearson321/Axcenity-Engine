@@ -101,6 +101,9 @@ const WORDS: &[(&str, Role)] = &[
     ("normaldirectx", Role::Normal { flip_green: true }),
     ("normaldx", Role::Normal { flip_green: true }),
     ("nrmdx", Role::Normal { flip_green: true }),
+    // Poly Haven's `nor_dx` / `nor_gl`, seen whole before `nor` alone.
+    ("nordx", Role::Normal { flip_green: true }),
+    ("norgl", Role::Normal { flip_green: false }),
     ("normalopengl", Role::Normal { flip_green: false }),
     ("normalgl", Role::Normal { flip_green: false }),
     ("normalmap", Role::Normal { flip_green: false }),
@@ -581,6 +584,35 @@ mod tests {
         for name in ["wood.png", "n.png", "texture_01.png", ""] {
             assert_eq!(role_from_name(name), None, "{name}");
         }
+    }
+
+    #[test]
+    fn poly_haven_normal_maps_say_which_convention_they_are() {
+        // Poly Haven names them `<asset>_nor_dx_<size>` and `<asset>_nor_gl_<size>`.
+        assert_eq!(
+            role_from_name("red_brick_03_nor_dx_2k.jpg"),
+            Some(Role::Normal { flip_green: true })
+        );
+        assert_eq!(
+            role_from_name("red_brick_03_nor_gl_2k.jpg"),
+            Some(Role::Normal { flip_green: false })
+        );
+        assert_eq!(
+            role_from_name("red_brick_03_diff_2k.jpg"),
+            Some(Role::BaseColor)
+        );
+        assert_eq!(
+            role_from_name("red_brick_03_rough_2k.jpg"),
+            Some(Role::Roughness)
+        );
+        assert_eq!(
+            role_from_name("red_brick_03_arm_2k.jpg"),
+            Some(Role::Packed(Packing::Orm))
+        );
+        assert_eq!(
+            role_from_name("red_brick_03_disp_2k.png"),
+            Some(Role::Height)
+        );
     }
 
     fn image(rgba: [u8; 4]) -> Arc<Image> {
