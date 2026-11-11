@@ -71,6 +71,35 @@ pub(crate) fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, WireE
     }
 }
 
+/// File bytes, written as one block (postcard's bytes) rather than one
+/// number per byte, which is many times faster for big files.
+struct Blob(Vec<u8>);
+
+impl Serialize for Blob {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Blob {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Blob, D::Error> {
+        struct Bytes;
+        impl<'de> serde::de::Visitor<'de> for Bytes {
+            type Value = Blob;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("bytes")
+            }
+            fn visit_bytes<E>(self, bytes: &[u8]) -> Result<Blob, E> {
+                Ok(Blob(bytes.to_vec()))
+            }
+            fn visit_byte_buf<E>(self, bytes: Vec<u8>) -> Result<Blob, E> {
+                Ok(Blob(bytes))
+            }
+        }
+        deserializer.deserialize_byte_buf(Bytes)
+    }
+}
+
 fn id(bits: u64) -> InstanceId {
     InstanceId::from_bits(bits)
 }
@@ -500,7 +529,7 @@ enum WireToHost {
         hash: FileHash,
         at: u64,
         total: u64,
-        bytes: Vec<u8>,
+        bytes: Blob,
     },
     Fetch(Vec<FileHash>),
     Lock(String),
@@ -554,7 +583,7 @@ impl From<&ToHost> for WireToHost {
                 hash: *hash,
                 at: *at,
                 total: *total,
-                bytes: bytes.0.to_vec(),
+                bytes: Blob(bytes.0.to_vec()),
             },
             ToHost::Fetch(hashes) => WireToHost::Fetch(hashes.clone()),
             ToHost::Lock { path } => WireToHost::Lock(path.clone()),
@@ -583,7 +612,7 @@ impl WireToHost {
                 hash,
                 at,
                 total,
-                bytes: Piece(Arc::from(bytes)),
+                bytes: Piece(Arc::from(bytes.0)),
             },
             WireToHost::Fetch(hashes) => ToHost::Fetch(hashes),
             WireToHost::Lock(path) => ToHost::Lock { path },
@@ -602,6 +631,7 @@ enum WireToClient {
         ids: Option<IdBlock>,
         rejected: Vec<(u64, WireRefusal)>,
         files: Manifest,
+        session: String,
     },
     Resumed {
         last_client_seq: u64,
@@ -631,7 +661,7 @@ enum WireToClient {
         hash: FileHash,
         at: u64,
         total: u64,
-        bytes: Vec<u8>,
+        bytes: Blob,
     },
     Missing(FileHash),
     Locks(BTreeMap<String, u32>),
@@ -649,6 +679,7 @@ impl From<&ToClient> for WireToClient {
                 ids,
                 rejected,
                 files,
+                session,
             } => WireToClient::Welcome {
                 world: WireWorld::of(&world.0, graveyard),
                 seq: *seq,
@@ -657,6 +688,7 @@ impl From<&ToClient> for WireToClient {
                 ids: *ids,
                 rejected: refusals(rejected),
                 files: files.clone(),
+                session: session.clone(),
             },
             ToClient::Resumed {
                 last_client_seq,
@@ -714,7 +746,7 @@ impl From<&ToClient> for WireToClient {
                 hash: *hash,
                 at: *at,
                 total: *total,
-                bytes: bytes.0.to_vec(),
+                bytes: Blob(bytes.0.to_vec()),
             },
             ToClient::Missing(hash) => WireToClient::Missing(*hash),
             ToClient::Locks(locks) => WireToClient::Locks(
@@ -738,6 +770,7 @@ impl WireToClient {
                 ids,
                 rejected,
                 files,
+                session,
             } => {
                 let (world, graveyard) = world.into_world()?;
                 ToClient::Welcome {
@@ -749,6 +782,7 @@ impl WireToClient {
                     ids,
                     rejected: unwire_refusals(rejected),
                     files,
+                    session,
                 }
             }
             WireToClient::Resumed {
@@ -811,7 +845,7 @@ impl WireToClient {
                 hash,
                 at,
                 total,
-                bytes: Piece(Arc::from(bytes)),
+                bytes: Piece(Arc::from(bytes.0)),
             },
             WireToClient::Missing(hash) => ToClient::Missing(hash),
             WireToClient::Locks(locks) => ToClient::Locks(

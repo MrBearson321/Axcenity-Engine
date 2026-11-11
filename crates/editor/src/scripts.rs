@@ -82,6 +82,9 @@ pub struct ScriptTab {
     /// What luau-lsp last found in the code (`luau_check.rs`), underlined.
     /// Kept while the code changes, until the next check comes back.
     pub problems: Vec<Diagnostic>,
+    /// In a Team Create session, who else is editing this file: the tab is
+    /// read-only until they save or close it. The app sets it each frame.
+    pub editing_elsewhere: Option<String>,
 }
 
 impl ScriptTab {
@@ -163,6 +166,7 @@ impl ScriptTabs {
             highlighted: None,
             assist: Assist::default(),
             problems: Vec::new(),
+            editing_elsewhere: None,
         });
         self.next_id += 1;
         self.tabs.len() - 1
@@ -348,6 +352,18 @@ impl ScriptTabs {
             return;
         };
         let warning = ui.visuals().warn_fg_color;
+        if let Some(who) = &tab.editing_elsewhere {
+            ui.colored_label(
+                warning,
+                theme::with_icon(
+                    icons::LOCK,
+                    &format!(
+                        "{who} is editing this file. It's read-only here until they save or \
+                         close it."
+                    ),
+                ),
+            );
+        }
         match tab.disk {
             Disk::Same => {}
             Disk::Changed => {
@@ -518,6 +534,7 @@ fn code_editor(
                 let keys = tab.assist.take_keys(ui, focused);
                 let output = egui::TextEdit::multiline(&mut tab.text)
                     .id(id)
+                    .interactive(tab.editing_elsewhere.is_none())
                     .font(font.clone())
                     .code_editor()
                     .frame(egui::Frame::NONE)

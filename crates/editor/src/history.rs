@@ -929,13 +929,10 @@ impl History {
     /// What the newest step changed that Team Create doesn't share yet
     /// (it shares Instances), such as "terrain".
     pub fn top_unshared(&self) -> Option<&'static str> {
+        // Files a step writes (stylesheets, clips, imports) are shared by
+        // the session's folder sync (TC5).
         match &self.undo.last()?.kind {
-            StepKind::Fields { texts, .. } | StepKind::Many { texts, .. } if !texts.is_empty() => {
-                Some("stylesheets")
-            }
-            StepKind::Files { .. } => Some("project files"),
             StepKind::World { texts, .. } if !texts.is_empty() => Some("project files"),
-            StepKind::Blobs { .. } => Some("imported files"),
             StepKind::Terrain { .. } => Some("terrain"),
             StepKind::Strings { .. } => Some("the string table"),
             _ => None,

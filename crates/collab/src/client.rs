@@ -114,6 +114,8 @@ pub struct Client {
     my_locks: BTreeSet<String>,
     /// This member's transactions the host refused lately, newest last.
     refused: VecDeque<u64>,
+    /// Names the session's project, once joined.
+    session: Option<String>,
 }
 
 impl Client {
@@ -143,7 +145,14 @@ impl Client {
             locks: BTreeMap::new(),
             my_locks: BTreeSet::new(),
             refused: VecDeque::new(),
+            session: None,
         }
+    }
+
+    /// Names the session's project, once joined (empty if the host didn't
+    /// name it).
+    pub fn session(&self) -> Option<&str> {
+        self.session.as_deref()
     }
 
     /// True if the host refused transaction `client_seq` (among the last
@@ -180,6 +189,17 @@ impl Client {
         }
         self.outbox.push(ToHost::Fetch(hashes));
         true
+    }
+
+    /// True when fetched files (or word of missing ones) wait for
+    /// [`Client::take_files`].
+    pub fn files_waiting(&self) -> bool {
+        !self.arrived.is_empty() || !self.missing.is_empty()
+    }
+
+    /// The documents this member asked to edit.
+    pub fn my_locks(&self) -> &BTreeSet<String> {
+        &self.my_locks
     }
 
     /// Files fetched since the last call.
@@ -546,8 +566,10 @@ impl Client {
                 ids,
                 rejected,
                 files,
+                session,
             } => {
                 self.files = files;
+                self.session = Some(session);
                 // The old copy is gone, and with it what undoes the pending
                 // edits on it. Blocks of IDs not used yet stay this member's.
                 for pending in &mut self.pending {
