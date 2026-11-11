@@ -234,7 +234,7 @@ pub fn prepare(repo: &Path, version: &Version, date: &str) -> Result<PathBuf, Pr
         published: true,
         note: String::new(),
         commit: String::new(),
-        formats: Default::default(),
+        formats: history.formats().clone(),
         verification: Default::default(),
         changes: history
             .unreleased()

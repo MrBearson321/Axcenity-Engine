@@ -1,0 +1,14 @@
+# The file formats this code writes, by name. `prepare` copies them into the
+# release record, and `check` wants a `breaking` change entry when one differs
+# from the last release's. Each is tested against its constant in the code:
+#   project           axcenity_project::FORMAT_VERSION (axcenity.json)
+#   world             world_file.rs WORLD_FORMAT_VERSION (world.json, levels, prefabs)
+#   axgame            packed.rs VERSION (built games)
+#   save              axcenity_save::SAVE_VERSION (game saves)
+#   network_protocol  axcenity_net::PROTOCOL_VERSION (hosts and clients must match)
+[formats]
+project = 5
+world = 2
+axgame = 2
+save = 2
+network_protocol = 11

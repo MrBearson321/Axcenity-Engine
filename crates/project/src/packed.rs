@@ -1060,4 +1060,24 @@ mod tests {
             fs::remove_dir_all(folder).unwrap();
         }
     }
+
+    /// `name`'s number in the repository's `releases/formats.toml`, which the
+    /// release tools copy into each release record.
+    fn released_format(name: &str) -> u32 {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../releases/formats.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        text.lines()
+            .find_map(|line| {
+                let (key, value) = line.split_once('=')?;
+                (key.trim() == name).then(|| value.trim().parse().unwrap())
+            })
+            .unwrap_or_else(|| panic!("releases/formats.toml has no `{name}`"))
+    }
+
+    #[test]
+    fn the_release_files_list_these_formats() {
+        assert_eq!(released_format("axgame"), VERSION);
+        assert_eq!(released_format("project"), crate::FORMAT_VERSION);
+    }
 }

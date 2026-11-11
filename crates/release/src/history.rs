@@ -13,8 +13,8 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::records::{
-    Category, Change, Evidence, Feature, FeatureFile, FeatureStatus, Introduced, IssueFile,
-    IssueStatus, KnownIssue, ReleaseRecord, Subsystem, VersionRef,
+    Category, Change, Evidence, Feature, FeatureFile, FeatureStatus, FormatsFile, Introduced,
+    IssueFile, IssueStatus, KnownIssue, ReleaseRecord, Subsystem, VersionRef,
 };
 use crate::version::Version;
 
@@ -23,6 +23,9 @@ pub const HISTORY_DIR: &str = "history";
 pub const UNRELEASED_DIR: &str = "unreleased";
 pub const FEATURES_DIR: &str = "features";
 pub const ISSUES_FILE: &str = "issues.toml";
+/// The formats the code writes now (`releases/formats.toml`); `prepare`
+/// copies them into the release record.
+pub const FORMATS_FILE: &str = "formats.toml";
 
 #[derive(Debug, Error)]
 pub enum LoadError {
@@ -210,6 +213,8 @@ pub struct History {
     /// Problems found while loading (a record whose file name isn't its
     /// version), reported by [`History::validate`].
     load_problems: Vec<Problem>,
+    /// From [`FORMATS_FILE`]; empty without one.
+    formats: BTreeMap<String, u32>,
 }
 
 impl History {
@@ -227,7 +232,13 @@ impl History {
             features,
             issues,
             load_problems: Vec::new(),
+            formats: BTreeMap::new(),
         }
+    }
+
+    /// The file formats the code writes now, by name (`project`, `save`, …).
+    pub fn formats(&self) -> &BTreeMap<String, u32> {
+        &self.formats
     }
 
     /// Reads a `releases/` folder. Missing parts are empty.
@@ -238,9 +249,11 @@ impl History {
                 sources.push((display(dir, &path), read(&path)?));
             }
         }
-        let issues_path = dir.join(ISSUES_FILE);
-        if issues_path.exists() {
-            sources.push((ISSUES_FILE.to_owned(), read(&issues_path)?));
+        for file in [ISSUES_FILE, FORMATS_FILE] {
+            let path = dir.join(file);
+            if path.exists() {
+                sources.push((file.to_owned(), read(&path)?));
+            }
         }
         History::from_sources(sources)
     }
@@ -266,6 +279,7 @@ impl History {
         let mut unreleased = Vec::new();
         let mut features = Vec::new();
         let mut issues = Vec::new();
+        let mut formats = BTreeMap::new();
         for (path, text) in &sources {
             let (folder, name) = path.rsplit_once('/').unwrap_or(("", path.as_str()));
             let Some(stem) = name.strip_suffix(".toml") else {
@@ -290,11 +304,15 @@ impl History {
                 }
                 FEATURES_DIR => features.extend(parse_text::<FeatureFile>(path, text)?.feature),
                 "" if name == ISSUES_FILE => issues = parse_text::<IssueFile>(path, text)?.issue,
+                "" if name == FORMATS_FILE => {
+                    formats = parse_text::<FormatsFile>(path, text)?.formats;
+                }
                 _ => {}
             }
         }
         let mut history = History::new(releases, unreleased, features, issues);
         history.load_problems = problems;
+        history.formats = formats;
         Ok(history)
     }
 
@@ -363,7 +381,9 @@ impl History {
             .iter()
             .filter_map(|(name, change)| clean(change).map(|c| (name.clone(), c)))
             .collect();
-        History::new(releases, unreleased, features, issues)
+        let mut public = History::new(releases, unreleased, features, issues);
+        public.formats = self.formats.clone();
+        public
     }
 
     /// Every change with the version it belongs to, oldest release first,
@@ -389,6 +409,32 @@ impl History {
     pub fn validate(&self) -> Vec<Problem> {
         let mut problems = self.load_problems.clone();
         let mut push = |file: String, message: String| problems.push(Problem { file, message });
+        // A format the next release changes needs a breaking change saying so.
+        if let Some(latest) = self.latest() {
+            let changed: Vec<String> = self
+                .formats
+                .iter()
+                .filter_map(|(name, &now)| {
+                    let then = *latest.formats.get(name)?;
+                    (then != now).then(|| format!("`{name}` {then} → {now}"))
+                })
+                .collect();
+            let said = self
+                .unreleased
+                .iter()
+                .any(|(_, c)| c.category == Category::Breaking);
+            if !changed.is_empty() && !said {
+                push(
+                    FORMATS_FILE.to_owned(),
+                    format!(
+                        "{} changed since {}, but no unreleased change is `breaking`; add one \
+                         that says what an older Axcenity can no longer open",
+                        changed.join(", "),
+                        latest.version
+                    ),
+                );
+            }
+        }
         let versions: BTreeSet<&Version> = self.releases.iter().map(|r| &r.version).collect();
         let feature_ids: BTreeSet<&str> = self.features.iter().map(|f| f.id.as_str()).collect();
         let issue_ids: BTreeSet<&str> = self.issues.iter().map(|i| i.id.as_str()).collect();

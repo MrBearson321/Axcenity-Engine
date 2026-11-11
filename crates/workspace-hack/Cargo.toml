@@ -21,8 +21,10 @@ arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 bytemuck = { version = "1", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "wasm_simd"] }
 byteorder = { version = "1" }
+cipher = { version = "0.4", default-features = false, features = ["zeroize"] }
 crc32fast = { version = "1" }
 crossbeam-utils = { version = "0.8" }
+crypto-common = { version = "0.1", default-features = false, features = ["getrandom"] }
 either = { version = "1", features = ["use_std"] }
 flate2 = { version = "1" }
 font-types = { version = "0.12", default-features = false, features = ["bytemuck", "serde", "std"] }
@@ -71,7 +73,8 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-trai
 [target.x86_64-unknown-linux-gnu.dependencies]
 ahash = { version = "0.8", features = ["no-rng", "serde"] }
 bitflags = { version = "2", default-features = false, features = ["std"] }
-crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
+crypto-common = { version = "0.1", default-features = false, features = ["std"] }
+digest = { version = "0.10", features = ["mac", "std"] }
 fastrand = { version = "2" }
 futures-io = { version = "0.3" }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
@@ -107,7 +110,8 @@ winnow = { version = "1" }
 [target.x86_64-apple-darwin.dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
 block2 = { version = "0.6" }
-crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
+crypto-common = { version = "0.1", default-features = false, features = ["std"] }
+digest = { version = "0.10", features = ["mac", "std"] }
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga", "tiff"] }
@@ -124,7 +128,8 @@ libc = { version = "0.2" }
 [target.aarch64-apple-darwin.dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
 block2 = { version = "0.6" }
-crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
+crypto-common = { version = "0.1", default-features = false, features = ["std"] }
+digest = { version = "0.10", features = ["mac", "std"] }
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga", "tiff"] }
@@ -139,7 +144,8 @@ smallvec = { version = "1", default-features = false, features = ["union"] }
 libc = { version = "0.2" }
 
 [target.x86_64-pc-windows-msvc.dependencies]
-crypto-common = { version = "0.1", default-features = false, features = ["getrandom", "std"] }
+crypto-common = { version = "0.1", default-features = false, features = ["std"] }
+digest = { version = "0.10", features = ["mac", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std"] }
 half = { version = "2", features = ["num-traits"] }
 smallvec = { version = "1", default-features = false, features = ["union"] }
