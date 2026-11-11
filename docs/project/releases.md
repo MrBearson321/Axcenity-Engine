@@ -73,7 +73,7 @@ GitHub Actions runs only for release tags, so each release run is deliberate ([d
    - **Sign and draft**, in the `release` environment: writes `axcenity-history.json` and `axcenity-release.json`, signs the manifest with minisign, verifies the signature with `packaging/axcenity-release.pub`, writes `SHA256SUMS.txt`, and creates a **draft** release with the notes from `axcenity-release notes`. With a required reviewer on the environment, this job waits for that person's approval first.
 5. **Publish**: open the draft on GitHub, read it, and press **Publish release**. Nothing reaches users before this. A published release never changes; a mistake is fixed by the next release (and a `[[corrections]]` entry in its record).
 
-To build an existing tag again (for example after a runner failure), run **Actions > Release > Run workflow** with dry run off and the tag filled in. It replaces the files of a draft, and refuses a tag that is already published.
+To build an existing tag again (for example after a runner failure), run **Actions > Release > Run workflow**, pick the tag under **Use workflow from**, and turn dry run off. It replaces the files of a draft, and refuses a tag that is already published. A run always builds the ref it was started on, never another one.
 
 ### Costs
 
@@ -86,7 +86,7 @@ The manifest is signed with [minisign](https://jedisct1.github.io/minisign/) (Ed
 1. Make the key pair without a password (GitHub keeps the secret encrypted; a password stored beside it adds nothing): `minisign -G -W -p axcenity-release.pub -s axcenity-release.key`.
 2. Commit `axcenity-release.pub` as `packaging/axcenity-release.pub`.
 3. In the repository's **Settings > Environments**, create `release`, add yourself as a required reviewer, and add an environment secret `MINISIGN_SECRET_KEY` with the whole contents of `axcenity-release.key`. Then keep the `.key` file offline (a password manager), not in the repository.
-4. Run **Actions > Release > Run workflow** with dry run on. Its **Signing key check** signs a scratch file and verifies it with the committed public key.
+4. Run **Actions > Release > Run workflow** on `main` with dry run on. Its **Signing key check** signs a scratch file and verifies it with the committed public key.
 
 Rotating the key means shipping the new public key in a release signed with the old one ([research/release-system/architecture.md](../research/release-system/architecture.md#9-security-and-integrity-d7)).
 
@@ -100,7 +100,7 @@ Before pushing a change to a workflow:
 - `cargo test -p axcenity-release`: the plan, notes, history file and manifest.
 - The scripts the steps call, run locally: `packaging/stage.py`, `packaging/update-zip.py`, `packaging/linux/build-packages.sh`, `scripts/check-release-build.py` (its docstring shows how to make an official build locally).
 
-Then, once merged, one dry run (**Run workflow** with dry run on) proves the trigger, permissions and signing key in about two Linux minutes, without building anything.
+Then, once merged, one dry run (**Run workflow** on `main` with dry run on) proves the trigger, permissions and signing key in about two Linux minutes, without building anything.
 
 ## Checking packages
 

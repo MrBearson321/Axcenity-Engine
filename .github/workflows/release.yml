@@ -6,30 +6,27 @@ name: Release
 # publishes on its own. How to cut a release: docs/project/releases.md.
 #
 # No build cache, on purpose: a cache saved by one tag can't be restored by
-# the next (caches are per ref), and a run started by hand runs in main's
-# context while building a tag, where saving a cache would let that code
-# feed later runs. Releases are rare and the runners are free, so every
-# release builds from scratch.
+# the next (caches are per ref), so it would only cost storage. Releases are
+# rare and the runners are free, so every release builds from scratch.
 on:
   push:
     tags:
       - "v*"
+  # Run workflow from a branch: a dry run. From a tag (pick it under "Use
+  # workflow from"): that tag's release, built again, unless dry run is on.
+  # Every job checks out the ref the run was started on, never another.
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Dry run: only check the release files and the signing key (about two Linux minutes)"
         type: boolean
         default: true
-      tag:
-        description: "Tag to build again, such as v0.2.0-alpha.1 (needed when dry run is off)"
-        required: false
-        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -43,7 +40,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       full: ${{ steps.mode.outputs.full }}
-      ref: ${{ steps.mode.outputs.ref }}
       tag: ${{ steps.plan.outputs.tag }}
       version: ${{ steps.plan.outputs.version }}
       channel: ${{ steps.plan.outputs.channel }}
@@ -55,34 +51,29 @@ jobs:
       - name: Decide what this run does
         id: mode
         env:
-          EVENT: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
-          INPUT_TAG: ${{ inputs.tag }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          if [ "$EVENT" = "push" ]; then
-            tag="$REF_NAME"; full=true
+          tag=""
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then tag="$GITHUB_REF_NAME"; fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            full=true
           elif [ "$DRY_RUN" = "true" ]; then
-            tag="$INPUT_TAG"; full=false
+            full=false
+          elif [ -n "$tag" ]; then
+            full=true
           else
-            if [ -z "$INPUT_TAG" ]; then
-              echo "::error::Turn dry run on, or give the tag to build"
-              exit 1
-            fi
-            tag="$INPUT_TAG"; full=true
+            echo "::error::A full run needs a release tag: pick it under \"Use workflow from\", or turn dry run on"
+            exit 1
           fi
-          if [ -n "$tag" ]; then ref="refs/tags/$tag"; else ref="$GITHUB_REF"; fi
           {
             echo "tag=$tag"
             echo "full=$full"
-            echo "ref=$ref"
           } >> "$GITHUB_OUTPUT"
-          echo "Full release run: $full; tag: ${tag:-none}; ref: $ref"
+          echo "Full release run: $full; tag: ${tag:-none}; ref: $GITHUB_REF"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.mode.outputs.ref }}
-      - uses: dtolnay/rust-toolchain@1.97.0
+          - uses: dtolnay/rust-toolchain@1.97.0
       - name: Check releases/, Cargo.toml and the tag
         env:
           TAG: ${{ steps.mode.outputs.tag }}
@@ -159,8 +150,6 @@ jobs:
     environment: release
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.ref }}
       - name: Install minisign
         run: sudo apt-get update -q && sudo apt-get install -y -q minisign
       - name: Sign and verify a scratch file
@@ -210,8 +199,6 @@ jobs:
       SOURCE_DATE_EPOCH: ${{ needs.validate.outputs.source_date_epoch }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.ref }}
       - uses: dtolnay/rust-toolchain@1.97.0
         if: matrix.host != 'macos'
       - uses: dtolnay/rust-toolchain@1.97.0
@@ -274,8 +261,6 @@ jobs:
       SOURCE_DATE_EPOCH: ${{ needs.validate.outputs.source_date_epoch }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -337,8 +322,6 @@ jobs:
       VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -381,8 +364,6 @@ jobs:
       VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -447,8 +428,6 @@ jobs:
       PRERELEASE: ${{ needs.validate.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.ref }}
       - uses: dtolnay/rust-toolchain@1.97.0
       - name: Install minisign
         run: sudo apt-get update -q && sudo apt-get install -y -q minisign

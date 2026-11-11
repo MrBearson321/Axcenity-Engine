@@ -10,6 +10,9 @@ GitHub (docs/project/releases.md, "Testing the release workflow").
 - Every bash `run:` block parses (`bash -n`), with `${{ … }}` replaced.
 - Jobs that can write to the repository or read the signing key are only the
   ones meant to.
+- No job checks out a ref other than the one the run started on, so code from
+  a tag never runs in the default branch's context (CodeQL's cache-poisoning
+  rule).
 
 Uses PyYAML. Exit code 1 on any problem.
 
@@ -108,6 +111,10 @@ def check_file(path: Path) -> list[str]:
             problems.append(f"{name}: reads a secret")
         if "secrets." in text and job.get("environment") != "release":
             problems.append(f"{name}: reads a secret outside the `release` environment")
+
+        for step in job.get("steps", []):
+            if str(step.get("uses", "")).startswith("actions/checkout") and "ref" in (step.get("with") or {}):
+                problems.append(f"{name}: checks out another ref ({step['with']['ref']})")
 
         shell = (job.get("defaults") or {}).get("run", {}).get("shell", "bash")
         for index, step in enumerate(job.get("steps", [])):
