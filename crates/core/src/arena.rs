@@ -37,6 +37,10 @@ pub struct Arena<T> {
     /// A replica takes its original's values at their own IDs
     /// ([`Arena::insert_at`]), and puts its own above `LOCAL_BASE`.
     replica: bool,
+    /// Index ranges this writer may fill (Team Create ID blocks), as
+    /// `(next, end)`: [`insert`](Self::insert) takes from these first in a
+    /// replica.
+    blocks: Vec<(u32, u32)>,
     len: usize,
 }
 
@@ -67,6 +71,7 @@ impl<T> Arena<T> {
             local_slots: Vec::new(),
             local_free: Vec::new(),
             replica: false,
+            blocks: Vec::new(),
             len: 0,
         }
     }
@@ -85,8 +90,61 @@ impl<T> Arena<T> {
         u32::try_from(self.slots.len()).expect("slots stay below LOCAL_BASE")
     }
 
+    /// Lets this arena fill indices `start..start + len` itself (at
+    /// generation 0), after any blocks it already has.
+    pub fn add_block(&mut self, start: u32, len: u32) {
+        let end = start.checked_add(len).filter(|&end| end <= LOCAL_BASE);
+        if let Some(end) = end
+            && len > 0
+        {
+            self.blocks.push((start, end));
+        }
+    }
+
+    /// How many indices are left in the blocks.
+    pub fn ids_left(&self) -> u32 {
+        self.blocks.iter().map(|(next, end)| end - next).sum()
+    }
+
+    /// The unused part of each block, as `(start, len)`.
+    pub fn blocks_left(&self) -> Vec<(u32, u32)> {
+        self.blocks
+            .iter()
+            .filter(|(next, end)| next < end)
+            .map(|&(next, end)| (next, end - next))
+            .collect()
+    }
+
+    /// Takes the next index from the blocks, as an ID at generation 0,
+    /// without storing anything there.
+    pub fn take_block_id(&mut self) -> Option<Id> {
+        while let Some((next, end)) = self.blocks.first_mut() {
+            if *next < *end {
+                let index = *next;
+                *next += 1;
+                return Some(Id {
+                    index,
+                    generation: 0,
+                });
+            }
+            self.blocks.remove(0);
+        }
+        None
+    }
+
     /// Stores `value` and returns its new ID.
     pub fn insert(&mut self, value: T) -> Id {
+        if self.replica {
+            // A block's indices are new everywhere, so their slots are
+            // empty; one that isn't (a bug elsewhere) is skipped.
+            while let Some(id) = self.take_block_id() {
+                if self.slot(id.index).is_none_or(|slot| slot.value.is_none()) {
+                    let stored = self.insert_at(id, value);
+                    debug_assert!(stored, "checked the slot is free");
+                    return id;
+                }
+            }
+        }
         self.len += 1;
         let (slots, free, base) = if self.replica {
             (&mut self.local_slots, &mut self.local_free, LOCAL_BASE)

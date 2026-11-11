@@ -1262,3 +1262,119 @@ fn a_parts_motion_changes_its_revision_but_not_its_revision_without_motion() {
         before + 1
     );
 }
+
+#[test]
+fn the_edit_journal_is_off_until_asked_and_keeps_what_each_edit_replaced() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let a = part_in(&mut world, workspace, "A");
+    assert!(!world.has_edits(), "off by default");
+    world.record_edits();
+    let b = part_in(&mut world, workspace, "B");
+    world.set_name(a, "Door").unwrap();
+    world.set_parent_at(b, workspace, 0).unwrap();
+    world
+        .set_attribute(a, "Damage", Some(Value::Number(2.0)))
+        .unwrap();
+    world.add_tag(a, "Hot").unwrap();
+    world.destroy(b).unwrap();
+    let edits = world.take_edits();
+    assert_eq!(
+        edits,
+        [
+            Edit::Created(b),
+            Edit::Name {
+                id: b,
+                before: "Part".into()
+            },
+            Edit::Parent {
+                id: b,
+                before: None
+            },
+            Edit::Name {
+                id: a,
+                before: "A".into()
+            },
+            Edit::Parent {
+                id: b,
+                before: Some((workspace, 1))
+            },
+            Edit::Attribute {
+                id: a,
+                name: "Damage".into(),
+                before: None
+            },
+            Edit::Tags {
+                id: a,
+                before: Vec::new()
+            },
+            // Destroying takes it out of the tree first.
+            Edit::Parent {
+                id: b,
+                before: Some((workspace, 0))
+            },
+            Edit::Destroyed(b),
+        ]
+    );
+    assert!(!world.has_edits(), "taking empties it");
+    // A move to where it already is isn't an edit.
+    world.set_parent_at(a, workspace, 0).unwrap();
+    assert!(!world.has_edits());
+}
+
+#[test]
+fn undoing_journalled_property_edits_newest_first_puts_metalness_back_after_material() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let a = part_in(&mut world, workspace, "A");
+    world
+        .set_known_property(a, "Metalness", Value::Number(0.25))
+        .unwrap();
+    world.record_edits();
+    world
+        .set_known_property(a, "Material", Value::Material(Material::Granite))
+        .unwrap();
+    for edit in world.take_edits().into_iter().rev() {
+        if let Edit::Property { id, name, before } = edit {
+            world.set_known_property(id, name, before).unwrap();
+        }
+    }
+    let part = world.get(a).unwrap();
+    assert_eq!(
+        part.property("Material"),
+        Some(&Value::Material(Material::Plastic))
+    );
+    assert_eq!(part.property("Metalness"), Some(&Value::Number(0.25)));
+}
+
+#[test]
+fn a_clone_of_a_recording_world_records_its_own_edits_only() {
+    let mut world = World::new();
+    world.record_edits();
+    let workspace = world.workspace();
+    part_in(&mut world, workspace, "A");
+    let mut copy = world.clone();
+    assert!(copy.is_recording_edits() && !copy.has_edits());
+    copy.stop_recording_edits();
+    part_in(&mut copy, workspace, "B");
+    assert!(!copy.has_edits());
+    assert!(world.has_edits());
+}
+
+#[test]
+fn a_replica_mode_world_makes_instances_at_ids_from_its_blocks_first() {
+    let mut world = World::new();
+    world.make_replica();
+    let start = world.next_unused_index() + 10;
+    world.add_id_block(start, 2);
+    assert_eq!(world.ids_left(), 2);
+    let a = world.create(ClassName::Part).unwrap();
+    assert_eq!(a.to_bits(), u64::from(start));
+    let taken = world.take_id().unwrap();
+    assert_eq!(taken.to_bits(), u64::from(start + 1));
+    assert_eq!(world.id_blocks_left(), []);
+    // Out of blocks: IDs only this computer uses.
+    assert!(world.create(ClassName::Part).unwrap().is_local());
+    world.create_at(taken, ClassName::Part).unwrap();
+    assert!(world.contains(taken));
+}

@@ -20,6 +20,7 @@ pub mod dialogue;
 mod enums;
 mod index;
 pub mod input;
+mod journal;
 pub mod memory;
 pub mod prefab;
 pub mod sound;
@@ -44,6 +45,7 @@ pub use enums::{
     KeyCode, Material, MaterialPreset, MouseBehavior, PartType, ParticleType, TextureChannel,
     ToneMapping, UserInputState, UserInputType,
 };
+pub use journal::Edit;
 pub use strings::StringTable;
 pub use terrain::{
     CHUNK_CELLS, DEFAULT_TERRAIN_HEIGHT, DEFAULT_TERRAIN_SAMPLES, FoliageInstance, FoliagePlant,

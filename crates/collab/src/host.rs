@@ -160,7 +160,7 @@ impl Host {
                 }
                 let blocks = m.blocks.clone();
                 let owns = |id| blocks.iter().any(|block: &IdBlock| block.contains(id));
-                match apply::apply(&mut self.doc, &transaction.ops, &owns) {
+                match apply::apply(&mut self.doc.view(), &transaction.ops, &owns) {
                     Ok(applied) => {
                         self.seq += 1;
                         let logged = Logged {
