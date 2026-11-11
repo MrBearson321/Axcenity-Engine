@@ -172,6 +172,8 @@ pub(super) enum Command {
     About,
     /// Help > Check for Updates…: Settings > Updates, checking.
     CheckForUpdates,
+    /// Debug > Graphics Benchmark…
+    GraphicsBenchmark,
     PanicDuringPlay,
     /// Play, or Continue at a breakpoint.
     Play,
@@ -753,6 +755,14 @@ impl EditorApp {
             Ok(()),
         );
         add(Command::About, "About Axcenity", "Help", &[], None, Ok(()));
+        add(
+            Command::GraphicsBenchmark,
+            "Graphics Benchmark…",
+            "Debug",
+            &["Benchmark", "Graphics settings", "Performance", "GPU"],
+            None,
+            Ok(()),
+        );
         if cfg!(debug_assertions) {
             add(
                 Command::PanicDuringPlay,
@@ -1094,6 +1104,7 @@ impl EditorApp {
             }
             Command::About => self.about_open = true,
             Command::CheckForUpdates => self.open_updates(),
+            Command::GraphicsBenchmark => self.open_graphics_benchmark(),
             Command::PanicDuringPlay => {
                 if let Some(session) = &mut self.play {
                     session.panic_next_frame();

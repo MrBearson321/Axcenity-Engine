@@ -474,6 +474,9 @@ fn command_description(command: &Command) -> String {
         Command::Learn => "Tutorials and notes on each part of the editor.",
         Command::About => "The editor's version and licences, and Copy diagnostics.",
         Command::CheckForUpdates => "Look for a newer Axcenity on your update channel.",
+        Command::GraphicsBenchmark => {
+            "Measure how this computer draws the viewport and get recommended editor graphics settings."
+        }
         Command::PanicDuringPlay => "Debug builds only: make Play fail, to test error handling.",
         Command::Play => {
             "Run the game in the editor. Changes made while playing are undone by Stop."
