@@ -293,9 +293,14 @@ impl Renderer {
         }
         surface.configure(&device, &config);
         let capabilities = read_capabilities(&device, Some(&adapter.get_info()));
+        let building = std::time::Instant::now();
         let mut scene =
             ScenePipeline::new(device, queue, config.format, width, height, capabilities);
         scene.time_gpu = false;
+        log::info!(
+            "graphics pipelines ready in {} ms",
+            building.elapsed().as_millis()
+        );
 
         Ok(Self {
             surface,

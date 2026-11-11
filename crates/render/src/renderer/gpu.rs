@@ -117,6 +117,23 @@ const MESH_READ: wgpu::BufferUsages = wgpu::BufferUsages::STORAGE;
 #[cfg(not(feature = "debug-views"))]
 const MESH_READ: wgpu::BufferUsages = wgpu::BufferUsages::empty();
 
+/// Runs each of `jobs` on a thread of its own and gives back their results
+/// in the same order. For GPU objects that take long to make, such as
+/// pipelines (wgpu's `Device` can be used from any thread). A panic in a
+/// job carries on in the caller.
+///
+/// `std::thread::scope` lets the jobs borrow from the caller, since every
+/// thread it starts has finished before it returns.
+pub(super) fn in_parallel<T: Send, const N: usize>(jobs: [&(dyn Fn() -> T + Sync); N]) -> [T; N] {
+    std::thread::scope(|scope| {
+        jobs.map(|job| scope.spawn(job)).map(|thread| {
+            thread
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        })
+    })
+}
+
 /// A pipeline that draws meshes with their instances into the HDR scene:
 /// solid items, see-through ones when `transparent` is true, or terrain
 /// chunks, by `shader`'s `entry_points` (vertex, fragment). `layouts` are
