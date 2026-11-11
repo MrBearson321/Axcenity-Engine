@@ -446,7 +446,9 @@ What was checked and left as it is:
 - **Caching cascades between frames** isn't worth it here: every plant sways, so its shadow moves every frame, and a moving camera moves the cascades. A scene with no wind and a still camera could keep them; no game benchmark is like that.
 - **Lowering Ultra** (fewer or smaller maps) is the one big saving (2.7 ms) and it's a quality choice, which the High preset already offers.
 
-The levers that remain are the scene's: the oaks are 1.7 M triangles, three quarters bark, and the bark material is double-sided.
+The levers that remain are the scene's: the oaks are 1.7 M triangles, three quarters bark, and the bark material is double-sided. Drawing only the bark one-sided (`profile_project`'s `single-sided-match` with `AXCENITY_PROFILE_MATCH=Bark`) saves 0.22–0.48 ms of GPU across the three cameras, and the pictures match (at most 108 of 3.7 million pixels differ by more than 8 of 255, one by more than 32): the bark is closed, so its back faces are never seen. That's a change to the project's model files, the owner's call; all double-sided materials one-sided saves 0.6–1.5 ms but leaves leaves' backs missing.
+
+After all of this the full regression check matched every baseline within 7% (Temperate Dry Patch 11.6 ms, GPU 11.3 ms, 1% low 71.6 FPS) and `cargo nextest run --workspace` passed 3,184 of 3,184.
 
 ## Levels of detail, inspected
 
