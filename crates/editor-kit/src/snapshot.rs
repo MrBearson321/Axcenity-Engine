@@ -22,6 +22,24 @@ pub fn snapshot_rendered(
     path: &std::path::Path,
     size: Vec2,
     frames: Vec<Vec<egui::Event>>,
+    show: impl FnMut(&mut egui::Ui, &RenderState),
+) {
+    // Half a second a frame, so fades and other transitions have finished
+    // by the frame that's saved.
+    let timed = frames
+        .into_iter()
+        .enumerate()
+        .map(|(index, events)| (index as f64 * 0.5, events))
+        .collect();
+    snapshot_timed(path, size, timed, show);
+}
+
+/// [`snapshot_rendered`] with each frame's time given, to catch an
+/// animation part way through.
+pub fn snapshot_timed(
+    path: &std::path::Path,
+    size: Vec2,
+    frames: Vec<(f64, Vec<egui::Event>)>,
     mut show: impl FnMut(&mut egui::Ui, &RenderState),
 ) {
     let instance = axcenity_render::adapters::instance();
@@ -53,13 +71,11 @@ pub fn snapshot_rendered(
         surface_config: eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY,
     };
     let mut last = None;
-    for (index, events) in frames.into_iter().enumerate() {
+    for (time, events) in frames {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
             events,
-            // Half a second a frame, so fades and other transitions have
-            // finished by the frame that's saved.
-            time: Some(index as f64 * 0.5),
+            time: Some(time),
             ..Default::default()
         };
         let mut output = ctx.run_ui(input, |ui| show(ui, &render_state));

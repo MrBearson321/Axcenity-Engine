@@ -233,6 +233,39 @@ fn balls_roll_down_a_wedge() {
 }
 
 #[test]
+fn a_corner_wedge_collides_as_its_shape() {
+    let (mut world, _) = world_with_floor();
+    // 8 studs each way, its point over the back right corner (+X, +Z).
+    let corner = part(&mut world, Vector3::new(0.0, 4.0, 0.0), true);
+    set(
+        &mut world,
+        corner,
+        "Shape",
+        Value::PartType(PartType::CornerWedge),
+    );
+    set(&mut world, corner, "Size", vector(8.0, 8.0, 8.0));
+    // Over the cut-away front left, a ball falls past the box's top and
+    // lands on the slopes, then rolls off toward -X and -Z.
+    let ball = part(&mut world, Vector3::new(-2.0, 10.0, -2.0), false);
+    set(&mut world, ball, "Shape", Value::PartType(PartType::Ball));
+    set(&mut world, ball, "Size", vector(1.0, 1.0, 1.0));
+    // Falling straight through it would leave it at (-2, -2) on the floor.
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 2.5, 60.0);
+    let late = position(&world, ball);
+    assert!(
+        late.x < -4.0 || late.z < -4.0,
+        "rolled off the front left: {late:?}"
+    );
+    // Its collider overlay has the bottom rectangle and the four edges up.
+    let edges = crate::shapes::wireframe(
+        &crate::shapes::Form::Primitive(PartType::CornerWedge),
+        Vec3::new(8.0, 8.0, 8.0),
+    );
+    assert_eq!(edges.len(), 8);
+}
+
+#[test]
 fn parts_with_invalid_numbers_are_left_out() {
     let mut world = World::new();
     let block = part(&mut world, Vector3::new(0.0, 10.0, 0.0), false);

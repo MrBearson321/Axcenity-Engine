@@ -13,7 +13,7 @@ Blocks let you script without typing: snap blocks together like puzzle pieces. T
 The bar above a Script or LocalScript tab picks the view:
 
 - **Code**: the Lua, typed.
-- **Blocks**: stacks of blocks under an event block, Scratch-style. A palette by category is on the left.
+- **Blocks**: stacks of blocks under an event block. A palette by category is on the left; each category has its own colour and icon, and event blocks start with the same icon.
 - **Graph**: the same blocks as nodes and wires, Blueprint-style. White **exec** wires say what runs next; coloured wires carry values (green numbers, pink text, red true or false, gold vectors, blue colours).
 
 Switching from Code to Blocks turns each line into the friendliest block that writes the same code, so nothing is lost. Switching back writes Lua again.

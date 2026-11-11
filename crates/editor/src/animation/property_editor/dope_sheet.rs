@@ -1,36 +1,11 @@
 use super::*;
 
 impl PropertyDoc {
-    /// The toolbar's part: play/pause, back to the start, Stop and Loop.
+    /// The toolbar's part: Loop. Playing is the transport's, over the
+    /// dope sheet.
     pub fn controls(&mut self, ui: &mut egui::Ui) {
-        let (icon, hover) = if self.playing {
-            (icons::PAUSE, "Pause")
-        } else {
-            (icons::PLAY, "Play")
-        };
-        if ui.button(icon).on_hover_text(hover).clicked() {
-            if !self.playing && self.playhead >= self.file.duration {
-                self.playhead = 0.0;
-            }
-            self.playing = !self.playing;
-        }
-        if ui
-            .button(icons::SKIP_BACK)
-            .on_hover_text("Back to the start")
-            .clicked()
-        {
-            self.playhead = 0.0;
-        }
-        if ui
-            .button(icons::STOP)
-            .on_hover_text("Stop and go back to the start")
-            .clicked()
-        {
-            self.playing = false;
-            self.playhead = 0.0;
-        }
-        ui.checkbox(&mut self.file.looping, "Loop");
-        ui.monospace(format!("{:.2} s", self.playhead));
+        ui.checkbox(&mut self.file.looping, "Loop")
+            .on_hover_text("On, it plays again from the start; off, it holds its last frame");
     }
 
     /// The drawer: the copy's objects as a tree, each with its tracks, and

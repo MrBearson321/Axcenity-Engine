@@ -36,6 +36,7 @@ pub mod store;
 #[cfg(test)]
 mod testing;
 pub(crate) mod timeline;
+pub(crate) mod transport;
 
 #[cfg(test)]
 pub use graph::{Node, words::when_words};
@@ -309,6 +310,14 @@ enum Clip {
 }
 
 impl Clip {
+    /// Either kind, as the transport plays it.
+    fn playback(&mut self) -> &mut dyn transport::Playback {
+        match self {
+            Clip::Take(doc) => doc.as_mut(),
+            Clip::Property(doc) => doc.as_mut(),
+        }
+    }
+
     fn path(&self) -> &str {
         match self {
             Clip::Take(doc) => &doc.path,
@@ -440,6 +449,16 @@ struct ClipView {
     /// Where the clip was last drawn, and in which pass, so its keys (K,
     /// Delete, Ctrl+C) work while the mouse is over it.
     drawn: Option<(egui::Rect, u64)>,
+    /// How fast the preview plays, kept from clip to clip while the editor
+    /// runs. Never saved: the clip's own Speed is.
+    rate: transport::Rate,
+}
+
+impl ClipView {
+    /// The open clip, as the transport plays it.
+    fn playback(&mut self) -> Option<&mut dyn transport::Playback> {
+        self.doc.as_mut().map(Clip::playback)
+    }
 }
 
 /// The open state machine, its live preview, and which parts are shown.

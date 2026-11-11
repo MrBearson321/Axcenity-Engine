@@ -1,4 +1,5 @@
-//! The block editor: Scratch-style blocks on a canvas.
+//! The block editor: snap-together blocks on a canvas, in Axcenity's own
+//! look (see "The look" below).
 //!
 //! On the left are the categories (Events, Control, Motion, ...) and a
 //! palette of their blocks, with a search box and each category's Luau
@@ -12,8 +13,18 @@
 //! it holds. "View as Lua" shows the Lua the blocks become.
 //!
 //! Blocks are painted here, piece by piece. egui only fills convex shapes,
-//! so a block is filled as convex pieces (rectangles, the hat's cap, the
-//! puzzle tab under it) and then outlined as one path.
+//! so a block is filled as convex pieces (rectangles, the rounded tab
+//! under it) and then outlined as one path.
+//!
+//! The look (usability brief §5): a category's colour is one deep hue its
+//! white labels read on (`Category::base_fill`), with a darker shade of it
+//! as the block's edge and the shadow it casts, so stacks read as raised
+//! pieces. Labels are Inter Medium. Blocks join with a rounded tab and
+//! notch; an event block (a hat) has a flat top with a lighter band and
+//! its category's icon, and the category list shows the same icons on
+//! rounded swatches. Typed values sit in light rounded fields with dark
+//! text, menus in darker ones; values that report are rounded rectangles
+//! and true-or-false ones pointed. Sizes keep to a 4-point grid.
 //!
 //! Where to change behavior:
 //! - `Category`, `sections` and `reporter_parts` — which pieces a block has
@@ -131,23 +142,29 @@ pub struct BlockContext<'a> {
     pub objects: &'a [ObjectInfo],
 }
 
-// Sizes at zoom 1, in points.
-const FONT_SIZE: f32 = 12.5;
+// Sizes at zoom 1, in points, on a 4-point grid.
+const FONT_SIZE: f32 = 13.0;
 const ROW_HEIGHT: f32 = 40.0;
-const PAD: f32 = 10.0;
-const GAP: f32 = 6.0;
-const MIN_WIDTH: f32 = 90.0;
+const PAD: f32 = 12.0;
+const GAP: f32 = 8.0;
+const MIN_WIDTH: f32 = 96.0;
 const ARM: f32 = 16.0;
 const MOUTH_MIN: f32 = 24.0;
-const FOOT: f32 = 24.0;
-const CORNER: f32 = 6.0;
+const FOOT: f32 = 20.0;
+const CORNER: f32 = 8.0;
 const INNER_CORNER: f32 = 4.0;
-const CAP: f32 = 16.0;
-const CAP_WIDTH: f32 = 84.0;
-const TAB_LEFT: f32 = 14.0;
-const TAB_WIDTH: f32 = 32.0;
-const TAB_DEPTH: f32 = 8.0;
+/// A hat's top band, above its row.
+const CAP: f32 = 8.0;
+/// A hat's top corners, rounder than a block's.
+const HAT_CORNER: f32 = 14.0;
+const TAB_LEFT: f32 = 16.0;
+const TAB_WIDTH: f32 = 28.0;
+const TAB_DEPTH: f32 = 6.0;
+/// How far below a block its shadow shows.
+const DROP: f32 = 2.0;
 const INPUT_HEIGHT: f32 = 24.0;
+/// The corners of typed fields, menus and reporters.
+const FIELD_CORNER: f32 = 6.0;
 const REPORTER_MIN_HEIGHT: f32 = 32.0;
 /// How near a dragged stack has to be to a place to snap into it.
 const SNAP: f32 = 34.0;
@@ -156,8 +173,9 @@ const CATEGORY_WIDTH: f32 = 74.0;
 const PALETTE_WIDTH: f32 = 270.0;
 const TOOLBAR_HEIGHT: f32 = 40.0;
 
-/// The dark grey of text typed into blocks, as in Scratch.
-const INPUT_TEXT: Color32 = Color32::from_rgb(87, 94, 117);
+/// Typed values: dark ink on a light field, 4.5:1 or more.
+const INPUT_TEXT: Color32 = Color32::from_rgb(34, 38, 52);
+const INPUT_FIELD: Color32 = Color32::from_rgb(250, 250, 252);
 const ERROR_OUTLINE: Color32 = Color32::from_rgb(255, 72, 72);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -212,50 +230,63 @@ impl Category {
         }
     }
 
-    /// Scratch's colours for its categories, darkened with Increase
-    /// contrast until their white labels reach 4.5:1.
+    /// The category's colour, darkened with Increase contrast until its
+    /// white labels reach 4.5:1.
     fn fill(self, palette: &theme::Palette) -> Color32 {
-        palette.under_white_text(self.scratch_fill())
+        palette.under_white_text(self.base_fill())
     }
 
-    fn scratch_fill(self) -> Color32 {
+    /// Axcenity's category colours: one hue each, a step apart around the
+    /// wheel (warm for what starts and steers a script, cool for what it
+    /// moves and shows, green for values), all deep enough that their
+    /// white labels reach 3:1 without Increase contrast.
+    fn base_fill(self) -> Color32 {
         match self {
-            Category::Events => Color32::from_rgb(255, 191, 0),
-            Category::Control => Color32::from_rgb(255, 171, 25),
-            Category::Motion => Color32::from_rgb(76, 151, 255),
-            Category::Looks => Color32::from_rgb(153, 102, 255),
-            Category::Sound => Color32::from_rgb(207, 99, 207),
-            Category::Operators => Color32::from_rgb(89, 192, 89),
-            Category::Variables => Color32::from_rgb(255, 140, 26),
-            Category::Sensing => Color32::from_rgb(92, 177, 214),
-            Category::Animation => Color32::from_rgb(64, 186, 140),
-            Category::Tweens => Color32::from_rgb(92, 112, 230),
-            Category::More => Color32::from_rgb(255, 102, 128),
-            Category::Lua => Color32::from_rgb(108, 117, 138),
+            Category::Events => Color32::from_rgb(190, 128, 18),
+            Category::Control => Color32::from_rgb(212, 98, 40),
+            Category::Variables => Color32::from_rgb(206, 62, 62),
+            Category::More => Color32::from_rgb(200, 56, 128),
+            Category::Sound => Color32::from_rgb(166, 70, 196),
+            Category::Looks => Color32::from_rgb(118, 88, 224),
+            Category::Tweens => Color32::from_rgb(72, 96, 214),
+            Category::Motion => Color32::from_rgb(30, 116, 206),
+            Category::Sensing => Color32::from_rgb(18, 130, 168),
+            Category::Animation => Color32::from_rgb(22, 138, 112),
+            Category::Operators => Color32::from_rgb(64, 138, 58),
+            Category::Lua => Color32::from_rgb(92, 100, 120),
         }
     }
 
-    /// The darker outline, and the background of menus on the block.
+    /// The darker shade under a block (its edge and the shadow it casts),
+    /// and the background of menus on the block.
     fn edge(self, palette: &theme::Palette) -> Color32 {
-        palette.under_white_text(self.scratch_edge())
+        palette.under_white_text(shade(self.base_fill()))
     }
 
-    fn scratch_edge(self) -> Color32 {
+    /// What the category's blocks are for, drawn white on its swatch in
+    /// the category list and at the start of its hat blocks.
+    fn icon(self) -> &'static str {
         match self {
-            Category::Events => Color32::from_rgb(204, 153, 0),
-            Category::Control => Color32::from_rgb(207, 139, 23),
-            Category::Motion => Color32::from_rgb(51, 115, 204),
-            Category::Looks => Color32::from_rgb(119, 77, 203),
-            Category::Sound => Color32::from_rgb(189, 66, 189),
-            Category::Operators => Color32::from_rgb(56, 148, 56),
-            Category::Variables => Color32::from_rgb(219, 110, 0),
-            Category::Sensing => Color32::from_rgb(46, 142, 184),
-            Category::Animation => Color32::from_rgb(36, 148, 106),
-            Category::Tweens => Color32::from_rgb(64, 82, 196),
-            Category::More => Color32::from_rgb(255, 51, 85),
-            Category::Lua => Color32::from_rgb(78, 86, 105),
+            Category::Events => icons::LIGHTNING,
+            Category::Control => icons::FLOW_ARROW,
+            Category::Motion => icons::ARROWS_OUT_CARDINAL,
+            Category::Looks => icons::EYE,
+            Category::Sound => icons::SPEAKER_HIGH,
+            Category::Operators => icons::PLUS_MINUS,
+            Category::Variables => icons::BRACKETS_CURLY,
+            Category::Sensing => icons::HAND_POINTING,
+            Category::Animation => icons::PERSON_SIMPLE_RUN,
+            Category::Tweens => icons::WAVE_SINE,
+            Category::More => icons::DOTS_THREE_CIRCLE,
+            Category::Lua => icons::CODE,
         }
     }
+}
+
+/// A category colour's darker shade: the same hue at 78%.
+fn shade(color: Color32) -> Color32 {
+    let darker = |value: u8| (f32::from(value) * 0.78).round() as u8;
+    Color32::from_rgb(darker(color.r()), darker(color.g()), darker(color.b()))
 }
 
 fn block_category(kind: &BlockKind) -> Category {
@@ -851,11 +882,11 @@ fn luau_sections(kind: &mut BlockKind) -> Vec<Section<'_>> {
 /// What a block shows, top to bottom. An event block's own body isn't
 /// here: it's the stack under it.
 fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<'a>> {
-    use Part::{Icon, Key, Object, Property, Slot, Variable};
+    use Part::{Key, Object, Property, Slot, Variable};
     use Section::{Mouth, Row};
     match kind {
         BlockKind::WhenStarted { .. } => {
-            vec![Row(vec![label("when game starts"), Icon(icons::FLAG)])]
+            vec![Row(vec![label("when game starts")])]
         }
         BlockKind::WhenTouched { part, .. } => vec![Row(vec![
             label("when"),
@@ -2183,18 +2214,28 @@ fn show_categories(ui: &mut egui::Ui, rect: Rect, state: &mut State) {
             ui.painter()
                 .rect_filled(item.shrink(3.0), 6, visuals.widgets.hovered.weak_bg_fill);
         }
-        let center = pos2(item.center().x, item.top() + 18.0);
-        ui.painter().circle(
-            center,
-            10.0,
-            category.fill(&theme::palette(ui.ctx())),
-            Stroke::new(1.0_f32, category.edge(&theme::palette(ui.ctx()))),
+        // A rounded swatch in the category's colour, with its icon.
+        let palette = theme::palette(ui.ctx());
+        let swatch =
+            Rect::from_center_size(pos2(item.center().x, item.top() + 19.0), vec2(26.0, 26.0));
+        ui.painter().rect_filled(
+            swatch.translate(vec2(0.0, DROP)),
+            8,
+            category.edge(&palette),
+        );
+        ui.painter().rect_filled(swatch, 8, category.fill(&palette));
+        ui.painter().text(
+            swatch.center(),
+            egui::Align2::CENTER_CENTER,
+            category.icon(),
+            FontId::proportional(15.0),
+            Color32::WHITE,
         );
         ui.painter().text(
-            pos2(item.center().x, item.top() + 40.0),
+            pos2(item.center().x, item.top() + 42.0),
             egui::Align2::CENTER_CENTER,
             category.name(),
-            FontId::proportional(10.5),
+            FontId::new(10.5, theme::medium_family()),
             visuals.text_color(),
         );
         if response.clicked() {

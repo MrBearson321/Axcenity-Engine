@@ -42,7 +42,7 @@ Put parts in named groups with their **CollisionGroup** property, then choose wh
 - A **WeldConstraint** holds two parts together as one rigid body. **Weld** (Model tab, Constraints) welds the selected parts to the largest of them; **Join Surfaces** welds parts as you place them.
 - Joints connect two parts at **Attachments**: hinges, sliders, springs, ropes, rods, ball sockets and more. Place them with the **Constraint** tool: click a surface on one part, then on the other.
 - Movers push or turn a part: **LinearVelocity**, **AngularVelocity**, **VectorForce**, **Torque**, **AlignPosition** and **AlignOrientation**.
-- **View > Overlays > Constraints** draws welds, joints and movers, and **Colliders** draws each part's collision shape.
+- **Viewport > Overlays > Constraints** draws welds, joints and movers, and **Colliders** draws each part's collision shape.
 
 ## Vehicles, ragdolls and destruction
 
@@ -52,6 +52,6 @@ Put parts in named groups with their **CollisionGroup** property, then choose wh
 
 ## Spatial queries
 
-Scripts ask the world what's where without moving anything: `workspace:Raycast()` finds the first part along a line, `workspace:GetPartBoundsInBox()` and `workspace:GetPartBoundsInRadius()` find parts in an area. **View > Overlays > Raycasts** shows recent rays during Play.
+Scripts ask the world what's where without moving anything: `workspace:Raycast()` finds the first part along a line, `workspace:GetPartBoundsInBox()` and `workspace:GetPartBoundsInRadius()` find parts in an area. **Viewport > Overlays > Raycasts** shows recent rays during Play.
 
 > **Known limits.** Imported models (MeshParts) collide as their convex hull, so hollows are filled in; split a hollow model into pieces, or use a Union with **CollisionFidelity** set to `PreciseConvexDecomposition`. A ragdoll can briefly bend past its joint limits on a hard landing.

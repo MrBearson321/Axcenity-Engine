@@ -143,6 +143,7 @@ pub fn collider(form: &Form, size: Vec3) -> Collider {
                 .rotation(Vec3::new(0.0, 0.0, FRAC_PI_2))
         }
         Form::Primitive(PartType::Wedge) => wedge(half),
+        Form::Primitive(PartType::CornerWedge) => corner_wedge(half),
         // rapier's capsule along X: its round ends' middles, and its radius.
         Form::Primitive(PartType::Capsule) => {
             let (reach, radius) = capsule(half);
@@ -170,6 +171,7 @@ pub fn wireframe(form: &Form, size: Vec3) -> Vec<(Vec3, Vec3)> {
         Form::Primitive(PartType::Ball) => ball_edges(half.min_element()),
         Form::Primitive(PartType::Cylinder) => cylinder_edges(half),
         Form::Primitive(PartType::Wedge) => wedge_edges(half),
+        Form::Primitive(PartType::CornerWedge) => corner_wedge_edges(half),
         Form::Primitive(PartType::Capsule) => capsule_edges(half),
         Form::Mesh(Some(model), Fidelity::Hull) => hull_edges(model, half),
         Form::Mesh(Some(model), Fidelity::Precise) => decomposed_edges(model, half),
@@ -323,6 +325,24 @@ fn capsule_edges(half: Vec3) -> Vec<(Vec3, Vec3)> {
     edges
 }
 
+/// The bottom rectangle and the four edges up to the point.
+fn corner_wedge_edges(half: Vec3) -> Vec<(Vec3, Vec3)> {
+    let corners = corner_wedge_corners(half);
+    [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (0, 4),
+        (1, 4),
+        (2, 4),
+        (3, 4),
+    ]
+    .into_iter()
+    .map(|(a, b)| (corners[a], corners[b]))
+    .collect()
+}
+
 fn wedge_edges(half: Vec3) -> Vec<(Vec3, Vec3)> {
     let corners = [
         Vec3::new(-half.x, -half.y, -half.z),
@@ -392,6 +412,25 @@ fn wedge(half: Vec3) -> ColliderBuilder {
     .collect();
     // Six distinct corners always make a hull, but fall back to a box rather than panic.
     ColliderBuilder::convex_hull(&corners).unwrap_or_else(|| cuboid(half))
+}
+
+/// The corners of a corner wedge: the bottom rectangle, then the point
+/// above its back right corner (+X, +Z).
+fn corner_wedge_corners(half: Vec3) -> [Vec3; 5] {
+    [
+        Vec3::new(-half.x, -half.y, -half.z),
+        Vec3::new(half.x, -half.y, -half.z),
+        Vec3::new(half.x, -half.y, half.z),
+        Vec3::new(-half.x, -half.y, half.z),
+        Vec3::new(half.x, half.y, half.z),
+    ]
+}
+
+/// A corner wedge: flat bottom, rising to a point over the back right corner.
+fn corner_wedge(half: Vec3) -> ColliderBuilder {
+    // Five corners that aren't flat always make a hull, but fall back to a
+    // box rather than panic.
+    ColliderBuilder::convex_hull(&corner_wedge_corners(half)).unwrap_or_else(|| cuboid(half))
 }
 
 /// The smallest convex shape around a model's corners, like shrink-wrap:

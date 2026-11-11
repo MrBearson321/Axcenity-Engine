@@ -1752,6 +1752,8 @@ mod agent_tests;
 #[cfg(test)]
 mod anim_drawer_tests;
 #[cfg(test)]
+mod anim_transport_tests;
+#[cfg(test)]
 mod asset_fix_tests;
 #[cfg(test)]
 mod asset_refs_tests;
@@ -1846,6 +1848,8 @@ mod relaunch_tests;
 mod rig_tests;
 #[cfg(test)]
 mod sequencer_tests;
+#[cfg(test)]
+mod sequencer_transport_tests;
 #[cfg(test)]
 mod settings_undo_tests;
 #[cfg(test)]
