@@ -21,6 +21,7 @@ axcenity-character = { path = "crates/character" }
 axcenity-cook = { path = "crates/cook" }
 axcenity-core = { path = "crates/core" }
 axcenity-gameplay = { path = "crates/gameplay" }
+axcenity-mcp = { path = "crates/mcp" }
 axcenity-mesh-edit = { path = "crates/mesh_edit" }
 axcenity-nav = { path = "crates/nav" }
 axcenity-net = { path = "crates/net" }
@@ -138,6 +139,13 @@ rayon = "1.10"
 # A quicker hash than std's for the renderer's per-frame maps, whose keys
 # are its own (MIT OR Apache-2.0); already in the tree through wgpu.
 rustc-hash = "2"
+# The editor's MCP server (`crates/mcp`, editor only; docs/research/mcp/), the
+# official Model Context Protocol SDK, Apache-2.0. Only the server and stdio:
+# no HTTP, no macros. It speaks both spec eras (2026-07-28 and the
+# `initialize` handshake of 2025-11-25 and before). It needs `tokio`, which
+# runs on the MCP thread only; the player and server never link either.
+rmcp = { version = "3.9", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "1.53", default-features = false, features = ["rt", "sync", "io-util", "io-std", "macros"] }
 # Physics. Its math types come from `glamx` (glam-based), re-exported as `rapier3d::math`.
 rapier3d = "0.36"
 serde = { version = "1", features = ["derive"] }

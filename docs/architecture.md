@@ -25,3 +25,4 @@ Map only. Open the one file that matches the change.
 - Assets panel: [editor/assets.md](editor/assets.md)
 - Server, client, and modules in the editor: [editor/sides.md](editor/sides.md)
 - Lua editor plugins: [editor/plugins.md](editor/plugins.md)
+- The MCP server for AI clients: [editor/mcp.md](editor/mcp.md)
