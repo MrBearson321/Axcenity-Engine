@@ -251,6 +251,12 @@ impl EditorApp {
                 .info(format!("Saved \"{name}\": {}.", saved.join(", ")));
             self.toasts.success(format!("Saved \"{name}\""));
             if let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) {
+                // The manifest says which Axcenity last saved it (format 5).
+                if let Err(err) = project::record_engine(&folder) {
+                    self.output.warning(format!(
+                        "Saved, but could not record this Axcenity's version: {err}"
+                    ));
+                }
                 match project::record_version(&folder, "Save") {
                     Ok(_) => {}
                     Err(err) => self

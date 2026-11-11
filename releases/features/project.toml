@@ -4,7 +4,7 @@
 id = "project.format-migration"
 name = "Project format upgrades"
 subsystem = "project"
-description = "Older projects are upgraded to the current format, keeping a copy of the previous files."
+description = "Older projects are upgraded to the current format after you agree, keeping a copy of the previous files and putting it back if the upgrade doesn't load; newer ones are refused with the version they need."
 status = "active"
 docs = "docs/project/world.md"
 [feature.introduced]

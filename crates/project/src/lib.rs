@@ -33,6 +33,7 @@
 mod asset_fix;
 mod asset_refs;
 mod backup;
+mod compat;
 mod levels;
 mod migrate;
 mod migrate_animation;
@@ -84,13 +85,14 @@ pub use asset_refs::{
 pub use backup::{
     BACKUP_SETTINGS_FILE, BackupSettings, back_up_project, backup_settings, save_backup_settings,
 };
+pub use compat::{Compatibility, compatibility};
 pub use levels::{
     DEFAULT_START_LEVEL, FileChange, LEVEL_SUFFIX, LEVELS_FOLDER, check_level_name,
     copy_workspace_into, keep_level_file, level_file, level_names, level_path, load_levels,
     load_with_level, new_level_text, read_level, read_start_level, replace_workspace, save_level,
     set_start_level, set_start_level_name, write_files, write_level,
 };
-pub use migrate::PREVIOUS_FORMAT_DIR;
+pub use migrate::{FAILED_UPGRADE_DIR, PREVIOUS_FORMAT_DIR, UpgradeStep, upgrade_steps};
 pub use object_scripts::{
     in_start_order, level_code, numbered_path, object_scripts, read_object_file, source_file_fits,
 };
@@ -149,8 +151,22 @@ pub const CLIENT_BLOCK_SCRIPT_SUFFIX: &str = ".client.blocks.json";
 /// one upgrades the project and keeps the previous files. `world.json` and
 /// prefabs have their own version and are not this number. Format 3 (v3
 /// Phase 7) is the one clip format and state machines; format 4 (Phase 34)
-/// physical properties, which keep older Metal parts' physics.
-pub const FORMAT_VERSION: u32 = 4;
+/// physical properties, which keep older Metal parts' physics; format 5
+/// (release system Phase 7) the engine that created and last saved the
+/// project ([`EngineRecord`]).
+pub const FORMAT_VERSION: u32 = 5;
+
+/// Which Axcenity versions made and last saved a project (`engine` in the
+/// manifest, format 5). Only for telling people what a project needs; the
+/// format number decides what opens.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineRecord {
+    /// `None` for a project from before format 5: nobody wrote it down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_with: Option<String>,
+    pub saved_with: String,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -175,6 +191,9 @@ pub struct Manifest {
     /// run in the player, or a game started with `--dev`, has it anyway.
     #[serde(default)]
     pub developer_console: bool,
+    /// The engine that made and last saved it (format 5; `None` before).
+    #[serde(default)]
+    pub engine: Option<EngineRecord>,
 }
 
 fn default_show_splash() -> bool {
@@ -504,29 +523,57 @@ pub(crate) fn load_project(
                 start_level: default_start_level(),
                 version: default_game_version(),
                 developer_console: false,
+                engine: None,
             }
         }
     };
+    // A manifest this engine can't read may be a newer format's: refuse it
+    // rather than open it as a current one.
+    if !problems.is_empty()
+        && let Some(found) = format_of(&manifest_text).filter(|&found| found > FORMAT_VERSION)
+    {
+        return Err(LoadError::TooNew {
+            path: manifest_path,
+            found,
+        });
+    }
     if manifest.format_version > FORMAT_VERSION {
         return Err(LoadError::TooNew {
             path: manifest_path,
             found: manifest.format_version,
         });
     }
-    let (migrated_from, migration_backup) = if manifest.format_version < FORMAT_VERSION {
+    // Whether the world read before an upgrade: only then is a world that
+    // doesn't read afterwards the upgrade's fault.
+    let mut world_read_before = false;
+    let upgrade = if manifest.format_version < FORMAT_VERSION {
         progress(LoadStep::Upgrade {
             from: manifest.format_version,
         });
+        world_read_before = load_world(folder).is_ok();
         let upgrade = migrate::upgrade(folder, manifest.format_version)?;
+        // The steps rewrote the manifest (format 5 added `engine`).
+        if let Some(upgraded) = read_manifest(folder) {
+            manifest = upgraded;
+        }
         manifest.format_version = FORMAT_VERSION;
-        (Some(upgrade.from), Some(upgrade.backup))
+        Some(upgrade)
     } else {
-        (None, None)
+        None
     };
+    let (migrated_from, migration_backup) = upgrade
+        .as_ref()
+        .map_or((None, None), |u| (Some(u.from), Some(u.backup.clone())));
 
     progress(LoadStep::World);
     let (mut world, mut world_loaded) = match load_world(folder) {
         Ok(world) => (world, true),
+        // The upgrade left a world this engine can't read: put the files
+        // back as they were rather than open an empty Workspace over them.
+        Err(err) if world_read_before && upgrade.as_ref().is_some_and(|u| u.fresh) => {
+            let upgrade = upgrade.expect("checked above");
+            return Err(migrate::put_back(folder, &upgrade, &err));
+        }
         Err(err) => {
             problems.push(err);
             (World::new(), false)
@@ -612,6 +659,33 @@ pub(crate) fn load_project(
     })
 }
 
+/// The `format_version` of a manifest that doesn't parse as a whole.
+fn format_of(text: &str) -> Option<u32> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    u32::try_from(value.get("format_version")?.as_u64()?).ok()
+}
+
+/// After a save: records this engine as the one that last saved the
+/// project (`engine.saved_with`), writing the manifest only when that
+/// changes. Returns whether it wrote.
+pub fn record_engine(folder: &Path) -> Result<bool, SaveError> {
+    let current = axcenity_release::Version::current().to_string();
+    let engine = read_manifest(folder).and_then(|m| m.engine);
+    if engine.as_ref().is_some_and(|e| e.saved_with == current) {
+        return Ok(false);
+    }
+    let record = EngineRecord {
+        created_with: engine.and_then(|e| e.created_with),
+        saved_with: current,
+    };
+    update_manifest(
+        folder,
+        "engine",
+        serde_json::to_value(record).expect("an engine record always serializes"),
+    )?;
+    Ok(true)
+}
+
 /// The name of the project in `folder`, from its manifest, without loading
 /// anything else (for lists of projects). `None` if `folder` has no
 /// readable manifest.
@@ -631,7 +705,7 @@ fn folder_name(folder: &Path) -> String {
     )
 }
 
-fn load_world(folder: &Path) -> Result<World, LoadError> {
+pub(crate) fn load_world(folder: &Path) -> Result<World, LoadError> {
     let path = folder.join(WORLD_FILE);
     let text = read(&path)?;
     parse_world(&text).map_err(|source| LoadError::World { path, source })

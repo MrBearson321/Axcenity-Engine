@@ -1,0 +1,5 @@
+category = "breaking"
+subsystem = "project"
+title = "The editor asks before upgrading an older project, and projects record which Axcenity saved them"
+details = "Projects are now format 5: the manifest records the Axcenity version that made and last saved the project. Opening an older project shows what the upgrade changes and where the files from before are kept, and nothing is written until you choose Upgrade; if the upgraded world won't load, the old files are put back. A project from a newer Axcenity is refused with the version to update to. What breaks: an older Axcenity can't open a project once this version has upgraded or saved it. To go back, open the copy kept in .axcenity/previous/4 with the older version."
+features = ["project.format-migration"]

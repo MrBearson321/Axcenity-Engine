@@ -859,6 +859,7 @@ dependencies = [
  "axcenity-assets",
  "axcenity-blocks-runtime",
  "axcenity-core",
+ "axcenity-release",
  "axcenity-terrain",
  "axcenity-workspace-hack",
  "notify",
