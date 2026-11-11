@@ -131,6 +131,11 @@ impl From<std::io::Error> for Failure {
 
 /// Runs one command; returns the exit code.
 pub fn run(args: &[String], env: &mut Env) -> i32 {
+    let help = |arg: &String| matches!(arg.as_str(), "--help" | "-h" | "help");
+    if args.first().is_some_and(help) || args.iter().any(|arg| arg == "--help") {
+        let _ = writeln!(env.out, "{USAGE}");
+        return 0;
+    }
     match command(args, env) {
         Ok(()) => 0,
         Err(Failure::Usage(text)) => {
@@ -400,9 +405,10 @@ fn one_key(words: &[String]) -> Result<String, Failure> {
     }
 }
 
-/// Every source with `kind` (or just `provider`), stopping once `limit`
-/// records are in. A failing source is reported on stderr; if every one
-/// fails, that's the error.
+/// Every source with `kind` (or just `provider`), their results taken in
+/// turn (one from each source, then the next from each), so the first
+/// `limit` show every source rather than only the first. A failing source
+/// is reported on stderr; if every one fails, that's the error.
 fn search(
     env: &mut Env,
     db: &Database,
@@ -420,7 +426,7 @@ fn search(
     }
     let mut query = Query::new(text, kind);
     query.per_page = limit.clamp(1, 50) as u32;
-    let mut records = Vec::new();
+    let mut pages = Vec::new();
     let mut failures = Vec::new();
     for source in &chosen {
         match source.search(env.http, &query) {
@@ -428,7 +434,7 @@ fn search(
                 for record in &page.records {
                     db.put_asset(record)?;
                 }
-                records.extend(page.records);
+                pages.push(page.records);
             }
             Err(err) => {
                 let _ = writeln!(env.err, "{}: {err}", source.info().name);
@@ -439,7 +445,20 @@ fn search(
     if failures.len() == chosen.len() {
         return Err(Failure::Unavailable("every source failed".into()));
     }
-    Ok(records)
+    Ok(in_turn(pages))
+}
+
+/// One record from each list, then the next from each, until all are used.
+fn in_turn(lists: Vec<Vec<AssetRecord>>) -> Vec<AssetRecord> {
+    let mut lists: Vec<_> = lists.into_iter().map(Vec::into_iter).collect();
+    let mut records = Vec::new();
+    loop {
+        let before = records.len();
+        records.extend(lists.iter_mut().filter_map(Iterator::next));
+        if records.len() == before {
+            return records;
+        }
+    }
 }
 
 /// The full record: from the source (and stored), or offline the stored one.
@@ -592,6 +611,45 @@ mod tests {
         let (code, out, _) = run_with(&nothing, &dir, &["where"]);
         assert_eq!((code, out.trim()), (0, dir.display().to_string().as_str()));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn help_prints_the_usage_and_succeeds() {
+        let dir = temp("help");
+        let nothing = Fixture::default();
+        for args in [&["--help"][..], &["-h"], &["help"], &["search", "--help"]] {
+            let (code, out, err) = run_with(&nothing, &dir, args);
+            assert_eq!((code, err.as_str()), (0, ""), "{args:?}");
+            assert!(out.starts_with("usage: axcenity-toolbox"), "{args:?}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_search_of_every_source_takes_from_each_in_turn() {
+        let record = |provider: &str, id: &str| AssetRecord {
+            provider: provider.into(),
+            id: id.into(),
+            ..AssetRecord::default()
+        };
+        let lists = vec![
+            vec![
+                record("ambientcg", "a1"),
+                record("ambientcg", "a2"),
+                record("ambientcg", "a3"),
+            ],
+            vec![record("polyhaven", "p1")],
+        ];
+        let keys: Vec<String> = in_turn(lists).iter().map(AssetRecord::key).collect();
+        assert_eq!(
+            keys,
+            [
+                "ambientcg:a1",
+                "polyhaven:p1",
+                "ambientcg:a2",
+                "ambientcg:a3"
+            ]
+        );
     }
 
     #[test]
