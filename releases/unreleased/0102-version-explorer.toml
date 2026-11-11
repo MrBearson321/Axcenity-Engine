@@ -1,5 +1,0 @@
-category = "feature"
-subsystem = "release"
-title = "Help > Version Explorer shows every release, feature and known issue, and compares two versions"
-details = "It works offline from the release history built into the editor. Help > About's Copy diagnostics copies the build, system, GPU and the known issues of your version for a bug report."
-features = ["release.version-explorer"]

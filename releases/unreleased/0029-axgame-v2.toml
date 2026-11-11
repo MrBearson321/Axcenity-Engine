@@ -1,7 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "improvement"
-subsystem = "project"
-title = "Built games are compressed (.axgame version 2) and unpack on several threads"
-features = ["project.build-game"]
-prs = [61]
-evidence = "reconstructed"

@@ -1,7 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "feature"
-subsystem = "editor"
-title = "A source-built editor rebuilds and relaunches itself when engine code changes, keeping the session"
-features = ["editor.engine-rebuild"]
-commits = ["07fbbd96", "c10b02ff"]
-evidence = "reconstructed"

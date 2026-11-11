@@ -1,7 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "feature"
-subsystem = "materials"
-title = "Material editor, material graphs and custom shader code"
-features = ["materials.material-editor", "materials.material-graph"]
-commits = ["7048b335", "46cf196c", "36e3b25d"]
-evidence = "reconstructed"

@@ -1,6 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "improvement"
-subsystem = "project"
-title = "Event-based file watching with a polling fallback"
-prs = [9]
-evidence = "reconstructed"

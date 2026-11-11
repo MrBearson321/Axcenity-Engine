@@ -1,7 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "performance"
-subsystem = "physics"
-title = "Faster physics: a sync overhaul, a parallel step on its own thread pool, and contact points kept between steps"
-features = ["physics.rigid-bodies"]
-prs = [25, 84, 86, 93, 99]
-evidence = "reconstructed"

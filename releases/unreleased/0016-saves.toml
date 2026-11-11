@@ -1,7 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "feature"
-subsystem = "project"
-title = "Save slots and checkpoints for games, with save migration"
-features = ["project.save-games"]
-commits = ["ceda19b2", "0ddbb1b4"]
-evidence = "reconstructed"

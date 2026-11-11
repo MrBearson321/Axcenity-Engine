@@ -1,6 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "performance"
-subsystem = "scripting"
-title = "Faster scripts: cheaper world access, a binary-heap scheduler, cached bytecode and fast builtins"
-prs = [7, 22, 29, 58]
-evidence = "reconstructed"

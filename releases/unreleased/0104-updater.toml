@@ -1,5 +1,0 @@
-category = "feature"
-subsystem = "release"
-title = "The editor downloads and installs updates itself, and can roll back"
-details = "Settings > Updates on the Windows setup and the Linux tar.gz: Download and install (resumable, checked against the signed manifest's size and SHA-256), then Restart and install. A small axcenity-updater swaps the install folder after the editor closes, checks the new version runs and puts the old one back if it doesn't; Roll back returns to the version it replaced. Projects, settings and other user files are never touched. Other installs are told how to update."
-features = ["release.updater"]

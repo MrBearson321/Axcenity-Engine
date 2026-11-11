@@ -1,8 +1,0 @@
-# Reconstructed 2026-11-11 from pull requests and commits after v0.1.0-alpha.3.
-category = "breaking"
-subsystem = "project"
-title = "Project format 2 → 4: one animation clip format with state machines, and physical properties"
-details = "Opening an older project upgrades it to format 4 and keeps a copy of its previous files in .axcenity/previous/<format>/. 0.1.0-alpha.3 can't open a project saved in format 4."
-features = ["project.format-migration", "animation.clips"]
-commits = ["dfecc01d", "03bb9f9c"]
-evidence = "reconstructed"
