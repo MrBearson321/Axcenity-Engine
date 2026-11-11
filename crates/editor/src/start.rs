@@ -586,29 +586,33 @@ impl StartScreen {
         let now = SystemTime::now();
         match self.view {
             View::Grid => {
-                let width = ui.available_width();
-                let columns = ((width + CARD_SPACING) / (MIN_CARD_WIDTH + CARD_SPACING))
-                    .floor()
-                    .max(1.0);
-                let card_width = (width - CARD_SPACING * (columns - 1.0)) / columns;
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(CARD_SPACING, CARD_SPACING + 4.0);
-                    let arrived_at = self.arrived.map_or(0.0, |(_, at)| at);
-                    for (index, link) in shown.iter().enumerate() {
-                        let thumbnail = self.thumbnail(ctx, &link.folder);
-                        let edited = self.edited(&link.folder).map(|time| ago(time, now));
-                        let delay = index.min(STAGGERED_CARDS) as f32 * CARD_STAGGER;
-                        let fade =
-                            theme::arrival(ctx, arrived_at, delay, 0.5, theme::curve::SETTLE);
-                        let card = ui.scope(|ui| {
-                            ui.multiply_opacity(fade);
-                            project_card(ui, link, thumbnail.as_ref(), edited, card_width)
-                        });
-                        if let Some(picked) = card.inner {
-                            chosen = Some((link.clone(), picked));
+                let (columns, card_width) = grid_columns(ui.available_width());
+                let arrived_at = self.arrived.map_or(0.0, |(_, at)| at);
+                ui.spacing_mut().item_spacing.y = CARD_SPACING + 4.0;
+                // Rows of `columns` cards each, laid out here rather than by
+                // `horizontal_wrapped`: each card fades in inside its own
+                // scope, and a wrapping row never breaks before a scope, so
+                // the cards ran off the page's right edge.
+                for (row, links) in shown.chunks(columns).enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = CARD_SPACING;
+                        for (column, link) in links.iter().enumerate() {
+                            let index = row * columns + column;
+                            let thumbnail = self.thumbnail(ctx, &link.folder);
+                            let edited = self.edited(&link.folder).map(|time| ago(time, now));
+                            let delay = index.min(STAGGERED_CARDS) as f32 * CARD_STAGGER;
+                            let fade =
+                                theme::arrival(ctx, arrived_at, delay, 0.5, theme::curve::SETTLE);
+                            let card = ui.scope(|ui| {
+                                ui.multiply_opacity(fade);
+                                project_card(ui, link, thumbnail.as_ref(), edited, card_width)
+                            });
+                            if let Some(picked) = card.inner {
+                                chosen = Some((link.clone(), picked));
+                            }
                         }
-                    }
-                });
+                    });
+                }
             }
             View::List => {
                 ui.spacing_mut().item_spacing.y = 2.0;
@@ -740,6 +744,18 @@ impl StartScreen {
 }
 
 /// True when `a` and `b` are the same folder, however they're written.
+/// How many project cards fit in a row `width` wide, and how wide each is
+/// so the row fills it (rounded down, so the row never overflows).
+fn grid_columns(width: f32) -> (usize, f32) {
+    let columns = ((width + CARD_SPACING) / (MIN_CARD_WIDTH + CARD_SPACING))
+        .floor()
+        .max(1.0);
+    let card_width = ((width - CARD_SPACING * (columns - 1.0)) / columns)
+        .floor()
+        .max(1.0);
+    (columns as usize, card_width)
+}
+
 fn same_folder(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
