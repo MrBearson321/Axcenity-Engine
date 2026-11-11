@@ -318,6 +318,12 @@ mod tests {
     }
 
     #[test]
+    fn the_built_in_release_key_is_a_minisign_public_key() {
+        let key = release_public_key().expect("packaging/axcenity-release.pub is committed");
+        assert!(minisign_verify::PublicKey::decode(key.trim()).is_ok());
+    }
+
+    #[test]
     fn the_best_update_is_the_newest_the_channel_offers() {
         let releases = list(&[
             release("v0.2.0-alpha.3", true, false),
