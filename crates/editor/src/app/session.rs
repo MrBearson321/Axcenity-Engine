@@ -592,27 +592,64 @@ impl EditorApp {
         }
         self.tabs.paused = pause.clone();
         if let Some(pause) = pause {
-            self.output.info(format!(
-                "Paused at {}:{}, before that line runs; its locals are under it in its \
-                 tab. Press Continue (F5) to carry on, or Stop (Shift+F5).",
-                pause.path, pause.line
-            ));
+            // A step's pause is shown in its tab; only the first pause and
+            // errors say so in Output.
+            if let Some(error) = &pause.error {
+                self.output.info(format!(
+                    "Paused where the error happened, {}:{}: {error}. Its locals are in its \
+                     tab. Press Continue (F5) to run the rest of the game, or Stop (Shift+F5).",
+                    pause.path, pause.line
+                ));
+            } else if pause.breakpoint {
+                self.output.info(format!(
+                    "Paused at {}:{}, before that line runs; its locals are under it in its \
+                     tab. Press Continue (F5) to carry on, Step Over (F10), Step Into (F11) or \
+                     Step Out (Shift+F11) to run a line at a time, or Stop (Shift+F5).",
+                    pause.path, pause.line
+                ));
+            }
             self.open_script(&pause.path, Some(pause.line));
+            self.evaluate_watches();
+        }
+    }
+    /// Works out the watches in the pause's innermost frame.
+    pub(super) fn evaluate_watches(&mut self) {
+        let Some(session) = &mut self.play else {
+            self.watches.clear_values();
+            return;
+        };
+        if self.tabs.paused.is_none() {
+            self.watches.clear_values();
+            return;
+        }
+        self.watches
+            .evaluate(|expression| session.evaluate(0, expression));
+    }
+    /// Turns pausing on errors on or off, in Play too if it's running.
+    pub(super) fn set_pause_on_error(&mut self, on: bool) {
+        self.play_settings.pause_on_error = on;
+        if let Some(session) = &mut self.play {
+            session.set_pause_on_error(on);
         }
     }
     /// Continues the game from the breakpoint it's paused at. It may pause
     /// again straight away, at the next breakpoint it reaches.
     pub(super) fn continue_play(&mut self) {
+        self.resume_play(axcenity_script::Resume::Continue);
+    }
+    /// Continues, or steps the paused script a line (roadmap G6).
+    pub(super) fn resume_play(&mut self, how: axcenity_script::Resume) {
         if !self.paused() {
             return;
         }
         let Some(session) = &mut self.play else {
             return;
         };
-        let result = session.continue_from_pause(&mut self.output);
+        let result = session.resume_from_pause(how, &mut self.output);
         // The paused time isn't game time: the next frame is a normal one.
         self.last_frame = Some(Instant::now());
         self.tabs.paused = None;
+        self.watches.clear_values();
         match result {
             Ok(()) => self.follow_pause(),
             Err(crash) => self.crashed(crash),
@@ -629,10 +666,12 @@ impl EditorApp {
         };
         session.set_breakpoints(self.tabs.breakpoints());
         let breakpoints = self.tabs.breakpoints();
+        // Only a breakpoint's pause: a step's or an error's has none.
         let cleared = self.tabs.paused.as_ref().is_some_and(|pause| {
-            !breakpoints
-                .get(&pause.path)
-                .is_some_and(|lines| lines.contains(&pause.line))
+            pause.breakpoint
+                && !breakpoints
+                    .get(&pause.path)
+                    .is_some_and(|lines| lines.contains(&pause.line))
         });
         if cleared {
             self.continue_play();

@@ -54,7 +54,7 @@ A profile decides which tools the assistant sees. Each tool's description costs 
 |---|---|---|---|
 | `lite` | 13: look, make, change, delete, scripts, checks, play, undo, save | about 2,100 tokens | local models with 8k–32k context |
 | `standard` (default) | 21: adds batches, duplicating, materials, environment, assets, terrain, animation | about 3,300 tokens | Claude Code, Cursor, Codex and other cloud models |
-| `full` | 27: adds levels, prefabs, solid modeling, stylesheets, input/collision/strings and asset rename/delete | about 4,400 tokens | assistants that should be able to do everything |
+| `full` | 28: adds levels, prefabs, solid modeling, stylesheets, input/collision/strings, asset rename/delete and rendering stats (in the editor window) | about 4,500 tokens | assistants that should be able to do everything |
 
 ### Local models
 

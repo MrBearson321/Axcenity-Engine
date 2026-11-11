@@ -251,6 +251,8 @@ pub struct EditorApp {
     /// Play's clients and emulated network (Phase 64 and 67), kept until
     /// the editor closes.
     play_settings: PlaySettings,
+    /// The debugger's watch expressions (roadmap G6).
+    watches: crate::watches::Watches,
     /// A button clicked in the viewport, delivered on the next Play frame.
     pending_ui_activation: Option<InstanceId>,
     /// `MouseEnter`, `MouseLeave` and buttons' sounds from the viewport,
@@ -282,6 +284,9 @@ pub struct EditorApp {
     game_keys: GameKeys,
     /// What Play's frames cost, for the Profiler panel.
     profiler: Profiler,
+    /// The viewport's last frame, edit or Play, for the AI's
+    /// `render_stats`.
+    last_drawn: Option<mcp::LastDrawn>,
     /// The Mixer panel's meters, mute and solo.
     mixer: crate::mixer::Mixer,
     /// The Tests panel's tree and the run going now (Phase 53).
@@ -857,6 +862,7 @@ impl EditorApp {
             dragged_parts: Vec::new(),
             play: None,
             play_settings: PlaySettings::default(),
+            watches: crate::watches::Watches::default(),
             pending_ui_activation: None,
             pending_ui_events: Vec::new(),
             nav_keys: Vec::new(),
@@ -870,6 +876,7 @@ impl EditorApp {
             ui_warnings: Vec::new(),
             last_frame: None,
             profiler: Profiler::default(),
+            last_drawn: None,
             mixer: crate::mixer::Mixer::default(),
             game_tests: crate::game_tests::GameTests::default(),
             plugins: crate::plugins::Plugins::default(),

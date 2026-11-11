@@ -116,6 +116,105 @@ fn changes_list_only_what_apply_would_change() {
 }
 
 #[test]
+fn changes_has_a_row_for_every_setting() {
+    use axcenity_render::{
+        AmbientOcclusion, CloudQuality, DepthOfFieldQuality, MotionBlurQuality, ReflectionQuality,
+        TextureQuality,
+    };
+    /// `a` unless the setting already draws as `a`.
+    fn other<T: PartialEq>(now: T, a: T, b: T) -> Option<T> {
+        Some(if now == a { b } else { a })
+    }
+    let high = GraphicsSettings::preset(Quality::High);
+    // Naming every field: a new setting doesn't compile here until it has
+    // a row below and in `changes`.
+    let GraphicsSettings {
+        quality: _,
+        automatic: _,
+        shadow_quality: _,
+        shadow_distance: _,
+        post_processing: _,
+        render_scale: _,
+        texture_quality: _,
+        texture_budget: _,
+        anti_aliasing: _,
+        ambient_occlusion: _,
+        reflection_quality: _,
+        contact_shadows: _,
+        realtime_gi: _,
+        volumetric_fog: _,
+        cloud_quality: _,
+        depth_of_field: _,
+        vignette: _,
+        film_grain: _,
+        chromatic_aberration: _,
+        sharpen: _,
+        motion_blur: _,
+    } = &high;
+    let edits: [fn(&mut GraphicsSettings); 21] = [
+        |s| s.quality = Quality::Low,
+        |s| s.automatic = !s.automatic,
+        |s| s.shadow_quality = other(s.shadow_quality(), ShadowQuality::Low, ShadowQuality::Ultra),
+        |s| s.shadow_distance = Some(s.shadow_distance() + 100.0),
+        |s| s.post_processing = Some(!s.post_processing()),
+        |s| s.render_scale = Some(s.render_scale() * 0.5),
+        |s| {
+            s.texture_quality = other(
+                s.texture_quality(),
+                TextureQuality::Quarter,
+                TextureQuality::Full,
+            )
+        },
+        |s| s.texture_budget = Some(s.texture_budget() / 2),
+        |s| s.anti_aliasing = other(s.anti_aliasing(), AntiAliasing::Off, AntiAliasing::Taa),
+        |s| {
+            s.ambient_occlusion = other(
+                s.ambient_occlusion(),
+                AmbientOcclusion::Off,
+                AmbientOcclusion::High,
+            )
+        },
+        |s| {
+            s.reflection_quality = other(
+                s.reflection_quality(),
+                ReflectionQuality::Low,
+                ReflectionQuality::Ultra,
+            )
+        },
+        |s| s.contact_shadows = Some(!s.contact_shadows()),
+        |s| s.realtime_gi = Some(!s.realtime_gi()),
+        |s| s.volumetric_fog = Some(!s.volumetric_fog()),
+        |s| s.cloud_quality = other(s.cloud_quality(), CloudQuality::Low, CloudQuality::Ultra),
+        |s| {
+            s.depth_of_field = other(
+                s.depth_of_field(),
+                DepthOfFieldQuality::Off,
+                DepthOfFieldQuality::High,
+            )
+        },
+        |s| s.vignette = Some(!s.vignette()),
+        |s| s.film_grain = Some(!s.film_grain()),
+        |s| s.chromatic_aberration = Some(!s.chromatic_aberration()),
+        |s| s.sharpen = Some(!s.sharpen()),
+        |s| {
+            s.motion_blur = other(
+                s.motion_blur(),
+                MotionBlurQuality::Off,
+                MotionBlurQuality::High,
+            )
+        },
+    ];
+    for (index, edit) in edits.iter().enumerate() {
+        let mut edited = high.clone();
+        edit(&mut edited);
+        assert!(
+            !changes(&high, &edited).is_empty(),
+            "edit {index} isn't listed"
+        );
+    }
+}
+
+#[test]
 fn the_window_draws_before_during_and_after_a_run() {
     let ctx = theme::test_context();
     let mut benchmark = GraphicsBenchmark {

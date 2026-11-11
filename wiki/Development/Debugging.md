@@ -18,7 +18,8 @@ Tools for finding out why something misbehaves. For slowness see [Profiling](../
 | Tool | How | Shows |
 |---|---|---|
 | Editor Console (Output) | Bottom panel; Lua typed there runs in the scripts' sandbox | `print`, script errors `path:line: message`, load problems with the cause chain |
-| Breakpoints | Click a script tab's gutter, then Play | Pauses the whole game before the line; call stack and locals; Continue (F5) |
+| Breakpoints | Click a script tab's gutter, then Play | Pauses the whole game before the line; call stack, locals and upvalues; Continue (F5), Step Over (F10), Step Into (F11), Step Out (Shift+F11); watch expressions |
+| Pause on errors | Ribbon > Clients > Pause on errors (off by default) | A script error pauses Play at the failed line with its call stack and locals |
 | Live Properties | Select during Play | Values update every frame; edits change the game world (Keep to carry them back) |
 | Visual-debug overlays | View > Overlays | Colliders, recent raycasts, bounds, sound emitters, navmesh, agent paths, culling |
 | Several clients | Game group: Clients, Network (latency, jitter, loss) | Each device's world; Profiler Network section |

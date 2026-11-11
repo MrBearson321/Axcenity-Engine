@@ -18,7 +18,7 @@ use axcenity_core::input::InputEvent;
 use axcenity_core::{ClassName, World};
 use axcenity_net::{Conditions, GameInfo, PeerStats, ScriptCode};
 use axcenity_project::ScriptFile;
-use axcenity_script::{Breakpoints, CameraState};
+use axcenity_script::{Breakpoints, CameraState, Resume};
 
 use super::{Crash, Session, play_user_id};
 use crate::output::Output;
@@ -41,6 +41,8 @@ pub struct PlaySettings {
     pub clients: usize,
     /// The network emulated between the clients (Phase 67).
     pub conditions: Conditions,
+    /// A script error pauses Play at the failed line (roadmap G6).
+    pub pause_on_error: bool,
 }
 
 impl Default for PlaySettings {
@@ -48,6 +50,7 @@ impl Default for PlaySettings {
         Self {
             clients: 1,
             conditions: Conditions::default(),
+            pause_on_error: false,
         }
     }
 }
@@ -91,6 +94,7 @@ impl Play {
             edit_world,
             scripts,
             breakpoints,
+            settings.pause_on_error,
             output,
             assets.clone(),
             camera,
@@ -127,6 +131,7 @@ impl Play {
                     edit_world,
                     &[],
                     breakpoints,
+                    settings.pause_on_error,
                     output,
                     assets.clone(),
                     camera,
@@ -277,6 +282,41 @@ impl Play {
             }
         }
         Ok(())
+    }
+
+    /// Steps the device whose pause is shown ([`Self::paused`]); the others
+    /// stay paused. Continue continues them all.
+    pub fn resume_from_pause(&mut self, how: Resume, output: &mut Output) -> Result<(), Crash> {
+        if how == Resume::Continue {
+            return self.continue_from_pause(output);
+        }
+        match self
+            .devices
+            .iter_mut()
+            .find(|device| device.pause().is_some())
+        {
+            Some(device) => device.resume_from_pause(how, output),
+            None => Ok(()),
+        }
+    }
+
+    /// Whether a script error pauses Play, on every device.
+    pub fn set_pause_on_error(&mut self, on: bool) {
+        for device in &mut self.devices {
+            device.sim.scripts.set_pause_on_error(on);
+        }
+    }
+
+    /// A watch expression's value in the shown pause's frame `frame`.
+    pub fn evaluate(&mut self, frame: usize, expression: &str) -> Result<String, String> {
+        match self
+            .devices
+            .iter_mut()
+            .find(|device| device.pause().is_some())
+        {
+            Some(device) => device.evaluate(frame, expression),
+            None => Err("Play isn't paused.".to_owned()),
+        }
     }
 
     /// The viewport's size, for every device's `Camera.ViewportSize`.

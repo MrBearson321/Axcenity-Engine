@@ -350,9 +350,11 @@ pub fn resume(lua: &Lua, thread: &Thread, args: impl IntoLuaMulti) {
             }
         }
         Err(err) => {
-            if watchdog::should_report(lua, &error_message(&err)) {
+            let message = error_message(&err);
+            if watchdog::should_report(lua, &message) {
                 push_error(lua, &err);
             }
+            debugger::failed(lua, thread, &message);
         }
     }
     debugger::leave(lua, thread);

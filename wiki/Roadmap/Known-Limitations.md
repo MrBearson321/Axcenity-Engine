@@ -17,7 +17,7 @@ What the engine doesn't do, or does with a known flaw, today. Each entry names w
 - No per-script **memory limit**; long C functions (`string.rep`, pathological patterns) aren't interrupted by the watchdog (`docs/scripting/sandbox.md`).
 - `task.defer` runs at the next step (Roblox: later in the same frame); a RemoteEvent message with no handler is dropped (Roblox queues it); `ContextActionResult.Pass` and touch buttons not implemented (`docs/scripting/client-server.md`).
 - Vector3 math allocates a userdata per result; `--!native` doesn't speed up engine calls.
-- A breakpoint inside a script-made coroutine or a C-called Lua function can't pause.
+- A breakpoint inside a script-made coroutine or a C-called Lua function can't pause; a step goes on to the next line where it can.
 
 ## Rendering
 
