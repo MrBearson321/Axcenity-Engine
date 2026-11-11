@@ -388,8 +388,8 @@ fn see_through_items_come_last_and_farthest_first() {
 /// A GPU device for tests, or `None` on machines without one (some CI
 /// runners have no graphics adapter at all).
 pub(super) fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+    let instance = crate::adapters::instance();
+    let adapter = pollster::block_on(crate::adapters::adapter(&instance, None)).ok()?;
     pollster::block_on(adapter.request_device(&Default::default())).ok()
 }
 
@@ -853,8 +853,8 @@ fn stats_count_draws_and_triangles_and_time_the_gpu_where_it_can() {
 
     // With them (where the adapter has them), a reading arrives a frame
     // or two after the GPU finishes, without waiting for it.
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    let instance = crate::adapters::instance();
+    let Ok(adapter) = pollster::block_on(crate::adapters::adapter(&instance, None)) else {
         return;
     };
     if !adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
@@ -924,8 +924,8 @@ fn stats_count_items_batches_and_gpu_bytes_by_kind() {
 /// skips don't.
 #[test]
 fn stats_time_each_pass_the_frame_draws() {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    let instance = crate::adapters::instance();
+    let Ok(adapter) = pollster::block_on(crate::adapters::adapter(&instance, None)) else {
         return;
     };
     if !adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
@@ -2202,8 +2202,8 @@ fn every_setting_and_value() -> Vec<GraphicsSettings> {
 #[test]
 fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
     // The instance is kept, so its report can count what's still alive.
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    let instance = crate::adapters::instance();
+    let Ok(adapter) = pollster::block_on(crate::adapters::adapter(&instance, None)) else {
         eprintln!("skipped: no graphics adapter on this machine");
         return;
     };

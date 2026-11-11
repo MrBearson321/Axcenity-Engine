@@ -248,9 +248,10 @@ fn clicking_the_button_turns_it_green_from_its_block_script() {
 /// Draws the game as the player would (from the character's camera, with
 /// the prompts over it) into `path`, when there's a GPU.
 fn snapshot(game: &Game, path: &Path) {
-    use axcenity_render::{TextureRenderer, wgpu};
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    use axcenity_render::TextureRenderer;
+    let instance = axcenity_render::adapters::instance();
+    let Ok(adapter) = pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
+    else {
         return;
     };
     let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))

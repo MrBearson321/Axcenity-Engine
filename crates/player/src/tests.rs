@@ -925,10 +925,10 @@ fn hello_modules_example_builds_stairs_through_two_modules() {
 /// without a GPU.
 #[test]
 fn every_example_renders() {
-    use axcenity_render::wgpu;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    let instance = axcenity_render::adapters::instance();
+    let Ok(adapter) = pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
+    else {
         return;
     };
     let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))
@@ -1093,9 +1093,10 @@ pub(super) fn write_png(path: &Path, pixels: &[u8], (width, height): (u32, u32))
 /// A script that sets `Lighting.ToneMapping` changes the frame drawn after it.
 #[test]
 fn a_script_setting_filmic_tone_mapping_changes_the_next_frame() {
-    use axcenity_render::{TextureRenderer, ToneMapping, wgpu};
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    use axcenity_render::{TextureRenderer, ToneMapping};
+    let instance = axcenity_render::adapters::instance();
+    let Ok(adapter) = pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
+    else {
         return;
     };
     let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))
@@ -1145,9 +1146,8 @@ fn a_script_setting_filmic_tone_mapping_changes_the_next_frame() {
 
 /// A GPU device for render tests, or `None` on machines without one.
 pub(super) fn test_gpu() -> Option<(axcenity_render::wgpu::Device, axcenity_render::wgpu::Queue)> {
-    use axcenity_render::wgpu;
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+    let instance = axcenity_render::adapters::instance();
+    let adapter = pollster::block_on(axcenity_render::adapters::adapter(&instance, None)).ok()?;
     pollster::block_on(adapter.request_device(&Default::default())).ok()
 }
 

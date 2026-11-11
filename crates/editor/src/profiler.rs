@@ -1022,10 +1022,9 @@ mod tests {
 
     #[test]
     fn the_graphics_tab_follows_the_renderers_stats_as_the_scene_changes() {
-        use axcenity_render::wgpu;
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = axcenity_render::adapters::instance();
         let Some((device, queue)) =
-            pollster::block_on(instance.request_adapter(&Default::default()))
+            pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
                 .ok()
                 .and_then(|adapter| {
                     pollster::block_on(adapter.request_device(&Default::default())).ok()

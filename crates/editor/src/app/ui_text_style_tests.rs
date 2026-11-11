@@ -645,9 +645,8 @@ fn brightness_of(
     items: Vec<axcenity_render::UiDrawItem>,
     (width, height): (u32, u32),
 ) -> Option<impl Fn(f32, f32) -> u32> {
-    use axcenity_render::wgpu;
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+    let instance = axcenity_render::adapters::instance();
+    let adapter = pollster::block_on(axcenity_render::adapters::adapter(&instance, None)).ok()?;
     let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
     let mut list = axcenity_scene::build_draw_list(
         &World::new(),

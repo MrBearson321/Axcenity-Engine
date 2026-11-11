@@ -24,8 +24,9 @@ pub fn snapshot_rendered(
     frames: Vec<Vec<egui::Event>>,
     mut show: impl FnMut(&mut egui::Ui, &RenderState),
 ) {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    let instance = axcenity_render::adapters::instance();
+    let Ok(adapter) = pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
+    else {
         eprintln!("skipped: no graphics adapter");
         return;
     };

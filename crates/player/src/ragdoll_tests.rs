@@ -331,10 +331,11 @@ fn an_enabled_ragdoll_collapses_without_bending_a_joint_past_its_limit() {
 /// Draws the ragdoll's MeshPart as posed by its bodies, from the side and
 /// a little above `at`, into `path`, when there's a GPU.
 fn snapshot(sim: &Sim, at: Vec3, path: &Path) {
-    use axcenity_render::{Camera, TextureRenderer, wgpu};
+    use axcenity_render::{Camera, TextureRenderer};
     const VIEW: (u32, u32) = (480, 360);
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+    let instance = axcenity_render::adapters::instance();
+    let Ok(adapter) = pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
+    else {
         return;
     };
     let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))

@@ -377,9 +377,9 @@ mod tests {
 
     #[test]
     fn the_preview_draws_the_material_on_its_sphere() {
-        use axcenity_render::wgpu;
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+        let instance = axcenity_render::adapters::instance();
+        let Ok(adapter) = pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
+        else {
             eprintln!("skipped: no graphics adapter on this machine");
             return;
         };
@@ -608,9 +608,9 @@ mod tests {
     type Gpu = (axcenity_render::wgpu::Device, axcenity_render::wgpu::Queue);
 
     fn gpu() -> Option<Gpu> {
-        use axcenity_render::wgpu;
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+        let instance = axcenity_render::adapters::instance();
+        let adapter =
+            pollster::block_on(axcenity_render::adapters::adapter(&instance, None)).ok()?;
         pollster::block_on(adapter.request_device(&Default::default())).ok()
     }
 

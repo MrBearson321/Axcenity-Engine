@@ -6,6 +6,7 @@
 //! drawn into with [`Renderer`], and [`TextureRenderer`] draws into a texture
 //! on a GPU device someone else set up (the editor's viewport).
 
+pub mod adapters;
 mod atmosphere;
 mod decal;
 mod draw_list;

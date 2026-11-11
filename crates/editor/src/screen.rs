@@ -94,9 +94,10 @@ mod tests {
     /// drawn at half size and scaled up to the viewport.
     #[test]
     fn picking_hits_the_part_drawn_under_the_pointer_at_half_render_scale() {
-        use axcenity_render::{GraphicsSettings, TextureRenderer, wgpu};
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+        use axcenity_render::{GraphicsSettings, TextureRenderer};
+        let instance = axcenity_render::adapters::instance();
+        let Ok(adapter) = pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
+        else {
             return;
         };
         let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))

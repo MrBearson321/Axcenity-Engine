@@ -41,12 +41,8 @@ const BATCH_FRAMES: usize = 60;
 /// were decoded from their source files and the tools measured and drew
 /// the uncooked path.
 pub(crate) fn bench_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        ..Default::default()
-    }))
-    .ok()?;
+    let instance = axcenity_render::adapters::instance();
+    let adapter = pollster::block_on(axcenity_render::adapters::adapter(&instance, None)).ok()?;
     let info = adapter.get_info();
     println!(
         "adapter: {} ({:?}, {})",

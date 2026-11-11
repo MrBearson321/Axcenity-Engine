@@ -248,22 +248,13 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Self> {
-        // `Instance` picks a graphics API: DirectX 12 or Vulkan on Windows,
-        // Metal on macOS, Vulkan on Linux.
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        // DirectX 12 on Windows, Metal on macOS, Vulkan on Linux
+        // (`adapters`).
+        let instance = crate::adapters::instance();
         let surface = instance
             .create_surface(target)
             .context("could not create a drawing surface for the window")?;
-
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-                // Bucketing hides a GPU's exact limits from untrusted web
-                // content; a desktop engine wants the real ones.
-                apply_limit_buckets: false,
-            })
+        let adapter = crate::adapters::adapter(&instance, Some(&surface))
             .await
             .context("no compatible graphics card found")?;
         log::info!("using graphics adapter: {:?}", adapter.get_info());

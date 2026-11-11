@@ -124,11 +124,11 @@ mod tests {
     /// there to look at.
     #[test]
     fn each_mode_draws_hello_graphics_its_own_way_and_lit_comes_back() {
+        use axcenity_render::TextureRenderer;
         use axcenity_render::glam::Vec3;
-        use axcenity_render::{TextureRenderer, wgpu};
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = axcenity_render::adapters::instance();
         let Some((device, queue)) =
-            pollster::block_on(instance.request_adapter(&Default::default()))
+            pollster::block_on(axcenity_render::adapters::adapter(&instance, None))
                 .ok()
                 .and_then(|adapter| {
                     pollster::block_on(adapter.request_device(&Default::default())).ok()
