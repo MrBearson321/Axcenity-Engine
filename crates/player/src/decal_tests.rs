@@ -8,7 +8,7 @@ use axcenity_core::{ClassName, Value};
 use axcenity_render::glam::Vec3;
 use axcenity_render::{Camera, DecalRole, TextureRenderer};
 
-use super::tests::{copy_folder, test_gpu};
+use super::tests::{TempCopy, test_gpu};
 use super::*;
 
 /// A Decal's or ProjectedDecal's class, path and properties.
@@ -48,9 +48,10 @@ fn decals_save_reload_and_export_and_draw_the_same() {
         return;
     };
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-decals");
-    let folder = std::env::temp_dir().join(format!("axcenity-decals-save-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&folder);
-    copy_folder(&example, &folder);
+    let folder = TempCopy::of(
+        &example,
+        &format!("axcenity-decals-save-{}", std::process::id()),
+    );
 
     let camera = Camera {
         position: Vec3::new(12.0, 8.0, 16.0),

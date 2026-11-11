@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use axcenity_core::{ClassName, InstanceId, Value, Vector3};
 
-use super::tests::copy_folder;
+use super::tests::TempCopy;
 use super::*;
 
 const FRAME: f32 = 1.0 / 60.0;
@@ -24,15 +24,12 @@ struct Game {
     printed: Vec<String>,
 }
 
-fn example_copy(test: &str) -> PathBuf {
+fn example_copy(test: &str) -> TempCopy {
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-levels");
-    let folder = std::env::temp_dir().join(format!(
-        "axcenity-player-levels-{test}-{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&folder);
-    copy_folder(&example, &folder);
-    folder
+    TempCopy::of(
+        &example,
+        &format!("axcenity-player-levels-{test}-{}", std::process::id()),
+    )
 }
 
 fn save_folder(test: &str) -> PathBuf {

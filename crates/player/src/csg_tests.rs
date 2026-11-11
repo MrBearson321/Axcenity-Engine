@@ -5,7 +5,7 @@
 
 use axcenity_core::{ClassName, Value, Vector3};
 
-use super::tests::copy_folder;
+use super::tests::TempCopy;
 use super::*;
 
 const FRAME: f32 = 1.0 / 60.0;
@@ -40,16 +40,16 @@ fn vector(world: &World, id: InstanceId, name: &str) -> Vector3 {
 }
 
 /// A copy of hello-csg to open, in a folder of its own.
-fn example_copy(tag: &str) -> PathBuf {
+fn example_copy(tag: &str) -> TempCopy {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-csg");
-    let folder = std::env::temp_dir().join(format!(
-        "axcenity-csg-{tag}-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = fs::remove_dir_all(&folder);
-    copy_folder(&example, &folder);
-    folder
+    TempCopy::of(
+        &example,
+        &format!(
+            "axcenity-csg-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ),
+    )
 }
 
 /// The player's frame, from the controllers through scripts and physics.

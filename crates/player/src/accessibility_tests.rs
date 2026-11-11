@@ -7,18 +7,16 @@ use std::path::Path;
 use axcenity_core::{InstanceId, UiSettings, Value};
 use axcenity_render::{DrawList, UiDrawItem, UiText};
 
-use super::tests::copy_folder;
+use super::tests::TempCopy;
 use super::*;
 
 /// hello-accessibility, opened from a copy, with its slots in `saves`.
-fn start(saves: &Path) -> (World, ScriptRuntime, PathBuf) {
+fn start(saves: &Path) -> (World, ScriptRuntime, TempCopy) {
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-accessibility");
-    let folder = std::env::temp_dir().join(format!(
-        "axcenity-player-hello-accessibility-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&folder);
-    copy_folder(&example, &folder);
+    let folder = TempCopy::of(
+        &example,
+        &format!("axcenity-player-hello-accessibility-{}", std::process::id()),
+    );
     let project = axcenity_project::load(&folder).unwrap();
     let mut world = project.world;
     let mut scripts = axcenity_sim::script_runtime();

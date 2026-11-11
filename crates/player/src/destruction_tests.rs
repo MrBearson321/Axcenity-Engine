@@ -18,7 +18,7 @@ struct Game {
     physics: Physics,
     clock: u32,
     printed: Vec<String>,
-    folder: PathBuf,
+    folder: super::tests::TempCopy,
 }
 
 impl Game {
