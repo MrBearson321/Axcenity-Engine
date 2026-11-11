@@ -31,14 +31,16 @@ pub struct Place {
     pub index: usize,
 }
 
-/// A World as Team Create edits it, with where each deleted Instance was,
-/// so something made inside it meanwhile can go to the nearest place that
-/// still exists.
+/// Where each deleted (detached) Instance was deleted from, so something
+/// made inside it meanwhile can go to the nearest place that still exists.
+pub type Graveyard = FxHashMap<InstanceId, Place>;
+
+/// A World as Team Create edits it, with its graveyard: what the host
+/// keeps.
 #[derive(Clone)]
 pub struct Doc {
     pub world: World,
-    /// Deleted (detached) Instances and the place they were deleted from.
-    pub graveyard: FxHashMap<InstanceId, Place>,
+    pub graveyard: Graveyard,
 }
 
 impl Doc {
@@ -49,15 +51,41 @@ impl Doc {
         world.make_replica();
         Doc {
             world,
-            graveyard: FxHashMap::default(),
+            graveyard: Graveyard::default(),
+        }
+    }
+
+    /// The document to apply ops to.
+    pub fn view(&mut self) -> DocMut<'_> {
+        DocMut {
+            world: &mut self.world,
+            graveyard: &mut self.graveyard,
         }
     }
 
     /// True if `id` is `game` or inside it (not deleted).
     pub fn in_tree(&self, id: InstanceId) -> bool {
-        let root = self.world.root();
-        id == root || self.world.is_descendant_of(id, root)
+        in_tree(&self.world, id)
     }
+}
+
+/// A World and graveyard owned elsewhere (a client's are the editor's edit
+/// World and its own graveyard), to apply ops to.
+pub struct DocMut<'a> {
+    pub world: &'a mut World,
+    pub graveyard: &'a mut Graveyard,
+}
+
+impl DocMut<'_> {
+    pub fn in_tree(&self, id: InstanceId) -> bool {
+        in_tree(self.world, id)
+    }
+}
+
+/// True if `id` is `game` or inside it (not deleted).
+pub fn in_tree(world: &World, id: InstanceId) -> bool {
+    let root = world.root();
+    id == root || world.is_descendant_of(id, root)
 }
 
 /// Why an op was skipped while the rest of its transaction applied.
@@ -141,7 +169,7 @@ enum Inverse {
 /// Applies `ops` in order. `owns` says whether a new Instance may take an
 /// ID (the host checks the author's blocks; a client trusts the host).
 pub fn apply(
-    doc: &mut Doc,
+    doc: &mut DocMut<'_>,
     ops: &[Op],
     owns: &dyn Fn(InstanceId) -> bool,
 ) -> Result<Applied, Refusal> {
@@ -159,7 +187,7 @@ pub fn apply(
 }
 
 /// Takes a transaction off again, newest op first.
-pub fn undo(doc: &mut Doc, undo: Undo) {
+pub fn undo(doc: &mut DocMut<'_>, undo: Undo) {
     for inverse in undo.0.into_iter().rev() {
         match inverse {
             Inverse::Uncreate(id) => {
@@ -168,7 +196,7 @@ pub fn undo(doc: &mut Doc, undo: Undo) {
             Inverse::Put { id, place, grave } => {
                 // Putting back where it was can't make a cycle: everything
                 // after this op has been undone already.
-                let _ = put(&mut doc.world, id, place);
+                let _ = put(doc.world, id, place);
                 match grave {
                     Some(grave) => doc.graveyard.insert(id, grave),
                     None => doc.graveyard.remove(&id),
@@ -189,13 +217,13 @@ pub fn undo(doc: &mut Doc, undo: Undo) {
             Inverse::Attribute { id, name, value } => {
                 let _ = doc.world.set_attribute(id, &name, value);
             }
-            Inverse::Tags { id, tags } => set_tags(&mut doc.world, id, &tags),
+            Inverse::Tags { id, tags } => set_tags(doc.world, id, &tags),
         }
     }
 }
 
 fn apply_op(
-    doc: &mut Doc,
+    doc: &mut DocMut<'_>,
     op: &Op,
     owns: &dyn Fn(InstanceId) -> bool,
     applied: &mut Applied,
@@ -213,9 +241,9 @@ fn apply_op(
                 applied.notes.push(Note::Dropped { id: *id, reason });
                 return Ok(());
             }
-            let before = fields_of(&doc.world, *id).expect("checked it exists");
+            let before = fields_of(doc.world, *id).expect("checked it exists");
             set_props(doc, *id, properties)?;
-            let (name, properties) = changed_fields(&doc.world, *id, &before);
+            let (name, properties) = changed_fields(doc.world, *id, &before);
             applied.undo.0.push(Inverse::Fields {
                 id: *id,
                 name,
@@ -268,7 +296,7 @@ fn apply_op(
 }
 
 /// Why an edit of `id` is skipped, if it is: delete wins.
-fn cannot_edit(doc: &Doc, id: InstanceId) -> Option<DropReason> {
+fn cannot_edit(doc: &DocMut<'_>, id: InstanceId) -> Option<DropReason> {
     if !doc.world.contains(id) {
         Some(DropReason::Gone)
     } else if !doc.in_tree(id) {
@@ -279,7 +307,7 @@ fn cannot_edit(doc: &Doc, id: InstanceId) -> Option<DropReason> {
 }
 
 fn create_tree(
-    doc: &mut Doc,
+    doc: &mut DocMut<'_>,
     nodes: &[NodeSpec],
     owns: &dyn Fn(InstanceId) -> bool,
     applied: &mut Applied,
@@ -329,7 +357,7 @@ fn create_tree(
                     .map_err(|error| Refusal::Invalid(error.to_string()))?;
             }
             put(
-                &mut doc.world,
+                doc.world,
                 node.id,
                 Some(Place {
                     parent: node.parent,
@@ -360,7 +388,7 @@ fn create_tree(
 }
 
 fn reparent(
-    doc: &mut Doc,
+    doc: &mut DocMut<'_>,
     id: InstanceId,
     parent: Option<InstanceId>,
     index: Option<usize>,
@@ -388,7 +416,7 @@ fn reparent(
         // Deleting something that's already out of the tree.
         return Ok(());
     }
-    let before = place_of(&doc.world, id);
+    let before = place_of(doc.world, id);
     let grave_before = doc.graveyard.get(&id).copied();
     let mut final_parent = parent;
     let mut final_index = index;
@@ -404,7 +432,7 @@ fn reparent(
         parent,
         index: final_index.unwrap_or(usize::MAX),
     });
-    put(&mut doc.world, id, place).map_err(|error| match error {
+    put(doc.world, id, place).map_err(|error| match error {
         TreeError::Cycle => Refusal::Cycle { id },
         other => Refusal::Invalid(other.to_string()),
     })?;
@@ -432,7 +460,7 @@ fn reparent(
 
 /// `parent` if it's in the game; otherwise the nearest place up from where
 /// it was deleted that still is, or the Workspace if there's none.
-fn surviving(doc: &Doc, parent: InstanceId) -> InstanceId {
+fn surviving(doc: &DocMut<'_>, parent: InstanceId) -> InstanceId {
     let mut current = parent;
     // A chain of deleted parents is short; the bound only guards against a
     // graveyard that loops.
@@ -455,8 +483,12 @@ fn surviving(doc: &Doc, parent: InstanceId) -> InstanceId {
 
 /// Sets `properties` on `id` in order; on an error, puts back what this
 /// call already changed.
-fn set_props(doc: &mut Doc, id: InstanceId, properties: &[(String, Value)]) -> Result<(), Refusal> {
-    let before = fields_of(&doc.world, id);
+fn set_props(
+    doc: &mut DocMut<'_>,
+    id: InstanceId,
+    properties: &[(String, Value)],
+) -> Result<(), Refusal> {
+    let before = fields_of(doc.world, id);
     for (name, value) in properties {
         let result = match name.as_str() {
             "Name" => match value {
@@ -474,7 +506,7 @@ fn set_props(doc: &mut Doc, id: InstanceId, properties: &[(String, Value)]) -> R
         };
         if let Err(message) = result {
             if let Some((name, properties)) = before {
-                restore_fields(&mut doc.world, id, name, properties);
+                restore_fields(doc.world, id, name, properties);
             }
             return Err(Refusal::Invalid(message));
         }
@@ -554,14 +586,18 @@ pub fn place_of(world: &World, id: InstanceId) -> Option<Place> {
     Some(Place { parent, index })
 }
 
-fn put(world: &mut World, id: InstanceId, place: Option<Place>) -> Result<(), TreeError> {
+pub(crate) fn put(
+    world: &mut World,
+    id: InstanceId,
+    place: Option<Place>,
+) -> Result<(), TreeError> {
     match place {
         Some(place) => world.set_parent_at(id, place.parent, place.index),
         None => world.set_parent(id, None),
     }
 }
 
-fn set_tags(world: &mut World, id: InstanceId, tags: &[String]) {
+pub(crate) fn set_tags(world: &mut World, id: InstanceId, tags: &[String]) {
     let now = world.get(id).map(|i| i.tags().to_vec()).unwrap_or_default();
     for tag in now {
         let _ = world.remove_tag(id, &tag);

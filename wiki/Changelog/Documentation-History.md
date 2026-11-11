@@ -14,6 +14,7 @@ Every change to this wiki, newest first: one line each. Keep the five newest als
 |---|---|---|---|
 | 2026-11-11 | MCP server | `render_stats` tool for the open editor | Claude |
 | 2026-11-11 | MCP server, threading model | MCP step 3.4: clients work in the open editor (Settings ▸ AI connections, loopback listener, relay, shared change log); the page also caught up with steps 4–6 (#116–#133) | Claude |
+| 2026-11-11 | System inventory, roadmap | Team Create TC2: the World's edit journal, `collab::capture`, the editor's session (`app/team.rs`) | Claude |
 | 2026-11-11 | System inventory, system dependencies, roadmap | Team Create TC1: the `collab` crate (sync core) | Claude |
 | 2026-11-11 | Repository structure | `documentation/` is now the user documentation (Learn, reference, generated API pages), embedded in the editor | Claude |
 | 2026-11-11 | Dependencies, rendering, roadmap, release process, project format, audio, profiling | Caught up with PRs #116–#130 (M12, format 5, G5, G7, G8, updater); moved the vault into the repo as `wiki/` with personal details removed | Claude |

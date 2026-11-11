@@ -134,7 +134,7 @@ impl ToolboxPanel {
             self.view = view;
             self.drawer = None;
             if self.view == View::Search {
-                self.start_search(ui.ctx(), 0);
+                self.start_search(ui.ctx(), 1);
             } else {
                 self.load_view(ui.ctx());
             }
@@ -169,8 +169,9 @@ impl ToolboxPanel {
                     records.into_iter().map(Listing::from_record).collect();
                 self.fetch_previews_for(ctx, &listings);
                 self.page = Some(Page {
-                    total: listings.len(),
                     listings,
+                    number: 1,
+                    more: Vec::new(),
                 });
             }
             Err(err) => {

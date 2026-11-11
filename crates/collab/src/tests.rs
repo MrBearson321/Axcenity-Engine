@@ -52,9 +52,7 @@ fn two_editors() -> (Net, Ids) {
 }
 
 fn transparency(net: &Net, i: usize, id: InstanceId) -> Value {
-    net.clients[i]
-        .world()
-        .unwrap()
+    net.worlds[i]
         .get(id)
         .unwrap()
         .property("Transparency")
@@ -253,7 +251,7 @@ fn a_member_can_restore_what_someone_else_deleted() {
 #[test]
 fn a_transaction_applies_whole_or_not_at_all() {
     let (mut net, ids) = two_editors();
-    let before = dump(net.host.doc());
+    let before = net.host_copy();
     // The second op names a property Parts don't have.
     let refused = net.submit(
         0,
@@ -264,11 +262,7 @@ fn a_transaction_applies_whole_or_not_at_all() {
         ],
     );
     assert!(matches!(refused, Err(Refusal::Invalid(_))));
-    assert_eq!(
-        dump(net.clients[0].doc().unwrap()),
-        before,
-        "nothing changed locally"
-    );
+    assert_eq!(net.copy(0), before, "nothing changed locally");
     // A forged one reaching the host changes nothing there either.
     let out = net.host.receive(
         member(0),
@@ -288,7 +282,7 @@ fn a_transaction_applies_whole_or_not_at_all() {
             ..
         }
     ));
-    assert_eq!(dump(net.host.doc()), before);
+    assert_eq!(net.host_copy(), before);
 }
 
 #[test]
@@ -445,21 +439,21 @@ fn undo_puts_material_back_first_so_metalness_comes_back_too() {
     let mut doc = crate::apply::Doc::new(world);
     let all = |_| true;
     apply::apply(
-        &mut doc,
+        &mut doc.view(),
         &[set(ids.a, "Metalness", Value::Number(0.9))],
         &all,
     )
     .unwrap();
-    let before = dump(&doc);
+    let before = dump_doc(&doc);
     let applied = apply::apply(
-        &mut doc,
+        &mut doc.view(),
         &[set(ids.a, "Material", Value::Material(Material::Wood))],
         &all,
     )
     .unwrap();
-    assert_ne!(dump(&doc), before);
-    apply::undo(&mut doc, applied.undo);
-    assert_eq!(dump(&doc), before);
+    assert_ne!(dump_doc(&doc), before);
+    apply::undo(&mut doc.view(), applied.undo);
+    assert_eq!(dump_doc(&doc), before);
 }
 
 #[test]
@@ -528,12 +522,12 @@ fn undo_puts_metalness_back_even_when_it_ended_where_it_started() {
     let mut doc = crate::apply::Doc::new(world);
     let all = |_| true;
     apply::apply(
-        &mut doc,
+        &mut doc.view(),
         &[set(ids.a, "Metalness", Value::Number(1.0))],
         &all,
     )
     .unwrap();
-    let before = dump(&doc);
+    let before = dump_doc(&doc);
     let both = crate::op::Op::SetProps {
         id: ids.a,
         properties: vec![
@@ -541,7 +535,7 @@ fn undo_puts_metalness_back_even_when_it_ended_where_it_started() {
             ("Metalness".into(), Value::Number(1.0)),
         ],
     };
-    let applied = apply::apply(&mut doc, &[both], &all).unwrap();
-    apply::undo(&mut doc, applied.undo);
-    assert_eq!(dump(&doc), before);
+    let applied = apply::apply(&mut doc.view(), &[both], &all).unwrap();
+    apply::undo(&mut doc.view(), applied.undo);
+    assert_eq!(dump_doc(&doc), before);
 }

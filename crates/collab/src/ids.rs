@@ -9,7 +9,7 @@
 use axcenity_core::InstanceId;
 
 /// How many IDs a block holds.
-pub const BLOCK_SIZE: u32 = 256;
+pub const BLOCK_SIZE: u32 = 1024;
 
 /// Arena indices `start..start + len`, each used at generation 0.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,10 +23,6 @@ impl IdBlock {
         let bits = id.to_bits();
         let (index, generation) = (bits as u32, (bits >> 32) as u32);
         generation == 0 && index >= self.start && index - self.start < self.len
-    }
-
-    fn id(&self, offset: u32) -> InstanceId {
-        InstanceId::from_bits(u64::from(self.start + offset))
     }
 }
 
@@ -53,37 +49,5 @@ impl IdAllocator {
             .filter(|&next| next < 1 << 31)
             .expect("Team Create ran out of IDs (over 2 billion)");
         block
-    }
-}
-
-/// A writer's side: the IDs it has left.
-#[derive(Clone, Debug, Default)]
-pub struct IdPool {
-    blocks: Vec<IdBlock>,
-    /// How many of the first block are used.
-    used: u32,
-}
-
-impl IdPool {
-    pub fn add(&mut self, block: IdBlock) {
-        self.blocks.push(block);
-    }
-
-    /// The next free ID, or `None` until the host sends another block.
-    pub fn take(&mut self) -> Option<InstanceId> {
-        loop {
-            let block = *self.blocks.first()?;
-            if self.used < block.len {
-                self.used += 1;
-                return Some(block.id(self.used - 1));
-            }
-            self.blocks.remove(0);
-            self.used = 0;
-        }
-    }
-
-    /// How many IDs are left.
-    pub fn left(&self) -> u32 {
-        self.blocks.iter().map(|block| block.len).sum::<u32>() - self.used
     }
 }

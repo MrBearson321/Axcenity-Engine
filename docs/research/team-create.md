@@ -253,7 +253,7 @@ Each phase is one or more PRs against `main`, tested locally as the policy asks.
 |---|---|---|
 | **TC0** | This proposal and ADR-0020 | Done: approved 2026-11-11 |
 | **TC1** Core | `collab` crate: operations, transactions, host and client state machines, ID blocks (`Arena` range allocation), in-memory transport | Done: `crates/collab`; a test per conflict rule and a convergence test (150 seeds by default, 3,000 checked) pass. Terrain chunks, string cells and file versions are left for TC2 and TC5 |
-| **TC2** Editor over loopback | `History` step to transaction, remote transactions into the edit World, own-step undo, unsynced-edit check, in-editor host | Two headless editors stay identical through the editor tests |
+| **TC2** Editor over loopback | `History` step to transaction, remote transactions into the edit World, own-step undo, unsynced-edit check, in-editor host | Done: instead of converting `History` steps, the World keeps an edit journal (`World::record_edits`) and `collab::capture` turns whatever changed it into one transaction per frame, so every tool, plugin and AI client syncs with no code of its own and nothing can bypass it; writers' ID blocks live in the arena. The editor side is `editor/src/app/team.rs` (held while a gesture is open; undo leaves alone what others changed since, with a warning; SplineMesh pieces stay local via `World::unrecorded`). Tests: capture tests, the convergence test with direct edits (3,000 seeds) and two headless editors in one session. Left for later: undoing a whole-world step (Console, prefab Apply) is refused in a session; terrain, the string table and files aren't shared until TC5; a shared Instance destroyed outright (rather than deleted) makes that copy reload |
 | **TC3** Network and identity | WebSocket over TLS, device keys, sign in and out, invites, roles enforced, handshake refusals | LAN test on Paul's PC and laptop |
 | **TC4** Interface | Team Create panel, title bar chip, presence in viewport, Explorer and Properties, Share and Join flows | UI snapshots; Paul tries it |
 | **TC5** Files | Content-addressed file sync, mirrors, document locks, conflict copies, imports as one transaction | File tests; two-machine test with scripts and imports |
@@ -275,7 +275,7 @@ The transport (WebSocket over TLS), the operation model and ID blocks are engine
 
 ## 15. Risks and simplifications
 
-- **Edits that bypass `History`** wouldn't sync. The change-log check turns that into a failing test; TC2 includes a sweep of every editor tool's tests under a session.
+- **Edits that bypass `History`** wouldn't sync. Resolved in TC2: sync reads the World's own edit journal, so there's no way around it.
 - **ID blocks** touch the arena, a core type every system uses. TC1 measures that nothing changes for non-collaborative Worlds (S10k bench) before going further; the fallback is provisional IDs with host mapping.
 - **Whole-world steps** (prefab Apply, level open) become large transactions; fine for v1, measured in TC2.
 - **Owner-hosted sessions** end when the owner leaves; documented, and TC7 is the answer for always-on.
