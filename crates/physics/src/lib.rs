@@ -99,6 +99,15 @@ pub const STEP_SECONDS: f64 = 1.0 / 60.0;
 /// default of the Workspace's `Gravity`, which [`gravity`] reads.
 pub const GRAVITY: f32 = 196.2;
 
+/// How far, in studs, two touching colliders may move against each other
+/// before rapier works out their contact points again instead of keeping
+/// last step's (rapier's default is 0.05). Kept points carry their impulses
+/// over, so stacks settle: at 0.05 a 2x2x2 block on a stack of five fell in
+/// 4 of 6 slightly different builds, at 0.1 in none, at no measured cost
+/// (docs/benchmarks.md, "Physics step, part 3"). At 0.2 parts landing on
+/// edited terrain missed the edit.
+const CONTACT_RECYCLE_DISTANCE: f32 = 0.1;
+
 /// The most steps one frame may run. The player already caps a frame at
 /// 0.1 s (6 steps), so this only matters if a host passes a huge time: the
 /// rest is dropped rather than freezing the game while physics catches up.
@@ -515,6 +524,9 @@ impl Physics {
         let mut rapier = PhysicsWorld::new();
         rapier.gravity = Vec3::new(0.0, -GRAVITY, 0.0);
         rapier.integration_parameters.dt = STEP_SECONDS as f32;
+        rapier
+            .integration_parameters
+            .normalized_contact_recycle_distance = CONTACT_RECYCLE_DISTANCE;
         Self {
             rapier,
             #[cfg(feature = "parallel")]
