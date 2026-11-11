@@ -28,15 +28,11 @@ pub const SPEC: ToolSpec = ToolSpec {
         Param::required(
             "kind",
             Kind::String,
-            "Block, Sphere, Model, PointLight... (docs lists all)",
+            "Block, Sphere, Model, PointLight... (see docs)",
         ),
         Param::optional("name", Kind::String, "default: the kind"),
         Param::optional("parent", Kind::String, "default: where Insert puts it"),
-        Param::optional(
-            "position",
-            Kind::Vector3,
-            "centre; default: on the ground at 0,0",
-        ),
+        Param::optional("position", Kind::Vector3, "centre; default on the ground"),
         Param::optional("size", Kind::Vector3, "studs"),
         Param::optional("color", Kind::Vector3, "[r,g,b] 0-1"),
         Param::optional("material", Kind::String, "e.g. Brick"),

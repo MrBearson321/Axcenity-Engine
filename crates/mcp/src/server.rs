@@ -12,9 +12,12 @@ use std::sync::Arc;
 use std::sync::mpsc;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
-    ToolAnnotations,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams,
+    GetPromptResponse, GetPromptResult, Implementation, ListPromptsResult,
+    ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+    Prompt, PromptArgument, PromptMessage, ReadResourceRequestParams, ReadResourceResponse,
+    ReadResourceResult, Resource, ResourceContents, ResourceTemplate, Role, ServerCapabilities,
+    ServerConfig, Tool, ToolAnnotations,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
@@ -23,6 +26,7 @@ use tokio::sync::oneshot;
 
 use crate::args::Args;
 use crate::error::ToolError;
+use crate::extras::{PromptSpec, ResourceSpec};
 use crate::spec::{Class, ToolSpec};
 
 /// One tool call for the engine to run.
@@ -60,6 +64,23 @@ pub struct Setup {
     pub instructions: String,
     /// In the order they're listed (a fixed order keeps clients' caches warm).
     pub tools: Vec<&'static ToolSpec>,
+    pub prompts: Vec<&'static PromptSpec>,
+    /// Listed only if the tool each mirrors is among `tools`.
+    pub resources: Vec<&'static ResourceSpec>,
+}
+
+impl Setup {
+    /// The resources whose tool this server lists.
+    fn resources(&self) -> impl Iterator<Item = &'static ResourceSpec> + '_ {
+        self.resources
+            .iter()
+            .copied()
+            .filter(|resource| self.tool(resource.tool).is_some())
+    }
+
+    fn tool(&self, name: &str) -> Option<&'static ToolSpec> {
+        self.tools.iter().copied().find(|spec| spec.name == name)
+    }
 }
 
 /// The tool as `rmcp` sends it, with annotations from its class: clients
@@ -97,12 +118,18 @@ struct Handler {
 
 impl ServerHandler for Handler {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(
-                Implementation::new("axcenity", self.setup.version.clone())
-                    .with_title("Axcenity Engine"),
-            )
-            .with_instructions(self.setup.instructions.clone())
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_prompts()
+                .enable_resources()
+                .enable_tools()
+                .build(),
+        )
+        .with_server_info(
+            Implementation::new("axcenity", self.setup.version.clone())
+                .with_title("Axcenity Engine"),
+        )
+        .with_instructions(self.setup.instructions.clone())
     }
 
     async fn list_tools(
@@ -135,6 +162,141 @@ impl ServerHandler for Handler {
             return Ok(failed(&error).into());
         }
         let client = context.client_info().map(|info| info.name);
+        Ok(match self.run(tool, args, client).await? {
+            Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
+            Err(error) => failed(&error),
+        }
+        .into())
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        let prompts = self
+            .setup
+            .prompts
+            .iter()
+            .map(|spec| {
+                let args = spec
+                    .args
+                    .iter()
+                    .map(|arg| {
+                        PromptArgument::new(arg.name)
+                            .with_description(arg.about)
+                            .with_required(arg.required)
+                    })
+                    .collect();
+                Prompt::new(spec.name, Some(spec.description), Some(args)).with_title(spec.title)
+            })
+            .collect();
+        Ok(ListPromptsResult::with_all_items(prompts))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        let Some(spec) = self
+            .setup
+            .prompts
+            .iter()
+            .find(|spec| spec.name == request.name)
+        else {
+            return Err(ErrorData::invalid_params(
+                format!("unknown prompt: {}", request.name),
+                None,
+            ));
+        };
+        let text = spec
+            .message(request.arguments.unwrap_or_default(), &self.setup.tools)
+            .map_err(|why| ErrorData::invalid_params(why, None))?;
+        Ok(
+            GetPromptResult::new(vec![PromptMessage::new_text(Role::User, text)])
+                .with_description(spec.description)
+                .into(),
+        )
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        let resources = self
+            .setup
+            .resources()
+            .filter(|spec| spec.template().is_none())
+            .map(|spec| {
+                Resource::new(spec.uri, spec.name)
+                    .with_title(spec.title)
+                    .with_description(spec.description)
+                    .with_mime_type("text/plain")
+            })
+            .collect();
+        Ok(ListResourcesResult::with_all_items(resources))
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        let templates = self
+            .setup
+            .resources()
+            .filter(|spec| spec.template().is_some())
+            .map(|spec| {
+                ResourceTemplate::new(spec.uri, spec.name)
+                    .with_title(spec.title)
+                    .with_description(spec.description)
+                    .with_mime_type("text/plain")
+            })
+            .collect();
+        Ok(ListResourceTemplatesResult::with_all_items(templates))
+    }
+
+    /// Reads a resource by running the tool it mirrors.
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        let found = self.setup.resources().find_map(|spec| {
+            let args = spec.args_for(&request.uri)?;
+            Some((self.setup.tool(spec.tool)?, args))
+        });
+        let Some((tool, args)) = found else {
+            return Err(ErrorData::resource_not_found(
+                format!("no resource {}", request.uri),
+                None,
+            ));
+        };
+        let args = Args::new(args);
+        if let Err(error) = args.check(tool) {
+            return Err(ErrorData::invalid_params(error.to_string(), None));
+        }
+        let client = context.client_info().map(|info| info.name);
+        match self.run(tool, args, client).await? {
+            Ok(text) => {
+                Ok(ReadResourceResult::new(vec![ResourceContents::text(text, request.uri)]).into())
+            }
+            Err(error) => Err(ErrorData::resource_not_found(error.to_string(), None)),
+        }
+    }
+}
+
+impl Handler {
+    /// Hands one call to the engine and waits for its outcome. The error is
+    /// for an engine that has stopped.
+    async fn run(
+        &self,
+        tool: &'static ToolSpec,
+        args: Args,
+        client: Option<String>,
+    ) -> Result<Outcome, ErrorData> {
         let (reply, answer) = oneshot::channel();
         let job = Job {
             call: Call { tool, args, client },
@@ -143,14 +305,9 @@ impl ServerHandler for Handler {
         if self.jobs.send(job).is_err() {
             return Err(ErrorData::internal_error("the editor has stopped", None));
         }
-        match answer.await {
-            Ok(Ok(text)) => Ok(CallToolResult::success(vec![ContentBlock::text(text)]).into()),
-            Ok(Err(error)) => Ok(failed(&error).into()),
-            Err(_) => Err(ErrorData::internal_error(
-                "the editor stopped before answering",
-                None,
-            )),
-        }
+        answer
+            .await
+            .map_err(|_| ErrorData::internal_error("the editor stopped before answering", None))
     }
 }
 

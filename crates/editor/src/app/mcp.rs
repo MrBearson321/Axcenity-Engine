@@ -32,6 +32,7 @@ mod asset_find;
 mod asset_import;
 mod asset_manage;
 mod batch;
+mod changes;
 mod docs;
 mod env_set;
 mod game_run;
@@ -49,6 +50,7 @@ mod project_check;
 mod project_info;
 mod project_save;
 mod project_settings;
+mod prompts;
 mod refs;
 mod scene_inspect;
 mod script_read;
@@ -101,6 +103,8 @@ pub(super) struct Session {
     /// The folders `asset_import` may copy from: only what the user named
     /// with `--allow-import`.
     pub import_folders: Vec<PathBuf>,
+    /// What changed in the world, for `history changes`.
+    pub changes: changes::ChangeLog,
 }
 
 impl Session {
@@ -116,6 +120,7 @@ impl Session {
             last_undo: None,
             files: Vec::new(),
             import_folders: Vec::new(),
+            changes: changes::ChangeLog::default(),
             id: format!(
                 "{:x}",
                 u64::from(std::process::id()) << 32 | u64::from(nanos)
@@ -125,11 +130,11 @@ impl Session {
 }
 
 impl Host {
-    pub fn new(app: EditorApp, mode: Mode) -> Self {
-        Host {
-            app,
-            session: Session::new(mode),
-        }
+    pub fn new(mut app: EditorApp, mode: Mode) -> Self {
+        let mut session = Session::new(mode);
+        // From here on the world's changes are noted, for `history changes`.
+        session.changes.take(&mut app.world, changes::By::Others);
+        Host { app, session }
     }
 }
 
@@ -277,7 +282,14 @@ pub(super) fn run(host: &mut Host, tool: &ToolSpec, args: &Args, client: Option<
         host.session.client = client.trim().chars().take(40).collect();
     }
     host.session.last_undo = None;
+    // Whatever changed between calls wasn't this client.
+    host.session
+        .changes
+        .take(&mut host.app.world, changes::By::Others);
     let outcome = call(host, tool, args);
+    host.session
+        .changes
+        .take(&mut host.app.world, changes::By::Client);
     log(host, tool, args, &outcome);
     outcome
 }
@@ -441,6 +453,8 @@ pub(crate) fn run_from_command_line(args: impl Iterator<Item = std::ffi::OsStrin
         version: TOOLKIT_VERSION.to_owned(),
         instructions: INSTRUCTIONS.to_owned(),
         tools: tools_for(options.profile),
+        prompts: prompts::PROMPTS.to_vec(),
+        resources: prompts::RESOURCES.to_vec(),
     };
     let mut host = Host::new(app, options.mode);
     host.session.import_folders = options.import_folders;

@@ -21,7 +21,7 @@ pub const SPEC: ToolSpec = ToolSpec {
     class: Class::Modify,
     idempotent: false,
     params: &[
-        Param::optional("path", Kind::String, "script to change: file or object"),
+        Param::optional("path", Kind::String, "script to change"),
         Param::optional("name", Kind::String, "new script's name"),
         Param::optional(
             "side",

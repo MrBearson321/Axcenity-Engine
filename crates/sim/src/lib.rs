@@ -9,6 +9,7 @@
 //! The order is written down in `docs/architecture/frame-loop.md`.
 
 mod host;
+pub mod occlusion;
 mod schedule;
 mod steps;
 
@@ -16,10 +17,13 @@ mod steps;
 mod blend_tests;
 #[cfg(test)]
 mod golden;
+#[cfg(test)]
+mod memory_tests;
 
 use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_character::Controllers;
+use axcenity_core::memory::{MemoryBreakdown, MemoryUse};
 use axcenity_core::{ClassName, World};
 use axcenity_nav::Agents;
 use axcenity_physics::Physics;
@@ -31,6 +35,7 @@ use axcenity_script::ScriptRuntime;
 /// Debris.
 pub use axcenity_gameplay::script_runtime;
 pub use host::{FrameCtx, HostIo};
+pub use occlusion::Occlusion;
 pub use schedule::{Hosts, Schedule, Stage, Step};
 
 /// The game's simulation: what the steps of a frame work on.
@@ -48,6 +53,9 @@ pub struct Sim {
     pub animators: Animators,
     /// The project's models and sounds.
     pub assets: Assets,
+    /// The walls between each spatial Sound and the listener (roadmap
+    /// G8); hosts with audio step it and pass it on.
+    pub occlusion: Occlusion,
 }
 
 impl Sim {
@@ -64,6 +72,28 @@ impl Sim {
             agents,
             animators: Animators::with_ground(axcenity_character::foot_ground),
             assets,
+            occlusion: Occlusion::default(),
+        }
+    }
+
+    /// The game's memory by kind (roadmap G7), for the profilers: Lua, the
+    /// Instances by class, the asset caches and physics. Sounds are the
+    /// host's (`GameAudio::memory`), so they're left at zero. Walks every
+    /// Instance and cache, so hosts ask every few frames.
+    pub fn memory(&self) -> MemoryBreakdown {
+        let assets = self.assets.memory();
+        let cache = |used: axcenity_assets::CacheUse| MemoryUse {
+            count: used.count,
+            bytes: used.bytes,
+        };
+        MemoryBreakdown {
+            lua: self.scripts.used_memory(),
+            instances: self.world.memory(),
+            models: cache(assets.models),
+            textures: cache(assets.textures),
+            lighting: cache(assets.lighting),
+            sounds: MemoryUse::default(),
+            physics: self.physics.memory(),
         }
     }
 

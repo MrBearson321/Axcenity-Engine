@@ -151,6 +151,8 @@ fix: did you mean "Workspace/House"? Use scene_inspect to list objects.
 
 The host keeps the edit world's change log on (`World::record_changes`) and drains it every frame into a bounded ring (like `WORKSPACE_MOVES_KEPT`), numbering changes. Every result carries `cursor`. Reads accept `since: cursor` and return only what changed; `history {action:"changes"}` summarises creates, removals and changed property names, including the **user's** edits in live mode ("the user moved 41 and deleted 44"). If a cursor fell out of the ring the answer says so and the agent re-reads.
 
+As built (step 5): only `history changes` carries the number, called a **mark** because `cursor` already means the paging token of cut results, and its default `since` is the last answer's mark, so a small model just asks again. Other results don't carry it (it would cost tokens on every call for a feature only the live editor really needs), and reads don't take `since`. A world swapped in whole (a level opened, a whole-world undo) makes older marks answer "read again".
+
 A separate snapshot system was considered and dropped: cursors plus `Instance::revision` cover "what changed", and version checkpoints (`project::versions`) cover "go back to before the AI started". No new storage.
 
 ### 6.4 Definitions budget and measuring it

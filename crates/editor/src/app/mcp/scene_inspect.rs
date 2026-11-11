@@ -26,14 +26,10 @@ pub const SPEC: ToolSpec = ToolSpec {
         Param::optional(
             "root",
             Kind::String,
-            "ID or path; default Workspace, \"game\" for all",
+            "ID or path; default Workspace; game for all",
         ),
         Param::optional("depth", Kind::Integer, "tree levels, default 2"),
-        Param::optional(
-            "class",
-            Kind::String,
-            "class or base class (BasePart, Light...)",
-        ),
+        Param::optional("class", Kind::String, "class or base (BasePart...)"),
         Param::optional("name", Kind::String, "name contains"),
         Param::optional("tag", Kind::String, "has tag"),
         Param::optional("near", Kind::Vector3, "within radius of [x,y,z]"),

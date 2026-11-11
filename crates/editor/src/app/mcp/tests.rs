@@ -1733,6 +1733,12 @@ fn level_lists_makes_renames_deletes_and_opens_levels() {
     assert!(opened_text.starts_with("opened Castle"), "{opened_text}");
     let list = ok(host, "level", json!({}));
     assert!(list.contains("Castle · open"), "{list}");
+    // A new world: changes from before it can't be listed.
+    let changes = ok(host, "history", json!({"action": "changes", "since": 0}));
+    assert!(changes.contains("can't list changes since 0"), "{changes}");
+    assert!(changes.contains("a level opened"), "{changes}");
+    let changes = ok(host, "history", json!({"action": "changes"}));
+    assert!(changes.contains("nothing changed"), "{changes}");
 }
 
 #[test]
@@ -2009,4 +2015,164 @@ fn asset_manage_renames_with_references_and_deletes_after_asking() {
     )
     .unwrap_err();
     assert_eq!(missing.code, Code::NotFound, "{missing}");
+}
+
+#[test]
+fn history_changes_says_what_changed_since_last_asked_and_by_whom() {
+    let mut opened = open("hello-part", "mcp-changes");
+    let host = &mut opened.app;
+    let first = ok(host, "history", json!({"action": "changes"}));
+    assert_eq!(first, "mark 0 · nothing changed since 0");
+    // The user (or another client) adds two parts and paints them, between calls.
+    let workspace = host.app.world.workspace();
+    let a = add(host, ClassName::Part, "Crate", workspace);
+    let b = add(host, ClassName::Part, "Crate", workspace);
+    let block = host.app.world.find_first_child(workspace, "Block").unwrap();
+    host.app
+        .world
+        .set_property(block, "Transparency", axcenity_core::Value::Number(0.5))
+        .unwrap();
+    let wall = ok(
+        host,
+        "object_create",
+        json!({"kind": "Block", "name": "Wall"}),
+    );
+    let wall_id = wall.split_whitespace().nth(1).unwrap().to_owned();
+    ok(
+        host,
+        "object_set",
+        json!({"id": id_text(block), "props": {"Color": [1, 0, 0]}}),
+    );
+    let text = ok(host, "history", json!({"action": "changes"}));
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(
+        lines[0].starts_with("mark ") && lines[0].ends_with(" · since 0:"),
+        "{text}"
+    );
+    // This client's first, then everyone else's; alike objects fold, and
+    // what both changed is said once, as someone else's.
+    let mine = lines.iter().position(|line| *line == "by you:").unwrap();
+    let theirs = lines
+        .iter()
+        .position(|line| line.starts_with("by others"))
+        .unwrap();
+    assert!(mine < theirs, "{text}");
+    assert!(
+        lines[mine + 1].starts_with(&format!("added {wall_id} Part \"Wall\" in Workspace")),
+        "{text}"
+    );
+    assert!(
+        lines.contains(
+            &format!(
+                "added 2× Part \"Crate\" in Workspace ({}, {})",
+                id_text(a),
+                id_text(b)
+            )
+            .as_str()
+        ),
+        "{text}"
+    );
+    assert!(
+        lines.contains(
+            &format!("set {} Part \"Block\": Color, Transparency", id_text(block)).as_str()
+        ),
+        "{text}"
+    );
+    // Asked again: only what's new since that answer.
+    let again = ok(host, "history", json!({"action": "changes"}));
+    assert!(again.contains("nothing changed"), "{again}");
+    ok(host, "object_delete", json!({"id": wall_id}));
+    let removed = ok(host, "history", json!({"action": "changes"}));
+    assert!(
+        removed.ends_with(&format!("\nremoved {wall_id} Part \"Wall\"")),
+        "{removed}"
+    );
+    // Undo is a change too; an old mark still lists everything since it.
+    ok(host, "history", json!({"action": "undo"}));
+    let back = ok(host, "history", json!({"action": "changes"}));
+    assert!(
+        back.contains(&format!("added {wall_id} Part \"Wall\"")),
+        "{back}"
+    );
+    let all = ok(host, "history", json!({"action": "changes", "since": 0}));
+    assert!(all.contains("Crate"), "{all}");
+    let ahead = ok(
+        host,
+        "history",
+        json!({"action": "changes", "since": 99_999}),
+    );
+    assert!(ahead.contains("is ahead of it"), "{ahead}");
+}
+
+#[test]
+fn prompts_name_only_listed_tools_and_resources_mirror_lite_read_tools() {
+    use axcenity_mcp::Class;
+    let goal = serde_json::Map::from_iter([("goal".to_owned(), json!("a hut"))]);
+    let lite = super::prompts::PROMPTS[0]
+        .message(goal.clone(), &tools_for(Profile::Lite))
+        .unwrap();
+    assert!(
+        lite.contains("a hut") && lite.contains("object_create"),
+        "{lite}"
+    );
+    // Lite has no batch and no project_save.
+    assert!(
+        !lite.contains("batch") && !lite.contains("project_save"),
+        "{lite}"
+    );
+    let standard = super::prompts::PROMPTS[0]
+        .message(goal, &tools_for(Profile::Standard))
+        .unwrap();
+    assert!(
+        standard.contains("one batch") && standard.contains("7. project_save"),
+        "{standard}"
+    );
+    let fix = super::prompts::PROMPTS[1]
+        .message(serde_json::Map::new(), &tools_for(Profile::Lite))
+        .unwrap();
+    assert!(
+        fix.starts_with("Find and fix") && !fix.contains("asset_find"),
+        "{fix}"
+    );
+    assert!(
+        super::prompts::PROMPTS[0]
+            .message(serde_json::Map::new(), &[])
+            .is_err()
+    );
+    // Every resource reads through a read-only tool every profile lists,
+    // with a parameter that tool has.
+    for resource in super::prompts::RESOURCES {
+        let spec = tools_for(Profile::Lite)
+            .into_iter()
+            .find(|spec| spec.name == resource.tool)
+            .unwrap_or_else(|| panic!("{} isn't a lite tool", resource.tool));
+        assert_eq!(spec.class, Class::Read, "{}", resource.uri);
+        if let Some((_, name)) = resource.template() {
+            assert!(spec.param(name).is_some(), "{}", resource.uri);
+        }
+    }
+}
+
+#[test]
+fn a_resource_reads_the_same_as_its_tool() {
+    let mut opened = open("hello-part", "mcp-resources");
+    let host = &mut opened.app;
+    let object = super::prompts::RESOURCES
+        .iter()
+        .find(|resource| resource.name == "object")
+        .unwrap();
+    let args = object
+        .args_for("axcenity://object/Workspace%2FBlock")
+        .unwrap();
+    let spec = TOOLS
+        .iter()
+        .find(|tool| tool.spec.name == "object_get")
+        .unwrap()
+        .spec;
+    let read = run(host, spec, &Args::new(args), Some("test")).unwrap();
+    assert_eq!(
+        read,
+        ok(host, "object_get", json!({"id": "Workspace/Block"}))
+    );
+    assert!(read.contains("\"Block\""), "{read}");
 }

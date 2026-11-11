@@ -313,6 +313,12 @@ fn each_frame_reports_its_steps_cost_and_the_load_for_the_profiler() {
     assert_eq!(load.bodies, 3);
     assert_eq!(load.sounds_playing, 0);
     assert!(load.lua_bytes > 0);
+    // The Profiler's Memory tab (G7) agrees with the Game tab.
+    let memory = session.memory();
+    assert_eq!(memory.physics.count, load.bodies);
+    assert_eq!(memory.lua, load.lua_bytes);
+    assert!(memory.instances.total.count >= 3);
+    assert_eq!(memory.sounds.count, 0, "no sound has played");
 }
 
 /// Play spawns no character in `world` (Phase 47).
