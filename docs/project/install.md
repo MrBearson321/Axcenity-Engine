@@ -72,3 +72,12 @@ chmod +x AxcenityEditor-*-linux-x86_64.AppImage
 ```
 
 You can also double-click it after marking it executable. Optional: [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) to add a menu entry. Same Vulkan driver requirement as the tarball.
+
+## Updating
+
+The editor looks for new releases on GitHub once a day (Settings > Updates: the channel to follow, how often, or Check now). It only says an update is there after checking the release's signed manifest, and it never installs anything without asking.
+
+- **Windows setup and the Linux `.tar.gz`** update themselves: Settings > Updates > **Download and install**, then **Restart and install**. The editor asks you to save, closes, swaps its folder for the new version, checks the new version starts, and opens your project again. If the new version doesn't start, the old one is put back. **Roll back** in the same place returns to the version it replaced. Your projects, settings and saves are never touched.
+- **`.deb`, `.rpm`, Arch, AppImage and macOS**: Settings > Updates says a new version is out and links it; install it the same way as the first time.
+
+Opening a project from an older Axcenity asks before upgrading it, and keeps a copy of its files from before in the project's `.axcenity/previous/<format>/` folder. After the upgrade, an older Axcenity can't open it; open that copy instead.

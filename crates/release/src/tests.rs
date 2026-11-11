@@ -852,6 +852,64 @@ fn prepare_refuses_an_invalid_history() {
 }
 
 #[test]
+fn a_format_change_needs_a_breaking_entry_and_prepare_records_the_formats() {
+    let root = sample("formats");
+    let history = History::load(&root).unwrap();
+    let then = history.latest().unwrap().formats["project"];
+    assert!(
+        history
+            .unreleased()
+            .iter()
+            .all(|(_, c)| c.category != crate::Category::Breaking)
+    );
+    write(
+        &root,
+        "formats.toml",
+        &format!("[formats]\nproject = {}\nsave = 2\n", then + 1),
+    );
+    // No breaking entry: a problem naming the format. A format the last
+    // release didn't record (`save`) isn't a change.
+    let problems: Vec<String> = History::load(&root)
+        .unwrap()
+        .validate()
+        .into_iter()
+        .map(|p| format!("{}: {}", p.file, p.message))
+        .collect();
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(
+        problems[0].starts_with("formats.toml: `project`"),
+        "{problems:?}"
+    );
+    assert!(!problems[0].contains("save"));
+    // With one: fine.
+    write(
+        &root,
+        "unreleased/format.toml",
+        "category = \"breaking\"\nsubsystem = \"project\"\ntitle = \"Format 6\"\ndetails = \"Older engines can't open it.\"\n",
+    );
+    let problems = History::load(&root).unwrap().validate();
+    assert!(problems.is_empty(), "{problems:?}");
+
+    // prepare copies the formats into the record.
+    let root = repo("prepare-formats", "0.2.0-alpha.1");
+    let then = History::load(&root.join("releases"))
+        .unwrap()
+        .latest()
+        .unwrap()
+        .formats["project"];
+    write(
+        &root.join("releases"),
+        "formats.toml",
+        &format!("[formats]\nproject = {then}\nsave = 2\n"),
+    );
+    prepare::prepare(&root, &v("0.2.0-alpha.2"), "2026-12-01").unwrap();
+    let history = History::load(&root.join("releases")).unwrap();
+    let record = history.release(&v("0.2.0-alpha.2")).unwrap();
+    assert_eq!(record.formats["project"], then);
+    assert_eq!(record.formats["save"], 2);
+}
+
+#[test]
 fn the_repositorys_own_release_files_are_consistent() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let problems = prepare::check(&repo, None).unwrap();
