@@ -106,6 +106,12 @@ fn world(name: &str, new_editor: &str) -> World {
     }
 }
 
+impl Drop for World {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
 impl World {
     fn instruction(&self, action: Action) -> Instruction {
         let updates = self.staged.parent().unwrap().parent().unwrap();
@@ -129,9 +135,16 @@ impl World {
     /// Every file outside the install, its siblings and `Updates/`.
     fn user_data(&self) -> BTreeMap<PathBuf, Vec<u8>> {
         let mut files = BTreeMap::new();
+        // By path components, so Windows' `\` separators count too.
+        let apps = self.install.parent().unwrap();
+        let updates = self.staged.parent().unwrap().parent().unwrap();
         walk(&self.root, &mut |path| {
-            let text = path.to_string_lossy();
-            if !text.contains("apps/Axcenity") && !text.contains("Updates") {
+            let in_install = path
+                .strip_prefix(apps)
+                .ok()
+                .and_then(|rest| rest.components().next())
+                .is_some_and(|first| first.as_os_str().to_string_lossy().starts_with("Axcenity"));
+            if !in_install && !path.starts_with(updates) {
                 files.insert(path.to_owned(), fs::read(path).unwrap());
             }
         });
@@ -167,6 +180,7 @@ fn walk(dir: &Path, each: &mut dyn FnMut(&Path)) {
 fn an_update_swaps_the_folder_keeps_the_old_one_and_touches_nothing_else() {
     let w = world("install", "0.2.0-alpha.2 new");
     let before = w.user_data();
+    assert_eq!(before.len(), 5, "projects, settings, a save and a note");
     let mut host = closing();
     let outcome = apply::run(&w.instruction(Action::Install), &mut host);
     assert!(outcome.ok, "{outcome:?}");
