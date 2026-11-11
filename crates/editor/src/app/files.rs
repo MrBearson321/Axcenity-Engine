@@ -413,6 +413,7 @@ impl EditorApp {
                 };
                 // The undo history stays: saving only marks this point as saved.
                 self.history.mark_saved();
+                self.saved_after_team_session();
                 true
             }
             Err(err) => {

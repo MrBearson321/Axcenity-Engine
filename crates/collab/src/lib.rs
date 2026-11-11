@@ -40,6 +40,7 @@ pub mod handshake;
 pub mod host;
 pub mod identity;
 pub mod ids;
+pub mod journal;
 pub mod message;
 pub mod mirror;
 pub mod op;
@@ -55,6 +56,8 @@ mod capture_tests;
 mod convergence_tests;
 #[cfg(test)]
 mod files_tests;
+#[cfg(test)]
+mod journal_tests;
 #[cfg(test)]
 mod net_tests;
 #[cfg(test)]

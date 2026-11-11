@@ -681,3 +681,39 @@ fn files_and_locks_travel_between_computers() {
         Some(sam.client().member())
     );
 }
+
+#[test]
+fn a_member_flooding_the_host_is_cut_off_and_comes_back() {
+    use crate::message::ToHost;
+    use crate::presence::{Camera, Presence};
+    let owner_id = Arc::new(Identity::new("Paul", [200, 80, 40]));
+    let (hosting, cert) = host(&owner_id, None);
+    let mut owner = Member::owner(&hosting, &cert, owner_id);
+    let invite = hosting.lock().invite(Role::Editor, INVITE_LIFETIME_SECONDS);
+    let mut sam = Member::invited(&invite, "Sam");
+    converge(&hosting, &mut [&mut owner, &mut sam]);
+
+    // Far more messages in one go than any editor sends in a second.
+    let flood = (0..crate::session::MAX_MESSAGES_PER_SECOND + 500)
+        .map(|i| {
+            ToHost::Presence(Presence {
+                selection: Vec::new(),
+                camera: Some(Camera {
+                    position: [i as f32, 0.0, 0.0],
+                    look: [0.0, 0.0, 1.0],
+                }),
+                editing: None,
+            })
+        })
+        .collect();
+    sam.remote.send(flood);
+    until(
+        &mut [&mut owner, &mut sam],
+        "the flood is cut off",
+        |members| members[1].lost > 0,
+    );
+    // Its connection was closed, not its membership: it reconnects.
+    sam.edit("Insert Part", add_part("After"));
+    converge(&hosting, &mut [&mut owner, &mut sam]);
+    assert!(part_named(&owner.world, "After"));
+}

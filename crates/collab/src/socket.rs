@@ -54,8 +54,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const CERT_NAME: &str = "axcenity-team-create";
 
 /// The largest message a host takes (one undo step: a pasted model can be
-/// big) and a joiner takes (the whole World when joining).
-const MAX_TO_HOST: usize = 256 << 20;
+/// big, but files come in 1 MiB pieces) and a joiner takes (the whole
+/// World when joining). A bigger one closes the connection (TC6).
+const MAX_TO_HOST: usize = 32 << 20;
 const MAX_TO_CLIENT: usize = 1 << 30;
 
 fn provider() -> Arc<CryptoProvider> {

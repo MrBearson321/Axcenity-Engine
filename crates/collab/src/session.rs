@@ -55,7 +55,14 @@ pub struct HostSession {
     gates: HashMap<ConnId, Gate>,
     members: HashMap<ConnId, MemberId>,
     conns: HashMap<MemberId, ConnId>,
+    /// Each connection's messages in the current second (rate limit).
+    rates: HashMap<ConnId, (Instant, u32)>,
 }
+
+/// The most messages a member may send in one second (TC6). An editor
+/// sends a few each frame, and a file a message per MiB, so only a broken
+/// or hostile client gets near it; its connection is closed.
+pub const MAX_MESSAGES_PER_SECOND: u32 = 1_000;
 
 impl HostSession {
     /// Hosts `host` for the members in `access`, listening on `bind`
@@ -98,6 +105,7 @@ impl HostSession {
             gates: HashMap::new(),
             members: HashMap::new(),
             conns: HashMap::new(),
+            rates: HashMap::new(),
         })
     }
 
@@ -236,6 +244,11 @@ impl HostSession {
                     .insert(conn, Gate::new(self.cert, self.versions.clone()));
             }
             NetEvent::Message(conn, bytes) => {
+                if !self.within_rate(conn) {
+                    log::warn!("Team Create: a connection sent too many messages; it's closed");
+                    self.listener.close(conn);
+                    return;
+                }
                 if let Some(&member) = self.members.get(&conn) {
                     match wire::decode_to_host(&bytes) {
                         Ok(message) => {
@@ -266,6 +279,7 @@ impl HostSession {
             }
             NetEvent::Closed(conn) => {
                 self.gates.remove(&conn);
+                self.rates.remove(&conn);
                 if let Some(member) = self.members.remove(&conn)
                     && self.conns.get(&member) == Some(&conn)
                 {
@@ -275,6 +289,29 @@ impl HostSession {
                 }
             }
         }
+    }
+
+    /// Counts a message from `conn`: false once it's past
+    /// [`MAX_MESSAGES_PER_SECOND`] in this second.
+    fn within_rate(&mut self, conn: ConnId) -> bool {
+        let now = Instant::now();
+        let (since, count) = self.rates.entry(conn).or_insert((now, 0));
+        if now.duration_since(*since) >= Duration::from_secs(1) {
+            *since = now;
+            *count = 0;
+        }
+        *count += 1;
+        *count <= MAX_MESSAGES_PER_SECOND
+    }
+
+    /// The session ended cleanly: the host's journal goes (TC6).
+    pub fn end_cleanly(&mut self) {
+        self.host.end_journal();
+    }
+
+    /// The host, to change (tests, and the hosting editor's journal).
+    pub fn host_mut(&mut self) -> &mut Host {
+        &mut self.host
     }
 
     fn admit(&mut self, conn: ConnId, member: Member) {
