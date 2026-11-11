@@ -36,6 +36,7 @@ mod surface_shaders;
 mod temporal;
 mod texture_budget;
 mod ui;
+mod upscaling;
 mod water;
 mod weather;
 mod wind;
