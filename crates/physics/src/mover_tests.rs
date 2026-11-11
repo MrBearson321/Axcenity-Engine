@@ -284,7 +284,9 @@ fn a_vector_force_off_the_center_turns_the_part_unless_applied_at_the_center() {
         pushed.push(block);
     }
     let mut physics = Physics::new();
-    run(&mut physics, &mut world, 0.5);
+    // A tenth of a second: it turns right over in a quarter, and so is
+    // nearly level again by half a second.
+    run(&mut physics, &mut world, 0.1);
     assert!(tilt(&world, pushed[0]) > 20.0);
     assert!(tilt(&world, pushed[1]) < 0.01);
 }
@@ -522,4 +524,38 @@ fn velocities_hold_their_speed_against_friction_on_the_floor() {
     assert!(distance(moving, v(5.0, 0.0, 0.0)) < 0.02, "{moving:?}");
     // The top still sits on the floor.
     assert!((vector(&world, top, "Position").y - 0.5).abs() < 0.05);
+}
+
+#[test]
+fn a_torque_turns_as_hard_every_step_and_stops_when_disabled() {
+    let mut world = World::new();
+    world
+        .set_property(world.workspace(), "Gravity", Value::Number(0.0))
+        .unwrap();
+    let block = part(&mut world, v(0.0, 10.0, 0.0), v(2.0, 2.0, 2.0), false);
+    let a0 = attachment(&mut world, block, v(0.0, 0.0, 0.0));
+    let twist = mover(&mut world, ClassName::Torque, a0);
+    set(
+        &mut world,
+        twist,
+        "Torque",
+        Value::Vector3(v(0.0, 50.0, 0.0)),
+    );
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 0.5);
+    // A 2-stud cube of density 1: mass 8, inertia 8 * (4 + 4) / 12 about Y.
+    let inertia = 8.0 * 8.0 / 12.0;
+    let expected = 50.0 / inertia * 0.5;
+    let spin = vector(&world, block, "AssemblyAngularVelocity").y;
+    // Less a little for the angular damping.
+    assert!(
+        spin <= expected && spin > expected * 0.8,
+        "{spin} vs {expected}"
+    );
+
+    // Disabled, nothing turns it harder any more: only damping slows it.
+    set(&mut world, twist, "Enabled", Value::Bool(false));
+    run(&mut physics, &mut world, 0.5);
+    let later = vector(&world, block, "AssemblyAngularVelocity").y;
+    assert!(later < spin, "{later} vs {spin}");
 }

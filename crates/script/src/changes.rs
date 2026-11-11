@@ -22,27 +22,20 @@ pub fn fire(lua: &Lua, changes: &[RecordedChange]) {
         let number = recorded.number;
         match recorded.change {
             Change::Property { instance, name } => {
+                let owner = Owner::Instance(instance);
+                // Most changes have nobody listening on their Instance
+                // (physics moves thousands of parts a frame), so those are
+                // passed over with one look. A handler connected from here
+                // on wouldn't run for this change anyway.
+                let listened = events::has_handlers(lua, owner);
+                if !listened && name != "Parent" {
+                    continue;
+                }
                 if !exists(lua, instance) {
                     continue;
                 }
-                let owner = Owner::Instance(instance);
-                // `Changed` gets the property's name; a property's own signal
-                // gets nothing, as in Roblox. A Value object's `Changed`
-                // only fires for its `Value`, with the new value.
-                match value_object_value(lua, instance) {
-                    None => events::fire_change(lua, owner, Event::Named("Changed"), number, name),
-                    Some(value) if name == "Value" => {
-                        events::fire_change(lua, owner, Event::Named("Changed"), number, value);
-                    }
-                    Some(_) => {}
-                }
-                events::fire_change(lua, owner, Event::PropertyChanged(name), number, ());
-                // A Slider, Toggle, Dropdown or ProgressBar also says what
-                // its new Value is.
-                if name == "Value"
-                    && let Some(value) = widget_value(lua, instance)
-                {
-                    events::fire_change(lua, owner, Event::Named("ValueChanged"), number, value);
+                if listened {
+                    fire_property_events(lua, instance, name, number);
                 }
                 if name == "Parent" {
                     fire_ancestry_changed(lua, instance, number);
@@ -69,6 +62,30 @@ pub fn fire(lua: &Lua, changes: &[RecordedChange]) {
         }
     }
     crate::collection::fire_tag_changes(lua, changes);
+}
+
+/// `Changed`, the property's own signal and a widget's `ValueChanged`
+/// for property `name` of `instance`.
+fn fire_property_events(lua: &Lua, instance: InstanceId, name: &'static str, number: u64) {
+    let owner = Owner::Instance(instance);
+    // `Changed` gets the property's name; a property's own signal gets
+    // nothing, as in Roblox. A Value object's `Changed` only fires for its
+    // `Value`, with the new value.
+    match value_object_value(lua, instance) {
+        None => events::fire_change(lua, owner, Event::Named("Changed"), number, name),
+        Some(value) if name == "Value" => {
+            events::fire_change(lua, owner, Event::Named("Changed"), number, value);
+        }
+        Some(_) => {}
+    }
+    events::fire_change(lua, owner, Event::PropertyChanged(name), number, ());
+    // A Slider, Toggle, Dropdown or ProgressBar also says what its new
+    // Value is.
+    if name == "Value"
+        && let Some(value) = widget_value(lua, instance)
+    {
+        events::fire_change(lua, owner, Event::Named("ValueChanged"), number, value);
+    }
 }
 
 fn fire_child_event(

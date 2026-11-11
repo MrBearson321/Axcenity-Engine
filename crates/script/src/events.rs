@@ -199,6 +199,16 @@ impl Connections {
         }
     }
 
+    /// Whether any event of `owner` has a handler (or had one: a list
+    /// left empty by disconnecting still counts).
+    pub fn has_owner(&self, owner: Owner) -> bool {
+        // `Event::Named("")` sorts before every other event.
+        self.handlers
+            .range((owner, Event::Named(""))..)
+            .next()
+            .is_some_and(|((other, _), _)| *other == owner)
+    }
+
     /// The owners noted since the last call as gone when connected to.
     pub fn take_connected_while_gone(&mut self) -> Vec<Owner> {
         std::mem::take(&mut self.connected_while_gone)
@@ -229,6 +239,13 @@ pub fn fire(lua: &Lua, owner: Owner, event: &'static str, args: impl IntoLuaMult
 /// Like [`fire`], for any kind of event.
 pub fn fire_event(lua: &Lua, owner: Owner, event: Event, args: impl IntoLuaMulti) {
     fire_handlers(lua, (owner, event), None, args);
+}
+
+/// Whether any of `owner`'s events has a handler, so firing its change
+/// events can be skipped when none has.
+pub fn has_handlers(lua: &Lua, owner: Owner) -> bool {
+    lua.app_data_ref::<Connections>()
+        .is_some_and(|connections| connections.has_owner(owner))
 }
 
 /// Like [`fire`], for change number `change` of the World: only handlers

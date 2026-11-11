@@ -309,6 +309,34 @@ Physics fell by about 22% on the test runner and 18% on the server (29% and 28% 
 
 The real projects (General Store Roadside, Abandoned Farmhouse, The Dimming, the biome patches) weren't run for M3: they're on the Windows desktop, not in the container.
 
+### Physics step, part 1 (comparison C10)
+
+The engine comparison (XB10k, PR #80) found physics the largest cost of an Axcenity frame. Timers around the parts of `Physics::step` on the test runner (cloud container, S10k, main `e52292c`) gave about 6.9 ms in all: rapier's step 4.0, finding touches 1.1, write-back 0.85, sync 0.5 and resetting forces 0.3. So about 40% was Axcenity's own work around rapier, all on one thread. What changed:
+
+- **Forces** are reset only on the bodies the wind or a mover pushed in the last step (`Physics::pushed`), not by looking at every part's body (0.3 → 0 ms). Torques are reset too now: before, a Torque mover's torque, and the turn of an off-center VectorForce, grew every step (`a_torque_turns_as_hard_every_step_and_stops_when_disabled`).
+- **Touches**: the step's contacts go into a sorted `Vec` merged with the sorted touching list (they were a `BTreeSet` and `BTreeMap`), and each collider's part and `CanTouch` sit in a table indexed by collider handle (`owners.rs`), so a contact needs no hash or part lookup (1.1 → 0.2 ms).
+- **Write-back**: `World::set_known_property` takes a `&'static str` name and looks it up once, and `set_property` no longer allocates a list per change (0.64 → 0.54 ms).
+- **Sync**: a part whose `revision_without_motion` didn't change since it was read whole has only its motion read again (`PartState::moved`), which S10k's 100 spinners hit every frame (0.39 → 0.29 ms).
+- **Heartbeat**: the ~4,400 property changes physics writes a frame were each looked up as `Changed`, the property's signal and a Value object's value, on both sides; `changes::fire` now skips an Instance with no handler at all in one look (`Connections::has_owner`).
+
+Main (`e52292c`) and the branch built into one target folder, copied out, and run alternately on the cloud container (4 vCPUs), four rounds of 600 frames each; medians of the runs' medians in milliseconds, ranges in brackets:
+
+| Scene, host | Step | main | branch | change |
+|---|---|---|---|---|
+| S10k, test runner | Physics | 6.12 [5.74–6.12] | 4.73 [4.44–5.08] | −23% |
+| | Heartbeat | 1.10 [1.05–1.11] | 0.54 [0.49–0.57] | −51% |
+| | **Frame** | **8.07** [7.67–8.11] | **6.09** [5.68–6.52] | **−24%** |
+| S10k, server | Physics | 6.04 [5.81–6.32] | 4.64 [4.01–4.72] | −23% |
+| | Heartbeat | 1.09 [1.07–1.12] | 0.52 [0.49–0.53] | −52% |
+| | **Frame** | **7.87** [7.60–8.22] | **5.84** [5.10–5.95] | **−26%** |
+| XB10k, test runner | Physics | 6.06 [5.80–6.17] | 4.63 [4.60–4.70] | −24% |
+| | Heartbeat | 1.08 [1.07–1.08] | 0.52 [0.51–0.53] | −52% |
+| | **Frame** | **7.25** [6.97–7.36] | **5.24** [5.20–5.34] | **−28%** |
+| XB10k, server | Physics | 6.07 [5.94–6.22] | 4.90 [4.75–4.99] | −19% |
+| | **Frame** | **7.86** [7.69–8.00] | **6.13** [5.95–6.23] | **−22%** |
+
+The 95th percentiles fell about as much (S10k test runner frame 10.18 → 8.11). The other steps didn't move. What's left of Physics is rapier's own step (about 3–4 ms here: the solver about 60% of it, contacts 30%), with about 0.95 ms of Axcenity's work around it: write-back 0.45–0.55 (string-keyed properties, roadmap L1), sync 0.3 (a revision check of every part, every frame) and touches 0.2.
+
 ### UI layout (M14)
 
 S10k has no GUI, so the UI is timed on its own: `cargo test -p axcenity-ui --release --test bench_inventory_ui -- --ignored --nocapture` lays out a 500-element inventory (a ScreenGui with a titled panel and a ScrollingFrame of 10 rows of 10 slots, each an icon, a count, a name and a Use button; 499 elements shown) styled by a 16-rule stylesheet with custom properties, descendant selectors and `:hover`/`:active` rules, with the pointer moving over the slots. No GPU. Same cloud container, main (7f29f1a) and the branch built into one target folder and run alternately, three runs each; medians of 5 batches of 60 frames, milliseconds:

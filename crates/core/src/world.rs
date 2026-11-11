@@ -1283,19 +1283,8 @@ impl World {
         name: &str,
         value: Value,
     ) -> Result<(), PropertyError> {
-        let instance = self.instances.get_mut(id.0).ok_or(PropertyError::Stale)?;
+        let instance = self.instances.get(id.0).ok_or(PropertyError::Stale)?;
         let class = instance.class;
-        // An IntValue holds whole numbers only.
-        let value = match value {
-            Value::Number(n) if class == ClassName::IntValue && name == "Value" => {
-                Value::Number(n.round())
-            }
-            // The time of day goes round the clock: 25 is 1 in the morning.
-            Value::Number(n) if class == ClassName::Lighting && name == "ClockTime" => {
-                Value::Number(n.rem_euclid(24.0))
-            }
-            value => value,
-        };
         // `get_key_value` also returns the stored `&'static str` key, which the
         // error needs because `name` only lives as long as this call.
         let Some((&key, _)) = instance.properties.get_key_value(name) else {
@@ -1304,10 +1293,37 @@ impl World {
                 name: name.to_owned(),
             });
         };
-        let slot = instance
-            .properties
-            .get_mut(key)
-            .expect("key was just found");
+        self.set_known_property(id, key, value)
+    }
+
+    /// [`set_property`](Self::set_property) for a property named by a
+    /// `&'static str`, such as a literal, which saves looking the name up
+    /// twice: physics writes thousands of parts' positions a frame.
+    pub fn set_known_property(
+        &mut self,
+        id: InstanceId,
+        key: &'static str,
+        value: Value,
+    ) -> Result<(), PropertyError> {
+        let instance = self.instances.get_mut(id.0).ok_or(PropertyError::Stale)?;
+        let class = instance.class;
+        // An IntValue holds whole numbers only.
+        let value = match value {
+            Value::Number(n) if class == ClassName::IntValue && key == "Value" => {
+                Value::Number(n.round())
+            }
+            // The time of day goes round the clock: 25 is 1 in the morning.
+            Value::Number(n) if class == ClassName::Lighting && key == "ClockTime" => {
+                Value::Number(n.rem_euclid(24.0))
+            }
+            value => value,
+        };
+        let Some(slot) = instance.properties.get_mut(key) else {
+            return Err(PropertyError::Unknown {
+                class,
+                name: key.to_owned(),
+            });
+        };
         if slot.kind() != value.kind() {
             return Err(PropertyError::WrongType {
                 class,
@@ -1316,15 +1332,19 @@ impl World {
                 actual: value.kind(),
             });
         }
-        // The properties that really change, for the change log.
-        let mut changed = Vec::new();
+        // The properties that really change, for the change log: this one
+        // and a Material's Metalness and Roughness at most. An array, so a
+        // set (physics writes thousands a frame) allocates nothing.
+        let mut changed: [&'static str; 3] = [""; 3];
+        let mut count = 0;
         if *slot != value {
-            changed.push(key);
+            changed[0] = key;
+            count = 1;
         }
         // Read before `value` moves into the slot below.
         let material = value.as_material();
         *slot = value;
-        if !changed.is_empty() {
+        if count > 0 {
             instance.revision += 1;
             if class.is_base_part() && MOTION_PROPERTIES.contains(&key) {
                 instance.motion_revision += 1;
@@ -1341,12 +1361,13 @@ impl World {
                     && *slot != Value::Number(number)
                 {
                     *slot = Value::Number(number);
-                    changed.push(name);
+                    changed[count] = name;
+                    count += 1;
                     instance.revision += 1;
                 }
             }
         }
-        for name in changed {
+        for &name in &changed[..count] {
             self.changed(Change::Property { instance: id, name });
         }
         Ok(())

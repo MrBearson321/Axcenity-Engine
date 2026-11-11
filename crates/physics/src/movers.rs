@@ -333,6 +333,11 @@ pub(crate) fn apply(
     }
 }
 
+/// The bodies `movers` push, which may get a force or torque each step.
+pub(crate) fn bodies(movers: &[Mover]) -> impl Iterator<Item = RigidBodyHandle> + '_ {
+    movers.iter().map(|mover| mover.body)
+}
+
 /// Adds one mover's force or torque; a velocity or align adds `extra` too.
 fn apply_one(bodies: &mut RigidBodySet, mover: &Mover, gravity: Vec3, extra: Vec3) {
     // Attachment1's pose in the world, and its body's.
