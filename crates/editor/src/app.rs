@@ -244,6 +244,8 @@ pub struct EditorApp {
     /// Play's clients and emulated network (Phase 64 and 67), kept until
     /// the editor closes.
     play_settings: PlaySettings,
+    /// The debugger's watch expressions (roadmap G6).
+    watches: crate::watches::Watches,
     /// A button clicked in the viewport, delivered on the next Play frame.
     pending_ui_activation: Option<InstanceId>,
     /// `MouseEnter`, `MouseLeave` and buttons' sounds from the viewport,
@@ -847,6 +849,7 @@ impl EditorApp {
             dragged_parts: Vec::new(),
             play: None,
             play_settings: PlaySettings::default(),
+            watches: crate::watches::Watches::default(),
             pending_ui_activation: None,
             pending_ui_events: Vec::new(),
             nav_keys: Vec::new(),

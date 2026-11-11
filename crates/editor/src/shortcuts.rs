@@ -198,6 +198,10 @@ pub enum Action {
     FindInScripts,
     Play,
     Stop,
+    /// While paused at a breakpoint (roadmap G6).
+    StepOver,
+    StepInto,
+    StepOut,
     DevConsole,
 
     // Editing the scene.
@@ -346,6 +350,9 @@ impl Action {
             FindInScripts,
             Play,
             Stop,
+            StepOver,
+            StepInto,
+            StepOut,
             DevConsole,
             Undo,
             Redo,
@@ -478,6 +485,10 @@ impl Action {
             // F5 plays and Shift+F5 stops, as in Roblox Studio.
             Play => keys![NONE F5],
             Stop => keys![SHIFT F5],
+            // Stepping while paused, as in Roblox Studio and most debuggers.
+            StepOver => keys![NONE F10],
+            StepInto => keys![NONE F11],
+            StepOut => keys![SHIFT F11],
             DevConsole => keys![NONE F9],
 
             Undo => keys![CMD Z],
@@ -621,7 +632,7 @@ impl Action {
         use Action::*;
         match self {
             Save | Settings | Search | Palette | QuickOpen | FindInScripts | Play | Stop
-            | DevConsole => Context::Everywhere,
+            | StepOver | StepInto | StepOut | DevConsole => Context::Everywhere,
             Undo | Redo | Duplicate | Rename | Delete | Tool(_) | PutToolDown | UseTool => {
                 Context::Scene
             }
@@ -670,6 +681,9 @@ impl Action {
             FindInScripts => "Find in Scripts",
             Play => "Play, or Continue",
             Stop => "Stop",
+            StepOver => "Step Over, while paused",
+            StepInto => "Step Into, while paused",
+            StepOut => "Step Out, while paused",
             DevConsole => "Developer console, during Play",
             Undo => "Undo",
             Redo => "Redo",

@@ -26,6 +26,7 @@ use axcenity_render::{Capabilities, GraphicsSettings};
 use axcenity_scene::{Particles, Streaming};
 use axcenity_script::{
     Breakpoints, CameraState, CameraView, GameCamera, KeyEvent, NetworkRequest, OutputKind, Pause,
+    Resume,
 };
 use axcenity_sim::{FrameCtx, HostIo, Hosts, Schedule, Sim};
 use axcenity_ui::LoadingGui;
@@ -127,6 +128,7 @@ impl Session {
         edit_world: &World,
         scripts: &[ScriptFile],
         breakpoints: &Breakpoints,
+        pause_on_error: bool,
         output: &mut Output,
         assets: Assets,
         camera: CameraState,
@@ -205,6 +207,7 @@ impl Session {
         // `RunService:IsStudio()` is true in the editor's Play.
         session.sim.scripts.set_studio(true);
         session.sim.scripts.set_breakpoints(breakpoints);
+        session.sim.scripts.set_pause_on_error(pause_on_error);
         guard(|| {
             // Animators start in their default states before any script
             // runs, as in the player, so scripts can read them.
@@ -346,10 +349,28 @@ impl Session {
     /// Continues from the pause: the paused script runs on from its line,
     /// then whatever waited for it. It may pause again at a breakpoint.
     pub fn continue_from_pause(&mut self, output: &mut Output) -> Result<(), Crash> {
+        self.resume_from_pause(Resume::Continue, output)
+    }
+
+    /// Continues, or steps the paused script to its next line (roadmap G6).
+    pub fn resume_from_pause(&mut self, how: Resume, output: &mut Output) -> Result<(), Crash> {
         guard(|| {
-            self.sim.scripts.continue_from_pause(&mut self.sim.world);
+            self.sim.scripts.resume_from_pause(&mut self.sim.world, how);
             self.forward_output(output);
         })
+    }
+
+    /// A watch expression's value in the paused frame `frame` (0 is the
+    /// innermost), or why it has none. Output it prints waits for the next
+    /// frame's Output.
+    pub fn evaluate(&mut self, frame: usize, expression: &str) -> Result<String, String> {
+        let world = &mut self.sim.world;
+        let scripts = &mut self.sim.scripts;
+        let mut value = Err(String::new());
+        match guard(|| value = scripts.evaluate(world, frame, expression)) {
+            Ok(()) => value,
+            Err(Crash(message)) => Err(format!("The engine failed: {message}")),
+        }
     }
 
     /// Makes the next frame panic, as an engine bug would.

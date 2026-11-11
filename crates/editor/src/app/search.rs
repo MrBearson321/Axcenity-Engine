@@ -475,6 +475,9 @@ fn command_description(command: &Command) -> String {
         Command::About => "The editor's version and licences, and Copy diagnostics.",
         Command::CheckForUpdates => "Look for a newer Axcenity on your update channel.",
         Command::PanicDuringPlay => "Debug builds only: make Play fail, to test error handling.",
+        Command::PauseOnErrors => {
+            "Turn on or off: a script error pauses Play where it happened, with its variables."
+        }
         Command::Play => {
             "Run the game in the editor. Changes made while playing are undone by Stop."
         }
