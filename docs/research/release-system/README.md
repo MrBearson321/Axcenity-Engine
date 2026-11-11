@@ -1,6 +1,6 @@
 # Versioning, releases, updates and the Version Explorer: audit and proposal
 
-Phases 1 and 2 of Paul's brief "Automated Versioning, Release Management & Update System" (2026-11-11). This is a proposal: nothing is implemented, and the decisions at the bottom need Paul's sign-off before phase 3 starts.
+Phases 1 and 2 of Paul's brief "Automated Versioning, Release Management & Update System" (2026-11-11). **Approved 2026-11-11:** Paul accepted every recommendation below except D1, where he chose option (b): **make the engine repository public** and publish releases from it. Phase 3 is under way.
 
 - **Date:** 2026-11-11
 - **Engine:** `main` at `19152d8`
@@ -29,7 +29,7 @@ Phases 1 and 2 of Paul's brief "Automated Versioning, Release Management & Updat
 
 ## Decisions for Paul
 
-Each has a recommendation. Phase 3 can start once D3–D6 and D12 are settled; the others are needed by the phase named.
+Each has a recommendation. Phase 3 can start once D3–D6 and D12 are settled; the others are needed by the phase named. **Outcome (2026-11-11):** all recommendations approved; D1 resolved as (b), the engine repository becomes public, so releases, update checks and downloads use it directly and the releases-only repository is not created.
 
 | # | Decision | Recommendation | Alternatives | Needed by |
 |---|---|---|---|---|
