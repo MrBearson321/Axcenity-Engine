@@ -1,8 +1,8 @@
 use super::*;
 
-/// A puzzle tab under a block, or the notch cut into the top of the first
-/// block of a loose stack. Drawn after the blocks, so a tab covers the top
-/// of the block it fits into, as in Scratch.
+/// The rounded tab under a block, or the notch cut into the top of the
+/// first block of a loose stack. Drawn after the blocks, so a tab (and its
+/// shadow) covers the top of the block it fits onto.
 pub(super) struct Tab {
     pub(super) at: Pos2,
     pub(super) fill: Color32,
@@ -70,8 +70,9 @@ impl<'a> BlockPainter<'a> {
         value * self.z
     }
 
+    /// Labels and values: Inter Medium, which holds up on coloured fills.
     pub(super) fn font(&self) -> FontId {
-        FontId::proportional(FONT_SIZE * self.z)
+        FontId::new(FONT_SIZE * self.z, theme::medium_family())
     }
 
     pub(super) fn code_galley(&self, ui: &egui::Ui, code: &str) -> std::sync::Arc<egui::Galley> {
@@ -286,7 +287,8 @@ impl<'a> BlockPainter<'a> {
         Drawn { height, ..drawn }
     }
 
-    /// The row of an event block, with its rounded cap.
+    /// The row of an event block: a flat top with rounder corners, a
+    /// lighter band across it, and its category's icon first.
     pub(super) fn hat(&mut self, ui: &mut egui::Ui, block: &mut Block, at: Pos2) -> Drawn {
         let category = block_category(&block.kind);
         let (fill, edge) = {
@@ -305,46 +307,54 @@ impl<'a> BlockPainter<'a> {
                 grabbed: None,
             };
         };
+        if !matches!(parts.first(), Some(Part::Icon(_))) {
+            parts.insert(0, Part::Icon(category.icon()));
+        }
         let size = self.row_size(ui, parts);
         let width = size.x.max(self.s(MIN_WIDTH + 40.0));
         let cap = self.s(CAP);
         let row = Rect::from_min_size(pos2(at.x, at.y + cap), vec2(width, size.y));
+        let whole = Rect::from_min_max(at, row.max);
         let background = self.painter.add(Shape::Noop);
-        let response = self.interact(
-            ui,
-            row.union(Rect::from_min_size(at, vec2(self.s(CAP_WIDTH), cap))),
-            id.with("hat"),
-        );
+        let response = self.interact(ui, whole, id.with("hat"));
         self.draw_row(ui, parts, row, id, block_id);
         drop(sections);
 
-        let cap_points = cap_arc(at, self.s(CAP_WIDTH), cap);
-        let mut fill_shapes = vec![
-            Shape::convex_polygon(cap_points.clone(), fill, Stroke::NONE),
+        let (top, corner) = (self.s(HAT_CORNER), self.s(CORNER));
+        let rounding = CornerRadius {
+            nw: radius(top),
+            ne: radius(top),
+            sw: radius(corner),
+            se: radius(corner),
+        };
+        let band = Rect::from_min_max(at, pos2(whole.right(), at.y + cap + self.s(4.0)));
+        let fill_shapes = vec![
+            Shape::rect_filled(whole.translate(vec2(0.0, self.s(DROP))), rounding, edge),
+            Shape::rect_filled(whole, rounding, fill),
             Shape::rect_filled(
-                row,
+                band,
                 CornerRadius {
-                    nw: 0,
-                    ne: radius(self.s(CORNER)),
-                    sw: radius(self.s(CORNER)),
-                    se: radius(self.s(CORNER)),
+                    nw: radius(top),
+                    ne: radius(top),
+                    sw: 0,
+                    se: 0,
                 },
-                fill,
+                Color32::from_white_alpha(34),
+            ),
+            Shape::closed_line(
+                rounded(
+                    &[
+                        (whole.left_top(), top),
+                        (whole.right_top(), top),
+                        (whole.right_bottom(), corner),
+                        (whole.left_bottom(), corner),
+                    ],
+                    None,
+                    None,
+                ),
+                self.outline(edge, highlighted),
             ),
         ];
-        let corner = self.s(CORNER);
-        let mut outline = vec![pos2(at.x, row.bottom() - corner)];
-        outline.extend(cap_points.iter().copied());
-        outline.extend(rounded(
-            &[
-                (pos2(row.right(), row.top()), corner),
-                (pos2(row.right(), row.bottom()), corner),
-                (pos2(row.left(), row.bottom()), corner),
-            ],
-            Some(*cap_points.last().unwrap_or(&row.left_top())),
-            Some(pos2(at.x, row.bottom() - corner)),
-        ));
-        fill_shapes.push(Shape::closed_line(outline, self.outline(edge, highlighted)));
         self.painter.set(background, Shape::Vec(fill_shapes));
         if has_body {
             self.tabs.push(Tab {
@@ -553,6 +563,18 @@ impl<'a> BlockPainter<'a> {
         let (left, right) = (first.left(), first.right());
         let last = pieces.len() - 1;
         let mut shapes = Vec::new();
+        // The shadow: the rows a little lower in the darker shade, showing
+        // under the block and inside its mouths.
+        let drop = vec2(0.0, self.s(DROP));
+        for (index, &(rect, arm)) in pieces.iter().enumerate() {
+            if !arm {
+                shapes.push(Shape::rect_filled(
+                    rect.translate(drop),
+                    self.piece_rounding(index, last, corner, inner),
+                    edge,
+                ));
+            }
+        }
         for (index, &(rect, arm)) in pieces.iter().enumerate() {
             if arm {
                 // A little longer, so no seam shows where it meets the rows.
@@ -563,14 +585,7 @@ impl<'a> BlockPainter<'a> {
                 ));
                 continue;
             }
-            let after_mouth = index > 0;
-            let before_mouth = index < last;
-            let rounding = CornerRadius {
-                nw: if after_mouth { 0 } else { radius(corner) },
-                ne: radius(if after_mouth { inner } else { corner }),
-                sw: if before_mouth { 0 } else { radius(corner) },
-                se: radius(if before_mouth { inner } else { corner }),
-            };
+            let rounding = self.piece_rounding(index, last, corner, inner);
             shapes.push(Shape::rect_filled(rect, rounding, fill));
         }
 
@@ -595,6 +610,18 @@ impl<'a> BlockPainter<'a> {
             self.outline(edge, highlighted),
         ));
         shapes
+    }
+
+    /// The corners of a block's row or foot: square where it meets an arm.
+    fn piece_rounding(&self, index: usize, last: usize, corner: f32, inner: f32) -> CornerRadius {
+        let after_mouth = index > 0;
+        let before_mouth = index < last;
+        CornerRadius {
+            nw: if after_mouth { 0 } else { radius(corner) },
+            ne: radius(if after_mouth { inner } else { corner }),
+            sw: if before_mouth { 0 } else { radius(corner) },
+            se: radius(if before_mouth { inner } else { corner }),
+        }
     }
 
     // ---- Rows and their parts -------------------------------------------------
@@ -677,7 +704,7 @@ impl<'a> BlockPainter<'a> {
                     egui::Align2::CENTER_CENTER,
                     *icon,
                     FontId::proportional(16.0 * self.z),
-                    Color32::from_rgb(76, 191, 86),
+                    Color32::WHITE,
                 );
             }
             // Value slots are drawn by `slot`.
@@ -848,8 +875,11 @@ impl<'a> BlockPainter<'a> {
         id: egui::Id,
         text: &mut String,
     ) -> Option<egui::Response> {
-        self.painter
-            .rect_filled(rect, radius(self.s(4.0)), Color32::from_black_alpha(45));
+        self.painter.rect_filled(
+            rect,
+            radius(self.s(FIELD_CORNER)),
+            Color32::from_black_alpha(45),
+        );
         if self.interactive {
             return Some(
                 ui.put(
@@ -891,7 +921,7 @@ impl<'a> BlockPainter<'a> {
         let hovered = response.as_ref().is_some_and(egui::Response::hovered);
         let fill = Color32::from_black_alpha(if hovered { 70 } else { 45 });
         self.painter
-            .rect_filled(rect, radius(rect.height() * 0.5), fill);
+            .rect_filled(rect, radius(self.s(FIELD_CORNER)), fill);
         self.painter.text(
             pos2(rect.left() + self.s(9.0), rect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -974,13 +1004,13 @@ impl<'a> BlockPainter<'a> {
         } else {
             self.painter.add(egui::epaint::RectShape::new(
                 rect,
-                radius(rect.height() * 0.5),
+                radius(self.s(FIELD_CORNER + 2.0)),
                 fill,
                 Stroke::new(1.0_f32, edge),
                 egui::StrokeKind::Inside,
             ));
         }
-        let inset = if boolean { size.y * 0.5 } else { self.s(10.0) };
+        let inset = if boolean { size.y * 0.45 } else { self.s(10.0) };
         let address = slot.map_or(
             SlotAddress {
                 block: 0,
@@ -1001,6 +1031,17 @@ impl<'a> BlockPainter<'a> {
         size
     }
 
+    /// The light field a typed value sits in.
+    pub(super) fn field(&self, rect: Rect) {
+        self.painter.add(egui::epaint::RectShape::new(
+            rect,
+            radius(self.s(FIELD_CORNER)),
+            INPUT_FIELD,
+            Stroke::new(1.0_f32, Color32::from_black_alpha(36)),
+            egui::StrokeKind::Inside,
+        ));
+    }
+
     /// A value typed into a slot.
     pub(super) fn literal(
         &mut self,
@@ -1013,13 +1054,11 @@ impl<'a> BlockPainter<'a> {
         let font = self.font();
         let response = match expression {
             Expression::Number { value } => {
-                self.painter
-                    .rect_filled(rect, radius(rect.height() * 0.5), Color32::WHITE);
+                self.field(rect);
                 self.number_input(ui, rect, id, value, font)
             }
             Expression::Text { value } => {
-                self.painter
-                    .rect_filled(rect, radius(self.s(4.0)), Color32::WHITE);
+                self.field(rect);
                 if self.interactive {
                     Some(
                         ui.put(
@@ -1050,8 +1089,7 @@ impl<'a> BlockPainter<'a> {
                 }
             }
             Expression::Boolean { value } if kind == SlotKind::Condition => {
-                // An empty pointed hole, as in Scratch, that still says
-                // what it's set to.
+                // An empty pointed hole that still says what it's set to.
                 self.painter.add(Shape::convex_polygon(
                     hexagon(rect),
                     Color32::from_black_alpha(60),
@@ -1103,8 +1141,7 @@ impl<'a> BlockPainter<'a> {
                     let width = self.axis_width(ui, *value);
                     let oval =
                         Rect::from_min_size(pos2(left, rect.top()), vec2(width, rect.height()));
-                    self.painter
-                        .rect_filled(oval, radius(oval.height() * 0.5), Color32::WHITE);
+                    self.field(oval);
                     last = self.number_input(ui, oval, id.with(axis), value, font.clone());
                     left += width + self.s(3.0);
                 }
@@ -1113,8 +1150,7 @@ impl<'a> BlockPainter<'a> {
             Expression::Color3 { r, g, b } => {
                 let mut srgb =
                     [*r, *g, *b].map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
-                self.painter
-                    .rect_filled(rect, radius(rect.height() * 0.5), Color32::WHITE);
+                self.field(rect);
                 let swatch = rect.shrink(self.s(3.0));
                 if self.interactive {
                     // `Color3` is sRGB from 0 to 1, as the colour button's bytes are.
@@ -1132,7 +1168,7 @@ impl<'a> BlockPainter<'a> {
                     let [red, green, blue] = srgb;
                     self.painter.rect_filled(
                         swatch,
-                        radius(swatch.height() * 0.5),
+                        radius(self.s(FIELD_CORNER - 2.0)),
                         Color32::from_rgb(red, green, blue),
                     );
                     None
@@ -1255,34 +1291,39 @@ impl<'a> BlockPainter<'a> {
 
     /// Draws the tabs and notches collected while drawing, over the blocks.
     pub(super) fn finish(&mut self) {
+        let drop = vec2(0.0, self.s(DROP));
         for tab in std::mem::take(&mut self.tabs) {
             let points = tab_points(tab.at, self.z);
-            let mut filled = points;
             // Covers the outline it hangs from, so the two blocks look joined.
-            filled[0].y -= 1.5;
-            filled[3].y -= 1.5;
-            self.painter.add(Shape::convex_polygon(
-                filled.to_vec(),
-                tab.fill,
-                Stroke::NONE,
-            ));
+            let mut filled = points.clone();
+            raise_ends(&mut filled);
+            let shadow: Vec<Pos2> = filled.iter().map(|point| *point + drop).collect();
             self.painter
-                .add(Shape::line(points.to_vec(), Stroke::new(1.0_f32, tab.edge)));
+                .add(Shape::convex_polygon(shadow, tab.edge, Stroke::NONE));
+            self.painter
+                .add(Shape::convex_polygon(filled, tab.fill, Stroke::NONE));
+            self.painter
+                .add(Shape::line(points, Stroke::new(1.0_f32, tab.edge)));
         }
         for notch in std::mem::take(&mut self.notches) {
             let points = tab_points(notch.at, self.z);
-            let mut filled = points;
-            filled[0].y -= 1.5;
-            filled[3].y -= 1.5;
-            self.painter.add(Shape::convex_polygon(
-                filled.to_vec(),
-                self.background,
-                Stroke::NONE,
-            ));
-            self.painter.add(Shape::line(
-                points.to_vec(),
-                Stroke::new(1.0_f32, notch.edge),
-            ));
+            let mut filled = points.clone();
+            raise_ends(&mut filled);
+            self.painter
+                .add(Shape::convex_polygon(filled, self.background, Stroke::NONE));
+            self.painter
+                .add(Shape::line(points, Stroke::new(1.0_f32, notch.edge)));
+        }
+    }
+}
+
+/// Lifts a tab's two ends by 1.5 points, so its fill covers the outline of
+/// the block it hangs from.
+fn raise_ends(points: &mut [Pos2]) {
+    let last = points.len().saturating_sub(1);
+    for index in [0, last] {
+        if let Some(point) = points.get_mut(index) {
+            point.y -= 1.5;
         }
     }
 }
@@ -1302,24 +1343,27 @@ pub(super) fn format_number(value: f64) -> String {
     rounded.to_string()
 }
 
-/// The puzzle tab's corners, from the top-left, for a block whose left edge
-/// and bottom are at `at`.
-pub(super) fn tab_points(at: Pos2, z: f32) -> [Pos2; 4] {
+/// The rounded tab's outline, left to right, for a block whose left edge
+/// and bottom are at `at`: a shallow bump, convex, so it fills as one piece.
+pub(super) fn tab_points(at: Pos2, z: f32) -> Vec<Pos2> {
     let left = at.x + TAB_LEFT * z;
-    let right = left + TAB_WIDTH * z;
-    let slope = 6.0 * z;
+    let width = TAB_WIDTH * z;
     let depth = TAB_DEPTH * z;
-    [
-        pos2(left, at.y),
-        pos2(left + slope, at.y + depth),
-        pos2(right - slope, at.y + depth),
-        pos2(right, at.y),
-    ]
+    let steps = 12;
+    (0..=steps)
+        .map(|step| {
+            let t = step as f32 / steps as f32;
+            // A flattened half-sine: steep sides, a broad rounded bottom.
+            let dip = (std::f32::consts::PI * t).sin().max(0.0).powf(0.6);
+            pos2(left + width * t, at.y + depth * dip)
+        })
+        .collect()
 }
 
-/// The pointed shape of a true-or-false reporter.
+/// The pointed shape of a true-or-false reporter: short points, so it
+/// reads as a value with arrowed ends.
 pub(super) fn hexagon(rect: Rect) -> Vec<Pos2> {
-    let point = rect.height() * 0.5;
+    let point = rect.height() * 0.4;
     vec![
         pos2(rect.left(), rect.center().y),
         pos2(rect.left() + point, rect.top()),
@@ -1328,22 +1372,6 @@ pub(super) fn hexagon(rect: Rect) -> Vec<Pos2> {
         pos2(rect.right() - point, rect.bottom()),
         pos2(rect.left() + point, rect.bottom()),
     ]
-}
-
-/// The rounded cap of an event block, from its left end to its right, for
-/// a block whose top-left corner (above the cap) is `at`.
-pub(super) fn cap_arc(at: Pos2, width: f32, height: f32) -> Vec<Pos2> {
-    let steps = 14;
-    (0..=steps)
-        .map(|step| {
-            let t = step as f32 / steps as f32;
-            let angle = std::f32::consts::PI * t;
-            pos2(
-                at.x + width * 0.5 * (1.0 - angle.cos()),
-                at.y + height * (1.0 - angle.sin()),
-            )
-        })
-        .collect()
 }
 
 /// The points of a polygon whose corners are rounded by their radii. With

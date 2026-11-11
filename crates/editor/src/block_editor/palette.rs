@@ -923,11 +923,16 @@ pub(super) fn show_palette(
                 }
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
-                    let (dot, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
-                    ui.painter().circle_filled(
-                        dot.center(),
-                        6.0,
-                        category.fill(&theme::palette(ui.ctx())),
+                    // The category list's swatch, small.
+                    let (swatch, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                    ui.painter()
+                        .rect_filled(swatch, 5, category.fill(&theme::palette(ui.ctx())));
+                    ui.painter().text(
+                        swatch.center(),
+                        egui::Align2::CENTER_CENTER,
+                        category.icon(),
+                        FontId::proportional(11.0),
+                        Color32::WHITE,
                     );
                     let heading = ui.label(
                         egui::RichText::new(category.name())
