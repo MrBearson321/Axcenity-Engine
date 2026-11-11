@@ -11,7 +11,7 @@ Design rules this list follows:
 
 | Profile | Tools | For | Definition budget |
 |---|---|---|---|
-| `lite` | 11 | local models, 8–32k context | ≤ 2,000 tokens |
+| `lite` | 11 (13 as built, with `project_save`) | local models, 8–32k context | ≤ 2,000 tokens (2,100 as built: Paul chose on 2026-11-11 to add `project_save` so headless lite sessions can save) |
 | `standard` (default) | 21 | Claude Code, Cursor, Codex | ≤ 4,500 tokens |
 | `full` | 28 | advanced agents that need everything | ≤ 6,500 tokens |
 

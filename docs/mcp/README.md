@@ -52,11 +52,9 @@ A profile decides which tools the assistant sees. Each tool's description costs 
 
 | Profile | Tools | Description cost | For |
 |---|---|---|---|
-| `lite` | 12: look, make, change, delete, scripts, checks, play, undo | about 2,000 tokens | local models with 8k–32k context |
-| `standard` (default) | 21: adds batches, duplicating, materials, environment, saving, assets, terrain, animation | about 3,300 tokens | Claude Code, Cursor, Codex and other cloud models |
+| `lite` | 13: look, make, change, delete, scripts, checks, play, undo, save | about 2,100 tokens | local models with 8k–32k context |
+| `standard` (default) | 21: adds batches, duplicating, materials, environment, assets, terrain, animation | about 3,300 tokens | Claude Code, Cursor, Codex and other cloud models |
 | `full` | 27: adds levels, prefabs, solid modeling, stylesheets, input/collision/strings and asset rename/delete | about 4,400 tokens | assistants that should be able to do everything |
-
-`lite` has no `project_save`, so in `lite` the assistant's object edits are lost when it closes the server. `--check` warns about this. Use `standard` if the assistant should save its own work.
 
 ### Local models
 
@@ -84,7 +82,7 @@ A profile decides which tools the assistant sees. Each tool's description costs 
 |---|---|
 | The assistant says the server failed to start | Run the `--check` line in a terminal. A `FAIL` line says why. |
 | `could not open a project in …` | Point it at the folder that holds `world.json`, not a file inside it. |
-| The assistant's changes are gone | It didn't save. Ask it to call `project_save`, and use `standard` or `full` (`lite` can't save). |
+| The assistant's changes are gone | It didn't save. Ask it to call `project_save` before it finishes. |
 | The editor doesn't show the assistant's changes | Close and reopen the project in the editor after the assistant saves (see the note in Quick start). |
 | `error not_allowed: …` | The mode doesn't allow it. The message names the `--mode` that would. |
 | `error needs_confirm: preview: …` | The assistant should read the preview and call again with the token. Some small models stop here, so tell it to go ahead. |

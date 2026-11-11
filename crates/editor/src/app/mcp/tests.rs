@@ -345,7 +345,7 @@ fn every_tool_is_short_flat_and_in_budget() {
     );
     // Budgets from docs/research/mcp/tool-inventory.md.
     for (profile, budget) in [
-        (Profile::Lite, 2000),
+        (Profile::Lite, 2100),
         (Profile::Standard, 4500),
         (Profile::Full, 6500),
     ] {
@@ -2115,9 +2115,9 @@ fn prompts_name_only_listed_tools_and_resources_mirror_lite_read_tools() {
         lite.contains("a hut") && lite.contains("object_create"),
         "{lite}"
     );
-    // Lite has no batch and no project_save.
+    // Lite has no batch, but saves.
     assert!(
-        !lite.contains("batch") && !lite.contains("project_save"),
+        !lite.contains("batch") && lite.contains("project_save"),
         "{lite}"
     );
     let standard = super::prompts::PROMPTS[0]
@@ -2194,11 +2194,8 @@ fn check_reports_the_project_and_prints_client_configs_with_full_paths() {
     assert!(report.contains("\nok   project \""), "{report}");
     assert!(report.contains("\nok   mode edit"), "{report}");
     assert!(report.contains("\nok   calls are logged to "), "{report}");
-    assert!(report.contains("\nok   profile lite: 12 tools"), "{report}");
-    assert!(
-        report.contains("\nwarn lite has no project_save"),
-        "{report}"
-    );
+    assert!(report.contains("\nok   profile lite: 13 tools"), "{report}");
+    assert!(!report.contains("\nwarn"), "{report}");
     let full = std::fs::canonicalize(&folder).unwrap();
     let json_folder = serde_json::to_string(&full.display().to_string()).unwrap();
     assert!(

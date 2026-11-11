@@ -13,7 +13,7 @@ pub const SPEC: ToolSpec = ToolSpec {
     name: "project_save",
     title: "Save project",
     summary: "Save the project's files (Version History keeps a version); previews first.",
-    profile: Profile::Standard,
+    profile: Profile::Lite,
     class: Class::Destructive,
     idempotent: true,
     params: &[CONFIRM],

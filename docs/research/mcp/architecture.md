@@ -160,7 +160,7 @@ A separate snapshot system was considered and dropped: cursors plus `Instance::r
 - Profiles hide tools a model won't use. Vendors report tool-selection accuracy dropping past 30–50 tools and OpenAI suggests fewer than 20 up front; `standard` has 21 and `lite` 11. Claude Code, Cursor and OpenAI now load tool definitions on demand, so there `standard` costs less than its full budget.
 - `tools/list` returns tools in a fixed order (the spec recommends it; it keeps client prompt caches warm).
 - Server `instructions` (sent by `initialize` / `server/discover`) ≤ 150 tokens: value format, the ID/path rule, "use `docs` for classes", "writes are undoable; deletes ask first".
-- A test serializes `tools/list` per profile and fails if the token estimate exceeds the budget (lite 2,000 / standard 4,500 / full 6,500). The estimate is calibrated once against real tokenizers (Claude and `o200k`) and recorded in `docs/mcp/benchmarks.md`; the test itself uses the calibrated characters-per-token ratio so it needs no tokenizer dependency.
+- A test serializes `tools/list` per profile and fails if the token estimate exceeds the budget (lite 2,100 / standard 4,500 / full 6,500; lite was 2,000 until it got `project_save`). The estimate is calibrated once against real tokenizers (Claude and `o200k`) and recorded in `docs/mcp/benchmarks.md`; the test itself uses the calibrated characters-per-token ratio so it needs no tokenizer dependency.
 
 ## 7. Safety and permissions
 
