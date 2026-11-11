@@ -1598,3 +1598,69 @@ fn solid_op_unions_and_separates_parts_as_undo_steps() {
     let parts = ok(host, "scene_inspect", json!({"class": "UnionOperation"}));
     assert!(!parts.contains("UnionOperation \""), "{parts}");
 }
+
+#[test]
+fn style_edit_lists_shows_and_changes_rules_by_selector() {
+    let mut opened = open("hello-css", "mcp-style");
+    let host = &mut opened.app;
+    let list = ok(host, "style_edit", json!({}));
+    assert!(
+        list.starts_with("ui.css · ") && list.contains("\n#score"),
+        "{list}"
+    );
+    let score = ok(
+        host,
+        "style_edit",
+        json!({"action": "get", "selector": "#score"}),
+    );
+    assert!(
+        score.contains("font-size: 20px;") && score.ends_with("in ui.css"),
+        "{score}"
+    );
+    // Change one in place, add one, remove one, add a :hover rule.
+    let set = ok(
+        host,
+        "style_edit",
+        json!({"action": "set", "selector": "#score", "props": {"font-size": "24px", "opacity": 0.8, "font-family": null}}),
+    );
+    assert!(set.contains("undo \"AI (test): Style #score\""), "{set}");
+    ok(
+        host,
+        "style_edit",
+        json!({"action": "set", "selector": "#score:hover", "props": {"color": "#ffffff"}}),
+    );
+    let score = ok(
+        host,
+        "style_edit",
+        json!({"action": "get", "selector": "#score"}),
+    );
+    assert!(
+        score.contains("font-size: 24px;") && score.contains("opacity: 0.8;"),
+        "{score}"
+    );
+    assert!(!score.contains("font-family"), "{score}");
+    assert!(
+        score.contains("#score:hover { color: #ffffff; }"),
+        "{score}"
+    );
+    let text = host.app.stylesheet_text("ui.css").unwrap();
+    assert_eq!(text.matches("font-size").count(), 1, "{text}");
+    // Undo puts the text back.
+    ok(host, "history", json!({"action": "undo", "steps": 2}));
+    let score = ok(
+        host,
+        "style_edit",
+        json!({"action": "get", "selector": "#score"}),
+    );
+    assert!(
+        score.contains("font-size: 20px;") && score.contains("font-family"),
+        "{score}"
+    );
+    let bad = call(
+        host,
+        "style_edit",
+        json!({"action": "set", "selector": "#score", "props": {"color": "red; } x {"}}),
+    )
+    .unwrap_err();
+    assert_eq!(bad.code, Code::BadValue, "{bad}");
+}

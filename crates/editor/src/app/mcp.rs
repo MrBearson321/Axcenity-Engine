@@ -51,6 +51,7 @@ mod scene_inspect;
 mod script_read;
 mod script_write;
 mod solid_op;
+mod style_edit;
 mod values;
 
 #[cfg(test)]
@@ -223,6 +224,10 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         spec: &solid_op::SPEC,
         call: solid_op::call,
+    },
+    Tool {
+        spec: &style_edit::SPEC,
+        call: style_edit::call,
     },
 ];
 
