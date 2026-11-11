@@ -810,3 +810,116 @@ fn an_import_reaches_everyone_as_one_step_with_its_files() {
             .any(|op| matches!(op, axcenity_collab::Op::FileVersion { path, .. } if path == file))
     );
 }
+
+/// Whether `world` has an Instance named `name` under the Workspace.
+fn has_named(world: &axcenity_core::World, name: &str) -> bool {
+    world
+        .descendants(world.workspace())
+        .into_iter()
+        .any(|id| world.get(id).is_some_and(|i| i.name() == name))
+}
+
+/// A hosted session from `project` with a joiner who has made a Part
+/// called "Crate", every copy caught up.
+fn session_with_a_crate(project: &std::path::Path, name: &str) -> (EditorApp, EditorApp) {
+    let mut a = EditorApp::new(Some(project));
+    let invite = over_loopback(
+        a.host_network_session(Some(&team_folder(&format!("{name}-host"))), 0)
+            .expect("hosting"),
+    );
+    let mut b = EditorApp::new(None);
+    b.join_network_session(&invite, Some(&team_folder(&format!("{name}-joiner"))))
+        .expect("joining");
+    settle_net(&mut a, &mut b, |_, b| b.project.is_some());
+    b.insert(Insertable::Part(PartType::Block), None);
+    let part = b.selected.expect("the new part is selected");
+    rename(&mut b, part, "Crate");
+    settle_net(&mut a, &mut b, |a, b| {
+        let seq = host_seq(a);
+        caught_up(a, seq) && caught_up(b, seq) && has_named(&a.world, "Crate")
+    });
+    (a, b)
+}
+
+/// Hosts a session from `project` and stops the host's editor without
+/// ending it (a crash). Returns how many scripts the project had.
+#[inline(never)]
+fn crash_a_session(project: &std::path::Path) -> usize {
+    let (a, b) = session_with_a_crate(project, "recover");
+    // The joiner's Part is a change to save in the host's project.
+    assert!(!a.history.is_saved());
+    let scripts = scripts(&a).len();
+    drop(b);
+    drop(a);
+    scripts
+}
+
+/// Runs `test` on a thread with room for several editors on its stack
+/// (an unoptimized `EditorApp` is large; the default is 2 MiB).
+fn with_big_stack(test: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(16 << 20)
+        .spawn(test)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn a_hosting_editor_that_stops_without_ending_gets_the_session_back() {
+    with_big_stack(recover_after_a_crash);
+}
+
+fn recover_after_a_crash() {
+    let project = copy_of_example("hello-touched", "team-recover");
+    let scripts_before = crash_a_session(&project);
+    assert!(axcenity_collab::journal::has_recovery(&project));
+
+    let c = EditorApp::new(Some(&project));
+    assert!(has_named(&c.world, "Crate"), "the session's World is back");
+    assert!(!c.history.is_saved(), "as changes to save");
+    assert!(!axcenity_collab::journal::has_recovery(&project));
+    // The project's scripts point at the recovered World's Instances.
+    let recovered = scripts(&c);
+    assert_eq!(recovered.len(), scripts_before);
+    for (path, id, _) in &recovered {
+        assert!(c.world.get(*id).is_some(), "{path}");
+    }
+    assert!(
+        warnings(&c)
+            .iter()
+            .any(|w| w.contains("stopped without ending"))
+    );
+}
+
+#[test]
+fn a_session_ended_with_its_changes_saved_leaves_nothing_to_recover() {
+    let project = copy_of_example("hello-touched", "team-quit-saved");
+    let (mut a, b) = session_with_a_crate(&project, "quit-saved");
+    drop(b);
+    assert!(a.save());
+    a.end_team_for_quit();
+    assert!(!axcenity_collab::journal::has_recovery(&project));
+}
+
+#[test]
+fn a_session_ended_with_changes_to_save_keeps_them_until_a_save() {
+    with_big_stack(keep_until_a_save);
+}
+
+fn keep_until_a_save() {
+    let project = copy_of_example("hello-touched", "team-end-unsaved");
+    end_unsaved_then_save(&project);
+    let reopened = EditorApp::new(Some(&project));
+    assert!(has_named(&reopened.world, "Crate"), "it was saved");
+}
+
+#[inline(never)]
+fn end_unsaved_then_save(project: &std::path::Path) {
+    let (mut a, b) = session_with_a_crate(project, "end-unsaved");
+    drop(b);
+    a.leave_team_session();
+    assert!(axcenity_collab::journal::has_recovery(project));
+    assert!(a.save());
+    assert!(!axcenity_collab::journal::has_recovery(project));
+}

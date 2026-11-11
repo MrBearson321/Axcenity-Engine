@@ -9,6 +9,7 @@ use axcenity_core::World;
 use crate::apply::{self, Doc, Note, Refusal};
 use crate::files::{self, Assembly, FileHash, FileStore, Manifest, MemoryStore, Piece};
 use crate::ids::{IdAllocator, IdBlock};
+use crate::journal::{self, Journal};
 use crate::message::{MemberId, Snapshot, ToClient, ToHost};
 use crate::op::Op;
 use crate::presence::{Collaborator, Presence, Profile};
@@ -82,6 +83,10 @@ pub struct Host {
     /// Names this session's project, so each member's folder for it is
     /// told apart from folders of other sessions.
     session: String,
+    /// Where accepted transactions are written before they're sent (TC6).
+    journal: Option<Journal>,
+    /// When the journal's snapshot was last written.
+    snapshot_at: Instant,
 }
 
 impl Host {
@@ -100,6 +105,51 @@ impl Host {
             locks: BTreeMap::new(),
             clock: Instant::now(),
             session: String::new(),
+            journal: None,
+            snapshot_at: Instant::now(),
+        }
+    }
+
+    /// Keeps a journal in the project at `project` (TC6): a snapshot of
+    /// the World now, then each accepted transaction, so a host that stops
+    /// without ending the session can be recovered ([`journal::recover`]).
+    pub fn start_journal(&mut self, project: &std::path::Path) -> std::io::Result<()> {
+        self.journal = Some(Journal::start(
+            project,
+            &self.doc.world,
+            &self.doc.graveyard,
+            self.seq,
+        )?);
+        self.snapshot_at = self.clock;
+        Ok(())
+    }
+
+    /// Whether this host keeps a journal.
+    pub fn has_journal(&self) -> bool {
+        self.journal.is_some()
+    }
+
+    /// Writes a fresh snapshot now, when the journal has entries.
+    pub fn snapshot(&mut self) {
+        self.snapshot_at = self.clock;
+        let Some(journal) = &mut self.journal else {
+            return;
+        };
+        if journal.since_snapshot() == 0 {
+            return;
+        }
+        if let Err(error) = journal.snapshot(&self.doc.world, &self.doc.graveyard, self.seq) {
+            log::error!("Team Create: couldn't write the session's snapshot: {error}");
+        }
+    }
+
+    /// The session ended cleanly: the journal and its snapshot go, as
+    /// there's nothing to recover.
+    pub fn end_journal(&mut self) {
+        if let Some(journal) = self.journal.take()
+            && let Err(error) = journal.end()
+        {
+            log::warn!("Team Create: couldn't remove the session's journal: {error}");
         }
     }
 
@@ -139,6 +189,9 @@ impl Host {
     /// [`LOCK_GRACE`] ends. Call it a few times a second.
     pub fn tick(&mut self, now: Instant) -> Vec<Outgoing> {
         self.clock = now;
+        if now.saturating_duration_since(self.snapshot_at) >= journal::SNAPSHOT_EVERY {
+            self.snapshot();
+        }
         let before = self.locks.len();
         self.locks.retain(|_, lock| {
             lock.away_since
@@ -318,6 +371,12 @@ impl Host {
                             notes: applied.notes,
                         };
                         let message = accepted(&logged);
+                        // Written down before anyone hears of it.
+                        if let Some(journal) = &mut self.journal
+                            && let Err(error) = journal.append(&logged)
+                        {
+                            log::error!("Team Create: couldn't write the journal: {error}");
+                        }
                         self.log.push_back(logged);
                         while self.log.len() > self.log_kept {
                             self.log.pop_front();

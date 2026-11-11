@@ -28,6 +28,12 @@
 //! another program changed (`disk_changed`), the string table and the
 //! input map included.
 //!
+//! Reliability (TC6): the hosting editor's host keeps a journal in the
+//! project (`collab::journal`). Others' edits are changes to save in the
+//! host's project; ending the session or quitting with them saved (or let
+//! go) removes the journal, and opening a project whose session stopped
+//! without ending brings its World back ([`EditorApp::recover_team_session`]).
+//!
 //! What SplineMeshes and SplineScatters make isn't shared: each copy makes
 //! its own ([`World::unrecorded`] in `generate_frame`).
 //!
@@ -46,6 +52,7 @@ use std::sync::{Arc, Mutex};
 
 use axcenity_collab::access::{Access, INVITE_LIFETIME_SECONDS, Invite};
 use axcenity_collab::identity::{Fingerprint, Identity};
+use axcenity_collab::journal;
 use axcenity_collab::mirror::{Change, Mirror};
 use axcenity_collab::session::{HostSession, Hosting, Remote, RemoteEvent};
 use axcenity_collab::socket::{DEFAULT_PORT, HostCert};
@@ -298,6 +305,8 @@ pub(crate) struct Team {
     /// The mirror's folder opens as the project once the session's files
     /// are in it (a joining editor).
     open_mirror: bool,
+    /// The newest transaction this editor's copy had last frame.
+    seen_seq: Option<u64>,
 }
 
 impl Team {
@@ -314,6 +323,7 @@ impl Team {
             mirror_synced: None,
             mirrors_home: None,
             open_mirror: false,
+            seen_seq: None,
         }
     }
 
@@ -508,9 +518,20 @@ impl EditorApp {
             .map_err(|e| format!("couldn't read the project's files: {e}"))?;
         let session_id = session_id(&cert.fingerprint(), &project);
         let mirror = Mirror::open(&project, &session_id, &identity.name);
-        let host = Host::new(session_world(self.world.clone()))
+        // What a session that stopped without ending left is taken in
+        // first: starting the journal writes over it.
+        self.recover_team_session();
+        let mut host = Host::new(session_world(self.world.clone()))
             .with_files(files, Box::new(store))
             .with_session(session_id);
+        // Every accepted change is written down before it's sent, so a
+        // crash loses nothing (TC6).
+        if let Err(error) = host.start_journal(&project) {
+            self.output.warning(format!(
+                "Team Create: couldn't start the session's journal ({error}); save often, \
+                 as a crash would lose the changes since the last save"
+            ));
+        }
         let mut session = HostSession::start(
             host,
             access,
@@ -665,21 +686,105 @@ impl EditorApp {
     }
 
     /// Leaves the session (or ends it, when this editor hosts). The World
-    /// stays as it is, for this editor alone.
+    /// stays as it is, for this editor alone. A hosted session with changes
+    /// not saved yet keeps its journal: saving lets it go, and if the
+    /// editor stops first, opening the project brings the changes back.
     pub(crate) fn leave_team_session(&mut self) {
         let Some(team) = self.team.take() else {
             return;
         };
         let hosted = team.hosting().is_some();
+        let unsaved = !self.history.is_saved();
+        if let Some(hosting) = team.hosting()
+            && !unsaved
+        {
+            hosting.lock().end_cleanly();
+        }
         // Dropping the hosting ends the session for everyone.
         drop(team);
         self.world.stop_recording_edits();
         self.history.set_shared(false);
-        self.output.info(if hosted {
-            "Team Create: you ended the session"
-        } else {
-            "Team Create: you left the session; your copy stays open here"
+        self.output.info(match (hosted, unsaved) {
+            (true, false) => "Team Create: you ended the session",
+            (true, true) => {
+                "Team Create: you ended the session. Save to keep its changes (they're kept \
+                 for you until you do, even if the editor stops)"
+            }
+            _ => "Team Create: you left the session; your copy stays open here",
         });
+    }
+
+    /// The editor is closing, its changes saved or let go: a hosted
+    /// session ends with nothing left to recover.
+    pub(crate) fn end_team_for_quit(&mut self) {
+        let Some(team) = self.team.take() else {
+            return;
+        };
+        if let Some(hosting) = team.hosting() {
+            hosting.lock().end_cleanly();
+        }
+    }
+
+    /// The World was saved: outside a session, what an ended one left to
+    /// recover is in the file now, so it goes.
+    pub(super) fn saved_after_team_session(&mut self) {
+        if self
+            .team
+            .as_ref()
+            .is_some_and(|team| team.hosting().is_some())
+        {
+            return;
+        }
+        if let Some(project) = &self.project
+            && journal::has_recovery(&project.folder)
+            && let Err(error) = journal::discard(&project.folder)
+        {
+            log::warn!("Team Create: couldn't remove the old session's journal: {error}");
+        }
+    }
+
+    /// Opening a project that hosted a session which stopped without
+    /// ending (the editor crashed, or the computer turned off): the
+    /// session's World, from its journal, takes the loaded one's place, as
+    /// changes to save. Nothing it accepted is lost.
+    pub(super) fn recover_team_session(&mut self) {
+        let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
+            return;
+        };
+        if self.team.is_some() || !journal::has_recovery(&folder) {
+            return;
+        }
+        let recovered = match journal::recover(&folder) {
+            Ok(Some(recovered)) => recovered,
+            Ok(None) => return,
+            Err(error) => {
+                self.output.warning(format!(
+                    "Team Create: the last session hosted from this project stopped without \
+                     ending, and its changes couldn't be read back ({error}). Its files are \
+                     kept in `{}`.",
+                    journal::FOLDER
+                ));
+                return;
+            }
+        };
+        let mut world = recovered.world;
+        // The string table isn't part of a session's World: the file's.
+        world.set_strings(self.world.strings().clone());
+        let loaded = std::mem::replace(&mut self.world, World::new());
+        self.replace_world(world);
+        self.generators = Default::default();
+        self.relink_to_session(&loaded);
+        self.history.mark_unsaved();
+        if let Err(error) = journal::discard(&folder) {
+            log::warn!("Team Create: couldn't remove the recovered journal: {error}");
+        }
+        self.output.warning(format!(
+            "Team Create: the last session hosted from this project stopped without ending. \
+             Its World is back as it was ({} change(s) after its last snapshot): save to keep it.",
+            recovered.replayed
+        ));
+        self.toasts
+            .warning("Recovered the last Team Create session's changes. Save to keep them.");
     }
 
     /// What the other members have selected, with their names and
@@ -830,6 +935,21 @@ impl EditorApp {
         if changed {
             self.forget_selection_outside_tree();
             self.generate_frame();
+        }
+        // The host's project is the session's: others' edits are changes
+        // to save there, so quitting asks first.
+        let seq = self
+            .team
+            .as_ref()
+            .and_then(|team| team.client.as_ref())
+            .map(Client::seq);
+        if let Some(team) = &mut self.team
+            && seq != team.seen_seq
+        {
+            if team.seen_seq.is_some() && team.hosting().is_some() {
+                self.history.mark_unsaved();
+            }
+            team.seen_seq = seq;
         }
         self.team_file_changes(file_changes, file_problem);
         self.open_team_mirror_when_ready();

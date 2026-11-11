@@ -1306,10 +1306,15 @@ impl EditorApp {
         color_palette::install(ctx, &self.colors);
         // The window's close button: stop it and ask first if there are
         // unsaved changes. `closing` lets the close through once allowed.
-        if ctx.input(|input| input.viewport().close_requested()) && !self.closing && self.unsaved()
-        {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.asking = Some(Discard::Quit);
+        if ctx.input(|input| input.viewport().close_requested()) {
+            if !self.closing && self.unsaved() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.asking = Some(Discard::Quit);
+            } else {
+                // Saved, or the changes were let go: a hosted session ends
+                // with nothing to recover.
+                self.end_team_for_quit();
+            }
         }
         self.keep_frames_steady(ctx);
         if self.brand.is_none() {
