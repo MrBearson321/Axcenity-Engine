@@ -15,6 +15,7 @@ axcenity-blocks.workspace = true
 axcenity-character.workspace = true
 axcenity-collab.workspace = true
 axcenity-core.workspace = true
+axcenity-editor-kit.workspace = true
 axcenity-gameplay.workspace = true
 axcenity-mcp.workspace = true
 axcenity-mesh-edit.workspace = true
@@ -67,6 +68,8 @@ profile-tracy = ["profiling/profile-with-tracy"]
 hot-patch = ["dep:dioxus-cli-config", "dep:dioxus-devtools", "dep:subsecond"]
 
 [dev-dependencies]
+# `theme::test_context`, `theme::run` and `snapshot` for drawing tests.
+axcenity-editor-kit = { workspace = true, features = ["test-support"] }
 # Draws editor UI offscreen in tests (see `snapshot.rs`).
 pollster.workspace = true
 # Builds update archives for the install tests (`app/update_install.rs`).

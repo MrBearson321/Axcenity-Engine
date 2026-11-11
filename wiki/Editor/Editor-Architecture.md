@@ -3,8 +3,8 @@ title: Editor architecture
 type: system
 status: current
 implementation: implemented
-crates: [editor, plugins]
-source: [crates/editor/src/main.rs, crates/editor/src/script_completion.rs, crates/editor/src/scripts/assist.rs, crates/editor/src/luau_check.rs, crates/editor/src/app/luau_checks.rs, crates/editor/src/app.rs, crates/editor/src/play.rs, crates/editor/src/play/multi.rs, crates/editor/src/viewport.rs, crates/editor/src/layout.rs, crates/editor/src/theme.rs, crates/editor/src/widgets.rs, crates/editor/src/responsive.rs, crates/editor/src/history.rs, crates/editor/src/cooking.rs, crates/editor/src/profiler.rs, crates/editor/src/start/nav.rs, crates/plugins/src/lib.rs, crates/plugins/src/api.rs, crates/plugins/src/bundle.rs]
+crates: [editor, editor-kit, plugins]
+source: [crates/editor/src/main.rs, crates/editor/src/script_completion.rs, crates/editor/src/scripts/assist.rs, crates/editor/src/luau_check.rs, crates/editor/src/app/luau_checks.rs, crates/editor/src/app.rs, crates/editor/src/play.rs, crates/editor/src/play/multi.rs, crates/editor/src/viewport.rs, crates/editor/src/layout.rs, crates/editor/src/theme.rs, crates/editor-kit/src/lib.rs, crates/editor-kit/src/theme.rs, crates/editor-kit/src/widgets.rs, crates/editor-kit/src/responsive.rs, crates/editor/src/history.rs, crates/editor/src/cooking.rs, crates/editor/src/profiler.rs, crates/editor/src/start/nav.rs, crates/plugins/src/lib.rs, crates/plugins/src/api.rs, crates/plugins/src/bundle.rs]
 docs: [docs/architecture.md, docs/editor/shell.md, docs/architecture/play-mode.md, docs/editor/selection.md, docs/editor/transforms.md, docs/editor/tree.md, docs/editor/scripts.md, docs/editor/plugins.md, crates/editor/CLAUDE.md]
 verified: 2026-11-11
 verified_commit: 19c7179d
@@ -35,7 +35,7 @@ flowchart TB
 
 - **State**: `EditorApp` (the audit counted 109 fields) is split by behavior across `app/*.rs` files; big modules are a parent file plus a same-named folder (`docs/architecture/crates.md`, "Where the big files split").
 - **Edits** route through `EditorApp::change` (or `change_many`) so undo and history stay consistent; asset files through `History::record_asset`, world-and-files steps through `History::record_world_and_files`.
-- **Design system**: colors from `theme::palette(ctx)` tokens, controls from `widgets.rs`, layouts that fit a 260-point column from `responsive.rs` (`toolbar`, `form`, `split`). See the design-system audit `docs/research/usability/design-system.md` (DS1–DS27, V1–V26); its Phase 1 (finished tokens: graph canvases read `theme::Canvas`, three radius tokens, one overlay palette `theme::overlay`, one changed-from-default mark) landed in PR #66.
+- **Design system** (the `editor-kit` crate, re-exported at the editor's crate root so `crate::theme` paths are unchanged): colors from `theme::palette(ctx)` tokens, controls from `widgets.rs`, layouts that fit a 260-point column from `responsive.rs` (`toolbar`, `form`, `split`). See the design-system audit `docs/research/usability/design-system.md` (DS1–DS27, V1–V26); its Phase 1 (finished tokens: graph canvases read `theme::Canvas`, three radius tokens, one overlay palette `theme::overlay`, one changed-from-default mark) landed in PR #66.
 
 ## Play mode
 
@@ -79,7 +79,7 @@ Lua plugins (`plugins` crate, Phase 54): `plugin.json` manifests found in plugin
 
 ## Limitations
 
-- One giant crate (~177k lines); `EditorApp` has ~118 fields (L6, now G11, after M12).
+- One giant crate (~177k lines, 4.4k of them now in `editor-kit`); `EditorApp` has ~118 fields. G11 (L6) splits it one step at a time: first the shared UI base into `editor-kit`, then one panel family per crate (Model Studio next; Blocks and Animation wait while their redesign is in progress).
 - egui repaints the whole editor every Play frame; panics while *drawing* the Play world aren't caught yet.
 - Editor Play can't host or join a real network game (loopback only).
 

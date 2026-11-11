@@ -44,4 +44,4 @@ Each crate's `CLAUDE.md` (under 10 lines) states what it is, which topic file to
 
 ## Editor UI
 
-Colors from `theme::palette(ctx)` tokens, controls from `widgets.rs`, layouts from `responsive.rs` (fit a 260-point column); a `Command` for every menu item and ribbon button; route color pickers through `color_palette::edit_srgb`. See `crates/editor/CLAUDE.md` and the design-system audit.
+Colors from `theme::palette(ctx)` tokens, controls from `widgets.rs`, layouts from `responsive.rs` (all in `editor-kit`) (fit a 260-point column); a `Command` for every menu item and ribbon button; route color pickers through `color_palette::edit_srgb`. See `crates/editor/CLAUDE.md` and the design-system audit.
