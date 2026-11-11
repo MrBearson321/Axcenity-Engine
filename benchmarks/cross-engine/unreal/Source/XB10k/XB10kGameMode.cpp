@@ -189,6 +189,12 @@ void AXB10kGameMode::Build()
 	Sun->GetRootComponent()->SetMobility(EComponentMobility::Movable);
 	Sun->SetActorRotation((-ToUnreal(FVector(0.5f, 1.f, 0.25f))).Rotation());
 	Sun->GetLightComponent()->SetCastShadows(true);
+	// README: sun shadows reach 700 units (70,000 cm). Only the "simple"
+	// profile's cascaded shadow maps use this; virtual shadow maps already reach.
+	if (UDirectionalLightComponent* SunLight = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
+	{
+		SunLight->SetDynamicShadowDistanceMovableLight(70000.f);
+	}
 	AActor* Sky = World->SpawnActor<AActor>();
 	USkyAtmosphereComponent* Atmosphere = NewObject<USkyAtmosphereComponent>(Sky);
 	Sky->SetRootComponent(Atmosphere);

@@ -41,6 +41,11 @@ func _process(delta: float) -> void:
 	frame += 1
 	if frame == 1:
 		first_frame_ms = ms
+	elif frame == WARMUP and OS.get_cmdline_user_args().has("--xb10k-screenshot"):
+		# `XB10k.exe ... -- --xb10k-screenshot` saves a warm-up frame (outside
+		# the measured ones) to check what it draws.
+		var path := OS.get_executable_path().get_base_dir().path_join("xb10k-screenshot.png")
+		get_viewport().get_texture().get_image().save_png(path)
 	elif frame > WARMUP + 1:
 		# --fixed-fps 60 isn't visible to scripts, so check its effect instead.
 		if absf(delta - 1.0 / 60.0) > 1e-6:
@@ -202,6 +207,7 @@ func folder(name_: String) -> Node3D:
 func build() -> void:
 	var sun := DirectionalLight3D.new()
 	sun.shadow_enabled = true
+	sun.directional_shadow_max_distance = 700.0  # README: sun shadows reach 700 units
 	add_child(sun)
 	sun.look_at_from_position(Vector3.ZERO, -Vector3(0.5, 1.0, 0.25).normalized(), Vector3(0, 0, 1))
 

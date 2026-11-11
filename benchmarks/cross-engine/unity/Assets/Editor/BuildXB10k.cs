@@ -18,6 +18,14 @@ public static class BuildXB10k
     {
         EnsurePipeline();
         EnsureLitMaterial();
+        // README: sun shadows reach 700 units (URP's default 50 draws none
+        // from the benchmark camera). Cascades and resolution stay default.
+        if (GraphicsSettings.defaultRenderPipeline is UniversalRenderPipelineAsset urp)
+        {
+            urp.shadowDistance = 700f;
+            EditorUtility.SetDirty(urp);
+            AssetDatabase.SaveAssets();
+        }
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var cam = new GameObject("Main Camera").AddComponent<Camera>();
         cam.tag = "MainCamera";

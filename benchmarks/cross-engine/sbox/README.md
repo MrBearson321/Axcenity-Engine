@@ -6,9 +6,9 @@ s&box needs the Steam client running. `sbox-cli` (in `<s&box>\bin\managed`, the 
 
 1. Make the project from the Minimal template, and copy `Code/*.cs` into its `Code` folder: `sbox-cli --new "XB10k" --template game.minimal --in <folder>`. In `xb10k.sbproj` set `"TickRate": 60` (the template's 50 would step physics at 50 Hz).
 2. Open it: `sbox-dev.exe -project <folder>\xb10k\xb10k.sbproj`. From the project folder, `sbox-cli --call editor_status` shows the compile state, and `sbox-cli --call play_start` presses Play (or press it by hand).
-3. Turn vsync and the frame cap off before timing: the engine's `RenderSettings.VSync` and `RenderSettings.MaxFrameRate` (Settings > Video in the game), or the `fps_max 0` console command for the cap. Use a 1920 × 1080 game view or window.
+3. Turn vsync and the frame cap off before timing: the engine's `RenderSettings.VSync` and `RenderSettings.MaxFrameRate` (Settings > Video in the game), or the `fps_max 0` console command for the cap. Use a 1920 × 1080 game view or window. The sun's shadow distance is the `r.shadows.csm.distance` console variable; the code sets it to 700 and logs `XB10K_SHADOW_DISTANCE`. `sbox-cli --call camera_screenshot '{"width":1920,"height":1080}'` saves what the camera sees.
 4. The console shows `XB10K_CHECK` (must be count=10000 sum=98894.50) and, about 12 seconds later, `XB10K_RESULT {json}` (`sbox-cli --call read_console '{"filter":"XB10K"}'`); the JSON is also written to the game's data folder as `xb10k-result.json`.
 
 Geometry is built in code (`Model.Builder`), one model per shape and size with its own collision; each object has a `ModelRenderer` (tinted) and a `ModelCollider`, and drops add a `Rigidbody`. s&box has no fixed time step per frame, so it runs in real time.
 
-The code compiles against s&box 1.0.1's assemblies (checked with the .NET SDK, adding s&box's implicit `global using static Sandbox.Internal.GlobalGameNamespace;`), but hasn't run in the engine yet.
+The code compiles against s&box 1.0.1's assemblies (checked with the .NET SDK, adding s&box's implicit `global using static Sandbox.Internal.GlobalGameNamespace;`), and runs in the s&box 26.11.10 editor.

@@ -189,6 +189,10 @@ public sealed class XB10kSystem : GameObjectSystem
 		var sunGo = new GameObject( true, "Sun" );
 		var sun = sunGo.Components.Create<DirectionalLight>();
 		sun.Shadows = true;
+		// README: sun shadows reach 700 units. s&box's sun shadow distance is
+		// the r.shadows.csm.distance console variable; log what it ends up as.
+		ConsoleSystem.SetValue( "r.shadows.csm.distance", 700 );
+		Log.Info( $"XB10K_SHADOW_DISTANCE {ConsoleSystem.GetValue( "r.shadows.csm.distance", "?" )}" );
 		sunGo.WorldRotation = Rotation.LookAt( -ToSbox( new Vector3( 0.5f, 1f, 0.25f ).Normal ) );
 
 		var camGo = new GameObject( true, "Camera" );

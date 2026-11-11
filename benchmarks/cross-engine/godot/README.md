@@ -10,7 +10,7 @@ godot.exe --headless --path . --export-release "Windows Desktop" export/XB10k.ex
 export\XB10k.exe --fixed-fps 60 --resolution 1920x1080
 ```
 
-The editor binary runs it too (`godot.exe --path . --fixed-fps 60 --resolution 1920x1080`), but more slowly than the export.
+The editor binary runs it too (`godot.exe --path . --fixed-fps 60 --resolution 1920x1080`), but more slowly than the export. Add `-- --xb10k-screenshot` to save `xb10k-screenshot.png` next to the executable during warm-up, to check what it draws (not for timing runs). The sun's `directional_shadow_max_distance` is 700, as the spec asks.
 
 `--fixed-fps 60` makes every frame advance 1/60 s of game time. The run prints `XB10K_CHECK` (must be count=10000 sum=98894.50) and `XB10K_RESULT {json}`, writes `xb10k-result.json` next to the executable (or to `user://`), and quits.
 
