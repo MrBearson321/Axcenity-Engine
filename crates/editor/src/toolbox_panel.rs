@@ -1,23 +1,31 @@
-//! The Assets panel's Get texture dialog: search ambientCG's public
-//! catalog, download one material, and save it as a texture set.
+//! The Toolbox tab: find assets on ambientCG, Poly Haven and Openverse,
+//! keep them in the central asset directory, and get them into the project
+//! through the editor's own paths (a texture set, a sky, a sound, or a
+//! model through the Import dialog).
 //!
-//! The catalog needs a network connection. Results show as soon as the
-//! catalog answers; their previews arrive afterwards, fetched by a few
-//! threads at once, and are kept for the rest of the dialog's life. A
-//! download runs on its own thread and writes the zip to disk before
-//! extracting it, so a large package is not held in memory. Cancelling, or
-//! closing the dialog, leaves the project as it was.
+//! The tab sits beside Assets and Console (the Assets panel's Toolbox
+//! button opens it). Kind tabs pick Textures, Skies, Models or Sounds; the
+//! view menu shows search results or the library's own lists (favourites,
+//! recently used, everything downloaded, what this project uses, a
+//! collection). Clicking a card opens its details drawer: who made it, its
+//! licence in plain words, its packages and sizes, whether it's in the
+//! library or the project, and Get, Favourite, Add to collection, Copy
+//! credit line and, for textures, Make material.
 //!
-//! Searching and the packages on offer come from the Toolbox's ambientCG
-//! source (its v3 API); when the chosen resolution and format aren't
-//! there, Get takes the nearest package and says so. A package is fetched
-//! once into the central asset directory (verified, and recorded with its
-//! source and licence in the metadata database) and copied into each
-//! project from there, so a second project gets it without downloading.
+//! Searches need a network connection. Results show as soon as the source
+//! answers; their previews arrive afterwards, fetched by a few threads at
+//! once, and are kept for the panel's life. A download runs on its own
+//! thread: a package is fetched once into the central asset directory
+//! (verified, and recorded with its source and licence in the metadata
+//! database) and copied into each project from there, so a second project
+//! gets it without downloading. Cancelling leaves the project as it was.
+//! Every install is recorded in the database and the project's
+//! `.axcenity/asset-sources.json` (`install.rs`), which Build Game's
+//! `CREDITS.txt` and the Assets panel's tooltips read.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
@@ -27,6 +35,7 @@ use axcenity_assets::{
     AUDIO_EXTENSIONS, PROJECT_AUDIO_FOLDER, PROJECT_SKY_FOLDER, PROJECT_TEXTURES_FOLDER,
     TEXTURE_EXTENSIONS, TEXTURE_SET_SUFFIX, texture_set_from_files, write_texture_set,
 };
+use axcenity_core::InstanceId;
 use axcenity_toolbox::ambientcg::AMBIENTCG;
 use axcenity_toolbox::db::{self, Database, Install};
 use axcenity_toolbox::directory::{self, AssetDirectory};
@@ -34,12 +43,20 @@ use axcenity_toolbox::download::Fetcher;
 use axcenity_toolbox::http::{self, Http};
 use axcenity_toolbox::variants::{self, Choice};
 use axcenity_toolbox::{
-    AssetRecord, AssetSource, Kind, Licenses, Package, Query, SourceError, Variant, files, license,
+    AssetRecord, AssetSource, Kind, Package, Query, SourceError, Variant, files, license,
 };
 use eframe::egui;
 
-use crate::dialog;
-use crate::theme::icons;
+use crate::theme::{self, icons};
+use crate::{responsive, widgets};
+
+mod drawer;
+pub mod install;
+mod packs;
+mod views;
+
+use install::{DownloadResult, Installed, download};
+pub use views::View;
 
 const PAGE: usize = 24;
 const RESOLUTIONS: [&str; 4] = ["1K", "2K", "4K", "8K"];
@@ -52,22 +69,51 @@ const CARD: egui::Vec2 = egui::vec2(124.0, 178.0);
 const CARD_PICTURE: f32 = 112.0;
 /// The largest a preview is shown when its card is hovered.
 const HOVER_PREVIEW: f32 = 256.0;
+/// From this width the details drawer sits beside the results.
+const DRAWER_BESIDE_FROM: f32 = 620.0;
 
-/// What finished while the dialog was open.
-pub struct TextureEvent {
-    pub close: bool,
-    /// `error` is a failure for Output. A saved set is not.
-    pub notice: Option<(bool, String)>,
+/// Where a texture got for a purpose goes once it's in the project.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// Terrain Studio's "From Toolbox…" for this layer.
+    TerrainLayer(InstanceId),
 }
 
-struct Listing {
-    id: String,
+/// What the editor should do after the panel drew.
+#[derive(Debug, PartialEq)]
+pub enum ToolboxAction {
+    /// A sentence for the Console; `error` for a failure.
+    Notice { error: bool, text: String },
+    /// A texture set is in the project at `path` (its `.texture.json`);
+    /// with a target, fill it.
+    TextureSet {
+        path: String,
+        name: String,
+        target: Option<Target>,
+    },
+    /// A sky is in the project: ask whether to use it.
+    AskSky(String),
+    /// A sound is in the project; the Assets panel should show it.
+    Sound(String),
+    /// A model is in the asset directory: open the Import dialog on it, and
+    /// record the install under `key` once it's imported.
+    ImportModel {
+        file: PathBuf,
+        key: String,
+        variant: String,
+    },
+    /// Write a material file from the texture set at `set` and open it.
+    MakeMaterial { set: String, name: String },
+}
+
+#[derive(Clone)]
+pub(crate) struct Listing {
     name: String,
     category: String,
     maps: Vec<String>,
     preview: Option<String>,
-    /// Its JPG and PNG packages, such as "2K JPG": one zip each from
-    /// ambientCG, loose maps from Poly Haven.
+    /// The packages Get can install for its kind, such as "2K JPG": one zip
+    /// each from ambientCG, loose maps from Poly Haven, a glTF bundle.
     packages: Vec<Variant>,
     /// The source lists its packages only in the full record (Poly Haven),
     /// so Get looks them up first.
@@ -77,8 +123,9 @@ struct Listing {
 }
 
 impl Listing {
-    /// A search result from one of the Toolbox's texture sources.
-    fn from_record(record: AssetRecord) -> Self {
+    /// A search result from one of the Toolbox's sources, or a record from
+    /// the library.
+    pub(crate) fn from_record(record: AssetRecord) -> Self {
         let kept = record.clone();
         // Poly Haven and Openverse list files only in the full record.
         let lookup = record.variants.is_empty() && record.provider != AMBIENTCG.info().key;
@@ -98,13 +145,16 @@ impl Listing {
                 .into_iter()
                 .filter(|variant| usable(kind, variant))
                 .collect(),
-            id: record.id,
             name: record.name,
         }
     }
+
+    fn key(&self) -> String {
+        self.record.key()
+    }
 }
 
-/// What the dialog offers for one kind of asset.
+/// What the panel offers for one kind of asset.
 struct KindRules {
     /// The tab's label and the plural in messages.
     label: &'static str,
@@ -121,6 +171,8 @@ struct KindRules {
 }
 
 const SKY_EXTENSIONS: [&str; 2] = ["hdr", "exr"];
+/// What a model package may bring: the model, its buffers and textures.
+const MODEL_EXTENSIONS: [&str; 7] = ["gltf", "glb", "bin", "fbx", "png", "jpg", "jpeg"];
 
 fn rules(kind: Kind) -> KindRules {
     match kind {
@@ -140,7 +192,15 @@ fn rules(kind: Kind) -> KindRules {
             extract: &AUDIO_EXTENSIONS,
             licenses: &[license::CC0, license::PD, license::CC_BY],
         },
-        Kind::Texture | Kind::Model | Kind::Sprites => KindRules {
+        Kind::Model => KindRules {
+            label: "Models",
+            noun: "models",
+            formats: &["GLTF", "FBX"],
+            resolution: true,
+            extract: &MODEL_EXTENSIONS,
+            licenses: &[],
+        },
+        Kind::Texture | Kind::Sprites => KindRules {
             label: "Textures",
             noun: "materials",
             formats: &FORMATS,
@@ -151,13 +211,13 @@ fn rules(kind: Kind) -> KindRules {
     }
 }
 
-/// The kinds the dialog has tabs for, in order.
-const KINDS: [Kind; 3] = [Kind::Texture, Kind::Hdri, Kind::Sound];
+/// The kinds the panel has tabs for, in order.
+const KINDS: [Kind; 4] = [Kind::Texture, Kind::Hdri, Kind::Model, Kind::Sound];
 
 /// Whether Get can install a package of a `kind` asset: for textures one
 /// zip or loose maps of JPG or PNG images (the formats the engine reads);
-/// for skies one HDR or EXR file, or a zip of them; for sounds one file the
-/// engine plays.
+/// for skies one HDR or EXR file, or a zip of them; for models a glTF or
+/// FBX bundle, or a zip; for sounds one file the engine plays.
 fn usable(kind: Kind, variant: &Variant) -> bool {
     let format_known = rules(kind)
         .formats
@@ -166,14 +226,14 @@ fn usable(kind: Kind, variant: &Variant) -> bool {
     let shape = match variant.package {
         Package::Archive => variant.files.len() == 1 && kind != Kind::Sound,
         Package::Maps => !variant.files.is_empty() && kind == Kind::Texture,
-        Package::Single => variant.files.len() == 1 && kind != Kind::Texture,
-        Package::Bundle => false,
+        Package::Single => variant.files.len() == 1 && !matches!(kind, Kind::Texture | Kind::Model),
+        Package::Bundle => !variant.files.is_empty() && kind == Kind::Model,
     };
-    // ambientCG labels its HDRI zips by resolution only ("4K"), so their
-    // format is unknown until they're unpacked.
-    let unlabelled_sky_zip =
-        kind == Kind::Hdri && variant.package == Package::Archive && variant.format.is_empty();
-    shape && (format_known || unlabelled_sky_zip)
+    // ambientCG labels its HDRI and model zips by resolution ("4K",
+    // "LQ-2K-JPG"), so what's in them is known only once they're unpacked.
+    let unlabelled_zip = variant.package == Package::Archive
+        && (kind == Kind::Model || (kind == Kind::Hdri && variant.format.is_empty()));
+    shape && (format_known || unlabelled_zip)
 }
 
 /// Leaves out loose maps the texture set doesn't need: a DirectX normal
@@ -231,37 +291,37 @@ struct SearchResult {
     listings: Vec<Listing>,
 }
 
-#[derive(Debug)]
-enum DownloadResult {
-    Saved(String),
-    Cancelled,
-}
-
 struct Job<T> {
     rx: Receiver<Result<T, String>>,
 }
 
-/// A fetched preview: the asset id, and `None` if it couldn't be fetched.
+/// A fetched preview: the asset's key, and `None` if it couldn't be fetched.
 type Preview = (String, Option<egui::ColorImage>);
 
 /// What one result card shows.
 struct Card {
-    id: String,
+    key: String,
     name: String,
     detail: String,
+    /// Its licence keeps it out of a commercial game.
+    blocked: Option<&'static str>,
     /// What Get would fetch ("Gets 2K JPG."), or `None` with no download.
     plan: Option<String>,
 }
 
-/// The Get texture dialog.
-pub struct GetTexture {
-    /// The tab: textures, skies or sounds.
+/// The Toolbox tab.
+pub struct ToolboxPanel {
+    /// The tab: textures, skies, models or sounds.
     kind: Kind,
     /// Where they come from: ambientCG, Poly Haven or Openverse.
     source: &'static dyn AssetSource,
+    /// Search results or one of the library's lists.
+    view: View,
     query: String,
     resolution: String,
     format: String,
+    /// Shows sounds whose licence needs care (NC, ND, SA, unknown).
+    restricted: bool,
     page: Option<Page>,
     error: Option<String>,
     status: Option<String>,
@@ -269,31 +329,47 @@ pub struct GetTexture {
     download: Option<Job<DownloadResult>>,
     generation: u64,
     cancel: Arc<AtomicBool>,
-    /// By asset id: `None` while fetching.
+    /// By asset key: `None` while fetching.
     previews: HashMap<String, Option<egui::TextureHandle>>,
     /// Assets whose preview couldn't be fetched, shown blank.
     no_preview: HashSet<String>,
     preview_tx: Sender<Preview>,
     preview_rx: Receiver<Preview>,
+    /// The card whose details are open.
+    drawer: Option<drawer::Drawer>,
+    /// Where the next texture got goes (Terrain Studio's From Toolbox…).
+    target: Option<Target>,
+    /// The project the library views were last read for.
+    shown_for: Option<PathBuf>,
+    /// The collections' names, for the menus.
+    collections: Vec<String>,
+    /// Searches the popular assets when next drawn (set when it's opened,
+    /// so a tab restored with the layout doesn't reach the network).
+    search_on_show: bool,
+    /// The pack being reviewed (Packs > Import pack…).
+    pack: Option<packs::Review>,
+    /// The Gets waiting their turn (a pack's Get all).
+    queue: VecDeque<Listing>,
 }
 
-impl GetTexture {
-    /// Opens the dialog and searches the popular materials.
-    pub fn open(ctx: &egui::Context) -> Self {
-        let mut dialog = Self::idle();
-        dialog.start_search(ctx, 0);
-        dialog
+impl Default for ToolboxPanel {
+    fn default() -> Self {
+        Self::idle()
     }
+}
 
-    /// The dialog before its first search.
+impl ToolboxPanel {
+    /// The panel before its first search.
     fn idle() -> Self {
         let (preview_tx, preview_rx) = mpsc::channel();
         Self {
             kind: Kind::Texture,
             source: &AMBIENTCG,
+            view: View::Search,
             query: String::new(),
             resolution: "2K".to_owned(),
             format: "JPG".to_owned(),
+            restricted: false,
             page: None,
             error: None,
             status: None,
@@ -305,91 +381,180 @@ impl GetTexture {
             no_preview: HashSet::new(),
             preview_tx,
             preview_rx,
+            drawer: None,
+            target: None,
+            shown_for: None,
+            collections: Vec::new(),
+            search_on_show: false,
+            pack: None,
+            queue: VecDeque::new(),
         }
     }
 
-    /// Draws the dialog. `Some` when it should close or Output should hear
-    /// about a download.
-    pub fn show(&mut self, ctx: &egui::Context, project: &Path) -> Option<TextureEvent> {
+    /// Switches to textures for `target` (Terrain Studio's From Toolbox…):
+    /// the next texture got fills it.
+    pub fn aim(&mut self, target: Target) {
+        self.target = Some(target);
+        if self.kind != Kind::Texture {
+            self.set_kind(Kind::Texture);
+        }
+    }
+
+    /// The tab was opened: show the popular assets if nothing is shown.
+    pub fn opened(&mut self) {
+        self.search_on_show = true;
+    }
+
+    /// Stops a running download; the project is left as it was.
+    pub fn cancel(&mut self) {
+        self.queue.clear();
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+
+    /// Draws the tab. `project` is the open project's folder; `can_edit`
+    /// is false during Play, when nothing is installed.
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: Option<&Path>,
+        can_edit: bool,
+    ) -> Vec<ToolboxAction> {
+        let ctx = ui.ctx().clone();
         if self.search.is_some() || self.download.is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
-        let notice = self.poll(ctx);
-        self.load_previews(ctx);
-
-        let screen = ctx.screen_rect().size();
-        let width = (screen.x - 64.0).clamp(280.0, 800.0);
-        let height = (screen.y - 260.0).clamp(200.0, 600.0);
-        let mut close = false;
-        let source = self.source.info();
-        let kind = rules(self.kind);
-        let licence = match source.licenses {
-            Licenses::All(code) => format!("Saved files are {code} and work offline."),
-            Licenses::PerAsset => {
-                "Each has its own licence, shown on its card; saved files work offline.".to_owned()
+        let mut actions = Vec::new();
+        self.poll(&ctx, &mut actions);
+        if can_edit {
+            self.advance_queue(&ctx, project);
+        }
+        self.load_previews(&ctx);
+        if self.search_on_show
+            && self.view == View::Search
+            && self.page.is_none()
+            && self.search.is_none()
+        {
+            self.start_search(&ctx, 0);
+        }
+        self.search_on_show = false;
+        if self.shown_for.as_deref() != project {
+            self.shown_for = project.map(Path::to_owned);
+            self.refresh_collections();
+            if self.view != View::Search {
+                self.load_view(&ctx);
             }
-        };
-        let subtitle = format!("{} from {}. {licence}", capitalize(kind.noun), source.name);
-        let ((), dismissed) = dialog::modal(ctx, "get texture", width, |ui| {
-            dialog::header(
-                ui,
-                icons::DOWNLOAD_SIMPLE,
-                dialog::Tone::Question,
-                "Toolbox",
-                Some(&subtitle),
-            );
-            self.kind_tabs(ui);
-            ui.horizontal_wrapped(|ui| {
+        }
+        let palette = theme::palette(&ctx);
+        self.kind_tabs(ui);
+        responsive::toolbar(ui, |ui| {
+            self.view_choice(ui);
+            responsive::room_for(ui, 60.0);
+            self.packs_menu(ui);
+            if self.view == View::Search {
+                responsive::room_for(ui, 120.0);
                 self.source_choice(ui);
+                let kind = rules(self.kind);
+                responsive::room_for(ui, 120.0);
+                let width = ui.available_size_before_wrap().x.clamp(80.0, 160.0);
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
                         .hint_text(format!("Search {}", kind.noun))
-                        .desired_width(180.0),
+                        .desired_width(width),
                 );
                 let enter =
                     response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
                 if (ui
-                    .add_enabled(self.search.is_none(), egui::Button::new("Search"))
+                    .add_enabled(
+                        self.search.is_none(),
+                        widgets::button(
+                            widgets::Role::Secondary,
+                            Some(icons::MAGNIFYING_GLASS),
+                            "Search",
+                            &palette,
+                        ),
+                    )
                     .clicked()
                     || enter)
                     && self.search.is_none()
                 {
                     self.start_search(ui.ctx(), 0);
                 }
-                if kind.resolution {
-                    self.choice(ui, "resolution", &RESOLUTIONS, true);
-                }
-                self.choice(ui, "format", kind.formats, false);
-            });
-            if let Some(error) = &self.error {
-                ui.colored_label(ui.visuals().error_fg_color, error);
             }
-            if let Some(status) = &self.status {
-                ui.label(status);
+            let kind = rules(self.kind);
+            if kind.resolution {
+                responsive::room_for(ui, 70.0);
+                self.choice(ui, "toolbox resolution", &RESOLUTIONS, true);
             }
-            ui.add_space(4.0);
-            self.results(ui, project, height);
-            // Where the results come from (Poly Haven's API terms ask for it).
-            ui.label(egui::RichText::new(source.credit).weak().small());
-            close |= dialog::buttons(
-                ui,
-                &[dialog::Button::new(icons::X, "Close", dialog::Kind::Plain)],
-                dialog::Enter::Main,
-            )
-            .is_some();
+            responsive::room_for(ui, 70.0);
+            self.choice(ui, "toolbox format", kind.formats, false);
+            if self.kind == Kind::Sound
+                && self.view == View::Search
+                && ui
+                    .checkbox(&mut self.restricted, "Show restricted")
+                    .on_hover_text(
+                        "Also show sounds whose licence is non-commercial, no-derivatives, \
+                         share-alike or unknown. Each is marked with why it needs care.",
+                    )
+                    .changed()
+            {
+                self.start_search(ui.ctx(), 0);
+            }
         });
-        close |= dismissed;
-        if close {
-            self.cancel.store(true, Ordering::Relaxed);
+        if let Some(target) = self.target {
+            ui.horizontal_wrapped(|ui| {
+                let Target::TerrainLayer(_) = target;
+                ui.label(
+                    egui::RichText::new("The next texture you get fills the terrain layer.")
+                        .color(palette.accent_text),
+                );
+                if ui.small_button("Stop").clicked() {
+                    self.target = None;
+                }
+            });
         }
-        (close || notice.is_some()).then_some(TextureEvent { close, notice })
+        if let Some(error) = &self.error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
+        if let Some(status) = self.status.clone() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(status);
+                if self.download.is_some() && ui.small_button("Cancel").clicked() {
+                    self.cancel();
+                }
+            });
+        }
+        self.pack_review(ui, project, can_edit);
+        ui.add_space(4.0);
+        let credit = self.source.info().credit;
+        let search_view = self.view == View::Search;
+        let open = self.drawer.is_some();
+        let width = ui.available_width();
+        if open && width >= DRAWER_BESIDE_FROM {
+            responsive::split(ui, DRAWER_BESIDE_FROM, 0.62, |ui, pane| {
+                if pane == 0 {
+                    self.results(ui, project, can_edit);
+                } else {
+                    self.drawer_pane(ui, project, can_edit, &mut actions);
+                }
+            });
+        } else {
+            self.results(ui, project, can_edit);
+            if open {
+                ui.separator();
+                self.drawer_pane(ui, project, can_edit, &mut actions);
+            }
+        }
+        // Where the results come from (Poly Haven's API terms ask for it).
+        if search_view {
+            ui.label(egui::RichText::new(credit).weak().small());
+        }
+        actions
     }
 
-    /// Textures, Skies and Sounds. Picking another kind takes its first
-    /// source and format, and searches.
+    /// Textures, Skies, Models and Sounds.
     fn kind_tabs(&mut self, ui: &mut egui::Ui) {
         let mut picked = None;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for kind in KINDS {
                 if ui
                     .selectable_label(self.kind == kind, rules(kind).label)
@@ -402,19 +567,34 @@ impl GetTexture {
         });
         if let Some(kind) = picked
             && self.search.is_none()
-            && let Some(source) = axcenity_toolbox::sources_for(kind).into_iter().next()
         {
-            self.kind = kind;
-            self.source = source;
-            self.format = rules(kind).formats[0].to_owned();
-            self.start_search(ui.ctx(), 0);
+            self.set_kind(kind);
+            if self.view == View::Search {
+                self.start_search(ui.ctx(), 0);
+            } else {
+                self.load_view(ui.ctx());
+            }
         }
+    }
+
+    /// Picks another kind: its first source and format. Searches when the
+    /// panel is next drawn.
+    fn set_kind(&mut self, kind: Kind) {
+        let Some(source) = axcenity_toolbox::sources_for(kind).into_iter().next() else {
+            return;
+        };
+        self.kind = kind;
+        self.source = source;
+        self.format = rules(kind).formats[0].to_owned();
+        self.page = None;
+        self.drawer = None;
+        self.error = None;
     }
 
     /// The source menu. Picking another source searches it.
     fn source_choice(&mut self, ui: &mut egui::Ui) {
         let mut picked = None;
-        egui::ComboBox::from_id_salt("texture source")
+        egui::ComboBox::from_id_salt("toolbox source")
             .selected_text(self.source.info().name)
             .show_ui(ui, |ui| {
                 for source in axcenity_toolbox::sources_for(self.kind) {
@@ -440,6 +620,7 @@ impl GetTexture {
         };
         egui::ComboBox::from_id_salt(salt)
             .selected_text(&selected)
+            .width(56.0)
             .show_ui(ui, |ui| {
                 for option in options {
                     let value = (*option).to_owned();
@@ -452,15 +633,21 @@ impl GetTexture {
             });
     }
 
-    fn results(&mut self, ui: &mut egui::Ui, project: &Path, height: f32) {
+    fn results(&mut self, ui: &mut egui::Ui, project: Option<&Path>, can_edit: bool) {
         let Some(page) = self.page.as_ref() else {
             if self.search.is_some() {
                 ui.label("Searching…");
+            } else if self.view == View::Search && self.error.is_none() {
+                ui.weak(format!(
+                    "Press Search to see {}'s most popular {}, or type what you're after.",
+                    self.source.info().name,
+                    rules(self.kind).noun
+                ));
             }
             return;
         };
         if page.listings.is_empty() {
-            ui.label(format!("No {} match that.", rules(self.kind).noun));
+            ui.label(self.view.empty_text(rules(self.kind).noun));
             return;
         }
         let total = page.total;
@@ -477,7 +664,10 @@ impl GetTexture {
                         .authors
                         .first()
                         .map_or("unknown author", String::as_str);
-                    format!("{} · {author}", record.license)
+                    format!(
+                        "{} · {author}",
+                        license::display(&record.license, &record.license_version)
+                    )
                 } else if maps.is_empty() {
                     listing.category.clone()
                 } else if listing.category.is_empty() {
@@ -486,9 +676,10 @@ impl GetTexture {
                     format!("{} · {maps}", listing.category)
                 };
                 Card {
-                    id: listing.id.clone(),
+                    key: listing.key(),
                     name: listing.name.clone(),
                     detail,
+                    blocked: license::commercial_block(&record.license),
                     plan: self
                         .package(listing)
                         .map(|choice| choice.describe())
@@ -500,8 +691,10 @@ impl GetTexture {
                 }
             })
             .collect();
+        let height = (ui.available_height() - 24.0).max(120.0);
+        let can_get = can_edit && project.is_some();
         egui::ScrollArea::vertical()
-            .id_salt("ambientcg results")
+            .id_salt("toolbox results")
             .max_height(height)
             .auto_shrink([false, true])
             .show(ui, |ui| {
@@ -513,13 +706,14 @@ impl GetTexture {
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.set_min_size(CARD);
-                                self.card(ui, project, card);
+                                self.card(ui, project, can_get, card);
                             },
                         );
                     }
                 });
             });
-        if shown < total
+        if self.view == View::Search
+            && shown < total
             && ui
                 .add_enabled(self.search.is_none(), egui::Button::new("More"))
                 .clicked()
@@ -528,12 +722,17 @@ impl GetTexture {
         }
     }
 
-    /// One result: its preview (larger when hovered), name, kind and Get.
-    fn card(&mut self, ui: &mut egui::Ui, project: &Path, card: &Card) {
+    /// One result: its preview (larger when hovered; click for details),
+    /// name, kind and Get.
+    fn card(&mut self, ui: &mut egui::Ui, project: Option<&Path>, can_get: bool, card: &Card) {
         ui.spacing_mut().item_spacing.y = 2.0;
         let (rect, response) =
-            ui.allocate_exact_size(egui::Vec2::splat(CARD_PICTURE), egui::Sense::hover());
-        let preview = self.previews.get(&card.id);
+            ui.allocate_exact_size(egui::Vec2::splat(CARD_PICTURE), egui::Sense::click());
+        let preview = self.previews.get(&card.key);
+        let selected = self
+            .drawer
+            .as_ref()
+            .is_some_and(|drawer| drawer.key == card.key);
         ui.painter()
             .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
         match preview {
@@ -547,7 +746,20 @@ impl GetTexture {
             }
             None => {}
         }
-        let tip = format!("{}\n{}", card.name, card.detail);
+        if selected {
+            ui.painter().rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(2.0_f32, ui.visuals().selection.stroke.color),
+                egui::StrokeKind::Inside,
+            );
+        }
+        let mut tip = format!("{}\n{}", card.name, card.detail);
+        if let Some(why) = card.blocked {
+            tip.push_str(&format!("\nNot for a commercial game: {why}."));
+        }
+        tip.push_str("\nClick for details.");
+        let clicked = response.clicked();
         match preview {
             Some(Some(texture)) => {
                 let texture = texture.clone();
@@ -560,19 +772,42 @@ impl GetTexture {
                 response.on_hover_text(&tip);
             }
         }
+        if clicked {
+            self.open_drawer(ui.ctx(), project, &card.key);
+        }
         ui.add(egui::Label::new(&card.name).truncate());
-        ui.add(egui::Label::new(egui::RichText::new(&card.detail).weak().small()).truncate());
+        let detail = match card.blocked {
+            Some(_) => egui::RichText::new(format!("{} {}", icons::WARNING, card.detail))
+                .color(ui.visuals().warn_fg_color)
+                .small(),
+            None => egui::RichText::new(&card.detail).weak().small(),
+        };
+        ui.add(egui::Label::new(detail).truncate());
         let button = ui.add_enabled(
-            card.plan.is_some() && self.download.is_none(),
+            can_get && card.plan.is_some() && self.download.is_none(),
             egui::Button::new("Get"),
         );
         let button = match &card.plan {
-            Some(plan) => button.on_hover_text(plan),
+            Some(plan) if can_get => button.on_hover_text(plan),
+            Some(_) => {
+                button.on_disabled_hover_text("Open a project (and stop Play) to get assets.")
+            }
             None => button.on_disabled_hover_text(format!("{} has no download.", card.name)),
         };
-        if button.clicked() {
-            self.start_download(ui.ctx(), project, &card.id);
+        if button.clicked()
+            && let Some(project) = project
+        {
+            self.start_download(ui.ctx(), project, &card.key);
         }
+    }
+
+    /// The listing with this key, in the page shown.
+    fn listing(&self, key: &str) -> Option<&Listing> {
+        self.page
+            .as_ref()?
+            .listings
+            .iter()
+            .find(|listing| listing.key() == key)
     }
 
     /// The package Get fetches for `listing`: the chosen resolution and
@@ -586,21 +821,25 @@ impl GetTexture {
             self.generation += 1;
             self.page = None;
         }
+        self.view = View::Search;
         self.error = None;
         self.status = Some("Searching…".to_owned());
         let generation = self.generation;
         let query = self.query.trim().to_owned();
         let source = self.source;
         let kind = self.kind;
+        let restricted = self.restricted;
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let result =
-                search(source, kind, &query, offset).map(|(total, listings)| SearchResult {
-                    generation,
-                    offset,
-                    total,
-                    listings,
+                search(source, kind, &query, offset, restricted).map(|(total, listings)| {
+                    SearchResult {
+                        generation,
+                        offset,
+                        total,
+                        listings,
+                    }
                 });
             let _ = tx.send(result);
             ctx.request_repaint();
@@ -608,14 +847,13 @@ impl GetTexture {
         self.search = Some(Job { rx });
     }
 
-    fn start_download(&mut self, ctx: &egui::Context, project: &Path, id: &str) {
-        let Some(listing) = self
-            .page
-            .as_ref()
-            .and_then(|page| page.listings.iter().find(|listing| listing.id == id))
-        else {
-            return;
-        };
+    fn start_download(&mut self, ctx: &egui::Context, project: &Path, key: &str) {
+        if let Some(listing) = self.listing(key).cloned() {
+            self.start_listing_download(ctx, project, &listing);
+        }
+    }
+
+    fn start_listing_download(&mut self, ctx: &egui::Context, project: &Path, listing: &Listing) {
         // Known now, or (Poly Haven) once the full record is looked up.
         let known = self
             .package(listing)
@@ -627,7 +865,10 @@ impl GetTexture {
         let name = listing.name.clone();
         let record = listing.record.clone();
         let project = project.to_owned();
-        let source = self.source;
+        let Some(source) = axcenity_toolbox::source(&record.provider) else {
+            self.error = Some(format!("{name} can't be downloaded from here."));
+            return;
+        };
         let (resolution, format) = (self.resolution.clone(), self.format.clone());
         self.error = None;
         self.status = Some(match &known {
@@ -654,8 +895,9 @@ impl GetTexture {
                             .record(&client, &record.id)
                             .map_err(|err| err.to_string())?;
                         let listing = Listing::from_record(full.clone());
-                        let choice = pick(&listing, &resolution, &format)
-                            .ok_or_else(|| "it has no JPG or PNG maps".to_owned())?;
+                        let choice = pick(&listing, &resolution, &format).ok_or_else(|| {
+                            format!("it has no {} the engine reads", rules(full.kind).noun)
+                        })?;
                         notes = choice.notes.join(" ");
                         let variant = choice.variant.clone();
                         (full, variant)
@@ -673,11 +915,13 @@ impl GetTexture {
                 )
             })();
             let result = match outcome {
-                Ok(DownloadResult::Cancelled) => Ok(DownloadResult::Cancelled),
-                Ok(DownloadResult::Saved(text)) if !notes.is_empty() => {
-                    Ok(DownloadResult::Saved(format!("{text} {notes}")))
+                Ok(DownloadResult::Saved { text, installed }) if !notes.is_empty() => {
+                    Ok(DownloadResult::Saved {
+                        text: format!("{text} {notes}"),
+                        installed,
+                    })
                 }
-                Ok(saved) => Ok(saved),
+                Ok(other) => Ok(other),
                 Err(err) => Err(format!("Could not get {name}: {err}")),
             };
             let _ = tx.send(result);
@@ -686,47 +930,71 @@ impl GetTexture {
         self.download = Some(Job { rx });
     }
 
-    /// Finished searches and downloads since last frame.
-    fn poll(&mut self, ctx: &egui::Context) -> Option<(bool, String)> {
+    /// Finished searches, look-ups and downloads since last frame.
+    fn poll(&mut self, ctx: &egui::Context, actions: &mut Vec<ToolboxAction>) {
         let search = self.search.take();
         if let Some(job) = search {
+            let name = self.source.info().name;
             match job.rx.try_recv() {
                 Ok(Ok(result)) => self.accept_search(ctx, result),
                 Ok(Err(err)) => {
                     self.status = None;
-                    self.error = Some(format!("Could not search ambientCG: {err}"));
+                    self.error = Some(format!("Could not search {name}: {err}"));
                 }
                 Err(TryRecvError::Empty) => self.search = Some(job),
                 Err(TryRecvError::Disconnected) => {
                     self.status = None;
-                    self.error = Some("Could not search ambientCG.".to_owned());
+                    self.error = Some(format!("Could not search {name}."));
                 }
             }
         }
-        let job = self.download.take()?;
+        self.poll_drawer();
+        let Some(job) = self.download.take() else {
+            return;
+        };
         match job.rx.try_recv() {
-            Ok(Ok(DownloadResult::Saved(text))) => {
+            Ok(Ok(DownloadResult::Saved { text, installed })) => {
                 self.status = None;
-                Some((false, text))
+                actions.push(ToolboxAction::Notice { error: false, text });
+                actions.push(match installed {
+                    Installed::TextureSet { path, name } => ToolboxAction::TextureSet {
+                        path,
+                        name,
+                        target: self.target.take(),
+                    },
+                    Installed::Sky(path) => ToolboxAction::AskSky(path),
+                    Installed::Sound(path) => ToolboxAction::Sound(path),
+                    Installed::Model { file, key, variant } => {
+                        ToolboxAction::ImportModel { file, key, variant }
+                    }
+                });
+                self.refresh_drawer();
+                if self.view != View::Search {
+                    self.load_view(ctx);
+                }
             }
             Ok(Ok(DownloadResult::Cancelled)) => {
                 self.status = None;
-                None
             }
             Ok(Err(err)) => {
                 self.status = None;
                 self.error = Some(err.clone());
-                Some((true, err))
+                actions.push(ToolboxAction::Notice {
+                    error: true,
+                    text: err,
+                });
             }
             Err(TryRecvError::Empty) => {
                 self.download = Some(job);
-                None
             }
             Err(TryRecvError::Disconnected) => {
                 self.status = None;
-                let err = "Could not download that texture.".to_owned();
+                let err = "Could not download that asset.".to_owned();
                 self.error = Some(err.clone());
-                Some((true, err))
+                actions.push(ToolboxAction::Notice {
+                    error: true,
+                    text: err,
+                });
             }
         }
     }
@@ -736,19 +1004,7 @@ impl GetTexture {
             return;
         }
         self.status = None;
-        // Previews not seen before, fetched now; the rest are kept.
-        let wanted: VecDeque<(String, String)> = result
-            .listings
-            .iter()
-            .filter(|listing| {
-                !self.previews.contains_key(&listing.id) && !self.no_preview.contains(&listing.id)
-            })
-            .filter_map(|listing| Some((listing.id.clone(), listing.preview.clone()?)))
-            .collect();
-        for (id, _) in &wanted {
-            self.previews.insert(id.clone(), None);
-        }
-        fetch_previews(ctx, wanted, &self.preview_tx);
+        self.fetch_previews_for(ctx, &result.listings);
         if result.offset == 0 || self.page.is_none() {
             self.page = Some(Page {
                 total: result.total,
@@ -760,24 +1016,53 @@ impl GetTexture {
         }
     }
 
+    /// Starts fetching the previews of `listings` not seen before.
+    fn fetch_previews_for(&mut self, ctx: &egui::Context, listings: &[Listing]) {
+        let wanted: VecDeque<(String, String)> = listings
+            .iter()
+            .filter(|listing| {
+                let key = listing.key();
+                !self.previews.contains_key(&key) && !self.no_preview.contains(&key)
+            })
+            .filter_map(|listing| Some((listing.key(), listing.preview.clone()?)))
+            .collect();
+        for (key, _) in &wanted {
+            self.previews.insert(key.clone(), None);
+        }
+        fetch_previews(ctx, wanted, &self.preview_tx);
+    }
+
     fn load_previews(&mut self, ctx: &egui::Context) {
-        for (id, image) in self.preview_rx.try_iter() {
+        for (key, image) in self.preview_rx.try_iter() {
             match image {
                 Some(image) => {
                     let handle = ctx.load_texture(
-                        format!("ambientcg {id}"),
+                        format!("toolbox {key}"),
                         image,
                         egui::TextureOptions::LINEAR,
                     );
-                    self.previews.insert(id, Some(handle));
+                    self.previews.insert(key, Some(handle));
                 }
                 None => {
-                    self.previews.remove(&id);
-                    self.no_preview.insert(id);
+                    self.previews.remove(&key);
+                    self.no_preview.insert(key);
                 }
             }
         }
     }
+}
+
+/// The asset directory and its database, opened for a moment.
+fn library() -> Result<(AssetDirectory, Database), String> {
+    let root = directory::locate().ok_or_else(|| {
+        format!(
+            "there is no asset directory; set {} to a folder",
+            directory::ENV
+        )
+    })?;
+    let dir = AssetDirectory::open(&root).map_err(|err| err.to_string())?;
+    let db = Database::open(&dir.database_path()).map_err(|err| err.to_string())?;
+    Ok((dir, db))
 }
 
 /// The package Get fetches for `listing` at a resolution and format such as
@@ -794,30 +1079,25 @@ fn pick<'a>(listing: &'a Listing, resolution: &str, format: &str) -> Option<Choi
     variants::choose(&listing.packages, &resolution, &format, &fallbacks)
 }
 
-/// `text` with its first letter upper-case.
-fn capitalize(text: &str) -> String {
-    let mut chars = text.chars();
-    chars
-        .next()
-        .map(|first| first.to_uppercase().chain(chars).collect())
-        .unwrap_or_default()
-}
-
 /// One page of `kind` assets matching `query` from one of the Toolbox's
-/// sources (most popular first; sounds only with the licences `rules` keeps).
+/// sources (most popular first; sounds only with the licences `rules` keeps
+/// unless `restricted`).
 fn search(
     source: &dyn AssetSource,
     kind: Kind,
     query: &str,
     offset: usize,
+    restricted: bool,
 ) -> Result<(usize, Vec<Listing>), String> {
     let client = http::Client::new(Duration::from_secs(30));
     let mut wanted = Query::new(query, kind);
-    wanted.licenses = rules(kind)
-        .licenses
-        .iter()
-        .map(|code| (*code).to_owned())
-        .collect();
+    if !restricted {
+        wanted.licenses = rules(kind)
+            .licenses
+            .iter()
+            .map(|code| (*code).to_owned())
+            .collect();
+    }
     wanted.per_page = PAGE as u32;
     wanted.page = (offset / PAGE) as u32 + 1;
     let page = source
@@ -871,198 +1151,11 @@ fn preview_image(client: &http::Client, url: &str) -> Option<egui::ColorImage> {
     ))
 }
 
-/// Gets one package of `record` into the project: a texture into
-/// `assets/textures/<id>/` with its texture set file, a sky into
-/// `assets/sky/`, a sound into `assets/audio/`.
-///
-/// The package goes into the central asset directory at `assets` first
-/// (verified, unpacked, recorded in its metadata database with the asset's
-/// source and licence), unless it's already there, in which case nothing
-/// is downloaded. Then its images are copied into the project, and the
-/// database records the install. Does nothing to the project when `cancel`
-/// is set before the files are moved into place.
-fn download(
-    http: &dyn Http,
-    source: &dyn AssetSource,
-    assets: &Path,
-    project: &Path,
-    record: &AssetRecord,
-    variant: &Variant,
-    cancel: &AtomicBool,
-) -> Result<DownloadResult, String> {
-    let id = record.id.as_str();
-    if !folder_id(id) {
-        return Err("the asset id is not a file name".to_owned());
-    }
-    let dir = AssetDirectory::open(assets).map_err(|err| err.to_string())?;
-    let db = Database::open(&dir.database_path()).map_err(|err| err.to_string())?;
-    let fetcher = Fetcher {
-        http,
-        dir: &dir,
-        db: &db,
-    };
-    let extract = rules(record.kind).extract;
-    let fetched = match fetcher.fetch_variant(source.info(), record, variant, extract, cancel) {
-        Ok(fetched) => fetched,
-        Err(SourceError::Cancelled) => return Ok(DownloadResult::Cancelled),
-        Err(err) => return Err(err.to_string()),
-    };
-    if cancel.load(Ordering::Relaxed) {
-        return Ok(DownloadResult::Cancelled);
-    }
-    let (outcome, installed) = if matches!(record.kind, Kind::Hdri | Kind::Sound) {
-        install_file(&dir, &fetched, project, record, variant)?
-    } else {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |time| time.as_millis());
-        let root = std::env::temp_dir().join(format!("axcenity-texture-{id}-{stamp}"));
-        let outcome = install(&root, &dir, &fetched, project, record, cancel);
-        let _ = fs::remove_dir_all(&root);
-        (outcome?, format!("{PROJECT_TEXTURES_FOLDER}/{id}"))
-    };
-    if let DownloadResult::Saved(_) = &outcome {
-        let install = Install {
-            project: project.display().to_string(),
-            path: installed,
-            key: record.key(),
-            variant: variant.label.clone(),
-            uid: None,
-            installed_at: db::now(),
-        };
-        if let Err(err) = db.record_install(&install) {
-            log::warn!("Could not record installing {}: {err}", record.key());
-        }
-    }
-    Ok(outcome)
-}
-
-/// Copies a downloaded sky into `assets/sky/<id>_<resolution>.<hdr|exr>`
-/// or a sound into `assets/audio/<name>-<id start>.<ext>`, and returns what
-/// to say and the file's path in the project.
-fn install_file(
-    dir: &AssetDirectory,
-    fetched: &db::Download,
-    project: &Path,
-    record: &AssetRecord,
-    variant: &Variant,
-) -> Result<(DownloadResult, String), String> {
-    let wanted = rules(record.kind).extract;
-    let file = fetched
-        .files
-        .iter()
-        .find(|file| wanted.contains(&extension(&file.path).as_str()))
-        .ok_or_else(|| "the download has no file the engine reads".to_owned())?;
-    let ext = extension(&file.path);
-    let relative = if record.kind == Kind::Hdri {
-        let resolution = variant.resolution.as_deref().unwrap_or("sky");
-        format!("{PROJECT_SKY_FOLDER}/{}_{resolution}.{ext}", record.id)
-    } else {
-        format!("{PROJECT_AUDIO_FOLDER}/{}.{ext}", sound_name(record))
-    };
-    let dest = relative
-        .split('/')
-        .fold(project.to_owned(), |path, part| path.join(part));
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-    let replaced = dest.exists();
-    let source = file
-        .path
-        .split('/')
-        .fold(dir.path(&fetched.folder), |path, part| path.join(part));
-    fs::copy(&source, &dest).map_err(|err| err.to_string())?;
-    let verb = if replaced { "Replaced" } else { "Saved" };
-    let message = format!("{verb} {} ({}) in {relative}.", record.name, record.license);
-    Ok((DownloadResult::Saved(message), relative))
-}
-
-/// A file name's extension, lower case.
-fn extension(name: &str) -> String {
-    name.rsplit_once('.')
-        .map(|(_, ext)| ext.to_ascii_lowercase())
-        .unwrap_or_default()
-}
-
-/// A sound's file name: its title as lower-case words joined by `-`, then
-/// the start of its id so two sounds with one title don't collide.
-fn sound_name(record: &AssetRecord) -> String {
-    let words: Vec<String> = record
-        .name
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .map(str::to_ascii_lowercase)
-        .collect();
-    let mut title = words.join("-");
-    title.truncate(40);
-    let title = title.trim_end_matches('-');
-    let id: String = record
-        .id
-        .chars()
-        .filter(char::is_ascii_alphanumeric)
-        .take(8)
-        .collect();
-    match (title.is_empty(), id.is_empty()) {
-        (true, _) => format!("sound-{id}"),
-        (false, true) => title.to_owned(),
-        (false, false) => format!("{title}-{id}"),
-    }
-}
-
-/// Copies a downloaded package's images into a staging folder, writes the
-/// texture set beside them, and swaps the folder into the project.
-fn install(
-    root: &Path,
-    dir: &AssetDirectory,
-    fetched: &db::Download,
-    project: &Path,
-    record: &AssetRecord,
-    cancel: &AtomicBool,
-) -> Result<DownloadResult, String> {
-    let id = record.id.as_str();
-    let staging = root.join("files");
-    fs::create_dir_all(&staging).map_err(|err| err.to_string())?;
-    let source = dir.path(&fetched.folder);
-    let mut names = Vec::new();
-    for file in &fetched.files {
-        // Unpacked archives are flat, so each path is a plain file name.
-        if file.path.contains('/') {
-            continue;
-        }
-        fs::copy(source.join(&file.path), staging.join(&file.path))
-            .map_err(|err| err.to_string())?;
-        names.push(file.path.clone());
-    }
-    let pairs: Vec<(String, String)> = names
-        .iter()
-        .map(|file| (file.clone(), format!("assets/textures/{id}/{file}")))
-        .collect();
-    let borrowed: Vec<(&str, &str)> = pairs
-        .iter()
-        .map(|(file, path)| (file.as_str(), path.as_str()))
-        .collect();
-    let set = texture_set_from_files(&record.provider, id, &record.url, &borrowed);
-    if set.maps.is_empty() {
-        return Err("none of the images were recognized as maps".to_owned());
-    }
-    write_texture_set(&staging.join(format!("{id}{TEXTURE_SET_SUFFIX}")), &set)
-        .map_err(|err| err.to_string())?;
-    if cancel.load(Ordering::Relaxed) {
-        return Ok(DownloadResult::Cancelled);
-    }
-    let dest = project.join("assets").join("textures").join(id);
-    let replaced = files::replace_dir(&staging, &dest, &root.join("previous"))
-        .map_err(|err| err.to_string())?;
-    let verb = if replaced { "Replaced" } else { "Saved" };
-    Ok(DownloadResult::Saved(format!(
-        "{verb} {} ({}) in assets/textures/{id}.",
-        record.name, record.license
-    )))
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+
+    use super::install::sound_name;
     use std::path::PathBuf;
 
     use axcenity_toolbox::RemoteFile;
@@ -1153,7 +1246,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            matches!(&saved, DownloadResult::Saved(text) if text.starts_with("Saved Fabric 086"))
+            matches!(&saved, DownloadResult::Saved { text, .. } if text.starts_with("Saved Fabric 086"))
         );
         let folder = first.join("assets").join("textures").join("Fabric086");
         assert!(folder.join("Fabric086.texture.json").is_file());
@@ -1217,12 +1310,12 @@ mod tests {
     /// The whole Get path against the real ambientCG: search, choose the
     /// nearest to 1K JPG, download into a temporary asset directory, unpack
     /// and save the texture set. Reaches the network, so run it by hand:
-    /// `cargo nextest run -p axcenity-editor --run-ignored only -E 'test(ambient_cg)'`
+    /// `cargo nextest run -p axcenity-editor --run-ignored only -E 'test(toolbox_panel)'`
     #[test]
     #[ignore = "reaches ambientCG"]
     fn get_downloads_a_real_material_into_a_project() {
         let temp = Temp::new("live");
-        let (_, listings) = search(&AMBIENTCG, Kind::Texture, "ground", 0).unwrap();
+        let (_, listings) = search(&AMBIENTCG, Kind::Texture, "ground", 0, false).unwrap();
         let listing = listings
             .into_iter()
             .find(|l| !l.packages.is_empty())
@@ -1241,14 +1334,17 @@ mod tests {
             &cancel,
         );
         assert!(
-            matches!(saved, Ok(DownloadResult::Saved(_))),
+            matches!(saved, Ok(DownloadResult::Saved { .. })),
             "{:?}",
             saved.err()
         );
-        let folder = project.join("assets").join("textures").join(&listing.id);
+        let folder = project
+            .join("assets")
+            .join("textures")
+            .join(&listing.record.id);
         assert!(
             folder
-                .join(format!("{}{TEXTURE_SET_SUFFIX}", listing.id))
+                .join(format!("{}{TEXTURE_SET_SUFFIX}", listing.record.id))
                 .is_file()
         );
     }
@@ -1258,7 +1354,7 @@ mod tests {
         let mut single = zip("8K EXR", "8k", "exr");
         single.package = Package::Single;
         let listing = Listing::from_record(record(vec![zip("2K JPG", "2k", "jpg"), single]));
-        assert_eq!(listing.id, "Fabric086");
+        assert_eq!(listing.record.id, "Fabric086");
         assert_eq!(listing.record.url, "https://ambientcg.com/a/Fabric086");
         assert_eq!(listing.maps, ["color", "normal", "occlusion"]);
         assert_eq!(listing.packages.len(), 1);
@@ -1267,7 +1363,7 @@ mod tests {
 
     #[test]
     fn get_offers_the_nearest_package_when_the_chosen_one_is_missing() {
-        let mut dialog = GetTexture::idle();
+        let mut dialog = ToolboxPanel::idle();
         let listing = Listing::from_record(record(vec![
             zip("1K JPG", "1k", "jpg"),
             zip("4K PNG", "4k", "png"),
@@ -1326,7 +1422,7 @@ mod tests {
         let listing = Listing::from_record(record);
         assert!(listing.lookup);
         assert!(listing.packages.is_empty());
-        let mut dialog = GetTexture::idle();
+        let mut dialog = ToolboxPanel::idle();
         dialog.page = Some(Page {
             total: 1,
             listings: vec![listing],
@@ -1364,7 +1460,7 @@ mod tests {
             &cancel,
         );
         assert!(
-            matches!(saved, Ok(DownloadResult::Saved(_))),
+            matches!(saved, Ok(DownloadResult::Saved { .. })),
             "{:?}",
             saved.err()
         );
@@ -1384,11 +1480,11 @@ mod tests {
     #[ignore = "reaches Poly Haven"]
     fn get_downloads_a_real_poly_haven_texture_into_a_project() {
         let temp = Temp::new("polyhaven-live");
-        let (_, listings) = search(&POLYHAVEN, Kind::Texture, "brick", 0).unwrap();
+        let (_, listings) = search(&POLYHAVEN, Kind::Texture, "brick", 0, false).unwrap();
         let listing = &listings[0];
         assert!(listing.lookup);
         let client = http::Client::new(Duration::from_secs(600));
-        let full = POLYHAVEN.record(&client, &listing.id).unwrap();
+        let full = POLYHAVEN.record(&client, &listing.record.id).unwrap();
         let listing = Listing::from_record(full.clone());
         let choice = pick(&listing, "1K", "JPG").unwrap();
         let variant = needed_maps(choice.variant);
@@ -1404,7 +1500,7 @@ mod tests {
             &cancel,
         );
         assert!(
-            matches!(saved, Ok(DownloadResult::Saved(_))),
+            matches!(saved, Ok(DownloadResult::Saved { .. })),
             "{:?}",
             saved.err()
         );
@@ -1476,7 +1572,7 @@ mod tests {
             &cancel,
         );
         assert!(
-            matches!(&saved, Ok(DownloadResult::Saved(text)) if text.ends_with("in assets/sky/fish_eagle_hill_4k.hdr.")),
+            matches!(&saved, Ok(DownloadResult::Saved { text, .. }) if text.ends_with("in assets/sky/fish_eagle_hill_4k.hdr.")),
             "{saved:?}"
         );
         assert_eq!(
@@ -1504,8 +1600,8 @@ mod tests {
             &cancel,
         );
         assert!(
-            matches!(&saved, Ok(DownloadResult::Saved(text))
-                if text == "Saved Creaking Door! (CC-BY) in assets/audio/creaking-door-4bd0a3e8.mp3."),
+            matches!(&saved, Ok(DownloadResult::Saved { text, .. })
+                if text == "Saved Creaking Door! (CC BY) in assets/audio/creaking-door-4bd0a3e8.mp3."),
             "{saved:?}"
         );
         assert!(
@@ -1575,11 +1671,11 @@ mod tests {
         format: &str,
     ) -> String {
         let temp = Temp::new(&format!("live-{}", source.info().key));
-        let (_, listings) = search(source, kind, words, 0).unwrap();
+        let (_, listings) = search(source, kind, words, 0, false).unwrap();
         let client = http::Client::new(Duration::from_secs(600));
         let listing = listings.into_iter().next().expect("a result");
         let listing = if listing.lookup {
-            Listing::from_record(source.record(&client, &listing.id).unwrap())
+            Listing::from_record(source.record(&client, &listing.record.id).unwrap())
         } else {
             listing
         };
@@ -1597,7 +1693,7 @@ mod tests {
             &cancel,
         );
         match saved {
-            Ok(DownloadResult::Saved(text)) => text,
+            Ok(DownloadResult::Saved { text, .. }) => text,
             other => panic!("{other:?}"),
         }
     }
@@ -1616,5 +1712,177 @@ mod tests {
         }
         let text = get_first(&OPENVERSE, Kind::Sound, "door", "", "MP3");
         assert!(text.contains("in assets/audio/"), "{text}");
+    }
+
+    fn bundle(gltf: &str) -> (AssetRecord, Variant, Fixture) {
+        let file = |path: &str, body: &str| RemoteFile {
+            url: format!("https://dl.polyhaven.org/file/ph-assets/Models/{path}"),
+            path: path.to_owned(),
+            size: Some(body.len() as u64),
+            md5: None,
+            map: None,
+        };
+        let files = [
+            ("chair_01_1k.gltf", gltf),
+            ("chair_01.bin", "buffer"),
+            ("textures/chair_01_diff_1k.jpg", "jpeg"),
+        ];
+        let variant = Variant {
+            label: "1K GLTF".into(),
+            resolution: Some("1k".into()),
+            format: "gltf".into(),
+            package: Package::Bundle,
+            files: files.iter().map(|(path, body)| file(path, body)).collect(),
+        };
+        let http = files.iter().fold(Fixture::default(), |http, (path, body)| {
+            http.with(&file(path, body).url, *body)
+        });
+        let record = AssetRecord {
+            provider: "polyhaven".into(),
+            id: "chair_01".into(),
+            kind: Kind::Model,
+            name: "Chair 01".into(),
+            license: "CC0".into(),
+            variants: vec![variant.clone()],
+            ..AssetRecord::default()
+        };
+        (record, variant, http)
+    }
+
+    #[test]
+    fn a_poly_haven_model_is_fetched_whole_and_handed_to_the_import_dialog() {
+        let temp = Temp::new("model");
+        let gltf = r#"{"asset": {"version": "2.0"}, "buffers": [{"uri": "chair_01.bin"}],
+                       "images": [{"uri": "textures/chair_01_diff_1k.jpg"}]}"#;
+        let (record, variant, http) = bundle(gltf);
+        assert!(usable(Kind::Model, &variant));
+        assert!(!usable(Kind::Texture, &variant));
+        let project = temp.0.join("Project");
+        let saved = download(
+            &http,
+            &POLYHAVEN,
+            &temp.0.join("Assets"),
+            &project,
+            &record,
+            &variant,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let DownloadResult::Saved {
+            installed: Installed::Model { file, key, variant },
+            ..
+        } = saved
+        else {
+            panic!("{saved:?}");
+        };
+        assert_eq!(file.file_name().unwrap(), "chair_01_1k.gltf");
+        assert!(
+            file.parent()
+                .unwrap()
+                .join("textures/chair_01_diff_1k.jpg")
+                .is_file()
+        );
+        assert_eq!(
+            (key.as_str(), variant.as_str()),
+            ("polyhaven:chair_01", "1K GLTF")
+        );
+        // The Import dialog copies it in; nothing is in the project before.
+        assert!(!project.exists());
+    }
+
+    #[test]
+    fn a_model_that_reaches_outside_its_folder_is_refused() {
+        let temp = Temp::new("escape");
+        let gltf = r#"{"asset": {"version": "2.0"}, "buffers": [{"uri": "../../metadata.db"}]}"#;
+        let (record, variant, http) = bundle(gltf);
+        let err = download(
+            &http,
+            &POLYHAVEN,
+            &temp.0.join("Assets"),
+            &temp.0.join("Project"),
+            &record,
+            &variant,
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(err.contains("outside its folder"), "{err}");
+    }
+
+    #[test]
+    fn a_texture_install_is_recorded_in_the_projects_asset_sources() {
+        let temp = Temp::new("sources");
+        let variant = zip("2K JPG", "2k", "jpg");
+        let record = record(vec![variant.clone()]);
+        let http = Fixture::default().with(&variant.files[0].url, package_zip());
+        let project = temp.0.join("Project");
+        download(
+            &http,
+            &AMBIENTCG,
+            &temp.0.join("Assets"),
+            &project,
+            &record,
+            &variant,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let snapshot = axcenity_toolbox::provenance::Snapshot::read(&project).unwrap();
+        assert_eq!(snapshot.files.len(), 1);
+        assert_eq!(snapshot.files[0].path, "assets/textures/Fabric086");
+        assert!(snapshot.files[0].uid.is_some(), "the texture set has an ID");
+        let source = snapshot
+            .source_of("assets/textures/Fabric086/Fabric086_2K-JPG_Color.jpg")
+            .unwrap();
+        assert_eq!(source.name, "Fabric 086");
+    }
+
+    #[test]
+    fn make_material_names_each_map_of_the_texture_set() {
+        use axcenity_assets::{Channel, MapSlot, TextureSet, TextureSetMap};
+        let map = |slot, path: &str, channel, flip_green| TextureSetMap {
+            slot,
+            path: path.into(),
+            channel,
+            invert: false,
+            flip_green,
+        };
+        let set = TextureSet {
+            source: "ambientcg".into(),
+            asset_id: "Rock030".into(),
+            link: String::new(),
+            maps: vec![
+                map(
+                    MapSlot::BaseColor,
+                    "assets/textures/Rock030/c.jpg",
+                    Channel::Red,
+                    false,
+                ),
+                map(
+                    MapSlot::Normal,
+                    "assets/textures/Rock030/n.jpg",
+                    Channel::Red,
+                    true,
+                ),
+                map(
+                    MapSlot::Roughness,
+                    "assets/textures/Rock030/arm.jpg",
+                    Channel::Green,
+                    false,
+                ),
+            ],
+        };
+        let material = install::material_from_set(&set);
+        let maps = &material.maps;
+        assert_eq!(
+            maps.color.as_ref().unwrap().path.as_deref(),
+            Some("assets/textures/Rock030/c.jpg")
+        );
+        assert_eq!(maps.normal.as_ref().unwrap().direct_x, Some(true));
+        assert_eq!(
+            maps.roughness.as_ref().unwrap().channel,
+            Some(Channel::Green)
+        );
+        assert!(maps.metalness.is_none());
+        assert_eq!(material.roughness, Some(1.0));
+        assert_eq!(material.metalness, None);
     }
 }

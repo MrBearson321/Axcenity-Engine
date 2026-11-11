@@ -27,6 +27,7 @@ pub mod library;
 pub mod license;
 pub mod migrate;
 pub mod openverse;
+pub mod pack;
 pub mod polyhaven;
 pub mod provenance;
 pub mod record;

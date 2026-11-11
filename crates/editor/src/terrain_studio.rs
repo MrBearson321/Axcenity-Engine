@@ -239,6 +239,8 @@ pub enum TerrainAction {
     PickLayerTexture(InstanceId, &'static str),
     /// Fill every map of a layer from a texture set in the project.
     UseTextureSet(InstanceId, AssetEntry),
+    /// Opens the Toolbox on Textures; the next texture got fills the layer.
+    FromToolbox(InstanceId),
     /// Set a layer's roughness, metalness and normal strength to suit its maps.
     AutoLayerSettings(InstanceId),
     /// Pick several texture files, sorted into the layer's maps by name.

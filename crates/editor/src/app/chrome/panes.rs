@@ -120,6 +120,7 @@ impl EditorApp {
                 }
             }
             Some(BrowserAction::Import { image_folder }) => self.import_with_dialog(image_folder),
+            Some(BrowserAction::OpenToolbox) => self.open_toolbox(None),
             Some(BrowserAction::SavePrefab) => self.save_prefab(),
             Some(BrowserAction::RenamePrefab { path, name }) => self.rename_prefab(&path, &name),
             Some(BrowserAction::DuplicatePrefab { path }) => self.duplicate_prefab(&path),

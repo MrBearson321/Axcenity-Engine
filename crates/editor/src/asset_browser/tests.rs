@@ -211,3 +211,47 @@ fn the_search_matches_every_word_in_the_path_or_kind() {
     );
     assert!(!search_matches(&door, "texture door"));
 }
+
+#[test]
+fn a_toolbox_assets_tooltip_says_where_it_came_from_and_its_licence() {
+    use axcenity_toolbox::provenance::{Snapshot, SourcedFile};
+    use axcenity_toolbox::{AssetRecord, Kind};
+    let folder =
+        std::env::temp_dir().join(format!("axcenity-assets-sources-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(folder.join("assets/audio")).unwrap();
+    std::fs::write(folder.join("assets/audio/rain-1a2b.mp3"), b"").unwrap();
+    let rain = AssetRecord {
+        provider: "openverse".into(),
+        id: "1a2b".into(),
+        kind: Kind::Sound,
+        name: "Rain".into(),
+        authors: vec!["Sam".into()],
+        license: "CC-BY-NC".into(),
+        license_version: "4.0".into(),
+        ..AssetRecord::default()
+    };
+    let mut snapshot = Snapshot::default();
+    snapshot.files.push(SourcedFile {
+        path: "assets/audio/rain-1a2b.mp3".into(),
+        key: rain.key(),
+        variant: "MP3".into(),
+        uid: None,
+    });
+    snapshot.assets.insert(rain.key(), rain);
+    snapshot.write(&folder).unwrap();
+    let mut browser = AssetBrowser::default();
+    browser.open(Some(&folder));
+    browser.rescan_if_due();
+    let line = browser.source_line("assets/audio/rain-1a2b.mp3").unwrap();
+    assert!(
+        line.starts_with("From Openverse · CC BY-NC 4.0 · by Sam"),
+        "{line}"
+    );
+    assert!(
+        line.contains('\n'),
+        "a non-commercial licence says so: {line}"
+    );
+    assert_eq!(browser.source_line("assets/audio/other.mp3"), None);
+    let _ = std::fs::remove_dir_all(&folder);
+}

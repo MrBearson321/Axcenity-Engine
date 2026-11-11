@@ -288,6 +288,8 @@ impl EditorApp {
             "Imported `{}` into the project as `{copy}`.",
             file.display()
         ));
+        let copy_path = copy.to_owned();
+        self.toolbox_imported(file, &copy_path);
         let animation = dialog
             .animation
             .as_ref()
