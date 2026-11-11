@@ -25,7 +25,7 @@ This page is for people using it. How it works inside, and every tool's paramete
 
 4. **Keep it.** Object edits stay in memory until the assistant calls `project_save`, which asks first. Scripts are saved as soon as they're written. Open the project in the editor afterwards to see the result.
 
-> **Don't edit the same project in the editor at the same time.** The server is a separate copy of the editor without a window, so the open editor doesn't see its changes until you reopen the project. If both save, the last save wins. Connecting to the editor window you have open is planned (step 3.4 of the [design](../research/mcp/architecture.md)).
+> **Working in the editor window.** Turn on **Settings ▸ AI connections ▸ Allow AI connections** in the editor and keep the project open there. The assistant's server then connects to that window: you see its changes as it makes them, and each one is a step you can undo with Ctrl+Z. The same page lists the connected assistants and has a Copy button for the Claude Code line. With the setting off, the server opens its own copy of the project without a window: don't edit the project in the editor at the same time, or your saves would overwrite each other (the editor warns in Output when it opens a project a windowless server has open). An assistant that was already running connects to the window once it restarts its server.
 
 ## Clients
 
@@ -54,7 +54,7 @@ A profile decides which tools the assistant sees. Each tool's description costs 
 |---|---|---|---|
 | `lite` | 13: look, make, change, delete, scripts, checks, play, undo, save | about 2,100 tokens | local models with 8k–32k context |
 | `standard` (default) | 21: adds batches, duplicating, materials, environment, assets, terrain, animation | about 3,300 tokens | Claude Code, Cursor, Codex and other cloud models |
-| `full` | 27: adds levels, prefabs, solid modeling, stylesheets, input/collision/strings and asset rename/delete | about 4,400 tokens | assistants that should be able to do everything |
+| `full` | 28: adds levels, prefabs, solid modeling, stylesheets, input/collision/strings, asset rename/delete and rendering stats (in the editor window) | about 4,500 tokens | assistants that should be able to do everything |
 
 ### Local models
 
@@ -83,7 +83,9 @@ A profile decides which tools the assistant sees. Each tool's description costs 
 | The assistant says the server failed to start | Run the `--check` line in a terminal. A `FAIL` line says why. |
 | `could not open a project in …` | Point it at the folder that holds `world.json`, not a file inside it. |
 | The assistant's changes are gone | It didn't save. Ask it to call `project_save` before it finishes. |
-| The editor doesn't show the assistant's changes | Close and reopen the project in the editor after the assistant saves (see the note in Quick start). |
+| The editor doesn't show the assistant's changes | Turn on Settings ▸ AI connections and restart the assistant's server (or the assistant), so it works in the window. Otherwise close and reopen the project after the assistant saves. |
+| `error busy: the editor has this project open …` | The editor took AI connections after the server started. Restart the server so it connects to the window. |
+| `error busy: the game is playing in the editor` | Stop Play in the editor, then ask again. |
 | `error not_allowed: …` | The mode doesn't allow it. The message names the `--mode` that would. |
 | `error needs_confirm: preview: …` | The assistant should read the preview and call again with the token. Some small models stop here, so tell it to go ahead. |
 | Windows: the JSON config is rejected | Write each `\` in a path as `\\`, or copy the line `--check` printed. |

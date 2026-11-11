@@ -43,6 +43,7 @@ fn the_projects_loading_screen_covers_play_until_a_local_script_is_ready() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        false,
         &mut output,
         Assets::default(),
         CameraState::default(),
@@ -98,6 +99,7 @@ fn scripts_change_only_the_copy() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        false,
         &mut output,
         Assets::default(),
         CameraState::default(),
@@ -125,6 +127,7 @@ fn script_errors_go_to_output_and_the_game_keeps_running() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        false,
         &mut output,
         Assets::default(),
         CameraState::default(),
@@ -159,6 +162,7 @@ fn a_panic_in_a_frame_is_caught_with_its_message() {
         &World::new(),
         &[],
         &Breakpoints::new(),
+        false,
         &mut output,
         Assets::default(),
         CameraState::default(),
@@ -206,6 +210,7 @@ end",
         &world,
         &scripts,
         &breakpoints,
+        false,
         &mut output,
         Assets::default(),
         CameraState::default(),
@@ -267,6 +272,82 @@ end",
     assert!(position(&session).y < start.y, "the unanchored part fell");
 }
 
+/// A session of `source` as `scripts/test.server.lua`, with breakpoints at
+/// `lines`, after its first frame.
+fn debugged(source: &str, lines: &[usize], pause_on_error: bool) -> (Session, Output) {
+    let mut world = World::new();
+    let scripts = [script(&mut world, source)];
+    let breakpoints = Breakpoints::from([(
+        "scripts/test.server.lua".to_string(),
+        lines.iter().copied().collect(),
+    )]);
+    let mut output = Output::default();
+    let mut session = Session::start(
+        &world,
+        &scripts,
+        &breakpoints,
+        pause_on_error,
+        &mut output,
+        Assets::default(),
+        CameraState::default(),
+        &LoadingScreen::default(),
+        &InputMap::default(),
+        None,
+        &GraphicsSettings::default(),
+        &Capabilities::default(),
+        PlayLevels::default(),
+    )
+    .unwrap();
+    session
+        .frame(
+            1.0 / 60.0,
+            &[],
+            MoveInput::default(),
+            CameraState::default(),
+            &mut output,
+        )
+        .unwrap();
+    (session, output)
+}
+
+#[test]
+fn play_steps_a_line_at_a_time_and_works_out_watches() {
+    let (mut session, mut output) = debugged(
+        "local speed = 4\nlocal doubled = speed * 2\nprint('doubled', doubled)",
+        &[2],
+        false,
+    );
+    let pause = session.pause().expect("paused at line 2");
+    assert!(pause.breakpoint);
+    assert_eq!(session.evaluate(0, "speed + 1"), Ok("5".to_owned()));
+
+    session
+        .resume_from_pause(axcenity_script::Resume::StepOver, &mut output)
+        .unwrap();
+    let pause = session.pause().expect("stepped to line 3");
+    assert_eq!((pause.line, pause.breakpoint), (3, false));
+    assert_eq!(session.evaluate(0, "doubled"), Ok("8".to_owned()));
+    session.continue_from_pause(&mut output).unwrap();
+    assert_eq!(output.lines().last().unwrap().text, "doubled\t8");
+}
+
+#[test]
+fn play_pauses_on_a_scripts_first_error_when_asked() {
+    let source = "local door = 'Front'\nerror('locked: ' .. door)";
+    let (session, _) = debugged(source, &[], true);
+    let pause = session.pause().expect("paused on the error at start");
+    assert_eq!(pause.line, 2);
+    assert!(
+        pause
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("locked: Front"))
+    );
+
+    let (session, _) = debugged(source, &[], false);
+    assert!(session.pause().is_none(), "off by default");
+}
+
 #[test]
 fn each_frame_reports_its_steps_cost_and_the_load_for_the_profiler() {
     let mut world = World::new();
@@ -284,6 +365,7 @@ fn each_frame_reports_its_steps_cost_and_the_load_for_the_profiler() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        false,
         &mut output,
         Assets::default(),
         CameraState::default(),
@@ -395,6 +477,7 @@ fn a_local_script_in_play_reads_keys_and_moves_the_camera() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        false,
         &mut output,
         Assets::default(),
         CameraState::default(),
@@ -455,6 +538,7 @@ fn render_stepped_sees_this_frames_animated_pose() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        false,
         &mut output,
         Assets::new(&folder),
         CameraState::default(),
@@ -521,6 +605,7 @@ fn particles_and_streaming_move_on_in_the_frame_without_a_scene_tab() {
         &world,
         &scripts,
         &Breakpoints::new(),
+        false,
         &mut output,
         Assets::default(),
         CameraState::default(),
@@ -758,6 +843,7 @@ fn bench_project_play() {
         &world,
         &[],
         &Breakpoints::new(),
+        false,
         &mut output,
         assets,
         CameraState::default(),

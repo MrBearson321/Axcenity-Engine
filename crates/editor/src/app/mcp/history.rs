@@ -38,12 +38,13 @@ pub fn call(host: &mut Host, args: &Args) -> Outcome {
     match args.str("action").unwrap_or("list") {
         "undo" => step(host, steps, true),
         "redo" => step(host, steps, false),
-        "changes" => {
-            Ok(host
-                .session
-                .changes
-                .summary(&host.app.world, args.u64("since"), CHANGE_LINES))
-        }
+        "changes" => Ok(host.changes.summary(
+            &host.app.world,
+            host.session.me,
+            &mut host.session.asked,
+            args.u64("since"),
+            CHANGE_LINES,
+        )),
         _ => Ok(list(host)),
     }
 }

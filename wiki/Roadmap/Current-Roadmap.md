@@ -77,7 +77,8 @@ Built after comparing Axcenity with Unity, Unreal, Roblox Studio, Godot and s&bo
 | G12 | Cooked-only games, read the pack in place | Planned |
 | G13 | 16–32 client LAN test | Planned, when the PC is free |
 | G14–G16 | Run without a player; physics debug views; humanoid retargeting | Planned |
-| Priority 4 | GPU-driven drawing, occlusion culling, dynamic GI, ray tracing, live collaboration, AI assistant in the editor, Parallel Luau, … | Future, each with a trigger in the gap analysis |
+| TC1–TC8 | Team Create (live collaboration; brief of 2026-11-11 §8): design approved ([ADR-0020](../Architecture/Architecture-Decisions/ADR-0020-Team-Create-Session-Authority-And-Operations.md), #134); TC1 sync core in `collab` (#140); TC2 editor sync over loopback (edit journal, capture, two-editor tests) | In progress |
+| Priority 4 | GPU-driven drawing, occlusion culling, dynamic GI, ray tracing, AI assistant in the editor, Parallel Luau, … | Future, each with a trigger in the gap analysis |
 
 ## Feature plan (unified plan, Phases 1–93)
 

@@ -175,6 +175,8 @@ pub(super) enum Command {
     /// Debug > Graphics Benchmark…
     GraphicsBenchmark,
     PanicDuringPlay,
+    /// The ribbon's Pause on errors switch (roadmap G6).
+    PauseOnErrors,
     /// Play, or Continue at a breakpoint.
     Play,
     Stop,
@@ -800,6 +802,14 @@ impl EditorApp {
             None,
             when(playing, "The game isn't playing."),
         );
+        add(
+            Command::PauseOnErrors,
+            "Pause on errors",
+            &ribbon("Clients"),
+            &["Break on errors", "Debugger"],
+            None,
+            Ok(()),
+        );
         for tool in Tool::ALL {
             let group = if Tool::TRANSFORM.contains(&tool) {
                 "Tools"
@@ -1109,6 +1119,9 @@ impl EditorApp {
                 if let Some(session) = &mut self.play {
                     session.panic_next_frame();
                 }
+            }
+            Command::PauseOnErrors => {
+                self.set_pause_on_error(!self.play_settings.pause_on_error);
             }
             Command::Play => {
                 if self.paused() {

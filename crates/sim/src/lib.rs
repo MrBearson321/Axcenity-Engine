@@ -60,7 +60,10 @@ pub struct Sim {
 
 impl Sim {
     /// A simulation of `world` with nothing moving yet.
-    pub fn new(world: World, scripts: ScriptRuntime, assets: Assets) -> Self {
+    pub fn new(mut world: World, scripts: ScriptRuntime, assets: Assets) -> Self {
+        // A copy of a Team Create edit world keeps edits; the game's are
+        // never sent, so don't keep them.
+        world.stop_recording_edits();
         // Agents and Humanoids walk on one navigation mesh (roadmap M13).
         let agents = Agents::default();
         axcenity_gameplay::share_nav_mesh(&scripts, agents.nav_mesh());

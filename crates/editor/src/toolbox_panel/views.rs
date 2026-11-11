@@ -127,6 +127,19 @@ impl ToolboxPanel {
                         picked = Some(view);
                     }
                 }
+                ui.separator();
+                if ui
+                    .button(theme::with_icon(
+                        icons::TRAY_ARROW_DOWN,
+                        "Downloaded / Imported Assets…",
+                    ))
+                    .on_hover_text(
+                        "Every asset downloaded or imported, of every kind, in a tab of its own.",
+                    )
+                    .clicked()
+                {
+                    self.open_inventory = true;
+                }
             })
             .response
             .on_hover_text("Search a source, or list what's in your library.");
@@ -134,11 +147,27 @@ impl ToolboxPanel {
             self.view = view;
             self.drawer = None;
             if self.view == View::Search {
-                self.start_search(ui.ctx(), 0);
+                self.start_search(ui.ctx(), 1);
             } else {
                 self.load_view(ui.ctx());
             }
         }
+    }
+
+    /// Shows `record` (from the Downloaded / Imported Assets tab): its kind's
+    /// tab, the Downloaded view (This project when it's not `downloaded`),
+    /// and its details, when next drawn.
+    pub fn show_record(&mut self, project: Option<&Path>, record: AssetRecord, downloaded: bool) {
+        if self.kind != record.kind && Kind::ALL.contains(&record.kind) {
+            self.set_kind(record.kind);
+        }
+        self.view = if downloaded {
+            View::Library
+        } else {
+            View::Project
+        };
+        self.shown_for = project.map(Path::to_owned);
+        self.reveal = Some(record);
     }
 
     /// Reads the collections' names for the menus.
@@ -169,8 +198,9 @@ impl ToolboxPanel {
                     records.into_iter().map(Listing::from_record).collect();
                 self.fetch_previews_for(ctx, &listings);
                 self.page = Some(Page {
-                    total: listings.len(),
                     listings,
+                    number: 1,
+                    more: Vec::new(),
                 });
             }
             Err(err) => {

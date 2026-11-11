@@ -120,7 +120,7 @@ impl EditorApp {
         };
         let was_recording = self.world.is_recording_changes();
         self.world.record_changes();
-        let leftover = self.world.take_changes();
+        let leftover = self.take_world_changes();
         drop(leftover);
         let before = self.world.clone();
         let mut started = None;
@@ -183,7 +183,7 @@ impl EditorApp {
         let was_recording = self.world.is_recording_changes();
         self.world.record_changes();
         // Changes from before the call are someone else's.
-        drop(self.world.take_changes());
+        drop(self.take_world_changes());
         let before = self.world.clone();
         // It hears of a new selection first, if it missed it.
         let selection = self.selection.clone();
@@ -238,7 +238,7 @@ impl EditorApp {
                 Request::Redo => history_moves.push(false),
             }
         }
-        let rest = self.world.take_changes();
+        let rest = self.take_world_changes();
         let ids = changed_ids(&rest);
         open =
             self.history
@@ -519,7 +519,7 @@ impl EditorApp {
         let playing = self.playing();
         let was_recording = self.world.is_recording_changes();
         self.world.record_changes();
-        drop(self.world.take_changes());
+        drop(self.take_world_changes());
         let entry = &mut self.plugins.entries[index];
         let view = &mut entry.widgets[widget];
         let input = UiInput {
@@ -600,7 +600,7 @@ impl EditorApp {
                 items.iter(),
             ),
         }
-        let changes = self.world.take_changes();
+        let changes = self.take_world_changes();
         if !was_recording {
             self.world.stop_recording_changes();
         }

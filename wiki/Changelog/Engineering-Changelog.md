@@ -13,6 +13,7 @@ Architecture-level changes, newest first. Not every commit: the ones that change
 
 ## 2026-11-11
 
+- **Team Create** design approved (#134, ADR-0020), TC1 sync core: the `collab` crate (#140). TC2 (editor sync over loopback) in review.
 - **M12** wgpu 30, egui 0.36, egui_dock 0.21, glyphon 0.12 (#104). **Project format 5** (#129). **Updater** and **Version Explorer** (#124, #118). **G5 UI prefabs** (#122), **G7 memory breakdown** (#125, #126), **G8 audio roll-off and occlusion** (#128), G2 on players' devices (#117). rapier patched in `vendor/` so Ice and Rubber stacks stand (#121). MCP steps 4–6 (#116, #119, #123, #127, #130).
 - **G2 scripts inside objects** (#91 design, #111 format, loading and runtime, #112/#115 editor support, #114 asset references, Asset Check, packages, Build Game).
 - **G3 physics render interpolation** (#110). **Physics step part 1** (#84), **own thread pool** (#86, fixed by #93), **render planning pool** (#88), **contact recycle 0.1 studs** (#99).

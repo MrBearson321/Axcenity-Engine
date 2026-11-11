@@ -26,7 +26,14 @@ impl EditorApp {
         if self.play.is_some() {
             return;
         }
-        for problem in self.generators.update(&mut self.world, &self.assets) {
+        // Each copy in a Team Create session makes its own, so they're
+        // never sent.
+        let generators = &mut self.generators;
+        let assets = &self.assets;
+        let problems = self
+            .world
+            .unrecorded(|world| generators.update(world, assets));
+        for problem in problems {
             self.output.warning(problem);
         }
     }

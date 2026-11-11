@@ -609,6 +609,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::Plugins => app.plugins_pane(ui),
                         Pane::ModelStudio => app.model_studio_pane(ui, None),
                         Pane::Toolbox => app.toolbox_pane(ui),
+                        Pane::Inventory => app.inventory_pane(ui),
                         Pane::VersionExplorer => app
                             .version_explorer
                             .show(ui, &axcenity_release::BuildInfo::current()),
@@ -1261,17 +1262,41 @@ pub(super) fn inserted(
 }
 
 #[test]
-fn each_primitive_is_inserted_at_the_camera_focus_point() {
+fn each_primitive_is_inserted_in_front_of_the_camera_on_the_floor() {
     let mut app = EditorApp::new(Some(&example("hello-touched")));
     let workspace = app.world.workspace();
-    app.viewport
-        .look_at(Vec3::new(30.0, 20.0, 10.0), Vec3::new(5.25, 3.0, -7.5));
+    // Looking down at the Floor (40 × 40, its top at Y = 0), past the Pad.
+    let eye = Vec3::new(30.0, 20.0, 10.0);
+    let toward = Vec3::new(5.25, 3.0, -7.5);
+    app.viewport.look_at(eye, toward);
     app.snap.move_on = false;
+    // Where the middle of the view meets the Floor.
+    let ray = (toward - eye).normalize();
+    let ground = eye + ray * (eye.y / -ray.y);
     let mut shapes = Vec::new();
-    for what in Insertable::PARTS {
+    let mut tops = vec![0.0];
+    for (n, what) in Insertable::PARTS.into_iter().enumerate() {
         let part = inserted(&mut app, what, None);
         assert_eq!(app.world.get(part).unwrap().parent(), Some(workspace));
-        assert_eq!(property(&app, part, "Position"), vector(5.25, 3.0, -7.5));
+        let at = property(&app, part, "Position").as_vector3().unwrap();
+        let size = property(&app, part, "Size").as_vector3().unwrap();
+        let across = Vec3::new(at.x - ground.x, 0.0, at.z - ground.z).length();
+        if n == 0 {
+            // Where the camera looks, not at its far-off focus point.
+            assert!(across < 1e-2, "{at:?} vs {ground}");
+        } else {
+            // The middle of the view now meets the parts before it: the new
+            // one goes on top of them or on the Floor just in front.
+            assert!(across < 6.0, "{what:?} at {at:?}, {across} from {ground}");
+        }
+        // Resting on the Floor or on a part inserted before it: never
+        // inside anything, so it doesn't fall or jump when Play starts.
+        let bottom = at.y - size.y / 2.0;
+        assert!(
+            tops.iter().any(|top| (bottom - top).abs() < 1e-3),
+            "{what:?}: bottom {bottom}, tops {tops:?}"
+        );
+        tops.push(at.y + size.y / 2.0);
         shapes.push(property(&app, part, "Shape"));
         let label = format!("Insert {}", name(&app, part));
         assert_eq!(app.history.undo_label(), Some(label.as_str()));
@@ -1288,11 +1313,29 @@ fn each_primitive_is_inserted_at_the_camera_focus_point() {
     );
     // They're in the world, so the viewport draws them.
     assert_eq!(drawn_parts(&app), 3 + 4);
+    // A picture of the pile, as the camera sees it.
+    if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+        crate::snapshot::snapshot_rendered(
+            &std::path::PathBuf::from(folder).join("insert-in-front.png"),
+            egui::vec2(480.0, 300.0),
+            vec![Vec::new(); 3],
+            |ui, render_state| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    app.scene_pane(ui, Some(render_state));
+                });
+            },
+        );
+    }
 
-    // With Snap move on, the point goes to the move grid.
+    // With Snap move on, it goes to the move grid along the Floor; its
+    // height stays where it rests.
     app.snap.move_on = true;
+    app.viewport.look_at(eye, Vec3::new(-6.0, 0.0, 4.0));
     let part = inserted(&mut app, Insertable::Part(PartType::Block), None);
-    assert_eq!(property(&app, part, "Position"), vector(5.0, 3.0, -8.0));
+    let at = property(&app, part, "Position").as_vector3().unwrap();
+    let size = property(&app, part, "Size").as_vector3().unwrap();
+    assert_eq!((at.x, at.z), (at.x.round(), at.z.round()), "{at:?}");
+    assert!((at.y - size.y / 2.0).abs() < 1e-3, "on the Floor: {at:?}");
 
     // Each insert is one undo step, and undoing it clears the selection.
     app.undo();
@@ -1300,6 +1343,40 @@ fn each_primitive_is_inserted_at_the_camera_focus_point() {
     assert_eq!(app.selected, None);
     app.redo();
     assert_eq!(children(&app, workspace).last(), Some(&part));
+}
+
+#[test]
+fn looking_at_the_sky_a_new_part_goes_ahead_and_stays_in_view() {
+    let mut app = EditorApp::new(Some(&example("hello-touched")));
+    // Standing on the Floor, looking just above the horizon.
+    let eye = Vec3::new(0.0, 4.0, 15.0);
+    app.viewport.look_at(eye, eye + Vec3::new(0.0, 0.3, -1.0));
+    app.snap.move_on = false;
+    let part = inserted(&mut app, Insertable::Part(PartType::Block), None);
+    let at = property(&app, part, "Position").as_vector3().unwrap();
+    let at = Vec3::new(at.x, at.y, at.z);
+    let distance = (at - eye).length();
+    assert!(
+        (4.0..=crate::spawning::REACH).contains(&distance),
+        "{distance} studs away: {at}"
+    );
+    assert!(at.z < eye.z, "in front of the camera: {at}");
+}
+
+#[test]
+fn a_duplicate_stays_on_its_original_wherever_the_camera_looks() {
+    let mut app = EditorApp::new(Some(&example("hello-touched")));
+    let pad = part(&app, "Pad");
+    app.select_from_viewport(Some(pad));
+    app.viewport
+        .look_at(Vec3::new(30.0, 20.0, 10.0), Vec3::new(-15.0, 0.0, -15.0));
+    app.duplicate_selected();
+    let copy = app.selected.unwrap();
+    assert_ne!(copy, pad);
+    assert_eq!(
+        property(&app, copy, "Position"),
+        property(&app, pad, "Position")
+    );
 }
 
 #[test]

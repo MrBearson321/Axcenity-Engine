@@ -874,6 +874,26 @@ impl Viewport {
         self.camera.focus()
     }
 
+    /// Where a new part goes in `world`: in front of the camera, on what
+    /// the middle of the view looks at (`spawning::spot`).
+    pub fn spawn_spot(&self, world: &axcenity_core::World) -> crate::spawning::Spot {
+        let camera = self.render_camera();
+        let (width, height) = self.pixel_size();
+        // Before the first frame there's no size yet: a common screen shape.
+        let aspect = if width > 0 && height > 0 {
+            width as f32 / height as f32
+        } else {
+            16.0 / 9.0
+        };
+        let view = axcenity_scene::CameraView::new(camera, aspect);
+        crate::spawning::spot(
+            world,
+            camera.position,
+            camera.look_at - camera.position,
+            Some(&view),
+        )
+    }
+
     /// Where the camera is and which way it looks (degrees, like a Part's
     /// Orientation), for `workspace.CurrentCamera` during Play.
     pub fn camera_view(&self) -> (axcenity_core::Vector3, axcenity_core::Vector3) {

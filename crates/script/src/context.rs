@@ -196,11 +196,28 @@ impl Context {
         debugger::pause(&self.lua)
     }
 
-    /// Resumes what the pause held, in order (see `debugger`).
-    pub fn continue_from_pause(&self, world: &mut World) {
+    /// Continues or steps from the pause, resuming what it held in order
+    /// (see `debugger`).
+    pub fn resume_from_pause(&self, world: &mut World, how: debugger::Resume) {
         with_world(&self.lua, world, || {
-            debugger::continue_from_pause(&self.lua)
+            debugger::resume_from_pause(&self.lua, how)
         });
+    }
+
+    pub fn set_pause_on_error(&self, on: bool) {
+        debugger::set_pause_on_error(&self.lua, on);
+    }
+
+    /// A watch expression's value in a paused frame (see `debugger`).
+    pub fn evaluate(
+        &self,
+        world: &mut World,
+        frame: usize,
+        expression: &str,
+    ) -> Result<String, String> {
+        with_world(&self.lua, world, || {
+            debugger::evaluate(&self.lua, frame, expression)
+        })
     }
 
     /// Runs a script's code as a new coroutine until it finishes, fails or
