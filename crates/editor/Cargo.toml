@@ -13,6 +13,7 @@ axcenity-cook.workspace = true
 axcenity-audio.workspace = true
 axcenity-blocks.workspace = true
 axcenity-character.workspace = true
+axcenity-collab.workspace = true
 axcenity-core.workspace = true
 axcenity-gameplay.workspace = true
 axcenity-mcp.workspace = true

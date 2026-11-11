@@ -67,6 +67,19 @@ pub struct Setup {
     pub prompts: Vec<&'static PromptSpec>,
     /// Listed only if the tool each mirrors is among `tools`.
     pub resources: Vec<&'static ResourceSpec>,
+    /// Called after each job is sent, so an engine that waits for
+    /// something else (the editor's window, between frames) looks at once.
+    pub waker: Option<Waker>,
+}
+
+/// Wakes the engine when a job arrives (the editor asks for a repaint).
+#[derive(Clone)]
+pub struct Waker(pub Arc<dyn Fn() + Send + Sync>);
+
+impl std::fmt::Debug for Waker {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Waker")
+    }
 }
 
 impl Setup {
@@ -305,6 +318,9 @@ impl Handler {
         if self.jobs.send(job).is_err() {
             return Err(ErrorData::internal_error("the editor has stopped", None));
         }
+        if let Some(waker) = &self.setup.waker {
+            (waker.0)();
+        }
         answer
             .await
             .map_err(|_| ErrorData::internal_error("the editor stopped before answering", None))
@@ -359,6 +375,24 @@ pub fn serve_stdio(
             runtime.block_on(serve(setup, jobs, rmcp::transport::stdio()))
         })
         .expect("start the MCP thread")
+}
+
+/// Serves `setup` on a TCP connection (the editor's loopback listener,
+/// after its handshake) until either side closes it, on the calling
+/// thread. When it returns, `jobs`' sender is dropped.
+pub fn serve_tcp(
+    setup: Setup,
+    jobs: mpsc::Sender<Job>,
+    stream: std::net::TcpStream,
+) -> std::io::Result<()> {
+    stream.set_nonblocking(true)?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let stream = tokio::net::TcpStream::from_std(stream)?;
+        serve(setup, jobs, stream.into_split()).await
+    })
 }
 
 /// The JSON text clients receive for `tools/list` in this setup, for

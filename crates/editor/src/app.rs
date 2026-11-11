@@ -67,6 +67,7 @@ mod solid;
 mod spline_content;
 mod splines;
 mod tags;
+mod team;
 mod terrain;
 mod texture_set;
 mod to_terrain;
@@ -204,6 +205,8 @@ pub struct EditorApp {
     /// Every change made to `world` since it was opened, for undo and redo.
     /// It also knows whether the world is as saved.
     history: History,
+    /// The Team Create session this editor is in, if any (`app/team.rs`).
+    team: Option<team::Team>,
     /// The tool picked in the toolbar, and its snapping settings. Both are
     /// preferences, so they stay when another project is opened.
     tool: Tool,
@@ -248,6 +251,8 @@ pub struct EditorApp {
     /// Play's clients and emulated network (Phase 64 and 67), kept until
     /// the editor closes.
     play_settings: PlaySettings,
+    /// The debugger's watch expressions (roadmap G6).
+    watches: crate::watches::Watches,
     /// A button clicked in the viewport, delivered on the next Play frame.
     pending_ui_activation: Option<InstanceId>,
     /// `MouseEnter`, `MouseLeave` and buttons' sounds from the viewport,
@@ -279,6 +284,9 @@ pub struct EditorApp {
     game_keys: GameKeys,
     /// What Play's frames cost, for the Profiler panel.
     profiler: Profiler,
+    /// The viewport's last frame, edit or Play, for the AI's
+    /// `render_stats`.
+    last_drawn: Option<mcp::LastDrawn>,
     /// The Mixer panel's meters, mute and solo.
     mixer: crate::mixer::Mixer,
     /// The Tests panel's tree and the run going now (Phase 53).
@@ -403,6 +411,9 @@ pub struct EditorApp {
     /// Whether the viewport shows the view cube (Test > View, View > View
     /// Cube). On unless turned off; saved between runs.
     view_cube: bool,
+    /// Settings > AI connections: MCP clients working in this window
+    /// (`mcp/live.rs`).
+    ai: mcp::AiConnections,
     /// Whether the viewport shows the measuring grid (saved between runs).
     grid: bool,
     /// How solid the grid's lines are, as a multiple of the usual soft look.
@@ -676,6 +687,7 @@ const LAYOUT_KEY: &str = "panel layout";
 const RIBBON_TABS_KEY: &str = "ribbon tabs";
 const LIGHT_CONES_KEY: &str = "light cones";
 const VIEW_CUBE_KEY: &str = "view cube";
+const AI_CONNECTIONS_KEY: &str = "ai connections";
 const GRID_KEY: &str = "grid";
 const GRID_STRENGTH_KEY: &str = "grid strength";
 const COLOR_PALETTES_KEY: &str = "color palettes";
@@ -829,6 +841,7 @@ impl EditorApp {
             find: Default::default(),
             references: None,
             history: History::new(),
+            team: None,
             tool: Tool::default(),
             snap: Snap::default(),
             modes: Modes::default(),
@@ -849,6 +862,7 @@ impl EditorApp {
             dragged_parts: Vec::new(),
             play: None,
             play_settings: PlaySettings::default(),
+            watches: crate::watches::Watches::default(),
             pending_ui_activation: None,
             pending_ui_events: Vec::new(),
             nav_keys: Vec::new(),
@@ -862,6 +876,7 @@ impl EditorApp {
             ui_warnings: Vec::new(),
             last_frame: None,
             profiler: Profiler::default(),
+            last_drawn: None,
             mixer: crate::mixer::Mixer::default(),
             game_tests: crate::game_tests::GameTests::default(),
             plugins: crate::plugins::Plugins::default(),
@@ -919,6 +934,7 @@ impl EditorApp {
             ribbon_tabs: RibbonTabs::default(),
             light_cones: false,
             view_cube: true,
+            ai: Default::default(),
             grid: true,
             grid_strength: DEFAULT_GRID_STRENGTH,
             colors: Default::default(),
@@ -985,6 +1001,7 @@ impl EditorApp {
             }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
             self.view_cube = storage.get_string(VIEW_CUBE_KEY).as_deref() != Some("off");
+            self.ai.allowed = storage.get_string(AI_CONNECTIONS_KEY).as_deref() == Some("on");
             self.grid = storage.get_string(GRID_KEY).as_deref() != Some("off");
             self.grid_strength = storage
                 .get_string(GRID_STRENGTH_KEY)
@@ -1100,6 +1117,8 @@ impl eframe::App for EditorApp {
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
         let cube = if self.view_cube { "on" } else { "off" };
         storage.set_string(VIEW_CUBE_KEY, cube.to_owned());
+        let ai = if self.ai.allowed { "on" } else { "off" };
+        storage.set_string(AI_CONNECTIONS_KEY, ai.to_owned());
         let grid = if self.grid { "on" } else { "off" };
         storage.set_string(GRID_KEY, grid.to_owned());
         storage.set_string(GRID_STRENGTH_KEY, self.grid_strength.to_string());
@@ -1295,6 +1314,9 @@ impl EditorApp {
             project.watcher.wake(ctx);
         }
         self.check_disk();
+        // AI clients' calls (Settings > AI connections), before this frame's
+        // input, so what they change is drawn now.
+        self.ai_frame(ctx);
         let seconds = ctx
             .input(|input| f64::from(input.stable_dt))
             .min(MAX_FRAME_SECONDS);
@@ -1315,6 +1337,8 @@ impl EditorApp {
             self.settings.open = !self.settings.open;
         }
         self.terrain_frame(ctx);
+        // Team Create: send what this frame's tools did, then catch up.
+        self.team_frame();
         self.generate_frame();
         self.palette_frame(ctx);
         self.shortcuts(ctx);
@@ -1797,6 +1821,8 @@ mod solid_tests;
 mod state_machine_tests;
 #[cfg(test)]
 mod strings_tests;
+#[cfg(test)]
+mod team_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

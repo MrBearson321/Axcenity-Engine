@@ -128,7 +128,7 @@ use crate::lent::with_world;
 pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, GameCamera};
 pub use chat::ChatLine;
 pub use console_service::{ConsoleCommandInfo, ConsoleRun, split_command};
-pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
+pub use debugger::{Breakpoints, Local, Pause, PausedFrame, Resume};
 pub use definitions::{
     ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions, property_description,
 };
@@ -2014,16 +2014,49 @@ impl ScriptRuntime {
     /// then everything the pause held, in order. A breakpoint hit again
     /// pauses again, holding the rest.
     pub fn continue_from_pause(&mut self, world: &mut World) {
-        let Some(side) = [Side::Server, Side::Client]
-            .into_iter()
-            .find(|&side| self.context(side).pause().is_some())
-        else {
+        self.resume_from_pause(world, Resume::Continue);
+    }
+
+    /// Continues from the pause, or steps the paused script (roadmap G6):
+    /// it pauses again at the next line the step reaches, unless a
+    /// breakpoint comes first or the script finishes. Everything the pause
+    /// held runs on as for Continue.
+    pub fn resume_from_pause(&mut self, world: &mut World, how: Resume) {
+        let Some(side) = self.paused_side() else {
             return;
         };
         self.fire_changes(world);
-        self.context(side).continue_from_pause(world);
+        self.context(side).resume_from_pause(world, how);
         self.collect(side);
         self.fire_changes(world);
+    }
+
+    /// Whether a script error pauses Play at the failed line (off by
+    /// default). Does nothing unless [`Self::enable_debugger`] was called.
+    pub fn set_pause_on_error(&mut self, on: bool) {
+        self.server.set_pause_on_error(on);
+        self.client.set_pause_on_error(on);
+    }
+
+    /// A watch expression's value as text in the paused call stack's frame
+    /// `frame` (0 is the innermost), or why it has none. It can call
+    /// functions and change things, as the line it's paused at could.
+    pub fn evaluate(
+        &mut self,
+        world: &mut World,
+        frame: usize,
+        expression: &str,
+    ) -> Result<String, String> {
+        let side = self.paused_side().ok_or("Play isn't paused.")?;
+        let value = self.context(side).evaluate(world, frame, expression);
+        self.collect(side);
+        value
+    }
+
+    fn paused_side(&self) -> Option<Side> {
+        [Side::Server, Side::Client]
+            .into_iter()
+            .find(|&side| self.context(side).pause().is_some())
     }
 
     /// Removes and returns the output produced since the last call.
@@ -2237,6 +2270,8 @@ mod sandbox_tests;
 #[cfg(test)]
 mod watchdog_tests;
 
+#[cfg(test)]
+mod debugger_step_tests;
 #[cfg(test)]
 mod debugger_tests;
 

@@ -631,6 +631,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "axcenity-collab"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "axcenity-core",
+ "axcenity-workspace-hack",
+ "rustc-hash 2.1.3",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "axcenity-cook"
 version = "0.2.0-alpha.1"
 dependencies = [
@@ -660,6 +670,7 @@ dependencies = [
  "axcenity-audio",
  "axcenity-blocks",
  "axcenity-character",
+ "axcenity-collab",
  "axcenity-cook",
  "axcenity-core",
  "axcenity-gameplay",

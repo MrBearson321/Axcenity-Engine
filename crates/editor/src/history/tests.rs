@@ -504,3 +504,66 @@ fn terrain_strokes_and_new_landscapes_undo_and_redo() {
         Some(&at(64.0))
     );
 }
+
+#[test]
+fn in_a_shared_world_undo_and_redo_leave_alone_what_someone_else_changed() {
+    let (mut world, part) = world_with_part();
+    let mut history = History::new();
+    history.set_shared(true);
+    set(&mut history, &mut world, part, "Position", at(1.0));
+    history.seal();
+    set(
+        &mut history,
+        &mut world,
+        part,
+        "Transparency",
+        Value::Number(0.5),
+    );
+    history.seal();
+    // Someone else moves the part.
+    world.set_property(part, "Position", at(7.0)).unwrap();
+    let restored = history.undo(&mut world).unwrap();
+    assert_eq!(
+        restored.skipped, 0,
+        "Transparency is still as the step left it"
+    );
+    assert_eq!(
+        world.get(part).unwrap().property("Transparency"),
+        Some(&Value::Number(0.0))
+    );
+    let restored = history.undo(&mut world).unwrap();
+    assert_eq!(restored.skipped, 1);
+    assert_eq!(position(&world, part), at(7.0), "their move stays");
+    // Nobody else changed Transparency, so redo puts it back.
+    history.redo(&mut world).unwrap();
+    assert_eq!(history.redo(&mut world).unwrap().skipped, 0);
+    assert_eq!(
+        world.get(part).unwrap().property("Transparency"),
+        Some(&Value::Number(0.5))
+    );
+}
+
+#[test]
+fn in_a_shared_world_undo_leaves_alone_a_move_someone_else_made_since() {
+    let (mut world, part) = world_with_part();
+    let workspace = world.workspace();
+    let folder = world.create(ClassName::Folder).unwrap();
+    world.set_parent(folder, Some(workspace)).unwrap();
+    let mut history = History::new();
+    history.set_shared(true);
+    let before = place_of(&world, part);
+    world.set_parent(part, None).unwrap();
+    history.record_tree(
+        &mut world,
+        "Delete Part".into(),
+        vec![Move {
+            id: part,
+            before,
+            after: None,
+        }],
+    );
+    // Someone else restores it into the folder.
+    world.set_parent(part, Some(folder)).unwrap();
+    assert_eq!(history.undo(&mut world).unwrap().skipped, 1);
+    assert_eq!(world.get(part).unwrap().parent(), Some(folder));
+}

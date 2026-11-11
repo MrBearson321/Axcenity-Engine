@@ -251,6 +251,8 @@ axcenity-toolbox migrate <old asset_library> [--dry-run]
   common: --dir <asset directory>  --offline
 ```
 
+Without `--provider`, `search` asks every source of that kind and takes their results in turn (one from each, then the next from each) before cutting to `--limit`, so every source shows. `--help` (or `-h`, `help`) prints the usage and exits 0.
+
 `--json` prints records and download entries in the database's shapes. Exit codes: 0 done, 2 a `SourceError` (its safe message on stderr), 3 a source unavailable.
 
 **The Python Blender integration (decision 2)** is a small package, `axcenity_toolbox`, kept in the engine repository at `crates/toolbox/python/` so it versions with the Rust core, and installed into the Blender pipeline. It does two things only: runs the CLI for anything that touches the network or writes (search, info, fetch, migrate), and reads `metadata.db` directly with `sqlite3` for fast local queries (records, downloads, maps, licences). In the Blender pipeline, one class per source registers with the existing `register_provider` and calls it, so `providers.search`, `providers.fetch` and the acquisition code don't change; `asset_registry.AssetLibrary` is rewritten over the package. The binary is found from `AXCENITY_TOOLBOX` or `PATH`. It has no Rust extension module, so it works with Blender's bundled Python without compiling anything.

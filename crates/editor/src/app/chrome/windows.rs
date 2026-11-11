@@ -1,31 +1,93 @@
 use super::*;
+use axcenity_script::Resume;
+
 use crate::shortcuts::{self, Action};
 
-/// The panel under a script paused at a breakpoint: the line, Continue, and
-/// each script function on the paused call stack with its locals, the
-/// breakpoint's own open. Returns true when Continue was pressed.
-pub(in crate::app) fn paused_panel(ui: &mut egui::Ui, pause: &axcenity_script::Pause) -> bool {
+/// The panel under a paused script (roadmap G6): where and why it paused,
+/// Continue and the step buttons, the watches, and each script function on
+/// the paused call stack with its locals and the variables it uses from
+/// outside, the innermost open. Returns how to carry on, if a button was
+/// pressed.
+pub(in crate::app) fn paused_panel(
+    ui: &mut egui::Ui,
+    pause: &axcenity_script::Pause,
+    watches: &mut crate::watches::Watches,
+) -> Option<Resume> {
     let palette = theme::palette(ui.ctx());
-    let continued = crate::responsive::toolbar(ui, |ui| {
+    let failed = pause.error.is_some();
+    let resume = crate::responsive::toolbar(ui, |ui| {
+        let title = if failed {
+            format!("Stopped by an error on line {}", pause.line)
+        } else {
+            format!("Paused before line {}", pause.line)
+        };
+        let color = if failed {
+            palette.error
+        } else {
+            palette.warning
+        };
         ui.label(
-            egui::RichText::new(theme::with_icon(
-                icons::PAUSE,
-                &format!("Paused before line {}", pause.line),
-            ))
-            .color(palette.warning)
-            .strong(),
+            egui::RichText::new(theme::with_icon(icons::PAUSE, &title))
+                .color(color)
+                .strong(),
         );
-        ui.button(theme::with_icon(filled_icons::PLAY, "Continue"))
-            .on_hover_text(format!(
-                "Run on from here ({})",
-                crate::shortcuts::Action::Play.menu_text(ui.ctx())
-            ))
-            .clicked()
+        let mut resume = None;
+        let buttons = [
+            (
+                Resume::Continue,
+                filled_icons::PLAY,
+                "Continue",
+                Action::Play,
+                "Run on from here",
+            ),
+            (
+                Resume::StepOver,
+                icons::ARROW_ARC_RIGHT,
+                "Step Over",
+                Action::StepOver,
+                "Run this line, then pause at the next one here",
+            ),
+            (
+                Resume::StepInto,
+                icons::ARROW_LINE_DOWN,
+                "Step Into",
+                Action::StepInto,
+                "Pause at the next line run, inside a function this line calls too",
+            ),
+            (
+                Resume::StepOut,
+                icons::ARROW_LINE_UP,
+                "Step Out",
+                Action::StepOut,
+                "Run to the end of this function, then pause where it was called",
+            ),
+        ];
+        for (how, icon, label, action, hover) in buttons {
+            // A failed script can't run on, so it can't step either.
+            let enabled = how == Resume::Continue || !failed;
+            if ui
+                .add_enabled(enabled, egui::Button::new(theme::with_icon(icon, label)))
+                .on_hover_text(format!("{hover} ({})", action.menu_text(ui.ctx())))
+                .on_disabled_hover_text(
+                    "The script that failed can't run on. Continue runs the rest of the game.",
+                )
+                .clicked()
+            {
+                resume = Some(how);
+            }
+        }
+        resume
     });
+    if let Some(error) = &pause.error {
+        ui.add(
+            egui::Label::new(egui::RichText::new(error).color(palette.error).monospace()).wrap(),
+        );
+    }
     ui.separator();
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
+            watches_section(ui, watches);
             for (index, frame) in pause.frames.iter().enumerate() {
                 let file = frame.path.rsplit('/').next().unwrap_or(&frame.path);
                 let title = match &frame.function {
@@ -37,25 +99,86 @@ pub(in crate::app) fn paused_panel(ui: &mut egui::Ui, pause: &axcenity_script::P
                     .default_open(index == 0)
                     .icon(widgets::chevron)
                     .show(ui, |ui| {
-                        if frame.locals.is_empty() {
+                        if frame.locals.is_empty() && frame.upvalues.is_empty() {
                             ui.weak("No local variables here yet.");
                             return;
                         }
-                        crate::responsive::form(ui, ("paused locals", index), |ui| {
-                            for local in &frame.locals {
-                                ui.monospace(&local.name);
-                                ui.add(
-                                    egui::Label::new(egui::RichText::new(&local.value).monospace())
-                                        .truncate(),
-                                )
-                                .on_hover_text(&local.value);
-                                ui.end_row();
-                            }
-                        });
+                        variables(ui, ("paused locals", index), &frame.locals);
+                        if !frame.upvalues.is_empty() {
+                            ui.weak("From outside this function");
+                            variables(ui, ("paused upvalues", index), &frame.upvalues);
+                        }
                     });
             }
         });
-    continued
+    resume
+}
+
+/// Names and values, one per row.
+fn variables(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    list: &[axcenity_script::Local],
+) {
+    crate::responsive::form(ui, id, |ui| {
+        for local in list {
+            ui.monospace(&local.name);
+            ui.add(egui::Label::new(egui::RichText::new(&local.value).monospace()).truncate())
+                .on_hover_text(&local.value);
+            ui.end_row();
+        }
+    });
+}
+
+/// The watches: each expression with its value in the innermost frame, a
+/// button to remove it, and a box to add one.
+fn watches_section(ui: &mut egui::Ui, watches: &mut crate::watches::Watches) {
+    let palette = theme::palette(ui.ctx());
+    egui::CollapsingHeader::new(theme::with_icon(icons::EYE, "Watches"))
+        .id_salt("paused watches")
+        .default_open(true)
+        .icon(widgets::chevron)
+        .show(ui, |ui| {
+            let mut removed = None;
+            crate::responsive::form(ui, "paused watch list", |ui| {
+                for (index, watch) in watches.list.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .small_button(icons::X)
+                            .on_hover_text("Remove this watch")
+                            .clicked()
+                        {
+                            removed = Some(index);
+                        }
+                        ui.monospace(&watch.expression);
+                    });
+                    let (text, color) = match &watch.value {
+                        Some(Ok(value)) => (value.as_str(), palette.text),
+                        Some(Err(error)) => (error.as_str(), palette.error),
+                        None => ("…", palette.text_weak),
+                    };
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(text).monospace().color(color))
+                            .truncate(),
+                    )
+                    .on_hover_text(text);
+                    ui.end_row();
+                }
+            });
+            if let Some(index) = removed {
+                watches.remove(index);
+            }
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut watches.draft)
+                    .hint_text("Add a watch: an expression, such as health * 2")
+                    .desired_width(f32::INFINITY)
+                    .font(egui::TextStyle::Monospace),
+            );
+            if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                watches.add_draft();
+                response.request_focus();
+            }
+        });
 }
 
 /// The green "Playing" badge in the header during Play, with a dot that
@@ -67,7 +190,8 @@ pub(in crate::app) fn playing_badge(ui: &mut egui::Ui, paused: bool) {
         (
             palette.warning,
             "Paused",
-            "Paused at a breakpoint. Continue (F5) carries on; Stop (Shift+F5) ends the game.",
+            "Paused. Continue (F5) carries on, Step Over (F10), Step Into (F11) and Step Out \
+             (Shift+F11) run one line at a time, and Stop (Shift+F5) ends the game.",
         )
     } else {
         (
@@ -214,6 +338,23 @@ impl EditorApp {
             self.continue_play();
         } else if play {
             self.play();
+        } else if self.paused() {
+            // Shift+F11 is Step Out, taken before F11's Step Into.
+            let step = ctx.input_mut(|input| {
+                shortcuts::consume_first(
+                    input,
+                    &[Action::StepOut, Action::StepInto, Action::StepOver],
+                )
+            });
+            let how = match step {
+                Some(Action::StepOver) => Some(Resume::StepOver),
+                Some(Action::StepInto) => Some(Resume::StepInto),
+                Some(Action::StepOut) => Some(Resume::StepOut),
+                _ => None,
+            };
+            if let Some(how) = how {
+                self.resume_play(how);
+            }
         }
 
         // A text box being typed in has its own undo, and uses Delete and
@@ -323,6 +464,91 @@ impl EditorApp {
             if keys.delete {
                 self.delete_selected();
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axcenity_script::{Local, Pause, PausedFrame};
+
+    use super::*;
+    use crate::watches::Watches;
+
+    fn pause(error: Option<&str>) -> Pause {
+        let local = |name: &str, value: &str| Local {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        };
+        Pause {
+            path: "scripts/door.server.lua".to_owned(),
+            line: 7,
+            frames: vec![
+                PausedFrame {
+                    function: Some("open".to_owned()),
+                    path: "scripts/door.server.lua".to_owned(),
+                    line: 7,
+                    locals: vec![local("angle", "90"), local("door", "Door")],
+                    upvalues: vec![local("speed", "4")],
+                },
+                PausedFrame {
+                    function: None,
+                    path: "scripts/door.server.lua".to_owned(),
+                    line: 12,
+                    locals: vec![local("speed", "4")],
+                    upvalues: Vec::new(),
+                },
+            ],
+            error: error.map(str::to_owned),
+            breakpoint: error.is_none(),
+        }
+    }
+
+    fn watches() -> Watches {
+        let mut watches = Watches::default();
+        for expression in ["angle * 2", "door.Missing"] {
+            watches.draft = expression.to_owned();
+            watches.add_draft();
+        }
+        watches.evaluate(|expression| match expression {
+            "angle * 2" => Ok("180".to_owned()),
+            _ => Err("Missing is not a valid member of Part \"Door\"".to_owned()),
+        });
+        watches
+    }
+
+    #[test]
+    fn the_paused_panel_draws_steps_watches_and_an_error() {
+        let ctx = theme::test_context();
+        let mut watches = watches();
+        for error in [None, Some("scripts/door.server.lua:7: locked")] {
+            let _ = theme::run(&ctx, egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let resume = paused_panel(ui, &pause(error), &mut watches);
+                    assert_eq!(resume, None, "nothing pressed");
+                });
+            });
+        }
+        let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") else {
+            return;
+        };
+        for (name, error) in [
+            ("paused-step.png", None),
+            (
+                "paused-error.png",
+                Some("scripts/door.server.lua:7: locked"),
+            ),
+        ] {
+            crate::snapshot::snapshot(
+                &std::path::PathBuf::from(&folder).join(name),
+                egui::vec2(520.0, 330.0),
+                vec![Vec::new(); 3],
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let _ = paused_panel(ui, &pause(error), &mut watches);
+                    });
+                },
+            );
         }
     }
 }

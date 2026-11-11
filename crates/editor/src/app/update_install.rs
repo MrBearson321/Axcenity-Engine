@@ -502,6 +502,8 @@ mod tests {
         (bytes, update)
     }
 
+    // Only the Linux tarball tests download; elsewhere this is unused.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     fn wait(install: &mut Install) {
         for _ in 0..2000 {
             install.poll();

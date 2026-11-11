@@ -3,7 +3,7 @@ title: Threading model
 type: architecture
 status: current
 verified: 2026-11-11
-verified_commit: 19c7179d
+verified_commit: 7e373ad1
 source: [crates/assets/src/loading.rs, crates/render/src/renderer/parallel.rs, crates/render/src/renderer/uploads.rs, crates/nav/src/shared.rs, crates/scene/src/terrain.rs, crates/terrain/src/job.rs, crates/script/src/csg.rs, crates/project/src/watch.rs, crates/project/src/packed.rs, crates/editor/src/cooking.rs, crates/player/src/preload.rs, crates/script/src/task.rs]
 docs: [docs/project/assets.md, docs/architecture/navigation.md, docs/scripting/execution.md, docs/development-policy.md]
 tags: [architecture, threading, perf]
@@ -36,6 +36,7 @@ Rule of thumb: **anything that reads or writes the World runs on the frame's thr
 | `navmesh build` | `nav/src/shared.rs` | Assembles the navigation mesh from the changed parts' solids (`Assembly::run`, M13) | The new mesh about 0.1 s of game time later (`SharedNavMesh`) |
 | Terrain layer maps | `scene` / loading workers | Decoded on the asset loading workers even when cooked, and the layer arrays built in parallel, each texture resized once (PRs #67, #69) | Pixels for the terrain's texture arrays |
 | `rmcp` thread (editor `--mcp`) | `mcp/src/server.rs` | MCP protocol on stdio; hands calls to the editor thread as `Job`s | Tool results |
+| `mcp listener` + one `mcp client` thread per connection (editor with Settings ▸ AI connections on) | `editor/src/app/mcp/live.rs` | Loopback listener; each relayed client's hello, then `rmcp` on that TCP connection (`serve_tcp`) | `Job`s drained on the main thread at the start of a frame, 4 ms budget, a repaint to wake it |
 | Terrain chunk worker | `scene/src/terrain.rs` | Builds terrain chunk meshes | Chunk meshes into `TerrainCache` |
 | `terrain job` | `terrain/src/job.rs` | Generation and erosion (editor) | A new heightfield |
 | CSG worker (per call) | `script/src/csg.rs` | `UnionAsync`, `SubtractAsync`, `IntersectAsync` through `mesh_edit::combine` | Resumes the script from `Context::step` |

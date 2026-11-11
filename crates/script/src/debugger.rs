@@ -1,5 +1,6 @@
 //! The editor's debugger: breakpoints that pause Play on a line, the
-//! paused script's locals, and Continue.
+//! paused script's locals, Continue and stepping, pausing on an error, and
+//! watch expressions (roadmap G6).
 //!
 //! Only the editor turns it on ([`install`], through
 //! `ScriptRuntime::enable_debugger`), for its own Play. The player never
@@ -27,6 +28,25 @@
 //! `table.sort` comparison). There the line runs, and Output says once that
 //! the breakpoint was passed.
 //!
+//! **Stepping.** [`resume_from_pause`] with a [`Resume`] other than
+//! Continue remembers the paused coroutine, its line and call depth. The
+//! hook pauses that coroutine again at the next line that step reaches: any
+//! new line for Step Into (in a function it calls too), a new line at the
+//! same depth or above for Step Over, and back in the caller for Step Out.
+//! A step across `task.wait` pauses where the coroutine carries on; a
+//! breakpoint another coroutine reaches first pauses there and ends the
+//! step; a coroutine that finishes ends it. Where the coroutine can't yield
+//! (inside a C function), the step goes on to the next line where it can.
+//!
+//! **Errors.** With [`set_pause_on_error`], a scheduler coroutine that fails
+//! pauses Play at the failed line. Luau keeps a failed coroutine's call
+//! stack, so its frames and locals are read as at a breakpoint; Continue
+//! carries on with everything else (the failed coroutine is over).
+//!
+//! **Watches.** [`evaluate`] runs an expression in a paused frame: its
+//! locals and upvalues first, then its script's globals. It runs script
+//! code (metamethods, calls), under the watchdog.
+//!
 //! **Locals.** Once the coroutine has yielded, its call stack is read
 //! through Luau's C API (`lua_getlocal`), not the `debug` library, which is
 //! never loaded. Local names are only in the bytecode at debug level 2, so
@@ -40,7 +60,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use mlua::{Function, Lua, MultiValue, Table, Thread, Value, VmState, ffi};
 
-use crate::{OutputKind, push_output, scheduler};
+use crate::{OutputKind, push_output, scheduler, watchdog};
 
 /// Breakpoints by script path, as the host passes them: line numbers
 /// counting from 1.
@@ -65,6 +85,24 @@ pub struct Pause {
     /// The script functions on the paused coroutine's call stack, innermost
     /// (the breakpoint's) first.
     pub frames: Vec<PausedFrame>,
+    /// Set when an error paused Play ([`set_pause_on_error`]): its message.
+    /// `line` is then the line that failed, which can't run on.
+    pub error: Option<String>,
+    /// Whether a breakpoint on `line` paused it (not only a step).
+    pub breakpoint: bool,
+}
+
+/// How Play carries on from a pause.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Resume {
+    /// Run on to the next breakpoint.
+    Continue,
+    /// Pause at the next line of this function (or the one it returns to).
+    StepOver,
+    /// Pause at the next line run, inside a function this line calls too.
+    StepInto,
+    /// Pause once this function returns to the one that called it.
+    StepOut,
 }
 
 /// One script function on a paused call stack.
@@ -77,6 +115,9 @@ pub struct PausedFrame {
     /// Its local variables visible at that line, in the order they were
     /// declared.
     pub locals: Vec<Local>,
+    /// The variables from outside it that it uses (upvalues), such as a
+    /// script's own locals inside one of its functions.
+    pub upvalues: Vec<Local>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -104,6 +145,42 @@ struct Debugger {
     /// Where the hook asked coroutines to yield. They don't stop there again
     /// until they've moved on.
     spots: Vec<Spot>,
+    /// The step under way, until the coroutine pauses or ends.
+    stepping: Option<Stepping>,
+    /// Pause when a scheduler coroutine fails ([`set_pause_on_error`]).
+    pause_on_error: bool,
+}
+
+/// A step from a pause: the coroutine and where it was.
+#[derive(Clone)]
+struct Stepping {
+    how: Resume,
+    thread: Thread,
+    path: String,
+    line: usize,
+    depth: i32,
+}
+
+impl Stepping {
+    /// Whether the stepping coroutine, at this line and depth, has gone as
+    /// far as the step goes.
+    fn reached(&self, path: &str, line: usize, depth: i32) -> bool {
+        let moved = path != self.path || line != self.line;
+        match self.how {
+            Resume::Continue => false,
+            Resume::StepInto => depth != self.depth || moved,
+            Resume::StepOver => depth < self.depth || (depth == self.depth && moved),
+            Resume::StepOut => depth < self.depth,
+        }
+    }
+}
+
+/// What a paused frame's watches can see: its variables, then its globals.
+struct Scope {
+    /// Upvalues first, then locals in the order declared, so a later name
+    /// shadows an earlier one as in the code.
+    variables: Vec<(String, Value)>,
+    globals: Option<Table>,
 }
 
 /// A coroutine held for Continue: what to resume it with, and the script
@@ -123,18 +200,31 @@ struct Spot {
 struct Step {
     state: *mut ffi::lua_State,
     location: Option<(String, usize, i32)>,
+    /// Whether the coroutine can yield here (not inside a C function).
+    yieldable: bool,
 }
 
-/// The breakpoint Play is paused at.
+/// The breakpoint, step or error Play is paused at.
 struct Stop {
     path: String,
     line: usize,
     thread: Thread,
+    /// Its call depth there.
+    depth: i32,
     /// Read by the hook, before the coroutine yields: afterwards Luau
     /// reports its innermost function one instruction early.
     frames: Vec<PausedFrame>,
+    /// One per frame, for watches.
+    scopes: Vec<Scope>,
     /// Set once the coroutine has really yielded.
     yielded: bool,
+    /// The step that paused here, if one did: it goes on if the coroutine
+    /// can't yield after all.
+    stepped: Option<Stepping>,
+    /// An error's message, when an error paused Play.
+    error: Option<String>,
+    /// Paused by a breakpoint on this line.
+    breakpoint: bool,
 }
 
 /// Turns the debugger on: every coroutine the scheduler resumes from here
@@ -166,7 +256,51 @@ pub fn pause(lua: &Lua) -> Option<Pause> {
         path: stop.path.clone(),
         line: stop.line,
         frames: stop.frames.clone(),
+        error: stop.error.clone(),
+        breakpoint: stop.breakpoint,
     })
+}
+
+/// Whether a scheduler coroutine that fails pauses Play (off by default).
+/// Does nothing without the debugger.
+pub fn set_pause_on_error(lua: &Lua, on: bool) {
+    if let Some(mut debugger) = lua.app_data_mut::<Debugger>() {
+        debugger.pause_on_error = on;
+    }
+}
+
+/// Called by the scheduler when `thread` failed with `message`, before
+/// [`leave`]. Pauses Play at the failed line when pausing on errors.
+pub fn failed(lua: &Lua, thread: &Thread, message: &str) {
+    let wanted = lua.app_data_ref::<Debugger>().is_some_and(|debugger| {
+        debugger.pause_on_error
+            && debugger.paused.is_none()
+            && debugger.running.last() == Some(thread)
+    });
+    if !wanted {
+        return;
+    }
+    let (frames, scopes) = read_frames(lua, thread);
+    let Some(top) = frames.first() else {
+        // Nothing of a script's on the stack to show.
+        return;
+    };
+    let (path, line) = (top.path.clone(), top.line);
+    if let Some(mut debugger) = lua.app_data_mut::<Debugger>() {
+        debugger.stepping = None;
+        debugger.paused = Some(Stop {
+            path,
+            line,
+            thread: thread.clone(),
+            depth: 0,
+            frames,
+            scopes,
+            yielded: true,
+            stepped: None,
+            error: Some(message.to_owned()),
+            breakpoint: false,
+        });
+    }
 }
 
 fn is_paused(lua: &Lua) -> bool {
@@ -207,6 +341,14 @@ pub fn leave(lua: &Lua, thread: &Thread) {
     debugger.running.pop();
     if !thread.is_resumable() {
         debugger.spots.retain(|spot| spot.thread != *thread);
+        if debugger
+            .stepping
+            .as_ref()
+            .is_some_and(|step| step.thread == *thread)
+        {
+            // Stepped off the end: the game runs on.
+            debugger.stepping = None;
+        }
     }
     if debugger.holding.as_ref() != Some(thread) {
         return;
@@ -260,6 +402,12 @@ fn hold_failed(lua: &Lua, thread: &Thread) {
             return;
         }
         let stop = debugger.paused.take().expect("checked above");
+        // A step goes on to the next line where it can pause.
+        let breakpoint = debugger.on_breakpoint(&stop.path, stop.line);
+        debugger.stepping = stop.stepped;
+        if !breakpoint {
+            return;
+        }
         debugger
             .reported
             .insert((stop.path.clone(), stop.line))
@@ -284,14 +432,25 @@ fn report_missed(lua: &Lua, path: &str, line: usize) {
     );
 }
 
-/// Resumes what the pause held, in order, unless one of them pauses again;
-/// then the rest wait for the next Continue.
-pub fn continue_from_pause(lua: &Lua) {
+/// Carries on from the pause as `how` says: Continue, or a step of the
+/// paused coroutine. Resumes what the pause held, in order, unless one of
+/// them pauses again; then the rest wait. A step from an error's pause is a
+/// Continue: that coroutine is over.
+pub fn resume_from_pause(lua: &Lua, how: Resume) {
     let queue = {
         let Some(mut debugger) = lua.app_data_mut::<Debugger>() else {
             return;
         };
-        debugger.paused = None;
+        let stop = debugger.paused.take();
+        debugger.stepping = stop
+            .filter(|stop| how != Resume::Continue && stop.error.is_none())
+            .map(|stop| Stepping {
+                how,
+                thread: stop.thread,
+                path: stop.path,
+                line: stop.line,
+                depth: stop.depth,
+            });
         debugger.holding = None;
         std::mem::take(&mut debugger.held)
     };
@@ -362,15 +521,28 @@ fn on_step(lua: &Lua, step: Step) -> VmState {
         return VmState::Continue;
     };
     if debugger.paused.is_none() {
-        if !debugger.on_breakpoint(&path, line) {
+        let breakpoint = debugger.on_breakpoint(&path, line);
+        let stepped = debugger
+            .stepping
+            .as_ref()
+            .is_some_and(|step| step.thread == current && step.reached(&path, line, depth));
+        // A step waits for a line where the coroutine can yield.
+        let stepped = stepped && step.yieldable;
+        if !breakpoint && !stepped {
             return VmState::Continue;
         }
+        let stepping = debugger.stepping.take();
         debugger.paused = Some(Stop {
             path: path.clone(),
             line,
             thread: current.clone(),
+            depth,
             frames: Vec::new(),
+            scopes: Vec::new(),
             yielded: false,
+            stepped: stepping,
+            error: None,
+            breakpoint,
         });
     }
     let at_breakpoint = debugger
@@ -386,11 +558,12 @@ fn on_step(lua: &Lua, step: Step) -> VmState {
     });
     drop(debugger);
     if at_breakpoint {
-        let frames = read_frames(lua, &current);
+        let (frames, scopes) = read_frames(lua, &current);
         if let Some(mut debugger) = lua.app_data_mut::<Debugger>()
             && let Some(stop) = &mut debugger.paused
         {
             stop.frames = frames;
+            stop.scopes = scopes;
         }
     }
     VmState::Yield
@@ -400,6 +573,7 @@ impl Debugger {
     /// Whether the step hook has nothing to do: the common case.
     fn is_idle(&self) -> bool {
         self.breakpoints.is_empty()
+            && self.stepping.is_none()
             && self.paused.is_none()
             && self.holding.is_none()
             && self.spots.is_empty()
@@ -473,9 +647,18 @@ unsafe extern "C-unwind" fn step_hook(state: *mut ffi::lua_State, _: *mut ffi::l
         if idle {
             return VmState::Continue;
         }
-        // SAFETY: inside the hook, the running function is at level 0.
-        let location = unsafe { step_location(state) };
-        on_step(lua, Step { state, location })
+        // SAFETY: inside the hook, the running function is at level 0, and
+        // `state` is the running coroutine.
+        let (location, yieldable) =
+            unsafe { (step_location(state), ffi::lua_isyieldable(state) != 0) };
+        on_step(
+            lua,
+            Step {
+                state,
+                location,
+                yieldable,
+            },
+        )
     }))
     .unwrap_or(VmState::Continue);
     // SAFETY: a step hook may yield its coroutine (Luau checks for that once
@@ -507,22 +690,28 @@ unsafe fn step_location(state: *mut ffi::lua_State) -> Option<(String, usize, i3
 }
 
 /// The script functions on the call stack of `thread`, which the step hook
-/// is about to yield.
+/// is about to yield (or which failed), and what each one's watches see.
 ///
 /// Part of the workspace's only `unsafe` code (decided in v2 Phase 4): mlua
 /// has no safe way to read a coroutine's locals, and loading the `debug`
 /// library would be unsafe too, with more reach. The player never gets here.
 #[allow(unsafe_code)]
-fn read_frames(lua: &Lua, thread: &Thread) -> Vec<PausedFrame> {
-    let mut frames: Vec<(Option<String>, String, usize, Vec<String>)> = Vec::new();
+fn read_frames(lua: &Lua, thread: &Thread) -> (Vec<PausedFrame>, Vec<Scope>) {
+    /// One frame as read: its function's name, path, line, and the names of
+    /// its locals and upvalues, whose values follow on the stack, then its
+    /// globals table.
+    type Read = (Option<String>, String, usize, Vec<String>, Vec<String>);
+    let mut frames: Vec<Read> = Vec::new();
     let from = thread.state();
     // SAFETY: `from` is the state of `thread`, which is alive (we hold it)
-    // and stopped in the step hook, which Luau gives room on the stack, so
-    // its stack can be read; `exec_raw` runs the closure in a protected call
-    // on another state (`to`), and every value `lua_getlocal` pushes on
-    // `from` is moved to `to` or popped, so the paused coroutine's stack is
-    // left as it was. The values left on
-    // `to` come back as `values`, one per name in `frames`, in order.
+    // and either stopped in the step hook, which Luau gives room on the
+    // stack, or failed, which leaves its stack in place; so its stack can be
+    // read. `exec_raw` runs the closure in a protected call on another state
+    // (`to`), and every value pushed on `from` (locals, the function, its
+    // upvalues and environment) is moved to `to` or popped, so the paused
+    // coroutine's stack is left as it was. The values left on `to` come back
+    // as `values`: for each frame in `frames`, one per local name, one per
+    // upvalue name, then its environment.
     let values = unsafe {
         lua.exec_raw::<MultiValue>((), |to| {
             let mut next_level = 0;
@@ -541,12 +730,17 @@ fn read_frames(lua: &Lua, thread: &Thread) -> Vec<PausedFrame> {
                 let Some(path) = source.strip_prefix('@') else {
                     continue;
                 };
+                // Room for the function, one value at a time on both
+                // states, and the environment at the end.
+                if ffi::lua_checkstack(from, 2) == 0 || ffi::lua_checkstack(to, 2) == 0 {
+                    break;
+                }
                 let function = (!record.name.is_null())
                     .then(|| CStr::from_ptr(record.name).to_string_lossy().into_owned());
                 let mut names = Vec::new();
                 let mut n = 1;
                 while names.len() < MAX_LOCALS {
-                    if ffi::lua_checkstack(from, 1) == 0 || ffi::lua_checkstack(to, 1) == 0 {
+                    if ffi::lua_checkstack(from, 1) == 0 || ffi::lua_checkstack(to, 2) == 0 {
                         break;
                     }
                     let name = ffi::lua_getlocal(from, level, n);
@@ -563,31 +757,131 @@ fn read_frames(lua: &Lua, thread: &Thread) -> Vec<PausedFrame> {
                     ffi::lua_xmove(from, to, 1);
                     names.push(name);
                 }
+                // The function itself, for its upvalues and environment.
+                let mut upvalues = Vec::new();
+                let mut function_record: ffi::lua_Debug = std::mem::zeroed();
+                if ffi::lua_getinfo(from, level, c"f".as_ptr(), &mut function_record) != 0 {
+                    let mut n = 1;
+                    while upvalues.len() < MAX_LOCALS
+                        && ffi::lua_checkstack(from, 1) != 0
+                        && ffi::lua_checkstack(to, 2) != 0
+                    {
+                        let name = ffi::lua_getupvalue(from, -1, n);
+                        if name.is_null() {
+                            break;
+                        }
+                        n += 1;
+                        let name = CStr::from_ptr(name).to_string_lossy().into_owned();
+                        if name.is_empty() || name.starts_with('(') {
+                            ffi::lua_pop(from, 1);
+                            continue;
+                        }
+                        ffi::lua_xmove(from, to, 1);
+                        upvalues.push(name);
+                    }
+                    ffi::lua_getfenv(from, -1);
+                    ffi::lua_xmove(from, to, 1);
+                    ffi::lua_pop(from, 1);
+                } else {
+                    ffi::lua_pushnil(to);
+                }
                 let line = usize::try_from(record.currentline).unwrap_or(0);
-                frames.push((function, path.to_owned(), line, names));
+                frames.push((function, path.to_owned(), line, names, upvalues));
             }
         })
     };
     let mut values = values.unwrap_or_default().into_iter();
     let tostring: Option<Function> = lua.globals().raw_get("tostring").ok();
-    frames
+    let mut scopes = Vec::with_capacity(frames.len());
+    let frames = frames
         .into_iter()
-        .map(|(function, path, line, names)| PausedFrame {
-            function,
-            path,
-            line,
-            locals: names
-                .into_iter()
-                .map(|name| Local {
-                    name,
-                    value: values
-                        .next()
-                        .map(|value| describe(&value, tostring.as_ref(), true))
-                        .unwrap_or_default(),
-                })
-                .collect(),
+        .map(|(function, path, line, names, upvalue_names)| {
+            let mut take = |names: Vec<String>| -> Vec<(String, Value)> {
+                names
+                    .into_iter()
+                    .map(|name| (name, values.next().unwrap_or(Value::Nil)))
+                    .collect()
+            };
+            let locals = take(names);
+            let upvalues = take(upvalue_names);
+            let globals = match values.next() {
+                Some(Value::Table(table)) => Some(table),
+                _ => None,
+            };
+            let shown = |variables: &[(String, Value)]| -> Vec<Local> {
+                variables
+                    .iter()
+                    .map(|(name, value)| Local {
+                        name: name.clone(),
+                        value: describe(value, tostring.as_ref(), true),
+                    })
+                    .collect()
+            };
+            let frame = PausedFrame {
+                function,
+                path,
+                line,
+                locals: shown(&locals),
+                upvalues: shown(&upvalues),
+            };
+            scopes.push(Scope {
+                variables: upvalues.into_iter().chain(locals).collect(),
+                globals,
+            });
+            frame
         })
-        .collect()
+        .collect();
+    (frames, scopes)
+}
+
+/// Evaluates the watch `expression` in the paused frame `frame` (0 is the
+/// innermost) and returns its value as text, as the locals are shown, or
+/// what went wrong. It sees that frame's locals and upvalues, then its
+/// script's globals. Calls and metamethods run, under the watchdog; a watch
+/// can't wait.
+pub fn evaluate(lua: &Lua, frame: usize, expression: &str) -> Result<String, String> {
+    let (variables, globals) = {
+        let debugger = lua
+            .app_data_ref::<Debugger>()
+            .ok_or("The debugger isn't on.")?;
+        let stop = debugger
+            .paused
+            .as_ref()
+            .filter(|stop| stop.yielded)
+            .ok_or("Play isn't paused.")?;
+        let scope = stop.scopes.get(frame).ok_or("There's no such frame.")?;
+        (scope.variables.clone(), scope.globals.clone())
+    };
+    let text = |err: mlua::Error| crate::errors::error_message(&err);
+    let scope = lua.create_table().map_err(text)?;
+    for (name, value) in variables {
+        scope.raw_set(name, value).map_err(text)?;
+    }
+    if let Some(globals) = globals {
+        let meta = lua.create_table().map_err(text)?;
+        meta.raw_set("__index", globals).map_err(text)?;
+        scope.set_metatable(Some(meta)).map_err(text)?;
+    }
+    let function = lua
+        .load(format!("return ({expression}\n)"))
+        .set_name("=watch")
+        .set_environment(scope)
+        .into_function()
+        .map_err(text)?;
+    let thread = lua.create_thread(function).map_err(text)?;
+    watchdog::enter(lua, &thread);
+    let result = thread.resume::<Value>(());
+    let stopped = watchdog::paused_by_watchdog(lua, &thread);
+    watchdog::leave(lua);
+    if let Some(message) = stopped {
+        return Err(message);
+    }
+    let value = result.map_err(text)?;
+    if thread.is_resumable() {
+        return Err("A watch can't wait.".to_owned());
+    }
+    let tostring: Option<Function> = lua.globals().raw_get("tostring").ok();
+    Ok(describe(&value, tostring.as_ref(), true))
 }
 
 /// A value as text. Tables are listed (one level deep at the top, `{…}`

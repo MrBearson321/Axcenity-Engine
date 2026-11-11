@@ -11,6 +11,7 @@
 
 use eframe::egui;
 
+use super::origin::{Origin, Origins};
 use super::{
     AssetBrowser, AssetEntry, AssetKind, AssetPayload, ItemMenu, LIST_PICTURE, LIST_ROW, PICTURE,
     TILE, global_badge,
@@ -168,9 +169,12 @@ pub(super) enum Shown {
     Folder(Package),
 }
 
-/// A run of things in the grid, under a heading inside an open folder.
+/// A run of things in the grid, under a heading: a kind of file inside an
+/// open folder, or a source's section.
 pub(super) struct Block {
-    pub(super) heading: Option<&'static str>,
+    pub(super) heading: Option<String>,
+    /// The source this block is the section of, when grouped by source.
+    pub(super) origin: Option<Origin>,
     pub(super) items: Vec<Shown>,
 }
 
@@ -187,6 +191,7 @@ pub(super) fn shown(
 ) -> Vec<Block> {
     let block = |items| Block {
         heading: None,
+        origin: None,
         items,
     };
     if searching {
@@ -200,11 +205,12 @@ pub(super) fn shown(
             }
             let heading = section(member.kind);
             match blocks.last_mut() {
-                Some(last) if last.heading == Some(heading) => {
+                Some(last) if last.heading.as_deref() == Some(heading) => {
                     last.items.push(Shown::Asset(member.clone()));
                 }
                 _ => blocks.push(Block {
-                    heading: Some(heading),
+                    heading: Some(heading.to_owned()),
+                    origin: None,
                     items: vec![Shown::Asset(member.clone())],
                 }),
             }
@@ -230,6 +236,91 @@ pub(super) fn shown(
         Vec::new()
     } else {
         vec![block(shown)]
+    }
+}
+
+/// [`shown`], in a section for each source the `entries` came from (in
+/// [`Origin`]'s order: built-in, made in Axcenity, imported, each Toolbox
+/// source, global assets). Each section holds its model folders and files
+/// as `shown` would, with an asset made from another (a material from its
+/// texture set) right after it. Inside the `open` folder, its files under
+/// their kinds' headings as before.
+pub(super) fn grouped(
+    entries: Vec<AssetEntry>,
+    packages: &[Package],
+    open: Option<&Package>,
+    searching: bool,
+    origins: &Origins,
+) -> Vec<Block> {
+    if open.is_some() && !searching {
+        return shown(entries, packages, open, searching);
+    }
+    let mut blocks = Vec::new();
+    for origin in origins.present(&entries) {
+        let mine: Vec<AssetEntry> = entries
+            .iter()
+            .filter(|entry| origins.of(entry) == origin)
+            .cloned()
+            .collect();
+        let folders: Vec<Package> = packages
+            .iter()
+            .filter(|package| origins.of(&package.model) == origin)
+            .cloned()
+            .collect();
+        let mut items: Vec<Shown> = shown(mine, &folders, None, searching)
+            .into_iter()
+            .flat_map(|block| block.items)
+            .collect();
+        follow_parents(&mut items, origins);
+        if !items.is_empty() {
+            blocks.push(Block {
+                heading: Some(origin.label()),
+                origin: Some(origin),
+                items,
+            });
+        }
+    }
+    blocks
+}
+
+/// Moves each asset listed under another (a material under its texture
+/// set) to just after it, when both are in `items`; the rest keep their
+/// order.
+fn follow_parents(items: &mut Vec<Shown>, origins: &Origins) {
+    let path = |item: &Shown| match item {
+        Shown::Asset(entry) => Some(entry.path.clone()),
+        Shown::Folder(_) => None,
+    };
+    let children: Vec<(String, String)> = items
+        .iter()
+        .filter_map(|item| {
+            let child = path(item)?;
+            let parent = origins.parent(&child)?.to_owned();
+            items
+                .iter()
+                .any(|other| path(other).as_deref() == Some(parent.as_str()))
+                .then_some((child, parent))
+        })
+        .collect();
+    for (child, parent) in children {
+        let Some(from) = items
+            .iter()
+            .position(|item| path(item).as_deref() == Some(child.as_str()))
+        else {
+            continue;
+        };
+        let moved = items.remove(from);
+        // After the parent and any children already moved behind it.
+        let mut at = items
+            .iter()
+            .position(|item| path(item).as_deref() == Some(parent.as_str()))
+            .map_or(items.len(), |at| at + 1);
+        while at < items.len()
+            && path(&items[at]).is_some_and(|next| origins.parent(&next) == Some(parent.as_str()))
+        {
+            at += 1;
+        }
+        items.insert(at, moved);
     }
 }
 

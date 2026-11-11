@@ -478,6 +478,9 @@ fn command_description(command: &Command) -> String {
             "Measure how this computer draws the viewport and get recommended editor graphics settings."
         }
         Command::PanicDuringPlay => "Debug builds only: make Play fail, to test error handling.",
+        Command::PauseOnErrors => {
+            "Turn on or off: a script error pauses Play where it happened, with its variables."
+        }
         Command::Play => {
             "Run the game in the editor. Changes made while playing are undone by Stop."
         }
