@@ -64,6 +64,8 @@ mod owners;
 mod query;
 mod shapes;
 mod sync;
+#[cfg(feature = "parallel")]
+pub mod threads;
 mod vehicles;
 
 pub use mass::Mass;
@@ -125,6 +127,9 @@ const SEPARATE_STEPS: u32 = 3;
 /// Owns the rapier simulation and remembers which body belongs to which Part.
 pub struct Physics {
     rapier: PhysicsWorld,
+    /// The threads rapier's step runs on (see [`threads`]).
+    #[cfg(feature = "parallel")]
+    pool: Option<threads::Pool>,
     /// A `BTreeMap` (sorted) rather than a `HashMap` so bodies are always
     /// visited in the same order, which keeps the simulation repeatable.
     parts: BTreeMap<InstanceId, Body>,
@@ -512,6 +517,8 @@ impl Physics {
         rapier.integration_parameters.dt = STEP_SECONDS as f32;
         Self {
             rapier,
+            #[cfg(feature = "parallel")]
+            pool: threads::shared(),
             parts: BTreeMap::new(),
             unsimulated_seconds: 0.0,
             owners: owners::Owners::default(),
@@ -640,12 +647,7 @@ impl Physics {
             self.pushed.extend(movers::bodies(&self.movers));
             vehicles::drive(&mut self.rapier, &mut self.vehicles, &mut self.rolling);
             let before = self.motions_before_step();
-            // The hook only runs for colliders with friction or
-            // elasticity weights (see `material`).
-            {
-                profiling::scope!("Physics::substep");
-                self.rapier.step_with_events(&material::Weighted, &());
-            }
+            self.substep();
             self.broken.extend(joints::break_overloaded(
                 world,
                 &mut self.rapier,
@@ -666,6 +668,28 @@ impl Physics {
             vehicles::write_wheels(world, &mut self.parts, &wheels);
         }
         steps
+    }
+
+    /// rapier's step, on physics' own threads (see [`threads`]). The hook
+    /// only runs for colliders with friction or elasticity weights (see
+    /// `material`).
+    fn substep(&mut self) {
+        profiling::scope!("Physics::substep");
+        let rapier = &mut self.rapier;
+        let mut step = || rapier.step_with_events(&material::Weighted, &());
+        #[cfg(feature = "parallel")]
+        if let Some(pool) = &self.pool {
+            pool.install(step);
+            return;
+        }
+        step();
+    }
+
+    /// Runs rapier's step on a pool of its own of `threads` threads, for
+    /// tests that compare thread counts.
+    #[cfg(all(test, feature = "parallel"))]
+    pub(crate) fn use_threads(&mut self, threads: usize) {
+        self.pool = threads::make(threads);
     }
 
     /// True if `id` currently has a body in the simulation.
