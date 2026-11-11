@@ -3,13 +3,14 @@
 //! the end and stop, a seek bar with where the playhead is and how long
 //! the clip runs, and how fast the preview plays.
 //!
-//! Keys, with the mouse over the open clip and nothing being typed: Space
-//! plays or pauses, Left and Right step a frame (Shift: ten), Home and End
-//! go to the start and end. They're in the shortcut table
-//! (`shortcuts.rs`, Animation clip) and so in Settings > Shortcuts.
+//! Keys, with the mouse over the open clip or sequence and nothing being
+//! typed: Space plays or pauses, Left and Right step a frame (Shift: ten),
+//! Home and End go to the start and end. They're in the shortcut table
+//! (`shortcuts.rs`, Animation and Sequencer) and so in Settings > Shortcuts.
 //!
-//! Both kinds of clip (an imported take's and a property clip's) play
-//! through [`Playback`], so they share one bar and one set of keys.
+//! Both kinds of clip (an imported take's and a property clip's) and the
+//! Sequencer's sequence play through [`Playback`], so they share one bar
+//! and one set of keys.
 
 use eframe::egui::{self, RichText, Sense, Stroke, vec2};
 
@@ -87,9 +88,19 @@ pub fn apply(clip: &mut dyn Playback, command: Command) {
     }
 }
 
+/// Whether nothing else wants the keyboard: nothing is being typed, no
+/// widget has focus (one tabbed to keeps Space and the arrows) and no menu
+/// is open. The transport's keys also need the mouse over its tab.
+pub fn keys_free(ctx: &egui::Context) -> bool {
+    !ctx.egui_wants_keyboard_input()
+        && ctx.memory(|memory| memory.focused()).is_none()
+        && !egui::Popup::is_any_open(ctx)
+}
+
 /// The transport keys pressed this frame, in order, taken so nothing else
 /// sees them. Call only while the clip should have them
-/// (`AnimationStudio::wants_transport_keys`).
+/// (`AnimationStudio::wants_transport_keys`, or the mouse over the
+/// Sequencer and [`keys_free`]).
 pub fn keys(input: &mut egui::InputState) -> Vec<Command> {
     use crate::shortcuts::{Action, consume_first};
     // Shift+Left before Left: a plain key's pattern matches with Shift too.
@@ -290,8 +301,8 @@ fn rate_picker(ui: &mut egui::Ui, rate: &mut Rate, follows_times: bool) {
             })
             .response
             .on_hover_text(
-                "How fast the preview plays. Only for watching: the clip's own Speed is \
-                 in the toolbar.",
+                "How fast the preview plays. Only for watching: it doesn't change the \
+                 clip or sequence.",
             );
     };
     if follows_times {

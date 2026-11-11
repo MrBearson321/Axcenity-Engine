@@ -1849,6 +1849,8 @@ mod rig_tests;
 #[cfg(test)]
 mod sequencer_tests;
 #[cfg(test)]
+mod sequencer_transport_tests;
+#[cfg(test)]
 mod settings_undo_tests;
 #[cfg(test)]
 mod solid_tests;
