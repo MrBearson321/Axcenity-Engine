@@ -4,6 +4,7 @@
     python generate.py check              # print the expected checksum
     python generate.py axcenity <folder>  # write the Axcenity project
     python generate.py roblox <file.rbxmx> # write the Roblox model (scripts only)
+    python generate.py roblox-place <file.rbxlx> # write a ready-to-Play place
 
 The formulas are in README.md; every engine's builder implements the same
 ones and prints `XB10K_CHECK` so a wrong scene shows up at once.
@@ -277,6 +278,52 @@ def write_roblox(path):
         f.write(xml)
 
 
+def _script_item(ref, cls, name, source, disabled):
+    return (f'<Item class="{cls}" referent="RBX{ref}"><Properties>'
+            f'<string name="Name">{name}</string>'
+            f'<bool name="Disabled">{"true" if disabled else "false"}</bool>'
+            f'<ProtectedString name="Source"><![CDATA[{source}]]></ProtectedString>'
+            f'</Properties></Item>')
+
+
+def write_roblox_place(path):
+    """A whole place, ready to open in Studio and Play: no Baseplate or
+    SpawnLocation, CharacterAutoLoads off, the builder and its templates in
+    ServerScriptService and the timer in StarterPlayerScripts."""
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    def source(name):
+        with open(os.path.join(here, "roblox", name)) as f:
+            return f.read()
+
+    folder_items = [
+        _script_item(2, "Script", "XB10kBuild", source("Build.server.lua"), False),
+        _script_item(3, "Script", "XB10kSpin", source("Spin.server.lua"), True),
+        _script_item(4, "Script", "XB10kBlink", source("Blink.server.lua"), True),
+        _script_item(5, "Script", "XB10kDrops", source("Drops.server.lua"), True),
+    ]
+    timer = _script_item(9, "LocalScript", "XB10kTimer", source("Timer.client.lua"), False)
+    xml = ('<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" version="4">'
+           '<Item class="Workspace" referent="RBX10"><Properties>'
+           '<string name="Name">Workspace</string>'
+           '<float name="Gravity">196.2</float></Properties></Item>'
+           '<Item class="Players" referent="RBX11"><Properties>'
+           '<string name="Name">Players</string>'
+           '<bool name="CharacterAutoLoads">false</bool></Properties></Item>'
+           '<Item class="ServerScriptService" referent="RBX12"><Properties>'
+           '<string name="Name">ServerScriptService</string></Properties>'
+           '<Item class="Folder" referent="RBX1"><Properties>'
+           '<string name="Name">XB10k</string></Properties>'
+           + "".join(folder_items) + '</Item></Item>'
+           '<Item class="StarterPlayer" referent="RBX13"><Properties>'
+           '<string name="Name">StarterPlayer</string></Properties>'
+           '<Item class="StarterPlayerScripts" referent="RBX14"><Properties>'
+           '<string name="Name">StarterPlayerScripts</string></Properties>'
+           + timer + '</Item></Item></roblox>')
+    with open(path, "w") as f:
+        f.write(xml)
+
+
 def main(argv):
     if len(argv) >= 2 and argv[1] == "check":
         count, total = checksum()
@@ -284,6 +331,9 @@ def main(argv):
     elif len(argv) == 3 and argv[1] == "axcenity":
         write_axcenity(argv[2])
         print(f"Wrote the XB10k Axcenity project to {argv[2]}")
+    elif len(argv) == 3 and argv[1] == "roblox-place":
+        write_roblox_place(argv[2])
+        print(f"Wrote the XB10k Roblox place to {argv[2]}")
     elif len(argv) == 3 and argv[1] == "roblox":
         write_roblox(argv[2])
         print(f"Wrote the XB10k Roblox model to {argv[2]}")
