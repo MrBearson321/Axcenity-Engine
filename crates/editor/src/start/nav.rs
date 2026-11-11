@@ -290,9 +290,8 @@ impl StartScreen {
         settings.on_hover_text(settings_tooltip(&ctx)).clicked()
     }
 
-    /// One header at a time: open chrome when labels are up, folded chrome
-    /// (mark + open button stacked with room) when they're down. They never
-    /// draw together, so the fold doesn't flash two overlapping layouts.
+    /// Header height lerps with the labels so the page list doesn't jump.
+    /// Open chrome and folded chrome never draw at once.
     fn sidebar_header(
         &mut self,
         bar: &mut egui::Ui,
@@ -303,12 +302,10 @@ impl StartScreen {
         wipe: f32,
     ) {
         let width = bar.available_width();
-        // Prefer the open header once labels are mostly in; otherwise the
-        // stacked folded chrome. A hard pick (not a dual overlay) avoids the
-        // mid-slide collision that looked like a glitch.
+        let height = HEADER_FOLDED + (HEADER_OPEN - HEADER_FOLDED) * labels;
+        let (header, _) = bar.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+
         if labels >= 0.5 {
-            let (header, _) =
-                bar.allocate_exact_size(vec2(width, HEADER_OPEN), egui::Sense::hover());
             let mut open_ui = bar.new_child(
                 egui::UiBuilder::new()
                     .max_rect(header)
@@ -340,9 +337,6 @@ impl StartScreen {
             return;
         }
 
-        // Folded: mark on top, open button under it. Height is fixed so the
-        // button is never clipped by the header band.
-        let (header, _) = bar.allocate_exact_size(vec2(width, HEADER_FOLDED), egui::Sense::hover());
         let fade = (1.0 - labels).clamp(0.0, 1.0);
         let mark_size = 24.0;
         let mark = Rect::from_center_size(
@@ -363,7 +357,6 @@ impl StartScreen {
             pos2(header.center().x, button_top + 14.0),
             vec2(width.min(40.0), 28.0),
         );
-        // Clip to the rail, not the mark row — the button sits below the mark.
         let mut folded_ui = bar.new_child(egui::UiBuilder::new().max_rect(button_rect).layout(
             egui::Layout::centered_and_justified(egui::Direction::TopDown),
         ));
